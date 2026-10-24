@@ -2,6 +2,7 @@
 /.*
 !/.gitignore
 !/.gitattributes
+!/.github/
 
 # Agent config and personal overrides, at any depth.
 .agents
