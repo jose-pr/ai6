@@ -625,57 +625,96 @@ def _plan(
 
 
 def _mission(args: argparse.Namespace) -> int:
-    """A brief from the inbox (``--next``) or a file (``--brief``): run it, file the
-    outcome in the inbox, and report it to the brief's source."""
+    """A brief from the inbox (``--next``) or a file (``--brief``): run it in its own
+    worktree, file the outcome in the inbox, and report it to the brief's source."""
     try:
         import coagent_i
+
+        from .missions import MissionRunner
     except ImportError:
         print(
             "coagent: --next and --brief need coagent-i installed (pip install -e i/)",
             file=sys.stderr,
         )
         return 2
-    inbox = coagent_i.Inbox(args.inbox)
     try:
+        runner = MissionRunner(
+            coagent_i.Inbox(args.inbox),
+            use_hooks=not args.no_hooks,
+            keep_worktrees=args.keep_worktrees,
+            on_event=lambda key, e: _report_event(e),
+            on_output=lambda key, data: _echo(data),
+        )
         if args.brief:
             with open(args.brief, encoding="utf-8") as f:
                 brief = coagent_i.Brief.from_json(f.read())
         else:
-            brief = inbox.claim()
+            brief = runner.inbox.claim()
             if brief is None:
                 print("coagent: the inbox is empty", file=sys.stderr)
                 return 0
-    except (OSError, coagent_i.BriefError) as exc:
+    except (OSError, coagent_i.BriefError, StationError) as exc:
         print(f"coagent: {exc}", file=sys.stderr)
         return 2
-    outcome: Dict[str, object] = {"agent": None, "profile": None, "station": brief.station}
-    result: Optional[Outcome] = None
+    outcome = runner.run(
+        brief,
+        claimed=args.next,
+        station=args.station,
+        profile=args.profile,
+        role=args.role,
+        tags=args.tag,
+    )
+    if outcome["state"] == "refused":
+        print(f"coagent: {outcome['reason']}", file=sys.stderr)
+        return 2
+    code = outcome["returncode"]
+    return 1 if code is None else (code if code >= 0 else 128 - code)
+
+
+def _serve(args: argparse.Namespace) -> int:
+    """Takes briefs from the inbox until interrupted (or, with ``--once``, drained)."""
     try:
-        spec, limits = _plan(
-            args.station or brief.station,
-            args.profile or brief.profile,
-            args.role or brief.role,
-            [*brief.tags, *args.tag],
-            brief.prompt,
-            name=brief.id,
+        import coagent_i
+
+        from .missions import MissionRunner, Scheduler
+    except ImportError:
+        print("coagent: serve needs coagent-i installed (pip install -e i/)", file=sys.stderr)
+        return 2
+    lock = threading.Lock()
+
+    def event(key: str, e: Event) -> None:
+        with lock:
+            stamp = time.strftime("%H:%M:%S", time.localtime(e.at))
+            print(f"{stamp} {key:<32} {e.state.value:<8} {e.detail}", flush=True)
+
+    try:
+        runner = MissionRunner(
+            coagent_i.Inbox(args.inbox),
+            use_hooks=not args.no_hooks,
+            keep_worktrees=args.keep_worktrees,
+            on_event=event,
         )
-        profile_hook = next(h for h in spec.hooks if isinstance(h, _ProfileHook))
-        outcome.update(profile=profile_hook.profile, station=spec.station)
-        result = _supervise_cli(spec, limits, not args.no_hooks)
-        outcome.update(
-            agent=result.agent,
-            state=result.state.value,
-            returncode=result.returncode,
-            reason=result.reason.value if result.reason else None,
-            runtime=round(result.runtime, 3),
-        )
-    except (ProfileError, StationError, TerminalError) as exc:
-        outcome.update(state="refused", reason=str(exc))
+    except StationError as exc:
         print(f"coagent: {exc}", file=sys.stderr)
-    if args.next:
-        inbox.finish(brief, outcome, ok=result is not None and result.state is State.DONE)
-    coagent_i.report(brief, outcome)
-    return _exit_code(result) if result is not None else 2
+        return 2
+    scheduler = Scheduler(runner, max_total=args.max, poll_interval=args.poll)
+    try:
+        scheduler.run(once=args.once, idle=args.idle)
+    except KeyboardInterrupt:
+        print("coagent: stopping; waiting for running missions", file=sys.stderr)
+        scheduler.stop()
+        scheduler.wait()
+    failed = [o for o in scheduler.finished if o["state"] != State.DONE.value]
+    return 1 if failed else 0
+
+
+def _echo(data: bytes) -> None:
+    sys.stdout.buffer.write(data)
+    sys.stdout.buffer.flush()
+
+
+def _report_event(event: Event) -> None:
+    print(f"\n[watchdog] {event.state.value}: {event.detail}", file=sys.stderr, flush=True)
 
 
 def _list_hooks() -> int:
@@ -740,10 +779,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     mission.add_argument("--next", action="store_true", help="claim the best brief in the inbox")
     mission.add_argument("--brief", help="run the brief in this JSON file")
     launch.add_argument("--inbox", help="inbox directory (with --next)")
+    launch.add_argument(
+        "--keep-worktrees", action="store_true", help="keep a mission's worktree even if unused"
+    )
     launch.add_argument("--tag", action="append", default=[], help="a tag the profile must have")
     launch.add_argument("--station", help="station id or name (default: the one holding .)")
     launch.add_argument("--no-hooks", action="store_true", help="run no global or project hooks")
     launch.add_argument("prompt", nargs="?", help="the task")
+
+    serve = sub.add_parser("serve", help="take briefs from the inbox and run them")
+    serve.add_argument("--max", type=int, default=4, help="missions at once (default 4)")
+    serve.add_argument("--poll", type=float, default=None, help="poll intake sources every S")
+    serve.add_argument("--once", action="store_true", help="exit once nothing is left to start")
+    serve.add_argument("--idle", type=float, default=1.0, help="seconds between steps")
+    serve.add_argument("--inbox", help="inbox directory")
+    serve.add_argument("--keep-worktrees", action="store_true")
+    serve.add_argument("--no-hooks", action="store_true", help="run no global or station hooks")
 
     mock = sub.add_parser("mock-agent", help=argparse.SUPPRESS)
     mock.add_argument("behavior", choices=("work", "loop", "hang", "cursor", "orphan"))
@@ -761,6 +812,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _list_stations()
     if args.command == "launch":
         return _launch(args)
+    if args.command == "serve":
+        return _serve(args)
     if args.command == "demo":
         return _demo(args.timeout, args.terminal)
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
