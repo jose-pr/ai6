@@ -13,18 +13,29 @@ import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import coagent_i
 
 from .config import Scope
-from .hooks import HookSet, load_hooks
+from .cover import Cover, CoverError, Covers, Identity, check_commits
+from .hooks import HookBase, HookContext, HookSet, Preparation, load_hooks
 from .hosts import HostError, Hosts
 from .profiles import Profile, ProfileError, load_profiles
 from .stations import Station, StationError, Stations
 from .terminal import Registry, TerminalError
 from .watchdog import AgentSpec, Event, Limits, Outcome, State, Watchdog
-from .worktree import LOCAL, SshGit, Worktree, WorktreeError, branch_name, is_git_checkout
+from .worktree import (
+    LOCAL,
+    Git,
+    SshGit,
+    Worktree,
+    WorktreeError,
+    branch_name,
+    commit_log,
+    head,
+    is_git_checkout,
+)
 
 __all__ = ["Assignment", "MissionRunner", "Scheduler", "TRANSCRIPT_LIMIT"]
 
@@ -60,6 +71,7 @@ class MissionRunner:
         *,
         stations: Optional[Stations] = None,
         hosts: Optional[Hosts] = None,
+        covers: Optional[Covers] = None,
         sources: Optional[Sequence[Any]] = None,
         use_hooks: bool = True,
         registry: Optional[Registry] = None,
@@ -71,6 +83,7 @@ class MissionRunner:
         self.inbox = inbox if inbox is not None else coagent_i.Inbox()
         self.stations = stations if stations is not None else Stations.load()
         self.hosts = hosts if hosts is not None else Hosts.load()
+        self.covers = covers if covers is not None else Covers.load()
         self.sources = sources
         self.use_hooks = use_hooks
         self.registry = registry
@@ -126,43 +139,67 @@ class MissionRunner:
             "runtime": 0.0,
         }
         transcript = bytearray()
-        result: Optional[Outcome] = None
         try:
             assignment = assignment or self.assign(brief, **assign)
             outcome.update(
                 profile=assignment.profile.name,
                 station=assignment.station.id if assignment.station else None,
             )
-            result, worktree = self._run(assignment, transcript)
+            result, extras = self._run(assignment, transcript)
             outcome.update(
                 agent=result.agent,
                 state=result.state.value,
                 returncode=result.returncode,
                 reason=result.reason.value if result.reason else None,
                 runtime=round(result.runtime, 3),
+                **extras,
             )
-            if worktree is not None:
-                outcome["worktree"] = worktree
-        except (ProfileError, StationError, HostError, TerminalError, WorktreeError) as exc:
+            cover = extras.get("cover")
+            station = assignment.station
+            if cover and cover["blown"] and station is not None and station.on_blown == "fail":
+                outcome.update(state="blown", reason="cover blown")
+        except (
+            ProfileError,
+            StationError,
+            HostError,
+            CoverError,
+            TerminalError,
+            WorktreeError,
+        ) as exc:
             outcome["reason"] = str(exc)
             _log.warning("mission %s refused: %s", brief.key, exc)
         if claimed:
-            ok = result is not None and result.state is State.DONE
+            ok = outcome["state"] == State.DONE.value
             self.inbox.finish(brief, outcome, ok=ok, transcript=bytes(transcript))
         coagent_i.report(brief, outcome, self.sources)
         return outcome
 
-    def _run(self, a: Assignment, transcript: bytearray):
+    def _run(self, a: Assignment, transcript: bytearray) -> Tuple[Outcome, Dict[str, Any]]:
         spec, station, key = a.spec, a.station, a.brief.key
+        git: Optional[Git] = LOCAL
+        cover: Optional[Cover] = None
         worktree: Optional[Worktree] = None
-        if station is not None and station.worktrees and station.path is not None:
-            git, root = LOCAL, self.worktree_root
+        if station is not None:
+            cover = self.covers.get(station.cover)
+            hook = _CoverHook(cover, station.identity, a.profile.name, a.profile.model or "")
+            spec = replace(spec, hooks=(*spec.hooks, hook))
             if station.host is not None:
                 host = self.hosts.get(station.host)
+                git = SshGit(host) if host.posix else None
+        if (
+            station is not None
+            and station.worktrees
+            and station.path is not None
+            and git is not None
+            and is_git_checkout(station.path, git)
+        ):
+            root = self.worktree_root
+            remote = station.host is not None
+            if remote:
                 # Without a work root a remote station's missions run in its checkout.
-                git = SshGit(host) if host.work_root else None
-                root = PurePosixPath(host.work_root) if host.work_root else None
-            if git is not None and is_git_checkout(station.path, git):
+                work_root = self.hosts.get(station.host).work_root  # type: ignore[arg-type]
+                root = PurePosixPath(work_root) if work_root else None
+            if not remote or root is not None:
                 branch = branch_name(
                     station.branch, id=a.brief.id, title=a.brief.title, station=station.id
                 )
@@ -170,6 +207,13 @@ class MissionRunner:
                     station.path, key, branch, root=root, base=station.base, git=git
                 )
                 spec = replace(spec, cwd=str(worktree.path))
+        # Where the agent's commits land, to hold them to the cover afterwards.
+        checked: Optional[Tuple[str, str]] = None
+        if worktree is not None:
+            checked = (str(worktree.path), worktree.base)
+        elif station is not None and station.path is not None and git is not None:
+            before = head(station.path, git)
+            checked = (str(station.path), before) if before else None
         # Configuration is the station's, wherever its worktree is.
         hooks = (
             load_hooks(spec.cwd, spec.hooks, stations=self.stations, station=station)
@@ -188,6 +232,7 @@ class MissionRunner:
             if self.on_event is not None:
                 self.on_event(key, e)
 
+        extras: Dict[str, Any] = {}
         try:
             result = Watchdog(
                 spec,
@@ -197,12 +242,47 @@ class MissionRunner:
                 registry=self.registry,
                 hooks=hooks,
             ).run()
+            if cover is not None and checked is not None and git is not None:
+                commits = commit_log(git, *checked)
+                broken = check_commits(
+                    commits,
+                    cover,
+                    station.identity if station is not None else None,
+                    model=a.profile.model or "",
+                )
+                extras["cover"] = {
+                    "policy": cover.name,
+                    "commits": len(commits),
+                    "blown": bool(broken),
+                    "violations": [v.as_dict() for v in broken],
+                }
         finally:
-            info = None
             if worktree is not None:
                 worktree.cleanup(keep=self.keep_worktrees)
-                info = worktree.describe()
-        return result, info
+        if worktree is not None:
+            extras["worktree"] = worktree.describe()
+        return result, extras
+
+
+class _CoverHook(HookBase):
+    """The station's cover: its identity for git, and the agent told the policy."""
+
+    def __init__(
+        self, cover: Cover, identity: Optional[Identity], profile: str, model: str
+    ) -> None:
+        self.name = f"cover:{cover.name}"
+        self.required = True
+        self._cover = cover
+        self._identity = identity
+        self._profile = profile
+        self._model = model
+
+    def prepare(self, ctx: HookContext) -> Preparation:
+        env: Dict[str, Optional[str]] = {"COAGENT_COVER": self._cover.name}
+        if self._identity is not None:
+            env.update(self._identity.git_env())
+        briefing = self._cover.briefing(self._identity, self._profile, self._model)
+        return Preparation(env=env, context=[briefing])
 
 
 class Scheduler:

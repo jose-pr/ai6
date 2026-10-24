@@ -15,7 +15,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PurePosixPath
-from typing import TYPE_CHECKING, List, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Protocol, Union
 
 if TYPE_CHECKING:
     from .hosts import Host
@@ -29,6 +29,8 @@ __all__ = [
     "Worktree",
     "WorktreeError",
     "branch_name",
+    "commit_log",
+    "head",
     "is_git_checkout",
     "state_dir",
 ]
@@ -141,6 +143,27 @@ class SshGit:
             raise WorktreeError(f"{self.host.id}: ssh: {exc}") from exc
 
 
+def head(path: "str | PurePath", git: Git = LOCAL) -> Optional[str]:
+    """The commit checked out at ``path``, or ``None`` when it is not a git checkout."""
+    out = git.run(str(path), "rev-parse", "--verify", "HEAD^{commit}", check=False).strip()
+    return out or None
+
+
+def commit_log(git: Git, path: str, base: str) -> List[Dict[str, str]]:
+    """Commits in ``base..HEAD`` at ``path``, as ``commits`` dicts for ``cover``."""
+    fmt = "%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e"
+    out = git.run(path, "log", f"--format={fmt}", f"{base}..HEAD")
+    commits = []
+    for record in out.split("\x1e"):
+        parts = record.strip("\n").split("\x1f")
+        if len(parts) == 4:
+            sha, author, committer, message = parts
+            commits.append(
+                {"sha": sha, "author": author, "committer": committer, "message": message}
+            )
+    return commits
+
+
 def is_git_checkout(path: "str | Path", git: Git = LOCAL) -> bool:
     out = git.run(str(path), "rev-parse", "--is-inside-work-tree", check=False)
     return out.strip() == "true"
@@ -189,6 +212,11 @@ class Worktree:
         return cls(
             repo, Path(path).resolve() if local else PurePosixPath(str(path)), branch, commit, git
         )
+
+    def log(self) -> List[Dict[str, str]]:
+        """Each commit since ``base``, newest first: ``sha``, ``author``, ``committer``
+        (as ``Name <email>``) and the whole ``message``."""
+        return commit_log(self.git, str(self.path), self.base)
 
     def commits(self) -> List[str]:
         """Commits on the branch since ``base``, newest first, as ``<sha> <subject>``."""

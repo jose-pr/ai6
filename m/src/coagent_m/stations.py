@@ -30,6 +30,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from .config import PROJECT_DIR, TRUST_ENV, config_dir, find_project, read_toml
+from .cover import Identity
 
 __all__ = [
     "CLEARANCES",
@@ -82,6 +83,12 @@ class Station:
     worktrees: bool = True
     branch: str = "{id}-{slug}"
     base: str = "HEAD"
+    # Universal Exports: the cover policy (see coagent_m.cover), the identity commits
+    # carry, and whether a commit that breaks cover fails the mission ("fail") or is
+    # only reported ("flag").
+    cover: str = "covert"
+    identity: Optional[Identity] = None
+    on_blown: str = "flag"
     # Free-form settings for intake sources; M does not read them.
     intake: Mapping[str, Any] = field(default_factory=dict)
 
@@ -214,6 +221,13 @@ def _station(sid: str, table: Mapping[str, Any], source: Path) -> Station:
         )
     if "config" in values:
         values["config"] = Path(os.path.expanduser(str(values["config"]))).resolve()
+    if "identity" in values:
+        ident = values["identity"]
+        if not isinstance(ident, Mapping) or not ident.get("name") or not ident.get("email"):
+            raise StationError(f"{source}: station {sid!r}: identity needs name and email")
+        values["identity"] = Identity(str(ident["name"]), str(ident["email"]))
+    if values.get("on_blown", "flag") not in ("flag", "fail"):
+        raise StationError(f"{source}: station {sid!r}: on_blown is flag or fail")
     for key in ("repos", "roster"):
         if key in values:
             values[key] = tuple(str(v) for v in values[key])
