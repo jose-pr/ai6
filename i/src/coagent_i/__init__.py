@@ -8,19 +8,22 @@ format M, Moneypenny and agents talk in, briefings, and debriefs.
 from __future__ import annotations
 
 from .brief import BRIEF_VERSION, Brief, BriefError
-from .inbox import INBOX_ENV, STATES, Inbox, default_inbox_dir
+from .inbox import DEFAULT_LEASE, INBOX_ENV, STATES, Inbox, Lease, LeaseLost, default_inbox_dir
 from .sources import CommandSource, Source, SourceError, load_sources, poll, report
 
 __version__ = "0.1.0.dev0"
 
 __all__ = [
     "BRIEF_VERSION",
+    "DEFAULT_LEASE",
     "INBOX_ENV",
     "STATES",
     "Brief",
     "BriefError",
     "CommandSource",
     "Inbox",
+    "Lease",
+    "LeaseLost",
     "Source",
     "SourceError",
     "default_inbox_dir",

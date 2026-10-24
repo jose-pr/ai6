@@ -84,7 +84,8 @@ class Inbox:
 
     def submit(self, brief: Brief, *, replace: bool = False) -> Path:
         """Files ``brief`` under ``new/``. A brief whose key is already in any state is
-        refused (``BriefError``) unless ``replace``, which only replaces one still new."""
+        refused (``BriefError``) unless ``replace``, which only replaces one still new.
+        """
         existing = self.find(brief.key)
         if existing is not None:
             state, path = existing
@@ -136,6 +137,16 @@ class Inbox:
                 )
             return brief
         return None
+
+    def read(self, key: str) -> Optional[Brief]:
+        """The brief keyed ``key``, in whatever state it is, or ``None``."""
+        found = self.find(key)
+        if found is None:
+            return None
+        try:
+            return Brief.from_json(found[1].read_text(encoding="utf-8"))
+        except (OSError, BriefError):
+            return None
 
     def lease(self, key: str) -> Optional[Lease]:
         """The lease on a claimed brief, or ``None`` (not claimed, or claimed without one)."""
@@ -247,7 +258,8 @@ class Inbox:
     def recover(self, lease: Lease, *, max_attempts: int = 3, by: str = "") -> Optional[str]:
         """Takes back a brief whose node was lost: to ``new/`` (answers ``"new"``) while it
         has attempts left, else to ``failed/`` with a ``lost`` outcome (``"failed"``).
-        ``None`` when another node got there first, or the lease was renewed meanwhile."""
+        ``None`` when another node got there first, or the lease was renewed meanwhile.
+        """
         current = self.lease(lease.key)
         if current is None or current != lease or current.expires >= time.time():
             return None
