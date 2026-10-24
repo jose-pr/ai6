@@ -16,8 +16,8 @@ repository.
 ## Rules
 
 - The three components share no code. They meet at two formats: M's socket frames
-  (defined in Rust in `moneypenny-proto`, with a Python mirror in M) and Q's loadout
-  TOML.
+  (guatiao values; schema in `moneypenny-proto`, read from Python through guatiao's
+  bindings) and Q's loadout TOML.
 - Nothing in M's watchdog may assume a backend: it sees bytes and timestamps only.
 - POSIX only (`pty`, process groups, SIGKILL).
 - Python 3.9 floor; `from __future__ import annotations` in every module; black,

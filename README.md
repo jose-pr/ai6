@@ -135,8 +135,12 @@ it**. Three seams keep them apart:
    sandbox profile. M passes it to the backend. Secrets reach the agent's environment
    and never its worktree, the event log or the terminal stream.
 
-The frame types are one Rust crate, compiled natively into the gateway and to wasm into
-the browser client, so the two ends cannot disagree about the protocol. The board is
+The frames are [guatiao](https://github.com/Boriken-Dev/guatiao) values on its wire
+format. The schema lives in one Rust crate, compiled natively into the gateway and to
+wasm into the browser client, and M reads and writes the same frames through guatiao's
+Python bindings. No end hand-rolls a codec, so no two ends can disagree about the
+protocol. The same encoding also runs over WebTransport, which the gateway can offer
+next to WebSockets. The board is
 Rust compiled to wasm. The terminal widget stays xterm.js with its WebGL renderer,
 behind a small interop shim: it already draws on the GPU, and its input handling (IME,
 selection, screen readers) is ahead of any Rust terminal. So wasm buys a shared codec
@@ -175,6 +179,7 @@ spinner redrawing in place counts as repetition.
 | herdr | Many processes multiplexed into one view with their states visible at a glance |
 | [tmux](https://github.com/tmux/tmux), [systemd-run](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html) | Session persistence and detach; transient units with cgroup limits |
 | [Model Context Protocol](https://modelcontextprotocol.io/) | The tool interface Q arms agents with |
+| [Boriken-Dev/guatiao](https://github.com/Boriken-Dev/guatiao) | Not prior art but a dependency: the wire format and framing for M ↔ gateway ↔ browser, from Rust, wasm and Python |
 
 ## Repository layout
 
