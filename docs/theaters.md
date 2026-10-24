@@ -11,7 +11,7 @@ os = "linux"                           # linux, macos, windows
 port = 22
 identity = "~/.ssh/coagent_lab"
 options = { ServerAliveInterval = "15" }
-safe_houses = "/srv/coagent/worktrees"   # where mission worktrees go on the theater
+safe_houses = "/srv/coagent/safe-houses"   # where mission safe houses go on the theater
 tags = ["gpu"]
 ```
 
@@ -38,7 +38,7 @@ path = "/srv/src/guatiao"          # the checkout, on the theater
 config = "~/coagent/stations/L"    # a local directory with the station's hooks and profiles
 ```
 
-The station's missions run on the theater whatever terminal their profile names. Worktrees
+The station's missions run on the theater whatever terminal their profile names. Safe houses
 are cut on the theater under its `safe_houses`, by git over ssh; without a `safe_houses`,
 missions run in the checkout itself. Hooks run on the supervisor's machine and see
 `COAGENT_THEATER`; the agent sees it too.

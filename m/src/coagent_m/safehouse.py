@@ -1,6 +1,7 @@
-"""A git worktree per mission, so agents working in parallel never share a checkout.
+"""Safe houses: a git worktree per mission, so agents working in parallel never share a
+checkout.
 
-A worktree is cut from the station's checkout onto a new branch and lives under M's state
+A safe house is cut from the station's checkout onto a new branch and lives under M's state
 directory (or a theater's ``safe_houses``), never inside the checkout itself. Git runs here
 (``LocalGit``) or on the station's theater over ssh (``SshGit``). When the mission ends it is removed, with
 its branch, if the agent left nothing behind; otherwise it is kept as the mission's work.
@@ -26,8 +27,8 @@ __all__ = [
     "Git",
     "LocalGit",
     "SshGit",
-    "Worktree",
-    "WorktreeError",
+    "SafeHouse",
+    "SafeHouseError",
     "branch_name",
     "commit_log",
     "head",
@@ -42,7 +43,7 @@ _SLUG = re.compile(r"[^a-z0-9]+")
 _UNSAFE_REF = re.compile(r"[^A-Za-z0-9._/-]+")
 
 
-class WorktreeError(Exception):
+class SafeHouseError(Exception):
     """git refused to create or remove a worktree; the message carries git's stderr."""
 
 
@@ -71,7 +72,7 @@ def branch_name(template: str, *, id: str, title: str, station: str = "") -> str
 
 
 class Git(Protocol):
-    """Where git runs: ``run`` answers stdout and raises ``WorktreeError`` on failure
+    """Where git runs: ``run`` answers stdout and raises ``SafeHouseError`` on failure
     (unless ``check`` is false); paths are on that machine."""
 
     def run(self, cwd: str, *args: str, check: bool = True) -> str: ...
@@ -90,9 +91,9 @@ class LocalGit:
                 ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=120
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise WorktreeError(f"git {args[0]}: {exc}") from exc
+            raise SafeHouseError(f"git {args[0]}: {exc}") from exc
         if check and done.returncode != 0:
-            raise WorktreeError(f"git {' '.join(args)}: {done.stderr.strip()}")
+            raise SafeHouseError(f"git {' '.join(args)}: {done.stderr.strip()}")
         return done.stdout
 
     def exists(self, path: str) -> bool:
@@ -115,7 +116,7 @@ class SshGit:
     def run(self, cwd: str, *args: str, check: bool = True) -> str:
         done = self._sh(" ".join(shlex.quote(a) for a in ["git", "-C", cwd, *args]))
         if check and done.returncode != 0:
-            raise WorktreeError(f"{self.theater.id}: git {' '.join(args)}: {done.stderr.strip()}")
+            raise SafeHouseError(f"{self.theater.id}: git {' '.join(args)}: {done.stderr.strip()}")
         return done.stdout
 
     def exists(self, path: str) -> bool:
@@ -124,11 +125,11 @@ class SshGit:
     def mkdirs(self, path: str) -> None:
         done = self._sh(f"mkdir -p {shlex.quote(path)}")
         if done.returncode != 0:
-            raise WorktreeError(f"{self.theater.id}: mkdir {path}: {done.stderr.strip()}")
+            raise SafeHouseError(f"{self.theater.id}: mkdir {path}: {done.stderr.strip()}")
 
     def _sh(self, command: str) -> "subprocess.CompletedProcess[str]":
         if not self.theater.posix:
-            raise WorktreeError(
+            raise SafeHouseError(
                 f"{self.theater.id}: worktrees on a Windows theater are not supported yet"
             )
         try:
@@ -140,7 +141,7 @@ class SshGit:
                 timeout=self.timeout,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise WorktreeError(f"{self.theater.id}: ssh: {exc}") from exc
+            raise SafeHouseError(f"{self.theater.id}: ssh: {exc}") from exc
 
 
 def head(path: "str | PurePath", git: Git = LOCAL) -> Optional[str]:
@@ -170,7 +171,7 @@ def is_git_checkout(path: "str | Path", git: Git = LOCAL) -> bool:
 
 
 @dataclass(frozen=True)
-class Worktree:
+class SafeHouse:
     """One mission's checkout: ``path`` on ``branch``, cut from ``base`` (a commit), on
     the machine ``git`` runs on."""
 
@@ -190,22 +191,22 @@ class Worktree:
         root: "Optional[Union[Path, PurePosixPath]]" = None,
         base: str = "HEAD",
         git: Git = LOCAL,
-    ) -> "Worktree":
+    ) -> "SafeHouse":
         """Adds a worktree for mission ``key`` at ``<root>/<key>`` on a new ``branch`` from
-        ``base``. ``root`` defaults to ``state_dir()/worktrees`` for local git and is
-        required for any other. Raises ``WorktreeError`` when the branch or path already
+        ``base``. ``root`` defaults to ``state_dir()/safe-houses`` for local git and is
+        required for any other. Raises ``SafeHouseError`` when the branch or path already
         exists, or ``repo`` is not a git checkout."""
         local = isinstance(git, LocalGit)
         if root is None:
             if not local:
-                raise WorktreeError("a remote worktree needs a root (the theater's safe_houses)")
-            root = state_dir() / "worktrees"
+                raise SafeHouseError("a remote safe house needs a root (the theater's safe_houses)")
+            root = state_dir() / "safe-houses"
         repo = Path(repo).resolve() if local else PurePosixPath(str(repo))
         if not is_git_checkout(repo, git):
-            raise WorktreeError(f"{repo} is not a git checkout")
+            raise SafeHouseError(f"{repo} is not a git checkout")
         path = root / key
         if git.exists(str(path)):
-            raise WorktreeError(f"{path} already exists")
+            raise SafeHouseError(f"{path} already exists")
         commit = git.run(str(repo), "rev-parse", "--verify", f"{base}^{{commit}}").strip()
         git.mkdirs(str(path.parent))
         git.run(str(repo), "worktree", "add", "-b", branch, str(path), commit)

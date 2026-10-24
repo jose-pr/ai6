@@ -154,7 +154,7 @@ def test_a_clean_mission_keeps_cover(station) -> None:
     out = configure("flag").run(brief("1", "fix: the build"))
     assert out["state"] == "done"
     assert out["cover"] == {"policy": "covert", "commits": 1, "blown": False, "violations": []}
-    branch = out["worktree"]["branch"]
+    branch = out["safe_house"]["branch"]
     assert git(repo, "log", "-1", "--format=%an <%ae>", branch).strip() == (
         "Field Office <office@example.invalid>"
     )

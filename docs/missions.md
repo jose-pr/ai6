@@ -54,7 +54,7 @@ env = { JIRA_SITE = "example.atlassian.net" }
 A source's command prints a JSON list of briefs, an object with `briefs`, or one JSON
 object per line. Its `report` command receives `{"brief": .., "outcome": ..}`, where the
 outcome carries `state`, `returncode`, `reason`, `runtime`, `agent`, `profile`, `station`
-and, for a worktree mission, the worktree's path, branch and commits.
+and, for a mission in a safe house, `safe_house`: its path, branch and commits.
 
 ## The inbox
 
@@ -75,7 +75,7 @@ python -m coagent_m.watchdog launch --next          # the best waiting brief
 python -m coagent_m.watchdog launch --brief b.json  # one brief from a file
 ```
 
-M resolves the station, picks the profile, cuts a worktree, runs the agent with the
+M resolves the station, picks the profile, cuts a safe house, runs the agent with the
 brief's title and body as its prompt, files the outcome and the transcript beside the
 brief, and reports it to the brief's source. A brief no profile at its station suits is
 filed as `failed` with state `refused`, and still reported.

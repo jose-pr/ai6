@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from coagent_m.worktree import Worktree, WorktreeError, branch_name, is_git_checkout
+from coagent_m.safehouse import SafeHouse, SafeHouseError, branch_name, is_git_checkout
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -36,7 +36,7 @@ def test_branch_names() -> None:
 
 
 def test_an_untouched_worktree_is_removed_with_its_branch(repo: Path, tmp_path: Path) -> None:
-    wt = Worktree.create(repo, "m1", "m1-branch", root=tmp_path / "wts")
+    wt = SafeHouse.create(repo, "m1", "m1-branch", root=tmp_path / "wts")
     assert (wt.path / "a.txt").read_text() == "a\n"
     assert wt.commits() == [] and not wt.dirty()
     assert wt.cleanup() is False
@@ -45,7 +45,7 @@ def test_an_untouched_worktree_is_removed_with_its_branch(repo: Path, tmp_path: 
 
 
 def test_work_is_kept(repo: Path, tmp_path: Path) -> None:
-    wt = Worktree.create(repo, "m2", "m2-branch", root=tmp_path / "wts")
+    wt = SafeHouse.create(repo, "m2", "m2-branch", root=tmp_path / "wts")
     (wt.path / "b.txt").write_text("b\n")
     assert wt.dirty()
     git(wt.path, "add", ".")
@@ -57,13 +57,13 @@ def test_work_is_kept(repo: Path, tmp_path: Path) -> None:
 
 
 def test_refusals(repo: Path, tmp_path: Path) -> None:
-    Worktree.create(repo, "m3", "m3-branch", root=tmp_path / "wts")
-    with pytest.raises(WorktreeError, match="already exists"):
-        Worktree.create(repo, "m3", "other", root=tmp_path / "wts")
-    with pytest.raises(WorktreeError, match="m3-branch"):
-        Worktree.create(repo, "m4", "m3-branch", root=tmp_path / "wts")
+    SafeHouse.create(repo, "m3", "m3-branch", root=tmp_path / "wts")
+    with pytest.raises(SafeHouseError, match="already exists"):
+        SafeHouse.create(repo, "m3", "other", root=tmp_path / "wts")
+    with pytest.raises(SafeHouseError, match="m3-branch"):
+        SafeHouse.create(repo, "m4", "m3-branch", root=tmp_path / "wts")
     plain = tmp_path / "plain"
     plain.mkdir()
     assert not is_git_checkout(plain)
-    with pytest.raises(WorktreeError, match="not a git checkout"):
-        Worktree.create(plain, "m5", "b", root=tmp_path / "wts")
+    with pytest.raises(SafeHouseError, match="not a git checkout"):
+        SafeHouse.create(plain, "m5", "b", root=tmp_path / "wts")

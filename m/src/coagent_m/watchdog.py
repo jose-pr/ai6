@@ -103,7 +103,7 @@ class Limits:
 
 @dataclass(frozen=True)
 class AgentSpec:
-    """What to run: ``argv`` in ``cwd`` (a git worktree) with ``env`` (from ``q``), on the
+    """What to run: ``argv`` in ``cwd`` (a safe house: a git worktree) with ``env`` (from ``q``), on the
     terminal provider named ``terminal`` (default: the best one available)."""
 
     name: str
@@ -671,7 +671,7 @@ def _plan(
 
 def _mission(args: argparse.Namespace) -> int:
     """A brief from the inbox (``--next``) or a file (``--brief``): run it in its own
-    worktree, file the outcome in the inbox, and report it to the brief's source."""
+    safe house, file the outcome in the inbox, and report it to the brief's source."""
     try:
         import coagent_i
 
@@ -686,7 +686,7 @@ def _mission(args: argparse.Namespace) -> int:
         runner = MissionRunner(
             coagent_i.open_inbox(args.inbox),
             use_hooks=not args.no_hooks,
-            keep_worktrees=args.keep_worktrees,
+            keep_safe_houses=args.keep_safe_houses,
             on_event=lambda key, e: _report_event(e),
             on_output=lambda key, data: _echo(data),
         )
@@ -736,7 +736,7 @@ def _serve(args: argparse.Namespace) -> int:
         runner = MissionRunner(
             coagent_i.open_inbox(args.inbox),
             use_hooks=not args.no_hooks,
-            keep_worktrees=args.keep_worktrees,
+            keep_safe_houses=args.keep_safe_houses,
             on_event=event,
         )
     except StationError as exc:
@@ -835,7 +835,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     mission.add_argument("--brief", help="run the brief in this JSON file")
     launch.add_argument("--inbox", help="inbox directory (with --next)")
     launch.add_argument(
-        "--keep-worktrees", action="store_true", help="keep a mission's worktree even if unused"
+        "--keep-safe-houses", action="store_true", help="keep a mission's safe house even if unused"
     )
     launch.add_argument("--tag", action="append", default=[], help="a tag the profile must have")
     launch.add_argument("--station", help="station id or name (default: the one holding .)")
@@ -848,7 +848,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     serve.add_argument("--once", action="store_true", help="exit once nothing is left to start")
     serve.add_argument("--idle", type=float, default=1.0, help="seconds between steps")
     serve.add_argument("--inbox", help="inbox directory")
-    serve.add_argument("--keep-worktrees", action="store_true")
+    serve.add_argument("--keep-safe-houses", action="store_true")
     serve.add_argument("--node", help="this office's name (default: host-pid)")
     serve.add_argument(
         "--role",

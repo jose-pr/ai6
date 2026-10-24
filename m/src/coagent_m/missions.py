@@ -1,4 +1,4 @@
-"""Missions: a brief, run at its station by the agent M assigns, in its own worktree.
+"""Missions: a brief, run at its station by the agent M assigns, in its own safe_house.
 
 ``MissionRunner`` runs one brief end to end; ``Scheduler`` keeps taking briefs from the
 inbox while there is capacity, overall, per station and per profile. Both need the
@@ -28,12 +28,12 @@ from .profiles import Profile, ProfileError, load_adapter, load_profiles
 from .stations import Station, StationError, Stations
 from .terminal import Registry, TerminalError
 from .watchdog import AgentSpec, Event, Limits, Outcome, State, Watchdog
-from .worktree import (
+from .safehouse import (
     LOCAL,
     Git,
     SshGit,
-    Worktree,
-    WorktreeError,
+    SafeHouse,
+    SafeHouseError,
     branch_name,
     commit_log,
     head,
@@ -68,8 +68,8 @@ class MissionRunner:
     """Assigns and runs briefs.
 
     ``stations`` defaults to ``Stations.load()``; ``use_hooks`` loads headquarters and
-    station hooks for each mission; ``worktree_root`` overrides where worktrees go;
-    ``keep_worktrees`` keeps them even when the agent left nothing. ``on_event(key,
+    station hooks for each mission; ``safe_house_root`` overrides where safe houses go;
+    ``keep_safe_houses`` keeps them even when the agent left nothing. ``on_event(key,
     event)`` and ``on_output(key, bytes)`` are called from the thread running the mission.
     """
 
@@ -83,8 +83,8 @@ class MissionRunner:
         sources: Optional[Sequence[Any]] = None,
         use_hooks: bool = True,
         registry: Optional[Registry] = None,
-        worktree_root: Optional[Path] = None,
-        keep_worktrees: bool = False,
+        safe_house_root: Optional[Path] = None,
+        keep_safe_houses: bool = False,
         on_event: Optional[Callable[[str, Event], None]] = None,
         on_output: Optional[Callable[[str, bytes], None]] = None,
     ) -> None:
@@ -95,8 +95,8 @@ class MissionRunner:
         self.sources = sources
         self.use_hooks = use_hooks
         self.registry = registry
-        self.worktree_root = worktree_root
-        self.keep_worktrees = keep_worktrees
+        self.safe_house_root = safe_house_root
+        self.keep_safe_houses = keep_safe_houses
         self.on_event = on_event
         self.on_output = on_output
         self._dogs: Dict[str, Watchdog] = {}
@@ -189,7 +189,7 @@ class MissionRunner:
             TheaterError,
             CoverError,
             TerminalError,
-            WorktreeError,
+            SafeHouseError,
         ) as exc:
             outcome["reason"] = str(exc)
             _log.warning("mission %s refused: %s", brief.key, exc)
@@ -214,7 +214,7 @@ class MissionRunner:
         spec, station, key = a.spec, a.station, a.brief.key
         git: Optional[Git] = LOCAL
         cover: Optional[Cover] = None
-        worktree: Optional[Worktree] = None
+        safe_house: Optional[SafeHouse] = None
         if station is not None:
             cover = self.covers.get(station.cover)
             hook = _CoverHook(cover, station.identity, a.profile.name, a.profile.model or "")
@@ -224,33 +224,33 @@ class MissionRunner:
                 git = SshGit(theater) if theater.posix else None
         if (
             station is not None
-            and station.worktrees
+            and station.safe_houses
             and station.path is not None
             and git is not None
             and is_git_checkout(station.path, git)
         ):
-            root = self.worktree_root
+            root = self.safe_house_root
             remote = station.theater is not None
             if remote:
-                # Without a work root a remote station's missions run in its checkout.
+                # Without the theater's safe_houses a remote station's missions run in its checkout.
                 safe_houses = self.theaters.get(station.theater).safe_houses  # type: ignore[arg-type]
                 root = PurePosixPath(safe_houses) if safe_houses else None
             if not remote or root is not None:
                 branch = branch_name(
                     station.branch, id=a.brief.id, title=a.brief.title, station=station.id
                 )
-                worktree = Worktree.create(
+                safe_house = SafeHouse.create(
                     station.path, key, branch, root=root, base=station.base, git=git
                 )
-                spec = replace(spec, cwd=str(worktree.path))
+                spec = replace(spec, cwd=str(safe_house.path))
         # Where the agent's commits land, to hold them to the cover afterwards.
         checked: Optional[Tuple[str, str]] = None
-        if worktree is not None:
-            checked = (str(worktree.path), worktree.base)
+        if safe_house is not None:
+            checked = (str(safe_house.path), safe_house.base)
         elif station is not None and station.path is not None and git is not None:
             before = head(station.path, git)
             checked = (str(station.path), before) if before else None
-        # Configuration is the station's, wherever its worktree is.
+        # Configuration is the station's, wherever its safe_house is.
         hooks = (
             load_hooks(spec.cwd, spec.hooks, stations=self.stations, station=station)
             if self.use_hooks
@@ -303,10 +303,10 @@ class MissionRunner:
                     "violations": [v.as_dict() for v in broken],
                 }
         finally:
-            if worktree is not None:
-                worktree.cleanup(keep=self.keep_worktrees)
-        if worktree is not None:
-            extras["worktree"] = worktree.describe()
+            if safe_house is not None:
+                safe_house.cleanup(keep=self.keep_safe_houses)
+        if safe_house is not None:
+            extras["safe_house"] = safe_house.describe()
         if a.adapter:
             debrief = getattr(load_adapter(a.adapter), "debrief", None)
             if debrief is not None:

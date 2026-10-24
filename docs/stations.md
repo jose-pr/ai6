@@ -25,15 +25,15 @@ set, is the only profiles it takes. `launch --role` and `launch --next` pick the
 profile the station accepts; naming a profile the station refuses is an error that says
 why. See [agents](agents.md).
 
-## Worktrees
+## Safe houses
 
-Each mission at a station gets its own git worktree, cut from the station's checkout at
-`base` onto a new branch named by `branch` (`{id}`, `{slug}`, `{station}`; default
-`{id}-{slug}`). Worktrees live under M's state directory
-(`$XDG_STATE_HOME/coagent/worktrees/`), never inside the checkout. When the mission
-ends, a worktree the agent left untouched is removed with its branch; one with commits
+Each mission at a station gets its own safe house: a git worktree, cut from the
+station's checkout at `base` onto a new branch named by `branch` (`{id}`, `{slug}`, `{station}`; default
+`{id}-{slug}`). Safe houses live under M's state directory
+(`$XDG_STATE_HOME/coagent/safe-houses/`), never inside the checkout. When the mission
+ends, a safe house the agent left untouched is removed with its branch; one with commits
 or changes is kept, and its path, branch and commits go into the mission's report. Set
-`worktrees = false` to run missions in the checkout itself.
+`safe_houses = false` to run missions in the checkout itself.
 
 ```toml
 [station.G]
@@ -62,7 +62,7 @@ on_blown = "fail"                                            # or "flag" (defaul
 
 M sets git's author and committer to the station's `identity` for the agent, tells the
 agent its cover in its context (`COAGENT_COVER` names it), and after the mission checks
-every commit it made — in its worktree, or in the checkout from the commit it started at.
+every commit it made — in its safe house, or in the checkout from the commit it started at.
 The report carries `cover: {policy, commits, blown, violations}`; with `on_blown = "fail"`
 a blown cover fails the mission (state `blown`).
 

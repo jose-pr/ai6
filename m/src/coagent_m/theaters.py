@@ -11,7 +11,7 @@ Each registered theater is also a terminal provider,
     port = 22
     identity = "~/.ssh/coagent_win1"        # optional: a key file
     options = { ServerAliveInterval = "15" }
-    safe_houses = "C:/coagent/worktrees"      # where mission worktrees go on the theater
+    safe_houses = "C:/coagent/safe-houses"      # where mission safe houses go on the theater
     tags = ["gpu"]
 """
 
@@ -45,7 +45,7 @@ class Theater:
     port: Optional[int] = None
     identity: Optional[str] = None
     options: Mapping[str, str] = field(default_factory=dict)
-    # Where mission worktrees go on the theater; required for a station there to use them.
+    # Where mission safe houses go on the theater; required for a station there to use them.
     safe_houses: Optional[str] = None
     tags: Tuple[str, ...] = ()
     # The ssh client to run, as argv; tests and unusual setups replace it.

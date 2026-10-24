@@ -87,7 +87,7 @@ def test_a_mission_at_a_remote_station(theater, tmp_path: Path, monkeypatch) -> 
     runner.on_output = lambda key, data: out.append(data)
     outcome = runner.run(coagent_i.Brief("Do it remotely", id="r1", station="R", role="implement"))
     text = b"".join(out).decode(errors="replace")
-    wt = outcome["worktree"]
+    wt = outcome["safe_house"]
     assert outcome["state"] == "done", outcome
     assert wt["path"] == str(work / "manual--r1") and wt["kept"]
     assert f"AT {wt['path']} THEATER {theater.id}" in text

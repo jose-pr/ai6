@@ -81,7 +81,7 @@ class TestRunner:
         r = runner()
         r.inbox.submit(brief("1", "G"))
         out = r.run(r.inbox.claim(), claimed=True)
-        wt = out["worktree"]
+        wt = out["safe_house"]
         assert out["state"] == "done" and not wt["kept"] and wt["branch"] == "1-work"
         assert "1-work" not in git(repo, "branch", "--list")
         transcript = r.inbox.transcript("t--1").decode()
@@ -91,7 +91,7 @@ class TestRunner:
         home, repo, _ = hq
         r = runner()
         out = r.run(brief("2", "G", title="commit a fix"))
-        wt = out["worktree"]
+        wt = out["safe_house"]
         assert wt["kept"] and wt["branch"] == "2-commit-a-fix"
         assert [c.split(" ", 1)[1] for c in wt["commits"]] == ["agent work"]
         assert "agent work" in git(repo, "log", "--format=%s", wt["branch"])
@@ -100,7 +100,7 @@ class TestRunner:
     def test_a_station_that_is_not_git_runs_in_place(self, hq) -> None:
         _, _, plain = hq
         out = runner().run(brief("3", "P"))
-        assert out["state"] == "done" and "worktree" not in out
+        assert out["state"] == "done" and "safe_house" not in out
 
     def test_unassignable_is_refused_and_filed(self, hq) -> None:
         r = runner()

@@ -18,7 +18,7 @@ station's ``.coagent/`` (its hooks and profiles) is read because it is registere
     roster = ["007", "q-branch"]    # absent: every profile
     clearance = "field"
     max_concurrent = 3
-    branch = "{id}-{slug}"          # each mission's worktree branch
+    branch = "{id}-{slug}"          # each mission's safe-house branch
     intake = { jira = "GUA" }       # read by intake sources, not by M
 """
 
@@ -81,9 +81,9 @@ class Station:
     # Labels an office must carry to run this station's missions, as in a Kubernetes
     # nodeSelector; values may be globs ("lab-*"). Offices are labelled node, host, os.
     selector: Mapping[str, str] = field(default_factory=dict)
-    # A git worktree per mission, cut from `base` onto a branch named by `branch`
-    # ({id}, {slug}, {station}); off, missions run in the checkout itself.
-    worktrees: bool = True
+    # A safe house per mission: a git worktree cut from `base` onto a branch named by
+    # `branch` ({id}, {slug}, {station}); off, missions run in the checkout itself.
+    safe_houses: bool = True
     branch: str = "{id}-{slug}"
     base: str = "HEAD"
     # Universal Exports: the cover policy (see coagent_m.cover), the identity commits

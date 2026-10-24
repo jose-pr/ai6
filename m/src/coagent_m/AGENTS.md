@@ -6,7 +6,7 @@ its source. It ships inside the package and is self-contained. Development
 documentation lives with the source at <https://github.com/jose-pr/coagent>.
 
 Public modules: `coagent_m.watchdog`, `coagent_m.terminal`, `coagent_m.hooks`,
-`coagent_m.profiles`, `coagent_m.stations`, `coagent_m.worktree`, `coagent_m.missions`
+`coagent_m.profiles`, `coagent_m.stations`, `coagent_m.safehouse`, `coagent_m.missions`
 (needs `coagent-i`), `coagent_m.config`. Names starting with `_` are private, and so
 are the `_`-prefixed submodules of `terminal` and `hooks`.
 
@@ -120,7 +120,7 @@ in order: max runtime, stall, loop), `blocked(now) -> bool`, `awaiting_input() -
 | `launch (--profile NAME \| --role ROLE [--tag T]...) [--station S] [--no-hooks] [PROMPT]` | starts the agent a profile describes, at the station holding `.` or `--station` |
 | `launch (--next [--inbox DIR] \| --brief FILE) [--station S] [--profile\|--role ..] [--no-hooks]` | runs a brief: its station, its profile or the best one for its role and tags there, its prompt; files the outcome (`--next`) and reports it to the brief's source |
 | `stations` | registered stations |
-| `serve [--max N] [--poll S] [--once] [--idle S] [--inbox DIR\|URL] [--keep-worktrees] [--no-hooks] [--node NAME] [--role control\|execution]... [--label K=V]... [--lease S] [--max-attempts N]` | runs as an office: M when it holds the leader lease, a worker otherwise; exits 1 if any mission did not finish `done` |
+| `serve [--max N] [--poll S] [--once] [--idle S] [--inbox DIR\|URL] [--keep-safe-houses] [--no-hooks] [--node NAME] [--role control\|execution]... [--label K=V]... [--lease S] [--max-attempts N]` | runs as an office: M when it holds the leader lease, a worker otherwise; exits 1 if any mission did not finish `done` |
 | `providers` | terminal providers, best first, with why each cannot run |
 | `hooks` | the hooks a run in this directory would use |
 | `profiles` | agent profiles, best first |
@@ -248,7 +248,7 @@ python = "package.module:attr"    # an object, or a class built with no argument
 
 ## `coagent_m.stations`
 
-- `Station(id, name="", description="", path=None, theater=None, config=None, repos=(), roster=(), clearance="field", max_concurrent=None, selector={}, worktrees=True, branch="{id}-{slug}", base="HEAD", cover="covert", identity=None, on_blown="flag", intake={})`:
+- `Station(id, name="", description="", path=None, theater=None, config=None, repos=(), roster=(), clearance="field", max_concurrent=None, selector={}, safe_houses=True, branch="{id}-{slug}", base="HEAD", cover="covert", identity=None, on_blown="flag", intake={})`:
   `id` is the station's one cover name (any short code); `name` the real project name;
   the station answers to both. `theater` names the theater its checkout (`path`, a path
   there) is on; `config` is a local directory with its hooks and profiles (needed for a
@@ -277,13 +277,13 @@ max_concurrent = 3
 intake = { jira = "GUA" }
 ```
 
-## `coagent_m.worktree`
+## `coagent_m.safehouse`
 
-- `Worktree.create(repo, key, branch, *, root=None, base="HEAD") -> Worktree`: a new
-  worktree at `<root>/<key>` (default root `state_dir()/worktrees`) on a new `branch`
-  from `base`. `WorktreeError` (with git's words) when the path or branch exists or
+- `SafeHouse.create(repo, key, branch, *, root=None, base="HEAD") -> SafeHouse`: a new
+  worktree at `<root>/<key>` (default root `state_dir()/safe-houses`) on a new `branch`
+  from `base`. `SafeHouseError` (with git's words) when the path or branch exists or
   `repo` is not a git checkout.
-- `Worktree`: `repo`, `path`, `branch`, `base` (a commit); `commits()` since `base`,
+- `SafeHouse`: `repo`, `path`, `branch`, `base` (a commit); `commits()` since `base`,
   `dirty()`, `cleanup(*, keep=False) -> kept` (removes the worktree and its branch only
   when there are no commits and no changes), `describe() -> dict`.
 - `branch_name(template, *, id, title, station="")`: `{id}`, `{slug}`, `{station}` filled
@@ -293,20 +293,20 @@ intake = { jira = "GUA" }
 
 ## `coagent_m.missions` (needs `coagent-i`)
 
-- `MissionRunner(inbox=None, *, stations=None, sources=None, use_hooks=True, registry=None, worktree_root=None, keep_worktrees=False, on_event=None, on_output=None)`:
+- `MissionRunner(inbox=None, *, stations=None, sources=None, use_hooks=True, registry=None, safe_house_root=None, keep_safe_houses=False, on_event=None, on_output=None)`:
   `on_event(key, Event)` and `on_output(key, bytes)` run on the mission's thread.
   - `assign(brief, *, station=None, profile=None, role=None, tags=()) -> Assignment`:
     the brief's station (else the one holding the current directory), its profile
     (else the best for its role and tags there), the `AgentSpec` and `Limits`. Raises
     `StationError` / `ProfileError`.
-  - `run(brief, assignment=None, *, claimed=False, **assign) -> dict`: cuts a worktree
-    when the station is a git checkout with `worktrees` on (station hooks and profiles
-    are still read from the station's own path), runs the agent, cleans the worktree
+  - `run(brief, assignment=None, *, claimed=False, **assign) -> dict`: cuts a safe house
+    when the station is a git checkout with `safe_houses` on (station hooks and profiles
+    are still read from the station's own path), runs the agent, cleans the safe house
     up, files the outcome and the transcript (the last `TRANSCRIPT_LIMIT` bytes) when
     `claimed`, and always reports to the brief's source. The outcome has `agent`,
     `profile`, `station`, `state` (`done`, `failed`, `stalled`, or `refused` when it
     could not be assigned or started), `returncode`, `reason`, `runtime` and, with a
-    worktree, `worktree` (`path`, `branch`, `base`, `kept`, `commits`).
+    safe house, `safe_house` (`path`, `branch`, `base`, `kept`, `commits`).
 - `MissionRunner.abandon(key)`: stops a mission without filing or reporting it (its
   brief belongs to another office); `run(..., node=None)` files as `node` and answers
   state `abandoned` when the lease passed elsewhere.

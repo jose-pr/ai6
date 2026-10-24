@@ -22,7 +22,7 @@ Planned, in this package:
 | Module | Purpose |
 | --- | --- |
 | `coagent_m.intake` | Jira JQL polling and webhook receiver → tasks |
-| `coagent_m.worktree` | `git worktree add` per task on its own branch; cleanup on exit |
+| `coagent_m.safehouse` | `git worktree add` per task on its own branch; cleanup on exit |
 | `coagent_m.bus` | the frame stream Moneypenny's gateway reads |
 | `coagent_m.daemon` | the service entry point and scheduler, honouring `max_concurrent` |
 
