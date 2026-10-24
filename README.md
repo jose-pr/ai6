@@ -2,6 +2,7 @@
 
 [![Version](https://img.shields.io/badge/version-0.1.0.dev0-blue.svg)](https://github.com/jose-pr/coagent/blob/main/CHANGELOG.md)
 [![Python versions](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.14-blue.svg)](https://github.com/jose-pr/coagent/blob/main/m/pyproject.toml)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/jose-pr/coagent/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://jose-pr.github.io/coagent/)
 [![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/coagent/test.yml)](https://github.com/jose-pr/coagent/actions/workflows/test.yml)
 
@@ -199,4 +200,14 @@ python3 -m venv .pyvenv/local && .pyvenv/local/bin/pip install -e ".[dev]"
 
 This project follows [Semantic Versioning](https://semver.org/) and keeps a
 [`CHANGELOG.md`](https://github.com/jose-pr/coagent/blob/main/CHANGELOG.md). Nothing is
-released yet, and no license has been chosen, so nothing is published.
+released yet.
+
+## License
+
+**Mozilla Public License 2.0** — see
+[`LICENSE`](https://github.com/jose-pr/coagent/blob/main/LICENSE). Its copyleft is per
+file: a modified file of this project must stay under the MPL 2.0, while your own files
+beside it, such as agent scripts, loadouts and integrations, are yours under any licence.
+Contributions need a one-time signature of the
+[contributor licence agreement](https://github.com/jose-pr/coagent/blob/main/CLA.md); see
+[`CONTRIBUTING.md`](https://github.com/jose-pr/coagent/blob/main/CONTRIBUTING.md).

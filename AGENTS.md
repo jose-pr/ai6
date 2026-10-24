@@ -22,8 +22,9 @@ repository.
 - POSIX only (`pty`, process groups, SIGKILL).
 - Python 3.9 floor; `from __future__ import annotations` in every module; black,
   line length 100.
-- No license yet: the repository stays private and `coagent-m` carries the
-  `Private :: Do Not Upload` classifier.
+- MPL-2.0 (`LICENSE`), with a CLA for outside contributions (`CLA.md`,
+  `.github/workflows/cla.yaml`). `m/LICENSE` is a copy of the root one, because a
+  Python package can only ship a licence file from inside its own project root.
 
 ## Commands
 
