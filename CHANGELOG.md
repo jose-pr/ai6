@@ -50,6 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `coagent_m.missions`: `MissionRunner` (assign, worktree, run, file with transcript,
   report) and `Scheduler`; `serve` runs briefs while there is capacity overall, per
   station and per profile. `Inbox.finish(transcript=)` and `Inbox.transcript()`.
+- Remote hosts (`hosts.toml`): each is an `ssh:<id>` terminal provider that forwards
+  only what M added to the environment and kills the whole remote session. Stations
+  gain `host` and `config`; their worktrees are cut on the host by git over ssh.
+- Cover (`coagent_m.cover`): stations gain `cover` (`covert`, `partial`, `overt` or one
+  from `covers.toml`), `identity` and `on_blown`. Agents commit as the identity, are told
+  the policy, and every commit they make is checked; a breach is reported as a blown
+  cover, or fails the mission.
+- Stations no longer take `aliases`: the id is the station's one cover name.
 - The documentation site (MkDocs Material) with guides, the Python API reference and the
   Rust reference, deployed by `docs.yml`.
 - Licensed under the Mozilla Public License 2.0, with a contributor licence agreement.

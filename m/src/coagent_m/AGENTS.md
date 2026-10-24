@@ -307,6 +307,36 @@ intake = { jira = "GUA" }
   `max_concurrent`; a brief over capacity stays new, one that cannot be assigned is
   claimed and filed as refused.
 
+## `coagent_m.cover`
+
+- `Cover(name, description="", agent_author=False, trailers=(), suggest="", model=False, footer="", forbid=(), announce=False)`;
+  `briefing(identity, profile, model) -> str` (what the agent is told).
+- `BUILTIN_COVERS`: `covert`, `partial` (`Assisted-by` only), `overt`.
+- `Covers(covers=None)`: built-ins plus custom; `get(name)`, `names()`,
+  `Covers.load(path=None)` from `<config_dir>/covers.toml` (`CoverError` for unknown keys
+  or a bad pattern).
+- `Identity(name, email)`, `git_env()` (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`).
+- `check_commits(commits, cover, identity=None, *, model="") -> [Violation]`: each commit
+  a dict of `sha`, `author`, `committer` (`Name <email>`), `message`. Rules: `author`,
+  `committer`, `trailer` (attribution trailers in the last paragraph: Co-Authored-By,
+  Generated-by, Assisted-by, Written-by, `*-Session`), `model`, `announce`, `forbid`,
+  `footer`. `Violation(commit, rule, detail)`, `as_dict()`.
+
+Stations carry `cover` (default `covert`), `identity` and `on_blown` (`flag` or
+`fail`). `MissionRunner` applies them; the outcome gains `cover: {policy, commits, blown,
+violations}`, and state `blown` when the station fails on it.
+
+## `coagent_m.hosts`
+
+- `Host(id, ssh, os="linux", description="", port=None, identity=None, options={}, work_root=None, tags=(), client=("ssh",))`:
+  `provider_name` (`ssh:<id>`), `posix`, `ssh_argv(*, tty)`.
+- `Hosts`: `add`, `get`, iteration, `providers()`, `Hosts.load(path=None)` from
+  `<config_dir>/hosts.toml` (`HostError` for unknown keys or an unknown `os`).
+- The `ssh:<id>` provider runs the agent through `ssh -tt` on the best local terminal,
+  forwards only the environment M and its hooks added, and on a POSIX host kills the
+  remote session (`pkill -s`) over a second connection. Windows hosts: commands run,
+  but a kill only drops the connection (scaffold).
+
 ## `coagent_m.config`
 
 - `config_dir()`: `COAGENT_HOME`, else `%APPDATA%\coagent` on Windows, else

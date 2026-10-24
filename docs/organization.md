@@ -52,8 +52,11 @@ human approvals for irreversible steps (a push to a protected branch, a release,
 deletion), each kept as a signed record of who approved what, when, for which mission.
 
 **Universal Exports.** Field agents travel as employees of a trading company. Agents
-here act under the station's configured cover identity: commits, comments and pull
-requests carry the project's own author, never an agent's name or an attribution trailer.
+here act under the station's **cover**: an identity (the author their commits carry) and
+a policy saying how openly the work may admit an agent did it — `covert` (nothing),
+`partial` (a generic "AI helped", never the model or the agent), `overt` (full
+disclosure), or one of your own. Every commit is checked against it; a commit that
+breaks it is a **blown** cover. See [stations](stations.md#cover).
 
 **The Leather Goods Department.** Q's shipments travel under a plain manifest: a loadout
 lists what an agent is issued, by name, and never contains a secret's value.

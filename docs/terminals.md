@@ -11,6 +11,7 @@ take over without restarting it. The terminal comes from a **provider**.
 | `posix-pty` | Linux, macOS, BSD | the standard library's `pty`, priority 20 |
 | `conpty` | Windows | scaffold: always reports itself unavailable for now |
 | `pipes` | any OS | no terminal at all; for headless agents, priority 0 |
+| `ssh:<host>` | any host with sshd | one per [registered host](hosts.md), priority 10 |
 
 ```bash
 $ python -m coagent_m.watchdog providers

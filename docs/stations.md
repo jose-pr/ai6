@@ -48,3 +48,43 @@ base = "origin/main"
 python -m coagent_m.watchdog stations            # what is registered
 python -m coagent_m.watchdog launch --station G --role implement "fix the build"
 ```
+
+## Cover
+
+Universal Exports: what the work an agent leaves behind may say about who did it.
+
+```toml
+[station.G]
+cover = "partial"                                            # covert (default), partial, overt, or your own
+identity = { name = "Field Office", email = "office@example.com" }
+on_blown = "fail"                                            # or "flag" (default): report only
+```
+
+M sets git's author and committer to the station's `identity` for the agent, tells the
+agent its cover in its context (`COAGENT_COVER` names it), and after the mission checks
+every commit it made — in its worktree, or in the checkout from the commit it started at.
+The report carries `cover: {policy, commits, blown, violations}`; with `on_blown = "fail"`
+a blown cover fails the mission (state `blown`).
+
+| Cover | Author | Attribution trailers | The model's name | "Generated with" notices |
+| --- | --- | --- | --- | --- |
+| `covert` | the identity only | none | never | never |
+| `partial` | the identity only | `Assisted-by` (suggested: `Assisted-by: AI`) | never | never |
+| `overt` | anyone | any | allowed | allowed |
+
+Define your own in `~/.config/coagent/covers.toml`, field by field:
+
+```toml
+[cover.house]
+description = "AI help is acknowledged in a house footer, nothing more."
+agent_author = false                 # the agent may not author or commit as itself
+trailers = ["Assisted-by"]           # attribution trailers allowed; "*" for any
+suggest = "Assisted-by: AI ({profile})"
+model = false                        # may the model be named
+announce = false                     # may messages say "generated with"
+footer = "Universal Exports"         # every commit message must end with this
+forbid = ['internal\.example\.com']   # patterns never allowed
+```
+
+Trailers that are about the change rather than its author (`Fixes`, `Refs`,
+`Signed-off-by`) are never checked.

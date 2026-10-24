@@ -15,6 +15,10 @@ contract in one page is the package's `AGENTS.md`, which ships with it.
 
 ::: coagent_m.stations
 
+::: coagent_m.cover
+
+::: coagent_m.hosts
+
 ::: coagent_m.worktree
 
 ::: coagent_m.missions

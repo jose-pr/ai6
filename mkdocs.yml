@@ -36,6 +36,7 @@ nav:
       - Agents, profiles and clearance: agents.md
       - Hooks: hooks.md
       - Terminals and plugins: terminals.md
+      - Remote hosts: hosts.md
       - The watchdog: watchdog.md
   - API Reference:
       - M (coagent_m): api/m.md
