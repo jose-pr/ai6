@@ -33,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `coagent_m.profiles`: launchers and agent profiles (`profiles.toml`) with aliases,
   `extends`, roles and tags; `AgentSpec.from_profile()`; `launch --profile` /
   `launch --role`, `profiles`, `hooks` and `providers` commands.
-- `coagent_m.stations`: projects registered in `stations.toml` by id, name and cover
-  names, with a checkout path, roster, clearance (`desk`, `field`, `00`) and budget. A
+- `coagent_m.stations`: projects registered in `stations.toml` by id (the station's one
+  cover name) and project name, with a checkout path, roster, clearance (`desk`, `field`, `00`) and budget. A
   project's `.coagent/` is read only when it is a station (or `COAGENT_TRUST_PROJECT=1`);
   `Scope.PROJECT` is now `Scope.STATION`. Profiles gain `clearance`; `choose()` and
   `AgentSpec.from_profile()` take a station; `launch --station` and `stations` commands.

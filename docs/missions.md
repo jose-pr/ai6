@@ -19,7 +19,7 @@ source ─► brief ─► inbox/new ─► M claims it ─► station ─► pr
   "source": "jira",
   "title": "Fix the flaky watchdog test",
   "body": "It fails one run in ten on macOS.",
-  "station": "Kingston",
+  "station": "G",
   "role": "implement",
   "tags": ["ci"],
   "priority": 5,

@@ -1,8 +1,8 @@
 """Stations: the projects M runs missions for.
 
-A station's ``id`` is any short code (``G``, ``GT``, ``B2``: a letter is the
-convention, not a limit), ``name`` the readable project name, and ``aliases`` any cover
-names it also answers to.
+A station's ``id`` is its cover name, and it has exactly one: any short code (``G``,
+``GT``, ``B2``; a letter is the convention, not a limit). ``name`` is the real project
+name.
 
 A station is a registered project: where its checkout lives, which repositories it spans,
 which agents are posted there and the highest clearance a mission there may use. A
@@ -13,7 +13,6 @@ station's ``.coagent/`` (its hooks and profiles) is read because it is registere
 
     [station.G]
     name = "guatiao"
-    aliases = ["Kingston"]
     path = "~/devel/guatiao"
     repos = ["https://github.com/Boriken-Dev/guatiao"]
     roster = ["007", "q-branch"]    # absent: every profile
@@ -65,7 +64,6 @@ class Station:
 
     id: str
     name: str = ""
-    aliases: Tuple[str, ...] = ()
     description: str = ""
     # The checkout; on `host` when one is named, else on this machine.
     path: Optional[Path] = None
@@ -126,7 +124,7 @@ class Stations:
             self.add(station)
 
     def add(self, station: Station) -> None:
-        """Raises ``StationError`` when its id, name or an alias is already taken."""
+        """Raises ``StationError`` when its id or name is already taken."""
         for other in self._by_id.values():
             if _keys(station) & _keys(other):
                 raise StationError(f"{station.label} clashes with {other.label}")
@@ -139,7 +137,7 @@ class Stations:
         return len(self._by_id)
 
     def get(self, key: str) -> Station:
-        """By id (``G``), name (``guatiao``) or alias."""
+        """By id, the cover name (``G``), or by project name (``guatiao``)."""
         if key in self._by_id:
             return self._by_id[key]
         for station in self._by_id.values():
@@ -200,7 +198,7 @@ _KEYS = {f.name for f in fields(Station)} - {"id"}
 
 
 def _keys(station: Station) -> set:
-    return {station.id, *([station.name] if station.name else []), *station.aliases}
+    return {station.id, *([station.name] if station.name else [])}
 
 
 def _station(sid: str, table: Mapping[str, Any], source: Path) -> Station:
@@ -216,7 +214,7 @@ def _station(sid: str, table: Mapping[str, Any], source: Path) -> Station:
         )
     if "config" in values:
         values["config"] = Path(os.path.expanduser(str(values["config"]))).resolve()
-    for key in ("aliases", "repos", "roster"):
+    for key in ("repos", "roster"):
         if key in values:
             values[key] = tuple(str(v) for v in values[key])
     station = Station(id=sid, **values)

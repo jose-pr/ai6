@@ -5,7 +5,6 @@ A station is a project M runs missions for, registered in the global `stations.t
 ```toml
 [station.G]
 name = "guatiao"
-aliases = ["Kingston"]
 path = "~/devel/guatiao"
 repos = ["https://github.com/Boriken-Dev/guatiao"]   # a station may span many repos
 roster = ["007", "006"]                              # absent: every profile
@@ -15,7 +14,7 @@ intake = { jira = "GUA" }                            # for intake sources; M ign
 ```
 
 The id is any short code (a letter is the convention, not the limit), and a station
-answers to its id, its name and every alias. Registering a project is what makes its
+answers to its id and to its project name. Registering a project is what makes its
 `.coagent/` (its hooks and profiles) readable: a directory no station holds is never
 read. Configuration runs headquarters → station → agent, the narrowest winning.
 

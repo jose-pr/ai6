@@ -37,17 +37,19 @@ def roster() -> ProfileSet:
 
 
 class TestRegistry:
-    def test_load_by_id_name_and_alias(self, home: Path, tmp_path: Path) -> None:
+    def test_load_by_id_and_name(self, home: Path, tmp_path: Path) -> None:
         stations = write_stations(
             home,
-            f"[station.GT]\nname = 'guatiao'\naliases = ['Kingston']\npath = {json.dumps(str(tmp_path))}\n",
+            f"[station.Kingston]\nname = 'guatiao'\npath = {json.dumps(str(tmp_path))}\n",
         )
-        assert stations.get("GT") is stations.get("guatiao") is stations.get("Kingston")
-        assert stations.get("GT").path == tmp_path.resolve()
+        assert stations.get("Kingston") is stations.get("guatiao")
+        assert stations.get("Kingston").path == tmp_path.resolve()
+        with pytest.raises(StationError, match="unknown keys"):
+            write_stations(home, "[station.A]\naliases = ['B']\n")
 
-    def test_a_cover_name_cannot_be_taken_twice(self) -> None:
+    def test_a_name_cannot_be_taken_twice(self) -> None:
         with pytest.raises(StationError, match="clashes"):
-            Stations([Station("A", aliases=("Nassau",)), Station("B", name="Nassau")])
+            Stations([Station("A", name="Nassau"), Station("Nassau")])
 
     def test_unknown_keys_and_clearances_are_errors(self, home: Path) -> None:
         with pytest.raises(StationError, match="unknown keys"):

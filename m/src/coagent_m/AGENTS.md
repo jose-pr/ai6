@@ -242,13 +242,16 @@ python = "package.module:attr"    # an object, or a class built with no argument
 
 ## `coagent_m.stations`
 
-- `Station(id, name="", aliases=(), description="", path=None, repos=(), roster=(), clearance="field", max_concurrent=None, intake={})`:
-  `id` is any short code; the station answers to its id, name and aliases. `roster`
+- `Station(id, name="", description="", path=None, host=None, config=None, repos=(), roster=(), clearance="field", max_concurrent=None, worktrees=True, branch="{id}-{slug}", base="HEAD", intake={})`:
+  `id` is the station's one cover name (any short code); `name` the real project name;
+  the station answers to both. `host` names the host its checkout (`path`, a path
+  there) is on; `config` is a local directory with its hooks and profiles (needed for a
+  remote station to have any). `roster`
   empty means every profile. `intake` is for intake sources; M ignores it.
   `contains(path)`, `label`, `why_not(profile) -> str | None` (not on the roster, or
   cleared above the station).
-- `Stations(stations=())`: `add` (`StationError` when an id, name or alias is taken),
-  iteration by id, `get(id_name_or_alias)`, `for_path(path)` (the deepest station
+- `Stations(stations=())`: `add` (`StationError` when an id or name is taken),
+  iteration by id, `get(id_or_name)`, `for_path(path)` (the deepest station
   holding it), `Stations.load(path=None)` from `<config_dir>/stations.toml`; unknown keys
   and unknown clearances raise `StationError`.
 - `CLEARANCES = ("desk", "field", "00")`, lowest first; `clearance_rank(c)`.
@@ -260,7 +263,6 @@ python = "package.module:attr"    # an object, or a class built with no argument
 ```toml
 [station.G]
 name = "guatiao"
-aliases = ["Kingston"]
 path = "~/devel/guatiao"
 repos = ["https://github.com/Boriken-Dev/guatiao"]
 roster = ["007", "006"]

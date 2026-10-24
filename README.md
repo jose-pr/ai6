@@ -34,8 +34,9 @@ has the conventions):
 | **I Branch** | `i/` | Intelligence and comms: mission briefs, the inbox, the contract user-supplied intake fills, the wire format, briefings and debriefs | briefs, inbox and intake contract implemented; wire, briefings, debriefs designed |
 | **Moneypenny** | `moneypenny/` | M's front desk: a Kanban board of runs (*Working · Blocked · Stalled · Done*) per station, and a WebGL terminal attached live to any agent | design |
 
-Projects are **Stations**: each registered project has an id (`G`, `GT`, `B2`), a name
-and any cover names, and holds its own checkout, roster, clearance and budget.
+Projects are **Stations**: each registered project has an id, which is its one cover name
+(`G`, `GT`, `B2`), and its real project name, and holds its own checkout (here or on a
+remote host), roster, clearance and budget.
 
 - **Supervisor–worker (harness) pattern.** Agents are disposable workers. M is the only
   long-lived process that holds state.
@@ -150,7 +151,7 @@ python -m coagent_m.watchdog launch --role review/security --station G "audit th
 Hand M a mission from anything that can write JSON, then let her take it:
 
 ```bash
-echo '{"id": "GUA-12", "title": "Fix the flaky test", "station": "Kingston", "role": "implement"}' \
+echo '{"id": "GUA-12", "title": "Fix the flaky test", "station": "G", "role": "implement"}' \
   | python -m coagent_i submit
 python -m coagent_m.watchdog launch --next
 ```
@@ -285,7 +286,6 @@ A station is a project M runs missions for, registered in the global `stations.t
 ```toml
 [station.G]
 name = "guatiao"
-aliases = ["Kingston"]
 path = "~/devel/guatiao"
 repos = ["https://github.com/Boriken-Dev/guatiao"]   # a station may span many repos
 roster = ["007", "006"]                              # absent: every profile
@@ -295,7 +295,7 @@ intake = { jira = "GUA" }                            # for intake sources; M ign
 ```
 
 The id is any short code (a letter is the convention, not the limit), and a station
-answers to its id, its name and every alias. Registering a project is what makes its
+answers to its id and to its project name. Registering a project is what makes its
 `.coagent/` (its hooks and profiles) readable: a directory no station holds is never
 read. Configuration runs headquarters → station → agent, the narrowest winning.
 

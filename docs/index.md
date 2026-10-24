@@ -40,7 +40,6 @@ Register a project as a station and give M an agent for it:
 # ~/.config/coagent/stations.toml
 [station.G]
 name = "guatiao"
-aliases = ["Kingston"]
 path = "~/devel/guatiao"
 
 # ~/.config/coagent/profiles.toml
@@ -57,7 +56,7 @@ roles = ["implement"]
 Hand M a mission from anything that can write JSON, and let her take it:
 
 ```bash
-echo '{"id": "GUA-12", "title": "Fix the flaky test", "station": "Kingston", "role": "implement"}' \
+echo '{"id": "GUA-12", "title": "Fix the flaky test", "station": "G", "role": "implement"}' \
   | python -m coagent_i submit
 python -m coagent_m.watchdog launch --next
 ```

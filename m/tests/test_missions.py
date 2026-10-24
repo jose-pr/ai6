@@ -26,7 +26,7 @@ def hq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("COAGENT_HOME", str(home))
     monkeypatch.delenv("COAGENT_INBOX", raising=False)
     (home / "stations.toml").write_text(
-        f"[station.G]\nname = 'guatiao'\naliases = ['Kingston']\npath = {json.dumps(str(checkout))}\n"
+        f"[station.G]\nname = 'guatiao'\npath = {json.dumps(str(checkout))}\n"
         "clearance = 'field'\n"
     )
     (home / "profiles.toml").write_text(textwrap.dedent(f"""
@@ -50,7 +50,7 @@ def hq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         brief = {
             "id": "GUA-1",
             "title": "Fix the build",
-            "station": "Kingston",
+            "station": "guatiao",
             "role": "implement",
         }
         f.write(f"import json\nprint(json.dumps([{brief!r}]))\n")

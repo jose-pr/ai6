@@ -66,7 +66,7 @@ exposed.
 ## Stations
 
 A station is a project, by id (`G`, `GT`, `B2`: a letter is the convention, not a
-limit), name and any cover names. It holds the project's checkout, the agents posted
+limit), which is its one cover name, and by project name. It holds the project's checkout, the agents posted
 there, the highest clearance a mission there may use, its budget, and settings for
 intake sources. Registering a project as a station is what makes its own `.coagent/`
 configuration readable.
