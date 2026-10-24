@@ -17,14 +17,26 @@ classifiers = [
     "Operating System :: POSIX",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "tomli>=2.0,<3; python_version < '3.11'",
+]
 
 [project.optional-dependencies]
+# Terminal plugins in any language, through guatiao; pinned to a commit until a release
+# carries what coagent-terminal-kind uses.
+guatiao = [
+    "guatiao @ git+https://github.com/Boriken-Dev/guatiao@c68361008a0e58c644fb0a3c4cfe107114cf22e9#subdirectory=bindings/python/guatiao",
+]
+# The Windows pseudo-console provider (a scaffold until it is implemented).
+conpty = ["pywinpty>=2.0,<3; sys_platform == 'win32'"]
 dev = ["black", "build", "pytest"]
 
 [project.urls]
 Homepage = "https://github.com/jose-pr/coagent/"
 Issues = "https://github.com/jose-pr/coagent/issues"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/.*", "/AGENTS.md", "*.local.*", "CLAUDE*"]

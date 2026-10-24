@@ -1,0 +1,21 @@
+[package]
+name = "coagent-terminal-pty"
+description = "A coagent terminal provider on portable-pty: openpty on Unix, ConPTY on Windows"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+exclude = [".*", "*.local.*"]
+
+# A guatiao plugin: `providers!` exports the entry symbol, so this crate is a cdylib only.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+coagent-terminal-kind.workspace = true
+portable-pty = "0.9"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
