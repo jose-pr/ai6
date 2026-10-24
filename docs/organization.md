@@ -97,14 +97,17 @@ Agents wear out in recognisable ways, and the section's job is to notice:
 
 ## Field dictionary
 
-The code uses plain names; these are what they stand for.
+Where the code has one of these things, it uses the field name: theaters (`theaters.toml`,
+`coagent_m.theaters`), safe houses (`coagent_m.safehouse`, a station's `safe_houses`) and
+offices (`serve --office`, the inbox's `office=`). The rest are plain names; these are what
+they stand for.
 
 | Term | In coagent |
 | --- | --- |
 | **Briefing room** | where a mission's parameters are handed over: the brief, plus the context hooks inject (`COAGENT_CONTEXT_FILE`) |
-| **Theatre of operations** | the theater a mission runs on: this machine, or one registered in `theaters.toml` |
+| **Theater (of operations)** | the machine a mission runs on: this one, or one registered in `theaters.toml` |
 | **Drop zone** | where an agent is inserted: the theater, the path and the terminal it is started on |
-| **Safe house** | the mission's git worktree: deniable, disposable, removed when the agent left nothing |
+| **Safe house** | the mission's git worktree (`SafeHouse`): deniable, disposable, removed when the agent left nothing |
 | **Dead drop** | the inbox: briefs and outcomes exchanged without the two sides ever meeting |
 | **Live drop** | handing a brief straight in (`submit -`, `launch --brief`) |
 | **Exfiltration route** | how work leaves the safe house: the kept branch and its commits, named in the report |
