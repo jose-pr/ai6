@@ -79,7 +79,7 @@ class Station:
     # How many agents may run here at once; None is no limit.
     max_concurrent: Optional[int] = None
     # Labels an office must carry to run this station's missions, as in a Kubernetes
-    # nodeSelector; values may be globs ("lab-*"). Offices are labelled node, host, os.
+    # nodeSelector; values may be globs ("lab-*"). Offices are labelled office, host, os.
     selector: Mapping[str, str] = field(default_factory=dict)
     # A safe house per mission: a git worktree cut from `base` onto a branch named by
     # `branch` ({id}, {slug}, {station}); off, missions run in the checkout itself.

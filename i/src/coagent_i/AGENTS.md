@@ -40,19 +40,19 @@ not end in `.json` in that directory, then rename it.
 
 ## Leases, offices and the leader (both stores)
 
-- `claim(key=None, *, node=None, lease=DEFAULT_LEASE, meta=None)`: with `node`, the claim
-  holds a `Lease(key, node, expires, attempt, meta)` (`expires` in epoch seconds).
-- `renew(key, node, lease=...) -> bool` (`False`: the lease is another node's now),
+- `claim(key=None, *, office=None, lease=DEFAULT_LEASE, meta=None)`: with `office`, the claim
+  holds a `Lease(key, office, expires, attempt, meta)` (`expires` in epoch seconds).
+- `renew(key, office, lease=...) -> bool` (`False`: the lease is another office's now),
   `lease(key)`, `leases()`, `expired(now=None)`, `attempts(key)`.
 - `recover(lease, *, max_attempts=3, by="") -> "new" | "failed" | None`: a lapsed lease's
   brief back to `new`, or `failed` with outcome state `lost` once attempts are spent;
-  `None` when another node won or the lease was renewed.
-- `finish(..., node=None)`: with `node`, `LeaseLost` (nothing filed) when the lease or
-  the claim is no longer that node's.
-- `heartbeat(node, info)`, `offices(within=DEFAULT_LEASE) -> [record]` (each with `node`,
-  `seen` and the info), `elect(node, ttl) -> bool` (holds, renews or takes the one leader
-  lease), `leader() -> {node, expires} | None`, `read(key) -> Brief | None`.
-- Leases compare wall clocks: nodes need synchronised clocks.
+  `None` when another office won or the lease was renewed.
+- `finish(..., office=None)`: with `office`, `LeaseLost` (nothing filed) when the lease or
+  the claim is no longer that office's.
+- `heartbeat(office, info)`, `offices(within=DEFAULT_LEASE) -> [record]` (each with `office`,
+  `seen` and the info), `elect(office, ttl) -> bool` (holds, renews or takes the one leader
+  lease), `leader() -> {office, expires} | None`, `read(key) -> Brief | None`.
+- Leases compare wall clocks: offices need synchronised clocks.
 
 ## `coagent_i.sql.SqlInbox(url, **engine_options)` and `open_inbox(location=None)`
 

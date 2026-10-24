@@ -745,7 +745,7 @@ def _serve(args: argparse.Namespace) -> int:
     labels = dict(item.split("=", 1) for item in args.label if "=" in item)
     scheduler = Scheduler(
         runner,
-        node=args.node,
+        office=args.office,
         max_total=args.max,
         poll_interval=args.poll,
         lease=args.lease,
@@ -849,7 +849,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     serve.add_argument("--idle", type=float, default=1.0, help="seconds between steps")
     serve.add_argument("--inbox", help="inbox directory")
     serve.add_argument("--keep-safe-houses", action="store_true")
-    serve.add_argument("--node", help="this office's name (default: host-pid)")
+    serve.add_argument("--office", help="this office's name (default: host-pid)")
     serve.add_argument(
         "--role",
         action="append",

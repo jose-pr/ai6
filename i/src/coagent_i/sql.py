@@ -57,7 +57,7 @@ _leases = Table(
     "coagent_leases",
     _meta,
     Column("key", String(512), primary_key=True),
-    Column("node", String(256), nullable=False),
+    Column("office", String(256), nullable=False),
     Column("expires", Float, nullable=False),
     Column("attempt", Integer, nullable=False),
     Column("meta", Text, nullable=False, default="{}"),
@@ -65,7 +65,7 @@ _leases = Table(
 _offices = Table(
     "coagent_offices",
     _meta,
-    Column("node", String(256), primary_key=True),
+    Column("office", String(256), primary_key=True),
     Column("seen", Float, nullable=False),
     Column("record", Text, nullable=False),
 )
@@ -73,7 +73,7 @@ _leader = Table(
     "coagent_leader",
     _meta,
     Column("id", Integer, primary_key=True),
-    Column("node", String(256), nullable=False),
+    Column("office", String(256), nullable=False),
     Column("expires", Float, nullable=False),
 )
 
@@ -155,7 +155,7 @@ class SqlInbox:
         self,
         key: Optional[str] = None,
         *,
-        node: Optional[str] = None,
+        office: Optional[str] = None,
         lease: float = DEFAULT_LEASE,
         meta: Optional[Mapping[str, Any]] = None,
     ) -> Optional[Brief]:
@@ -168,12 +168,12 @@ class SqlInbox:
                     .where(_briefs.c.key == brief.key, _briefs.c.state == "new")
                     .values(
                         state="claimed",
-                        attempts=_briefs.c.attempts + (1 if node is not None else 0),
+                        attempts=_briefs.c.attempts + (1 if office is not None else 0),
                     )
                 ).rowcount
                 if won != 1:
                     continue
-                if node is not None:
+                if office is not None:
                     attempt = db.execute(
                         select(_briefs.c.attempts).where(_briefs.c.key == brief.key)
                     ).scalar_one()
@@ -181,7 +181,7 @@ class SqlInbox:
                     db.execute(
                         insert(_leases).values(
                             key=brief.key,
-                            node=node,
+                            office=office,
                             expires=time.time() + lease,
                             attempt=attempt,
                             meta=json.dumps(dict(meta or {})),
@@ -210,12 +210,12 @@ class SqlInbox:
             n = db.execute(select(_briefs.c.attempts).where(_briefs.c.key == key)).scalar()
         return int(n or 0)
 
-    def renew(self, key: str, node: str, lease: float = DEFAULT_LEASE) -> bool:
+    def renew(self, key: str, office: str, lease: float = DEFAULT_LEASE) -> bool:
         claimed = exists().where(_briefs.c.key == key, _briefs.c.state == "claimed")
         with self._engine.begin() as db:
             won = db.execute(
                 update(_leases)
-                .where(_leases.c.key == key, _leases.c.node == node, claimed)
+                .where(_leases.c.key == key, _leases.c.office == office, claimed)
                 .values(expires=time.time() + lease)
             ).rowcount
         return won == 1
@@ -240,7 +240,7 @@ class SqlInbox:
             won = db.execute(
                 delete(_leases).where(
                     _leases.c.key == lease.key,
-                    _leases.c.node == lease.node,
+                    _leases.c.office == lease.office,
                     _leases.c.expires == lease.expires,
                     _leases.c.expires < time.time(),
                 )
@@ -256,7 +256,7 @@ class SqlInbox:
                 return "new"
             outcome = {
                 "state": "lost",
-                "reason": f"node {lease.node} was lost; {lease.attempt} attempts spent",
+                "reason": f"office {lease.office} was lost; {lease.attempt} attempts spent",
                 "recovered_by": by,
             }
             db.execute(
@@ -273,21 +273,21 @@ class SqlInbox:
         *,
         ok: bool,
         transcript: Optional[bytes] = None,
-        node: Optional[str] = None,
+        office: Optional[str] = None,
     ) -> str:
         state = "done" if ok else "failed"
         values: Dict[str, Any] = {"state": state, "outcome": json.dumps(dict(outcome))}
         if transcript is not None:
             values["transcript"] = transcript
         where = [_briefs.c.key == brief.key]
-        if node is not None:
-            held = exists().where(_leases.c.key == brief.key, _leases.c.node == node)
+        if office is not None:
+            held = exists().where(_leases.c.key == brief.key, _leases.c.office == office)
             where += [_briefs.c.state == "claimed", held]
         with self._engine.begin() as db:
             done = db.execute(update(_briefs).where(and_(*where)).values(**values)).rowcount
             if done != 1:
-                if node is not None:
-                    raise LeaseLost(f"{brief.key} is no longer held by {node}")
+                if office is not None:
+                    raise LeaseLost(f"{brief.key} is no longer held by {office}")
                 row = dict(
                     key=brief.key,
                     priority=brief.priority,
@@ -310,21 +310,21 @@ class SqlInbox:
             row = db.execute(select(_briefs.c.transcript).where(_briefs.c.key == key)).first()
         return bytes(row.transcript) if row is not None and row.transcript is not None else None
 
-    def heartbeat(self, node: str, info: Mapping[str, Any]) -> None:
+    def heartbeat(self, office: str, info: Mapping[str, Any]) -> None:
         now = time.time()
-        record = json.dumps({**dict(info), "node": node, "seen": now})
+        record = json.dumps({**dict(info), "office": office, "seen": now})
         with self._engine.begin() as db:
             n = db.execute(
-                update(_offices).where(_offices.c.node == node).values(seen=now, record=record)
+                update(_offices).where(_offices.c.office == office).values(seen=now, record=record)
             ).rowcount
             if n == 0:
                 try:
                     with db.begin_nested():
-                        db.execute(insert(_offices).values(node=node, seen=now, record=record))
+                        db.execute(insert(_offices).values(office=office, seen=now, record=record))
                 except IntegrityError:
                     db.execute(
                         update(_offices)
-                        .where(_offices.c.node == node)
+                        .where(_offices.c.office == office)
                         .values(seen=now, record=record)
                     )
 
@@ -332,17 +332,19 @@ class SqlInbox:
         since = time.time() - within
         with self._engine.connect() as db:
             rows = db.execute(
-                select(_offices.c.record).where(_offices.c.seen >= since).order_by(_offices.c.node)
+                select(_offices.c.record)
+                .where(_offices.c.seen >= since)
+                .order_by(_offices.c.office)
             ).all()
         return [json.loads(row.record) for row in rows]
 
-    def elect(self, node: str, ttl: float = DEFAULT_LEASE) -> bool:
+    def elect(self, office: str, ttl: float = DEFAULT_LEASE) -> bool:
         now = time.time()
         with self._engine.begin() as db:
             won = db.execute(
                 update(_leader)
-                .where(_leader.c.id == 1, or_(_leader.c.node == node, _leader.c.expires < now))
-                .values(node=node, expires=now + ttl)
+                .where(_leader.c.id == 1, or_(_leader.c.office == office, _leader.c.expires < now))
+                .values(office=office, expires=now + ttl)
             ).rowcount
             if won == 1:
                 return True
@@ -350,7 +352,7 @@ class SqlInbox:
                 return False
             try:
                 with db.begin_nested():
-                    db.execute(insert(_leader).values(id=1, node=node, expires=now + ttl))
+                    db.execute(insert(_leader).values(id=1, office=office, expires=now + ttl))
             except IntegrityError:
                 return False
         return True
@@ -358,7 +360,7 @@ class SqlInbox:
     def leader(self) -> Optional[Dict[str, Any]]:
         with self._engine.connect() as db:
             row = db.execute(select(_leader).where(_leader.c.id == 1)).first()
-        return {"node": row.node, "expires": row.expires} if row is not None else None
+        return {"office": row.office, "expires": row.expires} if row is not None else None
 
     def dispose(self) -> None:
         """Closes the connection pool."""
@@ -366,4 +368,4 @@ class SqlInbox:
 
 
 def _lease(row: Any) -> Lease:
-    return Lease(row.key, row.node, float(row.expires), int(row.attempt), json.loads(row.meta))
+    return Lease(row.key, row.office, float(row.expires), int(row.attempt), json.loads(row.meta))

@@ -6,12 +6,12 @@ office is lost, another office takes the role over and nothing waiting is lost.
 
 ```bash
 # headquarters: decides, and runs missions too
-python -m coagent_m.watchdog serve --node hq-1 --role control --role execution
+python -m coagent_m.watchdog serve --office hq-1 --role control --role execution
 # a standby: takes over as M if hq-1 is lost
-python -m coagent_m.watchdog serve --node hq-2 --role control
+python -m coagent_m.watchdog serve --office hq-2 --role control
 # workers: run missions, never decide
-python -m coagent_m.watchdog serve --node lab-gpu --role execution --label gpu=yes
-python -m coagent_m.watchdog serve --node win-1 --role execution --label os=windows
+python -m coagent_m.watchdog serve --office lab-gpu --role execution --label gpu=yes
+python -m coagent_m.watchdog serve --office win-1 --role execution --label os=windows
 ```
 
 All of them point at the same store with `COAGENT_INBOX` (or `--inbox`).
@@ -31,7 +31,7 @@ the office keeps renewing; when it lapses, the next `control` office takes it.
 M places each waiting brief on a live `execution` office with room:
 
 - whose **labels** match the station's `selector` (as a Kubernetes `nodeSelector`;
-  values may be globs). Every office is labelled `node`, `host` and `os`, plus any
+  values may be globs). Every office is labelled `office`, `host` and `os`, plus any
   `--label` given;
 - that can reach the station's checkout: a station on a remote theater can run from any
   office, a local checkout only from an office on that machine;

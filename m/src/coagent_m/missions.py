@@ -147,11 +147,11 @@ class MissionRunner:
         assignment: Optional[Assignment] = None,
         *,
         claimed: bool = False,
-        node: Optional[str] = None,
+        office: Optional[str] = None,
         **assign: Any,
     ) -> Dict[str, Any]:
         """Runs ``brief`` and answers its outcome. With ``claimed``, files the outcome
-        (and transcript) in the inbox, as ``node`` when the claim holds a lease; always
+        (and transcript) in the inbox, as ``office`` when the claim holds a lease; always
         reports it to the brief's source, unless the mission was abandoned or its lease
         passed to another office, which then owns the outcome."""
         outcome: Dict[str, Any] = {
@@ -202,7 +202,9 @@ class MissionRunner:
         if claimed:
             ok = outcome["state"] == State.DONE.value
             try:
-                self.inbox.finish(brief, outcome, ok=ok, transcript=bytes(transcript), node=node)
+                self.inbox.finish(
+                    brief, outcome, ok=ok, transcript=bytes(transcript), office=office
+                )
             except coagent_i.LeaseLost:
                 _log.warning("mission %s: its lease passed to another office", brief.key)
                 outcome.update(state="abandoned", reason="lease lost")
@@ -345,7 +347,7 @@ class Scheduler:
     """An office of M: runs the missions assigned to it and, while it holds the leader
     lease, is M — the one office that decides. ``roles`` is ``control`` (may be elected
     M), ``execution`` (runs missions) or both; ``labels`` describe the office to station
-    selectors, beside the automatic ``node``, ``host`` and ``os``.
+    selectors, beside the automatic ``office``, ``host`` and ``os``.
 
     Every office heartbeats into the shared inbox, renews the leases of what it runs
     (stopping any mission whose lease another office took) and runs what is leased to
@@ -360,7 +362,7 @@ class Scheduler:
         self,
         runner: MissionRunner,
         *,
-        node: Optional[str] = None,
+        office: Optional[str] = None,
         max_total: int = 4,
         poll_interval: Optional[float] = None,
         lease: float = coagent_i.DEFAULT_LEASE,
@@ -373,10 +375,10 @@ class Scheduler:
         if unknown or not roles:
             raise ValueError(f"roles are {ROLES}, not {list(roles)}")
         self.runner = runner
-        self.node = node or f"{socket.gethostname()}-{os.getpid()}"
+        self.office = office or f"{socket.gethostname()}-{os.getpid()}"
         self.roles = tuple(r for r in ROLES if r in roles)
         self.labels = {
-            "node": self.node,
+            "office": self.office,
             "host": socket.gethostname(),
             "os": _os_label(),
             **dict(labels or {}),
@@ -414,11 +416,11 @@ class Scheduler:
         what is assigned here. Answers how many briefs it placed or started."""
         inbox = self.runner.inbox
         self._renew()
-        inbox.heartbeat(self.node, self._info())
+        inbox.heartbeat(self.office, self._info())
         was_leading = self.leading
-        self.leading = "control" in self.roles and inbox.elect(self.node, ttl=self.lease)
+        self.leading = "control" in self.roles and inbox.elect(self.office, ttl=self.lease)
         if self.leading and not was_leading:
-            _log.info("office %s is M now", self.node)
+            _log.info("office %s is M now", self.office)
         placed = self._lead() if self.leading else 0
         return placed + (self._execute() if "execution" in self.roles else 0)
 
@@ -456,8 +458,8 @@ class Scheduler:
 
     def _renew(self) -> None:
         for key in self.running:
-            if not self.runner.inbox.renew(key, self.node, lease=self.lease):
-                _log.warning("office %s lost the lease on %s; stopping it", self.node, key)
+            if not self.runner.inbox.renew(key, self.office, lease=self.lease):
+                _log.warning("office %s lost the lease on %s; stopping it", self.office, key)
                 self.runner.abandon(key)
 
     def _lead(self) -> int:
@@ -467,10 +469,10 @@ class Scheduler:
         ):
             self.poll()
         for lease in inbox.expired():
-            where = inbox.recover(lease, max_attempts=self.max_attempts, by=self.node)
+            where = inbox.recover(lease, max_attempts=self.max_attempts, by=self.office)
             if where:
-                _log.warning("brief %s: office %s was lost; %s", lease.key, lease.node, where)
-        offices = {o["node"]: o for o in inbox.offices(within=self.lease)}
+                _log.warning("brief %s: office %s was lost; %s", lease.key, lease.office, where)
+        offices = {o["office"]: o for o in inbox.offices(within=self.lease)}
         leases = inbox.leases()
         placed = 0
         for brief in inbox.list("new"):
@@ -479,9 +481,9 @@ class Scheduler:
             try:
                 assignment = self.runner.assign(brief)
             except (ProfileError, StationError) as exc:
-                if inbox.claim(brief.key, node=self.node, lease=self.lease) is not None:
+                if inbox.claim(brief.key, office=self.office, lease=self.lease) is not None:
                     _log.warning("brief %s cannot be assigned: %s", brief.key, exc)
-                    self.finished.append(self.runner.run(brief, claimed=True, node=self.node))
+                    self.finished.append(self.runner.run(brief, claimed=True, office=self.office))
                 continue
             if not self._fits(assignment, leases):
                 continue
@@ -490,7 +492,7 @@ class Scheduler:
                 continue
             meta = {"station": assignment.station.id if assignment.station else None}
             meta["profile"] = assignment.profile.name
-            if inbox.claim(brief.key, node=office, lease=self.lease, meta=meta) is None:
+            if inbox.claim(brief.key, office=office, lease=self.lease, meta=meta) is None:
                 continue
             leases.append(coagent_i.Lease(brief.key, office, 0.0, 0, meta))
             placed += 1
@@ -516,7 +518,7 @@ class Scheduler:
         A station on a remote theater is reachable from any office."""
         load: Dict[str, int] = {}
         for lease in leases:
-            load[lease.node] = load.get(lease.node, 0) + 1
+            load[lease.office] = load.get(lease.office, 0) + 1
         station = a.station
         needs_local = station is not None and station.theater is None and station.path is not None
         selector = station.selector if station is not None else {}
@@ -531,13 +533,13 @@ class Scheduler:
                 continue
             if needs_local and station.id not in office.get("stations", ()):
                 continue
-            candidates.append((load.get(name, 0), name != self.node, name))
+            candidates.append((load.get(name, 0), name != self.office, name))
         return min(candidates)[2] if candidates else None
 
     def _execute(self) -> int:
         inbox, started, now = self.runner.inbox, 0, time.time()
         for lease in inbox.leases():
-            if lease.node != self.node or lease.expires < now or lease.key in self.running:
+            if lease.office != self.office or lease.expires < now or lease.key in self.running:
                 continue
             if len(self.running) >= self.max_total:
                 break
@@ -547,7 +549,7 @@ class Scheduler:
             try:
                 assignment = self.runner.assign(brief)
             except (ProfileError, StationError):
-                self.finished.append(self.runner.run(brief, claimed=True, node=self.node))
+                self.finished.append(self.runner.run(brief, claimed=True, office=self.office))
                 continue
             self._start(assignment)
             started += 1
@@ -560,7 +562,7 @@ class Scheduler:
 
         def mission() -> None:
             try:
-                self.finished.append(self.runner.run(a.brief, a, claimed=True, node=self.node))
+                self.finished.append(self.runner.run(a.brief, a, claimed=True, office=self.office))
             finally:
                 with self._lock:
                     self._running.pop(key, None)

@@ -67,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `--append-system-prompt`, and a debrief from the final `result` record.
 - Offices: several `serve` processes share one store; the office holding the leader
   lease is M (places briefs, recovers lost offices' briefs, enforces budgets across
-  offices); offices are `control`, `execution` or both, labelled `node`, `host`, `os`
+  offices); offices are `control`, `execution` or both, labelled `office`, `host`, `os`
   and `--label`; stations gain `selector`. Claims carry leases with heartbeats; a lost
   office's briefs are re-run up to `--max-attempts`, then filed `lost`.
 - `coagent_i.SqlInbox` (`sql` and `postgres` extras): the inbox in SQLite or PostgreSQL;

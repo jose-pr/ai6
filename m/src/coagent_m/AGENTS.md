@@ -120,7 +120,7 @@ in order: max runtime, stall, loop), `blocked(now) -> bool`, `awaiting_input() -
 | `launch (--profile NAME \| --role ROLE [--tag T]...) [--station S] [--no-hooks] [PROMPT]` | starts the agent a profile describes, at the station holding `.` or `--station` |
 | `launch (--next [--inbox DIR] \| --brief FILE) [--station S] [--profile\|--role ..] [--no-hooks]` | runs a brief: its station, its profile or the best one for its role and tags there, its prompt; files the outcome (`--next`) and reports it to the brief's source |
 | `stations` | registered stations |
-| `serve [--max N] [--poll S] [--once] [--idle S] [--inbox DIR\|URL] [--keep-safe-houses] [--no-hooks] [--node NAME] [--role control\|execution]... [--label K=V]... [--lease S] [--max-attempts N]` | runs as an office: M when it holds the leader lease, a worker otherwise; exits 1 if any mission did not finish `done` |
+| `serve [--max N] [--poll S] [--once] [--idle S] [--inbox DIR\|URL] [--keep-safe-houses] [--no-hooks] [--office NAME] [--role control\|execution]... [--label K=V]... [--lease S] [--max-attempts N]` | runs as an office: M when it holds the leader lease, a worker otherwise; exits 1 if any mission did not finish `done` |
 | `providers` | terminal providers, best first, with why each cannot run |
 | `hooks` | the hooks a run in this directory would use |
 | `profiles` | agent profiles, best first |
@@ -308,14 +308,14 @@ intake = { jira = "GUA" }
     could not be assigned or started), `returncode`, `reason`, `runtime` and, with a
     safe house, `safe_house` (`path`, `branch`, `base`, `kept`, `commits`).
 - `MissionRunner.abandon(key)`: stops a mission without filing or reporting it (its
-  brief belongs to another office); `run(..., node=None)` files as `node` and answers
+  brief belongs to another office); `run(..., office=None)` files as `office` and answers
   state `abandoned` when the lease passed elsewhere.
-- `Scheduler(runner, *, node=None, max_total=4, poll_interval=None, lease=60.0, max_attempts=3, roles=("control", "execution"), labels=None)`:
+- `Scheduler(runner, *, office=None, max_total=4, poll_interval=None, lease=60.0, max_attempts=3, roles=("control", "execution"), labels=None)`:
   an office. `step()` renews its leases (abandoning any it lost), heartbeats, takes or
   renews the leader lease if it has `control`, and as leader polls intake, recovers
   lapsed leases and places waiting briefs; with `execution` it then starts what is
   leased to it. Placement: live execution offices with room, labels matching the
-  station's `selector` (`fnmatch` globs; automatic labels `node`, `host`, `os`), able to
+  station's `selector` (`fnmatch` globs; automatic labels `office`, `host`, `os`), able to
   reach a local checkout, least loaded first. Budgets (`max_concurrent` of stations and
   profiles) count leases across offices. `run(*, once, idle)`, `stop()`, `wait()`,
   `leading`, `running`, `finished`. `ROLES = ("control", "execution")`; an unknown role

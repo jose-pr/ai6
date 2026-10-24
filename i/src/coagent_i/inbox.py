@@ -4,11 +4,11 @@
 ``failed/`` the finished ones, each beside its ``.outcome.json`` and, when the mission
 produced one, its ``.log`` transcript.
 
-Several supervisors (nodes) may share one inbox, on one machine or a shared directory.
-A node claims with a **lease** it keeps renewing; when a node is lost its leases expire,
-and any other node ``recover``s those briefs: back to ``new/`` for another attempt, or to
+Several supervisors (offices) may share one inbox, on one machine or a shared directory.
+An office claims with a **lease** it keeps renewing; when an office is lost its leases expire,
+and any other office ``recover``s those briefs: back to ``new/`` for another attempt, or to
 ``failed/`` once ``max_attempts`` are spent. Lease expiry compares wall clocks, so the
-nodes' clocks must agree to within a small part of the lease. Every move is a rename
+offices' clocks must agree to within a small part of the lease. Every move is a rename
 within one directory tree, so two supervisors never claim the same brief.
 """
 
@@ -41,22 +41,22 @@ DEFAULT_LEASE = 60.0
 
 
 class LeaseLost(Exception):
-    """The brief's lease belongs to another node now (this one was presumed lost)."""
+    """The brief's lease belongs to another office now (this one was presumed lost)."""
 
 
 @dataclass(frozen=True)
 class Lease:
-    """A node's hold on a claimed brief: until ``expires`` (seconds since the epoch)."""
+    """An office's hold on a claimed brief: until ``expires`` (seconds since the epoch)."""
 
     key: str
-    node: str
+    office: str
     expires: float
     attempt: int
     # What the claimer recorded about the assignment (station, profile), for others.
     meta: Mapping[str, Any] = field(default_factory=dict, compare=False)
 
     def to_json(self) -> str:
-        data = {"node": self.node, "expires": self.expires, "attempt": self.attempt}
+        data = {"office": self.office, "expires": self.expires, "attempt": self.attempt}
         return json.dumps({**data, "meta": dict(self.meta)}, indent=2)
 
 
@@ -113,13 +113,13 @@ class Inbox:
         self,
         key: Optional[str] = None,
         *,
-        node: Optional[str] = None,
+        office: Optional[str] = None,
         lease: float = DEFAULT_LEASE,
         meta: Optional[Mapping[str, Any]] = None,
     ) -> Optional[Brief]:
         """Moves the best new brief (or the one keyed ``key``) to ``claimed/`` and answers
         it; ``None`` when there is none. Another claimer winning the race is skipped.
-        With ``node``, the claim holds a lease for ``lease`` seconds (see ``renew``)."""
+        With ``office``, the claim holds a lease for ``lease`` seconds (see ``renew``)."""
         candidates = [b for b in self.list("new") if key is None or b.key == key]
         for brief in candidates:
             try:
@@ -129,11 +129,11 @@ class Inbox:
                 )
             except FileNotFoundError:
                 continue
-            if node is not None:
+            if office is not None:
                 attempt = self.attempts(brief.key) + 1
                 _write_atomic(self._dir("attempts") / f"{brief.key}.json", str(attempt))
                 self._write_lease(
-                    Lease(brief.key, node, time.time() + lease, attempt, dict(meta or {}))
+                    Lease(brief.key, office, time.time() + lease, attempt, dict(meta or {}))
                 )
             return brief
         return None
@@ -157,7 +157,7 @@ class Inbox:
             return None
         return Lease(
             key,
-            str(data["node"]),
+            str(data["office"]),
             float(data["expires"]),
             int(data["attempt"]),
             dict(data.get("meta") or {}),
@@ -170,11 +170,11 @@ class Inbox:
         except (OSError, ValueError):
             return 0
 
-    def renew(self, key: str, node: str, lease: float = DEFAULT_LEASE) -> bool:
-        """Extends ``node``'s lease; ``False`` when the lease is no longer its own, which
-        means another node recovered the brief and this one must stop working on it."""
+    def renew(self, key: str, office: str, lease: float = DEFAULT_LEASE) -> bool:
+        """Extends ``office``'s lease; ``False`` when the lease is no longer its own, which
+        means another office recovered the brief and this one must stop working on it."""
         current = self.lease(key)
-        if current is None or current.node != node:
+        if current is None or current.office != office:
             return False
         if not (self.root / "claimed" / f"{key}.json").is_file():
             return False
@@ -191,10 +191,10 @@ class Inbox:
                 found.append(lease)
         return found
 
-    def heartbeat(self, node: str, info: Mapping[str, Any]) -> None:
-        """Announces ``node`` as alive now, with whatever it says about itself."""
-        record = {**dict(info), "node": node, "seen": time.time()}
-        _write_atomic(self._dir("offices") / f"{_safe(node)}.json", json.dumps(record, indent=2))
+    def heartbeat(self, office: str, info: Mapping[str, Any]) -> None:
+        """Announces ``office`` as alive now, with whatever it says about itself."""
+        record = {**dict(info), "office": office, "seen": time.time()}
+        _write_atomic(self._dir("offices") / f"{_safe(office)}.json", json.dumps(record, indent=2))
 
     def offices(self, within: float = DEFAULT_LEASE) -> List[Dict[str, Any]]:
         """Nodes whose last heartbeat is no older than ``within`` seconds."""
@@ -209,28 +209,28 @@ class Inbox:
                 found.append(record)
         return found
 
-    def elect(self, node: str, ttl: float = DEFAULT_LEASE) -> bool:
-        """Holds, renews or takes the leader lease for ``node``; answers whether ``node``
-        is the leader now. Taking an expired lease is a rename only one node can win,
+    def elect(self, office: str, ttl: float = DEFAULT_LEASE) -> bool:
+        """Holds, renews or takes the leader lease for ``office``; answers whether ``office``
+        is the leader now. Taking an expired lease is a rename only one office can win,
         then an exclusive create."""
         path = self._dir("office") / "leader.json"
         current = self.leader()
         now = time.time()
-        if current is not None and current["node"] == node:
-            _write_atomic(path, json.dumps({"node": node, "expires": now + ttl}))
+        if current is not None and current["office"] == office:
+            _write_atomic(path, json.dumps({"office": office, "expires": now + ttl}))
             return True
         if current is not None and float(current["expires"]) >= now:
             return False
         if current is not None:
             try:
-                os.replace(path, path.with_name(f"leader.lapsed.{_safe(node)}"))
+                os.replace(path, path.with_name(f"leader.lapsed.{_safe(office)}"))
             except FileNotFoundError:
                 return False
         fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(json.dumps({"node": node, "expires": now + ttl}))
+            f.write(json.dumps({"office": office, "expires": now + ttl}))
         try:
-            os.link(tmp, path)  # fails if another node created it first
+            os.link(tmp, path)  # fails if another office created it first
         except FileExistsError:
             return False
         finally:
@@ -238,14 +238,14 @@ class Inbox:
         return True
 
     def leader(self) -> Optional[Dict[str, Any]]:
-        """The leader lease (``node``, ``expires``), live or lapsed, or ``None``."""
+        """The leader lease (``office``, ``expires``), live or lapsed, or ``None``."""
         try:
             return json.loads((self.root / "office" / "leader.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
 
     def expired(self, now: Optional[float] = None) -> List[Lease]:
-        """Leases on claimed briefs that ran out: their node stopped renewing them."""
+        """Leases on claimed briefs that ran out: their office stopped renewing them."""
         now = time.time() if now is None else now
         found = []
         directory = self.root / "claimed"
@@ -256,9 +256,9 @@ class Inbox:
         return found
 
     def recover(self, lease: Lease, *, max_attempts: int = 3, by: str = "") -> Optional[str]:
-        """Takes back a brief whose node was lost: to ``new/`` (answers ``"new"``) while it
+        """Takes back a brief whose office was lost: to ``new/`` (answers ``"new"``) while it
         has attempts left, else to ``failed/`` with a ``lost`` outcome (``"failed"``).
-        ``None`` when another node got there first, or the lease was renewed meanwhile.
+        ``None`` when another office got there first, or the lease was renewed meanwhile.
         """
         current = self.lease(lease.key)
         if current is None or current != lease or current.expires >= time.time():
@@ -277,7 +277,7 @@ class Inbox:
             return None
         outcome = {
             "state": "lost",
-            "reason": f"node {lease.node} was lost; {lease.attempt} attempts spent",
+            "reason": f"office {lease.office} was lost; {lease.attempt} attempts spent",
             "recovered_by": by,
         }
         self.finish(brief, outcome, ok=False)
@@ -290,16 +290,16 @@ class Inbox:
         *,
         ok: bool,
         transcript: Optional[bytes] = None,
-        node: Optional[str] = None,
+        office: Optional[str] = None,
     ) -> Path:
         """Moves a claimed brief to ``done/`` or ``failed/`` with its outcome, and its
-        transcript when given, beside it. With ``node``, raises ``LeaseLost`` (filing
-        nothing) when the lease is no longer that node's."""
-        if node is not None:
+        transcript when given, beside it. With ``office``, raises ``LeaseLost`` (filing
+        nothing) when the lease is no longer that office's."""
+        if office is not None:
             current = self.lease(brief.key)
             claimed = (self.root / "claimed" / f"{brief.key}.json").is_file()
-            if current is None or current.node != node or not claimed:
-                raise LeaseLost(f"{brief.key} is no longer held by {node}")
+            if current is None or current.office != office or not claimed:
+                raise LeaseLost(f"{brief.key} is no longer held by {office}")
         state = "done" if ok else "failed"
         target = self._dir(state) / f"{brief.key}.json"
         _write_atomic(target.with_suffix(".outcome.json"), json.dumps(dict(outcome), indent=2))

@@ -40,7 +40,7 @@ def office(name: str, **kw) -> Scheduler:
     runner = MissionRunner(
         coagent_i.open_inbox(), stations=Stations.load(), use_hooks=False, sources=[]
     )
-    return Scheduler(runner, node=name, lease=LEASE, **kw)
+    return Scheduler(runner, office=name, lease=LEASE, **kw)
 
 
 def step_until(offices, done, timeout: float = 15.0) -> None:
