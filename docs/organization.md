@@ -90,3 +90,25 @@ Agents wear out in recognisable ways, and the section's job is to notice:
 - **exposure**: a session that read untrusted input (an issue body, a web page) is
   marked, and what it may do next is restricted;
 - **debriefs**: every mission ends with a record I Branch keeps.
+
+## Field dictionary
+
+The code uses plain names; these are what they stand for.
+
+| Term | In coagent |
+| --- | --- |
+| **Briefing room** | where a mission's parameters are handed over: the brief, plus the context hooks inject (`COAGENT_CONTEXT_FILE`) |
+| **Theatre of operations** | the host a mission runs on: this machine, or one registered in `hosts.toml` |
+| **Drop zone** | where an agent is inserted: the host, the path and the terminal it is started on |
+| **Safe house** | the mission's git worktree: deniable, disposable, removed when the agent left nothing |
+| **Dead drop** | the inbox: briefs and outcomes exchanged without the two sides ever meeting |
+| **Live drop** | handing a brief straight in (`submit -`, `launch --brief`) |
+| **Exfiltration route** | how work leaves the safe house: the kept branch and its commits, named in the report |
+| **Going rogue / off-grid** | a session M has lost contact with (a dropped connection) or an agent acting outside its clearance |
+| **Burned / blown** | credentials or a cover identity that leaked: Q revokes them and issues new ones |
+| **HUMINT** | briefs written by people: tickets, requests |
+| **SIGINT** | signals turned into briefs: CI failures, alerts, webhooks |
+| **Bespoke assets** | tools issued to one agent for one mission |
+| **The Quartermaster's inventory** | Q's record of what was issued to whom |
+| **The Managing Director's office** | headquarters configuration (`~/.config/coagent/`) |
+| **Blades** | the informal channel where operators talk to M |
