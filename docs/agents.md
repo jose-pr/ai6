@@ -50,6 +50,35 @@ clearance = "field"
 **Codenames are slots; models are their occupants.** Missions and roles name `007`,
 never a model, so swapping the model behind `007` changes one profile.
 
+## Adapters
+
+A launcher can name an **adapter** instead of a command: a 00 Section package that knows
+one agent CLI's flags, where its context goes, how clearance and cover map onto its own
+settings, and how to read its transcript. `coagent-00` ships `claude`, for Claude Code:
+
+```toml
+[launcher.claude]
+adapter = "claude"
+options = { mode = "print" }          # print (headless, stream-json) or interactive
+
+[profile.007]
+launcher = "claude"
+model = "opus"
+effort = "high"
+clearance = "00"
+```
+
+| The profile's | becomes |
+| --- | --- |
+| clearance `desk` / `field` / `00` | `--permission-mode plan` / `acceptEdits` (and `git push` denied) / `bypassPermissions` |
+| station cover `covert` / `partial` / `overt` | Claude Code's `attribution` setting: hidden / the cover's suggested trailer / its default |
+| `model`, `effort` | `--model`, `--effort` |
+| the gathered context | `--append-system-prompt` |
+
+In print mode a mission's report gains a `debrief` from Claude Code's final `result`
+record: session id, turns, duration, cost and how many permissions it was denied.
+Adapters for other CLIs plug in through the `coagent.adapters` entry-point group.
+
 ## Clearance
 
 | Clearance | May |

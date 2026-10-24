@@ -219,7 +219,13 @@ python = "package.module:attr"    # an object, or a class built with no argument
 
 ## `coagent_m.profiles`
 
-- `Launcher(name, command, prompt="arg", env={})`: how to start one agent CLI.
+- `Launcher(name, command=(), prompt="arg", env={}, adapter=None, options={})`: how to
+  start one agent CLI — a `command` template, or an `adapter` (found by
+  `load_adapter(name)` in the `coagent.adapters` entry-point group, or
+  `register_adapter(obj)`) given a `LaunchRequest(profile, launcher, prompt, cwd,
+  station, cover)` (`clearance`, `options` = launcher options under profile `vars`).
+  An argv element `{context}` / `{context_file}` is filled after hooks run
+  (`watchdog.fill_context`) and dropped with its flag when there is no context.
   `command` placeholders: `{model}`, `{effort}`, `{profile}`, `{prompt}`, `{cwd}` and
   the profile's `vars`. `prompt`: `arg` appends the prompt, `stdin` types it after
   start, `none` drops it; a `{prompt}` placeholder overrides all three.

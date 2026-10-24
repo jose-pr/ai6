@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the policy, and every commit they make is checked; a breach is reported as a blown
   cover, or fails the mission.
 - Stations no longer take `aliases`: the id is the station's one cover name.
+- Adapters: a launcher may name an `adapter` (with `options`) instead of a `command`,
+  found through the `coagent.adapters` entry-point group; argv elements `{context}` and
+  `{context_file}` are filled once hooks have run; a mission's report gains the
+  adapter's `debrief`.
+- `coagent-00` (`00/`): the `claude` adapter for Claude Code: print or interactive mode,
+  clearance as `--permission-mode`, cover as the `attribution` setting, context as
+  `--append-system-prompt`, and a debrief from the final `result` record.
 - The documentation site (MkDocs Material) with guides, the Python API reference and the
   Rust reference, deployed by `docs.yml`.
 - Licensed under the Mozilla Public License 2.0, with a contributor licence agreement.

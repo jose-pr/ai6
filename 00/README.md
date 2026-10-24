@@ -1,51 +1,46 @@
-# 00 Section
+# coagent-00
 
-The field agents of [C.O.A.G.E.N.T.](https://github.com/jose-pr/coagent): **the coding
-agents that actually execute the work, and how to drive each one.**
+The **00 Section** of [C.O.A.G.E.N.T.](https://github.com/jose-pr/coagent): the agents
+that execute the work, and **adapters that know how to drive each agent CLI** so M does
+not have to.
 
-Design only, except for what M already reads: a roster of profiles and launchers in
-`profiles.toml` (see `coagent_m.profiles`). This directory will hold:
-
-| Path | What |
-| --- | --- |
-| `roster.example.toml` | an example roster: launchers for agent CLIs and the codenamed profiles built on them |
-| `adapters/` | one package per agent CLI: its flags, where its context goes, how it says "done" or "waiting for approval", and how to read its transcript |
-
-## A profile is an agent on the roster
+M finds adapters through the `coagent.adapters` entry-point group; a launcher names one.
+This package ships `claude`, for Claude Code.
 
 ```toml
+# ~/.config/coagent/profiles.toml
+[launcher.claude]
+adapter = "claude"
+options = { mode = "print" }          # or "interactive": the TUI, for a person to take over
+
 [profile.007]
 aliases = ["JamesBond"]
-launcher = "cli"
-model = "<model-id>"
+launcher = "claude"
+model = "opus"
 effort = "high"
 roles = ["plan", "review"]
 clearance = "00"
 ```
 
-M assigns profiles to missions by role and tags, among those the mission's station
-accepts. The model configurations are whatever you define; nothing here is built in.
-
-## Clearance
-
-| Clearance | May |
+| The profile's | becomes |
 | --- | --- |
-| `desk` | read, plan and propose; nothing leaves the worktree |
-| `field` | change its worktree and run its tests; anything irreversible needs M's authorization |
-| `00` | act unattended, including irreversible steps such as a push or a merge |
+| clearance `desk` / `field` / `00` | `--permission-mode plan` / `acceptEdits` (and `git push` denied) / `bypassPermissions` |
+| station cover `covert` / `partial` / `overt` | Claude Code's `attribution` setting: hidden / the cover's suggested trailer / its default |
+| `model`, `effort` | `--model`, `--effort` |
+| the context M's hooks gathered | `--append-system-prompt` |
 
-A station's `clearance` is the highest any mission there may use; M refuses a profile
-cleared above it. What each clearance permits is enforced by the adapter (the agent's
-own permission mode) and by Q (which credentials and sandbox it is issued).
+In `print` mode the run is `claude -p --output-format stream-json --verbose` with
+`--permission-prompts none`, so nothing waits on a prompt nobody will answer, and the
+final `result` record becomes the mission's debrief: session id, turns, cost and
+permission denials.
 
-## Adapters
+`roster.example.toml` is a starting roster. The adapter's contract is in
+[`src/coagent_00/AGENTS.md`](https://github.com/jose-pr/coagent/blob/main/00/src/coagent_00/AGENTS.md).
 
-An adapter turns a profile into a working agent session and reads the session back:
+```bash
+pip install -e 00/
+```
 
-- the command line, from the profile's model, effort and arguments;
-- the context: an instructions file, a system-prompt flag or stdin;
-- the agent's own signals for finished and for waiting on approval, which tell the
-  watchdog more than silence does;
-- the transcript, for I's debriefs.
+## License
 
-Until an adapter exists for a CLI, a launcher in `profiles.toml` is its adapter.
+MPL-2.0.

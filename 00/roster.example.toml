@@ -6,6 +6,19 @@
 command = ["agent-cli", "--model", "{model}"]
 prompt = "arg"
 
+# Claude Code, through the 00 Section's adapter (pip install -e 00/).
+[launcher.claude]
+adapter = "claude"
+options = { mode = "print" }
+
+[profile.nomi]
+description = "Claude Code, cleared for the field."
+launcher = "claude"
+model = "opus"
+effort = "high"
+roles = ["implement", "review"]
+clearance = "field"
+
 [profile.007]
 aliases = ["JamesBond"]
 description = "Plans and reviews; cleared to act unattended."

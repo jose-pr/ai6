@@ -13,7 +13,7 @@ repository.
 | `m/crates/coagent-terminal-kind/` | the terminal contract as guatiao kinds; its test pins both floor hashes |
 | `m/crates/coagent-terminal-pty/` | a terminal plugin (`cdylib`) on `portable-pty` |
 | `i/` | Python project `coagent-i` (package `coagent_i`): briefs, the inbox, the intake-source contract; `i/tests/` |
-| `00/` | the 00 Section: `roster.example.toml` (loads with `coagent_m.profiles`); CLI adapters to come |
+| `00/` | Python project `coagent-00` (package `coagent_00`): agent-CLI adapters, `claude` first, registered in the `coagent.adapters` entry-point group; `00/tests/` (one checks every emitted flag against the installed `claude --help`); `roster.example.toml` |
 | `docs/`, `mkdocs.yml` | the documentation site: hand-written pages, the Python reference (mkdocstrings over `m/src` and `i/src`), the changelog by snippet; rustdoc is copied under `/rust/` by `docs.yml`. Build: `pip install -e "m[docs]" -e i && mkdocs build --strict` |
 | `m/crates/coagent-native/` | a `cdylib` carrying guatiao's C ABI with `load`, for the Python binding |
 | `Cargo.toml` | the workspace; guatiao is a git dependency pinned to a commit, the same commit `m/pyproject.toml`'s `guatiao` extra names |
