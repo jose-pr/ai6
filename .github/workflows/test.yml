@@ -72,14 +72,17 @@ jobs:
       - working-directory: m
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,guatiao]" -e ../i
+          python -m pip install -e ".[dev,guatiao]" -e ../i -e ../00
       # Black's last release for 3.9 formats differently, so formatting is checked once.
       - name: Formatting
         if: matrix.python-version == '3.14'
         run: |
           (cd m && python -m black --check src tests)
           (cd i && python -m black --check src tests)
+          (cd 00 && python -m black --check src tests)
       - working-directory: i
+        run: python -m pytest -q -rs
+      - working-directory: "00"
         run: python -m pytest -q -rs
       - working-directory: m
         run: python -m pytest -q -rs
