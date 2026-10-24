@@ -29,7 +29,8 @@ Options, from the launcher's `options` with the profile's `vars` over them: `mod
   `suggest` → that text (with `{profile}`, `{model}` filled); `overt` → nothing.
 - `effort` must be one of `EFFORTS` (`low`, `medium`, `high`, `xhigh`, `max`); `ValueError`
   otherwise, and for an unknown `mode`.
-- The prompt is the last argument.
+- The prompt comes right after `-p` (or the executable), ahead of every option, so a
+  list-valued option such as `--disallowedTools` never takes it.
 - `debrief` / `parse_result(transcript)`: the last `{"type": "result"}` record as
   `agent`, `subtype`, `is_error`, `session_id`, `num_turns`, `duration_ms`,
   `total_cost_usd`, `permission_denials` (a count), `result` (first 2000 characters);

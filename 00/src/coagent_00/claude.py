@@ -48,7 +48,13 @@ class ClaudeAdapter:
         profile = request.profile
         argv: List[str] = [str(opts.get("executable", "claude"))]
         if mode == "print":
-            argv += ["-p", "--output-format", "stream-json", "--verbose"]
+            argv.append("-p")
+        # First, ahead of every option: the list-valued ones (--allowedTools and the
+        # like) take every argument up to the next option, the prompt included.
+        if request.prompt:
+            argv.append(request.prompt)
+        if mode == "print":
+            argv += ["--output-format", "stream-json", "--verbose"]
         if profile.model:
             argv += ["--model", profile.model]
         if profile.effort:
@@ -84,8 +90,6 @@ class ClaudeAdapter:
             argv += ["--settings", json.dumps(settings, sort_keys=True)]
         # M fills {context} once every hook has added to it, and drops the flag if none did.
         argv += ["--append-system-prompt", "{context}"]
-        if request.prompt:
-            argv.append(request.prompt)
         return argv, {}, None
 
     def debrief(self, transcript: bytes) -> Optional[Dict[str, Any]]:

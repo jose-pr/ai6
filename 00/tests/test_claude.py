@@ -32,10 +32,10 @@ def flag(argv, name):
 class TestLaunch:
     def test_print_mode(self) -> None:
         argv = launch()
-        assert argv[:5] == ["claude", "-p", "--output-format", "stream-json", "--verbose"]
+        assert argv[:6] == ["claude", "-p", "fix it", "--output-format", "stream-json", "--verbose"]
         assert (flag(argv, "--model"), flag(argv, "--effort")) == ("opus", "high")
         assert flag(argv, "--permission-prompts") == "none"
-        assert argv[-3:] == ["--append-system-prompt", "{context}", "fix it"]
+        assert argv[-2:] == ["--append-system-prompt", "{context}"]
 
     def test_clearance_sets_the_permission_mode(self) -> None:
         assert flag(launch("desk"), "--permission-mode") == "plan"
@@ -79,8 +79,11 @@ class TestLaunch:
 
     def test_context_is_filled_or_dropped(self) -> None:
         argv = launch(prompt="go")
-        assert fill_context(argv, None, None)[-1:] == ["go"]
-        assert "--append-system-prompt" not in fill_context(argv, None, None)
+        bare = fill_context(argv, None, None)
+        assert "--append-system-prompt" not in bare
+        # Without context the list-valued --disallowedTools ends the command line, and
+        # the prompt is still where no option can take it.
+        assert bare[:3] == ["claude", "-p", "go"] and bare[-1] == "Bash(git push)"
         assert flag(fill_context(argv, "be brief", "/c.md"), "--append-system-prompt") == "be brief"
 
 
@@ -152,6 +155,6 @@ def test_a_mission_through_m_has_a_debrief(tmp_path: Path, monkeypatch) -> None:
     args = json.loads((tmp_path / "args.json").read_text())
     assert out["state"] == "done"
     assert out["debrief"]["session_id"] == "s-1" and out["debrief"]["permission_denials"] == 1
-    assert args[-1] == "Fix the build" and "--append-system-prompt" in args
+    assert args[1] == "Fix the build" and "--append-system-prompt" in args
     # The station's covert cover reaches Claude Code as hidden attribution.
     assert json.loads(args[args.index("--settings") + 1])["attribution"]["commit"] == ""

@@ -23,7 +23,7 @@ print(
             "duration_ms": 1200,
             "total_cost_usd": 0.0123,
             "permission_denials": [{"tool_name": "Bash"}],
-            "result": "fixed: " + args[-1],
+            "result": "fixed: " + args[1],
         }
     ),
     flush=True,
