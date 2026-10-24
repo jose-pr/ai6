@@ -1,14 +1,12 @@
-"""Supervisor watchdog: run one sub-agent under a pty and SIGKILL it when it stalls or loops.
+"""Supervisor watchdog: run one sub-agent on a terminal and kill it when it stalls or loops.
 
-The agent runs in its own session and process group on a pseudo-terminal, so it behaves
-as it would in an interactive shell and every child it spawns dies with it. Three
-conditions end a run early:
+The terminal comes from a provider (``coagent_m.terminal``): a POSIX pty, a Windows
+pseudo-console, plain pipes, or a plugin. Whichever it is, the provider kills the agent
+together with every process it started. Three conditions end a run early:
 
 * **input hang / silence** -- no output and no operator input for ``stall_timeout``;
 * **loop** -- output keeps arriving but no line has been new for ``loop_timeout``;
 * **max runtime** -- an optional hard cap on wall-clock time.
-
-POSIX only (``pty``, process groups, ``SIGKILL``).
 """
 
 from __future__ import annotations
@@ -17,21 +15,34 @@ import argparse
 import enum
 import hashlib
 import os
-import pty
 import re
-import select
-import signal
-import subprocess
+import shutil
 import sys
+import tempfile
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Sequence
+from dataclasses import dataclass, replace
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+from .config import Scope
+from .hooks import Hook, HookBase, HookContext, HookSet, Preparation, load_hooks
+from .profiles import Profile, ProfileError, ProfileSet, load_profiles
+from .terminal import (
+    DEFAULT_COLS,
+    DEFAULT_ROWS,
+    Provider,
+    Registry,
+    Session,
+    TerminalError,
+    TerminalSpec,
+    default_registry,
+)
 
 __all__ = [
     "AgentSpec",
     "ActivityMonitor",
+    "CursorQueryResponder",
     "Event",
     "KillReason",
     "Limits",
@@ -48,7 +59,9 @@ _DIGITS = re.compile(rb"\d+")
 # A trailing, newline-less fragment shaped like a question waiting for an answer.
 _PROMPT = re.compile(rb"(?:[?:>$#\]\)]\s*$)|\[y/n\]|\(y/n\)|password", re.IGNORECASE)
 _MAX_PARTIAL = 4096
-_READ_SIZE = 65536
+# Output a session may still deliver after its program exits.
+_DRAIN_READS = 20
+_DRAIN_TIMEOUT = 0.05
 
 
 class State(str, enum.Enum):
@@ -89,12 +102,50 @@ class Limits:
 
 @dataclass(frozen=True)
 class AgentSpec:
-    """What to run: ``argv`` in ``cwd`` (a git worktree) with ``env`` (from ``q``)."""
+    """What to run: ``argv`` in ``cwd`` (a git worktree) with ``env`` (from ``q``), on the
+    terminal provider named ``terminal`` (default: the best one available)."""
 
     name: str
     argv: Sequence[str]
     cwd: Optional[str] = None
     env: Optional[Dict[str, str]] = None
+    terminal: Optional[str] = None
+    rows: int = DEFAULT_ROWS
+    cols: int = DEFAULT_COLS
+    # Agent-scope hooks; they run after global and project ones.
+    hooks: Sequence[Hook] = ()
+    # Typed into the terminal once the agent starts, followed by a newline.
+    input: Optional[str] = None
+
+    @classmethod
+    def from_profile(
+        cls,
+        profiles: ProfileSet,
+        profile: "str | Profile",
+        prompt: Optional[str] = None,
+        *,
+        name: Optional[str] = None,
+        cwd: Optional[str] = None,
+        limits: Limits = Limits(),
+    ) -> Tuple["AgentSpec", Limits]:
+        """The agent ``profile`` (a name, an alias or a resolved ``Profile``) describes, given
+        ``prompt``, and ``limits`` with the profile's overrides. Raises ``ProfileError``."""
+        if isinstance(profile, str):
+            profile = profiles.get(profile)
+        argv, env, typed = profiles.argv(profile, prompt, cwd)
+        try:
+            limits = replace(limits, **profile.limits)
+        except TypeError as exc:
+            raise ProfileError(f"profile {profile.name!r}: bad limits: {exc}") from exc
+        spec = cls(
+            name=name or profile.name,
+            argv=argv,
+            cwd=cwd,
+            terminal=profile.terminal,
+            hooks=(_ProfileHook(profile, env),),
+            input=typed,
+        )
+        return spec, limits
 
 
 @dataclass(frozen=True)
@@ -116,6 +167,41 @@ class Outcome:
     returncode: Optional[int]
     reason: Optional[KillReason]
     runtime: float
+
+
+class CursorQueryResponder:
+    """Answers the cursor-position query (``ESC[6n``) and removes it from the output.
+
+    Shells under a pty, and ConPTY itself, send it and block until answered, so an agent
+    with no emulator attached would look hung. The answer is always row 24, column 1: the
+    query is a handshake, and the real size may not have reached the terminal yet.
+    Removing it keeps an attached viewer's emulator from answering a second time.
+    """
+
+    QUERY = b"\x1b[6n"
+    ANSWER = b"\x1b[24;1R"
+
+    def __init__(self) -> None:
+        self._held = b""
+
+    def feed(self, data: bytes) -> Tuple[bytes, List[bytes]]:
+        """The output without queries, and one answer per query. A query split across
+        two reads is held back until it completes."""
+        data = self._held + data
+        self._held = b""
+        count = data.count(self.QUERY)
+        if count:
+            data = data.replace(self.QUERY, b"")
+        for keep in range(len(self.QUERY) - 1, 0, -1):
+            if data.endswith(self.QUERY[:keep]):
+                data, self._held = data[:-keep], data[-keep:]
+                break
+        return data, [self.ANSWER] * count
+
+    def flush(self) -> bytes:
+        """Whatever was held back, once no more output will arrive."""
+        held, self._held = self._held, b""
+        return held
 
 
 class ActivityMonitor:
@@ -195,8 +281,8 @@ class Watchdog:
 
     ``run()`` blocks; ``send()`` and ``kill()`` are safe to call from other threads, which
     is how an operator attached through Moneypenny types into the session.
-    ``on_output`` receives raw pty bytes for the terminal stream; ``on_event`` receives
-    state transitions. Both are called on the ``run()`` thread and must not block.
+    ``on_output`` receives the terminal's bytes (cursor queries removed); ``on_event``
+    receives state transitions. Both are called on the ``run()`` thread and must not block.
     """
 
     def __init__(
@@ -206,6 +292,8 @@ class Watchdog:
         on_event: Optional[Callable[[Event], None]] = None,
         on_output: Optional[Callable[[bytes], None]] = None,
         clock: Callable[[], float] = time.monotonic,
+        registry: Optional[Registry] = None,
+        hooks: Optional[HookSet] = None,
     ) -> None:
         self.spec = spec
         self.limits = limits
@@ -213,111 +301,187 @@ class Watchdog:
         self._on_event = on_event
         self._on_output = on_output
         self._clock = clock
+        self._registry = registry
+        self._hooks = hooks if hooks is not None else HookSet((Scope.AGENT, h) for h in spec.hooks)
         self._lock = threading.Lock()
         self._monitor: Optional[ActivityMonitor] = None
-        self._master: Optional[int] = None
-        self._proc: Optional[subprocess.Popen] = None
-        self._reaped = False
+        self._session: Optional[Session] = None
 
     def send(self, data: bytes) -> None:
         """Write operator input to the agent's terminal. Raises ``RuntimeError`` if not running."""
         with self._lock:
-            if self._master is None or self._monitor is None:
+            if self._session is None or self._monitor is None:
                 raise RuntimeError(f"agent {self.spec.name!r} is not running")
-            os.write(self._master, data)
+            self._session.write(data)
             self._monitor.operator_input(self._clock())
 
     def kill(self) -> None:
-        """SIGKILL the agent's whole process group. A no-op once it has exited."""
-        proc = self._proc
-        # Once reaped, the pid may belong to an unrelated process.
-        if proc is None or self._reaped:
-            return
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        """Kill the agent and everything it started. A no-op once it has exited."""
+        session = self._session
+        if session is not None:
+            session.kill()
+
+    def provider(self) -> Provider:
+        """The terminal provider ``run()`` will use. Raises ``ProviderUnavailable``."""
+        registry = self._registry if self._registry is not None else default_registry()
+        name = self.spec.terminal
+        return registry.get(name) if name else registry.best()
 
     def run(self) -> Outcome:
-        """Start the agent and supervise it until it exits or is killed."""
-        master, slave = pty.openpty()
-        start = self._clock()
+        """Start the agent and supervise it until it exits or is killed.
+
+        Hooks prepare it first; their context reaches the agent as the file named by
+        ``COAGENT_CONTEXT_FILE``. Raises ``ProviderUnavailable`` when no terminal can run
+        here, ``HookError`` when a required hook fails, and ``TerminalError`` when the
+        agent cannot start; none of them emits an event.
+        """
+        provider = self.provider()
+        run_dir = tempfile.mkdtemp(prefix=f"coagent-{_safe(self.spec.name)}-")
         try:
-            self._proc = subprocess.Popen(
-                list(self.spec.argv),
-                stdin=slave,
-                stdout=slave,
-                stderr=slave,
-                cwd=self.spec.cwd,
-                env=self.spec.env,
-                start_new_session=True,  # pgid == pid, so killpg reaches every descendant
-                close_fds=True,
-            )
-        except BaseException:
-            os.close(master)
-            raise
+            ctx = self._prepare(run_dir)
+            return self._run(provider, ctx)
         finally:
-            os.close(slave)
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+    def _prepare(self, run_dir: str) -> HookContext:
+        env = dict(os.environ if self.spec.env is None else self.spec.env)
+        env["COAGENT_AGENT"] = self.spec.name
+        env["COAGENT_RUN_DIR"] = run_dir
+        ctx = HookContext(self.spec.name, list(self.spec.argv), self.spec.cwd, env, run_dir)
+        self._hooks.prepare(ctx)
+        if ctx.context:
+            path = os.path.join(run_dir, "context.md")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write("\n\n".join(ctx.context) + "\n")
+            ctx.env["COAGENT_CONTEXT_FILE"] = path
+        return ctx
+
+    def _run(self, provider: Provider, ctx: HookContext) -> Outcome:
+        start = self._clock()
+        session = provider.spawn(
+            TerminalSpec(ctx.argv, ctx.cwd, ctx.env, self.spec.rows, self.spec.cols)
+        )
         with self._lock:
-            self._master = master
+            self._session = session
             self._monitor = ActivityMonitor(self.limits, start)
-        self._transition(State.WORKING, f"pid {self._proc.pid}")
+        self._transition(State.WORKING, f"pid {session.pid} on {provider.name}")
+        if self.spec.input is not None:
+            try:
+                session.write(self.spec.input.encode() + b"\n")
+            except TerminalError:
+                pass  # it exited already; the outcome says so
 
         reason = None
         try:
-            reason = self._supervise(master)
+            reason = self._supervise(session)
         finally:
+            # Also ends whatever a finished agent left running.
+            session.kill()
+            exit_ = session.wait()
             with self._lock:
-                self._master = None
-            os.close(master)
-            # Also reaps children a finished agent left running in its group.
-            self.kill()
-            returncode = self._proc.wait()
-            self._reaped = True
+                self._session = None
+            session.close()
+        returncode = exit_.returncode if exit_ is not None else None
 
         if reason is not None:
             final = State.STALLED
         else:
             final = State.DONE if returncode == 0 else State.FAILED
         self._transition(final, reason.value if reason else f"exit {returncode}")
-        return Outcome(self.spec.name, final, returncode, reason, self._clock() - start)
+        outcome = Outcome(self.spec.name, final, returncode, reason, self._clock() - start)
+        self._hooks.finished(ctx, outcome)
+        return outcome
 
-    def _supervise(self, master: int) -> Optional[KillReason]:
-        assert self._proc is not None and self._monitor is not None
+    def _supervise(self, session: Session) -> Optional[KillReason]:
+        assert self._monitor is not None
         limits = self.limits
         tick = max(0.05, min(1.0, limits.blocked_after / 2, limits.stall_timeout / 4))
+        responder = CursorQueryResponder()
+        eof = False
         while True:
-            readable, _, _ = select.select([master], [], [], tick)
-            now = self._clock()
-            if readable:
-                try:
-                    data = os.read(master, _READ_SIZE)
-                except OSError:  # EIO on Linux once every slave fd is closed
-                    data = b""
-                if not data:
+            if eof:
+                # No more output can come; the clock keeps running until the exit.
+                if session.wait(tick) is not None:
                     return None
-                with self._lock:
-                    self._monitor.feed(data, now)
-                if self._on_output is not None:
-                    self._on_output(data)
-                if self.state is State.BLOCKED:
-                    self._transition(State.WORKING, "output resumed")
-            elif self._proc.poll() is not None:
-                # Exited, but a detached descendant may still hold the pty open.
+                data: Optional[bytes] = None
+            else:
+                data = session.read(tick)
+            now = self._clock()
+            if data:
+                self._output(session, responder, data, now)
+            elif data == b"":
+                eof = True
+                self._output(session, responder, responder.flush(), now)
+            elif session.poll() is not None:
+                self._drain(session, responder)
                 return None
             with self._lock:
                 reason = self._monitor.verdict(now)
                 blocked = self._monitor.blocked(now)
             if reason is not None:
-                self.kill()
+                session.kill()
                 return reason
             if blocked and self.state is State.WORKING:
                 self._transition(State.BLOCKED, "waiting at a prompt")
 
+    def _output(
+        self, session: Session, responder: CursorQueryResponder, data: bytes, now: float
+    ) -> None:
+        clean, answers = responder.feed(data) if data else (b"", [])
+        for answer in answers:
+            try:
+                session.write(answer)
+            except TerminalError:
+                pass  # its input is gone; the exit follows
+        if not clean:
+            return
+        assert self._monitor is not None
+        with self._lock:
+            self._monitor.feed(clean, now)
+        if self._on_output is not None:
+            self._on_output(clean)
+        if self.state is State.BLOCKED:
+            self._transition(State.WORKING, "output resumed")
+
+    def _drain(self, session: Session, responder: CursorQueryResponder) -> None:
+        """Output written just before the exit; bounded, because a pseudo-console can
+        stay readable after its program has gone."""
+        for _ in range(_DRAIN_READS):
+            data = session.read(_DRAIN_TIMEOUT)
+            if not data:
+                break
+            self._output(session, responder, data, self._clock())
+        self._output(session, responder, responder.flush(), self._clock())
+
     def _transition(self, state: State, detail: str) -> None:
         self.state = state
+        event = Event(self.spec.name, state, time.time(), detail)
         if self._on_event is not None:
-            self._on_event(Event(self.spec.name, state, time.time(), detail))
+            self._on_event(event)
+        self._hooks.on_event(event)
+
+
+class _ProfileHook(HookBase):
+    """A profile's environment and context, applied after global and project hooks."""
+
+    def __init__(self, profile: Profile, env: Dict[str, str]) -> None:
+        self.name = f"profile:{profile.name}"
+        self.required = True
+        self._profile = profile
+        self._env = env
+
+    def prepare(self, ctx: HookContext) -> Preparation:
+        p = self._profile
+        env: Dict[str, Optional[str]] = {**self._env, "COAGENT_PROFILE": p.name}
+        if p.model:
+            env["COAGENT_MODEL"] = p.model
+        if p.effort:
+            env["COAGENT_EFFORT"] = p.effort
+        return Preparation(env=env, context=[p.context] if p.context else [])
+
+
+def _safe(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", name)[:40]
 
 
 def _mock_agent(behavior: str) -> int:
@@ -338,6 +502,29 @@ def _mock_agent(behavior: str) -> int:
         answer = sys.stdin.readline()
         print("[agent] ok" if answer.strip().lower() == "y" else "[agent] aborted", flush=True)
         return 0 if answer.strip().lower() == "y" else 1
+    if behavior == "cursor":
+        # What a shell does on start-up: ask where the cursor is, and wait for the answer.
+        if sys.stdin.isatty():
+            import tty
+
+            tty.setraw(sys.stdin.fileno())
+        os.write(sys.stdout.fileno(), CursorQueryResponder.QUERY)
+        reply = b""
+        while not reply.endswith(b"R"):
+            chunk = os.read(sys.stdin.fileno(), 1)
+            if not chunk:
+                return 1
+            reply += chunk
+        os.write(sys.stdout.fileno(), b"[agent] cursor at " + reply[2:-1] + b"\r\n")
+        return 0
+    if behavior == "orphan":
+        # Starts a descendant that outlives it unless the whole tree is killed, then goes quiet.
+        import subprocess
+
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        print(f"[agent] child {child.pid}", flush=True)
+        time.sleep(60)
+        return 0
     raise SystemExit(f"unknown mock behavior: {behavior}")
 
 
@@ -346,7 +533,7 @@ def _print_event(event: Event) -> None:
     print(f"{stamp} {event.agent:<8} {event.state.value:<8} {event.detail}", flush=True)
 
 
-def _demo(timeout: float) -> int:
+def _demo(timeout: float, terminal: Optional[str]) -> int:
     limits = Limits(
         stall_timeout=timeout,
         loop_timeout=timeout,
@@ -355,7 +542,7 @@ def _demo(timeout: float) -> int:
     )
     me = [sys.executable, "-m", "coagent_m.watchdog", "mock-agent"]
     dogs = [
-        Watchdog(AgentSpec(b, [*me, b]), limits, on_event=_print_event)
+        Watchdog(AgentSpec(b, [*me, b], terminal=terminal), limits, on_event=_print_event)
         for b in ("work", "loop", "hang")
     ]
     threads = [threading.Thread(target=d.run, name=d.spec.name) for d in dogs]
@@ -366,7 +553,48 @@ def _demo(timeout: float) -> int:
     return 0
 
 
-def _run(argv: Sequence[str], limits: Limits) -> int:
+def _providers() -> int:
+    for info in default_registry().providers():
+        state = "ok" if info.reason is None else f"unavailable: {info.reason}"
+        print(f"{info.priority:>4}  {info.name:<20} {state}")
+    return 0
+
+
+def _list_profiles() -> int:
+    for p in load_profiles(os.getcwd()).profiles():
+        alias = f" ({', '.join(p.aliases)})" if p.aliases else ""
+        what = " ".join(filter(None, [p.model, p.effort])) or "-"
+        roles = ", ".join(p.roles) or "-"
+        print(f"{p.priority:>4}  {p.name}{alias}  {what}  [{p.scope.value}]  roles: {roles}")
+    return 0
+
+
+def _launch(args: argparse.Namespace) -> int:
+    cwd = os.getcwd()
+    profiles = load_profiles(cwd)
+    try:
+        profile = (
+            profiles.get(args.profile) if args.profile else profiles.choose(args.role, args.tag)
+        )
+        spec, limits = AgentSpec.from_profile(profiles, profile, args.prompt, cwd=cwd)
+    except ProfileError as exc:
+        print(f"coagent: {exc}", file=sys.stderr)
+        return 2
+    return _supervise_cli(spec, limits, not args.no_hooks)
+
+
+def _list_hooks() -> int:
+    for scope, hook in load_hooks(os.getcwd()).hooks:
+        print(f"{scope.value:<8} {hook.name}")
+    return 0
+
+
+def _run(argv: Sequence[str], limits: Limits, terminal: Optional[str], use_hooks: bool) -> int:
+    spec = AgentSpec(os.path.basename(argv[0]), argv, cwd=os.getcwd(), terminal=terminal)
+    return _supervise_cli(spec, limits, use_hooks)
+
+
+def _supervise_cli(spec: AgentSpec, limits: Limits, use_hooks: bool) -> int:
     def echo(data: bytes) -> None:
         sys.stdout.buffer.write(data)
         sys.stdout.buffer.flush()
@@ -374,8 +602,12 @@ def _run(argv: Sequence[str], limits: Limits) -> int:
     def report(event: Event) -> None:
         print(f"\n[watchdog] {event.state.value}: {event.detail}", file=sys.stderr, flush=True)
 
-    spec = AgentSpec(os.path.basename(argv[0]), argv)
-    outcome = Watchdog(spec, limits, on_event=report, on_output=echo).run()
+    hooks = (
+        load_hooks(spec.cwd, spec.hooks)
+        if use_hooks
+        else HookSet((Scope.AGENT, h) for h in spec.hooks)
+    )
+    outcome = Watchdog(spec, limits, on_event=report, on_output=echo, hooks=hooks).run()
     if outcome.returncode is None:
         return 1
     return outcome.returncode if outcome.returncode >= 0 else 128 - outcome.returncode
@@ -389,19 +621,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     run.add_argument("--stall-timeout", type=float, default=DEFAULT_STALL_TIMEOUT)
     run.add_argument("--loop-timeout", type=float, default=DEFAULT_STALL_TIMEOUT)
     run.add_argument("--max-runtime", type=float, default=None)
+    run.add_argument("--terminal", help="terminal provider name (see `providers`)")
+    run.add_argument("--no-hooks", action="store_true", help="run no global or project hooks")
     run.add_argument("cmd", nargs=argparse.REMAINDER, help="-- command [args...]")
 
     demo = sub.add_parser("demo", help="run a healthy, a looping and a hanging mock agent")
     demo.add_argument("--timeout", type=float, default=3.0, help="stall and loop window")
+    demo.add_argument("--terminal", help="terminal provider name (see `providers`)")
+
+    sub.add_parser("providers", help="list terminal providers, best first")
+    sub.add_parser("hooks", help="list the hooks a run in this directory would use")
+    sub.add_parser("profiles", help="list agent profiles, best first")
+
+    launch = sub.add_parser("launch", help="start an agent from a profile")
+    pick = launch.add_mutually_exclusive_group(required=True)
+    pick.add_argument("--profile", help="profile name or alias")
+    pick.add_argument("--role", help="the best profile for this role")
+    launch.add_argument("--tag", action="append", default=[], help="a tag the profile must have")
+    launch.add_argument("--no-hooks", action="store_true", help="run no global or project hooks")
+    launch.add_argument("prompt", nargs="?", help="the task")
 
     mock = sub.add_parser("mock-agent", help=argparse.SUPPRESS)
-    mock.add_argument("behavior", choices=("work", "loop", "hang"))
+    mock.add_argument("behavior", choices=("work", "loop", "hang", "cursor", "orphan"))
 
     args = parser.parse_args(argv)
     if args.command == "mock-agent":
         return _mock_agent(args.behavior)
+    if args.command == "providers":
+        return _providers()
+    if args.command == "hooks":
+        return _list_hooks()
+    if args.command == "profiles":
+        return _list_profiles()
+    if args.command == "launch":
+        return _launch(args)
     if args.command == "demo":
-        return _demo(args.timeout)
+        return _demo(args.timeout, args.terminal)
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not cmd:
         parser.error("run needs a command after --")
@@ -410,7 +665,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         loop_timeout=args.loop_timeout,
         max_runtime=args.max_runtime,
     )
-    return _run(cmd, limits)
+    return _run(cmd, limits, args.terminal, not args.no_hooks)
 
 
 if __name__ == "__main__":
