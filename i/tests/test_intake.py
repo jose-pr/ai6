@@ -65,7 +65,8 @@ class TestInbox:
         assert [b.title for b in inbox.list()] == ["high", "low"]
         claimed = inbox.claim()
         assert claimed == high and inbox.find(high.key)[0] == "claimed"
-        inbox.finish(claimed, {"state": "done"}, ok=True)
+        inbox.finish(claimed, {"state": "done"}, ok=True, transcript=b"all good\n")
+        assert inbox.transcript(high.key) == b"all good\n"
         assert inbox.find(high.key)[0] == "done"
         assert inbox.outcome(high.key) == {"state": "done"}
         assert [b.title for b in inbox.list("new")] == ["low"]

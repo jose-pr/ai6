@@ -30,8 +30,10 @@ else `%LOCALAPPDATA%\coagent\inbox` or `$XDG_STATE_HOME/coagent/inbox`
   are skipped.
 - `claim(key=None) -> Brief | None`: moves the best new brief (or `key`) to `claimed/`
   by rename, so concurrent claimers never get the same one.
-- `finish(brief, outcome, *, ok) -> Path`: to `done/` or `failed/`, outcome beside it.
-- `find(key) -> (state, path) | None`, `outcome(key) -> dict | None`.
+- `finish(brief, outcome, *, ok, transcript=None) -> Path`: to `done/` or `failed/`,
+  with `<key>.outcome.json` and, given a transcript, `<key>.log` beside it.
+- `find(key) -> (state, path) | None`, `outcome(key) -> dict | None`,
+  `transcript(key) -> bytes | None`.
 
 Anything may write a brief straight into `new/`: write a temporary file whose name does
 not end in `.json` in that directory, then rename it.

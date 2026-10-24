@@ -1,7 +1,8 @@
 """The inbox: a directory anything can drop a brief into, and M takes them from.
 
 ``new/`` holds briefs waiting, ``claimed/`` those an agent is on, ``done/`` and
-``failed/`` the finished ones, each beside its ``.outcome.json``. Every move is a rename
+``failed/`` the finished ones, each beside its ``.outcome.json`` and, when the mission
+produced one, its ``.log`` transcript. Every move is a rename
 within one directory tree, so two supervisors never claim the same brief.
 """
 
@@ -85,17 +86,34 @@ class Inbox:
             return brief
         return None
 
-    def finish(self, brief: Brief, outcome: Mapping[str, Any], *, ok: bool) -> Path:
-        """Moves a claimed brief to ``done/`` or ``failed/`` with its outcome beside it."""
+    def finish(
+        self,
+        brief: Brief,
+        outcome: Mapping[str, Any],
+        *,
+        ok: bool,
+        transcript: Optional[bytes] = None,
+    ) -> Path:
+        """Moves a claimed brief to ``done/`` or ``failed/`` with its outcome, and its
+        transcript when given, beside it."""
         state = "done" if ok else "failed"
         target = self._dir(state) / f"{brief.key}.json"
         _write_atomic(target.with_suffix(".outcome.json"), json.dumps(dict(outcome), indent=2))
+        if transcript is not None:
+            target.with_suffix(".log").write_bytes(transcript)
         source = self.root / "claimed" / f"{brief.key}.json"
         if source.is_file():
             os.replace(source, target)
         else:
             _write_atomic(target, brief.to_json())
         return target
+
+    def transcript(self, key: str) -> Optional[bytes]:
+        for state in ("done", "failed"):
+            path = self.root / state / f"{key}.log"
+            if path.is_file():
+                return path.read_bytes()
+        return None
 
     def outcome(self, key: str) -> Optional[Dict[str, Any]]:
         for state in ("done", "failed"):
