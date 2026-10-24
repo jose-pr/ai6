@@ -21,7 +21,7 @@ from .config import Scope
 from .cover import Cover, CoverError, Covers, Identity, check_commits
 from .hooks import HookBase, HookContext, HookSet, Preparation, load_hooks
 from .hosts import HostError, Hosts
-from .profiles import Profile, ProfileError, load_profiles
+from .profiles import Profile, ProfileError, load_adapter, load_profiles
 from .stations import Station, StationError, Stations
 from .terminal import Registry, TerminalError
 from .watchdog import AgentSpec, Event, Limits, Outcome, State, Watchdog
@@ -54,6 +54,8 @@ class Assignment:
     profile: Profile
     spec: AgentSpec
     limits: Limits
+    # The 00 Section adapter the profile's launcher names, if any.
+    adapter: Optional[str] = None
 
 
 class MissionRunner:
@@ -117,7 +119,8 @@ class MissionRunner:
         spec, limits = AgentSpec.from_profile(
             profiles, chosen, brief.prompt, name=brief.id, cwd=cwd, station=where
         )
-        return Assignment(brief, where, chosen, spec, limits)
+        adapter = profiles.launcher_of(chosen).adapter
+        return Assignment(brief, where, chosen, spec, limits, adapter)
 
     def run(
         self,
@@ -261,6 +264,16 @@ class MissionRunner:
                 worktree.cleanup(keep=self.keep_worktrees)
         if worktree is not None:
             extras["worktree"] = worktree.describe()
+        if a.adapter:
+            debrief = getattr(load_adapter(a.adapter), "debrief", None)
+            if debrief is not None:
+                try:
+                    found = debrief(bytes(transcript))
+                except Exception:  # a debrief is a report, never a reason to fail
+                    _log.exception("adapter %s could not debrief %s", a.adapter, key)
+                    found = None
+                if found:
+                    extras["debrief"] = dict(found)
         return result, extras
 
 

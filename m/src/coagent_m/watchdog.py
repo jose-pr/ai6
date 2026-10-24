@@ -146,7 +146,15 @@ class AgentSpec:
                 raise ProfileError(why)
             if cwd is None and station.path is not None:
                 cwd = str(station.path)
-        argv, env, typed = profiles.argv(profile, prompt, cwd)
+        cover = None
+        if station is not None:
+            from .cover import CoverError, Covers
+
+            try:
+                cover = Covers.load().get(station.cover)
+            except CoverError as exc:
+                raise ProfileError(str(exc)) from exc
+        argv, env, typed = profiles.argv(profile, prompt, cwd, station=station, cover=cover)
         try:
             limits = replace(limits, **profile.limits)
         except TypeError as exc:
@@ -374,11 +382,14 @@ class Watchdog:
             self.spec.name, list(self.spec.argv), self.spec.cwd, env, run_dir, host=self.spec.host
         )
         self._hooks.prepare(ctx)
+        text = "\n\n".join(ctx.context)
+        path: Optional[str] = None
         if ctx.context:
             path = os.path.join(run_dir, "context.md")
             with open(path, "w", encoding="utf-8", newline="") as f:
-                f.write("\n\n".join(ctx.context) + "\n")
+                f.write(text + "\n")
             ctx.env["COAGENT_CONTEXT_FILE"] = path
+        ctx.argv = fill_context(ctx.argv, text if ctx.context else None, path)
         return ctx
 
     def _run(self, provider: Provider, ctx: HookContext) -> Outcome:
@@ -504,6 +515,25 @@ class _ProfileHook(HookBase):
         if p.effort:
             env["COAGENT_EFFORT"] = p.effort
         return Preparation(env=env, context=[p.context] if p.context else [])
+
+
+CONTEXT_TOKENS = ("{context}", "{context_file}")
+
+
+def fill_context(argv: Sequence[str], text: Optional[str], path: Optional[str]) -> List[str]:
+    """``argv`` with an element ``{context}`` replaced by the context and
+    ``{context_file}`` by its path. Without context, the token is dropped together with
+    the flag before it, so ``["--system", "{context}"]`` disappears entirely."""
+    out: List[str] = []
+    for part in argv:
+        if part not in CONTEXT_TOKENS:
+            out.append(part)
+        elif text is None:
+            if out and out[-1].startswith("-"):
+                out.pop()
+        else:
+            out.append(text if part == "{context}" else str(path))
+    return out
 
 
 def _safe(name: str) -> str:

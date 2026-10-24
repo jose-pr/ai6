@@ -29,15 +29,21 @@ for the best one for a role, and turns it and a prompt into an ``AgentSpec``.
 from __future__ import annotations
 
 import re
+from importlib import metadata
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple
 
 from .config import Scope, config_dir, read_toml
 from .stations import Station, Stations, clearance_rank, local_config
 
 __all__ = [
+    "ADAPTER_GROUP",
     "PROFILES_FILE",
+    "Adapter",
+    "LaunchRequest",
+    "load_adapter",
+    "register_adapter",
     "Launcher",
     "Profile",
     "ProfileError",
@@ -56,14 +62,79 @@ class ProfileError(Exception):
 
 @dataclass(frozen=True)
 class Launcher:
-    """How to start one agent CLI. ``{name}`` placeholders in ``command`` are filled from
-    the profile: ``model``, ``effort``, ``profile``, ``prompt``, ``cwd`` and its ``vars``."""
+    """How to start one agent CLI: a ``command`` template, or an ``adapter`` (a 00 Section
+    package that knows the CLI) with its ``options``. ``{name}`` placeholders in
+    ``command`` are filled from the profile: ``model``, ``effort``, ``profile``,
+    ``prompt``, ``cwd`` and its ``vars``."""
 
     name: str
-    command: Tuple[str, ...]
+    command: Tuple[str, ...] = ()
     prompt: str = "arg"
     env: Mapping[str, str] = field(default_factory=dict)
     scope: Scope = Scope.GLOBAL
+    adapter: Optional[str] = None
+    options: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class LaunchRequest:
+    """What an adapter is asked to launch. ``cover`` is the station's
+    ``coagent_m.cover.Cover``, when there is a station."""
+
+    profile: "Profile"
+    launcher: Launcher
+    prompt: Optional[str]
+    cwd: Optional[str]
+    station: Optional[Station] = None
+    cover: Optional[Any] = None
+
+    @property
+    def clearance(self) -> str:
+        return self.profile.clearance or "field"
+
+    @property
+    def options(self) -> Dict[str, Any]:
+        """The launcher's options, under the profile's ``vars``."""
+        return {**self.launcher.options, **self.profile.vars}
+
+
+class Adapter(Protocol):
+    """Drives one agent CLI. ``launch`` answers the command line, the environment to add
+    and any text to type once it starts; the optional ``debrief(transcript: bytes)``
+    answers a mapping for the mission's report, or ``None``."""
+
+    name: str
+
+    def launch(self, request: LaunchRequest) -> Tuple[List[str], Dict[str, str], Optional[str]]: ...
+
+
+ADAPTER_GROUP = "coagent.adapters"
+_adapters: Dict[str, Any] = {}
+
+
+def load_adapter(name: str) -> Any:
+    """The adapter ``name`` from the ``coagent.adapters`` entry-point group: an object,
+    or a class built with no arguments. Raises ``ProfileError`` when none is installed."""
+    if name in _adapters:
+        return _adapters[name]
+    eps = metadata.entry_points()
+    group = (
+        eps.select(group=ADAPTER_GROUP) if hasattr(eps, "select") else eps.get(ADAPTER_GROUP, ())
+    )
+    for ep in group:
+        if ep.name == name:
+            obj = ep.load()
+            _adapters[name] = obj() if isinstance(obj, type) else obj
+            return _adapters[name]
+    raise ProfileError(
+        f"no adapter {name!r} is installed (entry-point group {ADAPTER_GROUP!r}; "
+        "for the 00 Section's, pip install -e 00/)"
+    )
+
+
+def register_adapter(adapter: Any) -> None:
+    """Makes ``adapter`` loadable by its ``name`` without an entry point (tests, embedding)."""
+    _adapters[adapter.name] = adapter
 
 
 @dataclass(frozen=True)
@@ -145,9 +216,7 @@ class ProfileSet:
         where = f" at {station.label}" if station is not None else ""
         raise ProfileError(f"no profile suits {want}{where}")
 
-    def argv(self, profile: Profile, prompt: Optional[str] = None, cwd: Optional[str] = None):
-        """The command line, the environment additions and the text to type once it
-        starts, for ``profile`` given ``prompt``."""
+    def launcher_of(self, profile: Profile) -> Launcher:
         if not profile.launcher:
             raise ProfileError(f"profile {profile.name!r} names no launcher")
         launcher = self.launchers.get(profile.launcher)
@@ -155,6 +224,30 @@ class ProfileSet:
             raise ProfileError(
                 f"profile {profile.name!r} names launcher {profile.launcher!r}, which is not defined"
             )
+        return launcher
+
+    def argv(
+        self,
+        profile: Profile,
+        prompt: Optional[str] = None,
+        cwd: Optional[str] = None,
+        *,
+        station: Optional[Station] = None,
+        cover: Optional[Any] = None,
+    ):
+        """The command line, the environment additions and the text to type once it
+        starts, for ``profile`` given ``prompt``. An adapter launcher asks its adapter;
+        the profile's ``args`` and ``env`` are added either way."""
+        launcher = self.launcher_of(profile)
+        if launcher.adapter:
+            adapter = load_adapter(launcher.adapter)
+            request = LaunchRequest(profile, launcher, prompt, cwd, station, cover)
+            argv, env, typed = adapter.launch(request)
+            values = {**{k: str(v) for k, v in profile.vars.items()}, "profile": profile.name}
+            values.update(model=profile.model or "", effort=profile.effort or "")
+            values.update(prompt=prompt or "", cwd=cwd or "")
+            argv = [*argv, *(_fill(part, values, profile.name) for part in profile.args)]
+            return argv, {**launcher.env, **env, **profile.env}, typed
         values = {
             **{k: str(v) for k, v in profile.vars.items()},
             "profile": profile.name,
@@ -224,15 +317,24 @@ def load_file(path: Path, scope: Scope, into: ProfileSet) -> None:
 
 
 def _launcher(name: str, table: Mapping[str, Any], scope: Scope, path: Path) -> Launcher:
-    command = table.get("command")
-    if not isinstance(command, list) or not command:
-        raise ProfileError(f"{path}: launcher {name!r} needs command = [...]")
+    _known(table, {"command", "prompt", "env", "adapter", "options"}, f"{path}: launcher {name!r}")
+    command = table.get("command", [])
+    adapter = table.get("adapter")
+    if not adapter and (not isinstance(command, list) or not command):
+        raise ProfileError(f'{path}: launcher {name!r} needs command = [...] or adapter = ".."')
     prompt = str(table.get("prompt", "arg"))
     if prompt not in _PROMPT_MODES:
         raise ProfileError(f"{path}: launcher {name!r}: prompt must be one of {_PROMPT_MODES}")
-    _known(table, {"command", "prompt", "env"}, f"{path}: launcher {name!r}")
     env = {str(k): str(v) for k, v in table.get("env", {}).items()}
-    return Launcher(name, tuple(str(c) for c in command), prompt, env, scope)
+    return Launcher(
+        name,
+        tuple(str(c) for c in command),
+        prompt,
+        env,
+        scope,
+        str(adapter) if adapter else None,
+        dict(table.get("options", {})),
+    )
 
 
 _TUPLES = {"aliases", "roles", "tags", "args"}
