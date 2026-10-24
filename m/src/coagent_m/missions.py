@@ -1,8 +1,8 @@
 """Missions: a brief, run at its station by the agent M assigns, in its own safe_house.
 
 ``MissionRunner`` runs one brief end to end; ``Scheduler`` keeps taking briefs from the
-inbox while there is capacity, overall, per station and per profile. Both need the
-``coagent-i`` package, which defines briefs and the inbox.
+registry while there is capacity, overall, per station and per profile. Both need the
+``coagent-i`` package, which defines briefs and the registry.
 """
 
 from __future__ import annotations
@@ -75,26 +75,26 @@ class MissionRunner:
 
     def __init__(
         self,
-        inbox: Optional[coagent_i.Inbox] = None,
+        registry: Optional[coagent_i.Registry] = None,
         *,
         stations: Optional[Stations] = None,
         theaters: Optional[Theaters] = None,
         covers: Optional[Covers] = None,
         sources: Optional[Sequence[Any]] = None,
         use_hooks: bool = True,
-        registry: Optional[Registry] = None,
+        terminals: Optional[Registry] = None,
         safe_house_root: Optional[Path] = None,
         keep_safe_houses: bool = False,
         on_event: Optional[Callable[[str, Event], None]] = None,
         on_output: Optional[Callable[[str, bytes], None]] = None,
     ) -> None:
-        self.inbox = inbox if inbox is not None else coagent_i.open_inbox()
+        self.registry = registry if registry is not None else coagent_i.open_registry()
         self.stations = stations if stations is not None else Stations.load()
         self.theaters = theaters if theaters is not None else Theaters.load()
         self.covers = covers if covers is not None else Covers.load()
         self.sources = sources
         self.use_hooks = use_hooks
-        self.registry = registry
+        self.terminals = terminals
         self.safe_house_root = safe_house_root
         self.keep_safe_houses = keep_safe_houses
         self.on_event = on_event
@@ -151,7 +151,7 @@ class MissionRunner:
         **assign: Any,
     ) -> Dict[str, Any]:
         """Runs ``brief`` and answers its outcome. With ``claimed``, files the outcome
-        (and transcript) in the inbox, as ``office`` when the claim holds a lease; always
+        (and transcript) in the registry, as ``office`` when the claim holds a lease; always
         reports it to the brief's source, unless the mission was abandoned or its lease
         passed to another office, which then owns the outcome."""
         outcome: Dict[str, Any] = {
@@ -202,7 +202,7 @@ class MissionRunner:
         if claimed:
             ok = outcome["state"] == State.DONE.value
             try:
-                self.inbox.finish(
+                self.registry.finish(
                     brief, outcome, ok=ok, transcript=bytes(transcript), office=office
                 )
             except coagent_i.LeaseLost:
@@ -277,7 +277,7 @@ class MissionRunner:
                 a.limits,
                 on_event=event,
                 on_output=output,
-                registry=self.registry,
+                terminals=self.terminals,
                 hooks=hooks,
             )
             with self._dogs_lock:
@@ -349,7 +349,7 @@ class Scheduler:
     M), ``execution`` (runs missions) or both; ``labels`` describe the office to station
     selectors, beside the automatic ``office``, ``host`` and ``os``.
 
-    Every office heartbeats into the shared inbox, renews the leases of what it runs
+    Every office heartbeats into the shared registry, renews the leases of what it runs
     (stopping any mission whose lease another office took) and runs what is leased to
     it. The leader also polls intake (``poll_interval``), recovers briefs whose office
     was lost (back to new until ``max_attempts``), and places each waiting brief on the
@@ -406,7 +406,7 @@ class Scheduler:
         sources = (
             self.runner.sources if self.runner.sources is not None else coagent_i.load_sources()
         )
-        _, errors = coagent_i.poll(sources, self.runner.inbox)
+        _, errors = coagent_i.poll(sources, self.runner.registry)
         for e in errors:
             _log.warning("intake source failed: %s", e)
         self._last_poll = self._clock()
@@ -414,11 +414,11 @@ class Scheduler:
     def step(self) -> int:
         """One round: renew, heartbeat, lead if this office holds the lease, then start
         what is assigned here. Answers how many briefs it placed or started."""
-        inbox = self.runner.inbox
+        registry = self.runner.registry
         self._renew()
-        inbox.heartbeat(self.office, self._info())
+        registry.heartbeat(self.office, self._info())
         was_leading = self.leading
-        self.leading = "control" in self.roles and inbox.elect(self.office, ttl=self.lease)
+        self.leading = "control" in self.roles and registry.elect(self.office, ttl=self.lease)
         if self.leading and not was_leading:
             _log.info("office %s is M now", self.office)
         placed = self._lead() if self.leading else 0
@@ -429,7 +429,7 @@ class Scheduler:
         waiting could be placed."""
         while not self._stop.is_set():
             moved = self.step()
-            if once and not moved and not self.running and not self.runner.inbox.leases():
+            if once and not moved and not self.running and not self.runner.registry.leases():
                 break
             self._stop.wait(idle)
         self.wait()
@@ -458,30 +458,30 @@ class Scheduler:
 
     def _renew(self) -> None:
         for key in self.running:
-            if not self.runner.inbox.renew(key, self.office, lease=self.lease):
+            if not self.runner.registry.renew(key, self.office, lease=self.lease):
                 _log.warning("office %s lost the lease on %s; stopping it", self.office, key)
                 self.runner.abandon(key)
 
     def _lead(self) -> int:
-        inbox = self.runner.inbox
+        registry = self.runner.registry
         if self.poll_interval is not None and (
             self._last_poll is None or self._clock() - self._last_poll >= self.poll_interval
         ):
             self.poll()
-        for lease in inbox.expired():
-            where = inbox.recover(lease, max_attempts=self.max_attempts, by=self.office)
+        for lease in registry.expired():
+            where = registry.recover(lease, max_attempts=self.max_attempts, by=self.office)
             if where:
                 _log.warning("brief %s: office %s was lost; %s", lease.key, lease.office, where)
-        offices = {o["office"]: o for o in inbox.offices(within=self.lease)}
-        leases = inbox.leases()
+        offices = {o["office"]: o for o in registry.offices(within=self.lease)}
+        leases = registry.leases()
         placed = 0
-        for brief in inbox.list("new"):
+        for brief in registry.list("new"):
             if self._stop.is_set():
                 break
             try:
                 assignment = self.runner.assign(brief)
             except (ProfileError, StationError) as exc:
-                if inbox.claim(brief.key, office=self.office, lease=self.lease) is not None:
+                if registry.claim(brief.key, office=self.office, lease=self.lease) is not None:
                     _log.warning("brief %s cannot be assigned: %s", brief.key, exc)
                     self.finished.append(self.runner.run(brief, claimed=True, office=self.office))
                 continue
@@ -492,7 +492,7 @@ class Scheduler:
                 continue
             meta = {"station": assignment.station.id if assignment.station else None}
             meta["profile"] = assignment.profile.name
-            if inbox.claim(brief.key, office=office, lease=self.lease, meta=meta) is None:
+            if registry.claim(brief.key, office=office, lease=self.lease, meta=meta) is None:
                 continue
             leases.append(coagent_i.Lease(brief.key, office, 0.0, 0, meta))
             placed += 1
@@ -537,13 +537,13 @@ class Scheduler:
         return min(candidates)[2] if candidates else None
 
     def _execute(self) -> int:
-        inbox, started, now = self.runner.inbox, 0, time.time()
-        for lease in inbox.leases():
+        registry, started, now = self.runner.registry, 0, time.time()
+        for lease in registry.leases():
             if lease.office != self.office or lease.expires < now or lease.key in self.running:
                 continue
             if len(self.running) >= self.max_total:
                 break
-            brief = inbox.read(lease.key)
+            brief = registry.read(lease.key)
             if brief is None:
                 continue
             try:

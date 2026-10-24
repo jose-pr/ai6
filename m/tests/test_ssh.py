@@ -49,11 +49,11 @@ if real_theater() is not None:
 
 
 def run(theater: Theater, behavior: str, **kw):
-    registry = Registry([*builtin_providers(), SshProvider(theater)])
+    terminals = Registry([*builtin_providers(), SshProvider(theater)])
     argv = [sys.executable, "-m", "coagent_m.watchdog", "mock-agent", behavior]
     spec = AgentSpec(behavior, argv, terminal=theater.provider_name, **kw)
     output = []
-    out = Watchdog(spec, FAST, on_output=output.append, registry=registry).run()
+    out = Watchdog(spec, FAST, on_output=output.append, terminals=terminals).run()
     return out, b"".join(output).decode(errors="replace")
 
 

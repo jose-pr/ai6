@@ -126,7 +126,7 @@ class Station:
 
 
 class Stations:
-    """The station registry."""
+    """Every registered station."""
 
     def __init__(self, stations: "Iterator[Station] | List[Station]" = ()) -> None:
         self._by_id: Dict[str, Station] = {}

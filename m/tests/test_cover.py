@@ -126,7 +126,7 @@ def station(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     git(repo, "add", ".")
     git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "init")
     monkeypatch.setenv("COAGENT_HOME", str(home))
-    monkeypatch.delenv("COAGENT_INBOX", raising=False)
+    monkeypatch.delenv("COAGENT_REGISTRY", raising=False)
     (home / "agent.py").write_text(AGENT)
     (home / "profiles.toml").write_text(
         f"[launcher.py]\ncommand = [{json.dumps(sys.executable)}, {json.dumps(str(home / 'agent.py'))}]\n"
@@ -139,7 +139,7 @@ def station(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "identity = { name = 'Field Office', email = 'office@example.invalid' }\n"
         )
         return MissionRunner(
-            coagent_i.Inbox(), stations=Stations.load(), use_hooks=False, sources=[]
+            coagent_i.Registry(), stations=Stations.load(), use_hooks=False, sources=[]
         )
 
     return configure, repo
@@ -167,7 +167,7 @@ def test_a_blown_cover_is_reported_or_fails_the_mission(station) -> None:
     assert flagged["state"] == "done" and flagged["cover"]["blown"]
     assert {v["rule"] for v in flagged["cover"]["violations"]} == {"trailer", "model"}
     runner = configure("fail")
-    runner.inbox.submit(brief("3", title))
-    failed = runner.run(runner.inbox.claim(), claimed=True)
+    runner.registry.submit(brief("3", title))
+    failed = runner.run(runner.registry.claim(), claimed=True)
     assert (failed["state"], failed["reason"]) == ("blown", "cover blown")
-    assert runner.inbox.find("t--3")[0] == "failed"
+    assert runner.registry.find("t--3")[0] == "failed"

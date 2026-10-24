@@ -1,9 +1,9 @@
 # `coagent_i` — public API header
 
-Mission briefs, the inbox, and the contract user-supplied intake sources fill.
+Mission briefs, the registry, and the contract user-supplied intake sources fill.
 Self-contained: it ships inside the package. Source: <https://github.com/jose-pr/coagent>.
 
-Import from `coagent_i` (or its modules `brief`, `inbox`, `sources`). No runtime
+Import from `coagent_i` (or its modules `brief`, `registry`, `sources`). No runtime
 dependencies except `tomli` on Python 3.9 and 3.10. Python 3.9 or newer, any OS.
 
 ## `Brief(title, body="", id=<random>, source="manual", station=None, profile=None, role=None, tags=(), priority=0, url=None, data={}, created=<now, UTC ISO>, version=1)`
@@ -17,11 +17,11 @@ name or alias; `profile` names an agent outright, else M chooses by `role` and `
 `BriefError` for a missing title, any unknown key (extras go under `data`) or a
 `version` newer than `BRIEF_VERSION`.
 
-## `Inbox(root=None)`
+## `Registry(root=None)`
 
-`root` defaults to `default_inbox_dir()`: `COAGENT_INBOX`, else `$COAGENT_HOME/inbox`,
-else `%LOCALAPPDATA%\coagent\inbox` or `$XDG_STATE_HOME/coagent/inbox`
-(`~/.local/state/coagent/inbox`). States are directories: `new`, `claimed`, `done`,
+`root` defaults to `default_registry_dir()`: `COAGENT_REGISTRY`, else `$COAGENT_HOME/registry`,
+else `%LOCALAPPDATA%\coagent\registry` or `$XDG_STATE_HOME/coagent/registry`
+(`~/.local/state/coagent/registry`). States are directories: `new`, `claimed`, `done`,
 `failed`; a brief is `<state>/<key>.json`, its outcome `<key>.outcome.json`.
 
 - `submit(brief, *, replace=False) -> Path`: into `new/`, written atomically. A key
@@ -54,13 +54,13 @@ not end in `.json` in that directory, then rename it.
   lease), `leader() -> {office, expires} | None`, `read(key) -> Brief | None`.
 - Leases compare wall clocks: offices need synchronised clocks.
 
-## `coagent_i.sql.SqlInbox(url, **engine_options)` and `open_inbox(location=None)`
+## `coagent_i.sql.SqlRegistry(url, **engine_options)` and `open_registry(location=None)`
 
 The same API in a database through SQLAlchemy (`sql` extra; `postgres` adds psycopg):
 `sqlite:///path.db`, `postgresql+psycopg://...`. Tables (`coagent_briefs`,
 `coagent_leases`, `coagent_offices`, `coagent_leader`) are created on first use. Every
 contested step is one conditional `UPDATE`/`DELETE`. `find(key)` answers `(state, key)`.
-`open_inbox(location)` (default `COAGENT_INBOX`) opens `SqlInbox` for a URL, else `Inbox`.
+`open_registry(location)` (default `COAGENT_REGISTRY`) opens `SqlRegistry` for a URL, else `Registry`.
 
 ## Sources
 
@@ -78,13 +78,13 @@ A source has `name` and `poll() -> Iterable[Brief]`; optionally
   `<config_dir>/sources.toml` (keys: `name`, `command`, `report`, `station`, `timeout`,
   `env`, `cwd`; `./x` is relative to the file). Unknown keys and duplicate names raise
   `SourceError`.
-- `poll(sources, inbox) -> (filed, errors)`: each source once; a key already in the
-  inbox is not filed again; a failing source is one line in `errors`, not an exception.
+- `poll(sources, registry) -> (filed, errors)`: each source once; a key already in the
+  registry is not filed again; a failing source is one line in `errors`, not an exception.
 - `report(brief, outcome, sources=None) -> bool`: to the brief's source; `False` if it
   is unknown or takes no reports. A failing report is logged, never raised.
 - `config_dir()`: the same rule as `coagent_m.config.config_dir`.
 
-## CLI: `python -m coagent_i [--inbox DIR] <command>`
+## CLI: `python -m coagent_i [--registry DIR] <command>`
 
 `submit [FILE|-] [--replace]`, `list [--state S] [--json]`, `sources`, `poll` (exits 1
 when a source failed). Errors exit 2.

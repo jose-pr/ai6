@@ -74,7 +74,7 @@ class Theater:
 
 
 class Theaters:
-    """The theater registry."""
+    """Every registered theater."""
 
     def __init__(self, theaters: "Iterator[Theater] | List[Theater]" = ()) -> None:
         self._by_id: Dict[str, Theater] = {}

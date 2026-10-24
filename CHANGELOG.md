@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   project's `.coagent/` is read only when it is a station (or `COAGENT_TRUST_PROJECT=1`);
   `Scope.PROJECT` is now `Scope.STATION`. Profiles gain `clearance`; `choose()` and
   `AgentSpec.from_profile()` take a station; `launch --station` and `stations` commands.
-- `coagent-i` (`i/`): mission briefs, a file inbox (`new`, `claimed`, `done`, `failed`)
+- `coagent-i` (`i/`): mission briefs, a file registry (`new`, `claimed`, `done`, `failed`)
   and the contract user-supplied intake sources fill: command sources and
   `coagent.intake` entry points that poll for briefs and hear outcomes back;
   `python -m coagent_i submit|list|sources|poll`.
@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   stations gain `safe_houses`, `branch` and `base`.
 - `coagent_m.missions`: `MissionRunner` (assign, worktree, run, file with transcript,
   report) and `Scheduler`; `serve` runs briefs while there is capacity overall, per
-  station and per profile. `Inbox.finish(transcript=)` and `Inbox.transcript()`.
+  station and per profile. `Registry.finish(transcript=)` and `Registry.transcript()`.
 - Remote theaters (`theaters.toml`): each is an `ssh:<id>` terminal provider that forwards
   only what M added to the environment and kills the whole remote session. Stations
   gain `theater` and `config`; their safe houses are cut on the theater by git over ssh.
@@ -70,8 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   offices); offices are `control`, `execution` or both, labelled `office`, `host`, `os`
   and `--label`; stations gain `selector`. Claims carry leases with heartbeats; a lost
   office's briefs are re-run up to `--max-attempts`, then filed `lost`.
-- `coagent_i.SqlInbox` (`sql` and `postgres` extras): the inbox in SQLite or PostgreSQL;
-  `open_inbox()` picks it for a URL. `Inbox` gains leases, `renew`, `expired`,
+- `coagent_i.SqlRegistry` (`sql` and `postgres` extras): the registry in SQLite or PostgreSQL;
+  `open_registry()` picks it for a URL. `Registry` gains leases, `renew`, `expired`,
   `recover`, `heartbeat`, `offices`, `elect`, `leader`, `read`, `attempts`.
 - The documentation site (MkDocs Material) with guides, the Python API reference and the
   Rust reference, deployed by `docs.yml`.

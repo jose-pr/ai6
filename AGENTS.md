@@ -12,7 +12,7 @@ repository.
 | `m/tests/` | pytest suite; the watchdog cases run its own mock agents (`mock-agent work\|loop\|hang\|cursor\|orphan`) with sub-second limits, once per terminal provider that can run here |
 | `m/crates/coagent-terminal-kind/` | the terminal contract as guatiao kinds; its test pins both floor hashes |
 | `m/crates/coagent-terminal-pty/` | a terminal plugin (`cdylib`) on `portable-pty` |
-| `i/` | Python project `coagent-i` (package `coagent_i`): briefs, the inbox, the intake-source contract; `i/tests/` |
+| `i/` | Python project `coagent-i` (package `coagent_i`): briefs, the registry, the intake-source contract; `i/tests/` |
 | `00/` | Python project `coagent-00` (package `coagent_00`): agent-CLI adapters, `claude` first, registered in the `coagent.adapters` entry-point group; `00/tests/` (one checks every emitted flag against the installed `claude --help`); `roster.example.toml` |
 | `docs/`, `mkdocs.yml` | the documentation site: hand-written pages, the Python reference (mkdocstrings over `m/src` and `i/src`), the changelog by snippet; rustdoc is copied under `/rust/` by `docs.yml`. Build: `pip install -e "m[docs]" -e i && mkdocs build --strict` |
 | `m/crates/coagent-native/` | a `cdylib` carrying guatiao's C ABI with `load`, for the Python binding |
@@ -26,7 +26,7 @@ repository.
   may use I Branch's formats: briefs (`coagent_i`), and the wire frames (a crate in `i/`,
   planned). M imports `coagent_i` only inside `launch --next/--brief`.
 - Intake integrations (Jira, webhooks, ...) are never built in: they are user-supplied
-  sources, entry points or programs writing into the inbox. Keep that contract
+  sources, entry points or programs writing into the registry. Keep that contract
   (`i/src/coagent_i/AGENTS.md`) the only thing coagent owns there.
 - Nothing in M's watchdog may assume a terminal provider: it sees bytes and timestamps
   only. Platform code lives in a provider.

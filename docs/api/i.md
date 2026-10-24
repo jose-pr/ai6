@@ -1,9 +1,9 @@
 # I Branch (`coagent_i`)
 
-Mission briefs, the inbox, and the contract user-supplied intake sources fill.
+Mission briefs, the registry, and the contract user-supplied intake sources fill.
 
 ::: coagent_i.brief
 
-::: coagent_i.inbox
+::: coagent_i.registry
 
 ::: coagent_i.sources

@@ -150,7 +150,9 @@ def test_a_mission_through_m_has_a_debrief(tmp_path: Path, monkeypatch) -> None:
             None,
         ),
     )
-    runner = MissionRunner(coagent_i.Inbox(), stations=Stations.load(), use_hooks=False, sources=[])
+    runner = MissionRunner(
+        coagent_i.Registry(), stations=Stations.load(), use_hooks=False, sources=[]
+    )
     out = runner.run(coagent_i.Brief("Fix the build", id="1", station="G", role="implement"))
     args = json.loads((tmp_path / "args.json").read_text())
     assert out["state"] == "done"

@@ -55,10 +55,10 @@ hooks), and the agent also gets `COAGENT_PROFILE`, `COAGENT_MODEL` and
 table applied. With a `Station`, `cwd` defaults to its path and a profile the station
 refuses (`Station.why_not`) raises. Raises `ProfileError`.
 
-### `class Watchdog(spec, limits=Limits(), on_event=None, on_output=None, clock=time.monotonic, registry=None, hooks=None)`
+### `class Watchdog(spec, limits=Limits(), on_event=None, on_output=None, clock=time.monotonic, terminals=None, hooks=None)`
 
 - `run() -> Outcome`, in this order:
-  1. picks the provider (`spec.terminal`, or `registry.best()`; `registry=None` uses
+  1. picks the provider (`spec.terminal`, or `terminals.best()`; `terminals=None` uses
      `terminal.default_registry()`);
   2. makes a private run directory (removed afterwards);
   3. runs the hooks' `prepare` (`hooks=None` runs only `spec.hooks`; it loads nothing
@@ -118,16 +118,16 @@ in order: max runtime, stall, loop), `blocked(now) -> bool`, `awaiting_input() -
 | --- | --- |
 | `run [--stall-timeout S] [--loop-timeout S] [--max-runtime S] [--terminal NAME] [--no-hooks] -- CMD...` | supervises `CMD` in the current directory with global and project hooks |
 | `launch (--profile NAME \| --role ROLE [--tag T]...) [--station S] [--no-hooks] [PROMPT]` | starts the agent a profile describes, at the station holding `.` or `--station` |
-| `launch (--next [--inbox DIR] \| --brief FILE) [--station S] [--profile\|--role ..] [--no-hooks]` | runs a brief: its station, its profile or the best one for its role and tags there, its prompt; files the outcome (`--next`) and reports it to the brief's source |
+| `launch (--next [--registry DIR] \| --brief FILE) [--station S] [--profile\|--role ..] [--no-hooks]` | runs a brief: its station, its profile or the best one for its role and tags there, its prompt; files the outcome (`--next`) and reports it to the brief's source |
 | `stations` | registered stations |
-| `serve [--max N] [--poll S] [--once] [--idle S] [--inbox DIR\|URL] [--keep-safe-houses] [--no-hooks] [--office NAME] [--role control\|execution]... [--label K=V]... [--lease S] [--max-attempts N]` | runs as an office: M when it holds the leader lease, a worker otherwise; exits 1 if any mission did not finish `done` |
+| `serve [--max N] [--poll S] [--once] [--idle S] [--registry DIR\|URL] [--keep-safe-houses] [--no-hooks] [--office NAME] [--role control\|execution]... [--label K=V]... [--lease S] [--max-attempts N]` | runs as an office: M when it holds the leader lease, a worker otherwise; exits 1 if any mission did not finish `done` |
 | `providers` | terminal providers, best first, with why each cannot run |
 | `hooks` | the hooks a run in this directory would use |
 | `profiles` | agent profiles, best first |
 | `demo [--timeout S] [--terminal NAME]` | a healthy, a looping and a hanging mock agent |
 
 `run` and `launch` exit with the agent's code, or `128 + signal` when it was killed;
-`launch` exits 2 for a profile or station error; `--next` exits 0 on an empty inbox. A
+`launch` exits 2 for a profile or station error; `--next` exits 0 on an empty registry. A
 brief no profile suits is filed as failed with state `refused` and still reported.
 
 ## `coagent_m.terminal`
@@ -293,7 +293,7 @@ intake = { jira = "GUA" }
 
 ## `coagent_m.missions` (needs `coagent-i`)
 
-- `MissionRunner(inbox=None, *, stations=None, sources=None, use_hooks=True, registry=None, safe_house_root=None, keep_safe_houses=False, on_event=None, on_output=None)`:
+- `MissionRunner(registry=None, *, stations=None, sources=None, use_hooks=True, terminals=None, safe_house_root=None, keep_safe_houses=False, on_event=None, on_output=None)`:
   `on_event(key, Event)` and `on_output(key, bytes)` run on the mission's thread.
   - `assign(brief, *, station=None, profile=None, role=None, tags=()) -> Assignment`:
     the brief's station (else the one holding the current directory), its profile

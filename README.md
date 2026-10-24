@@ -31,7 +31,7 @@ has the conventions):
 | **M's Office** | `m/` | Stations, mission authorization, scheduling, the watchdog that kills a stalled or looping agent with every process it started, pluggable terminals, hooks, and assigning agent profiles to missions | watchdog, terminals, hooks, profiles, stations and brief-driven launch implemented; scheduler and worktrees designed |
 | **00 Section** | `00/` | The agents that execute: the roster of codenamed profiles, clearance, one adapter per agent CLI | roster format implemented in M; adapters designed |
 | **Q Branch** | `q/` | Gear issued per mission: credentials scoped to a station, sandboxes, tools that act (shell, file writes, git, deploy) | design |
-| **I Branch** | `i/` | Intelligence and comms: mission briefs, the inbox, the contract user-supplied intake fills, the wire format, briefings and debriefs | briefs, inbox and intake contract implemented; wire, briefings, debriefs designed |
+| **I Branch** | `i/` | Intelligence and comms: mission briefs, the registry, the contract user-supplied intake fills, the wire format, briefings and debriefs | briefs, registry and intake contract implemented; wire, briefings, debriefs designed |
 | **Moneypenny** | `moneypenny/` | M's front desk: a Kanban board of runs (*Working · Blocked · Stalled · Done*) per station, and a WebGL terminal attached live to any agent | design |
 
 Projects are **Stations**: each registered project has an id, which is its one cover name
@@ -179,11 +179,11 @@ output = "context"
 ```bash
 python -m coagent_m.watchdog run [--stall-timeout S] [--loop-timeout S] [--max-runtime S] [--terminal NAME] [--no-hooks] -- CMD [ARGS...]
 python -m coagent_m.watchdog launch (--profile NAME | --role ROLE [--tag T]...) [--station S] [--no-hooks] [PROMPT]
-python -m coagent_m.watchdog launch (--next [--inbox DIR] | --brief FILE) [--station S] [--no-hooks]
+python -m coagent_m.watchdog launch (--next [--registry DIR] | --brief FILE) [--station S] [--no-hooks]
 python -m coagent_m.watchdog providers
 python -m coagent_m.watchdog profiles
 python -m coagent_m.watchdog stations
-python -m coagent_i [--inbox DIR] (submit [FILE|-] | list [--state S] | sources | poll)
+python -m coagent_i [--registry DIR] (submit [FILE|-] | list [--state S] | sources | poll)
 python -m coagent_m.watchdog hooks
 python -m coagent_m.watchdog demo [--timeout S] [--terminal NAME]
 ```
@@ -201,7 +201,7 @@ code, or `128 + signal` when the watchdog killed it.
 | `coagent_m.profiles` | `Launcher`, `Profile`, `ProfileSet`, `load_profiles()`: the model configurations M assigns |
 | `coagent_m.stations` | `Station`, `Stations`, `CLEARANCES`, `local_config()`: the projects M runs missions for |
 | `coagent_m.config` | `config_dir()`, `find_project()`, `Scope` |
-| `coagent_i` | `Brief`, `Inbox`, `CommandSource`, `load_sources()`, `poll()`, `report()`: missions in, outcomes out |
+| `coagent_i` | `Brief`, `Registry`, `CommandSource`, `load_sources()`, `poll()`, `report()`: missions in, outcomes out |
 | `coagent-terminal-kind` (Rust) | the `coagent_terminal` and `coagent_terminal_session` guatiao kinds |
 | `coagent-terminal-pty` (Rust) | a terminal plugin on `portable-pty` |
 
@@ -215,7 +215,7 @@ The full contract is in [`m/src/coagent_m/AGENTS.md`](https://github.com/jose-pr
           ▼                                      ▼
 ┌──────────────────────────────┐    ┌──────────────────────────────┐
 │ I  (i/)  I Branch            │    │ Moneypenny  (moneypenny/)    │
-│  inbox · intake sources      │◄──►│  gateway · board · attach    │
+│  registry · intake sources      │◄──►│  gateway · board · attach    │
 │  wire frames · briefings     │    │  one swimlane per station    │
 │  debriefs                    │    └──────────────────────────────┘
 └──────────────────────────────┘
@@ -261,7 +261,7 @@ frames and the report. Each can be rewritten without touching the rest.
    inform (docs, search, a code index) are I's, and the loadout issues both. Secrets
    reach the agent's environment and never its worktree, the event log or the terminal
    stream.
-4. **I takes missions in from anything.** A brief is one JSON document; the inbox is a
+4. **I takes missions in from anything.** A brief is one JSON document; the registry is a
    directory; a source is any program that prints briefs or any Python object in the
    `coagent.intake` group, and it can hear back how its brief ended.
 5. **00 is data plus adapters.** M reads the roster to assign agents; an adapter knows
@@ -305,9 +305,9 @@ read. Configuration runs headquarters → station → agent, the narrowest winni
 ### Missions
 
 ```text
-source ─► brief ─► inbox/new ─► M claims it ─► station ─► profile ─► agent runs
+source ─► brief ─► registry/new ─► M claims it ─► station ─► profile ─► agent runs
                                                                          │
-           source ◄─ report ◄── inbox/done|failed ◄── outcome ◄──────────┘
+           source ◄─ report ◄── registry/done|failed ◄── outcome ◄──────────┘
 ```
 
 `python -m coagent_m.watchdog launch --next` takes the best brief, resolves its station
@@ -380,7 +380,7 @@ spinner redrawing in place counts as repetition.
 | `m/crates/` | Rust | The terminal kind, the `portable-pty` plugin and the native library M loads |
 | `00/` | data, adapters | The 00 Section: the example roster; CLI adapters to come |
 | `q/` | Python | Q Branch: credentials, sandboxes, acting tools, loadouts |
-| `i/` | Python, Rust | I Branch: package `coagent_i` (briefs, inbox, intake); the wire crate to come |
+| `i/` | Python, Rust | I Branch: package `coagent_i` (briefs, registry, intake); the wire crate to come |
 | `moneypenny/` | Rust: the gateway, and the browser client compiled to wasm | The team viewport |
 
 ## Development

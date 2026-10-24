@@ -6,7 +6,7 @@
           ▼                                      ▼
 ┌──────────────────────────────┐    ┌──────────────────────────────┐
 │ I  (i/)  I Branch            │    │ Moneypenny  (moneypenny/)    │
-│  inbox · intake sources      │◄──►│  gateway · board · attach    │
+│  registry · intake sources      │◄──►│  gateway · board · attach    │
 │  wire frames · briefings     │    │  one swimlane per station    │
 │  debriefs                    │    └──────────────────────────────┘
 └──────────────────────────────┘
@@ -52,7 +52,7 @@ frames and the report. Each can be rewritten without touching the rest.
    inform (docs, search, a code index) are I's, and the loadout issues both. Secrets
    reach the agent's environment and never its worktree, the event log or the terminal
    stream.
-4. **I takes missions in from anything.** A brief is one JSON document; the inbox is a
+4. **I takes missions in from anything.** A brief is one JSON document; the registry is a
    directory; a source is any program that prints briefs or any Python object in the
    `coagent.intake` group, and it can hear back how its brief ended.
 5. **00 is data plus adapters.** M reads the roster to assign agents; an adapter knows
@@ -101,5 +101,5 @@ stream so an attached viewer's emulator does not answer a second time.
 | `m/crates/` | Rust | The terminal kind, the `portable-pty` plugin and the native library M loads |
 | `00/` | data, adapters | The 00 Section: the example roster; CLI adapters to come |
 | `q/` | Python | Q Branch: credentials, sandboxes, acting tools, loadouts |
-| `i/` | Python, Rust | I Branch: package `coagent_i` (briefs, inbox, intake); the wire crate to come |
+| `i/` | Python, Rust | I Branch: package `coagent_i` (briefs, registry, intake); the wire crate to come |
 | `moneypenny/` | Rust: the gateway, and the browser client compiled to wasm | The team viewport |

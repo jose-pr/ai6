@@ -3,8 +3,8 @@
 coagent ships none; a user supplies them. A source is a Python object (an entry point in
 the ``coagent.intake`` group) or a program in any language declared in ``sources.toml``.
 Either can also be told how a brief ended, to comment on or move its ticket. A webhook
-receiver needs no source at all: it writes briefs into the inbox
-(``Inbox.submit``, or ``python -m coagent_i submit``).
+receiver needs no source at all: it writes briefs into the registry
+(``Registry.submit``, or ``python -m coagent_i submit``).
 
 ``sources.toml``, in the global config directory::
 
@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple
 
 from .brief import Brief, BriefError
-from .inbox import Inbox
+from .registry import Registry
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -189,9 +189,9 @@ def load_sources(path: Optional[Path] = None, *, entry_points: bool = True) -> L
     return sources
 
 
-def poll(sources: Iterable[Any], inbox: Inbox) -> Tuple[List[Brief], List[str]]:
+def poll(sources: Iterable[Any], registry: Registry) -> Tuple[List[Brief], List[str]]:
     """Polls every source once and files what is new. Answers the briefs filed and one
-    line per source that failed; a brief already in the inbox is not filed again."""
+    line per source that failed; a brief already in the registry is not filed again."""
     filed: List[Brief] = []
     errors: List[str] = []
     for source in sources:
@@ -203,8 +203,8 @@ def poll(sources: Iterable[Any], inbox: Inbox) -> Tuple[List[Brief], List[str]]:
         for brief in briefs:
             if brief.source != source.name:
                 brief = replace(brief, source=source.name)
-            if inbox.find(brief.key) is None:
-                inbox.submit(brief)
+            if registry.find(brief.key) is None:
+                registry.submit(brief)
                 filed.append(brief)
     return filed, errors
 

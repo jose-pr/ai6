@@ -9,7 +9,7 @@ any language, a Python package, a skill or an overlay, and I gives them three wa
 
 | Way in | How |
 | --- | --- |
-| **Drop a brief** | write a JSON file into the inbox, or `python -m coagent_i submit brief.json` |
+| **Drop a brief** | write a JSON file into the registry, or `python -m coagent_i submit brief.json` |
 | **Be polled** | a `[[source]]` in `sources.toml` whose command prints briefs as JSON |
 | **Be a package** | a Python object in the `coagent.intake` entry-point group |
 

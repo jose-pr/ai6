@@ -67,7 +67,7 @@ def hq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def runner(**kw) -> MissionRunner:
     return MissionRunner(
-        coagent_i.Inbox(), stations=Stations.load(), use_hooks=False, sources=[], **kw
+        coagent_i.Registry(), stations=Stations.load(), use_hooks=False, sources=[], **kw
     )
 
 
@@ -79,12 +79,12 @@ class TestRunner:
     def test_an_untouched_worktree_is_removed(self, hq) -> None:
         home, repo, _ = hq
         r = runner()
-        r.inbox.submit(brief("1", "G"))
-        out = r.run(r.inbox.claim(), claimed=True)
+        r.registry.submit(brief("1", "G"))
+        out = r.run(r.registry.claim(), claimed=True)
         wt = out["safe_house"]
         assert out["state"] == "done" and not wt["kept"] and wt["branch"] == "1-work"
         assert "1-work" not in git(repo, "branch", "--list")
-        transcript = r.inbox.transcript("t--1").decode()
+        transcript = r.registry.transcript("t--1").decode()
         assert f"AT {wt['path']}" in transcript and str(repo) not in transcript
 
     def test_work_is_kept_on_its_branch(self, hq) -> None:
@@ -104,10 +104,10 @@ class TestRunner:
 
     def test_unassignable_is_refused_and_filed(self, hq) -> None:
         r = runner()
-        r.inbox.submit(brief("4", "G", role="deploy"))
-        out = r.run(r.inbox.claim(), claimed=True)
+        r.registry.submit(brief("4", "G", role="deploy"))
+        out = r.run(r.registry.claim(), claimed=True)
         assert out["state"] == "refused" and "no profile suits" in out["reason"]
-        assert r.inbox.find("t--4")[0] == "failed"
+        assert r.registry.find("t--4")[0] == "failed"
 
 
 class TestScheduler:
@@ -116,10 +116,10 @@ class TestScheduler:
         monkeypatch.setenv("GATE", str(gate))
         r = runner()
         for i in range(2):
-            r.inbox.submit(brief(f"g{i}", "G"))  # station G takes one at a time
+            r.registry.submit(brief(f"g{i}", "G"))  # station G takes one at a time
         for i in range(2):
-            r.inbox.submit(brief(f"s{i}", "P", role="solo"))  # profile solo: one at a time
-        r.inbox.submit(brief("p", "P"))
+            r.registry.submit(brief(f"s{i}", "P", role="solo"))  # profile solo: one at a time
+        r.registry.submit(brief("p", "P"))
         s = Scheduler(r, max_total=10)
         s.step()
         assert s.running == ["t--g0", "t--p", "t--s0"]
@@ -127,31 +127,31 @@ class TestScheduler:
         gate.write_text("")
         s.run(once=True, idle=0.05)
         assert sorted(o["state"] for o in s.finished) == ["done"] * 5
-        assert r.inbox.list("new") == []
+        assert r.registry.list("new") == []
 
     def test_max_total(self, hq, tmp_path: Path, monkeypatch) -> None:
         gate = tmp_path / "gate"
         monkeypatch.setenv("GATE", str(gate))
         r = runner()
         for i in range(3):
-            r.inbox.submit(brief(f"p{i}", "P"))
+            r.registry.submit(brief(f"p{i}", "P"))
         s = Scheduler(r, max_total=2)
         s.step()
-        assert len(s.running) == 2 and len(r.inbox.list("new")) == 1
+        assert len(s.running) == 2 and len(r.registry.list("new")) == 1
         gate.write_text("")
         s.run(once=True, idle=0.05)
         assert len(s.finished) == 3
 
     def test_unassignable_briefs_do_not_block(self, hq) -> None:
         r = runner()
-        r.inbox.submit(brief("bad", "G", role="deploy", priority=9))
-        r.inbox.submit(brief("ok", "P"))
+        r.registry.submit(brief("bad", "G", role="deploy", priority=9))
+        r.registry.submit(brief("ok", "P"))
         s = Scheduler(r)
         s.run(once=True, idle=0.05)
         assert {o["state"] for o in s.finished} == {"refused", "done"}
 
 
 def test_serve_once_cli(hq) -> None:
-    coagent_i.Inbox().submit(brief("c1", "P"))
+    coagent_i.Registry().submit(brief("c1", "P"))
     assert main(["serve", "--once", "--idle", "0.05", "--no-hooks"]) == 0
-    assert coagent_i.Inbox().find("t--c1")[0] == "done"
+    assert coagent_i.Registry().find("t--c1")[0] == "done"

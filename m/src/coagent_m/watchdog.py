@@ -319,7 +319,7 @@ class Watchdog:
         on_event: Optional[Callable[[Event], None]] = None,
         on_output: Optional[Callable[[bytes], None]] = None,
         clock: Callable[[], float] = time.monotonic,
-        registry: Optional[Registry] = None,
+        terminals: Optional[Registry] = None,
         hooks: Optional[HookSet] = None,
     ) -> None:
         self.spec = spec
@@ -328,7 +328,7 @@ class Watchdog:
         self._on_event = on_event
         self._on_output = on_output
         self._clock = clock
-        self._registry = registry
+        self._terminals = terminals
         self._hooks = hooks if hooks is not None else HookSet((Scope.AGENT, h) for h in spec.hooks)
         self._lock = threading.Lock()
         self._monitor: Optional[ActivityMonitor] = None
@@ -350,9 +350,9 @@ class Watchdog:
 
     def provider(self) -> Provider:
         """The terminal provider ``run()`` will use. Raises ``ProviderUnavailable``."""
-        registry = self._registry if self._registry is not None else default_registry()
+        terminals = self._terminals if self._terminals is not None else default_registry()
         name = self.spec.terminal
-        return registry.get(name) if name else registry.best()
+        return terminals.get(name) if name else terminals.best()
 
     def run(self) -> Outcome:
         """Start the agent and supervise it until it exits or is killed.
@@ -670,8 +670,8 @@ def _plan(
 
 
 def _mission(args: argparse.Namespace) -> int:
-    """A brief from the inbox (``--next``) or a file (``--brief``): run it in its own
-    safe house, file the outcome in the inbox, and report it to the brief's source."""
+    """A brief from the registry (``--next``) or a file (``--brief``): run it in its own
+    safe house, file the outcome in the registry, and report it to the brief's source."""
     try:
         import coagent_i
 
@@ -684,7 +684,7 @@ def _mission(args: argparse.Namespace) -> int:
         return 2
     try:
         runner = MissionRunner(
-            coagent_i.open_inbox(args.inbox),
+            coagent_i.open_registry(args.registry),
             use_hooks=not args.no_hooks,
             keep_safe_houses=args.keep_safe_houses,
             on_event=lambda key, e: _report_event(e),
@@ -694,9 +694,9 @@ def _mission(args: argparse.Namespace) -> int:
             with open(args.brief, encoding="utf-8") as f:
                 brief = coagent_i.Brief.from_json(f.read())
         else:
-            brief = runner.inbox.claim()
+            brief = runner.registry.claim()
             if brief is None:
-                print("coagent: the inbox is empty", file=sys.stderr)
+                print("coagent: the registry is empty", file=sys.stderr)
                 return 0
     except (OSError, coagent_i.BriefError, StationError) as exc:
         print(f"coagent: {exc}", file=sys.stderr)
@@ -717,7 +717,7 @@ def _mission(args: argparse.Namespace) -> int:
 
 
 def _serve(args: argparse.Namespace) -> int:
-    """Takes briefs from the inbox until interrupted (or, with ``--once``, drained)."""
+    """Takes briefs from the registry until interrupted (or, with ``--once``, drained)."""
     try:
         import coagent_i
 
@@ -734,7 +734,7 @@ def _serve(args: argparse.Namespace) -> int:
 
     try:
         runner = MissionRunner(
-            coagent_i.open_inbox(args.inbox),
+            coagent_i.open_registry(args.registry),
             use_hooks=not args.no_hooks,
             keep_safe_houses=args.keep_safe_houses,
             on_event=event,
@@ -831,9 +831,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     pick.add_argument("--profile", help="profile name or alias")
     pick.add_argument("--role", help="the best profile for this role")
     mission = launch.add_mutually_exclusive_group()
-    mission.add_argument("--next", action="store_true", help="claim the best brief in the inbox")
+    mission.add_argument("--next", action="store_true", help="claim the best brief in the registry")
     mission.add_argument("--brief", help="run the brief in this JSON file")
-    launch.add_argument("--inbox", help="inbox directory (with --next)")
+    launch.add_argument("--registry", help="registry directory (with --next)")
     launch.add_argument(
         "--keep-safe-houses", action="store_true", help="keep a mission's safe house even if unused"
     )
@@ -842,12 +842,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     launch.add_argument("--no-hooks", action="store_true", help="run no global or project hooks")
     launch.add_argument("prompt", nargs="?", help="the task")
 
-    serve = sub.add_parser("serve", help="take briefs from the inbox and run them")
+    serve = sub.add_parser("serve", help="take briefs from the registry and run them")
     serve.add_argument("--max", type=int, default=4, help="missions at once (default 4)")
     serve.add_argument("--poll", type=float, default=None, help="poll intake sources every S")
     serve.add_argument("--once", action="store_true", help="exit once nothing is left to start")
     serve.add_argument("--idle", type=float, default=1.0, help="seconds between steps")
-    serve.add_argument("--inbox", help="inbox directory")
+    serve.add_argument("--registry", help="registry directory")
     serve.add_argument("--keep-safe-houses", action="store_true")
     serve.add_argument("--office", help="this office's name (default: host-pid)")
     serve.add_argument(

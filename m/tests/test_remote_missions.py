@@ -62,7 +62,7 @@ def test_a_mission_at_a_remote_station(theater, tmp_path: Path, monkeypatch) -> 
         checkout, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "init"
     )
     monkeypatch.setenv("COAGENT_HOME", str(home))
-    monkeypatch.delenv("COAGENT_INBOX", raising=False)
+    monkeypatch.delenv("COAGENT_REGISTRY", raising=False)
     (home / "agent.py").write_text(AGENT)
     (home / "theaters.toml").write_text(
         toml_theater(theater) + f"\nsafe_houses = {json.dumps(str(work))}\n"
@@ -77,7 +77,7 @@ def test_a_mission_at_a_remote_station(theater, tmp_path: Path, monkeypatch) -> 
         "[profile.field]\nlauncher = 'py'\nroles = ['implement']\n"
     )
     runner = MissionRunner(
-        coagent_i.Inbox(),
+        coagent_i.Registry(),
         stations=Stations.load(),
         theaters=Theaters.load(),
         use_hooks=False,

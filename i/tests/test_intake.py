@@ -11,7 +11,7 @@ from coagent_i import (
     Brief,
     BriefError,
     CommandSource,
-    Inbox,
+    Registry,
     SourceError,
     load_sources,
     poll,
@@ -20,7 +20,7 @@ from coagent_i import (
 from coagent_i.__main__ import main
 from coagent_i.sources import parse_briefs
 
-from backends import BACKENDS, make_inbox
+from backends import BACKENDS, make_registry
 
 
 def script(path: Path, body: str) -> list:
@@ -59,48 +59,48 @@ class TestBrief:
 
 @pytest.fixture(params=BACKENDS)
 def box(request, tmp_path: Path):
-    return make_inbox(request.param, tmp_path)
+    return make_registry(request.param, tmp_path)
 
 
-class TestInbox:
+class TestRegistry:
     def test_submit_claim_finish(self, box) -> None:
-        inbox = box
+        registry = box
         low = Brief("low", id="1", priority=0)
         high = Brief("high", id="2", priority=5)
-        inbox.submit(low)
-        inbox.submit(high)
-        assert [b.title for b in inbox.list()] == ["high", "low"]
-        claimed = inbox.claim()
-        assert claimed == high and inbox.find(high.key)[0] == "claimed"
-        inbox.finish(claimed, {"state": "done"}, ok=True, transcript=b"all good\n")
-        assert inbox.transcript(high.key) == b"all good\n"
-        assert inbox.find(high.key)[0] == "done"
-        assert inbox.outcome(high.key) == {"state": "done"}
-        assert [b.title for b in inbox.list("new")] == ["low"]
+        registry.submit(low)
+        registry.submit(high)
+        assert [b.title for b in registry.list()] == ["high", "low"]
+        claimed = registry.claim()
+        assert claimed == high and registry.find(high.key)[0] == "claimed"
+        registry.finish(claimed, {"state": "done"}, ok=True, transcript=b"all good\n")
+        assert registry.transcript(high.key) == b"all good\n"
+        assert registry.find(high.key)[0] == "done"
+        assert registry.outcome(high.key) == {"state": "done"}
+        assert [b.title for b in registry.list("new")] == ["low"]
 
     def test_a_brief_is_filed_once(self, box) -> None:
-        inbox = box
-        inbox.submit(Brief("a", id="1"))
+        registry = box
+        registry.submit(Brief("a", id="1"))
         with pytest.raises(BriefError, match="already new"):
-            inbox.submit(Brief("a", id="1"))
-        inbox.submit(Brief("a again", id="1"), replace=True)
-        inbox.claim()
+            registry.submit(Brief("a", id="1"))
+        registry.submit(Brief("a again", id="1"), replace=True)
+        registry.claim()
         with pytest.raises(BriefError, match="already claimed"):
-            inbox.submit(Brief("a", id="1"), replace=True)
+            registry.submit(Brief("a", id="1"), replace=True)
 
     def test_claim_by_key_and_empty(self, box) -> None:
-        inbox = box
-        assert inbox.claim() is None
-        inbox.submit(Brief("a", id="1"))
-        inbox.submit(Brief("b", id="2", priority=9))
-        assert inbox.claim("manual--1").title == "a"
+        registry = box
+        assert registry.claim() is None
+        registry.submit(Brief("a", id="1"))
+        registry.submit(Brief("b", id="2", priority=9))
+        assert registry.claim("manual--1").title == "a"
 
     def test_a_file_that_does_not_parse_is_skipped(self, tmp_path: Path) -> None:
-        inbox = Inbox(tmp_path)
+        registry = Registry(tmp_path)
         (tmp_path / "new").mkdir()
         (tmp_path / "new" / "junk.json").write_text("{nope")
-        inbox.submit(Brief("ok"))
-        assert [b.title for b in inbox.list()] == ["ok"]
+        registry.submit(Brief("ok"))
+        assert [b.title for b in registry.list()] == ["ok"]
 
 
 class TestSources:
@@ -130,18 +130,18 @@ class TestSources:
             """,
         )
         src = CommandSource("tracker", poller, report_command=reporter, station="G")
-        inbox = Inbox(tmp_path / "inbox")
-        filed, errors = poll([src], inbox)
+        registry = Registry(tmp_path / "registry")
+        filed, errors = poll([src], registry)
         assert errors == [] and [b.key for b in filed] == ["tracker--T-1"]
         assert filed[0].station == "G" and filed[0].title == "from tracker"
-        assert poll([src], inbox) == ([], [])  # already filed
+        assert poll([src], registry) == ([], [])  # already filed
         assert report(filed[0], {"state": "done"}, [src]) is True
         assert json.loads(log.read_text())["outcome"] == {"state": "done"}
 
     def test_a_failing_source_does_not_stop_the_others(self, tmp_path: Path) -> None:
         bad = CommandSource("bad", [sys.executable, "-c", "raise SystemExit(3)"])
         good = CommandSource("good", [sys.executable, "-c", 'print(\'[{"title": "t"}]\')'])
-        filed, errors = poll([bad, good], Inbox(tmp_path))
+        filed, errors = poll([bad, good], Registry(tmp_path))
         assert len(filed) == 1 and errors[0].startswith("bad: ")
 
     def test_sources_toml(self, tmp_path: Path) -> None:
@@ -161,7 +161,7 @@ class TestSources:
 def test_cli_submit_and_list(tmp_path: Path, capsys, monkeypatch) -> None:
     path = tmp_path / "b.json"
     path.write_text(json.dumps({"title": "Ship it", "id": "7", "station": "Q"}))
-    assert main(["--inbox", str(tmp_path / "in"), "submit", str(path)]) == 0
-    assert main(["--inbox", str(tmp_path / "in"), "list"]) == 0
+    assert main(["--registry", str(tmp_path / "in"), "submit", str(path)]) == 0
+    assert main(["--registry", str(tmp_path / "in"), "list"]) == 0
     assert "manual--7 @Q  Ship it" in capsys.readouterr().out
-    assert main(["--inbox", str(tmp_path / "in"), "submit", str(path)]) == 2
+    assert main(["--registry", str(tmp_path / "in"), "submit", str(path)]) == 2

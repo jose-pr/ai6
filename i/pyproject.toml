@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "coagent-i"
 version = "0.1.0.dev0"
 authors = [{ name = "jose-pr" }]
-description = "I Branch: mission briefs, the inbox and intake sources for C.O.A.G.E.N.T."
+description = "I Branch: mission briefs, the registry and intake sources for C.O.A.G.E.N.T."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MPL-2.0"
@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The inbox in a database: SQLite, or PostgreSQL with the postgres extra.
+# The registry in a database: SQLite, or PostgreSQL with the postgres extra.
 sql = ["sqlalchemy>=2.0,<3"]
 postgres = ["sqlalchemy>=2.0,<3", "psycopg[binary]>=3.1,<4"]
 dev = ["black", "build", "pytest", "sqlalchemy>=2.0,<3"]

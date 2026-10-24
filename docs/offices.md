@@ -14,7 +14,7 @@ python -m coagent_m.watchdog serve --office lab-gpu --role execution --label gpu
 python -m coagent_m.watchdog serve --office win-1 --role execution --label os=windows
 ```
 
-All of them point at the same store with `COAGENT_INBOX` (or `--inbox`).
+All of them point at the same store with `COAGENT_REGISTRY` (or `--registry`).
 
 ## Roles
 
@@ -61,10 +61,10 @@ to a still-running agent, are the next step.
 
 ## The store
 
-| `COAGENT_INBOX` | Store | For |
+| `COAGENT_REGISTRY` | Store | For |
 | --- | --- | --- |
-| a directory (default `~/.local/state/coagent/inbox`) | files, renamed atomically | one machine, or offices sharing a directory |
-| `sqlite:///path/inbox.db` | SQLite (`coagent-i[sql]`) | one machine |
+| a directory (default `~/.local/state/coagent/registry`) | files, renamed atomically | one machine, or offices sharing a directory |
+| `sqlite:///path/registry.db` | SQLite (`coagent-i[sql]`) | one machine |
 | `postgresql+psycopg://user@db/coagent` | PostgreSQL (`coagent-i[postgres]`) | offices on different theaters |
 
 Any database SQLAlchemy supports works the same way. Every step two offices could race

@@ -99,7 +99,7 @@ Agents wear out in recognisable ways, and the section's job is to notice:
 
 Where the code has one of these things, it uses the field name: theaters (`theaters.toml`,
 `coagent_m.theaters`), safe houses (`coagent_m.safehouse`, a station's `safe_houses`) and
-offices (`serve --office`, the inbox's `office=`). The rest are plain names; these are what
+offices (`serve --office`, the registry's `office=`). The rest are plain names; these are what
 they stand for.
 
 | Term | In coagent |
@@ -108,7 +108,8 @@ they stand for.
 | **Theater (of operations)** | the machine a mission runs on: this one, or one registered in `theaters.toml` |
 | **Drop zone** | where an agent is inserted: the theater, the path and the terminal it is started on |
 | **Safe house** | the mission's git worktree (`SafeHouse`): deniable, disposable, removed when the agent left nothing |
-| **Dead drop** | the inbox: briefs and outcomes exchanged without the two sides ever meeting |
+| **Registry** | the shared store every site uses (`coagent_i.Registry`): briefs, leases, check-ins; a file directory or a SQL database |
+| **Dead drop** | how the registry is used: briefs and outcomes exchanged without the two sides ever meeting |
 | **Live drop** | handing a brief straight in (`submit -`, `launch --brief`) |
 | **Exfiltration route** | how work leaves the safe house: the kept branch and its commits, named in the report |
 | **Going rogue / off-grid** | a session M has lost contact with (a dropped connection) or an agent acting outside its clearance |

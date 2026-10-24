@@ -23,7 +23,7 @@ python3 -m venv .pyvenv/local
 | --- | --- | --- |
 | `coagent-m[guatiao]` | `guatiao` (pinned to a commit) | terminal plugins in any language, such as the Rust `portable-pty` one |
 | `coagent-m[conpty]` | `pywinpty` (Windows) | the Windows pseudo-console provider, once implemented |
-| `coagent-i` | — | missions: briefs, the inbox, intake sources, `launch --next` |
+| `coagent-i` | — | missions: briefs, the registry, intake sources, `launch --next` |
 
 ## 30-second tour
 

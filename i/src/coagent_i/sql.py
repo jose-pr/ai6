@@ -1,7 +1,7 @@
-"""The inbox in a SQL database, for offices on different hosts: SQLite on one machine,
+"""The registry in a SQL database, for offices on different hosts: SQLite on one machine,
 PostgreSQL (or any database SQLAlchemy supports) across many.
 
-Same contract as ``coagent_i.inbox.Inbox``. Every step two offices could race on is one
+Same contract as ``coagent_i.registry.Registry``. Every step two offices could race on is one
 conditional ``UPDATE`` (or ``DELETE``) whose row count says who won: claiming a brief,
 renewing a lease, recovering it, finishing it, taking the leader lease. That holds on
 SQLite and PostgreSQL alike, with no table locks. Needs the ``sql`` extra (SQLAlchemy);
@@ -36,9 +36,9 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 from .brief import Brief, BriefError
-from .inbox import DEFAULT_LEASE, STATES, Lease, LeaseLost
+from .registry import DEFAULT_LEASE, STATES, Lease, LeaseLost
 
-__all__ = ["SqlInbox"]
+__all__ = ["SqlRegistry"]
 
 _meta = MetaData()
 _briefs = Table(
@@ -78,8 +78,8 @@ _leader = Table(
 )
 
 
-class SqlInbox:
-    """An inbox at a SQLAlchemy URL (``sqlite:///path/inbox.db``,
+class SqlRegistry:
+    """An registry at a SQLAlchemy URL (``sqlite:///path/registry.db``,
     ``postgresql+psycopg://user@host/db``). Tables are created on first use."""
 
     def __init__(self, url: str, **engine_options: Any) -> None:

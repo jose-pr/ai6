@@ -2,13 +2,13 @@
 
 coagent ships no tracker integration. Jira, GitHub issues, a webhook, a schedule: you
 supply those, as a program in any language, a Python package, a skill or an overlay. I
-Branch owns only the socket they plug into: a **brief** format, an **inbox**, the
+Branch owns only the socket they plug into: a **brief** format, an **registry**, the
 **source** contract, and **reports** back.
 
 ```text
-source ─► brief ─► inbox/new ─► M claims it ─► station ─► profile ─► agent runs
+source ─► brief ─► registry/new ─► M claims it ─► station ─► profile ─► agent runs
                                                                          │
-           source ◄─ report ◄── inbox/done|failed ◄── outcome ◄──────────┘
+           source ◄─ report ◄── registry/done|failed ◄── outcome ◄──────────┘
 ```
 
 ## A brief
@@ -36,7 +36,7 @@ Unknown keys are refused, so a typo is an error; extras go under `data`.
 
 | Way in | How |
 | --- | --- |
-| **Drop a brief** | write it into the inbox's `new/` (a temporary name, then a rename), or `python -m coagent_i submit brief.json` |
+| **Drop a brief** | write it into the registry's `new/` (a temporary name, then a rename), or `python -m coagent_i submit brief.json` |
 | **Be polled** | a `[[source]]` in `sources.toml` whose command prints briefs as JSON |
 | **Be a package** | a Python object in the `coagent.intake` entry-point group |
 
@@ -56,9 +56,9 @@ object per line. Its `report` command receives `{"brief": .., "outcome": ..}`, w
 outcome carries `state`, `returncode`, `reason`, `runtime`, `agent`, `profile`, `station`
 and, for a mission in a safe house, `safe_house`: its path, branch and commits.
 
-## The inbox
+## The registry
 
-A directory (default `~/.local/state/coagent/inbox`, or `COAGENT_INBOX`) with one
+A directory (default `~/.local/state/coagent/registry`, or `COAGENT_REGISTRY`) with one
 subdirectory per state: `new`, `claimed`, `done`, `failed`. Claiming is a rename, so two
 supervisors never take the same brief; every brief is filed once per `source--id` key.
 

@@ -6,83 +6,83 @@ from pathlib import Path
 import pytest
 
 from coagent_i import Brief
-from coagent_i.inbox import LeaseLost
+from coagent_i.registry import LeaseLost
 
-from backends import BACKENDS, make_inbox
+from backends import BACKENDS, make_registry
 
 
 @pytest.fixture(params=BACKENDS)
-def inbox(request, tmp_path: Path):
-    box = make_inbox(request.param, tmp_path)
+def registry(request, tmp_path: Path):
+    box = make_registry(request.param, tmp_path)
     box.submit(Brief("work", id="1"))
     return box
 
 
-def test_a_claim_holds_a_lease_its_node_renews(inbox) -> None:
-    brief = inbox.claim(office="a", lease=30)
-    lease = inbox.lease(brief.key)
+def test_a_claim_holds_a_lease_its_node_renews(registry) -> None:
+    brief = registry.claim(office="a", lease=30)
+    lease = registry.lease(brief.key)
     assert (lease.office, lease.attempt) == ("a", 1) and lease.expires > time.time() + 20
-    assert inbox.renew(brief.key, "a", lease=30)
-    assert not inbox.renew(brief.key, "b")
-    assert inbox.expired() == []
+    assert registry.renew(brief.key, "a", lease=30)
+    assert not registry.renew(brief.key, "b")
+    assert registry.expired() == []
 
 
-def test_a_lost_node_s_brief_is_requeued_then_failed(inbox) -> None:
+def test_a_lost_node_s_brief_is_requeued_then_failed(registry) -> None:
     for attempt in (1, 2):
-        brief = inbox.claim(office=f"n{attempt}", lease=0.01)
+        brief = registry.claim(office=f"n{attempt}", lease=0.01)
         time.sleep(0.02)
-        (lease,) = inbox.expired()
+        (lease,) = registry.expired()
         assert lease.attempt == attempt
-        assert inbox.recover(lease, max_attempts=3, by="survivor") == "new"
-        assert inbox.find(brief.key)[0] == "new"
-    brief = inbox.claim(office="n3", lease=0.01)
+        assert registry.recover(lease, max_attempts=3, by="survivor") == "new"
+        assert registry.find(brief.key)[0] == "new"
+    brief = registry.claim(office="n3", lease=0.01)
     time.sleep(0.02)
-    (lease,) = inbox.expired()
-    assert inbox.recover(lease, max_attempts=3, by="survivor") == "failed"
-    outcome = inbox.outcome(brief.key)
+    (lease,) = registry.expired()
+    assert registry.recover(lease, max_attempts=3, by="survivor") == "failed"
+    outcome = registry.outcome(brief.key)
     assert outcome["state"] == "lost" and "n3 was lost; 3 attempts" in outcome["reason"]
 
 
-def test_recovery_is_refused_for_a_live_or_renewed_lease(inbox) -> None:
-    brief = inbox.claim(office="a", lease=0.01)
+def test_recovery_is_refused_for_a_live_or_renewed_lease(registry) -> None:
+    brief = registry.claim(office="a", lease=0.01)
     time.sleep(0.02)
-    (stale,) = inbox.expired()
-    inbox.renew(brief.key, "a", lease=30)
-    assert inbox.recover(stale) is None
-    assert inbox.find(brief.key)[0] == "claimed"
+    (stale,) = registry.expired()
+    registry.renew(brief.key, "a", lease=30)
+    assert registry.recover(stale) is None
+    assert registry.find(brief.key)[0] == "claimed"
 
 
-def test_a_node_that_lost_its_lease_cannot_file(inbox) -> None:
-    brief = inbox.claim(office="a", lease=0.01)
+def test_a_node_that_lost_its_lease_cannot_file(registry) -> None:
+    brief = registry.claim(office="a", lease=0.01)
     time.sleep(0.02)
-    inbox.recover(inbox.expired()[0])
-    inbox.claim(office="b")
+    registry.recover(registry.expired()[0])
+    registry.claim(office="b")
     with pytest.raises(LeaseLost):
-        inbox.finish(brief, {"state": "done"}, ok=True, office="a")
-    assert not inbox.renew(brief.key, "a")
-    inbox.finish(brief, {"state": "done"}, ok=True, office="b")
-    assert inbox.find(brief.key)[0] == "done" and inbox.lease(brief.key) is None
+        registry.finish(brief, {"state": "done"}, ok=True, office="a")
+    assert not registry.renew(brief.key, "a")
+    registry.finish(brief, {"state": "done"}, ok=True, office="b")
+    assert registry.find(brief.key)[0] == "done" and registry.lease(brief.key) is None
 
 
-def test_lease_meta_and_listing(inbox) -> None:
-    brief = inbox.claim(office="a", meta={"station": "G", "profile": "007"})
-    inbox.renew(brief.key, "a")
-    (lease,) = inbox.leases()
+def test_lease_meta_and_listing(registry) -> None:
+    brief = registry.claim(office="a", meta={"station": "G", "profile": "007"})
+    registry.renew(brief.key, "a")
+    (lease,) = registry.leases()
     assert lease.meta == {"station": "G", "profile": "007"}
 
 
-def test_offices_announce_themselves(inbox) -> None:
-    inbox.heartbeat("office-1", {"capacity": 4})
-    inbox.heartbeat("office/2", {"capacity": 2})
-    assert sorted(o["office"] for o in inbox.offices()) == ["office-1", "office/2"]
-    assert inbox.offices(within=-1) == []
+def test_offices_announce_themselves(registry) -> None:
+    registry.heartbeat("office-1", {"capacity": 4})
+    registry.heartbeat("office/2", {"capacity": 2})
+    assert sorted(o["office"] for o in registry.offices()) == ["office-1", "office/2"]
+    assert registry.offices(within=-1) == []
 
 
-def test_one_leader_at_a_time_and_takeover(inbox) -> None:
-    assert inbox.elect("a", ttl=0.05)
-    assert not inbox.elect("b", ttl=0.05)
-    assert inbox.elect("a", ttl=0.05)  # renewal
+def test_one_leader_at_a_time_and_takeover(registry) -> None:
+    assert registry.elect("a", ttl=0.05)
+    assert not registry.elect("b", ttl=0.05)
+    assert registry.elect("a", ttl=0.05)  # renewal
     time.sleep(0.08)
-    assert inbox.elect("b", ttl=30)
-    assert not inbox.elect("a", ttl=30)
-    assert inbox.leader()["office"] == "b"
+    assert registry.elect("b", ttl=30)
+    assert not registry.elect("a", ttl=30)
+    assert registry.leader()["office"] == "b"

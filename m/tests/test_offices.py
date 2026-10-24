@@ -22,23 +22,23 @@ BACKENDS = ["file", "sqlite"] + (["postgres"] if os.environ.get("COAGENT_TEST_PO
 def backend(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     """Runs every test here against each store the offices could share."""
     if request.param == "sqlite":
-        monkeypatch.setenv("COAGENT_INBOX", f"sqlite:///{tmp_path / 'inbox.db'}")
+        monkeypatch.setenv("COAGENT_REGISTRY", f"sqlite:///{tmp_path / 'registry.db'}")
     elif request.param == "postgres":
         url = os.environ["COAGENT_TEST_POSTGRES"]
         from coagent_i import sql
 
-        box = sql.SqlInbox(url)
+        box = sql.SqlRegistry(url)
         with box._engine.begin() as db:
             for table in reversed(sql._meta.sorted_tables):
                 db.execute(table.delete())
         box.dispose()
-        monkeypatch.setenv("COAGENT_INBOX", url)
+        monkeypatch.setenv("COAGENT_REGISTRY", url)
     return request.param
 
 
 def office(name: str, **kw) -> Scheduler:
     runner = MissionRunner(
-        coagent_i.open_inbox(), stations=Stations.load(), use_hooks=False, sources=[]
+        coagent_i.open_registry(), stations=Stations.load(), use_hooks=False, sources=[]
     )
     return Scheduler(runner, office=name, lease=LEASE, **kw)
 
@@ -52,8 +52,10 @@ def step_until(offices, done, timeout: float = 15.0) -> None:
         time.sleep(0.05)
 
 
-def states(inbox) -> dict:
-    return {state: sorted(b.key for b in inbox.list(state)) for state in ("new", "claimed", "done")}
+def states(registry) -> dict:
+    return {
+        state: sorted(b.key for b in registry.list(state)) for state in ("new", "claimed", "done")
+    }
 
 
 def test_briefs_spread_across_offices(hq, tmp_path: Path, monkeypatch) -> None:
@@ -61,22 +63,22 @@ def test_briefs_spread_across_offices(hq, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("GATE", str(gate))
     a, b = office("a", max_total=2), office("b", max_total=2)
     for i in range(4):
-        a.runner.inbox.submit(brief(f"p{i}", "P"))
+        a.runner.registry.submit(brief(f"p{i}", "P"))
     b.step()  # b announces itself, and is M: the first to hold the lease
     a.step()
     b.step()
     a.step()
     assert len(a.running) == 2 and len(b.running) == 2
     gate.write_text("")
-    step_until([a, b], lambda: len(states(a.runner.inbox)["done"]) == 4)
+    step_until([a, b], lambda: len(states(a.runner.registry)["done"]) == 4)
 
 
 def test_a_control_office_runs_nothing_itself(hq, tmp_path: Path) -> None:
     boss = office("boss", roles=["control"])
     worker = office("worker", roles=["execution"])
-    boss.runner.inbox.submit(brief("1", "P"))
+    boss.runner.registry.submit(brief("1", "P"))
     worker.step()
-    step_until([boss, worker], lambda: states(boss.runner.inbox)["done"] == ["t--1"])
+    step_until([boss, worker], lambda: states(boss.runner.registry)["done"] == ["t--1"])
     assert boss.leading and not worker.leading
     assert [o["agent"] for o in worker.finished] == ["1"] and boss.finished == []
 
@@ -87,8 +89,8 @@ def test_a_selector_keeps_a_station_on_its_offices(hq, tmp_path: Path) -> None:
     stations.write_text(stations.read_text() + "selector = { gpu = 'y*' }\n")  # station P
     plain_office = office("plain")
     gpu_office = office("gpu", labels={"gpu": "yes"})
-    plain_office.runner.inbox.submit(brief("1", "P"))
-    step_until([plain_office, gpu_office], lambda: states(gpu_office.runner.inbox)["done"])
+    plain_office.runner.registry.submit(brief("1", "P"))
+    step_until([plain_office, gpu_office], lambda: states(gpu_office.runner.registry)["done"])
     assert [o["agent"] for o in gpu_office.finished] == ["1"] and plain_office.finished == []
 
 
@@ -96,8 +98,8 @@ def test_when_m_s_office_is_lost_another_takes_over(hq, tmp_path: Path, monkeypa
     gate = tmp_path / "gate"
     monkeypatch.setenv("GATE", str(gate))
     a, b = office("a", max_total=1), office("b", max_total=1)
-    inbox = a.runner.inbox
-    inbox.submit(brief("x", "P"))
+    registry = a.runner.registry
+    registry.submit(brief("x", "P"))
     a.step()
     assert a.leading and a.running == ["t--x"]
     b.step()
@@ -107,8 +109,8 @@ def test_when_m_s_office_is_lost_another_takes_over(hq, tmp_path: Path, monkeypa
     a.runner.abandon("t--x")
     time.sleep(LEASE + 0.1)
     gate.write_text("")
-    step_until([b], lambda: states(inbox)["done"] == ["t--x"])
-    assert b.leading and inbox.attempts("t--x") == 2
+    step_until([b], lambda: states(registry)["done"] == ["t--x"])
+    assert b.leading and registry.attempts("t--x") == 2
     assert [o["state"] for o in b.finished] == ["done"]
     a.wait()
     assert [o["state"] for o in a.finished] == ["abandoned"]

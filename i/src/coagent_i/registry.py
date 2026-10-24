@@ -1,10 +1,10 @@
-"""The inbox: a directory anything can drop a brief into, and M takes them from.
+"""The registry: a directory anything can drop a brief into, and M takes them from.
 
 ``new/`` holds briefs waiting, ``claimed/`` those an agent is on, ``done/`` and
 ``failed/`` the finished ones, each beside its ``.outcome.json`` and, when the mission
 produced one, its ``.log`` transcript.
 
-Several supervisors (offices) may share one inbox, on one machine or a shared directory.
+Several supervisors (offices) may share one registry, on one machine or a shared directory.
 An office claims with a **lease** it keeps renewing; when an office is lost its leases expire,
 and any other office ``recover``s those briefs: back to ``new/`` for another attempt, or to
 ``failed/`` once ``max_attempts`` are spent. Lease expiry compares wall clocks, so the
@@ -27,15 +27,15 @@ from .brief import Brief, BriefError
 
 __all__ = [
     "DEFAULT_LEASE",
-    "INBOX_ENV",
+    "REGISTRY_ENV",
     "STATES",
-    "Inbox",
+    "Registry",
     "Lease",
     "LeaseLost",
-    "default_inbox_dir",
+    "default_registry_dir",
 ]
 
-INBOX_ENV = "COAGENT_INBOX"
+REGISTRY_ENV = "COAGENT_REGISTRY"
 STATES = ("new", "claimed", "done", "failed")
 DEFAULT_LEASE = 60.0
 
@@ -60,27 +60,27 @@ class Lease:
         return json.dumps({**data, "meta": dict(self.meta)}, indent=2)
 
 
-def default_inbox_dir() -> Path:
-    """``$COAGENT_INBOX``, else ``$COAGENT_HOME/inbox``, else the platform's state
-    directory: ``%LOCALAPPDATA%\\coagent\\inbox`` or ``$XDG_STATE_HOME/coagent/inbox``
-    (``~/.local/state/coagent/inbox``)."""
-    if os.environ.get(INBOX_ENV):
-        return Path(os.environ[INBOX_ENV])
+def default_registry_dir() -> Path:
+    """``$COAGENT_REGISTRY``, else ``$COAGENT_HOME/registry``, else the platform's state
+    directory: ``%LOCALAPPDATA%\\coagent\\registry`` or ``$XDG_STATE_HOME/coagent/registry``
+    (``~/.local/state/coagent/registry``)."""
+    if os.environ.get(REGISTRY_ENV):
+        return Path(os.environ[REGISTRY_ENV])
     if os.environ.get("COAGENT_HOME"):
-        return Path(os.environ["COAGENT_HOME"]) / "inbox"
+        return Path(os.environ["COAGENT_HOME"]) / "registry"
     if sys.platform == "win32" and os.environ.get("LOCALAPPDATA"):
-        return Path(os.environ["LOCALAPPDATA"]) / "coagent" / "inbox"
+        return Path(os.environ["LOCALAPPDATA"]) / "coagent" / "registry"
     base = os.environ.get("XDG_STATE_HOME") or os.path.join(
         os.path.expanduser("~"), ".local", "state"
     )
-    return Path(base) / "coagent" / "inbox"
+    return Path(base) / "coagent" / "registry"
 
 
-class Inbox:
+class Registry:
     """Briefs on disk, by state."""
 
     def __init__(self, root: Optional["str | Path"] = None) -> None:
-        self.root = Path(root) if root is not None else default_inbox_dir()
+        self.root = Path(root) if root is not None else default_registry_dir()
 
     def submit(self, brief: Brief, *, replace: bool = False) -> Path:
         """Files ``brief`` under ``new/``. A brief whose key is already in any state is
