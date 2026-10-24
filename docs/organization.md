@@ -8,7 +8,8 @@ a decision, and the fiction's rules turn out to be good rules for running coding
 
 | Division | Here | Owns |
 | --- | --- | --- |
-| **M** (the Chief) | `m/` | policy, mission authorization, scheduling, stations, assigning agents |
+| **M** (the Chief) | `m/` | policy, mission authorization, scheduling, stations, assigning agents; a role one office holds at a time, and another takes over |
+| **Management offices** | `m/` (`serve`) | M's offices on many hosts: control (may be M), execution (run missions), or both |
 | **Chief of Staff** | `m/` (planned) | vetting incoming briefs and budgets before M sees them |
 | **Miss Moneypenny** | `moneypenny/` | information flow, the board, scheduling view, office security (who may attach) |
 | **00 Section** | `00/` | the agents that execute work |

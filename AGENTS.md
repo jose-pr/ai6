@@ -43,6 +43,14 @@ repository.
   `.github/workflows/cla.yaml`). `m/LICENSE` is a copy of the root one, because a
   Python package can only ship a licence file from inside its own project root.
 
+## Languages
+
+The control plane (M's decisions, the plugin surfaces users extend, I's formats) is
+Python. The execution plane moves to Rust piece by piece behind the existing seams: the
+terminal plugin is Rust today; an execution office as one static binary, and
+Moneypenny's gateway, are next. Do not port working Python for its own sake; the tests
+are the specification a Rust replacement must pass.
+
 ## Commands
 
 ```bash

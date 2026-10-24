@@ -38,6 +38,30 @@ else `%LOCALAPPDATA%\coagent\inbox` or `$XDG_STATE_HOME/coagent/inbox`
 Anything may write a brief straight into `new/`: write a temporary file whose name does
 not end in `.json` in that directory, then rename it.
 
+## Leases, offices and the leader (both stores)
+
+- `claim(key=None, *, node=None, lease=DEFAULT_LEASE, meta=None)`: with `node`, the claim
+  holds a `Lease(key, node, expires, attempt, meta)` (`expires` in epoch seconds).
+- `renew(key, node, lease=...) -> bool` (`False`: the lease is another node's now),
+  `lease(key)`, `leases()`, `expired(now=None)`, `attempts(key)`.
+- `recover(lease, *, max_attempts=3, by="") -> "new" | "failed" | None`: a lapsed lease's
+  brief back to `new`, or `failed` with outcome state `lost` once attempts are spent;
+  `None` when another node won or the lease was renewed.
+- `finish(..., node=None)`: with `node`, `LeaseLost` (nothing filed) when the lease or
+  the claim is no longer that node's.
+- `heartbeat(node, info)`, `offices(within=DEFAULT_LEASE) -> [record]` (each with `node`,
+  `seen` and the info), `elect(node, ttl) -> bool` (holds, renews or takes the one leader
+  lease), `leader() -> {node, expires} | None`, `read(key) -> Brief | None`.
+- Leases compare wall clocks: nodes need synchronised clocks.
+
+## `coagent_i.sql.SqlInbox(url, **engine_options)` and `open_inbox(location=None)`
+
+The same API in a database through SQLAlchemy (`sql` extra; `postgres` adds psycopg):
+`sqlite:///path.db`, `postgresql+psycopg://...`. Tables (`coagent_briefs`,
+`coagent_leases`, `coagent_offices`, `coagent_leader`) are created on first use. Every
+contested step is one conditional `UPDATE`/`DELETE`. `find(key)` answers `(state, key)`.
+`open_inbox(location)` (default `COAGENT_INBOX`) opens `SqlInbox` for a URL, else `Inbox`.
+
 ## Sources
 
 A source has `name` and `poll() -> Iterable[Brief]`; optionally

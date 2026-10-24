@@ -65,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `coagent-00` (`00/`): the `claude` adapter for Claude Code: print or interactive mode,
   clearance as `--permission-mode`, cover as the `attribution` setting, context as
   `--append-system-prompt`, and a debrief from the final `result` record.
+- Offices: several `serve` processes share one store; the office holding the leader
+  lease is M (places briefs, recovers lost offices' briefs, enforces budgets across
+  offices); offices are `control`, `execution` or both, labelled `node`, `host`, `os`
+  and `--label`; stations gain `selector`. Claims carry leases with heartbeats; a lost
+  office's briefs are re-run up to `--max-attempts`, then filed `lost`.
+- `coagent_i.SqlInbox` (`sql` and `postgres` extras): the inbox in SQLite or PostgreSQL;
+  `open_inbox()` picks it for a URL. `Inbox` gains leases, `renew`, `expired`,
+  `recover`, `heartbeat`, `offices`, `elect`, `leader`, `read`, `attempts`.
 - The documentation site (MkDocs Material) with guides, the Python API reference and the
   Rust reference, deployed by `docs.yml`.
 - Licensed under the Mozilla Public License 2.0, with a contributor licence agreement.

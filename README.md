@@ -53,6 +53,9 @@ remote host), roster, clearance and budget.
 - **Hooks, per scope.** Headquarters, station and agent hooks add environment, inject
   context, rewrite the command line, and see every event, in any language. A
   project's own hooks run only once it is registered as a station.
+- **No single point of failure.** Run M on several hosts: each is an office, one is M,
+  another takes over if it is lost, and briefs a lost office held are run again
+  elsewhere. Offices share files, SQLite or PostgreSQL.
 - **Bring your own intake.** No tracker is built in. Anything that can write a JSON
   file, or print one, can hand M a mission: a webhook receiver, a Jira poller, a skill,
   an overlay.

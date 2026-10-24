@@ -37,6 +37,7 @@ nav:
       - Hooks: hooks.md
       - Terminals and plugins: terminals.md
       - Remote hosts: hosts.md
+      - Offices, failover and the store: offices.md
       - The watchdog: watchdog.md
   - API Reference:
       - M (coagent_m): api/m.md
