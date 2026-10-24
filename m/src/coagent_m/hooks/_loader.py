@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 from ..config import TRUST_ENV, Scope, config_dir, read_toml
-from ..stations import Stations, local_config
+from ..stations import Station, Stations, local_config
 from ._base import Hook, HookContext, HookError
 from ._command import DEFAULT_TIMEOUT, CommandHook
 
@@ -100,13 +100,14 @@ def load_hooks(
     *,
     trust_project: Optional[bool] = None,
     stations: Optional[Stations] = None,
+    station: Optional[Station] = None,
 ) -> HookSet:
     """Global hooks (entry points, then ``<config_dir>/hooks.toml``), then those of the
     station holding ``cwd`` (``<station>/.coagent/hooks.toml``), then ``agent_hooks``.
     Outside every station a ``.coagent`` is read only with ``trust_project`` (or
     ``COAGENT_TRUST_PROJECT=1``)."""
     hooks = [*entry_point_hooks(), *load_file(config_dir() / HOOKS_FILE, Scope.GLOBAL)]
-    local, station = local_config(cwd, stations, trust=trust_project)
+    local, station = local_config(cwd, stations, trust=trust_project, station=station)
     if local is not None:
         hooks += load_file(local / HOOKS_FILE, Scope.STATION)
     elif station is None:

@@ -25,6 +25,8 @@ class HookContext:
     env: Dict[str, str]
     run_dir: str
     context: List[str] = field(default_factory=list)
+    # The host the agent runs on, when not this machine; `cwd` is then a path there.
+    host: Optional[str] = None
 
     def as_json(self) -> Dict[str, Any]:
         return {
@@ -33,6 +35,7 @@ class HookContext:
             "cwd": self.cwd,
             "run_dir": self.run_dir,
             "context": list(self.context),
+            "host": self.host,
         }
 
 

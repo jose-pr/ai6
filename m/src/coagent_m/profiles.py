@@ -200,13 +200,14 @@ def load_profiles(
     *,
     trust_project: Optional[bool] = None,
     stations: Optional[Stations] = None,
+    station: Optional[Station] = None,
 ) -> ProfileSet:
     """The global ``profiles.toml``, then that of the station holding ``cwd``, whose
     profiles override global ones of the same name (``load_hooks`` explains
     ``trust_project``)."""
     found = ProfileSet()
     load_file(config_dir() / PROFILES_FILE, Scope.GLOBAL, found)
-    local, _ = local_config(cwd, stations, trust=trust_project)
+    local, _ = local_config(cwd, stations, trust=trust_project, station=station)
     if local is not None:
         load_file(local / PROFILES_FILE, Scope.STATION, found)
     return found

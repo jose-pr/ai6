@@ -12,18 +12,19 @@ import os
 import threading
 import time
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 import coagent_i
 
 from .config import Scope
 from .hooks import HookSet, load_hooks
+from .hosts import HostError, Hosts
 from .profiles import Profile, ProfileError, load_profiles
 from .stations import Station, StationError, Stations
 from .terminal import Registry, TerminalError
 from .watchdog import AgentSpec, Event, Limits, Outcome, State, Watchdog
-from .worktree import Worktree, WorktreeError, branch_name, is_git_checkout
+from .worktree import LOCAL, SshGit, Worktree, WorktreeError, branch_name, is_git_checkout
 
 __all__ = ["Assignment", "MissionRunner", "Scheduler", "TRANSCRIPT_LIMIT"]
 
@@ -58,6 +59,7 @@ class MissionRunner:
         inbox: Optional[coagent_i.Inbox] = None,
         *,
         stations: Optional[Stations] = None,
+        hosts: Optional[Hosts] = None,
         sources: Optional[Sequence[Any]] = None,
         use_hooks: bool = True,
         registry: Optional[Registry] = None,
@@ -68,6 +70,7 @@ class MissionRunner:
     ) -> None:
         self.inbox = inbox if inbox is not None else coagent_i.Inbox()
         self.stations = stations if stations is not None else Stations.load()
+        self.hosts = hosts if hosts is not None else Hosts.load()
         self.sources = sources
         self.use_hooks = use_hooks
         self.registry = registry
@@ -91,7 +94,7 @@ class MissionRunner:
         key = station or brief.station
         where = self.stations.get(key) if key else self.stations.for_path(os.getcwd())
         cwd = str(where.path) if where is not None and where.path else os.getcwd()
-        profiles = load_profiles(cwd, stations=self.stations)
+        profiles = load_profiles(cwd, stations=self.stations, station=where)
         name = profile or brief.profile
         chosen = (
             profiles.get(name)
@@ -140,7 +143,7 @@ class MissionRunner:
             )
             if worktree is not None:
                 outcome["worktree"] = worktree
-        except (ProfileError, StationError, TerminalError, WorktreeError) as exc:
+        except (ProfileError, StationError, HostError, TerminalError, WorktreeError) as exc:
             outcome["reason"] = str(exc)
             _log.warning("mission %s refused: %s", brief.key, exc)
         if claimed:
@@ -152,23 +155,24 @@ class MissionRunner:
     def _run(self, a: Assignment, transcript: bytearray):
         spec, station, key = a.spec, a.station, a.brief.key
         worktree: Optional[Worktree] = None
-        if (
-            station is not None
-            and station.worktrees
-            and station.path is not None
-            and is_git_checkout(station.path)
-        ):
-            branch = branch_name(
-                station.branch, id=a.brief.id, title=a.brief.title, station=station.id
-            )
-            worktree = Worktree.create(
-                station.path, key, branch, root=self.worktree_root, base=station.base
-            )
-            spec = replace(spec, cwd=str(worktree.path))
+        if station is not None and station.worktrees and station.path is not None:
+            git, root = LOCAL, self.worktree_root
+            if station.host is not None:
+                host = self.hosts.get(station.host)
+                # Without a work root a remote station's missions run in its checkout.
+                git = SshGit(host) if host.work_root else None
+                root = PurePosixPath(host.work_root) if host.work_root else None
+            if git is not None and is_git_checkout(station.path, git):
+                branch = branch_name(
+                    station.branch, id=a.brief.id, title=a.brief.title, station=station.id
+                )
+                worktree = Worktree.create(
+                    station.path, key, branch, root=root, base=station.base, git=git
+                )
+                spec = replace(spec, cwd=str(worktree.path))
         # Configuration is the station's, wherever its worktree is.
-        config_cwd = str(station.path) if station is not None and station.path else spec.cwd
         hooks = (
-            load_hooks(config_cwd, spec.hooks, stations=self.stations)
+            load_hooks(spec.cwd, spec.hooks, stations=self.stations, station=station)
             if self.use_hooks
             else HookSet((Scope.AGENT, h) for h in spec.hooks)
         )

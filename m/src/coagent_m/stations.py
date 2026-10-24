@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, fields
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from .config import PROJECT_DIR, TRUST_ENV, config_dir, find_project, read_toml
@@ -67,7 +67,12 @@ class Station:
     name: str = ""
     aliases: Tuple[str, ...] = ()
     description: str = ""
+    # The checkout; on `host` when one is named, else on this machine.
     path: Optional[Path] = None
+    host: Optional[str] = None
+    # A local directory with the station's hooks and profiles, for a station whose
+    # checkout is on another host; a local station's is <path>/.coagent.
+    config: Optional[Path] = None
     repos: Tuple[str, ...] = ()
     # Profiles posted here; empty means every profile.
     roster: Tuple[str, ...] = ()
@@ -87,7 +92,9 @@ class Station:
         return f"Station {self.id}" + (f" ({self.name})" if self.name else "")
 
     def contains(self, path: "str | Path") -> bool:
-        if self.path is None:
+        """Whether ``path`` on this machine is inside the checkout; never, for a station
+        on another host."""
+        if self.path is None or self.host is not None:
             return False
         try:
             Path(path).resolve().relative_to(self.path)
@@ -158,19 +165,31 @@ class Stations:
 
 
 def local_config(
-    cwd: Optional[str], stations: Optional[Stations] = None, *, trust: Optional[bool] = None
+    cwd: Optional[str],
+    stations: Optional[Stations] = None,
+    *,
+    trust: Optional[bool] = None,
+    station: Optional[Station] = None,
 ) -> Tuple[Optional[Path], Optional[Station]]:
-    """The ``.coagent`` directory to read for ``cwd``, and the station it belongs to.
+    """The ``.coagent`` directory to read for ``cwd`` (or for ``station``, when given),
+    and the station it belongs to.
 
-    Inside a registered station: that station's ``<path>/.coagent``. Elsewhere, the
-    nearest ``.coagent`` only when ``trust`` is true or ``COAGENT_TRUST_PROJECT=1``
-    (for a checkout under development); otherwise none.
+    A station's is its ``config`` directory, else ``<path>/.coagent`` for a local one; a
+    station on another host without ``config`` has none. Outside every station, the
+    nearest ``.coagent`` only when ``trust`` is true or ``COAGENT_TRUST_PROJECT=1`` (for
+    a checkout under development); otherwise none.
     """
+    if station is not None:
+        if station.config is not None:
+            return station.config, station
+        if station.host is None and station.path is not None:
+            return Path(station.path) / PROJECT_DIR, station
+        return None, station
     stations = stations if stations is not None else Stations.load()
     here = cwd or os.getcwd()
     station = stations.for_path(here)
     if station is not None and station.path is not None:
-        return station.path / PROJECT_DIR, station
+        return station.config or station.path / PROJECT_DIR, station
     if trust is None:
         trust = os.environ.get(TRUST_ENV, "").lower() in ("1", "true", "yes")
     root = find_project(here) if trust else None
@@ -190,7 +209,13 @@ def _station(sid: str, table: Mapping[str, Any], source: Path) -> Station:
         raise StationError(f"{source}: station {sid!r}: unknown keys {unknown}")
     values: Dict[str, Any] = dict(table)
     if "path" in values:
-        values["path"] = Path(os.path.expanduser(str(values["path"]))).resolve()
+        raw = str(values["path"])
+        # A remote checkout's path is the host's; only a local one is resolved here.
+        values["path"] = (
+            PurePosixPath(raw) if values.get("host") else Path(os.path.expanduser(raw)).resolve()
+        )
+    if "config" in values:
+        values["config"] = Path(os.path.expanduser(str(values["config"]))).resolve()
     for key in ("aliases", "repos", "roster"):
         if key in values:
             values[key] = tuple(str(v) for v in values[key])
