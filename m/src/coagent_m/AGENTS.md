@@ -120,7 +120,7 @@ in order: max runtime, stall, loop), `blocked(now) -> bool`, `awaiting_input() -
 | `launch (--profile NAME \| --role ROLE [--tag T]...) [--station S] [--no-hooks] [PROMPT]` | starts the agent a profile describes, at the station holding `.` or `--station` |
 | `launch (--next [--inbox DIR] \| --brief FILE) [--station S] [--profile\|--role ..] [--no-hooks]` | runs a brief: its station, its profile or the best one for its role and tags there, its prompt; files the outcome (`--next`) and reports it to the brief's source |
 | `stations` | registered stations |
-| `serve [--max N] [--poll S] [--once] [--idle S] [--inbox DIR] [--keep-worktrees] [--no-hooks]` | runs briefs from the inbox while there is capacity; exits 1 if any mission did not finish `done` |
+| `serve [--max N] [--poll S] [--once] [--idle S] [--inbox DIR\|URL] [--keep-worktrees] [--no-hooks] [--node NAME] [--role control\|execution]... [--label K=V]... [--lease S] [--max-attempts N]` | runs as an office: M when it holds the leader lease, a worker otherwise; exits 1 if any mission did not finish `done` |
 | `providers` | terminal providers, best first, with why each cannot run |
 | `hooks` | the hooks a run in this directory would use |
 | `profiles` | agent profiles, best first |
@@ -248,7 +248,7 @@ python = "package.module:attr"    # an object, or a class built with no argument
 
 ## `coagent_m.stations`
 
-- `Station(id, name="", description="", path=None, host=None, config=None, repos=(), roster=(), clearance="field", max_concurrent=None, worktrees=True, branch="{id}-{slug}", base="HEAD", intake={})`:
+- `Station(id, name="", description="", path=None, host=None, config=None, repos=(), roster=(), clearance="field", max_concurrent=None, selector={}, worktrees=True, branch="{id}-{slug}", base="HEAD", cover="covert", identity=None, on_blown="flag", intake={})`:
   `id` is the station's one cover name (any short code); `name` the real project name;
   the station answers to both. `host` names the host its checkout (`path`, a path
   there) is on; `config` is a local directory with its hooks and profiles (needed for a
@@ -307,11 +307,19 @@ intake = { jira = "GUA" }
     `profile`, `station`, `state` (`done`, `failed`, `stalled`, or `refused` when it
     could not be assigned or started), `returncode`, `reason`, `runtime` and, with a
     worktree, `worktree` (`path`, `branch`, `base`, `kept`, `commits`).
-- `Scheduler(runner, *, max_total=4, poll_interval=None)`: `step() -> started`,
-  `run(*, once=False, idle=1.0)`, `stop()`, `wait()`, `running` (keys), `finished`
-  (outcomes). Capacity is `max_total`, a station's `max_concurrent` and a profile's
-  `max_concurrent`; a brief over capacity stays new, one that cannot be assigned is
-  claimed and filed as refused.
+- `MissionRunner.abandon(key)`: stops a mission without filing or reporting it (its
+  brief belongs to another office); `run(..., node=None)` files as `node` and answers
+  state `abandoned` when the lease passed elsewhere.
+- `Scheduler(runner, *, node=None, max_total=4, poll_interval=None, lease=60.0, max_attempts=3, roles=("control", "execution"), labels=None)`:
+  an office. `step()` renews its leases (abandoning any it lost), heartbeats, takes or
+  renews the leader lease if it has `control`, and as leader polls intake, recovers
+  lapsed leases and places waiting briefs; with `execution` it then starts what is
+  leased to it. Placement: live execution offices with room, labels matching the
+  station's `selector` (`fnmatch` globs; automatic labels `node`, `host`, `os`), able to
+  reach a local checkout, least loaded first. Budgets (`max_concurrent` of stations and
+  profiles) count leases across offices. `run(*, once, idle)`, `stop()`, `wait()`,
+  `leading`, `running`, `finished`. `ROLES = ("control", "execution")`; an unknown role
+  is `ValueError`.
 
 ## `coagent_m.cover`
 

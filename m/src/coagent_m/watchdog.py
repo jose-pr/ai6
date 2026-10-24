@@ -679,7 +679,7 @@ def _mission(args: argparse.Namespace) -> int:
         return 2
     try:
         runner = MissionRunner(
-            coagent_i.Inbox(args.inbox),
+            coagent_i.open_inbox(args.inbox),
             use_hooks=not args.no_hooks,
             keep_worktrees=args.keep_worktrees,
             on_event=lambda key, e: _report_event(e),
@@ -729,7 +729,7 @@ def _serve(args: argparse.Namespace) -> int:
 
     try:
         runner = MissionRunner(
-            coagent_i.Inbox(args.inbox),
+            coagent_i.open_inbox(args.inbox),
             use_hooks=not args.no_hooks,
             keep_worktrees=args.keep_worktrees,
             on_event=event,

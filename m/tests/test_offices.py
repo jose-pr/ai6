@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -14,10 +15,31 @@ from coagent_m.stations import Stations  # noqa: E402
 from test_scheduler import brief, hq  # noqa: E402,F401
 
 LEASE = 0.6
+BACKENDS = ["file", "sqlite"] + (["postgres"] if os.environ.get("COAGENT_TEST_POSTGRES") else [])
+
+
+@pytest.fixture(params=BACKENDS, autouse=True)
+def backend(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Runs every test here against each store the offices could share."""
+    if request.param == "sqlite":
+        monkeypatch.setenv("COAGENT_INBOX", f"sqlite:///{tmp_path / 'inbox.db'}")
+    elif request.param == "postgres":
+        url = os.environ["COAGENT_TEST_POSTGRES"]
+        from coagent_i import sql
+
+        box = sql.SqlInbox(url)
+        with box._engine.begin() as db:
+            for table in reversed(sql._meta.sorted_tables):
+                db.execute(table.delete())
+        box.dispose()
+        monkeypatch.setenv("COAGENT_INBOX", url)
+    return request.param
 
 
 def office(name: str, **kw) -> Scheduler:
-    runner = MissionRunner(coagent_i.Inbox(), stations=Stations.load(), use_hooks=False, sources=[])
+    runner = MissionRunner(
+        coagent_i.open_inbox(), stations=Stations.load(), use_hooks=False, sources=[]
+    )
     return Scheduler(runner, node=name, lease=LEASE, **kw)
 
 

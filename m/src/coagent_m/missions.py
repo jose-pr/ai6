@@ -88,7 +88,7 @@ class MissionRunner:
         on_event: Optional[Callable[[str, Event], None]] = None,
         on_output: Optional[Callable[[str, bytes], None]] = None,
     ) -> None:
-        self.inbox = inbox if inbox is not None else coagent_i.Inbox()
+        self.inbox = inbox if inbox is not None else coagent_i.open_inbox()
         self.stations = stations if stations is not None else Stations.load()
         self.hosts = hosts if hosts is not None else Hosts.load()
         self.covers = covers if covers is not None else Covers.load()

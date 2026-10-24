@@ -51,7 +51,6 @@ def hq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     plain = tmp_path / "plain"
     plain.mkdir()
     monkeypatch.setenv("COAGENT_HOME", str(home))
-    monkeypatch.delenv("COAGENT_INBOX", raising=False)
     monkeypatch.delenv("COAGENT_STATE", raising=False)
     (home / "agent.py").write_text(AGENT)
     (home / "stations.toml").write_text(
