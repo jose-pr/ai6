@@ -1,0 +1,92 @@
+# Organization
+
+coagent is organized the way the fictional Secret Intelligence Service of the James Bond
+novels and films is. The names are a convention, not decoration: each one says who owns
+a decision, and the fiction's rules turn out to be good rules for running coding agents.
+
+## Divisions
+
+| Division | Here | Owns |
+| --- | --- | --- |
+| **M** (the Chief) | `m/` | policy, mission authorization, scheduling, stations, assigning agents |
+| **Chief of Staff** | `m/` (planned) | vetting incoming briefs and budgets before M sees them |
+| **Miss Moneypenny** | `moneypenny/` | information flow, the board, scheduling view, office security (who may attach) |
+| **00 Section** | `00/` | the agents that execute work |
+| **Q Branch** | `q/` | gear: credentials, sandboxes, tools that act |
+| **R** (Q's deputy) | `q/` (planned) | acceptance of new gear before Q issues it |
+| **I Branch** | `i/` | intelligence and communications: briefs, intake, the wire format, briefings, debriefs |
+| **G** (Graphology) | `i/` (planned) | provenance: is a brief, plugin or hook file really from who it claims |
+| **Medical & Psychological** | `m/` | agent health: the watchdog today; budgets, exposure and quarantine next |
+| **Stations** | configuration | the projects missions are run for |
+
+No division depends on another except on I Branch's formats.
+
+## People and clearance
+
+| Role | Clearance | Meaning here |
+| --- | --- | --- |
+| Desk officer | `desk` | reads, plans and proposes; nothing leaves its worktree |
+| Case officer | `field` | changes its worktree and runs tests under *standard operational immunity*; anything irreversible needs M's authorization |
+| 00 agent | `00` | the *licence to kill*: may act unattended, including irreversible steps |
+| Station Chief | per station | an optional lead agent for one station (below) |
+| Sleeper | any | a standing order, dormant until triggered (below) |
+
+## Conventions
+
+**Codenames are slots; models are their occupants.** A 00 number is recycled property
+of the Crown: when an agent retires, the next qualified one inherits the number. Missions,
+plans and roles name a codename (`007`), never a model. Replacing the model behind `007`
+is a change to one profile.
+
+**Promotion is earned and signed.** A profile is promoted to `00` only on a recorded
+track record (missions completed at `field` without incident) and a human approval.
+
+**Retirement.** A profile past its date (a model at end of life, or one that keeps
+failing) is retired to desk duty: kept for reading and advice, never sent into the field.
+
+**A backup for every 00.** M keeps a replacement in mind for each agent (008 for 007),
+used when the first choice is unavailable, over budget or refused by the station.
+
+**Green ink.** Orders from the Chief's office are written in green ink. Here that means
+human approvals for irreversible steps (a push to a protected branch, a release, a
+deletion), each kept as a signed record of who approved what, when, for which mission.
+
+**Universal Exports.** Field agents travel as employees of a trading company. Agents
+here act under the station's configured cover identity: commits, comments and pull
+requests carry the project's own author, never an agent's name or an attribution trailer.
+
+**The Leather Goods Department.** Q's shipments travel under a plain manifest: a loadout
+lists what an agent is issued, by name, and never contains a secret's value.
+
+**Assume any agent can be turned.** 006 was a trusted peer until he was not. Any agent
+can be steered by what it reads (prompt injection), so clearance is least privilege,
+credentials are per station, and a session that read untrusted input is treated as
+exposed.
+
+## Stations
+
+A station is a project, by id (`G`, `GT`, `B2`: a letter is the convention, not a
+limit), name and any cover names. It holds the project's checkout, the agents posted
+there, the highest clearance a mission there may use, its budget, and settings for
+intake sources. Registering a project as a station is what makes its own `.coagent/`
+configuration readable.
+
+**Station Chief.** An optional lead agent per station: it knows the station's repos and
+CI, coordinates with friendly agencies (other bots and services on the project), breaks
+missions into tasks, and provides visiting 00 agents with safe houses (worktrees) and
+logistics (environment). M still authorizes and schedules.
+
+**Sleepers.** A standing order at a station: a trigger (CI turned red, a label added, a
+schedule) wakes a named profile with a set brief. Sleepers are delivered through I
+Branch's intake like any other brief.
+
+## Medical & Psychological Section
+
+Agents wear out in recognisable ways, and the section's job is to notice:
+
+- **stalls and loops**: the watchdog kills them today;
+- **exhaustion**: a context window or token budget running out;
+- **burnout**: a profile failing repeatedly, quarantined until a person looks;
+- **exposure**: a session that read untrusted input (an issue body, a web page) is
+  marked, and what it may do next is restricted;
+- **debriefs**: every mission ends with a record I Branch keeps.

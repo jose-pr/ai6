@@ -12,6 +12,9 @@ repository.
 | `m/tests/` | pytest suite; the watchdog cases run its own mock agents (`mock-agent work\|loop\|hang\|cursor\|orphan`) with sub-second limits, once per terminal provider that can run here |
 | `m/crates/coagent-terminal-kind/` | the terminal contract as guatiao kinds; its test pins both floor hashes |
 | `m/crates/coagent-terminal-pty/` | a terminal plugin (`cdylib`) on `portable-pty` |
+| `i/` | Python project `coagent-i` (package `coagent_i`): briefs, the inbox, the intake-source contract; `i/tests/` |
+| `00/` | the 00 Section: `roster.example.toml` (loads with `coagent_m.profiles`); CLI adapters to come |
+| `docs/organization.md` | the division of work and its naming conventions |
 | `m/crates/coagent-native/` | a `cdylib` carrying guatiao's C ABI with `load`, for the Python binding |
 | `Cargo.toml` | the workspace; guatiao is a git dependency pinned to a commit, the same commit `m/pyproject.toml`'s `guatiao` extra names |
 | `moneypenny/` | design for a Cargo workspace: gateway (axum) and a wasm client sharing one protocol crate |
@@ -19,16 +22,19 @@ repository.
 
 ## Rules
 
-- The three components share no code. They meet at two formats: M's socket frames
-  (guatiao values; schema in `moneypenny-proto`, read from Python through guatiao's
-  bindings) and Q's loadout TOML.
+- No division (`m/`, `00/`, `q/`, `i/`, `moneypenny/`) imports another, except that any
+  may use I Branch's formats: briefs (`coagent_i`), and the wire frames (a crate in `i/`,
+  planned). M imports `coagent_i` only inside `launch --next/--brief`.
+- Intake integrations (Jira, webhooks, ...) are never built in: they are user-supplied
+  sources, entry points or programs writing into the inbox. Keep that contract
+  (`i/src/coagent_i/AGENTS.md`) the only thing coagent owns there.
 - Nothing in M's watchdog may assume a terminal provider: it sees bytes and timestamps
   only. Platform code lives in a provider.
 - The two floor hashes in `coagent-terminal-kind`'s test and in
   `m/src/coagent_m/terminal/_guatiao.py` are one fact in two places: change both, and
   bump guatiao in `Cargo.toml` and `m/pyproject.toml` together.
-- A project's `.coagent/` is read only when trusted; never add a code path that reads it
-  otherwise.
+- A project's `.coagent/` is read only when it is a registered station (or explicitly
+  trusted); never add a code path that reads it otherwise.
 - Windows: `conpty` and process-tree kill (Job Objects) are scaffolds, marked as such
   in their modules and in `m/src/coagent_m/AGENTS.md`.
 - Python 3.9 floor; `from __future__ import annotations` in every module; black,
@@ -54,6 +60,10 @@ export GUATIAO_LIBRARY=$PWD/../target/debug/libcoagent_native.so COAGENT_TERMINA
 The test suite needs the package installed (`pip install -e`), not only on
 `sys.path`: the watchdog cases start `python -m coagent_m.watchdog mock-agent ...` in a
 child process.
+
+`i/` has its own venv and suite (`cd i && pip install -e ".[dev]" && pytest -q`); M's
+mission tests skip unless `coagent-i` is installed into M's venv too (`pip install -e
+../i`).
 
 CI: `.github/workflows/test.yml`, on `workflow_dispatch` or a pushed `ci-*` tag; Linux
 and macOS, Python 3.9 and 3.14, Rust fmt, clippy and tests.

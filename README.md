@@ -22,11 +22,20 @@ whether that session is a pty, a tmux pane or a systemd unit.
 
 ## Features
 
-| Component | What you get | State |
-| --- | --- | --- |
-| **M** — supervisor | One worktree and sandbox per task; a watchdog that kills a stalled or looping agent with every process it started; pluggable terminals, hooks and agent profiles; lifecycle events for the board | watchdog, terminals, hooks, profiles implemented; intake and worktrees designed |
-| **Moneypenny** — viewport | A Kanban board of runs (*Working · Blocked · Stalled · Done*); a WebGL terminal attached live to any agent, read-only or with a write lease | design |
-| **Q** — armory | Scoped, short-lived credentials injected at spawn and never written to disk; sandbox profiles; MCP server "loadouts" (filesystem, shell, database) per agent | design |
+The work is split the way the Secret Intelligence Service splits it
+([`docs/organization.md`](https://github.com/jose-pr/coagent/blob/main/docs/organization.md)
+has the conventions):
+
+| Division | Dir | What it owns | State |
+| --- | --- | --- | --- |
+| **M's Office** | `m/` | Stations, mission authorization, scheduling, the watchdog that kills a stalled or looping agent with every process it started, pluggable terminals, hooks, and assigning agent profiles to missions | watchdog, terminals, hooks, profiles, stations and brief-driven launch implemented; scheduler and worktrees designed |
+| **00 Section** | `00/` | The agents that execute: the roster of codenamed profiles, clearance, one adapter per agent CLI | roster format implemented in M; adapters designed |
+| **Q Branch** | `q/` | Gear issued per mission: credentials scoped to a station, sandboxes, tools that act (shell, file writes, git, deploy) | design |
+| **I Branch** | `i/` | Intelligence and comms: mission briefs, the inbox, the contract user-supplied intake fills, the wire format, briefings and debriefs | briefs, inbox and intake contract implemented; wire, briefings, debriefs designed |
+| **Moneypenny** | `moneypenny/` | M's front desk: a Kanban board of runs (*Working · Blocked · Stalled · Done*) per station, and a WebGL terminal attached live to any agent | design |
+
+Projects are **Stations**: each registered project has an id (`G`, `GT`, `B2`), a name
+and any cover names, and holds its own checkout, roster, clearance and budget.
 
 - **Supervisor–worker (harness) pattern.** Agents are disposable workers. M is the only
   long-lived process that holds state.
@@ -40,9 +49,12 @@ whether that session is a pty, a tmux pane or a systemd unit.
 - **Profiles: M knows her agents.** A profile names a model configuration under a
   codename (`007`, alias `JamesBond`): which CLI to launch, which model and effort,
   what environment, what it is good for. M picks the best profile for a role.
-- **Hooks, per scope.** Global, project and agent hooks add environment, inject
+- **Hooks, per scope.** Headquarters, station and agent hooks add environment, inject
   context, rewrite the command line, and see every event, in any language. A
-  project's hooks run only once the project is trusted.
+  project's own hooks run only once it is registered as a station.
+- **Bring your own intake.** No tracker is built in. Anything that can write a JSON
+  file, or print one, can hand M a mission: a webhook receiver, a Jira poller, a skill,
+  an overlay.
 
 ## Installation
 
@@ -132,12 +144,19 @@ roles = ["implement"]
 
 ```bash
 python -m coagent_m.watchdog launch --profile JamesBond "plan the intake module"
-python -m coagent_m.watchdog launch --role review/security "audit the gateway"
+python -m coagent_m.watchdog launch --role review/security --station G "audit the gateway"
+```
+
+Hand M a mission from anything that can write JSON, then let her take it:
+
+```bash
+echo '{"id": "GUA-12", "title": "Fix the flaky test", "station": "Kingston", "role": "implement"}' \
+  | python -m coagent_i submit
+python -m coagent_m.watchdog launch --next
 ```
 
 Inject environment and context with hooks, for example from a tool that knows the
-directory, in `~/.config/coagent/hooks.toml` (or a trusted project's
-`.coagent/hooks.toml`):
+directory, in `~/.config/coagent/hooks.toml` (or a station's `.coagent/hooks.toml`):
 
 ```toml
 [[hook]]
@@ -155,9 +174,12 @@ output = "context"
 
 ```bash
 python -m coagent_m.watchdog run [--stall-timeout S] [--loop-timeout S] [--max-runtime S] [--terminal NAME] [--no-hooks] -- CMD [ARGS...]
-python -m coagent_m.watchdog launch (--profile NAME | --role ROLE [--tag T]...) [--no-hooks] [PROMPT]
+python -m coagent_m.watchdog launch (--profile NAME | --role ROLE [--tag T]...) [--station S] [--no-hooks] [PROMPT]
+python -m coagent_m.watchdog launch (--next [--inbox DIR] | --brief FILE) [--station S] [--no-hooks]
 python -m coagent_m.watchdog providers
 python -m coagent_m.watchdog profiles
+python -m coagent_m.watchdog stations
+python -m coagent_i [--inbox DIR] (submit [FILE|-] | list [--state S] | sources | poll)
 python -m coagent_m.watchdog hooks
 python -m coagent_m.watchdog demo [--timeout S] [--terminal NAME]
 ```
@@ -173,7 +195,9 @@ code, or `128 + signal` when the watchdog killed it.
 | `coagent_m.terminal` | `Provider`, `Session`, `TerminalSpec`, `Registry`, `default_registry()`: where a terminal comes from |
 | `coagent_m.hooks` | `HookContext`, `Preparation`, `CommandHook`, `HookSet`, `load_hooks()`: what runs around a session |
 | `coagent_m.profiles` | `Launcher`, `Profile`, `ProfileSet`, `load_profiles()`: the model configurations M assigns |
-| `coagent_m.config` | `config_dir()`, `find_project()`, `project_trusted()`, `Scope` |
+| `coagent_m.stations` | `Station`, `Stations`, `CLEARANCES`, `local_config()`: the projects M runs missions for |
+| `coagent_m.config` | `config_dir()`, `find_project()`, `Scope` |
+| `coagent_i` | `Brief`, `Inbox`, `CommandSource`, `load_sources()`, `poll()`, `report()`: missions in, outcomes out |
 | `coagent-terminal-kind` (Rust) | the `coagent_terminal` and `coagent_terminal_session` guatiao kinds |
 | `coagent-terminal-pty` (Rust) | a terminal plugin on `portable-pty` |
 
@@ -182,31 +206,36 @@ The full contract is in [`m/src/coagent_m/AGENTS.md`](https://github.com/jose-pr
 ## Architecture
 
 ```text
-            Jira JQL poll / webhook                        operators (browser)
-                     │                                             │  HTTPS + WSS
-                     ▼                                             ▼
-┌──────────────────────────────────────┐      ┌───────────────────────────────────────┐
-│ M  (m/)  supervisor daemon           │      │ Moneypenny  (moneypenny/)             │
-│  task intake ─► scheduler            │      │  gateway (Rust): auth, fan-out,       │
-│  worktree + sandbox per task         │ unix │  write lease, scrollback replay       │
-│  terminals: pty│pipes│conpty│plugins │◄────►│  board API (cards = run states)       │
-│  watchdog: stall / loop ─► SIGKILL   │ sock │  client: Rust→wasm board + xterm.js   │
-│  event log (state transitions)       │      └───────────────────────────────────────┘
-└──────────────┬───────────────────────┘
-               │ spawn(spec, loadout)       ┌───────────────────────────────────────┐
-               ├───────────────────────────►│ Q  (q/)  armory                       │
-               │   env + MCP config         │  secret broker (scoped, short-lived)  │
-               ▼                            │  sandbox profiles                     │
-     ┌───────────────────┐                  │  MCP loadouts: fs, shell, db          │
-     │ sub-agent (pty)   │ ◄─── tools ───── └───────────────────────────────────────┘
-     │ in its worktree   │
-     └───────────────────┘
+  trackers, webhooks, skills (yours)       operators (browser)
+          │ briefs (JSON)                        │ HTTPS + WSS
+          ▼                                      ▼
+┌──────────────────────────────┐    ┌──────────────────────────────┐
+│ I  (i/)  I Branch            │    │ Moneypenny  (moneypenny/)    │
+│  inbox · intake sources      │◄──►│  gateway · board · attach    │
+│  wire frames · briefings     │    │  one swimlane per station    │
+│  debriefs                    │    └──────────────────────────────┘
+└──────────────────────────────┘
+          │ briefs ▲ reports                     │ frames (I's wire format)
+          ▼        │                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│ M  (m/)  M's Office                                            │
+│  stations · authorization · scheduling                         │
+│  watchdog · terminals · hooks                                  │
+│  profiles: who runs which mission                              │
+└────────────────────────────────────────────────────────────────┘
+          │ loadout                              │ spawn on a terminal
+          ▼                                      ▼
+┌──────────────────────────────┐    ┌──────────────────────────────┐
+│ Q  (q/)  Q Branch            │    │ 00  (00/)  00 Section        │
+│  credentials per station     │───►│  roster · CLI adapters       │
+│  sandboxes · tools that act  │    │  run in a station's worktree │
+└──────────────────────────────┘    └──────────────────────────────┘
 ```
 
-### How the three decouple
+### How the divisions decouple
 
-The boundary that matters is between **where a session runs** and **who is watching
-it**. Three seams keep them apart:
+No division depends on another, except on I Branch's formats: the brief, the wire
+frames and the report. Each can be rewritten without touching the rest.
 
 1. **Terminals are providers behind one contract in M.** A session exposes the same
    operations whatever runs it: *spawn, read output, write input, resize, kill the
@@ -217,32 +246,71 @@ it**. Three seams keep them apart:
    so `ssh host -t tmux attach -r -t agent-42` keeps working beside the web view, and a
    `systemd` one a transient unit with cgroup limits. The watchdog only ever sees bytes
    and timestamps, so its rules are the same for every provider.
-2. **Moneypenny speaks a terminal protocol, not a backend.** M sends the gateway framed
-   messages over a local Unix socket: `output`, `event`, `input`, `resize`, each with a
-   session id. The gateway fans one session's output out to any number of browsers and
-   replays a scrollback ring buffer to each new viewer. It forwards input from only the
-   viewer that holds the session's **write lease**, so two people never type into one
-   agent at once. Browsers never reach M or a backend directly.
+2. **Moneypenny and M speak I's wire format, not each other.** M sends framed messages
+   (`output`, `event`, `input`, `resize`, each with a session id) and the gateway fans
+   one session out to any number of browsers, replays a scrollback ring to each new
+   viewer, and forwards input only from the viewer holding the session's **write
+   lease**. Browsers never reach M or a terminal provider directly.
 3. **Q is consulted at spawn time and then gets out of the way.** M asks Q for a
    *loadout*: environment, credentials with a TTL, the MCP servers to start, and the
-   sandbox profile. M passes it to the backend. Secrets reach the agent's environment
-   and never its worktree, the event log or the terminal stream.
+   sandbox. Q equips, I informs: tools that change things are Q's, sources that only
+   inform (docs, search, a code index) are I's, and the loadout issues both. Secrets
+   reach the agent's environment and never its worktree, the event log or the terminal
+   stream.
+4. **I takes missions in from anything.** A brief is one JSON document; the inbox is a
+   directory; a source is any program that prints briefs or any Python object in the
+   `coagent.intake` group, and it can hear back how its brief ended.
+5. **00 is data plus adapters.** M reads the roster to assign agents; an adapter knows
+   one CLI's flags, context file and signals. Swapping agent CLIs touches only `00/`
+   and the roster.
 
 The frames are [guatiao](https://github.com/Boriken-Dev/guatiao) values on its wire
-format. The schema lives in one Rust crate, compiled natively into the gateway and to
-wasm into the browser client, and M reads and writes the same frames through guatiao's
-Python bindings. No end hand-rolls a codec, so no two ends can disagree about the
-protocol. The same encoding also runs over WebTransport, which the gateway can offer
-next to WebSockets. The board is
-Rust compiled to wasm. The terminal widget stays xterm.js with its WebGL renderer,
-behind a small interop shim: it already draws on the GPU, and its input handling (IME,
-selection, screen readers) is ahead of any Rust terminal. So wasm buys a shared codec
-and a Rust UI, not a faster terminal.
+format, declared once in a Rust crate in `i/`, compiled natively into the gateway and to
+wasm into the browser client, and read from Python through guatiao's bindings. No end
+hand-rolls a codec, so no two ends can disagree about the protocol, and the same encoding
+also runs over WebTransport. The board is Rust compiled to wasm. The terminal widget
+stays xterm.js with its WebGL renderer, behind a small interop shim: it already draws on
+the GPU, and its input handling (IME, selection, screen readers) is ahead of any Rust
+terminal. So wasm buys a shared codec and a Rust UI, not a faster terminal.
 
 The web side has its own security rules, borrowed from ttyd's model. Attach is
-authorized per session and mode (`read` or `write`) with a short-lived token minted by
-the gateway. WebSockets are same-origin and TLS-only. Operator input counts as activity
-for the watchdog, so a person driving an agent is never killed for being slow.
+authorized per station, session and mode (`read` or `write`) with a short-lived token
+minted by the gateway. WebSockets are same-origin and TLS-only. Operator input counts as
+activity for the watchdog, so a person driving an agent is never killed for being slow.
+
+### Stations
+
+A station is a project M runs missions for, registered in the global `stations.toml`:
+
+```toml
+[station.G]
+name = "guatiao"
+aliases = ["Kingston"]
+path = "~/devel/guatiao"
+repos = ["https://github.com/Boriken-Dev/guatiao"]   # a station may span many repos
+roster = ["007", "006"]                              # absent: every profile
+clearance = "field"                                  # the highest a mission here may use
+max_concurrent = 3
+intake = { jira = "GUA" }                            # for intake sources; M ignores it
+```
+
+The id is any short code (a letter is the convention, not the limit), and a station
+answers to its id, its name and every alias. Registering a project is what makes its
+`.coagent/` (its hooks and profiles) readable: a directory no station holds is never
+read. Configuration runs headquarters → station → agent, the narrowest winning.
+
+### Missions
+
+```text
+source ─► brief ─► inbox/new ─► M claims it ─► station ─► profile ─► agent runs
+                                                                         │
+           source ◄─ report ◄── inbox/done|failed ◄── outcome ◄──────────┘
+```
+
+`python -m coagent_m.watchdog launch --next` takes the best brief, resolves its station
+(id, name or alias), uses the profile it names or the best one for its role and tags
+that the station accepts, runs it in the station's checkout, files the outcome, and
+reports it to the brief's source. `launch --brief FILE` does the same for one file.
 
 ### Profiles and hooks
 
@@ -255,12 +323,12 @@ and M picks the best-ranked profile that suits a role.
 **Hooks** run around every session: before it starts (add environment, add context,
 rewrite the command line), on every state change, and once it ends. A hook is a Python
 object or a program in any language reading JSON on stdin. They load in three scopes,
-broadest first, so the narrowest wins: global (`~/.config/coagent/`), project (the
-nearest `.coagent/` above the agent's directory) and agent (the profile, or code).
+broadest first, so the narrowest wins: headquarters (`~/.config/coagent/`), station
+(`<station>/.coagent/`) and agent (the profile, or code).
 
-A project's `.coagent/` is read only once the project is trusted (`[trust] projects`
-in the global `config.toml`, or `COAGENT_TRUST_PROJECT=1`), because its hooks and
-launchers would run inside the supervisor, which holds the credentials.
+A project's `.coagent/` is read only when the project is a registered station (or with
+`COAGENT_TRUST_PROJECT=1`, for a checkout under development), because its hooks and
+launchers run inside the supervisor, which holds the credentials.
 
 The context collected reaches the agent as a file named by `COAGENT_CONTEXT_FILE`.
 
@@ -305,13 +373,12 @@ spinner redrawing in place counts as repetition.
 
 | Path | Language | What |
 | --- | --- | --- |
-| `m/` | Python | The supervisor daemon: package `coagent_m` |
+| `m/` | Python | M's Office: package `coagent_m` |
 | `m/crates/` | Rust | The terminal kind, the `portable-pty` plugin and the native library M loads |
+| `00/` | data, adapters | The 00 Section: the example roster; CLI adapters to come |
+| `q/` | Python | Q Branch: credentials, sandboxes, acting tools, loadouts |
+| `i/` | Python, Rust | I Branch: package `coagent_i` (briefs, inbox, intake); the wire crate to come |
 | `moneypenny/` | Rust: the gateway, and the browser client compiled to wasm | The team viewport |
-| `q/` | Python | Credentials, sandbox profiles and MCP loadouts |
-
-The components share no code. They talk through the socket protocol and the loadout
-format, so each can be rewritten without touching the others.
 
 ## Development
 
@@ -327,7 +394,15 @@ export GUATIAO_LIBRARY=$PWD/../target/debug/libcoagent_native.so COAGENT_TERMINA
 .pyvenv/local/bin/black --check src tests
 ```
 
-Without the two variables the suite still runs, on the built-in providers only. CI
+```bash
+cd i
+python3 -m venv .pyvenv/local && .pyvenv/local/bin/pip install -e ".[dev]"
+.pyvenv/local/bin/pytest -q
+```
+
+M's mission tests run when `coagent-i` is installed into M's environment too
+(`pip install -e ../i`). Without the two variables the suite still runs, on the
+built-in providers only. CI
 (`test.yml`, on a `ci-*` tag or by hand) runs it on Linux and macOS, Python 3.9 and
 3.14, with the plugin.
 

@@ -1,8 +1,14 @@
 # Q
 
-The armory of [C.O.A.G.E.N.T.](https://github.com/jose-pr/coagent): what an agent is
-allowed to hold. At spawn, M asks Q for a **loadout** and passes it to the session
-backend. Q is not on the hot path after that.
+Q Branch of [C.O.A.G.E.N.T.](https://github.com/jose-pr/coagent): **the gear issued
+for a mission.** At spawn, M asks Q for a **loadout** and passes it to the terminal
+provider. Q is not on the hot path after that.
+
+Q equips; I informs. Q owns the tools that *change* things (shell, file writes, git,
+deploy) and the credentials and sandboxes they need. Sources that only *inform* (docs,
+search, a code index, tracker reads) are I Branch's. A loadout is the one place that
+issues both to an agent. Credentials are issued per station: one station's secrets
+never reach another station's mission, and a profile's clearance bounds what it gets.
 
 Design only; nothing here builds yet. A loadout is one TOML file:
 

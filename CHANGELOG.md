@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `coagent_m.profiles`: launchers and agent profiles (`profiles.toml`) with aliases,
   `extends`, roles and tags; `AgentSpec.from_profile()`; `launch --profile` /
   `launch --role`, `profiles`, `hooks` and `providers` commands.
+- `coagent_m.stations`: projects registered in `stations.toml` by id, name and cover
+  names, with a checkout path, roster, clearance (`desk`, `field`, `00`) and budget. A
+  project's `.coagent/` is read only when it is a station (or `COAGENT_TRUST_PROJECT=1`);
+  `Scope.PROJECT` is now `Scope.STATION`. Profiles gain `clearance`; `choose()` and
+  `AgentSpec.from_profile()` take a station; `launch --station` and `stations` commands.
+- `coagent-i` (`i/`): mission briefs, a file inbox (`new`, `claimed`, `done`, `failed`)
+  and the contract user-supplied intake sources fill: command sources and
+  `coagent.intake` entry points that poll for briefs and hear outcomes back;
+  `python -m coagent_i submit|list|sources|poll`.
+- `launch --next` and `launch --brief FILE`: run a brief at its station with the profile
+  it names or the best one for its role, file the outcome and report it to its source.
+- `00/roster.example.toml` and `docs/organization.md`.
 - Licensed under the Mozilla Public License 2.0, with a contributor licence agreement.
 
 [Unreleased]: https://github.com/jose-pr/coagent/commits/main
