@@ -76,6 +76,19 @@ python -m coagent_m.watchdog launch --brief b.json  # one brief from a file
 ```
 
 M resolves the station, picks the profile, cuts a worktree, runs the agent with the
-brief's title and body as its prompt, files the outcome beside the brief, and reports it
-to the brief's source. A brief no profile at its station suits is filed as `failed`
-with state `refused`, and still reported.
+brief's title and body as its prompt, files the outcome and the transcript beside the
+brief, and reports it to the brief's source. A brief no profile at its station suits is
+filed as `failed` with state `refused`, and still reported.
+
+## Serving
+
+```bash
+python -m coagent_m.watchdog serve --max 4 --poll 60    # until interrupted
+python -m coagent_m.watchdog serve --once               # until nothing is left to start
+```
+
+`serve` keeps taking the best waiting brief while there is capacity: `--max` missions at
+once overall, a station's `max_concurrent`, and a profile's `max_concurrent`. A brief
+over capacity stays waiting until a slot frees, so a busy station never blocks another.
+With `--poll`, it polls the intake sources that often. Interrupting it stops new
+missions and waits for the running ones.

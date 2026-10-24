@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `00/roster.example.toml` and `docs/organization.md`.
 - A git worktree per mission (`coagent_m.worktree`), on a branch named from the brief;
   stations gain `worktrees`, `branch` and `base`.
+- `coagent_m.missions`: `MissionRunner` (assign, worktree, run, file with transcript,
+  report) and `Scheduler`; `serve` runs briefs while there is capacity overall, per
+  station and per profile. `Inbox.finish(transcript=)` and `Inbox.transcript()`.
 - The documentation site (MkDocs Material) with guides, the Python API reference and the
   Rust reference, deployed by `docs.yml`.
 - Licensed under the Mozilla Public License 2.0, with a contributor licence agreement.

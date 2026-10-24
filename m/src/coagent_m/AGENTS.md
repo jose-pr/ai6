@@ -6,7 +6,8 @@ its source. It ships inside the package and is self-contained. Development
 documentation lives with the source at <https://github.com/jose-pr/coagent>.
 
 Public modules: `coagent_m.watchdog`, `coagent_m.terminal`, `coagent_m.hooks`,
-`coagent_m.profiles`, `coagent_m.stations`, `coagent_m.config`. Names starting with `_` are private, and so
+`coagent_m.profiles`, `coagent_m.stations`, `coagent_m.worktree`, `coagent_m.missions`
+(needs `coagent-i`), `coagent_m.config`. Names starting with `_` are private, and so
 are the `_`-prefixed submodules of `terminal` and `hooks`.
 
 Install with `pip install -e m/` from a checkout. Runtime dependencies: none, except
@@ -119,6 +120,7 @@ in order: max runtime, stall, loop), `blocked(now) -> bool`, `awaiting_input() -
 | `launch (--profile NAME \| --role ROLE [--tag T]...) [--station S] [--no-hooks] [PROMPT]` | starts the agent a profile describes, at the station holding `.` or `--station` |
 | `launch (--next [--inbox DIR] \| --brief FILE) [--station S] [--profile\|--role ..] [--no-hooks]` | runs a brief: its station, its profile or the best one for its role and tags there, its prompt; files the outcome (`--next`) and reports it to the brief's source |
 | `stations` | registered stations |
+| `serve [--max N] [--poll S] [--once] [--idle S] [--inbox DIR] [--keep-worktrees] [--no-hooks]` | runs briefs from the inbox while there is capacity; exits 1 if any mission did not finish `done` |
 | `providers` | terminal providers, best first, with why each cannot run |
 | `hooks` | the hooks a run in this directory would use |
 | `profiles` | agent profiles, best first |
@@ -266,6 +268,42 @@ clearance = "field"
 max_concurrent = 3
 intake = { jira = "GUA" }
 ```
+
+## `coagent_m.worktree`
+
+- `Worktree.create(repo, key, branch, *, root=None, base="HEAD") -> Worktree`: a new
+  worktree at `<root>/<key>` (default root `state_dir()/worktrees`) on a new `branch`
+  from `base`. `WorktreeError` (with git's words) when the path or branch exists or
+  `repo` is not a git checkout.
+- `Worktree`: `repo`, `path`, `branch`, `base` (a commit); `commits()` since `base`,
+  `dirty()`, `cleanup(*, keep=False) -> kept` (removes the worktree and its branch only
+  when there are no commits and no changes), `describe() -> dict`.
+- `branch_name(template, *, id, title, station="")`: `{id}`, `{slug}`, `{station}` filled
+  and made a valid ref.
+- `state_dir()`: `COAGENT_STATE`, else `$COAGENT_HOME/state`, else `%LOCALAPPDATA%\coagent`
+  or `$XDG_STATE_HOME/coagent`. `is_git_checkout(path)`.
+
+## `coagent_m.missions` (needs `coagent-i`)
+
+- `MissionRunner(inbox=None, *, stations=None, sources=None, use_hooks=True, registry=None, worktree_root=None, keep_worktrees=False, on_event=None, on_output=None)`:
+  `on_event(key, Event)` and `on_output(key, bytes)` run on the mission's thread.
+  - `assign(brief, *, station=None, profile=None, role=None, tags=()) -> Assignment`:
+    the brief's station (else the one holding the current directory), its profile
+    (else the best for its role and tags there), the `AgentSpec` and `Limits`. Raises
+    `StationError` / `ProfileError`.
+  - `run(brief, assignment=None, *, claimed=False, **assign) -> dict`: cuts a worktree
+    when the station is a git checkout with `worktrees` on (station hooks and profiles
+    are still read from the station's own path), runs the agent, cleans the worktree
+    up, files the outcome and the transcript (the last `TRANSCRIPT_LIMIT` bytes) when
+    `claimed`, and always reports to the brief's source. The outcome has `agent`,
+    `profile`, `station`, `state` (`done`, `failed`, `stalled`, or `refused` when it
+    could not be assigned or started), `returncode`, `reason`, `runtime` and, with a
+    worktree, `worktree` (`path`, `branch`, `base`, `kept`, `commits`).
+- `Scheduler(runner, *, max_total=4, poll_interval=None)`: `step() -> started`,
+  `run(*, once=False, idle=1.0)`, `stop()`, `wait()`, `running` (keys), `finished`
+  (outcomes). Capacity is `max_total`, a station's `max_concurrent` and a profile's
+  `max_concurrent`; a brief over capacity stays new, one that cannot be assigned is
+  claimed and filed as refused.
 
 ## `coagent_m.config`
 
