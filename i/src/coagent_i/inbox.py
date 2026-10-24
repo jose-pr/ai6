@@ -19,7 +19,7 @@ import os
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
@@ -52,11 +52,12 @@ class Lease:
     node: str
     expires: float
     attempt: int
+    # What the claimer recorded about the assignment (station, profile), for others.
+    meta: Mapping[str, Any] = field(default_factory=dict, compare=False)
 
     def to_json(self) -> str:
-        return json.dumps(
-            {"node": self.node, "expires": self.expires, "attempt": self.attempt}, indent=2
-        )
+        data = {"node": self.node, "expires": self.expires, "attempt": self.attempt}
+        return json.dumps({**data, "meta": dict(self.meta)}, indent=2)
 
 
 def default_inbox_dir() -> Path:
@@ -113,6 +114,7 @@ class Inbox:
         *,
         node: Optional[str] = None,
         lease: float = DEFAULT_LEASE,
+        meta: Optional[Mapping[str, Any]] = None,
     ) -> Optional[Brief]:
         """Moves the best new brief (or the one keyed ``key``) to ``claimed/`` and answers
         it; ``None`` when there is none. Another claimer winning the race is skipped.
@@ -129,7 +131,9 @@ class Inbox:
             if node is not None:
                 attempt = self.attempts(brief.key) + 1
                 _write_atomic(self._dir("attempts") / f"{brief.key}.json", str(attempt))
-                self._write_lease(Lease(brief.key, node, time.time() + lease, attempt))
+                self._write_lease(
+                    Lease(brief.key, node, time.time() + lease, attempt, dict(meta or {}))
+                )
             return brief
         return None
 
@@ -140,7 +144,13 @@ class Inbox:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        return Lease(key, str(data["node"]), float(data["expires"]), int(data["attempt"]))
+        return Lease(
+            key,
+            str(data["node"]),
+            float(data["expires"]),
+            int(data["attempt"]),
+            dict(data.get("meta") or {}),
+        )
 
     def attempts(self, key: str) -> int:
         """How many times the brief has been claimed with a lease."""
@@ -157,8 +167,71 @@ class Inbox:
             return False
         if not (self.root / "claimed" / f"{key}.json").is_file():
             return False
-        self._write_lease(Lease(key, node, time.time() + lease, current.attempt))
+        self._write_lease(replace(current, expires=time.time() + lease))
         return True
+
+    def leases(self) -> List[Lease]:
+        """Every lease on a claimed brief, live or expired."""
+        directory = self.root / "claimed"
+        found = []
+        for path in sorted(directory.glob("*.json")) if directory.is_dir() else ():
+            lease = self.lease(path.stem)
+            if lease is not None:
+                found.append(lease)
+        return found
+
+    def heartbeat(self, node: str, info: Mapping[str, Any]) -> None:
+        """Announces ``node`` as alive now, with whatever it says about itself."""
+        record = {**dict(info), "node": node, "seen": time.time()}
+        _write_atomic(self._dir("offices") / f"{_safe(node)}.json", json.dumps(record, indent=2))
+
+    def offices(self, within: float = DEFAULT_LEASE) -> List[Dict[str, Any]]:
+        """Nodes whose last heartbeat is no older than ``within`` seconds."""
+        directory = self.root / "offices"
+        now, found = time.time(), []
+        for path in sorted(directory.glob("*.json")) if directory.is_dir() else ():
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if now - float(record.get("seen", 0)) <= within:
+                found.append(record)
+        return found
+
+    def elect(self, node: str, ttl: float = DEFAULT_LEASE) -> bool:
+        """Holds, renews or takes the leader lease for ``node``; answers whether ``node``
+        is the leader now. Taking an expired lease is a rename only one node can win,
+        then an exclusive create."""
+        path = self._dir("office") / "leader.json"
+        current = self.leader()
+        now = time.time()
+        if current is not None and current["node"] == node:
+            _write_atomic(path, json.dumps({"node": node, "expires": now + ttl}))
+            return True
+        if current is not None and float(current["expires"]) >= now:
+            return False
+        if current is not None:
+            try:
+                os.replace(path, path.with_name(f"leader.lapsed.{_safe(node)}"))
+            except FileNotFoundError:
+                return False
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"node": node, "expires": now + ttl}))
+        try:
+            os.link(tmp, path)  # fails if another node created it first
+        except FileExistsError:
+            return False
+        finally:
+            os.unlink(tmp)
+        return True
+
+    def leader(self) -> Optional[Dict[str, Any]]:
+        """The leader lease (``node``, ``expires``), live or lapsed, or ``None``."""
+        try:
+            return json.loads((self.root / "office" / "leader.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
 
     def expired(self, now: Optional[float] = None) -> List[Lease]:
         """Leases on claimed briefs that ran out: their node stopped renewing them."""
@@ -267,6 +340,10 @@ class Inbox:
         path = self.root / state
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+
+def _safe(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in name)
 
 
 def _write_atomic(path: Path, text: str) -> None:

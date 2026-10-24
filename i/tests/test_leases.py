@@ -60,3 +60,27 @@ def test_a_node_that_lost_its_lease_cannot_file(inbox: Inbox) -> None:
     assert not inbox.renew(brief.key, "a")
     inbox.finish(brief, {"state": "done"}, ok=True, node="b")
     assert inbox.find(brief.key)[0] == "done" and inbox.lease(brief.key) is None
+
+
+def test_lease_meta_and_listing(inbox: Inbox) -> None:
+    brief = inbox.claim(node="a", meta={"station": "G", "profile": "007"})
+    inbox.renew(brief.key, "a")
+    (lease,) = inbox.leases()
+    assert lease.meta == {"station": "G", "profile": "007"}
+
+
+def test_offices_announce_themselves(inbox: Inbox) -> None:
+    inbox.heartbeat("office-1", {"capacity": 4})
+    inbox.heartbeat("office/2", {"capacity": 2})
+    assert sorted(o["node"] for o in inbox.offices()) == ["office-1", "office/2"]
+    assert inbox.offices(within=-1) == []
+
+
+def test_one_leader_at_a_time_and_takeover(inbox: Inbox) -> None:
+    assert inbox.elect("a", ttl=0.05)
+    assert not inbox.elect("b", ttl=0.05)
+    assert inbox.elect("a", ttl=0.05)  # renewal
+    time.sleep(0.08)
+    assert inbox.elect("b", ttl=30)
+    assert not inbox.elect("a", ttl=30)
+    assert inbox.leader()["node"] == "b"
