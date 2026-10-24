@@ -1,0 +1,28 @@
+# Dotfiles are opt-in.
+/.*
+!/.gitignore
+!/.gitattributes
+
+# Agent config and personal overrides, at any depth.
+.agents
+CLAUDE*
+.claude
+*.local.*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+*.egg-info/
+.pyvenv/
+.venv/
+dist/
+build/
+
+# Rust
+target/
