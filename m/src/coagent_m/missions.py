@@ -7,13 +7,16 @@ inbox while there is capacity, overall, per station and per profile. Both need t
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
+import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import coagent_i
 
@@ -37,7 +40,10 @@ from .worktree import (
     is_git_checkout,
 )
 
-__all__ = ["Assignment", "MissionRunner", "Scheduler", "TRANSCRIPT_LIMIT"]
+__all__ = ["ROLES", "Assignment", "MissionRunner", "Scheduler", "TRANSCRIPT_LIMIT"]
+
+# What an office may do: be elected M, run missions.
+ROLES = ("control", "execution")
 
 # The tail of an agent's output kept as its transcript.
 TRANSCRIPT_LIMIT = 4 * 1024 * 1024
@@ -93,6 +99,18 @@ class MissionRunner:
         self.keep_worktrees = keep_worktrees
         self.on_event = on_event
         self.on_output = on_output
+        self._dogs: Dict[str, Watchdog] = {}
+        self._abandoned: set = set()
+        self._dogs_lock = threading.Lock()
+
+    def abandon(self, key: str) -> None:
+        """Stops the mission keyed ``key`` without filing or reporting its outcome: the
+        brief belongs to another office now."""
+        with self._dogs_lock:
+            self._abandoned.add(key)
+            dog = self._dogs.get(key)
+        if dog is not None:
+            dog.kill()
 
     def assign(
         self,
@@ -105,7 +123,8 @@ class MissionRunner:
     ) -> Assignment:
         """The station the brief names (else the one holding the current directory), the
         profile it names (else the best for its role and tags there), and the agent.
-        Raises ``StationError`` or ``ProfileError``; each override wins over the brief."""
+        Raises ``StationError`` or ``ProfileError``; each override wins over the brief.
+        """
         key = station or brief.station
         where = self.stations.get(key) if key else self.stations.for_path(os.getcwd())
         cwd = str(where.path) if where is not None and where.path else os.getcwd()
@@ -128,10 +147,13 @@ class MissionRunner:
         assignment: Optional[Assignment] = None,
         *,
         claimed: bool = False,
+        node: Optional[str] = None,
         **assign: Any,
     ) -> Dict[str, Any]:
         """Runs ``brief`` and answers its outcome. With ``claimed``, files the outcome
-        (and transcript) in the inbox; always reports it to the brief's source."""
+        (and transcript) in the inbox, as ``node`` when the claim holds a lease; always
+        reports it to the brief's source, unless the mission was abandoned or its lease
+        passed to another office, which then owns the outcome."""
         outcome: Dict[str, Any] = {
             "agent": None,
             "profile": None,
@@ -171,9 +193,20 @@ class MissionRunner:
         ) as exc:
             outcome["reason"] = str(exc)
             _log.warning("mission %s refused: %s", brief.key, exc)
+        with self._dogs_lock:
+            abandoned = brief.key in self._abandoned
+            self._abandoned.discard(brief.key)
+        if abandoned:
+            outcome.update(state="abandoned", reason="handed to another office")
+            return outcome
         if claimed:
             ok = outcome["state"] == State.DONE.value
-            self.inbox.finish(brief, outcome, ok=ok, transcript=bytes(transcript))
+            try:
+                self.inbox.finish(brief, outcome, ok=ok, transcript=bytes(transcript), node=node)
+            except coagent_i.LeaseLost:
+                _log.warning("mission %s: its lease passed to another office", brief.key)
+                outcome.update(state="abandoned", reason="lease lost")
+                return outcome
         coagent_i.report(brief, outcome, self.sources)
         return outcome
 
@@ -237,14 +270,24 @@ class MissionRunner:
 
         extras: Dict[str, Any] = {}
         try:
-            result = Watchdog(
+            dog = Watchdog(
                 spec,
                 a.limits,
                 on_event=event,
                 on_output=output,
                 registry=self.registry,
                 hooks=hooks,
-            ).run()
+            )
+            with self._dogs_lock:
+                self._dogs[key] = dog
+                abandoned = key in self._abandoned
+            if abandoned:
+                raise TerminalError("abandoned before it started")
+            try:
+                result = dog.run()
+            finally:
+                with self._dogs_lock:
+                    self._dogs.pop(key, None)
             if cover is not None and checked is not None and git is not None:
                 commits = commit_log(git, *checked)
                 broken = check_commits(
@@ -299,25 +342,50 @@ class _CoverHook(HookBase):
 
 
 class Scheduler:
-    """Takes briefs from the inbox while there is capacity and runs each on a thread.
+    """An office of M: runs the missions assigned to it and, while it holds the leader
+    lease, is M — the one office that decides. ``roles`` is ``control`` (may be elected
+    M), ``execution`` (runs missions) or both; ``labels`` describe the office to station
+    selectors, beside the automatic ``node``, ``host`` and ``os``.
 
-    Capacity is ``max_total`` missions at once, a station's ``max_concurrent`` and a
-    profile's ``max_concurrent``. A brief over capacity stays new until a slot frees; one
-    that cannot be assigned at all is claimed and filed as refused. ``poll_interval``
-    polls the intake sources that often (``None``: never).
+    Every office heartbeats into the shared inbox, renews the leases of what it runs
+    (stopping any mission whose lease another office took) and runs what is leased to
+    it. The leader also polls intake (``poll_interval``), recovers briefs whose office
+    was lost (back to new until ``max_attempts``), and places each waiting brief on the
+    least-loaded live office that can reach its station's checkout, within the station's
+    and the profile's ``max_concurrent`` counted across all offices. One office alone is
+    simply M with no standby. ``max_total`` is this office's own capacity.
     """
 
     def __init__(
         self,
         runner: MissionRunner,
         *,
+        node: Optional[str] = None,
         max_total: int = 4,
         poll_interval: Optional[float] = None,
+        lease: float = coagent_i.DEFAULT_LEASE,
+        max_attempts: int = 3,
+        roles: Sequence[str] = ("control", "execution"),
+        labels: Optional[Mapping[str, str]] = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        unknown = sorted(set(roles) - set(ROLES))
+        if unknown or not roles:
+            raise ValueError(f"roles are {ROLES}, not {list(roles)}")
         self.runner = runner
+        self.node = node or f"{socket.gethostname()}-{os.getpid()}"
+        self.roles = tuple(r for r in ROLES if r in roles)
+        self.labels = {
+            "node": self.node,
+            "host": socket.gethostname(),
+            "os": _os_label(),
+            **dict(labels or {}),
+        }
         self.max_total = max_total
         self.poll_interval = poll_interval
+        self.lease = lease
+        self.max_attempts = max_attempts
+        self.leading = False
         self._clock = clock
         self._lock = threading.Lock()
         self._running: Dict[str, Assignment] = {}
@@ -336,42 +404,30 @@ class Scheduler:
         sources = (
             self.runner.sources if self.runner.sources is not None else coagent_i.load_sources()
         )
-        filed, errors = coagent_i.poll(sources, self.runner.inbox)
+        _, errors = coagent_i.poll(sources, self.runner.inbox)
         for e in errors:
             _log.warning("intake source failed: %s", e)
         self._last_poll = self._clock()
 
     def step(self) -> int:
-        """Starts every waiting brief that fits; answers how many started."""
-        if self.poll_interval is not None and (
-            self._last_poll is None or self._clock() - self._last_poll >= self.poll_interval
-        ):
-            self.poll()
-        started = 0
-        for brief in self.runner.inbox.list("new"):
-            if self._stop.is_set() or len(self.running) >= self.max_total:
-                break
-            try:
-                assignment = self.runner.assign(brief)
-            except (ProfileError, StationError) as exc:
-                if self.runner.inbox.claim(brief.key) is not None:
-                    _log.warning("brief %s cannot be assigned: %s", brief.key, exc)
-                    self.finished.append(self.runner.run(brief, claimed=True))
-                continue
-            if not self._fits(assignment):
-                continue
-            if self.runner.inbox.claim(brief.key) is None:
-                continue  # another supervisor took it
-            self._start(assignment)
-            started += 1
-        return started
+        """One round: renew, heartbeat, lead if this office holds the lease, then start
+        what is assigned here. Answers how many briefs it placed or started."""
+        inbox = self.runner.inbox
+        self._renew()
+        inbox.heartbeat(self.node, self._info())
+        was_leading = self.leading
+        self.leading = "control" in self.roles and inbox.elect(self.node, ttl=self.lease)
+        if self.leading and not was_leading:
+            _log.info("office %s is M now", self.node)
+        placed = self._lead() if self.leading else 0
+        return placed + (self._execute() if "execution" in self.roles else 0)
 
     def run(self, *, once: bool = False, idle: float = 1.0) -> None:
-        """Steps until ``stop()``; with ``once``, until nothing waits that could start and
-        nothing runs."""
+        """Steps until ``stop()``; with ``once``, until nothing runs anywhere and nothing
+        waiting could be placed."""
         while not self._stop.is_set():
-            started = self.step()
-            if once and not started and not self.running:
+            moved = self.step()
+            if once and not moved and not self.running and not self.runner.inbox.leases():
                 break
             self._stop.wait(idle)
         self.wait()
@@ -384,21 +440,118 @@ class Scheduler:
         for thread in list(self._threads):
             thread.join()
 
-    def _fits(self, a: Assignment) -> bool:
-        with self._lock:
-            running = list(self._running.values())
-        if len(running) >= self.max_total:
-            return False
+    def _info(self) -> Dict[str, Any]:
+        local = [
+            s.id
+            for s in self.runner.stations
+            if s.host is None and s.path is not None and Path(s.path).is_dir()
+        ]
+        return {
+            "roles": list(self.roles),
+            "labels": self.labels,
+            "capacity": self.max_total if "execution" in self.roles else 0,
+            "running": len(self.running),
+            "stations": local,
+        }
+
+    def _renew(self) -> None:
+        for key in self.running:
+            if not self.runner.inbox.renew(key, self.node, lease=self.lease):
+                _log.warning("office %s lost the lease on %s; stopping it", self.node, key)
+                self.runner.abandon(key)
+
+    def _lead(self) -> int:
+        inbox = self.runner.inbox
+        if self.poll_interval is not None and (
+            self._last_poll is None or self._clock() - self._last_poll >= self.poll_interval
+        ):
+            self.poll()
+        for lease in inbox.expired():
+            where = inbox.recover(lease, max_attempts=self.max_attempts, by=self.node)
+            if where:
+                _log.warning("brief %s: office %s was lost; %s", lease.key, lease.node, where)
+        offices = {o["node"]: o for o in inbox.offices(within=self.lease)}
+        leases = inbox.leases()
+        placed = 0
+        for brief in inbox.list("new"):
+            if self._stop.is_set():
+                break
+            try:
+                assignment = self.runner.assign(brief)
+            except (ProfileError, StationError) as exc:
+                if inbox.claim(brief.key, node=self.node, lease=self.lease) is not None:
+                    _log.warning("brief %s cannot be assigned: %s", brief.key, exc)
+                    self.finished.append(self.runner.run(brief, claimed=True, node=self.node))
+                continue
+            if not self._fits(assignment, leases):
+                continue
+            office = self._place(assignment, offices, leases)
+            if office is None:
+                continue
+            meta = {"station": assignment.station.id if assignment.station else None}
+            meta["profile"] = assignment.profile.name
+            if inbox.claim(brief.key, node=office, lease=self.lease, meta=meta) is None:
+                continue
+            leases.append(coagent_i.Lease(brief.key, office, 0.0, 0, meta))
+            placed += 1
+        return placed
+
+    def _fits(self, a: Assignment, leases: Sequence[Any]) -> bool:
         station, profile = a.station, a.profile
         if station is not None and station.max_concurrent is not None:
-            here = sum(1 for r in running if r.station is not None and r.station.id == station.id)
+            here = sum(1 for l in leases if l.meta.get("station") == station.id)
             if here >= station.max_concurrent:
                 return False
         if profile.max_concurrent is not None:
-            same = sum(1 for r in running if r.profile.name == profile.name)
+            same = sum(1 for l in leases if l.meta.get("profile") == profile.name)
             if same >= profile.max_concurrent:
                 return False
         return True
+
+    def _place(
+        self, a: Assignment, offices: Dict[str, Any], leases: Sequence[Any]
+    ) -> Optional[str]:
+        """The live execution office with room whose labels match the station's selector
+        and that can reach its checkout, least loaded first, this office winning a tie.
+        A station on a remote host is reachable from any office."""
+        load: Dict[str, int] = {}
+        for lease in leases:
+            load[lease.node] = load.get(lease.node, 0) + 1
+        station = a.station
+        needs_local = station is not None and station.host is None and station.path is not None
+        selector = station.selector if station is not None else {}
+        candidates = []
+        for name, office in offices.items():
+            if "execution" not in office.get("roles", ROLES):
+                continue
+            if load.get(name, 0) >= int(office.get("capacity", 1)):
+                continue
+            labels = office.get("labels", {})
+            if any(not fnmatch.fnmatchcase(str(labels.get(k, "")), v) for k, v in selector.items()):
+                continue
+            if needs_local and station.id not in office.get("stations", ()):
+                continue
+            candidates.append((load.get(name, 0), name != self.node, name))
+        return min(candidates)[2] if candidates else None
+
+    def _execute(self) -> int:
+        inbox, started, now = self.runner.inbox, 0, time.time()
+        for lease in inbox.leases():
+            if lease.node != self.node or lease.expires < now or lease.key in self.running:
+                continue
+            if len(self.running) >= self.max_total:
+                break
+            brief = inbox.read(lease.key)
+            if brief is None:
+                continue
+            try:
+                assignment = self.runner.assign(brief)
+            except (ProfileError, StationError):
+                self.finished.append(self.runner.run(brief, claimed=True, node=self.node))
+                continue
+            self._start(assignment)
+            started += 1
+        return started
 
     def _start(self, a: Assignment) -> None:
         key = a.brief.key
@@ -407,7 +560,7 @@ class Scheduler:
 
         def mission() -> None:
             try:
-                self.finished.append(self.runner.run(a.brief, a, claimed=True))
+                self.finished.append(self.runner.run(a.brief, a, claimed=True, node=self.node))
             finally:
                 with self._lock:
                     self._running.pop(key, None)
@@ -415,3 +568,13 @@ class Scheduler:
         thread = threading.Thread(target=mission, name=f"mission-{key}", daemon=True)
         self._threads.append(thread)
         thread.start()
+
+
+def _os_label() -> str:
+    if sys.platform.startswith("linux"):
+        return "linux"
+    if sys.platform == "darwin":
+        return "macos"
+    if sys.platform == "win32":
+        return "windows"
+    return sys.platform

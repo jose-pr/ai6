@@ -78,6 +78,9 @@ class Station:
     clearance: str = "field"
     # How many agents may run here at once; None is no limit.
     max_concurrent: Optional[int] = None
+    # Labels an office must carry to run this station's missions, as in a Kubernetes
+    # nodeSelector; values may be globs ("lab-*"). Offices are labelled node, host, os.
+    selector: Mapping[str, str] = field(default_factory=dict)
     # A git worktree per mission, cut from `base` onto a branch named by `branch`
     # ({id}, {slug}, {station}); off, missions run in the checkout itself.
     worktrees: bool = True
@@ -228,6 +231,8 @@ def _station(sid: str, table: Mapping[str, Any], source: Path) -> Station:
         values["identity"] = Identity(str(ident["name"]), str(ident["email"]))
     if values.get("on_blown", "flag") not in ("flag", "fail"):
         raise StationError(f"{source}: station {sid!r}: on_blown is flag or fail")
+    if "selector" in values:
+        values["selector"] = {str(k): str(v) for k, v in dict(values["selector"]).items()}
     for key in ("repos", "roster"):
         if key in values:
             values[key] = tuple(str(v) for v in values[key])

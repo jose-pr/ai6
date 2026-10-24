@@ -737,7 +737,17 @@ def _serve(args: argparse.Namespace) -> int:
     except StationError as exc:
         print(f"coagent: {exc}", file=sys.stderr)
         return 2
-    scheduler = Scheduler(runner, max_total=args.max, poll_interval=args.poll)
+    labels = dict(item.split("=", 1) for item in args.label if "=" in item)
+    scheduler = Scheduler(
+        runner,
+        node=args.node,
+        max_total=args.max,
+        poll_interval=args.poll,
+        lease=args.lease,
+        max_attempts=args.max_attempts,
+        roles=args.role or ("control", "execution"),
+        labels=labels,
+    )
     try:
         scheduler.run(once=args.once, idle=args.idle)
     except KeyboardInterrupt:
@@ -834,6 +844,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     serve.add_argument("--idle", type=float, default=1.0, help="seconds between steps")
     serve.add_argument("--inbox", help="inbox directory")
     serve.add_argument("--keep-worktrees", action="store_true")
+    serve.add_argument("--node", help="this office's name (default: host-pid)")
+    serve.add_argument(
+        "--role",
+        action="append",
+        choices=("control", "execution"),
+        help="what this office does: control (may be elected M), execution (runs "
+        "missions); repeat for both, the default",
+    )
+    serve.add_argument(
+        "--label", action="append", default=[], help="KEY=VALUE for station selectors"
+    )
+    serve.add_argument("--lease", type=float, default=60.0, help="lease and heartbeat window, S")
+    serve.add_argument("--max-attempts", type=int, default=3, help="before a lost brief fails")
     serve.add_argument("--no-hooks", action="store_true", help="run no global or station hooks")
 
     mock = sub.add_parser("mock-agent", help=argparse.SUPPRESS)

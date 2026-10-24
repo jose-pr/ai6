@@ -122,9 +122,9 @@ class TestScheduler:
             r.inbox.submit(brief(f"s{i}", "P", role="solo"))  # profile solo: one at a time
         r.inbox.submit(brief("p", "P"))
         s = Scheduler(r, max_total=10)
-        assert s.step() == 3
+        s.step()
         assert s.running == ["t--g0", "t--p", "t--s0"]
-        assert s.step() == 0
+        assert s.step() == 0  # nothing more fits until one finishes
         gate.write_text("")
         s.run(once=True, idle=0.05)
         assert sorted(o["state"] for o in s.finished) == ["done"] * 5
@@ -137,7 +137,8 @@ class TestScheduler:
         for i in range(3):
             r.inbox.submit(brief(f"p{i}", "P"))
         s = Scheduler(r, max_total=2)
-        assert s.step() == 2
+        s.step()
+        assert len(s.running) == 2 and len(r.inbox.list("new")) == 1
         gate.write_text("")
         s.run(once=True, idle=0.05)
         assert len(s.finished) == 3
