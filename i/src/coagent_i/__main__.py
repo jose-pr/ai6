@@ -8,7 +8,8 @@ import sys
 from typing import Optional, Sequence
 
 from .brief import Brief, BriefError
-from .inbox import STATES, Inbox
+from . import open_inbox
+from .inbox import STATES
 from .sources import SourceError, load_sources, poll
 
 
@@ -29,7 +30,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub.add_parser("poll", help="poll every source once and file what is new")
 
     args = parser.parse_args(argv)
-    inbox = Inbox(args.inbox)
+    inbox = open_inbox(args.inbox)
     try:
         if args.command == "submit":
             text = (

@@ -22,7 +22,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["black", "build", "pytest"]
+# The inbox in a database: SQLite, or PostgreSQL with the postgres extra.
+sql = ["sqlalchemy>=2.0,<3"]
+postgres = ["sqlalchemy>=2.0,<3", "psycopg[binary]>=3.1,<4"]
+dev = ["black", "build", "pytest", "sqlalchemy>=2.0,<3"]
 
 [project.urls]
 Homepage = "https://github.com/jose-pr/coagent/"

@@ -20,6 +20,8 @@ from coagent_i import (
 from coagent_i.__main__ import main
 from coagent_i.sources import parse_briefs
 
+from backends import BACKENDS, make_inbox
+
 
 def script(path: Path, body: str) -> list:
     with open(path, "w", newline="") as f:
@@ -55,9 +57,14 @@ class TestBrief:
             Brief.from_dict({"title": "x", "version": 99})
 
 
+@pytest.fixture(params=BACKENDS)
+def box(request, tmp_path: Path):
+    return make_inbox(request.param, tmp_path)
+
+
 class TestInbox:
-    def test_submit_claim_finish(self, tmp_path: Path) -> None:
-        inbox = Inbox(tmp_path)
+    def test_submit_claim_finish(self, box) -> None:
+        inbox = box
         low = Brief("low", id="1", priority=0)
         high = Brief("high", id="2", priority=5)
         inbox.submit(low)
@@ -71,8 +78,8 @@ class TestInbox:
         assert inbox.outcome(high.key) == {"state": "done"}
         assert [b.title for b in inbox.list("new")] == ["low"]
 
-    def test_a_brief_is_filed_once(self, tmp_path: Path) -> None:
-        inbox = Inbox(tmp_path)
+    def test_a_brief_is_filed_once(self, box) -> None:
+        inbox = box
         inbox.submit(Brief("a", id="1"))
         with pytest.raises(BriefError, match="already new"):
             inbox.submit(Brief("a", id="1"))
@@ -81,8 +88,8 @@ class TestInbox:
         with pytest.raises(BriefError, match="already claimed"):
             inbox.submit(Brief("a", id="1"), replace=True)
 
-    def test_claim_by_key_and_empty(self, tmp_path: Path) -> None:
-        inbox = Inbox(tmp_path)
+    def test_claim_by_key_and_empty(self, box) -> None:
+        inbox = box
         assert inbox.claim() is None
         inbox.submit(Brief("a", id="1"))
         inbox.submit(Brief("b", id="2", priority=9))
