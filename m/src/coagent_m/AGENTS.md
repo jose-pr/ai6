@@ -6,12 +6,13 @@ its source. It ships inside the package and is self-contained. Development
 documentation lives with the source at <https://github.com/jose-pr/coagent>.
 
 Public modules: `coagent_m.watchdog`, `coagent_m.terminal`, `coagent_m.hooks`,
-`coagent_m.profiles`, `coagent_m.config`. Names starting with `_` are private, and so
+`coagent_m.profiles`, `coagent_m.stations`, `coagent_m.config`. Names starting with `_` are private, and so
 are the `_`-prefixed submodules of `terminal` and `hooks`.
 
 Install with `pip install -e m/` from a checkout. Runtime dependencies: none, except
 `tomli` on Python 3.9 and 3.10. Extras: `guatiao` (terminal plugins in any language,
-pinned to a guatiao commit), `conpty` (`pywinpty`, Windows only). Python 3.9 or newer.
+pinned to a guatiao commit), `conpty` (`pywinpty`, Windows only). `launch --next` and
+`--brief` need the sibling package `coagent-i`, imported only then. Python 3.9 or newer.
 
 ## Platforms
 
@@ -38,18 +39,20 @@ Frozen dataclass; every duration is in seconds.
 - `normalize_digits`: compare lines with digit runs folded, so `retry 1` and `retry 2`
   count as the same line. Off by default, because counters are also how progress looks.
 
-### `AgentSpec(name, argv, cwd=None, env=None, terminal=None, rows=24, cols=80, hooks=(), input=None)`
+### `AgentSpec(name, argv, cwd=None, env=None, terminal=None, rows=24, cols=80, hooks=(), input=None, station=None)`
 
 What to run. `env=None` inherits the supervisor's environment; a mapping replaces it.
 `terminal` names a provider (default: the best available). `hooks` are agent-scope
 hooks. `input` is typed into the terminal, plus a newline, right after the agent starts.
+`station` is a station id; the agent gets it as `COAGENT_STATION`.
 
-`AgentSpec.from_profile(profiles, profile, prompt=None, *, name=None, cwd=None, limits=Limits()) -> (AgentSpec, Limits)`:
+`AgentSpec.from_profile(profiles, profile, prompt=None, *, name=None, cwd=None, limits=Limits(), station=None) -> (AgentSpec, Limits)`:
 the agent a profile (name, alias or resolved `Profile`) describes. The profile's env
 and context are applied by an agent-scope hook (so they win over global and project
 hooks), and the agent also gets `COAGENT_PROFILE`, `COAGENT_MODEL` and
 `COAGENT_EFFORT`. The returned `Limits` are `limits` with the profile's `limits`
-table applied. Raises `ProfileError`.
+table applied. With a `Station`, `cwd` defaults to its path and a profile the station
+refuses (`Station.why_not`) raises. Raises `ProfileError`.
 
 ### `class Watchdog(spec, limits=Limits(), on_event=None, on_output=None, clock=time.monotonic, registry=None, hooks=None)`
 
@@ -113,14 +116,17 @@ in order: max runtime, stall, loop), `blocked(now) -> bool`, `awaiting_input() -
 | Command | Does |
 | --- | --- |
 | `run [--stall-timeout S] [--loop-timeout S] [--max-runtime S] [--terminal NAME] [--no-hooks] -- CMD...` | supervises `CMD` in the current directory with global and project hooks |
-| `launch (--profile NAME \| --role ROLE [--tag T]...) [--no-hooks] [PROMPT]` | starts the agent a profile describes |
+| `launch (--profile NAME \| --role ROLE [--tag T]...) [--station S] [--no-hooks] [PROMPT]` | starts the agent a profile describes, at the station holding `.` or `--station` |
+| `launch (--next [--inbox DIR] \| --brief FILE) [--station S] [--profile\|--role ..] [--no-hooks]` | runs a brief: its station, its profile or the best one for its role and tags there, its prompt; files the outcome (`--next`) and reports it to the brief's source |
+| `stations` | registered stations |
 | `providers` | terminal providers, best first, with why each cannot run |
 | `hooks` | the hooks a run in this directory would use |
 | `profiles` | agent profiles, best first |
 | `demo [--timeout S] [--terminal NAME]` | a healthy, a looping and a hanging mock agent |
 
 `run` and `launch` exit with the agent's code, or `128 + signal` when it was killed;
-`launch` exits 2 for a profile error.
+`launch` exits 2 for a profile or station error; `--next` exits 0 on an empty inbox. A
+brief no profile suits is filed as failed with state `refused` and still reported.
 
 ## `coagent_m.terminal`
 
@@ -188,8 +194,10 @@ instead of being logged and skipped. `HookBase` is an optional no-op base.
 - `HookSet(hooks)`: `(Scope, hook)` pairs in run order; `prepare(ctx)`,
   `on_event(event)`, `finished(ctx, outcome)`.
 - `load_hooks(cwd=None, agent_hooks=(), *, trust_project=None) -> HookSet`: global
-  hooks (the `coagent.hooks` entry-point group, then `<config_dir>/hooks.toml`), then
-  `<project>/.coagent/hooks.toml` **only if the project is trusted**, then `agent_hooks`.
+  hooks (the `coagent.hooks` entry-point group, then `<config_dir>/hooks.toml`), then the
+  `.coagent/hooks.toml` of the station holding `cwd`, then `agent_hooks`. A `.coagent`
+  no station holds is read only with `trust_project=True` or `COAGENT_TRUST_PROJECT=1`.
+  `stations=` passes a registry instead of loading `stations.toml`.
 - `load_file(path, scope)`, `entry_point_hooks()`, `parse_output(kind, text)`.
 
 `hooks.toml`:
@@ -213,28 +221,59 @@ python = "package.module:attr"    # an object, or a class built with no argument
   `command` placeholders: `{model}`, `{effort}`, `{profile}`, `{prompt}`, `{cwd}` and
   the profile's `vars`. `prompt`: `arg` appends the prompt, `stdin` types it after
   start, `none` drops it; a `{prompt}` placeholder overrides all three.
-- `Profile(name, aliases=(), description="", extends=None, launcher=None, model=None, effort=None, roles=(), tags=(), priority=0, env={}, args=(), vars={}, terminal=None, limits={}, context="", max_concurrent=None)`:
+- `Profile(name, aliases=(), description="", extends=None, launcher=None, model=None, effort=None, roles=(), tags=(), priority=0, env={}, args=(), vars={}, terminal=None, limits={}, context="", max_concurrent=None, clearance=None)`:
   a model configuration under a codename. `extends` inherits every unset field; `env`,
   `vars` and `limits` merge; aliases are never inherited. `suits(role=None, tags=())`:
   lists the role or a parent of it (`review` suits `review/security`) and every tag.
-  `max_concurrent` is recorded for a scheduler; nothing enforces it yet.
+  `max_concurrent` is recorded for a scheduler; nothing enforces it yet. `clearance` is
+  one of `stations.CLEARANCES`; unset means `field`.
 - `ProfileSet()`: `add_launcher`, `add` (a later name replaces an earlier one),
   `names()`, `get(name_or_alias)` (resolved), `profiles()` (resolved, priority
-  descending, then name), `choose(role=None, tags=())`,
+  descending, then name), `choose(role=None, tags=(), station=None)` (with a station,
+  only profiles it accepts),
   `argv(profile, prompt=None, cwd=None) -> (argv, env, typed_prompt)`.
-- `load_profiles(cwd=None, *, trust_project=None)`: `<config_dir>/profiles.toml`, then
-  a trusted project's `.coagent/profiles.toml`.
+- `load_profiles(cwd=None, *, trust_project=None, stations=None)`:
+  `<config_dir>/profiles.toml`, then the station's `.coagent/profiles.toml`, which
+  overrides a global profile of the same name.
 - `load_file(path, scope, into)`: raises `ProfileError` for an unknown key, so a typo
   is an error, not a missing setting.
+
+## `coagent_m.stations`
+
+- `Station(id, name="", aliases=(), description="", path=None, repos=(), roster=(), clearance="field", max_concurrent=None, intake={})`:
+  `id` is any short code; the station answers to its id, name and aliases. `roster`
+  empty means every profile. `intake` is for intake sources; M ignores it.
+  `contains(path)`, `label`, `why_not(profile) -> str | None` (not on the roster, or
+  cleared above the station).
+- `Stations(stations=())`: `add` (`StationError` when an id, name or alias is taken),
+  iteration by id, `get(id_name_or_alias)`, `for_path(path)` (the deepest station
+  holding it), `Stations.load(path=None)` from `<config_dir>/stations.toml`; unknown keys
+  and unknown clearances raise `StationError`.
+- `CLEARANCES = ("desk", "field", "00")`, lowest first; `clearance_rank(c)`.
+- `local_config(cwd, stations=None, *, trust=None) -> (dir | None, Station | None)`: the
+  `.coagent` to read for `cwd`: the station's, else the nearest one only when trusted.
+
+`stations.toml`:
+
+```toml
+[station.G]
+name = "guatiao"
+aliases = ["Kingston"]
+path = "~/devel/guatiao"
+repos = ["https://github.com/Boriken-Dev/guatiao"]
+roster = ["007", "006"]
+clearance = "field"
+max_concurrent = 3
+intake = { jira = "GUA" }
+```
 
 ## `coagent_m.config`
 
 - `config_dir()`: `COAGENT_HOME`, else `%APPDATA%\coagent` on Windows, else
   `$XDG_CONFIG_HOME/coagent` (`~/.config/coagent`).
 - `find_project(cwd)`: the nearest directory at or above `cwd` with a `.coagent` dir.
-- `project_trusted(root)`: `COAGENT_TRUST_PROJECT=1`, or `root` listed in
-  `[trust] projects = [...]` of `<config_dir>/config.toml`. **A project's hooks and
-  profiles start programs inside the supervisor, so an untrusted project's `.coagent`
-  is never read.**
-- `Scope`: `global`, `project`, `agent` — read in that order, narrower wins.
+- `Scope`: `global`, `station`, `agent` — read in that order, narrower wins.
 - `read_toml(path)`: the tables, or `None` when missing or unreadable (logged).
+- `TRUST_ENV` (`COAGENT_TRUST_PROJECT`): read an unregistered checkout's `.coagent`.
+  **A `.coagent` holds hooks and launchers that run inside the supervisor, so only a
+  registered station's, or one explicitly trusted, is ever read.**

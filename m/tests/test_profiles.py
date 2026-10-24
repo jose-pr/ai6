@@ -146,7 +146,7 @@ class TestFiles:
         )
         assert load_profiles(str(root)).get("007").model == "model-a"
         overridden = load_profiles(str(root), trust_project=True).get("007")
-        assert (overridden.model, overridden.scope) == ("model-p", Scope.PROJECT)
+        assert (overridden.model, overridden.scope) == ("model-p", Scope.STATION)
 
 
 class TestLaunch:

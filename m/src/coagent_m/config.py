@@ -1,5 +1,5 @@
-"""Where coagent's configuration lives: one global directory, and a ``.coagent``
-directory in any project, read only when the project is trusted."""
+"""Where coagent's configuration lives: one global directory (headquarters), and the
+``.coagent`` directory of each registered station (``coagent_m.stations``)."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ __all__ = [
     "Scope",
     "config_dir",
     "find_project",
-    "project_trusted",
     "read_toml",
 ]
 
@@ -40,7 +39,7 @@ class Scope(str, enum.Enum):
     override them."""
 
     GLOBAL = "global"
-    PROJECT = "project"
+    STATION = "station"
     AGENT = "agent"
 
 
@@ -63,19 +62,6 @@ def find_project(cwd: Optional[str]) -> Optional[Path]:
         if (d / PROJECT_DIR).is_dir():
             return d
     return None
-
-
-def project_trusted(root: Path) -> bool:
-    """Whether a project's ``.coagent`` files are read. They start programs inside the
-    supervisor, which holds the credentials, so a project is trusted only when listed
-    under ``[trust] projects`` in the global ``config.toml``, or when
-    ``COAGENT_TRUST_PROJECT=1``."""
-    if os.environ.get(TRUST_ENV, "").lower() in ("1", "true", "yes"):
-        return True
-    data = read_toml(config_dir() / CONFIG_FILE)
-    trusted = (data or {}).get("trust", {}).get("projects", [])
-    root = root.resolve()
-    return any(Path(os.path.expanduser(str(p))).resolve() == root for p in trusted)
 
 
 def read_toml(path: Path) -> Optional[Dict[str, Any]]:

@@ -28,6 +28,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from .config import Scope
 from .hooks import Hook, HookBase, HookContext, HookSet, Preparation, load_hooks
 from .profiles import Profile, ProfileError, ProfileSet, load_profiles
+from .stations import Station, StationError, Stations
 from .terminal import (
     DEFAULT_COLS,
     DEFAULT_ROWS,
@@ -116,6 +117,8 @@ class AgentSpec:
     hooks: Sequence[Hook] = ()
     # Typed into the terminal once the agent starts, followed by a newline.
     input: Optional[str] = None
+    # The id of the station the mission is for; the agent sees it as COAGENT_STATION.
+    station: Optional[str] = None
 
     @classmethod
     def from_profile(
@@ -127,11 +130,20 @@ class AgentSpec:
         name: Optional[str] = None,
         cwd: Optional[str] = None,
         limits: Limits = Limits(),
+        station: Optional[Station] = None,
     ) -> Tuple["AgentSpec", Limits]:
         """The agent ``profile`` (a name, an alias or a resolved ``Profile``) describes, given
-        ``prompt``, and ``limits`` with the profile's overrides. Raises ``ProfileError``."""
+        ``prompt``, and ``limits`` with the profile's overrides. With a ``station``, ``cwd``
+        defaults to its path and a profile it does not take is refused. Raises
+        ``ProfileError``."""
         if isinstance(profile, str):
             profile = profiles.get(profile)
+        if station is not None:
+            why = station.why_not(profile)
+            if why:
+                raise ProfileError(why)
+            if cwd is None and station.path is not None:
+                cwd = str(station.path)
         argv, env, typed = profiles.argv(profile, prompt, cwd)
         try:
             limits = replace(limits, **profile.limits)
@@ -144,6 +156,7 @@ class AgentSpec:
             terminal=profile.terminal,
             hooks=(_ProfileHook(profile, env),),
             input=typed,
+            station=station.id if station is not None else None,
         )
         return spec, limits
 
@@ -347,6 +360,8 @@ class Watchdog:
         env = dict(os.environ if self.spec.env is None else self.spec.env)
         env["COAGENT_AGENT"] = self.spec.name
         env["COAGENT_RUN_DIR"] = run_dir
+        if self.spec.station:
+            env["COAGENT_STATION"] = self.spec.station
         ctx = HookContext(self.spec.name, list(self.spec.argv), self.spec.cwd, env, run_dir)
         self._hooks.prepare(ctx)
         if ctx.context:
@@ -466,6 +481,7 @@ class _ProfileHook(HookBase):
 
     def __init__(self, profile: Profile, env: Dict[str, str]) -> None:
         self.name = f"profile:{profile.name}"
+        self.profile = profile.name
         self.required = True
         self._profile = profile
         self._env = env
@@ -569,18 +585,97 @@ def _list_profiles() -> int:
     return 0
 
 
+def _list_stations() -> int:
+    for s in Stations.load():
+        roster = ", ".join(s.roster) or "all"
+        print(f"{s.id:<4} {s.name or '-':<20} {s.clearance:<6} {s.path or '-'}  roster: {roster}")
+    return 0
+
+
 def _launch(args: argparse.Namespace) -> int:
-    cwd = os.getcwd()
-    profiles = load_profiles(cwd)
+    if args.next or args.brief:
+        return _mission(args)
+    if not (args.profile or args.role):
+        print("coagent: launch needs --profile, --role, --next or --brief", file=sys.stderr)
+        return 2
     try:
-        profile = (
-            profiles.get(args.profile) if args.profile else profiles.choose(args.role, args.tag)
-        )
-        spec, limits = AgentSpec.from_profile(profiles, profile, args.prompt, cwd=cwd)
-    except ProfileError as exc:
+        spec, limits = _plan(args.station, args.profile, args.role, args.tag, args.prompt)
+    except (ProfileError, StationError) as exc:
         print(f"coagent: {exc}", file=sys.stderr)
         return 2
-    return _supervise_cli(spec, limits, not args.no_hooks)
+    return _exit_code(_supervise_cli(spec, limits, not args.no_hooks))
+
+
+def _plan(
+    station_key: Optional[str],
+    profile_name: Optional[str],
+    role: Optional[str],
+    tags: Sequence[str],
+    prompt: Optional[str],
+    name: Optional[str] = None,
+) -> Tuple[AgentSpec, Limits]:
+    stations = Stations.load()
+    station = stations.get(station_key) if station_key else stations.for_path(os.getcwd())
+    cwd = str(station.path) if station is not None and station.path else os.getcwd()
+    profiles = load_profiles(cwd, stations=stations)
+    profile = profiles.get(profile_name) if profile_name else profiles.choose(role, tags, station)
+    return AgentSpec.from_profile(
+        profiles, profile, prompt, cwd=cwd, station=station, name=name or profile.name
+    )
+
+
+def _mission(args: argparse.Namespace) -> int:
+    """A brief from the inbox (``--next``) or a file (``--brief``): run it, file the
+    outcome in the inbox, and report it to the brief's source."""
+    try:
+        import coagent_i
+    except ImportError:
+        print(
+            "coagent: --next and --brief need coagent-i installed (pip install -e i/)",
+            file=sys.stderr,
+        )
+        return 2
+    inbox = coagent_i.Inbox(args.inbox)
+    try:
+        if args.brief:
+            with open(args.brief, encoding="utf-8") as f:
+                brief = coagent_i.Brief.from_json(f.read())
+        else:
+            brief = inbox.claim()
+            if brief is None:
+                print("coagent: the inbox is empty", file=sys.stderr)
+                return 0
+    except (OSError, coagent_i.BriefError) as exc:
+        print(f"coagent: {exc}", file=sys.stderr)
+        return 2
+    outcome: Dict[str, object] = {"agent": None, "profile": None, "station": brief.station}
+    result: Optional[Outcome] = None
+    try:
+        spec, limits = _plan(
+            args.station or brief.station,
+            args.profile or brief.profile,
+            args.role or brief.role,
+            [*brief.tags, *args.tag],
+            brief.prompt,
+            name=brief.id,
+        )
+        profile_hook = next(h for h in spec.hooks if isinstance(h, _ProfileHook))
+        outcome.update(profile=profile_hook.profile, station=spec.station)
+        result = _supervise_cli(spec, limits, not args.no_hooks)
+        outcome.update(
+            agent=result.agent,
+            state=result.state.value,
+            returncode=result.returncode,
+            reason=result.reason.value if result.reason else None,
+            runtime=round(result.runtime, 3),
+        )
+    except (ProfileError, StationError, TerminalError) as exc:
+        outcome.update(state="refused", reason=str(exc))
+        print(f"coagent: {exc}", file=sys.stderr)
+    if args.next:
+        inbox.finish(brief, outcome, ok=result is not None and result.state is State.DONE)
+    coagent_i.report(brief, outcome)
+    return _exit_code(result) if result is not None else 2
 
 
 def _list_hooks() -> int:
@@ -591,10 +686,10 @@ def _list_hooks() -> int:
 
 def _run(argv: Sequence[str], limits: Limits, terminal: Optional[str], use_hooks: bool) -> int:
     spec = AgentSpec(os.path.basename(argv[0]), argv, cwd=os.getcwd(), terminal=terminal)
-    return _supervise_cli(spec, limits, use_hooks)
+    return _exit_code(_supervise_cli(spec, limits, use_hooks))
 
 
-def _supervise_cli(spec: AgentSpec, limits: Limits, use_hooks: bool) -> int:
+def _supervise_cli(spec: AgentSpec, limits: Limits, use_hooks: bool) -> Outcome:
     def echo(data: bytes) -> None:
         sys.stdout.buffer.write(data)
         sys.stdout.buffer.flush()
@@ -607,7 +702,10 @@ def _supervise_cli(spec: AgentSpec, limits: Limits, use_hooks: bool) -> int:
         if use_hooks
         else HookSet((Scope.AGENT, h) for h in spec.hooks)
     )
-    outcome = Watchdog(spec, limits, on_event=report, on_output=echo, hooks=hooks).run()
+    return Watchdog(spec, limits, on_event=report, on_output=echo, hooks=hooks).run()
+
+
+def _exit_code(outcome: Outcome) -> int:
     if outcome.returncode is None:
         return 1
     return outcome.returncode if outcome.returncode >= 0 else 128 - outcome.returncode
@@ -632,12 +730,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub.add_parser("providers", help="list terminal providers, best first")
     sub.add_parser("hooks", help="list the hooks a run in this directory would use")
     sub.add_parser("profiles", help="list agent profiles, best first")
+    sub.add_parser("stations", help="list registered stations")
 
-    launch = sub.add_parser("launch", help="start an agent from a profile")
-    pick = launch.add_mutually_exclusive_group(required=True)
+    launch = sub.add_parser("launch", help="start an agent from a profile, or for a brief")
+    pick = launch.add_mutually_exclusive_group()
     pick.add_argument("--profile", help="profile name or alias")
     pick.add_argument("--role", help="the best profile for this role")
+    mission = launch.add_mutually_exclusive_group()
+    mission.add_argument("--next", action="store_true", help="claim the best brief in the inbox")
+    mission.add_argument("--brief", help="run the brief in this JSON file")
+    launch.add_argument("--inbox", help="inbox directory (with --next)")
     launch.add_argument("--tag", action="append", default=[], help="a tag the profile must have")
+    launch.add_argument("--station", help="station id or name (default: the one holding .)")
     launch.add_argument("--no-hooks", action="store_true", help="run no global or project hooks")
     launch.add_argument("prompt", nargs="?", help="the task")
 
@@ -653,6 +757,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _list_hooks()
     if args.command == "profiles":
         return _list_profiles()
+    if args.command == "stations":
+        return _list_stations()
     if args.command == "launch":
         return _launch(args)
     if args.command == "demo":

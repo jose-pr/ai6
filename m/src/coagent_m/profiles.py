@@ -33,7 +33,8 @@ from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .config import PROJECT_DIR, Scope, config_dir, find_project, project_trusted, read_toml
+from .config import Scope, config_dir, read_toml
+from .stations import Station, Stations, clearance_rank, local_config
 
 __all__ = [
     "PROFILES_FILE",
@@ -87,6 +88,9 @@ class Profile:
     context: str = ""
     # How many agents of this profile may run at once; None is no limit.
     max_concurrent: Optional[int] = None
+    # One of stations.CLEARANCES; unset is "field". A station refuses a profile cleared
+    # above it.
+    clearance: Optional[str] = None
     scope: Scope = Scope.GLOBAL
 
     def suits(self, role: Optional[str] = None, tags: Iterable[str] = ()) -> bool:
@@ -125,14 +129,21 @@ class ProfileSet:
         resolved = [self.get(n) for n in self._profiles]
         return sorted(resolved, key=lambda p: (-p.priority, p.name))
 
-    def choose(self, role: Optional[str] = None, tags: Iterable[str] = ()) -> Profile:
-        """The best profile that suits ``role`` and ``tags``."""
+    def choose(
+        self,
+        role: Optional[str] = None,
+        tags: Iterable[str] = (),
+        station: Optional[Station] = None,
+    ) -> Profile:
+        """The best profile that suits ``role`` and ``tags`` and, given a ``station``, may
+        run there."""
         tags = tuple(tags)
         for profile in self.profiles():
-            if profile.suits(role, tags):
+            if profile.suits(role, tags) and (station is None or not station.why_not(profile)):
                 return profile
         want = ", ".join(filter(None, [f"role {role!r}" if role else "", *tags])) or "anything"
-        raise ProfileError(f"no profile suits {want}")
+        where = f" at {station.label}" if station is not None else ""
+        raise ProfileError(f"no profile suits {want}{where}")
 
     def argv(self, profile: Profile, prompt: Optional[str] = None, cwd: Optional[str] = None):
         """The command line, the environment additions and the text to type once it
@@ -184,15 +195,20 @@ class ProfileSet:
         return _merge(self._resolve(profile.extends, seen + (name,)), profile)
 
 
-def load_profiles(cwd: Optional[str] = None, *, trust_project: Optional[bool] = None) -> ProfileSet:
-    """The global ``profiles.toml``, then the project's, if trusted."""
+def load_profiles(
+    cwd: Optional[str] = None,
+    *,
+    trust_project: Optional[bool] = None,
+    stations: Optional[Stations] = None,
+) -> ProfileSet:
+    """The global ``profiles.toml``, then that of the station holding ``cwd``, whose
+    profiles override global ones of the same name (``load_hooks`` explains
+    ``trust_project``)."""
     found = ProfileSet()
     load_file(config_dir() / PROFILES_FILE, Scope.GLOBAL, found)
-    root = find_project(cwd)
-    if root is not None:
-        trusted = project_trusted(root) if trust_project is None else trust_project
-        if trusted:
-            load_file(root / PROJECT_DIR / PROFILES_FILE, Scope.PROJECT, found)
+    local, _ = local_config(cwd, stations, trust=trust_project)
+    if local is not None:
+        load_file(local / PROFILES_FILE, Scope.STATION, found)
     return found
 
 
@@ -226,6 +242,11 @@ def _profile(name: str, table: Mapping[str, Any], scope: Scope, path: Path) -> P
     allowed = {f.name for f in fields(Profile)} - {"name", "scope"}
     _known(table, allowed, f"{path}: profile {name!r}")
     values: Dict[str, Any] = {"name": name, "scope": scope}
+    if "clearance" in table:
+        try:
+            clearance_rank(str(table["clearance"]))
+        except Exception as exc:
+            raise ProfileError(f"{path}: profile {name!r}: {exc}") from None
     for key, value in table.items():
         if key in _TUPLES:
             values[key] = tuple(str(v) for v in value)

@@ -159,11 +159,11 @@ class TestScopes:
         _, text = run(show(cwd=cwd), hooks=load_hooks(cwd))
         assert "X=project" in text
 
-    def test_trust_from_global_config(self, isolated: Path, tmp_path: Path) -> None:
+    def test_a_registered_station_is_read(self, isolated: Path, tmp_path: Path) -> None:
         root = self._project(tmp_path, "project")
-        (isolated / "config.toml").write_text(f"[trust]\nprojects = [{json.dumps(str(root))}]\n")
-        hooks = load_hooks(str(root))
-        assert [(s, h.name) for s, h in hooks.hooks] == [(Scope.PROJECT, "proj")]
+        (isolated / "stations.toml").write_text(f"[station.P]\npath = {json.dumps(str(root))}\n")
+        hooks = load_hooks(str(root / "sub"))
+        assert [(s, h.name) for s, h in hooks.hooks] == [(Scope.STATION, "proj")]
 
     def test_narrower_scope_wins(self, tmp_path: Path) -> None:
         root = self._project(tmp_path, "project")
@@ -175,7 +175,7 @@ class TestScopes:
                 return Preparation(env={"X": "agent"})
 
         hooks = load_hooks(str(root), [Agent()], trust_project=True)
-        assert [s for s, _ in hooks.hooks] == [Scope.PROJECT, Scope.AGENT]
+        assert [s for s, _ in hooks.hooks] == [Scope.STATION, Scope.AGENT]
         _, text = run(show(cwd=str(root)), hooks=hooks)
         assert "X=agent" in text
 

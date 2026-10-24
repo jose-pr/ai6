@@ -8,8 +8,8 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
-from ..config import PROJECT_DIR, TRUST_ENV, Scope, config_dir, find_project, project_trusted
-from ..config import read_toml
+from ..config import TRUST_ENV, Scope, config_dir, read_toml
+from ..stations import Stations, local_config
 from ._base import Hook, HookContext, HookError
 from ._command import DEFAULT_TIMEOUT, CommandHook
 
@@ -99,18 +99,18 @@ def load_hooks(
     agent_hooks: Sequence[Hook] = (),
     *,
     trust_project: Optional[bool] = None,
+    stations: Optional[Stations] = None,
 ) -> HookSet:
-    """Global hooks (entry points, then ``<config_dir>/hooks.toml``), then the project's
-    (``<project>/.coagent/hooks.toml``, if trusted), then ``agent_hooks``."""
+    """Global hooks (entry points, then ``<config_dir>/hooks.toml``), then those of the
+    station holding ``cwd`` (``<station>/.coagent/hooks.toml``), then ``agent_hooks``.
+    Outside every station a ``.coagent`` is read only with ``trust_project`` (or
+    ``COAGENT_TRUST_PROJECT=1``)."""
     hooks = [*entry_point_hooks(), *load_file(config_dir() / HOOKS_FILE, Scope.GLOBAL)]
-    root = find_project(cwd)
-    if root is not None:
-        path = root / PROJECT_DIR / HOOKS_FILE
-        trusted = project_trusted(root) if trust_project is None else trust_project
-        if trusted:
-            hooks += load_file(path, Scope.PROJECT)
-        elif path.is_file():
-            _log.warning("%s ignored: the project is not trusted (see %s)", path, TRUST_ENV)
+    local, station = local_config(cwd, stations, trust=trust_project)
+    if local is not None:
+        hooks += load_file(local / HOOKS_FILE, Scope.STATION)
+    elif station is None:
+        _log.debug("no station holds %s; its .coagent is not read (see %s)", cwd, TRUST_ENV)
     hooks += [(Scope.AGENT, h) for h in agent_hooks]
     return HookSet(hooks)
 
