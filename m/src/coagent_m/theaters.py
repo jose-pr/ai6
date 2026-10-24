@@ -1,17 +1,17 @@
-"""Hosts: the machines missions run on, reached over ssh.
+"""Theaters of operations: the machines missions run on, reached over ssh.
 
-A host is a theatre of operations. Each registered host is also a terminal provider,
-``ssh:<id>``, and a station whose ``host`` names it keeps its checkout there.
+Each registered theater is also a terminal provider,
+``ssh:<id>``, and a station whose ``theater`` names it keeps its checkout there.
 
-``hosts.toml``, in the global config directory::
+``theaters.toml``, in the global config directory::
 
-    [host.win1]
+    [theater.win1]
     ssh = "builder@win1.example.internal"   # anything `ssh` accepts as a destination
     os = "windows"                          # linux, macos, windows
     port = 22
     identity = "~/.ssh/coagent_win1"        # optional: a key file
     options = { ServerAliveInterval = "15" }
-    work_root = "C:/coagent/worktrees"      # where mission worktrees go on the host
+    safe_houses = "C:/coagent/worktrees"      # where mission worktrees go on the theater
     tags = ["gpu"]
 """
 
@@ -24,18 +24,18 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from .config import config_dir, read_toml
 
-__all__ = ["HOSTS_FILE", "OSES", "Host", "HostError", "Hosts"]
+__all__ = ["THEATERS_FILE", "OSES", "Theater", "TheaterError", "Theaters"]
 
-HOSTS_FILE = "hosts.toml"
+THEATERS_FILE = "theaters.toml"
 OSES = ("linux", "macos", "windows")
 
 
-class HostError(Exception):
-    """A host is unknown or its declaration does not fit."""
+class TheaterError(Exception):
+    """A theater is unknown or its declaration does not fit."""
 
 
 @dataclass(frozen=True)
-class Host:
+class Theater:
     """One machine missions can run on."""
 
     id: str
@@ -45,8 +45,8 @@ class Host:
     port: Optional[int] = None
     identity: Optional[str] = None
     options: Mapping[str, str] = field(default_factory=dict)
-    # Where mission worktrees go on the host; required for a station there to use them.
-    work_root: Optional[str] = None
+    # Where mission worktrees go on the theater; required for a station there to use them.
+    safe_houses: Optional[str] = None
     tags: Tuple[str, ...] = ()
     # The ssh client to run, as argv; tests and unusual setups replace it.
     client: Tuple[str, ...] = ("ssh",)
@@ -73,60 +73,60 @@ class Host:
         return argv
 
 
-class Hosts:
-    """The host registry."""
+class Theaters:
+    """The theater registry."""
 
-    def __init__(self, hosts: "Iterator[Host] | List[Host]" = ()) -> None:
-        self._by_id: Dict[str, Host] = {}
-        for host in hosts:
-            self.add(host)
+    def __init__(self, theaters: "Iterator[Theater] | List[Theater]" = ()) -> None:
+        self._by_id: Dict[str, Theater] = {}
+        for theater in theaters:
+            self.add(theater)
 
-    def add(self, host: Host) -> None:
-        if host.id in self._by_id:
-            raise HostError(f"host {host.id!r} is registered twice")
-        self._by_id[host.id] = host
+    def add(self, theater: Theater) -> None:
+        if theater.id in self._by_id:
+            raise TheaterError(f"theater {theater.id!r} is registered twice")
+        self._by_id[theater.id] = theater
 
-    def __iter__(self) -> Iterator[Host]:
+    def __iter__(self) -> Iterator[Theater]:
         return iter(sorted(self._by_id.values(), key=lambda h: h.id))
 
     def __len__(self) -> int:
         return len(self._by_id)
 
-    def get(self, key: str) -> Host:
+    def get(self, key: str) -> Theater:
         try:
             return self._by_id[key]
         except KeyError:
             known = ", ".join(sorted(self._by_id)) or "none"
-            raise HostError(f"no host {key!r} (hosts: {known})") from None
+            raise TheaterError(f"no theater {key!r} (theaters: {known})") from None
 
     def providers(self) -> List[Any]:
-        """One ``ssh:<id>`` terminal provider per host."""
+        """One ``ssh:<id>`` terminal provider per theater."""
         from .terminal._ssh import SshProvider
 
         return [SshProvider(h) for h in self]
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "Hosts":
-        """``<config_dir>/hosts.toml``. Raises ``HostError`` for a table that does not fit."""
-        path = path or config_dir() / HOSTS_FILE
+    def load(cls, path: Optional[Path] = None) -> "Theaters":
+        """``<config_dir>/theaters.toml``. Raises ``TheaterError`` for a table that does not fit."""
+        path = path or config_dir() / THEATERS_FILE
         found = cls()
-        for hid, table in ((read_toml(path) or {}).get("host", {})).items():
-            found.add(_host(str(hid), table, path))
+        for hid, table in ((read_toml(path) or {}).get("theater", {})).items():
+            found.add(_theater(str(hid), table, path))
         return found
 
 
-_KEYS = {f.name for f in fields(Host)} - {"id"}
+_KEYS = {f.name for f in fields(Theater)} - {"id"}
 
 
-def _host(hid: str, table: Mapping[str, Any], source: Path) -> Host:
+def _theater(hid: str, table: Mapping[str, Any], source: Path) -> Theater:
     unknown = sorted(set(table) - _KEYS)
     if unknown:
-        raise HostError(f"{source}: host {hid!r}: unknown keys {unknown}")
+        raise TheaterError(f"{source}: theater {hid!r}: unknown keys {unknown}")
     if not table.get("ssh"):
-        raise HostError(f'{source}: host {hid!r} needs ssh = "<destination>"')
+        raise TheaterError(f'{source}: theater {hid!r} needs ssh = "<destination>"')
     values: Dict[str, Any] = dict(table)
     if values.get("os", "linux") not in OSES:
-        raise HostError(f"{source}: host {hid!r}: os must be one of {OSES}")
+        raise TheaterError(f"{source}: theater {hid!r}: os must be one of {OSES}")
     for key in ("tags", "client"):
         if key in values:
             values[key] = tuple(str(v) for v in values[key])
@@ -134,4 +134,4 @@ def _host(hid: str, table: Mapping[str, Any], source: Path) -> Host:
         values["options"] = {str(k): str(v) for k, v in values["options"].items()}
     if "port" in values:
         values["port"] = int(values["port"])
-    return Host(id=hid, **values)
+    return Theater(id=hid, **values)

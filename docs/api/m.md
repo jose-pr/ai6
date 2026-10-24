@@ -17,7 +17,7 @@ contract in one page is the package's `AGENTS.md`, which ships with it.
 
 ::: coagent_m.cover
 
-::: coagent_m.hosts
+::: coagent_m.theaters
 
 ::: coagent_m.worktree
 

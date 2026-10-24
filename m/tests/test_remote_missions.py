@@ -12,15 +12,15 @@ if sys.platform == "win32":
     pytest.skip("remote missions drive a POSIX shell", allow_module_level=True)
 coagent_i = pytest.importorskip("coagent_i")
 
-from coagent_m.hosts import Hosts  # noqa: E402
+from coagent_m.theaters import Theaters  # noqa: E402
 from coagent_m.missions import MissionRunner  # noqa: E402
 from coagent_m.stations import Stations  # noqa: E402
 
-from test_ssh import HOSTS  # noqa: E402
+from test_ssh import THEATERS  # noqa: E402
 
 AGENT = textwrap.dedent("""
     import os, subprocess
-    print("AT", os.getcwd(), "HOST", os.environ.get("COAGENT_HOST"), flush=True)
+    print("AT", os.getcwd(), "THEATER", os.environ.get("COAGENT_THEATER"), flush=True)
     open("work.txt", "w").write("x\\n")
     subprocess.run(["git", "add", "."], check=True)
     subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@example.invalid",
@@ -34,24 +34,24 @@ def git(cwd: Path, *args: str) -> str:
     ).stdout
 
 
-def toml_host(host) -> str:
-    lines = [f"[host.{host.id}]", f"ssh = {json.dumps(host.ssh)}"]
-    if host.port:
-        lines.append(f"port = {host.port}")
-    if host.identity:
-        lines.append(f"identity = {json.dumps(host.identity)}")
-    if host.options:
+def toml_theater(theater) -> str:
+    lines = [f"[theater.{theater.id}]", f"ssh = {json.dumps(theater.ssh)}"]
+    if theater.port:
+        lines.append(f"port = {theater.port}")
+    if theater.identity:
+        lines.append(f"identity = {json.dumps(theater.identity)}")
+    if theater.options:
         lines.append(
             "options = { "
-            + ", ".join(f"{k} = {json.dumps(v)}" for k, v in host.options.items())
+            + ", ".join(f"{k} = {json.dumps(v)}" for k, v in theater.options.items())
             + " }"
         )
-    lines.append("client = [" + ", ".join(json.dumps(c) for c in host.client) + "]")
+    lines.append("client = [" + ", ".join(json.dumps(c) for c in theater.client) + "]")
     return "\n".join(lines)
 
 
-@pytest.mark.parametrize("host", HOSTS)
-def test_a_mission_at_a_remote_station(host, tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("theater", THEATERS)
+def test_a_mission_at_a_remote_station(theater, tmp_path: Path, monkeypatch) -> None:
     home, checkout, work, cfg = (tmp_path / n for n in ("hq", "checkout", "work", "cfg"))
     for d in (home, checkout, cfg):
         d.mkdir()
@@ -64,9 +64,11 @@ def test_a_mission_at_a_remote_station(host, tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setenv("COAGENT_HOME", str(home))
     monkeypatch.delenv("COAGENT_INBOX", raising=False)
     (home / "agent.py").write_text(AGENT)
-    (home / "hosts.toml").write_text(toml_host(host) + f"\nwork_root = {json.dumps(str(work))}\n")
+    (home / "theaters.toml").write_text(
+        toml_theater(theater) + f"\nsafe_houses = {json.dumps(str(work))}\n"
+    )
     (home / "stations.toml").write_text(
-        f"[station.R]\nhost = {json.dumps(host.id)}\npath = {json.dumps(str(checkout))}\n"
+        f"[station.R]\ntheater = {json.dumps(theater.id)}\npath = {json.dumps(str(checkout))}\n"
         f"config = {json.dumps(str(cfg))}\n"
     )
     # The station's profiles come from its local config directory, not the remote checkout.
@@ -75,7 +77,11 @@ def test_a_mission_at_a_remote_station(host, tmp_path: Path, monkeypatch) -> Non
         "[profile.field]\nlauncher = 'py'\nroles = ['implement']\n"
     )
     runner = MissionRunner(
-        coagent_i.Inbox(), stations=Stations.load(), hosts=Hosts.load(), use_hooks=False, sources=[]
+        coagent_i.Inbox(),
+        stations=Stations.load(),
+        theaters=Theaters.load(),
+        use_hooks=False,
+        sources=[],
     )
     out = []
     runner.on_output = lambda key, data: out.append(data)
@@ -84,5 +90,5 @@ def test_a_mission_at_a_remote_station(host, tmp_path: Path, monkeypatch) -> Non
     wt = outcome["worktree"]
     assert outcome["state"] == "done", outcome
     assert wt["path"] == str(work / "manual--r1") and wt["kept"]
-    assert f"AT {wt['path']} HOST {host.id}" in text
+    assert f"AT {wt['path']} THEATER {theater.id}" in text
     assert "remote work" in git(checkout, "log", "--format=%s", wt["branch"])

@@ -23,7 +23,7 @@ import coagent_i
 from .config import Scope
 from .cover import Cover, CoverError, Covers, Identity, check_commits
 from .hooks import HookBase, HookContext, HookSet, Preparation, load_hooks
-from .hosts import HostError, Hosts
+from .theaters import TheaterError, Theaters
 from .profiles import Profile, ProfileError, load_adapter, load_profiles
 from .stations import Station, StationError, Stations
 from .terminal import Registry, TerminalError
@@ -78,7 +78,7 @@ class MissionRunner:
         inbox: Optional[coagent_i.Inbox] = None,
         *,
         stations: Optional[Stations] = None,
-        hosts: Optional[Hosts] = None,
+        theaters: Optional[Theaters] = None,
         covers: Optional[Covers] = None,
         sources: Optional[Sequence[Any]] = None,
         use_hooks: bool = True,
@@ -90,7 +90,7 @@ class MissionRunner:
     ) -> None:
         self.inbox = inbox if inbox is not None else coagent_i.open_inbox()
         self.stations = stations if stations is not None else Stations.load()
-        self.hosts = hosts if hosts is not None else Hosts.load()
+        self.theaters = theaters if theaters is not None else Theaters.load()
         self.covers = covers if covers is not None else Covers.load()
         self.sources = sources
         self.use_hooks = use_hooks
@@ -186,7 +186,7 @@ class MissionRunner:
         except (
             ProfileError,
             StationError,
-            HostError,
+            TheaterError,
             CoverError,
             TerminalError,
             WorktreeError,
@@ -219,9 +219,9 @@ class MissionRunner:
             cover = self.covers.get(station.cover)
             hook = _CoverHook(cover, station.identity, a.profile.name, a.profile.model or "")
             spec = replace(spec, hooks=(*spec.hooks, hook))
-            if station.host is not None:
-                host = self.hosts.get(station.host)
-                git = SshGit(host) if host.posix else None
+            if station.theater is not None:
+                theater = self.theaters.get(station.theater)
+                git = SshGit(theater) if theater.posix else None
         if (
             station is not None
             and station.worktrees
@@ -230,11 +230,11 @@ class MissionRunner:
             and is_git_checkout(station.path, git)
         ):
             root = self.worktree_root
-            remote = station.host is not None
+            remote = station.theater is not None
             if remote:
                 # Without a work root a remote station's missions run in its checkout.
-                work_root = self.hosts.get(station.host).work_root  # type: ignore[arg-type]
-                root = PurePosixPath(work_root) if work_root else None
+                safe_houses = self.theaters.get(station.theater).safe_houses  # type: ignore[arg-type]
+                root = PurePosixPath(safe_houses) if safe_houses else None
             if not remote or root is not None:
                 branch = branch_name(
                     station.branch, id=a.brief.id, title=a.brief.title, station=station.id
@@ -444,7 +444,7 @@ class Scheduler:
         local = [
             s.id
             for s in self.runner.stations
-            if s.host is None and s.path is not None and Path(s.path).is_dir()
+            if s.theater is None and s.path is not None and Path(s.path).is_dir()
         ]
         return {
             "roles": list(self.roles),
@@ -513,12 +513,12 @@ class Scheduler:
     ) -> Optional[str]:
         """The live execution office with room whose labels match the station's selector
         and that can reach its checkout, least loaded first, this office winning a tie.
-        A station on a remote host is reachable from any office."""
+        A station on a remote theater is reachable from any office."""
         load: Dict[str, int] = {}
         for lease in leases:
             load[lease.node] = load.get(lease.node, 0) + 1
         station = a.station
-        needs_local = station is not None and station.host is None and station.path is not None
+        needs_local = station is not None and station.theater is None and station.path is not None
         selector = station.selector if station is not None else {}
         candidates = []
         for name, office in offices.items():

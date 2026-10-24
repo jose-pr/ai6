@@ -44,15 +44,15 @@ class CommandHook:
             COAGENT_RUN_DIR=ctx.run_dir,
             COAGENT_CWD=ctx.cwd or os.getcwd(),
         )
-        if ctx.host:
-            env["COAGENT_HOST"] = ctx.host
+        if ctx.theater:
+            env["COAGENT_THEATER"] = ctx.theater
         try:
             done = subprocess.run(
                 list(self.command),
                 input=json.dumps(ctx.as_json()).encode(),
                 capture_output=True,
                 # A remote agent's directory is not on this machine; the hook runs here.
-                cwd=None if ctx.host else ctx.cwd,
+                cwd=None if ctx.theater else ctx.cwd,
                 env=env,
                 timeout=self.timeout,
             )

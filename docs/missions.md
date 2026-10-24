@@ -91,5 +91,5 @@ python -m coagent_m.watchdog serve --once               # until nothing is left 
 once overall, a station's `max_concurrent`, and a profile's `max_concurrent`. A brief
 over capacity stays waiting until a slot frees, so a busy station never blocks another.
 With `--poll`, it polls the intake sources that often. Interrupting it stops new
-missions and waits for the running ones. Several `serve` processes on different hosts
+missions and waits for the running ones. Several `serve` processes on different theaters
 share the work and survive one another: see [offices](offices.md).

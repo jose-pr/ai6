@@ -113,27 +113,27 @@ def plugin_providers(dirs: Optional[Iterable[str]] = None) -> List[Provider]:
     return scan(dirs)
 
 
-def host_providers() -> List[Provider]:
-    """One ``ssh:<id>`` provider per host in ``hosts.toml``. A malformed file is logged
+def theater_providers() -> List[Provider]:
+    """One ``ssh:<id>`` provider per theater in ``theaters.toml``. A malformed file is logged
     and yields none."""
-    from ..hosts import HostError, Hosts
+    from ..theaters import TheaterError, Theaters
 
     try:
-        return Hosts.load().providers()
-    except HostError as exc:
+        return Theaters.load().providers()
+    except TheaterError as exc:
         _log.warning("%s", exc)
         return []
 
 
 def default_registry() -> Registry:
-    """Built-ins, entry points, guatiao plugins, then registered hosts. A later provider
+    """Built-ins, entry points, guatiao plugins, then registered theaters. A later provider
     whose name is taken is logged and skipped."""
     registry = Registry()
     providers = [
         *builtin_providers(),
         *entry_point_providers(),
         *plugin_providers(),
-        *host_providers(),
+        *theater_providers(),
     ]
     for provider in providers:
         try:

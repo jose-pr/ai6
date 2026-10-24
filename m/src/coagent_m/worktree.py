@@ -1,8 +1,8 @@
 """A git worktree per mission, so agents working in parallel never share a checkout.
 
 A worktree is cut from the station's checkout onto a new branch and lives under M's state
-directory (or a host's ``work_root``), never inside the checkout itself. Git runs here
-(``LocalGit``) or on the station's host over ssh (``SshGit``). When the mission ends it is removed, with
+directory (or a theater's ``safe_houses``), never inside the checkout itself. Git runs here
+(``LocalGit``) or on the station's theater over ssh (``SshGit``). When the mission ends it is removed, with
 its branch, if the agent left nothing behind; otherwise it is kept as the mission's work.
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path, PurePath, PurePosixPath
 from typing import TYPE_CHECKING, Dict, List, Optional, Protocol, Union
 
 if TYPE_CHECKING:
-    from .hosts import Host
+    from .theaters import Theater
 
 __all__ = [
     "LOCAL",
@@ -107,15 +107,15 @@ LOCAL = LocalGit()
 
 @dataclass(frozen=True)
 class SshGit:
-    """git on a POSIX host, over ssh."""
+    """git on a POSIX theater, over ssh."""
 
-    host: "Host"
+    theater: "Theater"
     timeout: float = 120.0
 
     def run(self, cwd: str, *args: str, check: bool = True) -> str:
         done = self._sh(" ".join(shlex.quote(a) for a in ["git", "-C", cwd, *args]))
         if check and done.returncode != 0:
-            raise WorktreeError(f"{self.host.id}: git {' '.join(args)}: {done.stderr.strip()}")
+            raise WorktreeError(f"{self.theater.id}: git {' '.join(args)}: {done.stderr.strip()}")
         return done.stdout
 
     def exists(self, path: str) -> bool:
@@ -124,23 +124,23 @@ class SshGit:
     def mkdirs(self, path: str) -> None:
         done = self._sh(f"mkdir -p {shlex.quote(path)}")
         if done.returncode != 0:
-            raise WorktreeError(f"{self.host.id}: mkdir {path}: {done.stderr.strip()}")
+            raise WorktreeError(f"{self.theater.id}: mkdir {path}: {done.stderr.strip()}")
 
     def _sh(self, command: str) -> "subprocess.CompletedProcess[str]":
-        if not self.host.posix:
+        if not self.theater.posix:
             raise WorktreeError(
-                f"{self.host.id}: worktrees on a Windows host are not supported yet"
+                f"{self.theater.id}: worktrees on a Windows theater are not supported yet"
             )
         try:
             return subprocess.run(
-                [*self.host.ssh_argv(tty=False), command],
+                [*self.theater.ssh_argv(tty=False), command],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise WorktreeError(f"{self.host.id}: ssh: {exc}") from exc
+            raise WorktreeError(f"{self.theater.id}: ssh: {exc}") from exc
 
 
 def head(path: "str | PurePath", git: Git = LOCAL) -> Optional[str]:
@@ -198,7 +198,7 @@ class Worktree:
         local = isinstance(git, LocalGit)
         if root is None:
             if not local:
-                raise WorktreeError("a remote worktree needs a root (the host's work_root)")
+                raise WorktreeError("a remote worktree needs a root (the theater's safe_houses)")
             root = state_dir() / "worktrees"
         repo = Path(repo).resolve() if local else PurePosixPath(str(repo))
         if not is_git_checkout(repo, git):

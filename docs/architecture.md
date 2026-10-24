@@ -38,7 +38,7 @@ frames and the report. Each can be rewritten without touching the rest.
    Windows pseudo-console. Any other comes from the `coagent.terminals` entry-point
    group or as a guatiao library serving the `coagent_terminal` kind, in any language;
    the first is Rust on `portable-pty`. A `tmux` provider would give each agent a pane,
-   so `ssh host -t tmux attach -r -t agent-42` keeps working beside the web view, and a
+   so `ssh <theater> -t tmux attach -r -t agent-42` keeps working beside the web view, and a
    `systemd` one a transient unit with cgroup limits. The watchdog only ever sees bytes
    and timestamps, so its rules are the same for every provider.
 2. **Moneypenny and M speak I's wire format, not each other.** M sends framed messages

@@ -1,7 +1,7 @@
-"""A terminal on another host: ``ssh -tt`` run on a local terminal provider.
+"""A terminal on another theater: ``ssh -tt`` run on a local terminal provider.
 
-The remote side gets a real pseudo-terminal from ``sshd`` (ConPTY on a Windows host), so
-the agent behaves as it would locally. On a POSIX host the command first reports its
+The remote side gets a real pseudo-terminal from ``sshd`` (ConPTY on a Windows theater), so
+the agent behaves as it would locally. On a POSIX theater the command first reports its
 session id in an OSC escape sequence no terminal displays, then ``exec``s the agent, so
 the agent leads that session and ``kill`` can end every process in it over a second
 connection: dropping the connection alone only sends the session a hangup.
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 from ._base import Exit, Provider, Session, TerminalError, TerminalSpec
 
 if TYPE_CHECKING:
-    from ..hosts import Host
+    from ..theaters import Theater
 
 # OSC 777 is unassigned in xterm; terminals ignore an OSC they do not know.
 _MARK = re.compile(rb"\x1b\]777;coagent-sid=(\d+)\x07")
@@ -28,7 +28,7 @@ _KILL_TIMEOUT = 15.0
 
 
 def remote_command(spec: TerminalSpec, env: Dict[str, str], posix: bool) -> str:
-    """The command line ``sshd`` hands the host's shell."""
+    """The command line ``sshd`` hands the theater's shell."""
     if not posix:
         # Scaffold: cmd.exe quoting, no session id, so a kill ends only the connection.
         parts = [f'set "{k}={v}"' for k, v in env.items()]
@@ -57,8 +57,8 @@ def forwarded_env(spec: TerminalSpec) -> Dict[str, str]:
 class SshSession:
     """A local session running ``ssh``, plus what is known about the remote one."""
 
-    def __init__(self, host: "Host", inner: Session) -> None:
-        self._host = host
+    def __init__(self, theater: "Theater", inner: Session) -> None:
+        self._theater = theater
         self._inner = inner
         self._held = b""
         self._killed = False
@@ -96,8 +96,8 @@ class SshSession:
         with self._lock:
             sid, already = self.remote_sid, self._killed
             self._killed = True
-        if sid is not None and not already and self._host.posix and self.poll() is None:
-            remote_kill(self._host, sid)
+        if sid is not None and not already and self._theater.posix and self.poll() is None:
+            remote_kill(self._theater, sid)
         self._inner.kill()
 
     def poll(self) -> Optional[Exit]:
@@ -123,13 +123,13 @@ def _split_partial_mark(data: bytes):
     return data, b""
 
 
-def remote_kill(host: "Host", sid: int) -> bool:
-    """SIGKILLs every process in session ``sid`` on ``host``; answers whether ssh ran.
+def remote_kill(theater: "Theater", sid: int) -> bool:
+    """SIGKILLs every process in session ``sid`` on ``theater``; answers whether ssh ran.
     ``pkill -s`` where it exists, else the session leader's process group."""
     cmd = f"pkill -KILL -s {sid} 2>/dev/null || kill -KILL -- -{sid} 2>/dev/null; true"
     try:
         subprocess.run(
-            [*host.ssh_argv(tty=False), cmd],
+            [*theater.ssh_argv(tty=False), cmd],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=_KILL_TIMEOUT,
@@ -140,14 +140,14 @@ def remote_kill(host: "Host", sid: int) -> bool:
 
 
 class SshProvider:
-    """``ssh:<host>``: runs the agent on a registered host. ``local`` is the provider the
+    """``ssh:<theater>``: runs the agent on a registered theater. ``local`` is the provider the
     ``ssh`` client itself runs on (default: the best local one with a real terminal)."""
 
     priority = 10
 
-    def __init__(self, host: "Host", local: Optional[Provider] = None) -> None:
-        self.host = host
-        self.name = host.provider_name
+    def __init__(self, theater: "Theater", local: Optional[Provider] = None) -> None:
+        self.theater = theater
+        self.name = theater.provider_name
         self._local = local
 
     def available(self) -> Optional[str]:
@@ -159,11 +159,11 @@ class SshProvider:
 
     def spawn(self, spec: TerminalSpec) -> SshSession:
         argv = [
-            *self.host.ssh_argv(tty=True),
-            remote_command(spec, forwarded_env(spec), self.host.posix),
+            *self.theater.ssh_argv(tty=True),
+            remote_command(spec, forwarded_env(spec), self.theater.posix),
         ]
         local = TerminalSpec(argv, None, None, spec.rows, spec.cols)
-        return SshSession(self.host, self._inner_provider().spawn(local))
+        return SshSession(self.theater, self._inner_provider().spawn(local))
 
     def _inner_provider(self) -> Provider:
         if self._local is not None:

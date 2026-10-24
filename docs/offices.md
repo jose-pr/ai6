@@ -1,6 +1,6 @@
 # Offices, failover and the store
 
-M is a role, not a machine. Run `serve` on several hosts and each is an **office**; they
+M is a role, not a machine. Run `serve` on several theaters and each is an **office**; they
 share one store, and exactly one of them is **M**, the office that decides. If M's
 office is lost, another office takes the role over and nothing waiting is lost.
 
@@ -33,7 +33,7 @@ M places each waiting brief on a live `execution` office with room:
 - whose **labels** match the station's `selector` (as a Kubernetes `nodeSelector`;
   values may be globs). Every office is labelled `node`, `host` and `os`, plus any
   `--label` given;
-- that can reach the station's checkout: a station on a remote host can run from any
+- that can reach the station's checkout: a station on a remote theater can run from any
   office, a local checkout only from an office on that machine;
 - least loaded first.
 
@@ -46,7 +46,7 @@ selector = { gpu = "yes", os = "linux" }
 ## When an office is lost
 
 Every claim is a **lease** its office renews with each heartbeat. An office that stops
-— a crash, a lost host, a cut network — stops renewing, its leases lapse, and M puts
+— a crash, a lost theater, a cut network — stops renewing, its leases lapse, and M puts
 those briefs back in the queue for another office: up to `--max-attempts` times
 (default 3), after which the brief is filed as failed with state `lost`. An office that
 comes back and finds its lease taken stops that mission rather than run it twice. A
@@ -65,7 +65,7 @@ to a still-running agent, are the next step.
 | --- | --- | --- |
 | a directory (default `~/.local/state/coagent/inbox`) | files, renamed atomically | one machine, or offices sharing a directory |
 | `sqlite:///path/inbox.db` | SQLite (`coagent-i[sql]`) | one machine |
-| `postgresql+psycopg://user@db/coagent` | PostgreSQL (`coagent-i[postgres]`) | offices on different hosts |
+| `postgresql+psycopg://user@db/coagent` | PostgreSQL (`coagent-i[postgres]`) | offices on different theaters |
 
 Any database SQLAlchemy supports works the same way. Every step two offices could race
 on — claiming a brief, renewing a lease, recovering it, filing it, taking the leader

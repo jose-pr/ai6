@@ -119,8 +119,8 @@ class AgentSpec:
     input: Optional[str] = None
     # The id of the station the mission is for; the agent sees it as COAGENT_STATION.
     station: Optional[str] = None
-    # The host it runs on, when not this machine (COAGENT_HOST); `cwd` is a path there.
-    host: Optional[str] = None
+    # The theater it runs on, when not this machine (COAGENT_THEATER); `cwd` is a path there.
+    theater: Optional[str] = None
 
     @classmethod
     def from_profile(
@@ -167,11 +167,11 @@ class AgentSpec:
             hooks=(_ProfileHook(profile, env),),
             input=typed,
             station=station.id if station is not None else None,
-            host=station.host if station is not None else None,
+            theater=station.theater if station is not None else None,
         )
-        if spec.host:
-            # The checkout is on the host, so the agent runs there whatever its terminal.
-            spec = replace(spec, terminal=f"ssh:{spec.host}")
+        if spec.theater:
+            # The checkout is on the theater, so the agent runs there whatever its terminal.
+            spec = replace(spec, terminal=f"ssh:{spec.theater}")
         return spec, limits
 
 
@@ -376,10 +376,15 @@ class Watchdog:
         env["COAGENT_RUN_DIR"] = run_dir
         if self.spec.station:
             env["COAGENT_STATION"] = self.spec.station
-        if self.spec.host:
-            env["COAGENT_HOST"] = self.spec.host
+        if self.spec.theater:
+            env["COAGENT_THEATER"] = self.spec.theater
         ctx = HookContext(
-            self.spec.name, list(self.spec.argv), self.spec.cwd, env, run_dir, host=self.spec.host
+            self.spec.name,
+            list(self.spec.argv),
+            self.spec.cwd,
+            env,
+            run_dir,
+            theater=self.spec.theater,
         )
         self._hooks.prepare(ctx)
         text = "\n\n".join(ctx.context)

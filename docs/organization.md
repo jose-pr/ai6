@@ -9,7 +9,7 @@ a decision, and the fiction's rules turn out to be good rules for running coding
 | Division | Here | Owns |
 | --- | --- | --- |
 | **M** (the Chief) | `m/` | policy, mission authorization, scheduling, stations, assigning agents; a role one office holds at a time, and another takes over |
-| **Management offices** | `m/` (`serve`) | M's offices on many hosts: control (may be M), execution (run missions), or both |
+| **Management offices** | `m/` (`serve`) | M's offices on many theaters: control (may be M), execution (run missions), or both |
 | **Chief of Staff** | `m/` (planned) | vetting incoming briefs and budgets before M sees them |
 | **Miss Moneypenny** | `moneypenny/` | information flow, the board, scheduling view, office security (who may attach) |
 | **00 Section** | `00/` | the agents that execute work |
@@ -102,8 +102,8 @@ The code uses plain names; these are what they stand for.
 | Term | In coagent |
 | --- | --- |
 | **Briefing room** | where a mission's parameters are handed over: the brief, plus the context hooks inject (`COAGENT_CONTEXT_FILE`) |
-| **Theatre of operations** | the host a mission runs on: this machine, or one registered in `hosts.toml` |
-| **Drop zone** | where an agent is inserted: the host, the path and the terminal it is started on |
+| **Theatre of operations** | the theater a mission runs on: this machine, or one registered in `theaters.toml` |
+| **Drop zone** | where an agent is inserted: the theater, the path and the terminal it is started on |
 | **Safe house** | the mission's git worktree: deniable, disposable, removed when the agent left nothing |
 | **Dead drop** | the inbox: briefs and outcomes exchanged without the two sides ever meeting |
 | **Live drop** | handing a brief straight in (`submit -`, `launch --brief`) |

@@ -248,9 +248,9 @@ python = "package.module:attr"    # an object, or a class built with no argument
 
 ## `coagent_m.stations`
 
-- `Station(id, name="", description="", path=None, host=None, config=None, repos=(), roster=(), clearance="field", max_concurrent=None, selector={}, worktrees=True, branch="{id}-{slug}", base="HEAD", cover="covert", identity=None, on_blown="flag", intake={})`:
+- `Station(id, name="", description="", path=None, theater=None, config=None, repos=(), roster=(), clearance="field", max_concurrent=None, selector={}, worktrees=True, branch="{id}-{slug}", base="HEAD", cover="covert", identity=None, on_blown="flag", intake={})`:
   `id` is the station's one cover name (any short code); `name` the real project name;
-  the station answers to both. `host` names the host its checkout (`path`, a path
+  the station answers to both. `theater` names the theater its checkout (`path`, a path
   there) is on; `config` is a local directory with its hooks and profiles (needed for a
   remote station to have any). `roster`
   empty means every profile. `intake` is for intake sources; M ignores it.
@@ -340,15 +340,15 @@ Stations carry `cover` (default `covert`), `identity` and `on_blown` (`flag` or
 `fail`). `MissionRunner` applies them; the outcome gains `cover: {policy, commits, blown,
 violations}`, and state `blown` when the station fails on it.
 
-## `coagent_m.hosts`
+## `coagent_m.theaters`
 
-- `Host(id, ssh, os="linux", description="", port=None, identity=None, options={}, work_root=None, tags=(), client=("ssh",))`:
+- `Theater(id, ssh, os="linux", description="", port=None, identity=None, options={}, safe_houses=None, tags=(), client=("ssh",))`:
   `provider_name` (`ssh:<id>`), `posix`, `ssh_argv(*, tty)`.
-- `Hosts`: `add`, `get`, iteration, `providers()`, `Hosts.load(path=None)` from
-  `<config_dir>/hosts.toml` (`HostError` for unknown keys or an unknown `os`).
+- `Theaters`: `add`, `get`, iteration, `providers()`, `Theaters.load(path=None)` from
+  `<config_dir>/theaters.toml` (`TheaterError` for unknown keys or an unknown `os`).
 - The `ssh:<id>` provider runs the agent through `ssh -tt` on the best local terminal,
-  forwards only the environment M and its hooks added, and on a POSIX host kills the
-  remote session (`pkill -s`) over a second connection. Windows hosts: commands run,
+  forwards only the environment M and its hooks added, and on a POSIX theater kills the
+  remote session (`pkill -s`) over a second connection. Windows theaters: commands run,
   but a kill only drops the connection (scaffold).
 
 ## `coagent_m.config`

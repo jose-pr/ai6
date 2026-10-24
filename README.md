@@ -36,7 +36,7 @@ has the conventions):
 
 Projects are **Stations**: each registered project has an id, which is its one cover name
 (`G`, `GT`, `B2`), and its real project name, and holds its own checkout (here or on a
-remote host), roster, clearance and budget.
+remote theater), roster, clearance and budget.
 
 - **Supervisor–worker (harness) pattern.** Agents are disposable workers. M is the only
   long-lived process that holds state.
@@ -53,7 +53,7 @@ remote host), roster, clearance and budget.
 - **Hooks, per scope.** Headquarters, station and agent hooks add environment, inject
   context, rewrite the command line, and see every event, in any language. A
   project's own hooks run only once it is registered as a station.
-- **No single point of failure.** Run M on several hosts: each is an office, one is M,
+- **No single point of failure.** Run M on several theaters: each is an office, one is M,
   another takes over if it is lost, and briefs a lost office held are run again
   elsewhere. Offices share files, SQLite or PostgreSQL.
 - **Bring your own intake.** No tracker is built in. Anything that can write a JSON
@@ -247,7 +247,7 @@ frames and the report. Each can be rewritten without touching the rest.
    Windows pseudo-console. Any other comes from the `coagent.terminals` entry-point
    group or as a guatiao library serving the `coagent_terminal` kind, in any language;
    the first is Rust on `portable-pty`. A `tmux` provider would give each agent a pane,
-   so `ssh host -t tmux attach -r -t agent-42` keeps working beside the web view, and a
+   so `ssh <theater> -t tmux attach -r -t agent-42` keeps working beside the web view, and a
    `systemd` one a transient unit with cgroup limits. The watchdog only ever sees bytes
    and timestamps, so its rules are the same for every provider.
 2. **Moneypenny and M speak I's wire format, not each other.** M sends framed messages

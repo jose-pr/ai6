@@ -66,11 +66,11 @@ class Station:
     id: str
     name: str = ""
     description: str = ""
-    # The checkout; on `host` when one is named, else on this machine.
+    # The checkout; on `theater` when one is named, else on this machine.
     path: Optional[Path] = None
-    host: Optional[str] = None
+    theater: Optional[str] = None
     # A local directory with the station's hooks and profiles, for a station whose
-    # checkout is on another host; a local station's is <path>/.coagent.
+    # checkout is on another theater; a local station's is <path>/.coagent.
     config: Optional[Path] = None
     repos: Tuple[str, ...] = ()
     # Profiles posted here; empty means every profile.
@@ -101,8 +101,8 @@ class Station:
 
     def contains(self, path: "str | Path") -> bool:
         """Whether ``path`` on this machine is inside the checkout; never, for a station
-        on another host."""
-        if self.path is None or self.host is not None:
+        on another theater."""
+        if self.path is None or self.theater is not None:
             return False
         try:
             Path(path).resolve().relative_to(self.path)
@@ -183,14 +183,14 @@ def local_config(
     and the station it belongs to.
 
     A station's is its ``config`` directory, else ``<path>/.coagent`` for a local one; a
-    station on another host without ``config`` has none. Outside every station, the
+    station on another theater without ``config`` has none. Outside every station, the
     nearest ``.coagent`` only when ``trust`` is true or ``COAGENT_TRUST_PROJECT=1`` (for
     a checkout under development); otherwise none.
     """
     if station is not None:
         if station.config is not None:
             return station.config, station
-        if station.host is None and station.path is not None:
+        if station.theater is None and station.path is not None:
             return Path(station.path) / PROJECT_DIR, station
         return None, station
     stations = stations if stations is not None else Stations.load()
@@ -218,9 +218,9 @@ def _station(sid: str, table: Mapping[str, Any], source: Path) -> Station:
     values: Dict[str, Any] = dict(table)
     if "path" in values:
         raw = str(values["path"])
-        # A remote checkout's path is the host's; only a local one is resolved here.
+        # A remote checkout's path is the theater's; only a local one is resolved here.
         values["path"] = (
-            PurePosixPath(raw) if values.get("host") else Path(os.path.expanduser(raw)).resolve()
+            PurePosixPath(raw) if values.get("theater") else Path(os.path.expanduser(raw)).resolve()
         )
     if "config" in values:
         values["config"] = Path(os.path.expanduser(str(values["config"]))).resolve()
