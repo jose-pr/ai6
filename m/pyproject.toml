@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coagent-m"
+version = "0.1.0.dev0"
+authors = [{ name = "jose-pr" }]
+description = "M: the C.O.A.G.E.N.T. supervisor daemon and agent watchdog."
+readme = "README.md"
+requires-python = ">=3.9"
+# No license chosen yet: the Private classifier makes PyPI refuse an upload.
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["black", "build", "pytest"]
+
+[project.urls]
+Homepage = "https://github.com/jose-pr/coagent/"
+Issues = "https://github.com/jose-pr/coagent/issues"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/.*", "/AGENTS.md", "*.local.*", "CLAUDE*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coagent_m"]
+exclude = ["*.local.*", "CLAUDE*"]
+
+[tool.black]
+target-version = ["py39"]
+line-length = 100
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
