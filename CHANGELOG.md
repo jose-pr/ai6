@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `launch --next` and `launch --brief FILE`: run a brief at its station with the profile
   it names or the best one for its role, file the outcome and report it to its source.
 - `00/roster.example.toml` and `docs/organization.md`.
+- A git worktree per mission (`coagent_m.worktree`), on a branch named from the brief;
+  stations gain `worktrees`, `branch` and `base`.
+- The documentation site (MkDocs Material) with guides, the Python API reference and the
+  Rust reference, deployed by `docs.yml`.
 - Licensed under the Mozilla Public License 2.0, with a contributor licence agreement.
 
 [Unreleased]: https://github.com/jose-pr/coagent/commits/main

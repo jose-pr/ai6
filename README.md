@@ -400,6 +400,12 @@ python3 -m venv .pyvenv/local && .pyvenv/local/bin/pip install -e ".[dev]"
 .pyvenv/local/bin/pytest -q
 ```
 
+The site (`docs/`, MkDocs Material, the Python reference by mkdocstrings):
+
+```bash
+pip install -e "m[docs]" -e i && mkdocs build --strict
+```
+
 M's mission tests run when `coagent-i` is installed into M's environment too
 (`pip install -e ../i`). Without the two variables the suite still runs, on the
 built-in providers only. CI

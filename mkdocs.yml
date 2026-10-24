@@ -1,0 +1,64 @@
+site_name: coagent
+site_description: C.O.A.G.E.N.T. — a self-hosted supervisor for fleets of coding agents, each a live terminal a person can step into
+site_url: https://jose-pr.github.io/coagent/
+repo_url: https://github.com/jose-pr/coagent
+repo_name: jose-pr/coagent
+edit_uri: edit/main/docs/
+
+# Constrained to docs/ so a strict build does not scan the repository's own markdown:
+# the API headers and component READMEs are not pages.
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Organization: organization.md
+  - Guides:
+      - Stations: stations.md
+      - Missions and intake: missions.md
+      - Agents, profiles and clearance: agents.md
+      - Hooks: hooks.md
+      - Terminals and plugins: terminals.md
+      - The watchdog: watchdog.md
+  - API Reference:
+      - M (coagent_m): api/m.md
+      - I Branch (coagent_i): api/i.md
+      # rustdoc's own output, copied under rust/ by the docs workflow. An absolute URL
+      # because it is not a page mkdocs knows, and a relative one would fail --strict.
+      - Rust: https://jose-pr.github.io/coagent/rust/coagent_terminal_kind/index.html
+  - Changelog: changelog.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [m/src, i/src]
+          options:
+            show_source: true
+            show_root_heading: true
+            merge_init_into_class: true
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.snippets:
+      base_path: ["."]
+  - pymdownx.superfences
