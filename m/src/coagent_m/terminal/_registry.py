@@ -113,11 +113,29 @@ def plugin_providers(dirs: Optional[Iterable[str]] = None) -> List[Provider]:
     return scan(dirs)
 
 
+def host_providers() -> List[Provider]:
+    """One ``ssh:<id>`` provider per host in ``hosts.toml``. A malformed file is logged
+    and yields none."""
+    from ..hosts import HostError, Hosts
+
+    try:
+        return Hosts.load().providers()
+    except HostError as exc:
+        _log.warning("%s", exc)
+        return []
+
+
 def default_registry() -> Registry:
-    """Built-ins, then entry points, then guatiao plugins. A later provider whose
-    name is taken is logged and skipped."""
+    """Built-ins, entry points, guatiao plugins, then registered hosts. A later provider
+    whose name is taken is logged and skipped."""
     registry = Registry()
-    for provider in [*builtin_providers(), *entry_point_providers(), *plugin_providers()]:
+    providers = [
+        *builtin_providers(),
+        *entry_point_providers(),
+        *plugin_providers(),
+        *host_providers(),
+    ]
+    for provider in providers:
         try:
             registry.add(provider)
         except ValueError as exc:

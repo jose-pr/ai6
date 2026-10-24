@@ -2,7 +2,7 @@
 
 M asks a ``Registry`` for a ``Provider``, and the provider starts a ``Session``. Built in:
 ``posix-pty`` (Linux, macOS, BSD), ``conpty`` (Windows; scaffold) and ``pipes`` (any OS,
-no terminal). More arrive through the ``coagent.terminals`` entry-point group, or as
+no terminal); each host in ``hosts.toml`` adds ``ssh:<id>``. More arrive through the ``coagent.terminals`` entry-point group, or as
 guatiao libraries serving the ``coagent_terminal`` kind in any language.
 """
 
@@ -26,6 +26,7 @@ from ._registry import (
     builtin_providers,
     default_registry,
     entry_point_providers,
+    host_providers,
     plugin_providers,
 )
 
@@ -45,5 +46,6 @@ __all__ = [
     "builtin_providers",
     "default_registry",
     "entry_point_providers",
+    "host_providers",
     "plugin_providers",
 ]
