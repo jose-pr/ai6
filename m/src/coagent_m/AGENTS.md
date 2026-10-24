@@ -5,9 +5,22 @@ signature, arguments, contract and gotchas, so the package can be used without r
 its source. It ships inside the package and is self-contained. Development
 documentation lives with the source at <https://github.com/jose-pr/coagent>.
 
-Everything public is in `coagent_m.watchdog`; names starting with `_` are private.
-Install with `pip install -e m/` from a checkout. There are no extras and no runtime
-dependencies. POSIX only: importing the module needs `pty`.
+Public modules: `coagent_m.watchdog`, `coagent_m.terminal`, `coagent_m.hooks`,
+`coagent_m.profiles`, `coagent_m.config`. Names starting with `_` are private, and so
+are the `_`-prefixed submodules of `terminal` and `hooks`.
+
+Install with `pip install -e m/` from a checkout. Runtime dependencies: none, except
+`tomli` on Python 3.9 and 3.10. Extras: `guatiao` (terminal plugins in any language,
+pinned to a guatiao commit), `conpty` (`pywinpty`, Windows only). Python 3.9 or newer.
+
+## Platforms
+
+| | Linux, macOS, BSD | Windows |
+| --- | --- | --- |
+| `posix-pty` | yes | unavailable |
+| `pipes` | yes, tree kill by process group | yes, but **kills the direct child only** |
+| `conpty` | unavailable | **scaffold: always unavailable** |
+| guatiao plugins | yes | loads; the `portable-pty` plugin kills the direct child only |
 
 ## `coagent_m.watchdog`
 
@@ -25,30 +38,56 @@ Frozen dataclass; every duration is in seconds.
 - `normalize_digits`: compare lines with digit runs folded, so `retry 1` and `retry 2`
   count as the same line. Off by default, because counters are also how progress looks.
 
-### `AgentSpec(name, argv, cwd=None, env=None)`
+### `AgentSpec(name, argv, cwd=None, env=None, terminal=None, rows=24, cols=80, hooks=(), input=None)`
 
-What to run. `env=None` inherits the supervisor's environment; pass a full mapping to
-replace it.
+What to run. `env=None` inherits the supervisor's environment; a mapping replaces it.
+`terminal` names a provider (default: the best available). `hooks` are agent-scope
+hooks. `input` is typed into the terminal, plus a newline, right after the agent starts.
 
-### `class Watchdog(spec, limits=Limits(), on_event=None, on_output=None, clock=time.monotonic)`
+`AgentSpec.from_profile(profiles, profile, prompt=None, *, name=None, cwd=None, limits=Limits()) -> (AgentSpec, Limits)`:
+the agent a profile (name, alias or resolved `Profile`) describes. The profile's env
+and context are applied by an agent-scope hook (so they win over global and project
+hooks), and the agent also gets `COAGENT_PROFILE`, `COAGENT_MODEL` and
+`COAGENT_EFFORT`. The returned `Limits` are `limits` with the profile's `limits`
+table applied. Raises `ProfileError`.
 
-- `run() -> Outcome`: starts `argv` on a new pty in a new session (its pgid is its pid)
-  and blocks until it exits or is killed. On return, the whole process group has been
-  sent SIGKILL and the agent has been reaped, so descendants of a finished agent do not
-  survive it.
-- `send(data: bytes) -> None`: writes operator input to the terminal, and counts as
-  activity for both the stall and loop rules. Thread-safe. Raises `RuntimeError` when
-  the agent is not running.
-- `kill() -> None`: SIGKILL the process group now. Thread-safe; no-op after exit.
-- `state: State`: the current state, updated on the `run()` thread.
-- `on_event(Event)` and `on_output(bytes)` run on the `run()` thread. A slow callback
-  delays the watchdog's own checks.
+### `class Watchdog(spec, limits=Limits(), on_event=None, on_output=None, clock=time.monotonic, registry=None, hooks=None)`
+
+- `run() -> Outcome`, in this order:
+  1. picks the provider (`spec.terminal`, or `registry.best()`; `registry=None` uses
+     `terminal.default_registry()`);
+  2. makes a private run directory (removed afterwards);
+  3. runs the hooks' `prepare` (`hooks=None` runs only `spec.hooks`; it loads nothing
+     from disk — pass `hooks.load_hooks(cwd, spec.hooks)` for global and project hooks);
+  4. writes the collected context to `<run_dir>/context.md` and sets
+     `COAGENT_CONTEXT_FILE`; `COAGENT_AGENT` and `COAGENT_RUN_DIR` are always set;
+  5. spawns, then supervises until the agent exits or is killed;
+  6. kills whatever the agent left running, reaps it, and calls the hooks' `finished`.
+
+  Raises before any event: `ProviderUnavailable`, `HookError` (a required hook
+  failed), `TerminalError` (the agent could not start).
+- `send(data: bytes) -> None`: operator input; counts as activity for both the stall
+  and loop rules. Thread-safe. `RuntimeError` when the agent is not running.
+- `kill() -> None`: kills the agent and its descendants now. Thread-safe; no-op after.
+- `provider() -> Provider`: what `run()` will use.
+- `state: State`, updated on the `run()` thread.
+- `on_event(Event)`, `on_output(bytes)` and every hook's `on_event` run on the `run()`
+  thread. A slow callback delays the watchdog's own checks.
+
+**Cursor-position queries are answered by the watchdog.** `ESC[6n` is removed from the
+output (`on_output` never sees it) and answered with a fixed `ESC[24;1R`, for every
+provider. Shells under a pty, and ConPTY at start-up, block until it is answered, so
+without this an unattended agent looks hung. A viewer's emulator must not answer it.
+
+### `CursorQueryResponder()`
+
+`feed(data) -> (clean_bytes, [answers])`; a query split across reads is held back until
+it completes. `flush() -> bytes` releases a held prefix. `QUERY`, `ANSWER` constants.
 
 ### `Outcome(agent, state, returncode, reason, runtime)`
 
 `state` is `DONE` (exit 0), `FAILED` (non-zero exit) or `STALLED` (killed; `reason`
-says why). `returncode` follows `subprocess`, so a SIGKILL is `-9`; `runtime` is in
-seconds.
+says why). `returncode` follows `subprocess`: a signal is negative. `runtime` in seconds.
 
 ### `Event(agent, state, at, detail="")`
 
@@ -65,16 +104,137 @@ then `BLOCKED` and `WORKING` alternating any number of times, then exactly one o
 ### `class ActivityMonitor(limits, now)`
 
 The stall and loop rules with no process attached; drive it with any clock.
+`feed(data, now)`, `operator_input(now)`, `verdict(now) -> KillReason | None` (checked
+in order: max runtime, stall, loop), `blocked(now) -> bool`, `awaiting_input() -> bool`.
+`\r` and `\n` both end a line; ANSI CSI and OSC sequences are stripped before comparing.
 
-- `feed(data, now)`, `operator_input(now)`.
-- `verdict(now) -> KillReason | None`, checked in this order: max runtime, stall, loop.
-- `blocked(now) -> bool`, `awaiting_input() -> bool`.
+### CLI: `python -m coagent_m.watchdog <command>`
 
-`\r` and `\n` both end a line. ANSI CSI and OSC sequences are stripped before lines are
-compared.
+| Command | Does |
+| --- | --- |
+| `run [--stall-timeout S] [--loop-timeout S] [--max-runtime S] [--terminal NAME] [--no-hooks] -- CMD...` | supervises `CMD` in the current directory with global and project hooks |
+| `launch (--profile NAME \| --role ROLE [--tag T]...) [--no-hooks] [PROMPT]` | starts the agent a profile describes |
+| `providers` | terminal providers, best first, with why each cannot run |
+| `hooks` | the hooks a run in this directory would use |
+| `profiles` | agent profiles, best first |
+| `demo [--timeout S] [--terminal NAME]` | a healthy, a looping and a hanging mock agent |
 
-### CLI
+`run` and `launch` exit with the agent's code, or `128 + signal` when it was killed;
+`launch` exits 2 for a profile error.
 
-`python -m coagent_m.watchdog run [--stall-timeout S] [--loop-timeout S] [--max-runtime S] -- CMD...`
-exits with the agent's code, or `128 + signal` when the agent was killed.
-`python -m coagent_m.watchdog demo [--timeout S]` runs the three built-in mock agents.
+## `coagent_m.terminal`
+
+### `TerminalSpec(argv, cwd=None, env=None, rows=24, cols=80)`
+
+`environment(term=None) -> dict`: the environment to start with; `term` fills `TERM`
+only when unset (the pty providers pass `xterm-256color`).
+
+### `Session` (protocol)
+
+`pid: int`; `read(timeout) -> bytes | b"" | None` (data; `b""` once no more output can
+ever arrive; `None` when nothing came within `timeout`); `write(bytes)`;
+`resize(rows, cols)`; `kill()` (the program and every process it started; idempotent;
+no-op once reaped); `poll() -> Exit | None`; `wait(timeout=None) -> Exit | None`;
+`close()` (kills first if still running). `write`, `resize` and `kill` are safe from
+another thread while `read` blocks. Output can still arrive after the program exits;
+an exit is never inferred from EOF alone.
+
+### `Provider` (protocol)
+
+`name: str` (unique in a registry), `priority: int`, `available() -> str | None` (why
+it cannot run here), `spawn(TerminalSpec) -> Session` (raises `TerminalError`).
+
+### `Exit(code=None, signal=None)`
+
+`returncode` property: `code`, or `-signal`.
+
+### `class Registry(providers=())`
+
+`add(provider)` (`ValueError` on a duplicate name), `set_priority(name, priority)`
+(overrides the provider's own), `providers() -> [ProviderInfo]` best first (priority
+descending, then name; each with `reason` asked now), `get(name)` and `best()` (both
+raise `ProviderUnavailable`, naming every reason).
+
+### Discovery
+
+- `builtin_providers()`: `posix-pty` (priority 20), `conpty` (20), `pipes` (0).
+- `entry_point_providers()`: the `coagent.terminals` entry-point group; each names a
+  provider, or a callable answering one or a list. A broken one is logged and skipped.
+- `plugin_providers(dirs=None)`: guatiao libraries serving the `coagent_terminal` kind,
+  in `dirs` or in `COAGENT_TERMINAL_PLUGINS` (an `os.pathsep` list); priority 30, keyed
+  by the provider's guatiao key. Empty without the `guatiao` extra. The native guatiao
+  library comes from `GUATIAO_LIBRARY` (a `coagent-native` build).
+- `default_registry()`: all three, in that order; a later duplicate name is skipped.
+
+`TerminalError`, `ProviderUnavailable(TerminalError)`.
+
+## `coagent_m.hooks`
+
+A hook is any object with `name` and any of:
+`prepare(ctx: HookContext) -> Preparation | None`, `on_event(event)`,
+`finished(ctx, outcome)`; `required = True` makes a failing `prepare` raise `HookError`
+instead of being logged and skipped. `HookBase` is an optional no-op base.
+
+- `HookContext(agent, argv, cwd, env, run_dir, context=[])`: mutable; each hook sees
+  what earlier ones prepared. `as_json()` is what a command hook reads on stdin.
+- `Preparation(env={}, context=(), argv=None)`: `env` merges (`None` removes a key),
+  `context` appends, `argv` replaces.
+- `CommandHook(name, command, output="json", required=False, timeout=30.0, env=None)`:
+  runs `command` in the agent's directory with `COAGENT_HOOK`, `COAGENT_AGENT`,
+  `COAGENT_RUN_DIR`, `COAGENT_CWD` set and the context as JSON on stdin. `output` is how
+  stdout is read: `env` (`K=V` / `export K=V` lines), `context` (text), `json`
+  (`{"env": .., "context": .., "argv": ..}`) or `none`. Non-zero exit or timeout →
+  `HookError`.
+- `HookSet(hooks)`: `(Scope, hook)` pairs in run order; `prepare(ctx)`,
+  `on_event(event)`, `finished(ctx, outcome)`.
+- `load_hooks(cwd=None, agent_hooks=(), *, trust_project=None) -> HookSet`: global
+  hooks (the `coagent.hooks` entry-point group, then `<config_dir>/hooks.toml`), then
+  `<project>/.coagent/hooks.toml` **only if the project is trusted**, then `agent_hooks`.
+- `load_file(path, scope)`, `entry_point_hooks()`, `parse_output(kind, text)`.
+
+`hooks.toml`:
+
+```toml
+[[hook]]
+name = "env-for-this-dir"
+command = ["some-tool", "env"]   # a list; "./x" is relative to this file
+output = "env"                    # env | context | json | none
+required = false
+timeout = 30
+env = { KEY = "value" }
+
+[[hook]]
+python = "package.module:attr"    # an object, or a class built with no arguments
+```
+
+## `coagent_m.profiles`
+
+- `Launcher(name, command, prompt="arg", env={})`: how to start one agent CLI.
+  `command` placeholders: `{model}`, `{effort}`, `{profile}`, `{prompt}`, `{cwd}` and
+  the profile's `vars`. `prompt`: `arg` appends the prompt, `stdin` types it after
+  start, `none` drops it; a `{prompt}` placeholder overrides all three.
+- `Profile(name, aliases=(), description="", extends=None, launcher=None, model=None, effort=None, roles=(), tags=(), priority=0, env={}, args=(), vars={}, terminal=None, limits={}, context="", max_concurrent=None)`:
+  a model configuration under a codename. `extends` inherits every unset field; `env`,
+  `vars` and `limits` merge; aliases are never inherited. `suits(role=None, tags=())`:
+  lists the role or a parent of it (`review` suits `review/security`) and every tag.
+  `max_concurrent` is recorded for a scheduler; nothing enforces it yet.
+- `ProfileSet()`: `add_launcher`, `add` (a later name replaces an earlier one),
+  `names()`, `get(name_or_alias)` (resolved), `profiles()` (resolved, priority
+  descending, then name), `choose(role=None, tags=())`,
+  `argv(profile, prompt=None, cwd=None) -> (argv, env, typed_prompt)`.
+- `load_profiles(cwd=None, *, trust_project=None)`: `<config_dir>/profiles.toml`, then
+  a trusted project's `.coagent/profiles.toml`.
+- `load_file(path, scope, into)`: raises `ProfileError` for an unknown key, so a typo
+  is an error, not a missing setting.
+
+## `coagent_m.config`
+
+- `config_dir()`: `COAGENT_HOME`, else `%APPDATA%\coagent` on Windows, else
+  `$XDG_CONFIG_HOME/coagent` (`~/.config/coagent`).
+- `find_project(cwd)`: the nearest directory at or above `cwd` with a `.coagent` dir.
+- `project_trusted(root)`: `COAGENT_TRUST_PROJECT=1`, or `root` listed in
+  `[trust] projects = [...]` of `<config_dir>/config.toml`. **A project's hooks and
+  profiles start programs inside the supervisor, so an untrusted project's `.coagent`
+  is never read.**
+- `Scope`: `global`, `project`, `agent` — read in that order, narrower wins.
+- `read_toml(path)`: the tables, or `None` when missing or unreadable (logged).

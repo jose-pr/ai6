@@ -8,8 +8,12 @@ repository.
 
 | Path | What |
 | --- | --- |
-| `m/` | Python project `coagent-m` (package `coagent_m`, `src/` layout): the supervisor. Only `watchdog.py` exists |
-| `m/tests/` | pytest suite; the integration tests run the watchdog's own mock agents with sub-second limits |
+| `m/` | Python project `coagent-m` (package `coagent_m`, `src/` layout): the supervisor — `watchdog`, `terminal/` (providers), `hooks/`, `profiles`, `config` |
+| `m/tests/` | pytest suite; the watchdog cases run its own mock agents (`mock-agent work\|loop\|hang\|cursor\|orphan`) with sub-second limits, once per terminal provider that can run here |
+| `m/crates/coagent-terminal-kind/` | the terminal contract as guatiao kinds; its test pins both floor hashes |
+| `m/crates/coagent-terminal-pty/` | a terminal plugin (`cdylib`) on `portable-pty` |
+| `m/crates/coagent-native/` | a `cdylib` carrying guatiao's C ABI with `load`, for the Python binding |
+| `Cargo.toml` | the workspace; guatiao is a git dependency pinned to a commit, the same commit `m/pyproject.toml`'s `guatiao` extra names |
 | `moneypenny/` | design for a Cargo workspace: gateway (axum) and a wasm client sharing one protocol crate |
 | `q/` | design for the Python package `coagent_q`: secrets broker, sandbox profiles, MCP loadouts |
 
@@ -18,8 +22,15 @@ repository.
 - The three components share no code. They meet at two formats: M's socket frames
   (guatiao values; schema in `moneypenny-proto`, read from Python through guatiao's
   bindings) and Q's loadout TOML.
-- Nothing in M's watchdog may assume a backend: it sees bytes and timestamps only.
-- POSIX only (`pty`, process groups, SIGKILL).
+- Nothing in M's watchdog may assume a terminal provider: it sees bytes and timestamps
+  only. Platform code lives in a provider.
+- The two floor hashes in `coagent-terminal-kind`'s test and in
+  `m/src/coagent_m/terminal/_guatiao.py` are one fact in two places: change both, and
+  bump guatiao in `Cargo.toml` and `m/pyproject.toml` together.
+- A project's `.coagent/` is read only when trusted; never add a code path that reads it
+  otherwise.
+- Windows: `conpty` and process-tree kill (Job Objects) are scaffolds, marked as such
+  in their modules and in `m/src/coagent_m/AGENTS.md`.
 - Python 3.9 floor; `from __future__ import annotations` in every module; black,
   line length 100.
 - MPL-2.0 (`LICENSE`), with a CLA for outside contributions (`CLA.md`,
@@ -29,8 +40,20 @@ repository.
 ## Commands
 
 ```bash
+cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo build -p coagent-native -p coagent-terminal-pty
+
 cd m
-python3 -m venv .pyvenv/local && .pyvenv/local/bin/pip install -e ".[dev]"
+python3 -m venv .pyvenv/local && .pyvenv/local/bin/pip install -e ".[dev,guatiao]"
+export GUATIAO_LIBRARY=$PWD/../target/debug/libcoagent_native.so COAGENT_TERMINAL_PLUGINS=$PWD/../target/debug
 .pyvenv/local/bin/pytest -q
 .pyvenv/local/bin/black --check src tests
 ```
+
+The test suite needs the package installed (`pip install -e`), not only on
+`sys.path`: the watchdog cases start `python -m coagent_m.watchdog mock-agent ...` in a
+child process.
+
+CI: `.github/workflows/test.yml`, on `workflow_dispatch` or a pushed `ci-*` tag; Linux
+and macOS, Python 3.9 and 3.14, Rust fmt, clippy and tests.
