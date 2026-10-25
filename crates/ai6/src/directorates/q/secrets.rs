@@ -232,6 +232,20 @@ impl SecretBroker {
         loadout: &Loadout,
         request: SecretLeaseRequest,
     ) -> Result<SecretLease, SecretError> {
+        self.lease_names(loadout, &loadout.secrets, request)
+    }
+
+    /// Acquires some of the loadout's named values; a name the loadout does not declare is
+    /// [`SecretError::AccessDenied`] and nothing is acquired.
+    pub fn lease_names(
+        &self,
+        loadout: &Loadout,
+        names: &[String],
+        request: SecretLeaseRequest,
+    ) -> Result<SecretLease, SecretError> {
+        if names.iter().any(|name| !loadout.secrets.contains(name)) {
+            return Err(SecretError::AccessDenied);
+        }
         validate_ttl(request.ttl, self.max_ttl)?;
         let lease_id = Uuid::new_v4().simple().to_string();
         let backend_request = SecretRequest {
@@ -240,7 +254,12 @@ impl SecretBroker {
             mission_id: request.mission_id,
             ttl: request.ttl,
         };
-        let names = loadout.secrets.clone();
+        let names: Vec<String> = names
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .cloned()
+            .collect();
         let values = if names.is_empty() {
             BTreeMap::new()
         } else {
@@ -270,6 +289,59 @@ impl SecretBroker {
             backend_lease: !names.is_empty(),
             backend_revoked: Mutex::new(false),
         })
+    }
+}
+
+/// The Station's own secret backend: each value is read, when it is leased, from the
+/// Station's environment or a file on the Station, as its [`SecretDefinition`] says. Nothing
+/// is cached, and revoking has nothing to undo.
+///
+/// [`SecretDefinition`]: super::SecretDefinition
+#[derive(Debug, Clone, Default)]
+pub struct StationSecrets {
+    sources: BTreeMap<String, super::SecretSource>,
+}
+
+impl StationSecrets {
+    /// Reads each definition's secret from its source.
+    pub fn new(definitions: impl IntoIterator<Item = super::SecretDefinition>) -> Self {
+        Self {
+            sources: definitions
+                .into_iter()
+                .map(|definition| (definition.name().to_owned(), definition.source().clone()))
+                .collect(),
+        }
+    }
+}
+
+impl SecretBackend for StationSecrets {
+    fn acquire(
+        &self,
+        _request: &SecretRequest,
+        names: &[String],
+    ) -> Result<BTreeMap<String, SecretValue>, SecretBackendFailure> {
+        let mut values = BTreeMap::new();
+        for name in names {
+            let mut value = match self.sources.get(name) {
+                Some(super::SecretSource::Env(variable)) => std::env::var(variable).ok(),
+                Some(super::SecretSource::File(path)) => std::fs::read_to_string(path).ok(),
+                None => None,
+            }
+            .filter(|value| !value.is_empty())
+            .ok_or(SecretBackendFailure)?;
+            if value.ends_with('\n') {
+                value.pop();
+                if value.ends_with('\r') {
+                    value.pop();
+                }
+            }
+            values.insert(name.clone(), SecretValue::new(value));
+        }
+        Ok(values)
+    }
+
+    fn revoke(&self, _lease_id: &str) -> Result<(), SecretBackendFailure> {
+        Ok(())
     }
 }
 
@@ -572,6 +644,53 @@ mod tests {
             .unwrap();
         lease.revoke().unwrap();
         assert!(backend.0.lock().unwrap().revoked.is_empty());
+    }
+
+    #[test]
+    fn a_lease_of_some_names_takes_only_declared_ones() {
+        let catalog = LoadoutCatalog::from_str("[loadout.007]\nsecrets = ['token', 'other']")
+            .expect("valid test loadout");
+        let loadout = catalog.for_agent("007").unwrap();
+        let broker = SecretBroker::new(Backend::default());
+        let lease = broker
+            .lease_names(loadout, &["token".to_owned()], request())
+            .unwrap();
+        assert_eq!(lease.names(), ["token"]);
+        assert_eq!(
+            broker
+                .lease_names(loadout, &["undeclared".to_owned()], request())
+                .err(),
+            Some(SecretError::AccessDenied)
+        );
+    }
+
+    #[test]
+    fn the_station_backend_reads_files_without_their_last_newline_and_refuses_what_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("token");
+        std::fs::write(&file, "from-a-file\n").unwrap();
+        let catalog = LoadoutCatalog::from_str(&format!(
+            "[loadout.007]\nsecrets = ['token', 'missing']\n[secret.token]\nfrom = {{ file = {:?} }}\n\
+             [secret.missing]\nfrom = {{ file = {:?} }}\n",
+            file.to_string_lossy(),
+            dir.path().join("absent").to_string_lossy()
+        ))
+        .unwrap();
+        let backend = super::StationSecrets::new(catalog.secrets());
+        let request = SecretRequest {
+            lease_id: "l".to_owned(),
+            station: "s".to_owned(),
+            mission_id: "m".to_owned(),
+            ttl: DEFAULT_SECRET_LEASE_TTL,
+        };
+        let values = backend.acquire(&request, &["token".to_owned()]).unwrap();
+        assert_eq!(values["token"].with_exposed(str::to_owned), "from-a-file");
+        assert!(backend.acquire(&request, &["missing".to_owned()]).is_err());
+        assert!(
+            backend
+                .acquire(&request, &["undeclared".to_owned()])
+                .is_err()
+        );
     }
 
     #[test]

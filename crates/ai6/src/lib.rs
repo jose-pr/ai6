@@ -73,8 +73,9 @@ pub use directorates::q::transport::{
 pub use directorates::q::{
     DEFAULT_SECRET_LEASE_TTL, Loadout, LoadoutCatalog, MAX_LOADOUT_BYTES, MAX_SECRET_LEASE_TTL,
     McpServer, QError, QErrorKind, SandboxError, SandboxProfile, SandboxRequest, SecretBackend,
-    SecretBackendFailure, SecretBroker, SecretError, SecretLease, SecretLeaseRequest,
-    SecretRequest, SecretValue, claude_mcp_config,
+    SecretBackendFailure, SecretBroker, SecretDefinition, SecretError, SecretLease,
+    SecretLeaseRequest, SecretRequest, SecretSource, SecretValue, StationSecrets,
+    claude_mcp_config,
 };
 pub use directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,

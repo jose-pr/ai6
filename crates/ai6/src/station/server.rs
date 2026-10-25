@@ -4,6 +4,7 @@
 mod cables_mcp;
 #[cfg(feature = "publisher")]
 mod controls;
+mod credentials;
 #[cfg(feature = "cables-mcp")]
 mod green_ink;
 mod medical;
@@ -118,6 +119,8 @@ pub struct StationConfig {
     /// Theaters declared in code; `serve` merges them over `theaters.toml` into `theaters`.
     extra_theaters: Vec<Theater>,
     theaters: Theaters,
+    /// Q's loadouts and secret backend, and the credential leases issued to Sessions.
+    credentials: credentials::CredentialDesk,
 }
 
 impl StationConfig {
@@ -152,6 +155,26 @@ impl StationConfig {
         self.extra_theaters.push(theater);
         self
     }
+
+    /// Issues credentials from `catalog` instead of the configuration directory's
+    /// `loadouts.toml`: each Session gets its Agent's loadout secrets as leases.
+    #[must_use]
+    pub fn with_loadouts(mut self, catalog: crate::directorates::q::LoadoutCatalog) -> Self {
+        self.credentials = self.credentials.with_catalog(catalog);
+        self
+    }
+
+    /// Leases loadout secrets from `backend` instead of the Station's own
+    /// ([`StationSecrets`](crate::directorates::q::StationSecrets), which reads each from the
+    /// Station's environment or a file, as its `[secret.<name>]` says).
+    #[must_use]
+    pub fn with_secret_backend(
+        mut self,
+        backend: impl crate::directorates::q::SecretBackend + 'static,
+    ) -> Self {
+        self.credentials = self.credentials.with_backend(Arc::new(backend));
+        self
+    }
 }
 
 impl Default for StationConfig {
@@ -164,6 +187,7 @@ impl Default for StationConfig {
             terminal: None,
             extra_theaters: Vec::new(),
             theaters: Theaters::default(),
+            credentials: credentials::CredentialDesk::default(),
         }
     }
 }
@@ -398,6 +422,14 @@ where
         })?;
     }
     config.station.theaters = theaters;
+    let loadouts = config_dir.join("loadouts.toml");
+    if !config.station.credentials.has_catalog() && loadouts.is_file() {
+        let catalog = crate::directorates::q::LoadoutCatalog::load(&loadouts).map_err(|error| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("AI6 loadouts: {error}"))
+        })?;
+        config.station.credentials =
+            std::mem::take(&mut config.station.credentials).with_catalog(catalog);
+    }
     let station_id = config
         .station_id
         .take()
@@ -3097,6 +3129,8 @@ async fn start_mission(
         initial_context.push(briefing);
     }
     let exposure = medical::open_gate(&state, &mission);
+    credentials::issue(&state, &mission, &agent.id, &exposure, &mut environment)
+        .map_err(configuration_error)?;
     #[cfg(feature = "cables-mcp")]
     let mut cables_mcp = if let Some(operation_id) = mission.operation_id.as_deref() {
         let theater = state
@@ -3681,6 +3715,14 @@ async fn resume_mission(
         .ok_or_else(|| conflict("Provider has not issued a Session ID yet"))?;
     acquire_session_hold(&state, &mission, &session_id)?;
     let exposure = medical::open_gate(&state, &mission);
+    credentials::issue(
+        &state,
+        &mission,
+        &resume_agent.id,
+        &exposure,
+        &mut environment,
+    )
+    .map_err(configuration_error)?;
     #[cfg(feature = "publisher")]
     let telemetry = state.publisher.as_ref().and_then(|publisher| {
         mission.operation_id.as_ref().map(|operation_id| {
@@ -4702,6 +4744,7 @@ fn finish_operation(
         }
     });
     let operation = operation?;
+    credentials::release(state, mission_id);
     if let Ok(session) = operation.session.lock() {
         let _ = session.close();
     }
@@ -4846,6 +4889,7 @@ fn stop_operation(
     let Some(operation) = operation else {
         return;
     };
+    credentials::release(state, mission_id);
     // A runner keeps the harness going without this Station; the Mission stays Working, so the
     // next start re-attaches to it.
     if let Some(runner) = &operation.runner {
@@ -4890,6 +4934,7 @@ async fn finalize_mission_resources(
         .map_err(|_| internal_error())?
         .remove(mission_id)
         .inspect(|operation| operation.gate.close());
+    credentials::release(state, mission_id);
     let Some(operation) = operation else {
         return Ok(());
     };
@@ -4934,6 +4979,7 @@ async fn start_failure(
     error: impl std::fmt::Display,
     safe_house: Option<SafeHouse>,
 ) -> ApiErrorResponse {
+    credentials::release(state, mission_id);
     let mut message = error.to_string();
     if let Some(safe_house) = safe_house.filter(SafeHouse::is_isolated) {
         match tokio::task::spawn_blocking(move || safe_house.finish()).await {
@@ -8558,6 +8604,253 @@ mod tests {
         let _ = fs::remove_dir_all(&scratch);
     }
 
+    /// A secret backend that hands out fake values and remembers what it revoked.
+    #[derive(Clone, Default)]
+    struct FakeSecrets {
+        revoked: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl crate::directorates::q::SecretBackend for FakeSecrets {
+        fn acquire(
+            &self,
+            _request: &crate::directorates::q::SecretRequest,
+            names: &[String],
+        ) -> Result<
+            BTreeMap<String, crate::directorates::q::SecretValue>,
+            crate::directorates::q::SecretBackendFailure,
+        > {
+            Ok(names
+                .iter()
+                .map(|name| {
+                    let value = format!("fake-{name}-0451");
+                    (
+                        name.clone(),
+                        crate::directorates::q::SecretValue::new(value),
+                    )
+                })
+                .collect())
+        }
+
+        fn revoke(
+            &self,
+            lease_id: &str,
+        ) -> Result<(), crate::directorates::q::SecretBackendFailure> {
+            self.revoked.lock().unwrap().push(lease_id.to_owned());
+            Ok(())
+        }
+    }
+
+    /// Every regular file under `root` whose bytes contain `needle`. A FIFO is skipped: opening
+    /// one to read waits for a writer.
+    fn files_holding(root: &Path, needle: &str) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(dir) = pending.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                if kind.is_dir() {
+                    pending.push(path);
+                } else if kind.is_file()
+                    && fs::read(&path).is_ok_and(|bytes| {
+                        bytes
+                            .windows(needle.len())
+                            .any(|window| window == needle.as_bytes())
+                    })
+                {
+                    found.push(path);
+                }
+            }
+        }
+        found
+    }
+
+    fn credential_loadouts() -> crate::directorates::q::LoadoutCatalog {
+        "[loadout.007]\nsecrets = [\"forge-token\", \"release-token\"]\n\n\
+         [secret.release-token]\nenv = \"RELEASE_TOKEN\"\ngreen_ink = true\nkinds = [\"release\"]\n"
+            .parse()
+            .unwrap()
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_session_gets_its_leased_credentials_and_a_green_ink_one_only_with_an_approval() {
+        let root = tempfile::tempdir().unwrap();
+        let theater_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(theater_root.path().join("work")).unwrap();
+        let (mut state, _) = remote_hands_state(root.path(), theater_root.path(), phone());
+        let mission_id = format!("credentials-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "release the build".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let secrets = FakeSecrets::default();
+        state.station = state
+            .station
+            .clone()
+            .with_loadouts(credential_loadouts())
+            .with_secret_backend(secrets.clone());
+        let recorded = |starts: bool| {
+            if starts {
+                RECORDED_STARTS
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|request| request.mission_id.as_str() == mission_id)
+                    .map(|request| request.environment.clone())
+            } else {
+                RECORDED_RESUMES
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|request| request.mission_id.as_str() == mission_id)
+                    .map(|request| request.environment.clone())
+            }
+            .expect("the handler was called")
+        };
+
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let environment = recorded(true);
+        assert_eq!(environment["FORGE_TOKEN"], "fake-forge-token-0451");
+        assert!(
+            !environment.contains_key("RELEASE_TOKEN"),
+            "a green ink credential waits for its approval"
+        );
+        for place in [root.path(), theater_root.path()] {
+            assert!(
+                files_holding(place, "fake-forge-token").is_empty(),
+                "no lease value is written on the Station or the Theater"
+            );
+        }
+        let leased: Vec<_> = state
+            .intake
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "credential")
+            .collect();
+        assert_eq!(leased.len(), 1);
+        assert_eq!(leased[0].detail["secrets"], "forge-token");
+
+        // An approval of another kind does not unlock it; a release approval does, once.
+        let now = state.clock.now() as f64;
+        let session = SessionId::try_new("provider-session-remote").unwrap();
+        for (kind, target) in [
+            ("push", "origin:refs/heads/main"),
+            ("release", "tag v1.0.0"),
+        ] {
+            let request = crate::directorates::registry::approvals::ApprovalRequest::try_new(
+                "G",
+                MissionId::try_new(&mission_id).unwrap(),
+                session.clone(),
+                "007",
+                crate::ActionScope::try_new(kind, target).unwrap(),
+                "ship it",
+                kind,
+            )
+            .unwrap()
+            .expiring(now, Duration::from_secs(600));
+            state.intake.request_approval(&request).unwrap();
+            if kind == "release" {
+                continue;
+            }
+            state
+                .intake
+                .decide_approval(
+                    "G",
+                    &request.id,
+                    &crate::Ruling::approve("operator", now, now + 600.0),
+                )
+                .unwrap();
+        }
+        let resume = |state: DaemonState| {
+            let mission_id = mission_id.clone();
+            async move {
+                let _ = resume_mission(
+                    State(state.clone()),
+                    axum::extract::Path(mission_id.clone()),
+                    Json(ResumeMission {
+                        message: Some("carry on".to_owned()),
+                        environment: BTreeMap::new(),
+                    }),
+                )
+                .await
+                .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+                wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+            }
+        };
+        resume(state.clone()).await;
+        assert!(!recorded(false).contains_key("RELEASE_TOKEN"));
+
+        let release = state
+            .intake
+            .pending_approvals("G", now)
+            .unwrap()
+            .into_iter()
+            .find(|request| request.scope.kind == "release")
+            .unwrap();
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &release.id,
+                &crate::Ruling::approve("operator", now, now + 600.0),
+            )
+            .unwrap();
+        resume(state.clone()).await;
+        let environment = recorded(false);
+        assert_eq!(environment["RELEASE_TOKEN"], "fake-release-token-0451");
+        assert_eq!(environment["FORGE_TOKEN"], "fake-forge-token-0451");
+        let leased = state.intake.timeline_events("G").unwrap();
+        assert!(leased.iter().any(|event| {
+            event.kind == "credential"
+                && event.detail.get("approval") == Some(&release.id)
+                && event.detail["secrets"] == "forge-token,release-token"
+        }));
+
+        // Single use: the same approval does not lease it again.
+        resume(state.clone()).await;
+        assert!(!recorded(false).contains_key("RELEASE_TOKEN"));
+
+        // Ending the Mission revokes what is still leased.
+        let before = secrets.revoked.lock().unwrap().len();
+        finalize_mission_resources(&state, &mission_id, true)
+            .await
+            .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
+        assert_eq!(secrets.revoked.lock().unwrap().len(), before + 1);
+        assert!(state.station.credentials.issued_for(&mission_id).is_empty());
+        for place in [root.path(), theater_root.path()] {
+            assert!(files_holding(place, "fake-release-token").is_empty());
+        }
+        state.stopping.store(true, Ordering::Release);
+    }
+
     #[test]
     fn the_launch_plan_follows_the_theaters_declared_facts() {
         let root = tempfile::tempdir().unwrap();
@@ -8958,10 +9251,16 @@ mod tests {
             request: AgentStart,
             terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            let script =
-                "i=1; while [ $i -le 40 ]; do echo \"tick $i\"; i=$((i + 1)); sleep 0.05; done";
+            let script = request
+                .environment
+                .get("MOCK_LINES_SCRIPT")
+                .cloned()
+                .unwrap_or_else(|| {
+                    "i=1; while [ $i -le 40 ]; do echo \"tick $i\"; i=$((i + 1)); sleep 0.05; done"
+                        .to_owned()
+                });
             let spec = crate::directorates::q::terminal::Spec {
-                argv: vec!["sh".to_owned(), "-c".to_owned(), script.to_owned()],
+                argv: vec!["sh".to_owned(), "-c".to_owned(), script],
                 cwd: Some(request.working_directory),
                 env: Some(request.environment),
                 rows: 24,
@@ -9077,6 +9376,71 @@ mod tests {
                 .with_transport(theater, Box::new(shell)),
         );
         (state, link, forwards)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_wrapped_harness_holds_its_credentials_in_memory_and_the_theater_disk_never_does() {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let theater = Theater::new(
+            "box",
+            TheaterAccess::Transport(crate::TransportAccess::new("shell")),
+        )
+        .with_harness("mock-lines")
+        .with_workdir(work.to_string_lossy().into_owned());
+        let (mut state, _link, _forwards) = shell_station(root.path(), theater, "mock-lines", None);
+        state.station = state
+            .station
+            .clone()
+            .with_loadouts(credential_loadouts())
+            .with_secret_backend(FakeSecrets::default());
+        // The harness says how long its credential is, never what it is.
+        let script = "echo \"forge ${#FORGE_TOKEN}\"; echo \"release ${RELEASE_TOKEN:-absent}\"; \
+                      sleep 0.2";
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::from([("MOCK_LINES_SCRIPT".to_owned(), script.to_owned())]),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        let mut lines = Vec::new();
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                match pop_event(&state, "mission-1") {
+                    Some(event) if event.kind == "completed" => break,
+                    Some(event) => lines.extend(event.text),
+                    None => tokio::time::sleep(Duration::from_millis(5)).await,
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the Session did not complete: {lines:?}"));
+        assert_eq!(
+            lines,
+            [
+                format!("forge {}", "fake-forge-token-0451".len()),
+                "release absent".to_owned()
+            ]
+        );
+        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        let home = root.path().join("home");
+        assert!(
+            home.join(".ai6/detached").is_dir(),
+            "the harness ran wrapped"
+        );
+        assert_eq!(
+            files_holding(root.path(), "fake-forge-token"),
+            Vec::<PathBuf>::new(),
+            "the credential passed through a FIFO and was never written on the Theater"
+        );
+        assert!(state.station.credentials.issued_for("mission-1").is_empty());
     }
 
     /// Collects the Mission's events until it completes, dropping the link for a while once

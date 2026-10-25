@@ -14,6 +14,7 @@ pub use sandbox::{SandboxError, SandboxRequest};
 pub use secrets::{
     DEFAULT_SECRET_LEASE_TTL, MAX_SECRET_LEASE_TTL, SecretBackend, SecretBackendFailure,
     SecretBroker, SecretError, SecretLease, SecretLeaseRequest, SecretRequest, SecretValue,
+    StationSecrets,
 };
 
 use std::collections::BTreeMap;
@@ -237,12 +238,82 @@ impl McpServer {
     }
 }
 
+/// Where the Station's own backend ([`StationSecrets`]) reads a secret's value.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretSource {
+    /// An environment variable of the Station's process.
+    Env(String),
+    /// A file on the Station; one trailing newline is dropped.
+    File(PathBuf),
+}
+
+/// How a loadout secret reaches a Session: `[secret.<name>]`.
+///
+/// Every key has a default, so a secret a loadout names needs no table of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretDefinition {
+    name: String,
+    env: String,
+    green_ink: bool,
+    kinds: Vec<String>,
+    source: SecretSource,
+}
+
+impl SecretDefinition {
+    /// The definition every key at its default: the Session variable is the name in upper
+    /// case with `-` and `.` as `_`, read on the Station from `AI6_SECRET_<that variable>`.
+    pub fn new(name: impl Into<String>) -> Self {
+        let name = name.into();
+        let env: String = name
+            .chars()
+            .map(|c| match c {
+                '-' | '.' => '_',
+                other => other.to_ascii_uppercase(),
+            })
+            .collect();
+        Self {
+            source: SecretSource::Env(format!("AI6_SECRET_{env}")),
+            name,
+            env,
+            green_ink: false,
+            kinds: Vec::new(),
+        }
+    }
+
+    /// The secret's name in loadouts.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The environment variable a Session sees it in.
+    pub fn env(&self) -> &str {
+        &self.env
+    }
+
+    /// Whether it is leased only while the Mission holds a live green ink approval.
+    pub fn green_ink(&self) -> bool {
+        self.green_ink
+    }
+
+    /// The approval kinds that unlock a green ink secret; empty means any.
+    pub fn kinds(&self) -> &[String] {
+        &self.kinds
+    }
+
+    /// Where [`StationSecrets`] reads it.
+    pub fn source(&self) -> &SecretSource {
+        &self.source
+    }
+}
+
 /// Validated loadouts and the named policies they reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadoutCatalog {
     loadouts: BTreeMap<String, Loadout>,
     sandboxes: BTreeMap<String, SandboxProfile>,
     servers: BTreeMap<String, McpServer>,
+    secrets: BTreeMap<String, SecretDefinition>,
 }
 
 impl LoadoutCatalog {
@@ -316,6 +387,25 @@ impl LoadoutCatalog {
     pub fn mcp_servers(&self) -> impl Iterator<Item = &McpServer> {
         self.servers.values()
     }
+
+    /// How the secret `name` reaches a Session: its `[secret.<name>]` table, or every default.
+    pub fn secret(&self, name: &str) -> SecretDefinition {
+        self.secrets
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| SecretDefinition::new(name))
+    }
+
+    /// The definition of every secret any loadout names, in stable name order.
+    pub fn secrets(&self) -> Vec<SecretDefinition> {
+        let names: std::collections::BTreeSet<&String> = self
+            .loadouts
+            .values()
+            .flat_map(|loadout| &loadout.secrets)
+            .chain(self.secrets.keys())
+            .collect();
+        names.into_iter().map(|name| self.secret(name)).collect()
+    }
 }
 
 impl FromStr for LoadoutCatalog {
@@ -336,6 +426,26 @@ struct Document {
     sandbox: BTreeMap<String, RawSandbox>,
     #[serde(default)]
     mcp: BTreeMap<String, RawMcpServer>,
+    #[serde(default)]
+    secret: BTreeMap<String, RawSecret>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSecret {
+    env: Option<String>,
+    #[serde(default)]
+    green_ink: bool,
+    #[serde(default)]
+    kinds: Vec<String>,
+    from: Option<RawSource>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+enum RawSource {
+    Env(String),
+    File(String),
 }
 
 #[derive(Deserialize)]
@@ -458,6 +568,37 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
         );
     }
 
+    let mut secrets = BTreeMap::new();
+    for (name, raw) in document.secret {
+        validate_name(&name, QErrorKind::Schema, path.clone())?;
+        let mut definition = SecretDefinition::new(&name);
+        if let Some(env) = raw.env {
+            definition.env = env;
+        }
+        if !crate::directorates::q::transport::kit::is_variable_name(&definition.env) {
+            return Err(QError::new(QErrorKind::Schema, path));
+        }
+        definition.source = match raw.from {
+            Some(RawSource::Env(variable))
+                if crate::directorates::q::transport::kit::is_variable_name(&variable) =>
+            {
+                SecretSource::Env(variable)
+            }
+            Some(RawSource::File(file)) if !file.trim().is_empty() => {
+                SecretSource::File(PathBuf::from(file))
+            }
+            Some(_) => return Err(QError::new(QErrorKind::Schema, path)),
+            None => SecretSource::Env(format!("AI6_SECRET_{}", definition.env)),
+        };
+        validate_names(&raw.kinds, QErrorKind::Schema, path.clone())?;
+        if !raw.kinds.is_empty() && !raw.green_ink {
+            return Err(QError::new(QErrorKind::Schema, path));
+        }
+        definition.green_ink = raw.green_ink;
+        definition.kinds = raw.kinds;
+        secrets.insert(name, definition);
+    }
+
     for loadout in loadouts.values() {
         if loadout
             .sandbox
@@ -473,6 +614,7 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
         loadouts,
         sandboxes,
         servers,
+        secrets,
     })
 }
 
@@ -611,6 +753,55 @@ deny = ["git push --force"]
             LoadoutCatalog::from_str(&input).unwrap_err().kind(),
             QErrorKind::TooLarge
         );
+    }
+
+    #[test]
+    fn secrets_default_their_variable_and_source_and_green_ink_needs_its_flag() {
+        let catalog = LoadoutCatalog::from_str(
+            r#"
+[loadout.007]
+secrets = ["forge-token", "release"]
+
+[secret.release]
+env = "GH_TOKEN"
+green_ink = true
+kinds = ["release", "push"]
+from = { file = "/etc/ai6/secrets/release" }
+"#,
+        )
+        .unwrap();
+        let forge = catalog.secret("forge-token");
+        assert_eq!(forge.env(), "FORGE_TOKEN");
+        assert_eq!(
+            forge.source(),
+            &super::SecretSource::Env("AI6_SECRET_FORGE_TOKEN".to_owned())
+        );
+        assert!(!forge.green_ink() && forge.kinds().is_empty());
+        let release = catalog.secret("release");
+        assert_eq!(release.env(), "GH_TOKEN");
+        assert!(release.green_ink());
+        assert_eq!(release.kinds(), ["release", "push"]);
+        assert_eq!(
+            catalog
+                .secrets()
+                .iter()
+                .map(|definition| definition.name())
+                .collect::<Vec<_>>(),
+            ["forge-token", "release"]
+        );
+        for bad in [
+            "[loadout.007]\n[secret.x]\nenv = \"not a name\"\n",
+            "[loadout.007]\n[secret.x]\nkinds = [\"push\"]\n",
+            "[loadout.007]\n[secret.x]\nfrom = { env = \"\" }\n",
+            "[loadout.007]\n[secret.x]\nfrom = { vault = \"x\" }\n",
+            "[loadout.007]\n[secret.x]\nvalue = \"inline\"\n",
+        ] {
+            assert_eq!(
+                LoadoutCatalog::from_str(bad).unwrap_err().kind(),
+                QErrorKind::Schema,
+                "{bad}"
+            );
+        }
     }
 
     #[test]
