@@ -165,6 +165,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai6-theater-container"
+version = "0.1.0"
+dependencies = [
+ "ai6",
+ "ai6-transport-container",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "ai6-transport-adb"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,24 @@
+[package]
+name = "ai6-theater-container"
+description = "An AI6 Theater provider that makes a fresh Docker or Podman container per Mission and removes it afterwards"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+exclude = [".*", "*.local.*"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+ai6 = { path = "../../../ai6", default-features = false }
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+ai6 = { path = "../../../ai6", features = ["daemon"] }
+ai6-transport-container = { path = "../../transports/container" }
+serde_json.workspace = true

@@ -9,6 +9,7 @@ members = [
     "crates/providers/safehouses/*",
     "crates/providers/sources/*",
     "crates/providers/terminals/*",
+    "crates/providers/theaters/*",
     "crates/providers/transports/*",
 ]
 
