@@ -63,6 +63,10 @@ pub struct Mission {
     /// When a parked Mission resumes, as Unix seconds; set only while `state` is `Parked`.
     #[serde(default)]
     pub parked_until: Option<i64>,
+    /// Why a blocked Mission stopped when AI6 itself stopped it (`budget`); unset when the
+    /// Agent or the terminal is what is waiting. Cleared by the next state change.
+    #[serde(default)]
+    pub blocked_reason: Option<String>,
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -185,6 +189,7 @@ impl MissionStore {
             cover: None,
             revision: 1,
             parked_until: None,
+            blocked_reason: None,
         };
         let mut next = self.missions.clone();
         next.insert(key, mission.clone());
@@ -279,6 +284,7 @@ impl MissionStore {
         }
         mission.state = state;
         mission.parked_until = None;
+        mission.blocked_reason = None;
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
@@ -305,6 +311,29 @@ impl MissionStore {
         }
         mission.state = MissionState::Parked;
         mission.parked_until = Some(until);
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
+    /// Blocks an active Mission because AI6 stopped it, recording `reason`.
+    ///
+    /// Blocking again with another reason replaces the reason, so a repeated stop is harmless.
+    pub fn block_for(&mut self, mission_id: &str, reason: &str) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.state != MissionState::Blocked
+            && !valid_transition(mission.state, MissionState::Blocked)
+        {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Blocked,
+            });
+        }
+        mission.state = MissionState::Blocked;
+        mission.parked_until = None;
+        mission.blocked_reason = Some(reason.to_owned());
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
@@ -346,6 +375,7 @@ impl MissionStore {
         }
         mission.state = MissionState::Queued;
         mission.parked_until = None;
+        mission.blocked_reason = None;
         mission.agent_id = Some(agent_id);
         mission.revision += 1;
         let updated = mission.clone();

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
+use crate::directorates::medical::usage::{Budget, BudgetDefinition};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
 use crate::directorates::registry::sleepers::Sleeper;
 use crate::directorates::registry::store::validate_station_id;
@@ -50,6 +51,8 @@ pub struct Agent {
     pub env: BTreeMap<String, String>,
     /// Watchdog limits layered over the daemon settings.
     pub limits: WatchdogOverrides,
+    /// Spending limits for this Agent's Sessions, layered over its Operation's.
+    pub budget: Budget,
     /// Optional concurrent operation limit.
     pub max_concurrent: Option<usize>,
 }
@@ -126,6 +129,8 @@ pub struct Operation {
     pub on_limit: OnLimit,
     /// Seconds to park when a limit reports no reset time.
     pub limit_fallback_secs: u64,
+    /// Spending limits for this Operation's Missions; none is set unless configured.
+    pub budget: Budget,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
@@ -227,6 +232,14 @@ impl Roster {
         let agents_file = root.join(AGENTS_FILE);
         if agents_file.exists() {
             let document: AgentsDocument = parse_file(&agents_file)?;
+            for (id, definition) in &document.agent {
+                definition.budget.resolve().map_err(|message| {
+                    error(format!(
+                        "{}: Agent {id:?}: {message}",
+                        agents_file.display()
+                    ))
+                })?;
+            }
             roster.agents = document.agent;
             for (id, definition) in document.role {
                 roster
@@ -469,6 +482,7 @@ struct OperationDefinition {
     on_blown: String,
     on_limit: OnLimit,
     limit_fallback_secs: Option<u64>,
+    budget: BudgetDefinition,
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
 }
@@ -525,6 +539,9 @@ impl OperationDefinition {
         self.refuse_replaced_keys(&id, source)?;
         let path = self.path.map(|path| expand_path(&path));
         let config = self.config.map(|path| expand_path(&path));
+        let budget = self.budget.resolve().map_err(|message| {
+            error(format!("{}: Operation {id:?}: {message}", source.display()))
+        })?;
         let operation = Operation {
             id,
             name: self.name,
@@ -571,6 +588,7 @@ impl OperationDefinition {
             limit_fallback_secs: self
                 .limit_fallback_secs
                 .unwrap_or(DEFAULT_LIMIT_FALLBACK_SECS),
+            budget,
             sources: self.sources,
             sleepers: self.sleepers,
         };
@@ -667,6 +685,7 @@ struct AgentDefinition {
     context: Option<String>,
     env: BTreeMap<String, String>,
     limits: WatchdogOverrides,
+    budget: BudgetDefinition,
     max_concurrent: Option<usize>,
 }
 
@@ -748,6 +767,10 @@ fn resolve_agent(
         .map(|agent| agent.env.clone())
         .unwrap_or_default();
     env.extend(definition.env.clone());
+    let own_budget = definition
+        .budget
+        .resolve()
+        .map_err(|message| error(format!("Agent {id:?}: {message}")))?;
     let agent = Agent {
         id,
         description: if definition.description.is_empty() {
@@ -803,6 +826,9 @@ fn resolve_agent(
             .as_ref()
             .map(|agent| agent.limits.merge(&definition.limits))
             .unwrap_or_else(|| definition.limits.clone()),
+        budget: base
+            .as_ref()
+            .map_or(own_budget, |agent| agent.budget.merge(&own_budget)),
         max_concurrent: definition
             .max_concurrent
             .or_else(|| base.as_ref().and_then(|agent| agent.max_concurrent)),
@@ -1091,6 +1117,59 @@ sources = {{ jira = \"GUA\" }}\n",
         for invalid in ["on_limit = \"retry\"", "limit_fallback_secs = 0"] {
             directory.write("operations.toml", &format!("[operation.C]\n{invalid}\n"));
             assert!(Roster::load(&directory.0).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn budgets_are_unset_by_default_and_layer_from_preset_to_agent() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "operations.toml",
+            "[operation.A]\n[operation.B.budget]\npreset = \"strict\"\nmission_cost_usd = 3\n",
+        );
+        directory.write(
+            "agents.toml",
+            "[agent.base.budget]\nsession_tokens = 1000\n[agent.child]\nextends = \"base\"\n[agent.child.budget]\nwarn_at = 0.5\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        assert!(!roster.operation("A").unwrap().budget.is_limited());
+        let strict = roster.operation("B").unwrap().budget;
+        assert_eq!(strict.mission_cost_micro_usd, Some(3_000_000));
+        assert!(strict.session_tokens.is_some());
+        let child = roster.agent(None, "child").unwrap().budget;
+        assert_eq!(child.session_tokens, Some(1000));
+        assert_eq!(child.warn_at_permille, Some(500));
+    }
+
+    #[test]
+    fn a_negative_or_non_numeric_budget_is_refused_naming_its_key() {
+        let directory = TestDirectory::new();
+        for (file, text, key) in [
+            (
+                "operations.toml",
+                "[operation.A.budget]\nmission_tokens = -5\n",
+                "mission_tokens",
+            ),
+            (
+                "operations.toml",
+                "[operation.A.budget]\nmission_cost_usd = \"lots\"\n",
+                "mission_cost_usd",
+            ),
+            (
+                "agents.toml",
+                "[agent.007.budget]\nsession_tokens = 1.5\n",
+                "session_tokens",
+            ),
+            (
+                "agents.toml",
+                "[agent.007.budget]\nwarn_at = 2\n",
+                "warn_at",
+            ),
+        ] {
+            directory.write(file, text);
+            let message = Roster::load(&directory.0).unwrap_err().to_string();
+            assert!(message.contains(key), "{text}: {message}");
+            directory.write(file, "");
         }
     }
 

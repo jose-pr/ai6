@@ -13,10 +13,11 @@ use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    UsageLimit,
+    TokenUsage, UsageLimit,
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
+use ai6::micro_usd;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -84,6 +85,7 @@ impl AgentHandler for ClaudeHandler {
         if let Some(effort) = request.effort.as_ref() {
             argv.extend(["--effort".to_string(), effort.clone()]);
         }
+        add_budget(&mut argv, request.max_cost_micro_usd);
         add_cables_mcp(&mut argv, &request.environment);
         let session = spawn(
             terminal,
@@ -120,6 +122,7 @@ impl AgentHandler for ClaudeHandler {
         if let Some(effort) = request.effort {
             argv.extend(["--effort".to_string(), effort]);
         }
+        add_budget(&mut argv, request.max_cost_micro_usd);
         add_cables_mcp(&mut argv, &request.environment);
         let session = spawn(
             terminal,
@@ -157,6 +160,43 @@ fn add_cables_mcp(argv: &mut Vec<String>, environment: &BTreeMap<String, String>
         }
     });
     argv.extend(["--mcp-config".to_owned(), config.to_string()]);
+}
+
+/// Gives Claude Code its own spend ceiling for this process (print mode only).
+fn add_budget(argv: &mut Vec<String>, max_cost_micro_usd: Option<u64>) {
+    if let Some(micro) = max_cost_micro_usd {
+        argv.extend([
+            "--max-budget-usd".to_owned(),
+            format!("{}.{:06}", micro / 1_000_000, micro % 1_000_000),
+        ]);
+    }
+}
+
+/// The usage a `result` event reports: `usage` token counts and `total_cost_usd`, both
+/// running totals for the Claude Code process.
+fn decode_usage(value: &Value) -> Option<TokenUsage> {
+    if value.get("type").and_then(Value::as_str)? != "result" {
+        return None;
+    }
+    let usage = value.get("usage");
+    let cost = value.get("total_cost_usd").and_then(Value::as_f64);
+    if usage.is_none() && cost.is_none() {
+        return None;
+    }
+    let count = |key: &str| {
+        usage
+            .and_then(|usage| usage.get(key))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
+    Some(TokenUsage {
+        input: count("input_tokens"),
+        output: count("output_tokens"),
+        cache_read: count("cache_read_input_tokens"),
+        cache_write: count("cache_creation_input_tokens"),
+        cost_micro_usd: cost.map_or(0, micro_usd),
+        cumulative: true,
+    })
 }
 
 struct ClaudeSession {
@@ -384,6 +424,7 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
         text,
         data: None,
         limit: None,
+        usage: None,
     }
 }
 
@@ -458,6 +499,7 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
             text,
             data: Some(line),
             limit: Some(limit),
+            usage: decode_usage(value),
         });
     }
     let kind = match event_type {
@@ -481,6 +523,7 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
         text,
         data: Some(line),
         limit: None,
+        usage: decode_usage(value),
     })
 }
 
@@ -728,6 +771,7 @@ mod tests {
                     environment: environment.clone(),
                     model: Some("sonnet".to_owned()),
                     effort: Some("high".to_owned()),
+                    max_cost_micro_usd: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -752,6 +796,7 @@ mod tests {
                     environment,
                     model: Some("sonnet".to_owned()),
                     effort: Some("high".to_owned()),
+                    max_cost_micro_usd: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -895,6 +940,7 @@ mod tests {
                     environment: BTreeMap::from([("TOKEN".to_owned(), "fresh".to_owned())]),
                     model: Some("sonnet".to_owned()),
                     effort: Some("high".to_owned()),
+                    max_cost_micro_usd: None,
                 },
                 terminal.into_object(),
             )
@@ -958,6 +1004,7 @@ mod tests {
                 environment: BTreeMap::new(),
                 model: None,
                 effort: None,
+                max_cost_micro_usd: None,
             },
             terminal.into_object(),
         ) {
@@ -1102,5 +1149,78 @@ mod tests {
         assert!(argv[2].contains("${AI6_CABLE_MCP_URL}"));
         assert!(argv[2].contains("${AI6_CABLE_MCP_TOKEN}"));
         assert!(!argv[2].contains("session-secret-token"));
+    }
+
+    /// The shape Claude Code 2.1 prints for a finished turn. The field names follow its
+    /// stream-json output; the figures are invented.
+    fn result_with_usage() -> Value {
+        json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "result": "done",
+            "session_id": "claude-session-7",
+            "total_cost_usd": 0.0123456,
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 345,
+                "cache_creation_input_tokens": 6789,
+                "cache_read_input_tokens": 101112
+            }
+        })
+    }
+
+    #[test]
+    fn a_result_reports_tokens_and_cost_as_running_totals() {
+        let event = decode_event(&result_with_usage(), b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, "completed");
+        assert_eq!(
+            event.usage,
+            Some(TokenUsage {
+                input: 12,
+                output: 345,
+                cache_read: 101_112,
+                cache_write: 6_789,
+                cost_micro_usd: 12_346,
+                cumulative: true,
+            })
+        );
+    }
+
+    #[test]
+    fn only_a_result_carries_usage_and_a_cost_alone_is_enough() {
+        let assistant = json!({ "type": "assistant", "usage": { "input_tokens": 5 } });
+        assert_eq!(
+            decode_event(&assistant, b"{}".to_vec()).unwrap().usage,
+            None
+        );
+        let bare = json!({ "type": "result", "result": "ok" });
+        assert_eq!(decode_event(&bare, b"{}".to_vec()).unwrap().usage, None);
+        let cost_only = json!({ "type": "result", "total_cost_usd": 1.5 });
+        let usage = decode_event(&cost_only, b"{}".to_vec())
+            .unwrap()
+            .usage
+            .unwrap();
+        assert_eq!((usage.input, usage.cost_micro_usd), (0, 1_500_000));
+    }
+
+    #[test]
+    fn a_limit_error_result_keeps_its_usage() {
+        let mut value = result_with_usage();
+        value["is_error"] = json!(true);
+        value["result"] = json!("Claude AI usage limit reached|1790000000");
+        let event = decode_event(&value, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, LIMIT_EVENT);
+        assert_eq!(event.usage.unwrap().output, 345);
+    }
+
+    #[test]
+    fn a_spend_ceiling_is_passed_as_max_budget_usd() {
+        let mut argv = vec!["claude".to_owned()];
+        add_budget(&mut argv, Some(2_500_007));
+        assert_eq!(argv[1..], ["--max-budget-usd", "2.500007"]);
+        let mut none = vec!["claude".to_owned()];
+        add_budget(&mut none, None);
+        assert_eq!(none.len(), 1);
     }
 }

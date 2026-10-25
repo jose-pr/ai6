@@ -30,6 +30,9 @@ pub struct AgentStart {
     pub model: Option<String>,
     /// The requested reasoning effort, when supported by the handler.
     pub effort: Option<String>,
+    /// Spend, in millionths of a dollar, after which the harness should stop on its own, when
+    /// it can; AI6 enforces its budgets itself regardless.
+    pub max_cost_micro_usd: Option<u64>,
 }
 
 /// How AI6 resumes a provider-issued Session.
@@ -50,6 +53,9 @@ pub struct AgentResume {
     pub model: Option<String>,
     /// The requested reasoning effort when the harness supports it on resume.
     pub effort: Option<String>,
+    /// Spend, in millionths of a dollar, after which the harness should stop on its own, when
+    /// it can; AI6 enforces its budgets itself regardless.
+    pub max_cost_micro_usd: Option<u64>,
 }
 
 /// A message AI6 sends to an already running Agent Session.
@@ -77,6 +83,27 @@ pub struct UsageLimit {
     pub window: Option<String>,
 }
 
+/// Tokens and cost a provider reported for a Session, as the provider reports them.
+///
+/// Money is an integer count of millionths of a dollar so records never carry floats.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[map(crate = ::guatiao)]
+pub struct TokenUsage {
+    /// Prompt tokens that were not served from the cache.
+    pub input: u64,
+    /// Tokens the model generated.
+    pub output: u64,
+    /// Prompt tokens read from the provider's cache.
+    pub cache_read: u64,
+    /// Prompt tokens written to the provider's cache.
+    pub cache_write: u64,
+    /// Cost in millionths of a dollar; `0` when the provider reports no cost.
+    pub cost_micro_usd: u64,
+    /// Whether the figures are running totals since the provider process started (`true`)
+    /// or only what the last step added (`false`).
+    pub cumulative: bool,
+}
+
 /// One provider event returned to the daemon.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize)]
 #[map(crate = ::guatiao)]
@@ -89,6 +116,8 @@ pub struct AgentEvent {
     pub data: Option<Vec<u8>>,
     /// The limit that stopped the Session; set only on a `limit` event.
     pub limit: Option<UsageLimit>,
+    /// Token usage and cost the provider reported with this event.
+    pub usage: Option<TokenUsage>,
 }
 
 /// Starts or resumes the configured Agent implementation.

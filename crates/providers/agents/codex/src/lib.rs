@@ -14,7 +14,7 @@ use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    UsageLimit,
+    TokenUsage, UsageLimit,
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
@@ -352,6 +352,28 @@ fn decode_limit(
     Some((UsageLimit { resets_at, window }, text))
 }
 
+/// The tokens one model request used, from a `thread/tokenUsage/updated` notification.
+///
+/// The notification also carries the thread's running total, which survives a resume, so
+/// only `last` (the latest request) is read and reported as an addition. Codex reports no
+/// cost. Its `inputTokens` include the cached ones, which are split out here.
+fn decode_usage(message: &Value) -> Option<TokenUsage> {
+    if message.get("method")?.as_str()? != "thread/tokenUsage/updated" {
+        return None;
+    }
+    let last = message.pointer("/params/tokenUsage/last")?;
+    let count = |key: &str| last.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let cached = count("cachedInputTokens");
+    Some(TokenUsage {
+        input: count("inputTokens").saturating_sub(cached),
+        output: count("outputTokens"),
+        cache_read: cached,
+        cache_write: 0,
+        cost_micro_usd: 0,
+        cumulative: false,
+    })
+}
+
 fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent> {
     let method = message.get("method")?.as_str().unwrap_or("event");
     if let Some((limit, text)) = decode_limit(message, hint) {
@@ -360,6 +382,7 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
             text,
             data: serde_json::to_vec(message).ok(),
             limit: Some(limit),
+            usage: None,
         });
     }
     let kind = match method {
@@ -378,6 +401,7 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
         text,
         data: serde_json::to_vec(message).ok(),
         limit: None,
+        usage: decode_usage(message),
     })
 }
 
@@ -722,6 +746,7 @@ mod tests {
                     environment: environment.clone(),
                     model: Some("gpt-5".to_owned()),
                     effort: Some("high".to_owned()),
+                    max_cost_micro_usd: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -747,6 +772,7 @@ mod tests {
                     environment,
                     model: Some("gpt-5".to_owned()),
                     effort: Some("high".to_owned()),
+                    max_cost_micro_usd: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -885,6 +911,7 @@ mod tests {
                     environment: BTreeMap::from([("TOKEN".to_owned(), "fresh".to_owned())]),
                     model: Some("gpt-5".to_owned()),
                     effort: Some("high".to_owned()),
+                    max_cost_micro_usd: None,
                 },
                 terminal.into_object(),
             )
@@ -947,6 +974,7 @@ mod tests {
                 environment: BTreeMap::new(),
                 model: None,
                 effort: None,
+                max_cost_micro_usd: None,
             },
             terminal.into_object(),
         );
@@ -1081,5 +1109,52 @@ mod tests {
             argv.iter()
                 .all(|argument| !argument.contains("session-secret-token"))
         );
+    }
+
+    /// The `thread/tokenUsage/updated` notification as the app-server protocol's schema
+    /// describes it; the figures are invented.
+    fn token_usage_notification() -> Value {
+        json!({
+            "method": "thread/tokenUsage/updated",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "tokenUsage": {
+                    "total": { "totalTokens": 9000, "inputTokens": 8000, "cachedInputTokens": 3000,
+                               "outputTokens": 1000, "reasoningOutputTokens": 200 },
+                    "last": { "totalTokens": 1500, "inputTokens": 1200, "cachedInputTokens": 700,
+                              "outputTokens": 300, "reasoningOutputTokens": 50 },
+                    "modelContextWindow": 272000
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn a_token_usage_notification_reports_the_last_request_as_an_addition() {
+        let event = decode_event(&token_usage_notification(), None).unwrap();
+        assert_eq!(event.kind, "thread/tokenUsage/updated");
+        assert_eq!(
+            event.usage,
+            Some(TokenUsage {
+                input: 500,
+                output: 300,
+                cache_read: 700,
+                cache_write: 0,
+                cost_micro_usd: 0,
+                cumulative: false,
+            })
+        );
+    }
+
+    #[test]
+    fn other_notifications_and_a_total_without_last_carry_no_usage() {
+        let delta = json!({ "method": "item/agentMessage/delta", "params": { "delta": "hi" } });
+        assert_eq!(decode_event(&delta, None).unwrap().usage, None);
+        let total_only = json!({
+            "method": "thread/tokenUsage/updated",
+            "params": { "tokenUsage": { "total": { "totalTokens": 1 } } }
+        });
+        assert_eq!(decode_event(&total_only, None).unwrap().usage, None);
     }
 }

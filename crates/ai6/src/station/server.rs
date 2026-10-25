@@ -2,6 +2,7 @@
 
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
+mod medical;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -30,6 +31,7 @@ use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
 use crate::directorates::m::theaters::{LOCAL_THEATER, Theater, TheaterAccess, Theaters};
+use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
 use crate::directorates::q::safehouse::{SafeHouseReport, SafeHouseSpec};
 use crate::directorates::q::terminal::TerminalBridge;
@@ -2593,6 +2595,7 @@ async fn start_mission(
         environment: environment.clone(),
         model: model.clone(),
         effort: effort.clone(),
+        max_cost_micro_usd: medical::remaining_mission_cost(&state, &mission_id),
     };
     #[cfg(feature = "publisher")]
     let terminal_handle = match &telemetry {
@@ -3015,6 +3018,7 @@ async fn resume_mission(
         environment: environment.clone(),
         model: model.clone(),
         effort: effort.clone(),
+        max_cost_micro_usd: medical::remaining_mission_cost(&state, &mission_id),
     };
     let resumed = tokio::task::spawn_blocking(move || {
         let expected_session_id = resume_request.session_id.clone();
@@ -3230,6 +3234,8 @@ fn spawn_event_pump_with_monitor(
     let event_pumps = state.event_pumps.clone();
     let event_pump = tokio::task::spawn_blocking(move || {
         let mut output_revision = monitor.output_revision();
+        let mut usage_tracker = UsageTracker::default();
+        let mut budget_notices = BTreeSet::new();
         loop {
             if state.stopping.load(Ordering::Acquire) {
                 stop_operation(&state, &mission_id, &session);
@@ -3255,6 +3261,22 @@ fn spawn_event_pump_with_monitor(
                 Ok((Some(event), session_id)) => {
                     monitor.record_activity();
                     attach_observed_session(&state, &mission_id, &session, session_id);
+                    if let Some(reported) = &event.usage
+                        && let Some(recorded) =
+                            medical::record_usage(&state, &mission_id, &mut usage_tracker, reported)
+                        && medical::enforce_budget(
+                            &state,
+                            &mission_id,
+                            &recorded,
+                            &mut budget_notices,
+                        )
+                        .is_some()
+                        && !matches!(event.kind.as_str(), "completed" | "failed" | LIMIT_EVENT)
+                    {
+                        queue_event(&state, &mission_id, event);
+                        medical::stop_for_budget(&state, &mission_id, &session);
+                        break;
+                    }
                     if event.kind == LIMIT_EVENT {
                         handle_limit(&state, &mission_id, &session, event);
                         break;
@@ -3276,6 +3298,7 @@ fn spawn_event_pump_with_monitor(
                         text: Some(error),
                         data: None,
                         limit: None,
+                        usage: None,
                     };
                     let finished = finish_operation(&state, &mission_id, &session);
                     publish_finished_event(&state, &mission_id, event, finished);
@@ -3304,6 +3327,7 @@ fn spawn_event_pump_with_monitor(
                             text: Some("terminal output resumed".to_owned()),
                             data: None,
                             limit: None,
+                            usage: None,
                         },
                     );
                 }
@@ -3322,6 +3346,7 @@ fn spawn_event_pump_with_monitor(
                     text: Some("waiting at a terminal prompt".to_owned()),
                     data: None,
                     limit: None,
+                    usage: None,
                 };
                 apply_event_state(&state, &mission_id, &event);
                 queue_event(&state, &mission_id, event);
@@ -3356,6 +3381,7 @@ fn spawn_event_pump_with_monitor(
                     text: Some(reason),
                     data: None,
                     limit: None,
+                    usage: None,
                 };
                 apply_event_state(&state, &mission_id, &event);
                 queue_event(&state, &mission_id, event);
@@ -4097,6 +4123,7 @@ mod tests {
             text: None,
             data: None,
             limit: None,
+            usage: None,
         };
         let finished = FinishOutcome {
             cover_blown: true,
@@ -4119,6 +4146,7 @@ mod tests {
             text: None,
             data: None,
             limit: None,
+            usage: None,
         };
         let finished = FinishOutcome {
             cover_blown: true,
@@ -4141,7 +4169,7 @@ mod tests {
         CableAction, CableGrant, CablePolicy, CableScope, CableTarget,
     };
     use crate::directorates::section_00::agent::{
-        AgentHandler, AgentResume, AgentStart, UsageLimit,
+        AgentHandler, AgentResume, AgentStart, TokenUsage, UsageLimit,
     };
     use crate::guatiao::library::{Object, ProviderError, Registry};
     use crate::guatiao::{FromValue, Provider, Status, ToValue, Value};
@@ -4457,6 +4485,7 @@ mod tests {
                     text: None,
                     data: None,
                     limit: None,
+                    usage: None,
                 },
             )
         }
@@ -4498,6 +4527,7 @@ mod tests {
                         resets_at,
                         window: Some("five_hour".to_owned()),
                     }),
+                    usage: None,
                 },
             )
             .into_object())
@@ -4516,6 +4546,65 @@ mod tests {
         }
     }
 
+    /// A provider whose Session reports the cumulative usage listed in its Agent's
+    /// `MOCK_USAGE` (`input:output:cost_micro_usd`, comma separated) and then stays quiet.
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "mock-spend", name = "Mock Spend", crate = crate::guatiao)]
+    struct MockSpendHandler;
+
+    impl AgentHandler for MockSpendHandler {
+        fn start(
+            &self,
+            request: AgentStart,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            let reports = request
+                .environment
+                .get("MOCK_USAGE")
+                .map(String::as_str)
+                .unwrap_or_default();
+            let events = reports
+                .split(',')
+                .filter(|report| !report.is_empty())
+                .map(|report| {
+                    let figures: Vec<u64> = report
+                        .split(':')
+                        .map(|figure| figure.parse().unwrap())
+                        .collect();
+                    AgentEvent {
+                        kind: "text".to_owned(),
+                        text: None,
+                        data: None,
+                        limit: None,
+                        usage: Some(TokenUsage {
+                            input: figures[0],
+                            output: figures[1],
+                            cache_read: 0,
+                            cache_write: 0,
+                            cost_micro_usd: figures[2],
+                            cumulative: true,
+                        }),
+                    }
+                })
+                .collect();
+            let session_id = SessionId::try_new("provider-session-spend")
+                .map_err(|error| test_provider_error(&error.to_string()))?;
+            Ok(MockSession {
+                session_id,
+                events: Mutex::new(events),
+            }
+            .into_object())
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(MockSession::new(request.session_id, "completed").into_object())
+        }
+    }
+
     impl AgentSession for MockSession {
         fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
             Ok(Some(self.session_id.clone()))
@@ -4526,11 +4615,16 @@ mod tests {
         }
 
         fn next_event(&self, _timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
-            Ok(self
+            let event = self
                 .events
                 .lock()
                 .map_err(|_| test_provider_error("mock session lock was poisoned"))?
-                .pop_front())
+                .pop_front();
+            if event.is_none() {
+                // An idle provider waits for its timeout instead of spinning the event pump.
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(event)
         }
 
         fn interrupt(&self) -> Result<(), ProviderError> {
@@ -4671,6 +4765,7 @@ mod tests {
         providers = [
             MockHandler,
             MockLimitedHandler,
+            MockSpendHandler,
             MockTerminalProvider,
             MockSafeHouseProvider,
             MockPlainProvider
@@ -5427,7 +5522,7 @@ mod tests {
         );
         assert_eq!(
             stations[0].info()["handlers"],
-            serde_json::json!(["mock-agent", "mock-limit"])
+            serde_json::json!(["mock-agent", "mock-limit", "mock-spend"])
         );
 
         schedule_intake_once(&state);
@@ -6590,5 +6685,149 @@ mod tests {
             .expect("a cover report is recorded");
         assert!(!report.checkable, "no history is not a pass");
         assert!(!report.blown && report.commits == 0 && report.violations.is_empty());
+    }
+
+    /// Waits until the Mission's ledger satisfies `ready`, and returns it.
+    async fn wait_for_usage(
+        state: &DaemonState,
+        mission_id: &str,
+        ready: impl Fn(&crate::MissionUsage) -> bool,
+    ) -> crate::MissionUsage {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(Some(usage)) = state.intake.mission_usage(Some("G"), mission_id)
+                    && ready(&usage)
+                {
+                    return usage;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("Mission {mission_id} never reached the expected usage"))
+    }
+
+    #[tokio::test]
+    async fn crossing_warn_at_is_reported_and_the_limit_blocks_the_mission_with_reason_budget() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "[operation.G.budget]\nmission_cost_usd = 0.01\n",
+            "[agent.007]\nhandler = \"mock-spend\"\n[agent.007.env]\nMOCK_USAGE = \"100:10:5000,250:30:8500,300:40:10500\"\n",
+        );
+        start_mission_one(&state).await;
+        wait_for_state(&state, "mission-1", MissionState::Blocked).await;
+
+        let mission = state
+            .missions
+            .lock()
+            .unwrap()
+            .get("mission-1")
+            .unwrap()
+            .clone();
+        assert_eq!(mission.blocked_reason.as_deref(), Some("budget"));
+        assert!(
+            state.sessions.lock().unwrap().is_empty(),
+            "the Session is stopped"
+        );
+        let mut notices = Vec::new();
+        while let Some(event) = pop_event(&state, "mission-1") {
+            if event.kind == "budget" {
+                notices.push(event.text.unwrap());
+            }
+        }
+        assert_eq!(notices.len(), 2, "{notices:?}");
+        assert!(notices[0].contains("is near") && notices[0].contains("mission_cost_usd"));
+        assert!(notices[1].contains("reached") && notices[1].contains("$0.01"));
+        let actions: Vec<_> = state
+            .intake
+            .list_audit(10)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.action)
+            .collect();
+        assert!(actions.contains(&"budget.warn".to_owned()), "{actions:?}");
+        assert!(actions.contains(&"budget.limit".to_owned()), "{actions:?}");
+        let usage = state
+            .intake
+            .mission_usage(Some("G"), "mission-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(usage.total.cost_micro_usd, 10_500);
+    }
+
+    #[tokio::test]
+    async fn without_a_budget_nothing_is_stopped_however_much_is_spent() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-spend\"\n[agent.007.env]\nMOCK_USAGE = \"100:10:5000000000,900:90:9000000000\"\n",
+        );
+        start_mission_one(&state).await;
+        wait_for_usage(&state, "mission-1", |usage| usage.total.input == 900).await;
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .state,
+            MissionState::Working
+        );
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_mission_cost_limit_becomes_the_harness_spend_ceiling() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "[operation.G.budget]\nmission_cost_usd = 2.0\n",
+            "[agent.007]\nhandler = \"mock-spend\"\n[agent.007.env]\nMOCK_USAGE = \"1:1:500000\"\n",
+        );
+        assert_eq!(
+            medical::remaining_mission_cost(&state, "mission-1"),
+            Some(2_000_000)
+        );
+        start_mission_one(&state).await;
+        wait_for_usage(&state, "mission-1", |usage| {
+            usage.total.cost_micro_usd == 500_000
+        })
+        .await;
+        assert_eq!(
+            medical::remaining_mission_cost(&state, "mission-1"),
+            Some(1_500_000)
+        );
+        assert_eq!(
+            medical::remaining_mission_cost(&state, "mission-2"),
+            Some(2_000_000)
+        );
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn cumulative_provider_usage_is_recorded_once_per_session_and_mission() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-spend\"\n[agent.007.env]\nMOCK_USAGE = \"100:10:5000,250:30:12000\"\n",
+        );
+        start_mission_one(&state).await;
+        let usage = wait_for_usage(&state, "mission-1", |usage| usage.total.input == 250).await;
+
+        assert_eq!(usage.total.output, 30);
+        assert_eq!(usage.total.cost_micro_usd, 12_000);
+        assert_eq!(usage.sessions.len(), 1);
+        let hold = session_hold(&state, "mission-1").unwrap();
+        assert_eq!(usage.sessions[&hold.id], usage.total);
+        assert_eq!(
+            usage.daily_cost_micro_usd.values().sum::<u64>(),
+            12_000,
+            "the cost counts toward one UTC day"
+        );
+        state.stopping.store(true, Ordering::Release);
     }
 }

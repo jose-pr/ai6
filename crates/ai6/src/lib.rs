@@ -31,6 +31,10 @@ pub use directorates::m::theaters::{
     LOCAL_THEATER, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind, TheaterSummary,
     Theaters,
 };
+pub use directorates::medical::usage::{
+    Budget, BudgetBreach, BudgetDefinition, BudgetLevel, BudgetPreset, BudgetScope,
+    DEFAULT_WARN_AT_PERMILLE, MissionUsage, UsageTotals, UsageTracker, micro_usd, utc_day,
+};
 pub use directorates::medical::watchdog::{
     DEFAULT_BLOCKED_AFTER, DEFAULT_LINE_HISTORY, DEFAULT_LOOP_MIN_LINES, DEFAULT_STALL_TIMEOUT,
     Watchdog, WatchdogConfig, WatchdogOverrides,
@@ -71,7 +75,7 @@ pub use directorates::registry::store::{
 };
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    UsageLimit,
+    TokenUsage, UsageLimit,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

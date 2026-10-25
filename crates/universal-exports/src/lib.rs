@@ -14,8 +14,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
-    Authorizer, Brief, Directory, FileRegistry, Lookup, MissionProposal, Person, StationSettings,
-    Verdict,
+    Authorizer, Brief, Directory, FileRegistry, Lookup, MissionProposal, MissionUsage, Person,
+    StationSettings, Verdict,
 };
 use ai6_diptel::{
     FrameReceiver, IncomingFrame, LifecycleEvent, MissionId, OperationId, SessionId, SessionState,
@@ -576,6 +576,19 @@ impl Gateway {
     }
 
     async fn enrich_missions(&self, mut missions: Vec<BoardMission>) -> Vec<BoardMission> {
+        if let Some(registry) = self.registry.clone() {
+            missions = tokio::task::spawn_blocking(move || {
+                for mission in &mut missions {
+                    mission.usage = registry
+                        .mission_usage(Some(&mission.operation_id), &mission.mission_id)
+                        .ok()
+                        .flatten();
+                }
+                missions
+            })
+            .await
+            .unwrap_or_default();
+        }
         let inner = self.inner.lock().await;
         for mission in &mut missions {
             mission.brief = inner.missions.iter().find_map(|((station, id), brief)| {
@@ -1226,6 +1239,15 @@ async fn mission_detail(
         .missions
         .get(&(operation_id, mission_id))
         .cloned();
+    if let Some(registry) = gateway.registry.clone() {
+        let (operation, mission_id) = (mission.operation_id.clone(), mission.mission_id.clone());
+        mission.usage = tokio::task::spawn_blocking(move || {
+            registry.mission_usage(Some(&operation), &mission_id)
+        })
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+    }
     Ok(Json(mission))
 }
 
@@ -1624,6 +1646,7 @@ fn group_missions(sessions: Vec<BoardSession>) -> Vec<BoardMission> {
             mission_id,
             sessions,
             brief: None,
+            usage: None,
         })
         .collect()
 }
@@ -2658,6 +2681,9 @@ pub struct BoardMission {
     pub sessions: Vec<BoardSession>,
     /// Exact Mission brief and sanitized launch manifest published by AI6, when known.
     pub brief: Option<LaunchManifest>,
+    /// Tokens and cost the Mission's Sessions consumed, from the shared Registry ledger;
+    /// absent until a provider reports usage.
+    pub usage: Option<MissionUsage>,
 }
 
 /// AI6 Station overview derived from the shared check-in Registry.
@@ -4853,6 +4879,20 @@ mod tests {
                 .contains("7132")
         );
 
+        FileRegistry::open(directory.path())
+            .record_usage(
+                Some("G"),
+                "mission-g",
+                "session-g",
+                &ai6::UsageTotals {
+                    input: 120,
+                    output: 30,
+                    cost_micro_usd: 4_500,
+                    ..ai6::UsageTotals::default()
+                },
+                1_790_000_000,
+            )
+            .unwrap();
         let mission_detail = client
             .get(format!("{base}/v1/operations/G/missions/mission-g"))
             .bearer_auth(&viewer_token)
@@ -4861,6 +4901,12 @@ mod tests {
             .unwrap();
         assert_eq!(mission_detail.status(), StatusCode::OK);
         let mission_detail: serde_json::Value = mission_detail.json().await.unwrap();
+        assert_eq!(mission_detail["usage"]["total"]["input"], 120);
+        assert_eq!(mission_detail["usage"]["total"]["cost_micro_usd"], 4_500);
+        assert_eq!(
+            mission_detail["usage"]["sessions"]["session-g"]["output"],
+            30
+        );
         assert_eq!(
             mission_detail["brief"]["prompt"],
             "Review the requested change"
