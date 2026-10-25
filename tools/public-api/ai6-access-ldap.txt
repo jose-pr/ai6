@@ -1,0 +1,44 @@
+pub mod ai6_access_ldap
+pub mod ai6_access_ldap::search
+pub const ai6_access_ldap::search::IN_CHAIN: &str
+pub fn ai6_access_ldap::search::disabled(core::option::Option<&str>) -> bool
+pub fn ai6_access_ldap::search::escaped(&str) -> alloc::string::String
+pub fn ai6_access_ldap::search::filter(&str, &str, &str) -> alloc::string::String
+pub fn ai6_access_ldap::search::group_name(&str) -> alloc::string::String
+pub fn ai6_access_ldap::search::in_the_clear(&str, bool) -> bool
+pub struct ai6_access_ldap::LdapAccounts
+impl ai6_access_ldap::LdapAccounts
+pub fn ai6_access_ldap::LdapAccounts::new(ai6_access_ldap::LdapAccountsConfig) -> core::result::Result<Self, alloc::string::String>
+impl ai6::directorates::m::access::Authenticator for ai6_access_ldap::LdapAccounts
+pub fn ai6_access_ldap::LdapAccounts::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Directory for ai6_access_ldap::LdapAccounts
+pub fn ai6_access_ldap::LdapAccounts::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6_access_ldap::LdapAccountsConfig> for ai6_access_ldap::LdapAccounts
+pub type ai6_access_ldap::LdapAccounts::Error = guatiao::library::kind::ProviderError
+pub fn ai6_access_ldap::LdapAccounts::try_from(ai6_access_ldap::LdapAccountsConfig) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for ai6_access_ldap::LdapAccounts
+pub fn ai6_access_ldap::LdapAccounts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::library::kind::parts::ProviderDecl for ai6_access_ldap::LdapAccounts
+pub const ai6_access_ldap::LdapAccounts::KINDS: &'static [&'static str]
+pub fn ai6_access_ldap::LdapAccounts::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6_access_ldap::LdapAccountsConfig
+pub ai6_access_ldap::LdapAccountsConfig::base: alloc::string::String
+pub ai6_access_ldap::LdapAccountsConfig::bind: core::option::Option<alloc::string::String>
+pub ai6_access_ldap::LdapAccountsConfig::bind_password: core::option::Option<alloc::string::String>
+pub ai6_access_ldap::LdapAccountsConfig::ca_file: core::option::Option<alloc::string::String>
+pub ai6_access_ldap::LdapAccountsConfig::group_attribute: alloc::string::String
+pub ai6_access_ldap::LdapAccountsConfig::group_base: core::option::Option<alloc::string::String>
+pub ai6_access_ldap::LdapAccountsConfig::group_filter: core::option::Option<alloc::string::String>
+pub ai6_access_ldap::LdapAccountsConfig::name_attribute: alloc::string::String
+pub ai6_access_ldap::LdapAccountsConfig::nested_groups: bool
+pub ai6_access_ldap::LdapAccountsConfig::start_tls: bool
+pub ai6_access_ldap::LdapAccountsConfig::timeout_seconds: u32
+pub ai6_access_ldap::LdapAccountsConfig::url: alloc::string::String
+pub ai6_access_ldap::LdapAccountsConfig::user_filter: alloc::string::String
+impl core::convert::TryFrom<ai6_access_ldap::LdapAccountsConfig> for ai6_access_ldap::LdapAccounts
+pub type ai6_access_ldap::LdapAccounts::Error = guatiao::library::kind::ProviderError
+pub fn ai6_access_ldap::LdapAccounts::try_from(ai6_access_ldap::LdapAccountsConfig) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for ai6_access_ldap::LdapAccountsConfig
+pub fn ai6_access_ldap::LdapAccountsConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[no_mangle] pub static ai6_access_ldap::guatiao_declares: [u8; 55]
+#[no_mangle] pub unsafe c fn ai6_access_ldap::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

@@ -1,0 +1,24 @@
+pub mod ai6_access_local
+pub struct ai6_access_local::LocalAccounts
+impl ai6_access_local::LocalAccounts
+pub fn ai6_access_local::LocalAccounts::open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, alloc::string::String>
+impl ai6::directorates::m::access::Authenticator for ai6_access_local::LocalAccounts
+pub fn ai6_access_local::LocalAccounts::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Directory for ai6_access_local::LocalAccounts
+pub fn ai6_access_local::LocalAccounts::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6_access_local::LocalAccountsConfig> for ai6_access_local::LocalAccounts
+pub type ai6_access_local::LocalAccounts::Error = guatiao::library::kind::ProviderError
+pub fn ai6_access_local::LocalAccounts::try_from(ai6_access_local::LocalAccountsConfig) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for ai6_access_local::LocalAccounts
+pub fn ai6_access_local::LocalAccounts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::library::kind::parts::ProviderDecl for ai6_access_local::LocalAccounts
+pub const ai6_access_local::LocalAccounts::KINDS: &'static [&'static str]
+pub fn ai6_access_local::LocalAccounts::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6_access_local::LocalAccountsConfig
+pub ai6_access_local::LocalAccountsConfig::path: alloc::string::String
+impl core::convert::TryFrom<ai6_access_local::LocalAccountsConfig> for ai6_access_local::LocalAccounts
+pub type ai6_access_local::LocalAccounts::Error = guatiao::library::kind::ProviderError
+pub fn ai6_access_local::LocalAccounts::try_from(ai6_access_local::LocalAccountsConfig) -> core::result::Result<Self, Self::Error>
+#[no_mangle] pub static ai6_access_local::guatiao_declares: [u8; 55]
+#[no_mangle] pub unsafe c fn ai6_access_local::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>
+pub fn ai6_access_local::hash_password(&str) -> core::result::Result<alloc::string::String, alloc::string::String>

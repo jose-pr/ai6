@@ -1,0 +1,18 @@
+pub mod ai6_agent_claude
+pub struct ai6_agent_claude::ClaudeConfig
+pub ai6_agent_claude::ClaudeConfig::executable: alloc::string::String
+impl core::convert::TryFrom<ai6_agent_claude::ClaudeConfig> for ai6_agent_claude::ClaudeHandler
+pub type ai6_agent_claude::ClaudeHandler::Error = guatiao::library::kind::ProviderError
+pub fn ai6_agent_claude::ClaudeHandler::try_from(ai6_agent_claude::ClaudeConfig) -> core::result::Result<Self, Self::Error>
+pub struct ai6_agent_claude::ClaudeHandler
+impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_claude::ClaudeHandler
+pub fn ai6_agent_claude::ClaudeHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_claude::ClaudeHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6_agent_claude::ClaudeConfig> for ai6_agent_claude::ClaudeHandler
+pub type ai6_agent_claude::ClaudeHandler::Error = guatiao::library::kind::ProviderError
+pub fn ai6_agent_claude::ClaudeHandler::try_from(ai6_agent_claude::ClaudeConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_agent_claude::ClaudeHandler
+pub const ai6_agent_claude::ClaudeHandler::KINDS: &'static [&'static str]
+pub fn ai6_agent_claude::ClaudeHandler::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[no_mangle] pub static ai6_agent_claude::guatiao_declares: [u8; 24]
+#[no_mangle] pub unsafe c fn ai6_agent_claude::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

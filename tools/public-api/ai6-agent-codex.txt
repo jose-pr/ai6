@@ -1,0 +1,18 @@
+pub mod ai6_agent_codex
+pub struct ai6_agent_codex::CodexConfig
+pub ai6_agent_codex::CodexConfig::executable: alloc::string::String
+impl core::convert::TryFrom<ai6_agent_codex::CodexConfig> for ai6_agent_codex::CodexHandler
+pub type ai6_agent_codex::CodexHandler::Error = guatiao::library::kind::ProviderError
+pub fn ai6_agent_codex::CodexHandler::try_from(ai6_agent_codex::CodexConfig) -> core::result::Result<Self, Self::Error>
+pub struct ai6_agent_codex::CodexHandler
+impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_codex::CodexHandler
+pub fn ai6_agent_codex::CodexHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_codex::CodexHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6_agent_codex::CodexConfig> for ai6_agent_codex::CodexHandler
+pub type ai6_agent_codex::CodexHandler::Error = guatiao::library::kind::ProviderError
+pub fn ai6_agent_codex::CodexHandler::try_from(ai6_agent_codex::CodexConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_agent_codex::CodexHandler
+pub const ai6_agent_codex::CodexHandler::KINDS: &'static [&'static str]
+pub fn ai6_agent_codex::CodexHandler::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[no_mangle] pub static ai6_agent_codex::guatiao_declares: [u8; 24]
+#[no_mangle] pub unsafe c fn ai6_agent_codex::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

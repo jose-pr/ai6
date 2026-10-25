@@ -12,9 +12,9 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - "CHANGELOG.md"
-      - "m/src/**"
-      - "i/src/**"
-      - "m/crates/**/*.rs"
+      - "crates/**/*.rs"
+      - "crates/providers/**/*.rs"
+      - "clients/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
     inputs:
@@ -65,20 +65,23 @@ jobs:
           enablement: true
       - name: Build the Rust API reference
         # Strict, so a broken intra-doc link fails here rather than shipping.
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
-      - name: Install the packages and the docs tooling
-        # Editable, because mkdocstrings renders the packages by importing them.
-        run: pip install -e "m[docs]" -e i
-      - name: Build the narrative site and the Python reference
+      - name: Install the narrative docs tooling
+        run: pip install mkdocs mkdocs-material pymdown-extensions
+      - name: Build the narrative site
         run: mkdocs build --strict
+        env:
+          # Material's upstream MkDocs 2.0 banner is not a site diagnostic; keep
+          # strict mode focused on broken links and actual build warnings.
+          NO_MKDOCS_2_WARNING: "1"
       - name: Add the Rust reference under /rust/
-        # cargo doc writes no root index for a workspace, so the kind crate gets one.
+        # Cargo doc writes no root index for a workspace; provide one.
         run: |
           mkdir -p site/rust
           cp -r target/doc/. site/rust/
-          printf '%s' '<!doctype html><meta http-equiv="refresh" content="0; url=coagent_terminal_kind/index.html">' > site/rust/index.html
+          printf '%s' '<!doctype html><meta charset="utf-8"><title>AI6 Rust API</title><h1>AI6 Rust API</h1><ul><li><a href="ai6/index.html">ai6: the Station daemon and AI6 contracts</a></li><li><a href="universal_exports/index.html">universal-exports: the public API gateway</a></li><li><a href="ai6_diptel/index.html">ai6-diptel: the wire contract</a></li><li><a href="ai6_agent_claude/index.html">ai6-agent-claude: Claude Code AgentHandler</a></li><li><a href="ai6_agent_codex/index.html">ai6-agent-codex: Codex AgentHandler</a></li><li><a href="ai6_terminal_pty/index.html">ai6-terminal-pty: the pty terminal provider</a></li><li><a href="ai6_access_key/index.html">ai6-access-key</a></li><li><a href="ai6_access_ldap/index.html">ai6-access-ldap</a></li><li><a href="ai6_access_local/index.html">ai6-access-local</a></li><li><a href="ai6_access_peer/index.html">ai6-access-peer</a></li><li><a href="ai6_access_proxy/index.html">ai6-access-proxy</a></li></ul>' > site/rust/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/

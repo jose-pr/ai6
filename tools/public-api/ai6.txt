@@ -1,0 +1,1885 @@
+pub mod ai6
+pub use ai6::guatiao
+pub mod ai6::directorates
+pub mod ai6::directorates::i
+pub mod ai6::directorates::i::cables
+#[non_exhaustive] pub enum ai6::directorates::i::cables::CableAction
+pub ai6::directorates::i::cables::CableAction::Discover
+pub ai6::directorates::i::cables::CableAction::Receive
+pub ai6::directorates::i::cables::CableAction::Release
+pub ai6::directorates::i::cables::CableAction::Send
+#[non_exhaustive] pub enum ai6::directorates::i::cables::CableInboundMode
+pub ai6::directorates::i::cables::CableInboundMode::Deliver
+pub ai6::directorates::i::cables::CableInboundMode::Hold
+pub ai6::directorates::i::cables::CableInboundMode::Refuse
+#[non_exhaustive] pub enum ai6::directorates::i::cables::CableRelayError
+pub ai6::directorates::i::cables::CableRelayError::InvalidRequest
+pub ai6::directorates::i::cables::CableRelayError::RegistryUnavailable
+pub ai6::directorates::i::cables::CableRelayError::Unavailable
+impl core::error::Error for ai6::CableRelayError
+impl core::fmt::Display for ai6::CableRelayError
+pub fn ai6::CableRelayError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::i::cables::CableScope
+pub ai6::directorates::i::cables::CableScope::Agent
+pub ai6::directorates::i::cables::CableScope::Channel
+pub ai6::directorates::i::cables::CableScope::Global
+pub ai6::directorates::i::cables::CableScope::Station
+pub ai6::directorates::i::cables::CableScope::Theater
+#[non_exhaustive] pub enum ai6::directorates::i::cables::CableState
+pub ai6::directorates::i::cables::CableState::Acked
+pub ai6::directorates::i::cables::CableState::Delivered
+pub ai6::directorates::i::cables::CableState::Expired
+pub ai6::directorates::i::cables::CableState::Failed
+pub ai6::directorates::i::cables::CableState::Held
+pub ai6::directorates::i::cables::CableState::Queued
+pub ai6::directorates::i::cables::CableState::Refused
+pub struct ai6::directorates::i::cables::Cable
+impl ai6::directorates::i::cables::Cable
+pub fn ai6::directorates::i::cables::Cable::body(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::conversation_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::created_at(&self) -> f64
+pub fn ai6::directorates::i::cables::Cable::expires_at(&self) -> f64
+pub fn ai6::directorates::i::cables::Cable::id(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::idempotency_key(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::recipients(&self) -> &[ai6::directorates::i::cables::CableRecipient]
+pub fn ai6::directorates::i::cables::Cable::reply_to(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::same_request(&self, &Self) -> bool
+pub fn ai6::directorates::i::cables::Cable::sender_agent(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::sender_operation(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::sender_station(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::sender_theater(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::session_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::target(&self) -> &ai6::directorates::i::cables::CableTarget
+pub fn ai6::directorates::i::cables::Cable::try_new(ai6::directorates::i::cables::CableDraft) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub fn ai6::directorates::i::cables::Cable::with_recipient_state(&self, &str, core::option::Option<&str>, ai6::directorates::i::cables::CableState) -> core::result::Result<core::option::Option<Self>, ai6::directorates::i::cables::CableError>
+impl core::fmt::Debug for ai6::directorates::i::cables::Cable
+pub fn ai6::directorates::i::cables::Cable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableAuditRecord
+pub ai6::directorates::i::cables::CableAuditRecord::agent: alloc::string::String
+pub ai6::directorates::i::cables::CableAuditRecord::at: f64
+pub ai6::directorates::i::cables::CableAuditRecord::cable_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableAuditRecord::decision: &'static str
+pub ai6::directorates::i::cables::CableAuditRecord::event: &'static str
+pub ai6::directorates::i::cables::CableAuditRecord::mission_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableAuditRecord::operation: alloc::string::String
+pub ai6::directorates::i::cables::CableAuditRecord::session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableAuditRecord::station: alloc::string::String
+pub ai6::directorates::i::cables::CableAuditRecord::target_name: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableAuditRecord::target_scope: ai6::directorates::i::cables::CableScope
+pub ai6::directorates::i::cables::CableAuditRecord::theater: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::i::cables::CableConfig
+impl ai6::CableConfig
+pub fn ai6::CableConfig::channels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>
+pub fn ai6::CableConfig::max_fanout(&self) -> usize
+pub fn ai6::CableConfig::parse_toml(&str) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub fn ai6::CableConfig::policy(&self) -> core::result::Result<ai6::CablePolicy, ai6::directorates::i::cables::CableError>
+pub fn ai6::CableConfig::quota_limits(&self) -> (f64, u32, f64, u32)
+impl core::default::Default for ai6::CableConfig
+pub fn ai6::CableConfig::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableDelivery
+pub ai6::directorates::i::cables::CableDelivery::body: alloc::string::String
+pub ai6::directorates::i::cables::CableDelivery::cable_id: alloc::string::String
+pub ai6::directorates::i::cables::CableDelivery::conversation_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDelivery::created_at: f64
+pub ai6::directorates::i::cables::CableDelivery::expires_at: f64
+pub ai6::directorates::i::cables::CableDelivery::from_agent: alloc::string::String
+pub ai6::directorates::i::cables::CableDelivery::from_operation: alloc::string::String
+pub ai6::directorates::i::cables::CableDelivery::from_station: alloc::string::String
+pub ai6::directorates::i::cables::CableDelivery::from_theater: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDelivery::mission_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDelivery::reply_to: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDelivery::session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDelivery::state: ai6::directorates::i::cables::CableState
+pub ai6::directorates::i::cables::CableDelivery::target: ai6::directorates::i::cables::CableTarget
+impl core::fmt::Debug for ai6::CableDelivery
+pub fn ai6::CableDelivery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableDraft
+pub ai6::directorates::i::cables::CableDraft::body: alloc::string::String
+pub ai6::directorates::i::cables::CableDraft::conversation_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDraft::created_at: f64
+pub ai6::directorates::i::cables::CableDraft::expires_at: f64
+pub ai6::directorates::i::cables::CableDraft::id: alloc::string::String
+pub ai6::directorates::i::cables::CableDraft::idempotency_key: alloc::string::String
+pub ai6::directorates::i::cables::CableDraft::mission_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDraft::recipients: alloc::vec::Vec<ai6::directorates::i::cables::CableRecipient>
+pub ai6::directorates::i::cables::CableDraft::reply_to: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDraft::sender_agent: alloc::string::String
+pub ai6::directorates::i::cables::CableDraft::sender_operation: alloc::string::String
+pub ai6::directorates::i::cables::CableDraft::sender_station: alloc::string::String
+pub ai6::directorates::i::cables::CableDraft::sender_theater: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDraft::session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::cables::CableDraft::target: ai6::directorates::i::cables::CableTarget
+impl ai6::directorates::i::cables::CableDraft
+pub fn ai6::directorates::i::cables::CableDraft::new(alloc::string::String, alloc::string::String, alloc::string::String, ai6::directorates::i::cables::CableTarget, alloc::string::String, alloc::vec::Vec<ai6::directorates::i::cables::CableRecipient>, alloc::string::String, alloc::string::String, f64, f64) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_mission(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_sender_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_session(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::fmt::Debug for ai6::directorates::i::cables::CableDraft
+pub fn ai6::directorates::i::cables::CableDraft::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableEndpoint
+impl ai6::CableEndpoint
+pub fn ai6::CableEndpoint::agent(&self) -> &str
+pub fn ai6::CableEndpoint::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::CableEndpoint::operation(&self) -> &str
+pub fn ai6::CableEndpoint::session_id(&self) -> core::option::Option<&str>
+pub fn ai6::CableEndpoint::station(&self) -> &str
+pub fn ai6::CableEndpoint::theater(&self) -> core::option::Option<&str>
+pub fn ai6::CableEndpoint::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableError(_)
+impl core::error::Error for ai6::directorates::i::cables::CableError
+impl core::fmt::Display for ai6::directorates::i::cables::CableError
+pub fn ai6::directorates::i::cables::CableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableGrant
+impl ai6::CableGrant
+pub fn ai6::CableGrant::try_new(alloc::string::String, ai6::CableAction, ai6::directorates::i::cables::CableTarget) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableHeldDelivery
+pub ai6::directorates::i::cables::CableHeldDelivery::cable_id: alloc::string::String
+pub ai6::directorates::i::cables::CableHeldDelivery::expires_at: f64
+pub ai6::directorates::i::cables::CableHeldDelivery::from_agent: alloc::string::String
+pub ai6::directorates::i::cables::CableHeldDelivery::recipients: alloc::vec::Vec<ai6::CableHeldRecipient>
+pub ai6::directorates::i::cables::CableHeldDelivery::target: ai6::directorates::i::cables::CableTarget
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableHeldRecipient
+pub ai6::directorates::i::cables::CableHeldRecipient::agent: alloc::string::String
+pub ai6::directorates::i::cables::CableHeldRecipient::session_id: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CablePolicy
+impl ai6::CablePolicy
+pub fn ai6::CablePolicy::try_new(alloc::vec::Vec<ai6::CableGrant>, alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::CableInboundMode>) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CablePrincipal
+impl ai6::CablePrincipal
+pub fn ai6::CablePrincipal::agent(&self) -> &str
+pub fn ai6::CablePrincipal::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::CablePrincipal::operation(&self) -> &str
+pub fn ai6::CablePrincipal::session_id(&self) -> core::option::Option<&str>
+pub fn ai6::CablePrincipal::station(&self) -> &str
+pub fn ai6::CablePrincipal::theater(&self) -> core::option::Option<&str>
+pub fn ai6::CablePrincipal::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub struct ai6::directorates::i::cables::CableRecipient
+impl ai6::directorates::i::cables::CableRecipient
+pub fn ai6::directorates::i::cables::CableRecipient::agent(&self) -> &str
+pub fn ai6::directorates::i::cables::CableRecipient::session_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::CableRecipient::state(&self) -> ai6::directorates::i::cables::CableState
+pub fn ai6::directorates::i::cables::CableRecipient::try_new(alloc::string::String, core::option::Option<alloc::string::String>, ai6::directorates::i::cables::CableState) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub struct ai6::directorates::i::cables::CableRelay
+impl ai6::CableRelay
+pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::discover(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::CableEndpoint>, ai6::CableRelayError>
+pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
+pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
+pub fn ai6::CableRelay::new(alloc::sync::Arc<ai6::directorates::i::intake::IntakeRegistry>, ai6::CablePolicy, impl core::ops::function::Fn() -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>) -> Self
+pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::release(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::CableRelease, ai6::CableRelayError>
+pub fn ai6::CableRelay::reply(&self, &ai6::CablePrincipal, &str, alloc::string::String, alloc::string::String) -> core::result::Result<ai6::directorates::i::cables::Cable, ai6::CableRelayError>
+pub fn ai6::CableRelay::send(&self, &ai6::CablePrincipal, ai6::CableSendRequest) -> core::result::Result<ai6::directorates::i::cables::Cable, ai6::CableRelayError>
+pub fn ai6::CableRelay::unregister_endpoint(&self, &ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableRelease
+pub ai6::directorates::i::cables::CableRelease::delivered: usize
+pub ai6::directorates::i::cables::CableRelease::refused: usize
+#[non_exhaustive] pub struct ai6::directorates::i::cables::CableSendRequest
+impl ai6::CableSendRequest
+pub fn ai6::CableSendRequest::new(ai6::directorates::i::cables::CableTarget, alloc::string::String, alloc::string::String) -> Self
+pub fn ai6::CableSendRequest::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::CableSendRequest::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::CableSendRequest::with_ttl(self, f64) -> Self
+impl core::fmt::Debug for ai6::CableSendRequest
+pub fn ai6::CableSendRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::i::cables::CableTarget
+impl ai6::directorates::i::cables::CableTarget
+pub fn ai6::directorates::i::cables::CableTarget::name(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::CableTarget::scope(&self) -> ai6::directorates::i::cables::CableScope
+pub fn ai6::directorates::i::cables::CableTarget::try_new(ai6::directorates::i::cables::CableScope, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub const ai6::directorates::i::cables::DEFAULT_CABLE_TTL: f64
+pub const ai6::directorates::i::cables::MAX_CABLE_BODY_BYTES: usize
+pub const ai6::directorates::i::cables::MAX_CABLE_FANOUT: usize
+pub const ai6::directorates::i::cables::MAX_CABLE_TTL: f64
+pub mod ai6::directorates::i::intake
+#[non_exhaustive] pub enum ai6::directorates::i::intake::LeaseRecovery
+pub ai6::directorates::i::intake::LeaseRecovery::Failed
+pub ai6::directorates::i::intake::LeaseRecovery::Requeued
+pub struct ai6::directorates::i::intake::AuditEntry
+pub ai6::directorates::i::intake::AuditEntry::action: alloc::string::String
+pub ai6::directorates::i::intake::AuditEntry::actor: alloc::string::String
+pub ai6::directorates::i::intake::AuditEntry::at: f64
+pub ai6::directorates::i::intake::AuditEntry::id: alloc::string::String
+pub ai6::directorates::i::intake::AuditEntry::operation: alloc::string::String
+pub ai6::directorates::i::intake::AuditEntry::resource: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::intake::AuditEntry::target: alloc::string::String
+pub struct ai6::directorates::i::intake::Brief
+pub ai6::directorates::i::intake::Brief::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::intake::Brief::body: alloc::string::String
+pub ai6::directorates::i::intake::Brief::created: alloc::string::String
+pub ai6::directorates::i::intake::Brief::data: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub ai6::directorates::i::intake::Brief::id: alloc::string::String
+pub ai6::directorates::i::intake::Brief::operation: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::intake::Brief::priority: i64
+pub ai6::directorates::i::intake::Brief::role: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::intake::Brief::source: alloc::string::String
+pub ai6::directorates::i::intake::Brief::tags: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::i::intake::Brief::title: alloc::string::String
+pub ai6::directorates::i::intake::Brief::url: core::option::Option<alloc::string::String>
+pub ai6::directorates::i::intake::Brief::version: u32
+impl ai6::directorates::i::intake::Brief
+pub fn ai6::directorates::i::intake::Brief::key(&self) -> alloc::string::String
+pub fn ai6::directorates::i::intake::Brief::prompt(&self) -> alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::i::intake::HeadquartersLease
+impl ai6::directorates::i::intake::HeadquartersLease
+pub fn ai6::directorates::i::intake::HeadquartersLease::expires(&self) -> f64
+pub fn ai6::directorates::i::intake::HeadquartersLease::station(&self) -> &str
+pub struct ai6::directorates::i::intake::IntakeRegistry
+impl ai6::directorates::i::intake::IntakeRegistry
+pub fn ai6::directorates::i::intake::IntakeRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::cables::Cable>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
+pub fn ai6::directorates::i::intake::IntakeRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::Brief>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::Lease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::Lease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::cables::Cable>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::finish(&self, &ai6::directorates::i::intake::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<std::path::PathBuf>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::from_environment() -> core::io::error::Result<Self>
+pub fn ai6::directorates::i::intake::IntakeRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::cables::Cable>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::HeadquartersLease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::cables::Cable>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::Lease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::leases(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::Lease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::AuditEntry>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::list_mission_proposals(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::MissionProposal>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::list_new(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::Brief>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::open(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::directorates::i::intake::IntakeRegistry::promote_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::i::intake::Brief>
+pub fn ai6::directorates::i::intake::IntakeRegistry::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
+pub fn ai6::directorates::i::intake::IntakeRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::Brief>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::record_audit(&self, &ai6::directorates::i::intake::AuditEntry) -> core::io::error::Result<std::path::PathBuf>
+pub fn ai6::directorates::i::intake::IntakeRegistry::recover(&self, &ai6::directorates::i::intake::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::LeaseRecovery>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::i::intake::MissionProposal>
+pub fn ai6::directorates::i::intake::IntakeRegistry::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::root(&self) -> &std::path::Path
+pub fn ai6::directorates::i::intake::IntakeRegistry::set_station_settings(&self, &str, &ai6::directorates::i::intake::StationSettings) -> core::io::error::Result<()>
+pub fn ai6::directorates::i::intake::IntakeRegistry::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::StationSettings>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::StationRecord>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
+pub fn ai6::directorates::i::intake::IntakeRegistry::submit_brief(&self, &ai6::directorates::i::intake::Brief) -> core::io::error::Result<std::path::PathBuf>
+pub fn ai6::directorates::i::intake::IntakeRegistry::submit_cable(&self, &ai6::directorates::i::cables::Cable) -> core::io::error::Result<ai6::directorates::i::cables::Cable>
+pub fn ai6::directorates::i::intake::IntakeRegistry::submit_mission_proposal(&self, &ai6::directorates::i::intake::MissionProposal) -> core::io::error::Result<std::path::PathBuf>
+pub fn ai6::directorates::i::intake::IntakeRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::i::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::i::cables::Cable>>
+#[non_exhaustive] pub struct ai6::directorates::i::intake::Lease
+impl ai6::directorates::i::intake::Lease
+pub fn ai6::directorates::i::intake::Lease::attempt(&self) -> u32
+pub fn ai6::directorates::i::intake::Lease::expires(&self) -> f64
+pub fn ai6::directorates::i::intake::Lease::key(&self) -> &str
+pub fn ai6::directorates::i::intake::Lease::meta(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::i::intake::Lease::station(&self) -> &str
+impl core::cmp::PartialEq for ai6::directorates::i::intake::Lease
+pub fn ai6::directorates::i::intake::Lease::eq(&self, &Self) -> bool
+#[non_exhaustive] pub struct ai6::directorates::i::intake::MissionProposal
+pub ai6::directorates::i::intake::MissionProposal::brief: ai6::directorates::i::intake::Brief
+pub ai6::directorates::i::intake::MissionProposal::created_at: f64
+pub ai6::directorates::i::intake::MissionProposal::id: alloc::string::String
+pub ai6::directorates::i::intake::MissionProposal::operation_id: alloc::string::String
+pub ai6::directorates::i::intake::MissionProposal::parent_mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::directorates::i::intake::MissionProposal::proposer_agent_id: alloc::string::String
+pub ai6::directorates::i::intake::MissionProposal::proposer_session_id: ai6::directorates::m::identity::SessionId
+impl ai6::directorates::i::intake::MissionProposal
+pub fn ai6::directorates::i::intake::MissionProposal::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::SessionId, &str, ai6::directorates::i::intake::Brief) -> core::io::error::Result<Self>
+#[non_exhaustive] pub struct ai6::directorates::i::intake::StationRecord
+impl ai6::directorates::i::intake::StationRecord
+pub fn ai6::directorates::i::intake::StationRecord::info(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::i::intake::StationRecord::seen(&self) -> f64
+pub fn ai6::directorates::i::intake::StationRecord::station(&self) -> &str
+#[non_exhaustive] pub struct ai6::directorates::i::intake::StationSettings
+impl ai6::directorates::i::intake::StationSettings
+pub fn ai6::directorates::i::intake::StationSettings::max_concurrent_missions(&self) -> usize
+pub fn ai6::directorates::i::intake::StationSettings::station(&self) -> &str
+pub fn ai6::directorates::i::intake::StationSettings::try_new(impl core::convert::Into<alloc::string::String>, usize) -> core::io::error::Result<Self>
+pub const ai6::directorates::i::intake::DEFAULT_LEASE: core::time::Duration
+pub const ai6::directorates::i::intake::MAX_STATION_MISSION_CAPACITY: usize
+pub fn ai6::directorates::i::intake::default_registry_dir() -> core::io::error::Result<std::path::PathBuf>
+pub mod ai6::directorates::m
+pub mod ai6::directorates::m::access
+pub enum ai6::directorates::m::access::Verdict
+pub ai6::directorates::m::access::Verdict::Invalid
+pub ai6::directorates::m::access::Verdict::Unknown
+pub ai6::directorates::m::access::Verdict::Valid(ai6::directorates::m::access::Lookup)
+pub struct ai6::directorates::m::access::Attempt
+pub ai6::directorates::m::access::Attempt::certificate: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::access::Attempt::headers: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::access::Attempt::name: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::access::Attempt::peer: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::access::Attempt::secret: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::access::Attempt::secure: core::option::Option<bool>
+impl core::fmt::Debug for ai6::directorates::m::access::Attempt
+pub fn ai6::directorates::m::access::Attempt::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::m::access::AuthorizationDecision
+pub ai6::directorates::m::access::AuthorizationDecision::allowed: bool
+pub ai6::directorates::m::access::AuthorizationDecision::limits: alloc::collections::btree::map::BTreeMap<alloc::string::String, guatiao::value::value::Value>
+pub struct ai6::directorates::m::access::AuthorizationRequest
+pub ai6::directorates::m::access::AuthorizationRequest::action: alloc::string::String
+pub ai6::directorates::m::access::AuthorizationRequest::person: ai6::directorates::m::access::Person
+pub ai6::directorates::m::access::AuthorizationRequest::resource: alloc::string::String
+pub struct ai6::directorates::m::access::Lookup
+pub ai6::directorates::m::access::Lookup::by: alloc::string::String
+pub ai6::directorates::m::access::Lookup::value: alloc::string::String
+impl core::fmt::Debug for ai6::directorates::m::access::Lookup
+pub fn ai6::directorates::m::access::Lookup::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::m::access::Person
+pub ai6::directorates::m::access::Person::attributes: alloc::collections::btree::map::BTreeMap<alloc::string::String, guatiao::value::value::Value>
+pub ai6::directorates::m::access::Person::display_name: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::access::Person::email: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::access::Person::groups: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::access::Person::id: alloc::string::String
+pub ai6::directorates::m::access::Person::name: alloc::string::String
+impl core::fmt::Debug for ai6::directorates::m::access::Person
+pub fn ai6::directorates::m::access::Person::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::m::access::RoleAuthorizer
+impl ai6::directorates::m::access::RoleAuthorizer
+pub fn ai6::directorates::m::access::RoleAuthorizer::from_toml(&str) -> core::result::Result<Self, ai6::directorates::m::access::RolePolicyError>
+pub fn ai6::directorates::m::access::RoleAuthorizer::load(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, ai6::directorates::m::access::RolePolicyError>
+impl ai6::directorates::m::access::Authorizer for ai6::directorates::m::access::RoleAuthorizer
+pub fn ai6::directorates::m::access::RoleAuthorizer::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for ai6::directorates::m::access::RoleAuthorizer
+pub fn ai6::directorates::m::access::RoleAuthorizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::access::RoleAuthorizerConfig
+pub ai6::directorates::m::access::RoleAuthorizerConfig::policy_toml: alloc::string::String
+impl core::convert::TryFrom<ai6::directorates::m::access::RoleAuthorizerConfig> for ai6::directorates::m::access::RoleAuthorizerProvider
+pub type ai6::directorates::m::access::RoleAuthorizerProvider::Error = guatiao::library::kind::ProviderError
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::try_from(ai6::directorates::m::access::RoleAuthorizerConfig) -> core::result::Result<Self, Self::Error>
+pub struct ai6::directorates::m::access::RoleAuthorizerProvider(_)
+impl ai6::directorates::m::access::Authorizer for ai6::directorates::m::access::RoleAuthorizerProvider
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6::directorates::m::access::RoleAuthorizerConfig> for ai6::directorates::m::access::RoleAuthorizerProvider
+pub type ai6::directorates::m::access::RoleAuthorizerProvider::Error = guatiao::library::kind::ProviderError
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::try_from(ai6::directorates::m::access::RoleAuthorizerConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6::directorates::m::access::RoleAuthorizerProvider
+pub const ai6::directorates::m::access::RoleAuthorizerProvider::KINDS: &'static [&'static str]
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6::directorates::m::access::RolePolicyError(_)
+impl core::error::Error for ai6::directorates::m::access::RolePolicyError
+impl core::fmt::Display for ai6::directorates::m::access::RolePolicyError
+pub fn ai6::directorates::m::access::RolePolicyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait ai6::directorates::m::access::Authenticator: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::m::access::Authenticator::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authenticator for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Authenticator>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Authenticator>::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authenticator for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Authenticator>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Authenticator>::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+pub trait ai6::directorates::m::access::Authorizer: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::m::access::Authorizer::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authorizer for ai6::directorates::m::access::RoleAuthorizer
+pub fn ai6::directorates::m::access::RoleAuthorizer::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authorizer for ai6::directorates::m::access::RoleAuthorizerProvider
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authorizer for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Authorizer>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Authorizer>::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authorizer for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Authorizer>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Authorizer>::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+pub trait ai6::directorates::m::access::Directory: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::m::access::Directory::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Directory for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Directory>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Directory>::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Directory for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Directory>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Directory>::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+pub mod ai6::directorates::m::cover
+#[non_exhaustive] pub struct ai6::directorates::m::cover::Cover
+impl ai6::directorates::m::cover::Cover
+pub fn ai6::directorates::m::cover::Cover::briefing(&self, core::option::Option<&ai6::directorates::m::roster::OperationIdentity>, &str, &str) -> alloc::string::String
+pub fn ai6::directorates::m::cover::Cover::check_commits(&self, &[ai6::directorates::m::cover::CoverCommit], core::option::Option<&ai6::directorates::m::roster::OperationIdentity>, &str) -> alloc::vec::Vec<ai6::directorates::m::cover::CoverViolation>
+pub fn ai6::directorates::m::cover::Cover::name(&self) -> &str
+#[non_exhaustive] pub struct ai6::directorates::m::cover::CoverCommit
+pub ai6::directorates::m::cover::CoverCommit::author: alloc::string::String
+pub ai6::directorates::m::cover::CoverCommit::committer: alloc::string::String
+pub ai6::directorates::m::cover::CoverCommit::message: alloc::string::String
+pub ai6::directorates::m::cover::CoverCommit::sha: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::m::cover::CoverError(_)
+impl core::error::Error for ai6::directorates::m::cover::CoverError
+impl core::fmt::Display for ai6::directorates::m::cover::CoverError
+pub fn ai6::directorates::m::cover::CoverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::cover::CoverReport
+pub ai6::directorates::m::cover::CoverReport::blown: bool
+pub ai6::directorates::m::cover::CoverReport::commits: usize
+pub ai6::directorates::m::cover::CoverReport::policy: alloc::string::String
+pub ai6::directorates::m::cover::CoverReport::violations: alloc::vec::Vec<ai6::directorates::m::cover::CoverViolation>
+#[non_exhaustive] pub struct ai6::directorates::m::cover::CoverViolation
+pub ai6::directorates::m::cover::CoverViolation::commit: alloc::string::String
+pub ai6::directorates::m::cover::CoverViolation::detail: alloc::string::String
+pub ai6::directorates::m::cover::CoverViolation::rule: alloc::string::String
+pub struct ai6::directorates::m::cover::Covers
+impl ai6::directorates::m::cover::Covers
+pub fn ai6::directorates::m::cover::Covers::get(&self, &str) -> core::result::Result<&ai6::directorates::m::cover::Cover, ai6::directorates::m::cover::CoverError>
+pub fn ai6::directorates::m::cover::Covers::load(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, ai6::directorates::m::cover::CoverError>
+pub fn ai6::directorates::m::cover::Covers::names(&self) -> alloc::vec::Vec<&str>
+pub fn ai6::directorates::m::cover::Covers::parse_toml(&str) -> core::result::Result<Self, ai6::directorates::m::cover::CoverError>
+impl core::default::Default for ai6::directorates::m::cover::Covers
+pub fn ai6::directorates::m::cover::Covers::default() -> Self
+pub mod ai6::directorates::m::identity
+pub struct ai6::directorates::m::identity::AccessTokenRecord
+impl ai6::directorates::m::identity::AccessTokenRecord
+pub fn ai6::directorates::m::identity::AccessTokenRecord::active_at(&self, f64) -> bool
+pub fn ai6::directorates::m::identity::AccessTokenRecord::digest(&self) -> &str
+pub fn ai6::directorates::m::identity::AccessTokenRecord::expires_at(&self) -> f64
+pub fn ai6::directorates::m::identity::AccessTokenRecord::issued_at(&self) -> f64
+pub fn ai6::directorates::m::identity::AccessTokenRecord::person_id(&self) -> &str
+pub fn ai6::directorates::m::identity::AccessTokenRecord::revoked_at(&self) -> core::option::Option<f64>
+pub fn ai6::directorates::m::identity::AccessTokenRecord::token_id(&self) -> &str
+pub fn ai6::directorates::m::identity::AccessTokenRecord::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64, f64, core::option::Option<f64>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+impl core::fmt::Debug for ai6::directorates::m::identity::AccessTokenRecord
+pub fn ai6::directorates::m::identity::AccessTokenRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::identity::InvalidIdentity
+impl core::error::Error for ai6::directorates::m::identity::InvalidIdentity
+impl core::fmt::Display for ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::InvalidIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::m::identity::MissionId(_)
+impl ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::as_str(&self) -> &str
+pub fn ai6::directorates::m::identity::MissionId::try_new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+impl core::borrow::Borrow<str> for ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::borrow(&self) -> &str
+impl core::convert::AsRef<str> for ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::as_ref(&self) -> &str
+impl core::convert::From<ai6::directorates::m::identity::MissionId> for alloc::string::String
+pub fn alloc::string::String::from(ai6::directorates::m::identity::MissionId) -> Self
+impl core::convert::TryFrom<alloc::string::String> for ai6::directorates::m::identity::MissionId
+pub type ai6::directorates::m::identity::MissionId::Error = ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::MissionId::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Display for ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::m::identity::MissionId
+pub type ai6::directorates::m::identity::MissionId::Err = ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::MissionId::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl guatiao::value::convert::FromValue for ai6::directorates::m::identity::MissionId
+pub const ai6::directorates::m::identity::MissionId::KINDS: guatiao::value::convert::kinds::Kinds
+pub fn ai6::directorates::m::identity::MissionId::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+pub struct ai6::directorates::m::identity::SessionId(_)
+impl ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::as_str(&self) -> &str
+pub fn ai6::directorates::m::identity::SessionId::try_new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+impl core::borrow::Borrow<str> for ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::borrow(&self) -> &str
+impl core::convert::AsRef<str> for ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::as_ref(&self) -> &str
+impl core::convert::From<ai6::directorates::m::identity::SessionId> for alloc::string::String
+pub fn alloc::string::String::from(ai6::directorates::m::identity::SessionId) -> Self
+impl core::convert::TryFrom<alloc::string::String> for ai6::directorates::m::identity::SessionId
+pub type ai6::directorates::m::identity::SessionId::Error = ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::SessionId::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Display for ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::m::identity::SessionId
+pub type ai6::directorates::m::identity::SessionId::Err = ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::SessionId::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl guatiao::value::convert::FromValue for ai6::directorates::m::identity::SessionId
+pub const ai6::directorates::m::identity::SessionId::KINDS: guatiao::value::convert::kinds::Kinds
+pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+pub const ai6::directorates::m::identity::MAX_ID_BYTES: usize
+pub mod ai6::directorates::m::mission
+pub enum ai6::directorates::m::mission::MissionError
+pub ai6::directorates::m::mission::MissionError::AlreadyExists
+pub ai6::directorates::m::mission::MissionError::EmptyPrompt
+pub ai6::directorates::m::mission::MissionError::InvalidOperation
+pub ai6::directorates::m::mission::MissionError::InvalidTransition
+pub ai6::directorates::m::mission::MissionError::InvalidTransition::from: ai6::directorates::m::mission::MissionState
+pub ai6::directorates::m::mission::MissionError::InvalidTransition::to: ai6::directorates::m::mission::MissionState
+pub ai6::directorates::m::mission::MissionError::NotFound
+pub ai6::directorates::m::mission::MissionError::Persistence
+pub ai6::directorates::m::mission::MissionError::SessionAlreadyAttached
+pub ai6::directorates::m::mission::MissionError::TerminalMission
+#[non_exhaustive] pub enum ai6::directorates::m::mission::MissionState
+pub ai6::directorates::m::mission::MissionState::Abandoned
+pub ai6::directorates::m::mission::MissionState::Blocked
+pub ai6::directorates::m::mission::MissionState::Blown
+pub ai6::directorates::m::mission::MissionState::Done
+pub ai6::directorates::m::mission::MissionState::Failed
+pub ai6::directorates::m::mission::MissionState::Queued
+pub ai6::directorates::m::mission::MissionState::Stalled
+pub ai6::directorates::m::mission::MissionState::Working
+pub struct ai6::directorates::m::mission::Mission
+pub ai6::directorates::m::mission::Mission::agent_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::cover: core::option::Option<ai6::directorates::m::cover::CoverReport>
+pub ai6::directorates::m::mission::Mission::mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::directorates::m::mission::Mission::operation_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::prompt: alloc::string::String
+pub ai6::directorates::m::mission::Mission::revision: u64
+pub ai6::directorates::m::mission::Mission::role_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::safe_house: core::option::Option<ai6::station::safehouse::SafeHouseReport>
+pub ai6::directorates::m::mission::Mission::session_ids: alloc::vec::Vec<ai6::directorates::m::identity::SessionId>
+pub ai6::directorates::m::mission::Mission::state: ai6::directorates::m::mission::MissionState
+pub struct ai6::directorates::m::mission::MissionBook
+impl ai6::directorates::m::mission::MissionBook
+pub fn ai6::directorates::m::mission::MissionBook::attach_session(&mut self, &str, ai6::directorates::m::identity::SessionId) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionBook::create(&mut self, ai6::directorates::m::identity::MissionId, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionBook::get(&self, &str) -> core::option::Option<&ai6::directorates::m::mission::Mission>
+pub fn ai6::directorates::m::mission::MissionBook::list(&self) -> alloc::vec::Vec<ai6::directorates::m::mission::Mission>
+pub fn ai6::directorates::m::mission::MissionBook::open(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
+pub fn ai6::directorates::m::mission::MissionBook::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionBook::set_safe_house(&mut self, &str, ai6::station::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionBook::transition(&mut self, &str, ai6::directorates::m::mission::MissionState) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub mod ai6::directorates::m::roster
+#[non_exhaustive] pub struct ai6::directorates::m::roster::Agent
+pub ai6::directorates::m::roster::Agent::aliases: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::clearance: alloc::string::String
+pub ai6::directorates::m::roster::Agent::context: alloc::string::String
+pub ai6::directorates::m::roster::Agent::description: alloc::string::String
+pub ai6::directorates::m::roster::Agent::effort: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::env: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::roster::Agent::handler: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::id: alloc::string::String
+pub ai6::directorates::m::roster::Agent::limits: ai6::directorates::medical::watchdog::WatchdogOverrides
+pub ai6::directorates::m::roster::Agent::max_concurrent: core::option::Option<usize>
+pub ai6::directorates::m::roster::Agent::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::priority: i64
+pub ai6::directorates::m::roster::Agent::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::tags: alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::roster::AgentRole
+pub ai6::directorates::m::roster::AgentRole::id: alloc::string::String
+pub ai6::directorates::m::roster::AgentRole::policy: alloc::string::String
+pub ai6::directorates::m::roster::AgentRole::purpose: alloc::string::String
+impl ai6::directorates::m::roster::AgentRole
+pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+#[non_exhaustive] pub struct ai6::directorates::m::roster::Operation
+pub ai6::directorates::m::roster::Operation::base: alloc::string::String
+pub ai6::directorates::m::roster::Operation::branch: alloc::string::String
+pub ai6::directorates::m::roster::Operation::clearance: alloc::string::String
+pub ai6::directorates::m::roster::Operation::config: core::option::Option<std::path::PathBuf>
+pub ai6::directorates::m::roster::Operation::cover: alloc::string::String
+pub ai6::directorates::m::roster::Operation::description: alloc::string::String
+pub ai6::directorates::m::roster::Operation::id: alloc::string::String
+pub ai6::directorates::m::roster::Operation::identity: core::option::Option<ai6::directorates::m::roster::OperationIdentity>
+pub ai6::directorates::m::roster::Operation::intake: toml::table::Table
+pub ai6::directorates::m::roster::Operation::max_concurrent: core::option::Option<usize>
+pub ai6::directorates::m::roster::Operation::name: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::Operation::on_blown: alloc::string::String
+pub ai6::directorates::m::roster::Operation::path: core::option::Option<std::path::PathBuf>
+pub ai6::directorates::m::roster::Operation::repos: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::Operation::safe_houses: bool
+pub ai6::directorates::m::roster::Operation::selector: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::roster::Operation::theater: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::m::roster::OperationIdentity
+pub ai6::directorates::m::roster::OperationIdentity::email: alloc::string::String
+pub ai6::directorates::m::roster::OperationIdentity::name: alloc::string::String
+pub struct ai6::directorates::m::roster::Roster
+impl ai6::directorates::m::roster::Roster
+pub fn ai6::directorates::m::roster::Roster::agent(&self, core::option::Option<&str>, &str) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::agents_for_operation(&self, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::roster::Agent>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::load(impl core::convert::Into<std::path::PathBuf>) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::operation(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::Operation, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::Operation>
+pub fn ai6::directorates::m::roster::Roster::role(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::AgentRole, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::roles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::AgentRole>
+pub fn ai6::directorates::m::roster::Roster::select_agent(&self, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
+pub struct ai6::directorates::m::roster::RosterError(_)
+impl core::error::Error for ai6::directorates::m::roster::RosterError
+impl core::fmt::Display for ai6::directorates::m::roster::RosterError
+pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn ai6::directorates::m::roster::config_dir() -> core::result::Result<std::path::PathBuf, ai6::directorates::m::roster::RosterError>
+pub mod ai6::directorates::medical
+pub mod ai6::directorates::medical::watchdog
+pub struct ai6::directorates::medical::watchdog::InactivityMonitor
+impl ai6::directorates::medical::watchdog::InactivityMonitor
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::is_max_runtime_exceeded(&self) -> bool
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::is_stalled(&self) -> bool
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::max_runtime(&self) -> core::option::Option<core::time::Duration>
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::new(core::time::Duration) -> Self
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::record_activity(&self)
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::timeout(&self) -> core::time::Duration
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::with_config(ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
+impl core::default::Default for ai6::directorates::medical::watchdog::InactivityMonitor
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::default() -> Self
+pub struct ai6::directorates::medical::watchdog::WatchdogConfig
+impl ai6::directorates::medical::watchdog::WatchdogConfig
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::blocked_after(&self) -> core::time::Duration
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::history(&self) -> usize
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::loop_min_lines(&self) -> usize
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::loop_timeout(&self) -> core::time::Duration
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::max_runtime(&self) -> core::option::Option<core::time::Duration>
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::normalize_digits(&self) -> bool
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::stall_timeout(&self) -> core::time::Duration
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_blocked_after(self, core::time::Duration) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_history(self, usize) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_loop_min_lines(self, usize) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_loop_timeout(self, core::time::Duration) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_max_runtime(self, core::option::Option<core::time::Duration>) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_normalize_digits(self, bool) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_stall_timeout(self, core::time::Duration) -> Self
+impl core::default::Default for ai6::directorates::medical::watchdog::WatchdogConfig
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::medical::watchdog::WatchdogOverrides
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::blocked_after: core::option::Option<core::time::Duration>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::history: core::option::Option<usize>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::loop_min_lines: core::option::Option<usize>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::loop_timeout: core::option::Option<core::time::Duration>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::max_runtime: core::option::Option<core::time::Duration>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::normalize_digits: core::option::Option<bool>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::stall_timeout: core::option::Option<core::time::Duration>
+impl ai6::directorates::medical::watchdog::WatchdogOverrides
+pub fn ai6::directorates::medical::watchdog::WatchdogOverrides::apply_to(&self, &ai6::directorates::medical::watchdog::WatchdogConfig) -> ai6::directorates::medical::watchdog::WatchdogConfig
+pub const ai6::directorates::medical::watchdog::DEFAULT_BLOCKED_AFTER: core::time::Duration
+pub const ai6::directorates::medical::watchdog::DEFAULT_LINE_HISTORY: usize
+pub const ai6::directorates::medical::watchdog::DEFAULT_LOOP_MIN_LINES: usize
+pub const ai6::directorates::medical::watchdog::DEFAULT_STALL_TIMEOUT: core::time::Duration
+pub mod ai6::directorates::q
+pub mod ai6::directorates::q::terminal
+pub use ai6::directorates::q::terminal::guatiao
+pub struct ai6::directorates::q::terminal::ExitInfo
+pub ai6::directorates::q::terminal::ExitInfo::code: core::option::Option<i64>
+pub ai6::directorates::q::terminal::ExitInfo::running: bool
+pub ai6::directorates::q::terminal::ExitInfo::signal: core::option::Option<i64>
+pub struct ai6::directorates::q::terminal::Spec
+pub ai6::directorates::q::terminal::Spec::argv: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::terminal::Spec::cols: u16
+pub ai6::directorates::q::terminal::Spec::cwd: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::terminal::Spec::env: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
+pub ai6::directorates::q::terminal::Spec::rows: u16
+pub struct ai6::directorates::q::terminal::TerminalBridge
+impl ai6::directorates::q::terminal::TerminalBridge
+pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>
+impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
+pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub const ai6::directorates::q::terminal::READ_TIMED_OUT: i64
+pub trait ai6::directorates::q::terminal::AgentTerminal: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::terminal::AgentTerminal::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::q::terminal::AgentTerminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
+pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::AgentTerminal for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub trait ai6::directorates::q::terminal::Terminal: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::terminal::Terminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::Terminal for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::Terminal for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub trait ai6::directorates::q::terminal::TerminalSession: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::terminal::TerminalSession::exit_status(&self, i64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalSession::exit_status_in(&self, i64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::q::terminal::TerminalSession::kill(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalSession::pid(&self) -> i64
+pub fn ai6::directorates::q::terminal::TerminalSession::read(&self, &mut [u8], i64) -> core::result::Result<i64, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalSession::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalSession::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::TerminalSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::exit_status(&self, i64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::exit_status_in(&self, i64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::kill(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::pid(&self) -> i64
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::read(&self, &mut [u8], i64) -> core::result::Result<i64, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+#[non_exhaustive] pub enum ai6::directorates::q::QErrorKind
+pub ai6::directorates::q::QErrorKind::InvalidUtf8
+pub ai6::directorates::q::QErrorKind::Io
+pub ai6::directorates::q::QErrorKind::Parse
+pub ai6::directorates::q::QErrorKind::Schema
+pub ai6::directorates::q::QErrorKind::TooLarge
+#[non_exhaustive] pub enum ai6::directorates::q::SandboxError
+pub ai6::directorates::q::SandboxError::DuplicateMount
+pub ai6::directorates::q::SandboxError::InvalidCommand
+pub ai6::directorates::q::SandboxError::InvalidPath
+pub ai6::directorates::q::SandboxError::InvalidWorktree
+pub ai6::directorates::q::SandboxError::MissingWorktreeMount
+pub ai6::directorates::q::SandboxError::UnsupportedBackend
+pub ai6::directorates::q::SandboxError::UnsupportedNetworkPolicy
+pub ai6::directorates::q::SandboxError::UnsupportedPlatform
+impl core::error::Error for ai6::SandboxError
+impl core::fmt::Display for ai6::SandboxError
+pub fn ai6::SandboxError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::q::SecretError
+pub ai6::directorates::q::SecretError::AccessDenied
+pub ai6::directorates::q::SecretError::Backend
+pub ai6::directorates::q::SecretError::Expired
+pub ai6::directorates::q::SecretError::InvalidIdentity
+pub ai6::directorates::q::SecretError::InvalidResponse
+pub ai6::directorates::q::SecretError::InvalidTtl
+impl core::error::Error for ai6::SecretError
+impl core::fmt::Display for ai6::SecretError
+pub fn ai6::SecretError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::Loadout
+impl ai6::directorates::q::Loadout
+pub fn ai6::directorates::q::Loadout::agent(&self) -> &str
+pub fn ai6::directorates::q::Loadout::mcp_names(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::Loadout::sandbox_name(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::q::Loadout::secret_names(&self) -> &[alloc::string::String]
+pub struct ai6::directorates::q::LoadoutCatalog
+impl ai6::directorates::q::LoadoutCatalog
+pub fn ai6::directorates::q::LoadoutCatalog::for_agent(&self, &str) -> core::result::Result<&ai6::directorates::q::Loadout, ai6::directorates::q::QError>
+pub fn ai6::directorates::q::LoadoutCatalog::load(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, ai6::directorates::q::QError>
+pub fn ai6::directorates::q::LoadoutCatalog::loadouts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::Loadout>
+pub fn ai6::directorates::q::LoadoutCatalog::mcp_servers(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::McpServer>
+pub fn ai6::directorates::q::LoadoutCatalog::sandbox_for(&self, &ai6::directorates::q::Loadout) -> core::option::Option<&ai6::directorates::q::SandboxProfile>
+pub fn ai6::directorates::q::LoadoutCatalog::sandboxes(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::SandboxProfile>
+pub fn ai6::directorates::q::LoadoutCatalog::servers_for(&self, &ai6::directorates::q::Loadout) -> core::result::Result<alloc::vec::Vec<&ai6::directorates::q::McpServer>, ai6::directorates::q::QError>
+impl core::str::traits::FromStr for ai6::directorates::q::LoadoutCatalog
+pub type ai6::directorates::q::LoadoutCatalog::Err = ai6::directorates::q::QError
+pub fn ai6::directorates::q::LoadoutCatalog::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub struct ai6::directorates::q::McpServer
+impl ai6::directorates::q::McpServer
+pub fn ai6::directorates::q::McpServer::command(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::McpServer::deny(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::McpServer::name(&self) -> &str
+pub struct ai6::directorates::q::QError
+impl ai6::directorates::q::QError
+pub const fn ai6::directorates::q::QError::column(&self) -> core::option::Option<usize>
+pub const fn ai6::directorates::q::QError::kind(&self) -> ai6::directorates::q::QErrorKind
+pub const fn ai6::directorates::q::QError::line(&self) -> core::option::Option<usize>
+pub const fn ai6::directorates::q::QError::offset(&self) -> core::option::Option<usize>
+pub fn ai6::directorates::q::QError::path(&self) -> core::option::Option<&std::path::Path>
+impl core::error::Error for ai6::directorates::q::QError
+pub fn ai6::directorates::q::QError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for ai6::directorates::q::QError
+pub fn ai6::directorates::q::QError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::SandboxProfile
+impl ai6::directorates::q::SandboxProfile
+pub fn ai6::directorates::q::SandboxProfile::backend(&self) -> &str
+pub fn ai6::directorates::q::SandboxProfile::name(&self) -> &str
+pub fn ai6::directorates::q::SandboxProfile::network(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::SandboxProfile::read_only(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::SandboxProfile::read_write(&self) -> &[alloc::string::String]
+impl ai6::directorates::q::SandboxProfile
+pub fn ai6::directorates::q::SandboxProfile::bubblewrap_argv(&self, &ai6::SandboxRequest) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, ai6::SandboxError>
+pub struct ai6::directorates::q::SandboxRequest
+impl ai6::SandboxRequest
+pub fn ai6::SandboxRequest::new(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
+pub fn ai6::SandboxRequest::with_allowed_root(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::SandboxRequest::with_executable(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct ai6::directorates::q::SecretBackendFailure
+impl ai6::SecretBackendFailure
+pub const fn ai6::SecretBackendFailure::new() -> Self
+impl core::default::Default for ai6::SecretBackendFailure
+pub fn ai6::SecretBackendFailure::default() -> Self
+impl core::error::Error for ai6::SecretBackendFailure
+impl core::fmt::Display for ai6::SecretBackendFailure
+pub fn ai6::SecretBackendFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::SecretBroker
+impl ai6::SecretBroker
+pub fn ai6::SecretBroker::lease(&self, &ai6::directorates::q::Loadout, ai6::SecretLeaseRequest) -> core::result::Result<ai6::SecretLease, ai6::SecretError>
+pub fn ai6::SecretBroker::new(impl ai6::SecretBackend + 'static) -> Self
+pub fn ai6::SecretBroker::with_max_ttl(self, core::time::Duration) -> core::result::Result<Self, ai6::SecretError>
+impl core::fmt::Debug for ai6::SecretBroker
+pub fn ai6::SecretBroker::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::SecretLease
+impl ai6::SecretLease
+pub fn ai6::SecretLease::expires_at(&self) -> std::time::Instant
+pub fn ai6::SecretLease::is_active(&self) -> bool
+pub fn ai6::SecretLease::mission_id(&self) -> &str
+pub fn ai6::SecretLease::names(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::SecretLease::revoke(&self) -> core::result::Result<(), ai6::SecretError>
+pub fn ai6::SecretLease::station(&self) -> &str
+pub fn ai6::SecretLease::with_secret<T>(&self, &str, impl core::ops::function::FnOnce(&str) -> T) -> core::result::Result<T, ai6::SecretError>
+impl core::fmt::Debug for ai6::SecretLease
+pub fn ai6::SecretLease::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::SecretLeaseRequest
+impl ai6::SecretLeaseRequest
+pub fn ai6::SecretLeaseRequest::mission_id(&self) -> &str
+pub fn ai6::SecretLeaseRequest::station(&self) -> &str
+pub fn ai6::SecretLeaseRequest::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::SecretError>
+pub const fn ai6::SecretLeaseRequest::ttl(&self) -> core::time::Duration
+pub fn ai6::SecretLeaseRequest::with_ttl(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::time::Duration) -> core::result::Result<Self, ai6::SecretError>
+pub struct ai6::directorates::q::SecretRequest
+impl ai6::SecretRequest
+pub fn ai6::SecretRequest::lease_id(&self) -> &str
+pub fn ai6::SecretRequest::mission_id(&self) -> &str
+pub fn ai6::SecretRequest::station(&self) -> &str
+pub const fn ai6::SecretRequest::ttl(&self) -> core::time::Duration
+impl core::fmt::Debug for ai6::SecretRequest
+pub fn ai6::SecretRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::SecretValue(_)
+impl ai6::SecretValue
+pub fn ai6::SecretValue::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::SecretValue::with_exposed<T>(&self, impl core::ops::function::FnOnce(&str) -> T) -> T
+impl core::fmt::Debug for ai6::SecretValue
+pub fn ai6::SecretValue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for ai6::SecretValue
+pub fn ai6::SecretValue::drop(&mut self)
+pub const ai6::directorates::q::DEFAULT_SECRET_LEASE_TTL: core::time::Duration
+pub const ai6::directorates::q::MAX_LOADOUT_BYTES: usize
+pub const ai6::directorates::q::MAX_SECRET_LEASE_TTL: core::time::Duration
+pub trait ai6::directorates::q::SecretBackend: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::SecretBackend::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
+pub fn ai6::directorates::q::SecretBackend::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
+pub fn ai6::directorates::q::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
+pub mod ai6::directorates::section_00
+pub mod ai6::directorates::section_00::agent
+pub struct ai6::directorates::section_00::agent::AgentEvent
+pub ai6::directorates::section_00::agent::AgentEvent::data: core::option::Option<alloc::vec::Vec<u8>>
+pub ai6::directorates::section_00::agent::AgentEvent::kind: alloc::string::String
+pub ai6::directorates::section_00::agent::AgentEvent::text: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::section_00::agent::AgentMessage
+pub ai6::directorates::section_00::agent::AgentMessage::text: alloc::string::String
+pub struct ai6::directorates::section_00::agent::AgentResume
+pub ai6::directorates::section_00::agent::AgentResume::effort: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentResume::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentResume::message: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentResume::mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::directorates::section_00::agent::AgentResume::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentResume::session_id: ai6::directorates::m::identity::SessionId
+pub ai6::directorates::section_00::agent::AgentResume::working_directory: alloc::string::String
+pub struct ai6::directorates::section_00::agent::AgentStart
+pub ai6::directorates::section_00::agent::AgentStart::agent_id: alloc::string::String
+pub ai6::directorates::section_00::agent::AgentStart::clearance: alloc::string::String
+pub ai6::directorates::section_00::agent::AgentStart::effort: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentStart::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentStart::initial_context: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentStart::mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::directorates::section_00::agent::AgentStart::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentStart::prompt: alloc::string::String
+pub ai6::directorates::section_00::agent::AgentStart::working_directory: alloc::string::String
+pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub trait ai6::directorates::section_00::agent::AgentSession: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::section_00::agent::AgentSession::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentSession::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::section_00::agent::AgentSession::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentSession::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentSession::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::agent::AgentSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+pub mod ai6::station
+pub mod ai6::station::identity
+#[non_exhaustive] pub enum ai6::station::identity::StationIdentityError
+pub ai6::station::identity::StationIdentityError::AlreadyAccepted
+pub ai6::station::identity::StationIdentityError::Certificate
+pub ai6::station::identity::StationIdentityError::InvalidId
+pub ai6::station::identity::StationIdentityError::Io(core::io::error::Error)
+pub ai6::station::identity::StationIdentityError::NotWaiting
+pub ai6::station::identity::StationIdentityError::Path
+pub ai6::station::identity::StationIdentityError::Tls
+pub ai6::station::identity::StationIdentityError::TrustPattern
+impl core::error::Error for ai6::station::identity::StationIdentityError
+pub fn ai6::station::identity::StationIdentityError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for ai6::station::identity::StationIdentityError
+pub fn ai6::station::identity::StationIdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum ai6::station::identity::TlsTrust
+pub ai6::station::identity::TlsTrust::Ca
+pub ai6::station::identity::TlsTrust::Ca::ca_file: std::path::PathBuf
+pub ai6::station::identity::TlsTrust::Ca::san: alloc::vec::Vec<alloc::string::String>
+pub ai6::station::identity::TlsTrust::Ca::subject: alloc::vec::Vec<alloc::string::String>
+pub ai6::station::identity::TlsTrust::Peers(ai6::station::identity::PeerTrustStore)
+pub ai6::station::identity::TlsTrust::PeersOrCa
+pub ai6::station::identity::TlsTrust::PeersOrCa::ca_file: std::path::PathBuf
+pub ai6::station::identity::TlsTrust::PeersOrCa::peers: ai6::station::identity::PeerTrustStore
+pub ai6::station::identity::TlsTrust::PeersOrCa::san: alloc::vec::Vec<alloc::string::String>
+pub ai6::station::identity::TlsTrust::PeersOrCa::subject: alloc::vec::Vec<alloc::string::String>
+pub struct ai6::station::identity::PeerTrustStore
+impl ai6::station::identity::PeerTrustStore
+pub fn ai6::station::identity::PeerTrustStore::accept(&self, &ai6::station::identity::StationFingerprint) -> core::result::Result<(), ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::PeerTrustStore::accepted(&self) -> core::result::Result<alloc::vec::Vec<ai6::station::identity::StationFingerprint>, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::PeerTrustStore::open(&std::path::Path) -> core::result::Result<Self, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::PeerTrustStore::waiting(&self) -> core::result::Result<alloc::vec::Vec<ai6::station::identity::StationFingerprint>, ai6::station::identity::StationIdentityError>
+pub struct ai6::station::identity::StationFingerprint(_)
+impl ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationFingerprint::as_str(&self) -> &str
+impl core::borrow::Borrow<str> for ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationFingerprint::borrow(&self) -> &str
+impl core::convert::AsRef<str> for ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationFingerprint::as_ref(&self) -> &str
+impl core::convert::TryFrom<alloc::string::String> for ai6::station::identity::StationFingerprint
+pub type ai6::station::identity::StationFingerprint::Error = ai6::station::identity::StationIdentityError
+pub fn ai6::station::identity::StationFingerprint::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Display for ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationFingerprint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::station::identity::StationFingerprint
+pub type ai6::station::identity::StationFingerprint::Err = ai6::station::identity::StationIdentityError
+pub fn ai6::station::identity::StationFingerprint::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub struct ai6::station::identity::StationIdentity
+impl ai6::station::identity::StationIdentity
+pub fn ai6::station::identity::StationIdentity::from_pem(&str) -> core::result::Result<Self, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::StationIdentity::generate() -> core::result::Result<Self, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::StationIdentity::id(&self) -> &ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationIdentity::open_or_create(&std::path::Path) -> core::result::Result<Self, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::StationIdentity::read(&std::path::Path) -> core::result::Result<core::option::Option<Self>, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::StationIdentity::write_new(&self, &std::path::Path) -> core::result::Result<(), ai6::station::identity::StationIdentityError>
+impl core::clone::Clone for ai6::station::identity::StationIdentity
+pub fn ai6::station::identity::StationIdentity::clone(&self) -> Self
+impl core::fmt::Debug for ai6::station::identity::StationIdentity
+pub fn ai6::station::identity::StationIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn ai6::station::identity::client_config(&ai6::station::identity::StationIdentity, &ai6::station::identity::StationFingerprint) -> core::result::Result<rustls::client::client_conn::ClientConfig, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::server_config(&ai6::station::identity::StationIdentity, ai6::station::identity::TlsTrust) -> core::result::Result<rustls::server::server_conn::ServerConfig, ai6::station::identity::StationIdentityError>
+pub mod ai6::station::plugins
+#[non_exhaustive] pub enum ai6::station::plugins::PluginBuildError
+pub ai6::station::plugins::PluginBuildError::ConfigurationRequired
+pub ai6::station::plugins::PluginBuildError::ConfigurationRequired::provider: alloc::string::String
+pub ai6::station::plugins::PluginBuildError::InvalidConfiguration
+pub ai6::station::plugins::PluginBuildError::InvalidConfiguration::provider: alloc::string::String
+pub ai6::station::plugins::PluginBuildError::InvalidConfiguration::reason: alloc::string::String
+pub ai6::station::plugins::PluginBuildError::NotFound
+pub ai6::station::plugins::PluginBuildError::NotFound::provider: alloc::string::String
+pub ai6::station::plugins::PluginBuildError::Refused
+pub ai6::station::plugins::PluginBuildError::Refused::provider: alloc::string::String
+pub ai6::station::plugins::PluginBuildError::Refused::reason: alloc::string::String
+pub ai6::station::plugins::PluginBuildError::Unavailable
+pub ai6::station::plugins::PluginBuildError::Unavailable::provider: alloc::string::String
+pub ai6::station::plugins::PluginBuildError::Unavailable::reason: alloc::string::String
+pub ai6::station::plugins::PluginBuildError::WrongKind
+pub ai6::station::plugins::PluginBuildError::WrongKind::provider: alloc::string::String
+impl core::error::Error for ai6::station::plugins::PluginBuildError
+impl core::fmt::Display for ai6::station::plugins::PluginBuildError
+pub fn ai6::station::plugins::PluginBuildError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::station::plugins::PluginScanSummary
+pub ai6::station::plugins::PluginScanSummary::failed: alloc::vec::Vec<alloc::string::String>
+pub ai6::station::plugins::PluginScanSummary::loaded: alloc::vec::Vec<alloc::string::String>
+pub ai6::station::plugins::PluginScanSummary::skipped: alloc::vec::Vec<alloc::string::String>
+pub ai6::station::plugins::PluginScanSummary::unreadable: alloc::vec::Vec<alloc::string::String>
+pub struct ai6::station::plugins::Plugins
+impl ai6::station::plugins::Plugins
+pub fn ai6::station::plugins::Plugins::authenticator(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::m::access::Authenticator>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::authenticators(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::authorizer(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::m::access::Authorizer>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::authorizers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::directories(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::directory(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::m::access::Directory>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::handler(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::handlers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::scan(&[std::path::PathBuf]) -> Self
+pub fn ai6::station::plugins::Plugins::scan_summary(&self) -> &ai6::station::plugins::PluginScanSummary
+pub fn ai6::station::plugins::Plugins::terminal(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::terminals(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub struct ai6::station::plugins::ProviderInfo
+pub ai6::station::plugins::ProviderInfo::id: alloc::string::String
+pub ai6::station::plugins::ProviderInfo::name: alloc::string::String
+pub ai6::station::plugins::ProviderInfo::unavailable: core::option::Option<alloc::string::String>
+pub fn ai6::station::plugins::library(guatiao::library::raw::host::Host) -> core::option::Option<guatiao::library::kind::parts::LibraryParts>
+pub mod ai6::station::publisher
+#[non_exhaustive] pub enum ai6::station::publisher::PublisherError
+pub ai6::station::publisher::PublisherError::InvalidOrigin
+pub ai6::station::publisher::PublisherError::InvalidToken
+impl core::error::Error for ai6::station::publisher::PublisherError
+impl core::fmt::Display for ai6::station::publisher::PublisherError
+pub fn ai6::station::publisher::PublisherError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::station::publisher::Config
+impl ai6::station::publisher::Config
+pub fn ai6::station::publisher::Config::try_new(&str, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::station::publisher::PublisherError>
+impl core::fmt::Debug for ai6::station::publisher::Config
+pub fn ai6::station::publisher::Config::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod ai6::station::safehouse
+#[non_exhaustive] pub struct ai6::station::safehouse::SafeHouse
+pub ai6::station::safehouse::SafeHouse::base: alloc::string::String
+pub ai6::station::safehouse::SafeHouse::branch: alloc::string::String
+pub ai6::station::safehouse::SafeHouse::path: std::path::PathBuf
+pub ai6::station::safehouse::SafeHouse::repository: std::path::PathBuf
+impl ai6::station::safehouse::SafeHouse
+pub fn ai6::station::safehouse::SafeHouse::active_report(&self) -> ai6::station::safehouse::SafeHouseReport
+pub fn ai6::station::safehouse::SafeHouse::commits(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::create(impl core::convert::AsRef<std::path::Path>, impl core::convert::AsRef<std::path::Path>, &str, &ai6::directorates::m::identity::MissionId, &str, &str, &str) -> core::result::Result<Self, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::finish(&self) -> core::result::Result<ai6::station::safehouse::SafeHouseReport, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::reopen(impl core::convert::AsRef<std::path::Path>, &ai6::station::safehouse::SafeHouseReport) -> core::result::Result<Self, ai6::station::safehouse::SafeHouseError>
+#[non_exhaustive] pub struct ai6::station::safehouse::SafeHouseError(_)
+impl core::error::Error for ai6::station::safehouse::SafeHouseError
+impl core::fmt::Display for ai6::station::safehouse::SafeHouseError
+pub fn ai6::station::safehouse::SafeHouseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::station::safehouse::SafeHouseReport
+pub ai6::station::safehouse::SafeHouseReport::base: alloc::string::String
+pub ai6::station::safehouse::SafeHouseReport::branch: alloc::string::String
+pub ai6::station::safehouse::SafeHouseReport::commits: alloc::vec::Vec<alloc::string::String>
+pub ai6::station::safehouse::SafeHouseReport::kept: bool
+pub ai6::station::safehouse::SafeHouseReport::path: alloc::string::String
+pub const ai6::station::safehouse::STATE_ENV: &str
+pub fn ai6::station::safehouse::branch_name(&str, &str, &str, &str) -> alloc::string::String
+pub fn ai6::station::safehouse::state_dir() -> core::result::Result<std::path::PathBuf, ai6::station::safehouse::SafeHouseError>
+pub mod ai6::station::server
+#[non_exhaustive] pub enum ai6::station::server::StationRole
+pub ai6::station::server::StationRole::Control
+pub ai6::station::server::StationRole::Execution
+pub struct ai6::station::server::ServeConfig
+impl ai6::station::server::ServeConfig
+pub fn ai6::station::server::ServeConfig::new(core::net::socket_addr::SocketAddr) -> Self
+pub fn ai6::station::server::ServeConfig::with_config_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::station::server::ServeConfig::with_max_concurrent_missions(self, usize) -> Self
+pub fn ai6::station::server::ServeConfig::with_plugin_paths(self, impl core::iter::traits::collect::IntoIterator<Item = std::path::PathBuf>) -> Self
+pub fn ai6::station::server::ServeConfig::with_publisher(self, ai6::station::publisher::Config) -> Self
+pub fn ai6::station::server::ServeConfig::with_station_config(self, ai6::station::server::StationConfig) -> Self
+pub fn ai6::station::server::ServeConfig::with_station_id(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
+#[non_exhaustive] pub struct ai6::station::server::StationConfig
+impl ai6::station::server::StationConfig
+pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
+pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::default::Default for ai6::station::server::StationConfig
+pub fn ai6::station::server::StationConfig::default() -> Self
+pub const ai6::station::server::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
+pub const ai6::station::server::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
+pub const ai6::station::server::DEFAULT_TERMINAL: &str
+pub async fn ai6::station::server::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::station::server::serve_with_capacity<F>(core::net::socket_addr::SocketAddr, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::station::server::serve_with_config_dir<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], &std::path::Path, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::station::server::serve_with_config_dir_and_capacity<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], &std::path::Path, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::station::server::serve_with_options<F>(ai6::station::server::ServeConfig, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::station::server::serve_with_plugins<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::station::server::serve_with_plugins_and_capacity<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+#[non_exhaustive] pub enum ai6::CableAction
+pub ai6::CableAction::Discover
+pub ai6::CableAction::Receive
+pub ai6::CableAction::Release
+pub ai6::CableAction::Send
+#[non_exhaustive] pub enum ai6::CableInboundMode
+pub ai6::CableInboundMode::Deliver
+pub ai6::CableInboundMode::Hold
+pub ai6::CableInboundMode::Refuse
+#[non_exhaustive] pub enum ai6::CableRelayError
+pub ai6::CableRelayError::InvalidRequest
+pub ai6::CableRelayError::RegistryUnavailable
+pub ai6::CableRelayError::Unavailable
+impl core::error::Error for ai6::CableRelayError
+impl core::fmt::Display for ai6::CableRelayError
+pub fn ai6::CableRelayError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::CableScope
+pub ai6::CableScope::Agent
+pub ai6::CableScope::Channel
+pub ai6::CableScope::Global
+pub ai6::CableScope::Station
+pub ai6::CableScope::Theater
+#[non_exhaustive] pub enum ai6::CableState
+pub ai6::CableState::Acked
+pub ai6::CableState::Delivered
+pub ai6::CableState::Expired
+pub ai6::CableState::Failed
+pub ai6::CableState::Held
+pub ai6::CableState::Queued
+pub ai6::CableState::Refused
+#[non_exhaustive] pub enum ai6::LeaseRecovery
+pub ai6::LeaseRecovery::Failed
+pub ai6::LeaseRecovery::Requeued
+#[non_exhaustive] pub enum ai6::QErrorKind
+pub ai6::QErrorKind::InvalidUtf8
+pub ai6::QErrorKind::Io
+pub ai6::QErrorKind::Parse
+pub ai6::QErrorKind::Schema
+pub ai6::QErrorKind::TooLarge
+#[non_exhaustive] pub enum ai6::SandboxError
+pub ai6::SandboxError::DuplicateMount
+pub ai6::SandboxError::InvalidCommand
+pub ai6::SandboxError::InvalidPath
+pub ai6::SandboxError::InvalidWorktree
+pub ai6::SandboxError::MissingWorktreeMount
+pub ai6::SandboxError::UnsupportedBackend
+pub ai6::SandboxError::UnsupportedNetworkPolicy
+pub ai6::SandboxError::UnsupportedPlatform
+impl core::error::Error for ai6::SandboxError
+impl core::fmt::Display for ai6::SandboxError
+pub fn ai6::SandboxError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::SecretError
+pub ai6::SecretError::AccessDenied
+pub ai6::SecretError::Backend
+pub ai6::SecretError::Expired
+pub ai6::SecretError::InvalidIdentity
+pub ai6::SecretError::InvalidResponse
+pub ai6::SecretError::InvalidTtl
+impl core::error::Error for ai6::SecretError
+impl core::fmt::Display for ai6::SecretError
+pub fn ai6::SecretError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::StationIdentityError
+pub ai6::StationIdentityError::AlreadyAccepted
+pub ai6::StationIdentityError::Certificate
+pub ai6::StationIdentityError::InvalidId
+pub ai6::StationIdentityError::Io(core::io::error::Error)
+pub ai6::StationIdentityError::NotWaiting
+pub ai6::StationIdentityError::Path
+pub ai6::StationIdentityError::Tls
+pub ai6::StationIdentityError::TrustPattern
+impl core::error::Error for ai6::station::identity::StationIdentityError
+pub fn ai6::station::identity::StationIdentityError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for ai6::station::identity::StationIdentityError
+pub fn ai6::station::identity::StationIdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::StationRole
+pub ai6::StationRole::Control
+pub ai6::StationRole::Execution
+pub enum ai6::TlsTrust
+pub ai6::TlsTrust::Ca
+pub ai6::TlsTrust::Ca::ca_file: std::path::PathBuf
+pub ai6::TlsTrust::Ca::san: alloc::vec::Vec<alloc::string::String>
+pub ai6::TlsTrust::Ca::subject: alloc::vec::Vec<alloc::string::String>
+pub ai6::TlsTrust::Peers(ai6::station::identity::PeerTrustStore)
+pub ai6::TlsTrust::PeersOrCa
+pub ai6::TlsTrust::PeersOrCa::ca_file: std::path::PathBuf
+pub ai6::TlsTrust::PeersOrCa::peers: ai6::station::identity::PeerTrustStore
+pub ai6::TlsTrust::PeersOrCa::san: alloc::vec::Vec<alloc::string::String>
+pub ai6::TlsTrust::PeersOrCa::subject: alloc::vec::Vec<alloc::string::String>
+pub enum ai6::Verdict
+pub ai6::Verdict::Invalid
+pub ai6::Verdict::Unknown
+pub ai6::Verdict::Valid(ai6::directorates::m::access::Lookup)
+pub struct ai6::AccessTokenRecord
+impl ai6::directorates::m::identity::AccessTokenRecord
+pub fn ai6::directorates::m::identity::AccessTokenRecord::active_at(&self, f64) -> bool
+pub fn ai6::directorates::m::identity::AccessTokenRecord::digest(&self) -> &str
+pub fn ai6::directorates::m::identity::AccessTokenRecord::expires_at(&self) -> f64
+pub fn ai6::directorates::m::identity::AccessTokenRecord::issued_at(&self) -> f64
+pub fn ai6::directorates::m::identity::AccessTokenRecord::person_id(&self) -> &str
+pub fn ai6::directorates::m::identity::AccessTokenRecord::revoked_at(&self) -> core::option::Option<f64>
+pub fn ai6::directorates::m::identity::AccessTokenRecord::token_id(&self) -> &str
+pub fn ai6::directorates::m::identity::AccessTokenRecord::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64, f64, core::option::Option<f64>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+impl core::fmt::Debug for ai6::directorates::m::identity::AccessTokenRecord
+pub fn ai6::directorates::m::identity::AccessTokenRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::AgentEvent
+pub ai6::AgentEvent::data: core::option::Option<alloc::vec::Vec<u8>>
+pub ai6::AgentEvent::kind: alloc::string::String
+pub ai6::AgentEvent::text: core::option::Option<alloc::string::String>
+pub struct ai6::AgentMessage
+pub ai6::AgentMessage::text: alloc::string::String
+pub struct ai6::AgentResume
+pub ai6::AgentResume::effort: core::option::Option<alloc::string::String>
+pub ai6::AgentResume::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::AgentResume::message: core::option::Option<alloc::string::String>
+pub ai6::AgentResume::mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::AgentResume::model: core::option::Option<alloc::string::String>
+pub ai6::AgentResume::session_id: ai6::directorates::m::identity::SessionId
+pub ai6::AgentResume::working_directory: alloc::string::String
+#[non_exhaustive] pub struct ai6::AgentRole
+pub ai6::AgentRole::id: alloc::string::String
+pub ai6::AgentRole::policy: alloc::string::String
+pub ai6::AgentRole::purpose: alloc::string::String
+impl ai6::directorates::m::roster::AgentRole
+pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub struct ai6::AgentStart
+pub ai6::AgentStart::agent_id: alloc::string::String
+pub ai6::AgentStart::clearance: alloc::string::String
+pub ai6::AgentStart::effort: core::option::Option<alloc::string::String>
+pub ai6::AgentStart::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::AgentStart::initial_context: alloc::vec::Vec<alloc::string::String>
+pub ai6::AgentStart::mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::AgentStart::model: core::option::Option<alloc::string::String>
+pub ai6::AgentStart::prompt: alloc::string::String
+pub ai6::AgentStart::working_directory: alloc::string::String
+pub struct ai6::Attempt
+pub ai6::Attempt::certificate: core::option::Option<alloc::string::String>
+pub ai6::Attempt::headers: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::Attempt::name: core::option::Option<alloc::string::String>
+pub ai6::Attempt::peer: core::option::Option<alloc::string::String>
+pub ai6::Attempt::secret: core::option::Option<alloc::string::String>
+pub ai6::Attempt::secure: core::option::Option<bool>
+impl core::fmt::Debug for ai6::directorates::m::access::Attempt
+pub fn ai6::directorates::m::access::Attempt::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::AuditEntry
+pub ai6::AuditEntry::action: alloc::string::String
+pub ai6::AuditEntry::actor: alloc::string::String
+pub ai6::AuditEntry::at: f64
+pub ai6::AuditEntry::id: alloc::string::String
+pub ai6::AuditEntry::operation: alloc::string::String
+pub ai6::AuditEntry::resource: core::option::Option<alloc::string::String>
+pub ai6::AuditEntry::target: alloc::string::String
+pub struct ai6::AuthorizationDecision
+pub ai6::AuthorizationDecision::allowed: bool
+pub ai6::AuthorizationDecision::limits: alloc::collections::btree::map::BTreeMap<alloc::string::String, guatiao::value::value::Value>
+pub struct ai6::AuthorizationRequest
+pub ai6::AuthorizationRequest::action: alloc::string::String
+pub ai6::AuthorizationRequest::person: ai6::directorates::m::access::Person
+pub ai6::AuthorizationRequest::resource: alloc::string::String
+pub struct ai6::Brief
+pub ai6::Brief::agent: core::option::Option<alloc::string::String>
+pub ai6::Brief::body: alloc::string::String
+pub ai6::Brief::created: alloc::string::String
+pub ai6::Brief::data: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub ai6::Brief::id: alloc::string::String
+pub ai6::Brief::operation: core::option::Option<alloc::string::String>
+pub ai6::Brief::priority: i64
+pub ai6::Brief::role: core::option::Option<alloc::string::String>
+pub ai6::Brief::source: alloc::string::String
+pub ai6::Brief::tags: alloc::vec::Vec<alloc::string::String>
+pub ai6::Brief::title: alloc::string::String
+pub ai6::Brief::url: core::option::Option<alloc::string::String>
+pub ai6::Brief::version: u32
+impl ai6::directorates::i::intake::Brief
+pub fn ai6::directorates::i::intake::Brief::key(&self) -> alloc::string::String
+pub fn ai6::directorates::i::intake::Brief::prompt(&self) -> alloc::string::String
+pub struct ai6::Cable
+impl ai6::directorates::i::cables::Cable
+pub fn ai6::directorates::i::cables::Cable::body(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::conversation_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::created_at(&self) -> f64
+pub fn ai6::directorates::i::cables::Cable::expires_at(&self) -> f64
+pub fn ai6::directorates::i::cables::Cable::id(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::idempotency_key(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::recipients(&self) -> &[ai6::directorates::i::cables::CableRecipient]
+pub fn ai6::directorates::i::cables::Cable::reply_to(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::same_request(&self, &Self) -> bool
+pub fn ai6::directorates::i::cables::Cable::sender_agent(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::sender_operation(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::sender_station(&self) -> &str
+pub fn ai6::directorates::i::cables::Cable::sender_theater(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::session_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::Cable::target(&self) -> &ai6::directorates::i::cables::CableTarget
+pub fn ai6::directorates::i::cables::Cable::try_new(ai6::directorates::i::cables::CableDraft) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub fn ai6::directorates::i::cables::Cable::with_recipient_state(&self, &str, core::option::Option<&str>, ai6::directorates::i::cables::CableState) -> core::result::Result<core::option::Option<Self>, ai6::directorates::i::cables::CableError>
+impl core::fmt::Debug for ai6::directorates::i::cables::Cable
+pub fn ai6::directorates::i::cables::Cable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::CableAuditRecord
+pub ai6::CableAuditRecord::agent: alloc::string::String
+pub ai6::CableAuditRecord::at: f64
+pub ai6::CableAuditRecord::cable_id: core::option::Option<alloc::string::String>
+pub ai6::CableAuditRecord::decision: &'static str
+pub ai6::CableAuditRecord::event: &'static str
+pub ai6::CableAuditRecord::mission_id: core::option::Option<alloc::string::String>
+pub ai6::CableAuditRecord::operation: alloc::string::String
+pub ai6::CableAuditRecord::session_id: core::option::Option<alloc::string::String>
+pub ai6::CableAuditRecord::station: alloc::string::String
+pub ai6::CableAuditRecord::target_name: core::option::Option<alloc::string::String>
+pub ai6::CableAuditRecord::target_scope: ai6::directorates::i::cables::CableScope
+pub ai6::CableAuditRecord::theater: core::option::Option<alloc::string::String>
+pub struct ai6::CableConfig
+impl ai6::CableConfig
+pub fn ai6::CableConfig::channels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>
+pub fn ai6::CableConfig::max_fanout(&self) -> usize
+pub fn ai6::CableConfig::parse_toml(&str) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub fn ai6::CableConfig::policy(&self) -> core::result::Result<ai6::CablePolicy, ai6::directorates::i::cables::CableError>
+pub fn ai6::CableConfig::quota_limits(&self) -> (f64, u32, f64, u32)
+impl core::default::Default for ai6::CableConfig
+pub fn ai6::CableConfig::default() -> Self
+#[non_exhaustive] pub struct ai6::CableDelivery
+pub ai6::CableDelivery::body: alloc::string::String
+pub ai6::CableDelivery::cable_id: alloc::string::String
+pub ai6::CableDelivery::conversation_id: core::option::Option<alloc::string::String>
+pub ai6::CableDelivery::created_at: f64
+pub ai6::CableDelivery::expires_at: f64
+pub ai6::CableDelivery::from_agent: alloc::string::String
+pub ai6::CableDelivery::from_operation: alloc::string::String
+pub ai6::CableDelivery::from_station: alloc::string::String
+pub ai6::CableDelivery::from_theater: core::option::Option<alloc::string::String>
+pub ai6::CableDelivery::mission_id: core::option::Option<alloc::string::String>
+pub ai6::CableDelivery::reply_to: core::option::Option<alloc::string::String>
+pub ai6::CableDelivery::session_id: core::option::Option<alloc::string::String>
+pub ai6::CableDelivery::state: ai6::directorates::i::cables::CableState
+pub ai6::CableDelivery::target: ai6::directorates::i::cables::CableTarget
+impl core::fmt::Debug for ai6::CableDelivery
+pub fn ai6::CableDelivery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::CableDraft
+pub ai6::CableDraft::body: alloc::string::String
+pub ai6::CableDraft::conversation_id: core::option::Option<alloc::string::String>
+pub ai6::CableDraft::created_at: f64
+pub ai6::CableDraft::expires_at: f64
+pub ai6::CableDraft::id: alloc::string::String
+pub ai6::CableDraft::idempotency_key: alloc::string::String
+pub ai6::CableDraft::mission_id: core::option::Option<alloc::string::String>
+pub ai6::CableDraft::recipients: alloc::vec::Vec<ai6::directorates::i::cables::CableRecipient>
+pub ai6::CableDraft::reply_to: core::option::Option<alloc::string::String>
+pub ai6::CableDraft::sender_agent: alloc::string::String
+pub ai6::CableDraft::sender_operation: alloc::string::String
+pub ai6::CableDraft::sender_station: alloc::string::String
+pub ai6::CableDraft::sender_theater: core::option::Option<alloc::string::String>
+pub ai6::CableDraft::session_id: core::option::Option<alloc::string::String>
+pub ai6::CableDraft::target: ai6::directorates::i::cables::CableTarget
+impl ai6::directorates::i::cables::CableDraft
+pub fn ai6::directorates::i::cables::CableDraft::new(alloc::string::String, alloc::string::String, alloc::string::String, ai6::directorates::i::cables::CableTarget, alloc::string::String, alloc::vec::Vec<ai6::directorates::i::cables::CableRecipient>, alloc::string::String, alloc::string::String, f64, f64) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_mission(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_sender_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::i::cables::CableDraft::with_session(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::fmt::Debug for ai6::directorates::i::cables::CableDraft
+pub fn ai6::directorates::i::cables::CableDraft::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::CableEndpoint
+impl ai6::CableEndpoint
+pub fn ai6::CableEndpoint::agent(&self) -> &str
+pub fn ai6::CableEndpoint::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::CableEndpoint::operation(&self) -> &str
+pub fn ai6::CableEndpoint::session_id(&self) -> core::option::Option<&str>
+pub fn ai6::CableEndpoint::station(&self) -> &str
+pub fn ai6::CableEndpoint::theater(&self) -> core::option::Option<&str>
+pub fn ai6::CableEndpoint::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+#[non_exhaustive] pub struct ai6::CableError(_)
+impl core::error::Error for ai6::directorates::i::cables::CableError
+impl core::fmt::Display for ai6::directorates::i::cables::CableError
+pub fn ai6::directorates::i::cables::CableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::CableGrant
+impl ai6::CableGrant
+pub fn ai6::CableGrant::try_new(alloc::string::String, ai6::CableAction, ai6::directorates::i::cables::CableTarget) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+#[non_exhaustive] pub struct ai6::CableHeldDelivery
+pub ai6::CableHeldDelivery::cable_id: alloc::string::String
+pub ai6::CableHeldDelivery::expires_at: f64
+pub ai6::CableHeldDelivery::from_agent: alloc::string::String
+pub ai6::CableHeldDelivery::recipients: alloc::vec::Vec<ai6::CableHeldRecipient>
+pub ai6::CableHeldDelivery::target: ai6::directorates::i::cables::CableTarget
+#[non_exhaustive] pub struct ai6::CableHeldRecipient
+pub ai6::CableHeldRecipient::agent: alloc::string::String
+pub ai6::CableHeldRecipient::session_id: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::CablePolicy
+impl ai6::CablePolicy
+pub fn ai6::CablePolicy::try_new(alloc::vec::Vec<ai6::CableGrant>, alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::CableInboundMode>) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+#[non_exhaustive] pub struct ai6::CablePrincipal
+impl ai6::CablePrincipal
+pub fn ai6::CablePrincipal::agent(&self) -> &str
+pub fn ai6::CablePrincipal::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::CablePrincipal::operation(&self) -> &str
+pub fn ai6::CablePrincipal::session_id(&self) -> core::option::Option<&str>
+pub fn ai6::CablePrincipal::station(&self) -> &str
+pub fn ai6::CablePrincipal::theater(&self) -> core::option::Option<&str>
+pub fn ai6::CablePrincipal::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub struct ai6::CableRecipient
+impl ai6::directorates::i::cables::CableRecipient
+pub fn ai6::directorates::i::cables::CableRecipient::agent(&self) -> &str
+pub fn ai6::directorates::i::cables::CableRecipient::session_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::CableRecipient::state(&self) -> ai6::directorates::i::cables::CableState
+pub fn ai6::directorates::i::cables::CableRecipient::try_new(alloc::string::String, core::option::Option<alloc::string::String>, ai6::directorates::i::cables::CableState) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub struct ai6::CableRelay
+impl ai6::CableRelay
+pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::discover(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::CableEndpoint>, ai6::CableRelayError>
+pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
+pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
+pub fn ai6::CableRelay::new(alloc::sync::Arc<ai6::directorates::i::intake::IntakeRegistry>, ai6::CablePolicy, impl core::ops::function::Fn() -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>) -> Self
+pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::release(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::CableRelease, ai6::CableRelayError>
+pub fn ai6::CableRelay::reply(&self, &ai6::CablePrincipal, &str, alloc::string::String, alloc::string::String) -> core::result::Result<ai6::directorates::i::cables::Cable, ai6::CableRelayError>
+pub fn ai6::CableRelay::send(&self, &ai6::CablePrincipal, ai6::CableSendRequest) -> core::result::Result<ai6::directorates::i::cables::Cable, ai6::CableRelayError>
+pub fn ai6::CableRelay::unregister_endpoint(&self, &ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+#[non_exhaustive] pub struct ai6::CableRelease
+pub ai6::CableRelease::delivered: usize
+pub ai6::CableRelease::refused: usize
+#[non_exhaustive] pub struct ai6::CableSendRequest
+impl ai6::CableSendRequest
+pub fn ai6::CableSendRequest::new(ai6::directorates::i::cables::CableTarget, alloc::string::String, alloc::string::String) -> Self
+pub fn ai6::CableSendRequest::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::CableSendRequest::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::CableSendRequest::with_ttl(self, f64) -> Self
+impl core::fmt::Debug for ai6::CableSendRequest
+pub fn ai6::CableSendRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::CableTarget
+impl ai6::directorates::i::cables::CableTarget
+pub fn ai6::directorates::i::cables::CableTarget::name(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::i::cables::CableTarget::scope(&self) -> ai6::directorates::i::cables::CableScope
+pub fn ai6::directorates::i::cables::CableTarget::try_new(ai6::directorates::i::cables::CableScope, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::i::cables::CableError>
+pub struct ai6::ExitInfo
+pub ai6::ExitInfo::code: core::option::Option<i64>
+pub ai6::ExitInfo::running: bool
+pub ai6::ExitInfo::signal: core::option::Option<i64>
+#[non_exhaustive] pub struct ai6::HeadquartersLease
+impl ai6::directorates::i::intake::HeadquartersLease
+pub fn ai6::directorates::i::intake::HeadquartersLease::expires(&self) -> f64
+pub fn ai6::directorates::i::intake::HeadquartersLease::station(&self) -> &str
+pub struct ai6::InactivityMonitor
+impl ai6::directorates::medical::watchdog::InactivityMonitor
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::is_max_runtime_exceeded(&self) -> bool
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::is_stalled(&self) -> bool
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::max_runtime(&self) -> core::option::Option<core::time::Duration>
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::new(core::time::Duration) -> Self
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::record_activity(&self)
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::timeout(&self) -> core::time::Duration
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::with_config(ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
+impl core::default::Default for ai6::directorates::medical::watchdog::InactivityMonitor
+pub fn ai6::directorates::medical::watchdog::InactivityMonitor::default() -> Self
+pub struct ai6::IntakeRegistry
+impl ai6::directorates::i::intake::IntakeRegistry
+pub fn ai6::directorates::i::intake::IntakeRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::cables::Cable>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
+pub fn ai6::directorates::i::intake::IntakeRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::Brief>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::Lease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::Lease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::cables::Cable>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::finish(&self, &ai6::directorates::i::intake::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<std::path::PathBuf>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::from_environment() -> core::io::error::Result<Self>
+pub fn ai6::directorates::i::intake::IntakeRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::cables::Cable>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::HeadquartersLease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::cables::Cable>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::Lease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::leases(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::Lease>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::AuditEntry>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::list_mission_proposals(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::MissionProposal>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::list_new(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::Brief>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::open(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::directorates::i::intake::IntakeRegistry::promote_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::i::intake::Brief>
+pub fn ai6::directorates::i::intake::IntakeRegistry::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
+pub fn ai6::directorates::i::intake::IntakeRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::Brief>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::record_audit(&self, &ai6::directorates::i::intake::AuditEntry) -> core::io::error::Result<std::path::PathBuf>
+pub fn ai6::directorates::i::intake::IntakeRegistry::recover(&self, &ai6::directorates::i::intake::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::LeaseRecovery>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::i::intake::MissionProposal>
+pub fn ai6::directorates::i::intake::IntakeRegistry::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::root(&self) -> &std::path::Path
+pub fn ai6::directorates::i::intake::IntakeRegistry::set_station_settings(&self, &str, &ai6::directorates::i::intake::StationSettings) -> core::io::error::Result<()>
+pub fn ai6::directorates::i::intake::IntakeRegistry::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::i::intake::StationSettings>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::i::intake::StationRecord>>
+pub fn ai6::directorates::i::intake::IntakeRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
+pub fn ai6::directorates::i::intake::IntakeRegistry::submit_brief(&self, &ai6::directorates::i::intake::Brief) -> core::io::error::Result<std::path::PathBuf>
+pub fn ai6::directorates::i::intake::IntakeRegistry::submit_cable(&self, &ai6::directorates::i::cables::Cable) -> core::io::error::Result<ai6::directorates::i::cables::Cable>
+pub fn ai6::directorates::i::intake::IntakeRegistry::submit_mission_proposal(&self, &ai6::directorates::i::intake::MissionProposal) -> core::io::error::Result<std::path::PathBuf>
+pub fn ai6::directorates::i::intake::IntakeRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::i::intake::IntakeRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::i::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::i::cables::Cable>>
+#[non_exhaustive] pub struct ai6::InvalidIdentity
+impl core::error::Error for ai6::directorates::m::identity::InvalidIdentity
+impl core::fmt::Display for ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::InvalidIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::Lease
+impl ai6::directorates::i::intake::Lease
+pub fn ai6::directorates::i::intake::Lease::attempt(&self) -> u32
+pub fn ai6::directorates::i::intake::Lease::expires(&self) -> f64
+pub fn ai6::directorates::i::intake::Lease::key(&self) -> &str
+pub fn ai6::directorates::i::intake::Lease::meta(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::i::intake::Lease::station(&self) -> &str
+impl core::cmp::PartialEq for ai6::directorates::i::intake::Lease
+pub fn ai6::directorates::i::intake::Lease::eq(&self, &Self) -> bool
+pub struct ai6::Loadout
+impl ai6::directorates::q::Loadout
+pub fn ai6::directorates::q::Loadout::agent(&self) -> &str
+pub fn ai6::directorates::q::Loadout::mcp_names(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::Loadout::sandbox_name(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::q::Loadout::secret_names(&self) -> &[alloc::string::String]
+pub struct ai6::LoadoutCatalog
+impl ai6::directorates::q::LoadoutCatalog
+pub fn ai6::directorates::q::LoadoutCatalog::for_agent(&self, &str) -> core::result::Result<&ai6::directorates::q::Loadout, ai6::directorates::q::QError>
+pub fn ai6::directorates::q::LoadoutCatalog::load(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, ai6::directorates::q::QError>
+pub fn ai6::directorates::q::LoadoutCatalog::loadouts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::Loadout>
+pub fn ai6::directorates::q::LoadoutCatalog::mcp_servers(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::McpServer>
+pub fn ai6::directorates::q::LoadoutCatalog::sandbox_for(&self, &ai6::directorates::q::Loadout) -> core::option::Option<&ai6::directorates::q::SandboxProfile>
+pub fn ai6::directorates::q::LoadoutCatalog::sandboxes(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::SandboxProfile>
+pub fn ai6::directorates::q::LoadoutCatalog::servers_for(&self, &ai6::directorates::q::Loadout) -> core::result::Result<alloc::vec::Vec<&ai6::directorates::q::McpServer>, ai6::directorates::q::QError>
+impl core::str::traits::FromStr for ai6::directorates::q::LoadoutCatalog
+pub type ai6::directorates::q::LoadoutCatalog::Err = ai6::directorates::q::QError
+pub fn ai6::directorates::q::LoadoutCatalog::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub struct ai6::Lookup
+pub ai6::Lookup::by: alloc::string::String
+pub ai6::Lookup::value: alloc::string::String
+impl core::fmt::Debug for ai6::directorates::m::access::Lookup
+pub fn ai6::directorates::m::access::Lookup::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::McpServer
+impl ai6::directorates::q::McpServer
+pub fn ai6::directorates::q::McpServer::command(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::McpServer::deny(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::McpServer::name(&self) -> &str
+pub struct ai6::MissionId(_)
+impl ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::as_str(&self) -> &str
+pub fn ai6::directorates::m::identity::MissionId::try_new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+impl core::borrow::Borrow<str> for ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::borrow(&self) -> &str
+impl core::convert::AsRef<str> for ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::as_ref(&self) -> &str
+impl core::convert::From<ai6::directorates::m::identity::MissionId> for alloc::string::String
+pub fn alloc::string::String::from(ai6::directorates::m::identity::MissionId) -> Self
+impl core::convert::TryFrom<alloc::string::String> for ai6::directorates::m::identity::MissionId
+pub type ai6::directorates::m::identity::MissionId::Error = ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::MissionId::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Display for ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::m::identity::MissionId
+pub type ai6::directorates::m::identity::MissionId::Err = ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::MissionId::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl guatiao::value::convert::FromValue for ai6::directorates::m::identity::MissionId
+pub const ai6::directorates::m::identity::MissionId::KINDS: guatiao::value::convert::kinds::Kinds
+pub fn ai6::directorates::m::identity::MissionId::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::MissionId
+pub fn ai6::directorates::m::identity::MissionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6::MissionProposal
+pub ai6::MissionProposal::brief: ai6::directorates::i::intake::Brief
+pub ai6::MissionProposal::created_at: f64
+pub ai6::MissionProposal::id: alloc::string::String
+pub ai6::MissionProposal::operation_id: alloc::string::String
+pub ai6::MissionProposal::parent_mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::MissionProposal::proposer_agent_id: alloc::string::String
+pub ai6::MissionProposal::proposer_session_id: ai6::directorates::m::identity::SessionId
+impl ai6::directorates::i::intake::MissionProposal
+pub fn ai6::directorates::i::intake::MissionProposal::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::SessionId, &str, ai6::directorates::i::intake::Brief) -> core::io::error::Result<Self>
+#[non_exhaustive] pub struct ai6::Operation
+pub ai6::Operation::base: alloc::string::String
+pub ai6::Operation::branch: alloc::string::String
+pub ai6::Operation::clearance: alloc::string::String
+pub ai6::Operation::config: core::option::Option<std::path::PathBuf>
+pub ai6::Operation::cover: alloc::string::String
+pub ai6::Operation::description: alloc::string::String
+pub ai6::Operation::id: alloc::string::String
+pub ai6::Operation::identity: core::option::Option<ai6::directorates::m::roster::OperationIdentity>
+pub ai6::Operation::intake: toml::table::Table
+pub ai6::Operation::max_concurrent: core::option::Option<usize>
+pub ai6::Operation::name: core::option::Option<alloc::string::String>
+pub ai6::Operation::on_blown: alloc::string::String
+pub ai6::Operation::path: core::option::Option<std::path::PathBuf>
+pub ai6::Operation::repos: alloc::vec::Vec<alloc::string::String>
+pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
+pub ai6::Operation::safe_houses: bool
+pub ai6::Operation::selector: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::Operation::theater: core::option::Option<alloc::string::String>
+pub struct ai6::OperationIdentity
+pub ai6::OperationIdentity::email: alloc::string::String
+pub ai6::OperationIdentity::name: alloc::string::String
+pub struct ai6::PeerTrustStore
+impl ai6::station::identity::PeerTrustStore
+pub fn ai6::station::identity::PeerTrustStore::accept(&self, &ai6::station::identity::StationFingerprint) -> core::result::Result<(), ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::PeerTrustStore::accepted(&self) -> core::result::Result<alloc::vec::Vec<ai6::station::identity::StationFingerprint>, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::PeerTrustStore::open(&std::path::Path) -> core::result::Result<Self, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::PeerTrustStore::waiting(&self) -> core::result::Result<alloc::vec::Vec<ai6::station::identity::StationFingerprint>, ai6::station::identity::StationIdentityError>
+pub struct ai6::Person
+pub ai6::Person::attributes: alloc::collections::btree::map::BTreeMap<alloc::string::String, guatiao::value::value::Value>
+pub ai6::Person::display_name: core::option::Option<alloc::string::String>
+pub ai6::Person::email: core::option::Option<alloc::string::String>
+pub ai6::Person::groups: alloc::vec::Vec<alloc::string::String>
+pub ai6::Person::id: alloc::string::String
+pub ai6::Person::name: alloc::string::String
+impl core::fmt::Debug for ai6::directorates::m::access::Person
+pub fn ai6::directorates::m::access::Person::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::QError
+impl ai6::directorates::q::QError
+pub const fn ai6::directorates::q::QError::column(&self) -> core::option::Option<usize>
+pub const fn ai6::directorates::q::QError::kind(&self) -> ai6::directorates::q::QErrorKind
+pub const fn ai6::directorates::q::QError::line(&self) -> core::option::Option<usize>
+pub const fn ai6::directorates::q::QError::offset(&self) -> core::option::Option<usize>
+pub fn ai6::directorates::q::QError::path(&self) -> core::option::Option<&std::path::Path>
+impl core::error::Error for ai6::directorates::q::QError
+pub fn ai6::directorates::q::QError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for ai6::directorates::q::QError
+pub fn ai6::directorates::q::QError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::RoleAuthorizer
+impl ai6::directorates::m::access::RoleAuthorizer
+pub fn ai6::directorates::m::access::RoleAuthorizer::from_toml(&str) -> core::result::Result<Self, ai6::directorates::m::access::RolePolicyError>
+pub fn ai6::directorates::m::access::RoleAuthorizer::load(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, ai6::directorates::m::access::RolePolicyError>
+impl ai6::directorates::m::access::Authorizer for ai6::directorates::m::access::RoleAuthorizer
+pub fn ai6::directorates::m::access::RoleAuthorizer::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for ai6::directorates::m::access::RoleAuthorizer
+pub fn ai6::directorates::m::access::RoleAuthorizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::RoleAuthorizerConfig
+pub ai6::RoleAuthorizerConfig::policy_toml: alloc::string::String
+impl core::convert::TryFrom<ai6::directorates::m::access::RoleAuthorizerConfig> for ai6::directorates::m::access::RoleAuthorizerProvider
+pub type ai6::directorates::m::access::RoleAuthorizerProvider::Error = guatiao::library::kind::ProviderError
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::try_from(ai6::directorates::m::access::RoleAuthorizerConfig) -> core::result::Result<Self, Self::Error>
+pub struct ai6::RoleAuthorizerProvider(_)
+impl ai6::directorates::m::access::Authorizer for ai6::directorates::m::access::RoleAuthorizerProvider
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6::directorates::m::access::RoleAuthorizerConfig> for ai6::directorates::m::access::RoleAuthorizerProvider
+pub type ai6::directorates::m::access::RoleAuthorizerProvider::Error = guatiao::library::kind::ProviderError
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::try_from(ai6::directorates::m::access::RoleAuthorizerConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6::directorates::m::access::RoleAuthorizerProvider
+pub const ai6::directorates::m::access::RoleAuthorizerProvider::KINDS: &'static [&'static str]
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6::RolePolicyError(_)
+impl core::error::Error for ai6::directorates::m::access::RolePolicyError
+impl core::fmt::Display for ai6::directorates::m::access::RolePolicyError
+pub fn ai6::directorates::m::access::RolePolicyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::Roster
+impl ai6::directorates::m::roster::Roster
+pub fn ai6::directorates::m::roster::Roster::agent(&self, core::option::Option<&str>, &str) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::agents_for_operation(&self, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::roster::Agent>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::load(impl core::convert::Into<std::path::PathBuf>) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::operation(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::Operation, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::Operation>
+pub fn ai6::directorates::m::roster::Roster::role(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::AgentRole, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::roles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::AgentRole>
+pub fn ai6::directorates::m::roster::Roster::select_agent(&self, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
+pub struct ai6::RosterError(_)
+impl core::error::Error for ai6::directorates::m::roster::RosterError
+impl core::fmt::Display for ai6::directorates::m::roster::RosterError
+pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SandboxProfile
+impl ai6::directorates::q::SandboxProfile
+pub fn ai6::directorates::q::SandboxProfile::backend(&self) -> &str
+pub fn ai6::directorates::q::SandboxProfile::name(&self) -> &str
+pub fn ai6::directorates::q::SandboxProfile::network(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::SandboxProfile::read_only(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::SandboxProfile::read_write(&self) -> &[alloc::string::String]
+impl ai6::directorates::q::SandboxProfile
+pub fn ai6::directorates::q::SandboxProfile::bubblewrap_argv(&self, &ai6::SandboxRequest) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, ai6::SandboxError>
+pub struct ai6::SandboxRequest
+impl ai6::SandboxRequest
+pub fn ai6::SandboxRequest::new(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
+pub fn ai6::SandboxRequest::with_allowed_root(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::SandboxRequest::with_executable(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct ai6::SecretBackendFailure
+impl ai6::SecretBackendFailure
+pub const fn ai6::SecretBackendFailure::new() -> Self
+impl core::default::Default for ai6::SecretBackendFailure
+pub fn ai6::SecretBackendFailure::default() -> Self
+impl core::error::Error for ai6::SecretBackendFailure
+impl core::fmt::Display for ai6::SecretBackendFailure
+pub fn ai6::SecretBackendFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SecretBroker
+impl ai6::SecretBroker
+pub fn ai6::SecretBroker::lease(&self, &ai6::directorates::q::Loadout, ai6::SecretLeaseRequest) -> core::result::Result<ai6::SecretLease, ai6::SecretError>
+pub fn ai6::SecretBroker::new(impl ai6::SecretBackend + 'static) -> Self
+pub fn ai6::SecretBroker::with_max_ttl(self, core::time::Duration) -> core::result::Result<Self, ai6::SecretError>
+impl core::fmt::Debug for ai6::SecretBroker
+pub fn ai6::SecretBroker::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SecretLease
+impl ai6::SecretLease
+pub fn ai6::SecretLease::expires_at(&self) -> std::time::Instant
+pub fn ai6::SecretLease::is_active(&self) -> bool
+pub fn ai6::SecretLease::mission_id(&self) -> &str
+pub fn ai6::SecretLease::names(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::SecretLease::revoke(&self) -> core::result::Result<(), ai6::SecretError>
+pub fn ai6::SecretLease::station(&self) -> &str
+pub fn ai6::SecretLease::with_secret<T>(&self, &str, impl core::ops::function::FnOnce(&str) -> T) -> core::result::Result<T, ai6::SecretError>
+impl core::fmt::Debug for ai6::SecretLease
+pub fn ai6::SecretLease::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SecretLeaseRequest
+impl ai6::SecretLeaseRequest
+pub fn ai6::SecretLeaseRequest::mission_id(&self) -> &str
+pub fn ai6::SecretLeaseRequest::station(&self) -> &str
+pub fn ai6::SecretLeaseRequest::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::SecretError>
+pub const fn ai6::SecretLeaseRequest::ttl(&self) -> core::time::Duration
+pub fn ai6::SecretLeaseRequest::with_ttl(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::time::Duration) -> core::result::Result<Self, ai6::SecretError>
+pub struct ai6::SecretRequest
+impl ai6::SecretRequest
+pub fn ai6::SecretRequest::lease_id(&self) -> &str
+pub fn ai6::SecretRequest::mission_id(&self) -> &str
+pub fn ai6::SecretRequest::station(&self) -> &str
+pub const fn ai6::SecretRequest::ttl(&self) -> core::time::Duration
+impl core::fmt::Debug for ai6::SecretRequest
+pub fn ai6::SecretRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SecretValue(_)
+impl ai6::SecretValue
+pub fn ai6::SecretValue::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::SecretValue::with_exposed<T>(&self, impl core::ops::function::FnOnce(&str) -> T) -> T
+impl core::fmt::Debug for ai6::SecretValue
+pub fn ai6::SecretValue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for ai6::SecretValue
+pub fn ai6::SecretValue::drop(&mut self)
+pub struct ai6::ServeConfig
+impl ai6::station::server::ServeConfig
+pub fn ai6::station::server::ServeConfig::new(core::net::socket_addr::SocketAddr) -> Self
+pub fn ai6::station::server::ServeConfig::with_config_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::station::server::ServeConfig::with_max_concurrent_missions(self, usize) -> Self
+pub fn ai6::station::server::ServeConfig::with_plugin_paths(self, impl core::iter::traits::collect::IntoIterator<Item = std::path::PathBuf>) -> Self
+pub fn ai6::station::server::ServeConfig::with_publisher(self, ai6::station::publisher::Config) -> Self
+pub fn ai6::station::server::ServeConfig::with_station_config(self, ai6::station::server::StationConfig) -> Self
+pub fn ai6::station::server::ServeConfig::with_station_id(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
+pub struct ai6::SessionId(_)
+impl ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::as_str(&self) -> &str
+pub fn ai6::directorates::m::identity::SessionId::try_new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+impl core::borrow::Borrow<str> for ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::borrow(&self) -> &str
+impl core::convert::AsRef<str> for ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::as_ref(&self) -> &str
+impl core::convert::From<ai6::directorates::m::identity::SessionId> for alloc::string::String
+pub fn alloc::string::String::from(ai6::directorates::m::identity::SessionId) -> Self
+impl core::convert::TryFrom<alloc::string::String> for ai6::directorates::m::identity::SessionId
+pub type ai6::directorates::m::identity::SessionId::Error = ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::SessionId::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Display for ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::m::identity::SessionId
+pub type ai6::directorates::m::identity::SessionId::Err = ai6::directorates::m::identity::InvalidIdentity
+pub fn ai6::directorates::m::identity::SessionId::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl guatiao::value::convert::FromValue for ai6::directorates::m::identity::SessionId
+pub const ai6::directorates::m::identity::SessionId::KINDS: guatiao::value::convert::kinds::Kinds
+pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
+pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+pub struct ai6::Spec
+pub ai6::Spec::argv: alloc::vec::Vec<alloc::string::String>
+pub ai6::Spec::cols: u16
+pub ai6::Spec::cwd: core::option::Option<alloc::string::String>
+pub ai6::Spec::env: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
+pub ai6::Spec::rows: u16
+#[non_exhaustive] pub struct ai6::StationConfig
+impl ai6::station::server::StationConfig
+pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
+pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::default::Default for ai6::station::server::StationConfig
+pub fn ai6::station::server::StationConfig::default() -> Self
+pub struct ai6::StationFingerprint(_)
+impl ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationFingerprint::as_str(&self) -> &str
+impl core::borrow::Borrow<str> for ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationFingerprint::borrow(&self) -> &str
+impl core::convert::AsRef<str> for ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationFingerprint::as_ref(&self) -> &str
+impl core::convert::TryFrom<alloc::string::String> for ai6::station::identity::StationFingerprint
+pub type ai6::station::identity::StationFingerprint::Error = ai6::station::identity::StationIdentityError
+pub fn ai6::station::identity::StationFingerprint::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Display for ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationFingerprint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::station::identity::StationFingerprint
+pub type ai6::station::identity::StationFingerprint::Err = ai6::station::identity::StationIdentityError
+pub fn ai6::station::identity::StationFingerprint::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub struct ai6::StationIdentity
+impl ai6::station::identity::StationIdentity
+pub fn ai6::station::identity::StationIdentity::from_pem(&str) -> core::result::Result<Self, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::StationIdentity::generate() -> core::result::Result<Self, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::StationIdentity::id(&self) -> &ai6::station::identity::StationFingerprint
+pub fn ai6::station::identity::StationIdentity::open_or_create(&std::path::Path) -> core::result::Result<Self, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::StationIdentity::read(&std::path::Path) -> core::result::Result<core::option::Option<Self>, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::StationIdentity::write_new(&self, &std::path::Path) -> core::result::Result<(), ai6::station::identity::StationIdentityError>
+impl core::clone::Clone for ai6::station::identity::StationIdentity
+pub fn ai6::station::identity::StationIdentity::clone(&self) -> Self
+impl core::fmt::Debug for ai6::station::identity::StationIdentity
+pub fn ai6::station::identity::StationIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::StationRecord
+impl ai6::directorates::i::intake::StationRecord
+pub fn ai6::directorates::i::intake::StationRecord::info(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::i::intake::StationRecord::seen(&self) -> f64
+pub fn ai6::directorates::i::intake::StationRecord::station(&self) -> &str
+#[non_exhaustive] pub struct ai6::StationSettings
+impl ai6::directorates::i::intake::StationSettings
+pub fn ai6::directorates::i::intake::StationSettings::max_concurrent_missions(&self) -> usize
+pub fn ai6::directorates::i::intake::StationSettings::station(&self) -> &str
+pub fn ai6::directorates::i::intake::StationSettings::try_new(impl core::convert::Into<alloc::string::String>, usize) -> core::io::error::Result<Self>
+pub struct ai6::TerminalBridge
+impl ai6::directorates::q::terminal::TerminalBridge
+pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>
+impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
+pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub struct ai6::WatchdogConfig
+impl ai6::directorates::medical::watchdog::WatchdogConfig
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::blocked_after(&self) -> core::time::Duration
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::history(&self) -> usize
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::loop_min_lines(&self) -> usize
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::loop_timeout(&self) -> core::time::Duration
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::max_runtime(&self) -> core::option::Option<core::time::Duration>
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::normalize_digits(&self) -> bool
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::stall_timeout(&self) -> core::time::Duration
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_blocked_after(self, core::time::Duration) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_history(self, usize) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_loop_min_lines(self, usize) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_loop_timeout(self, core::time::Duration) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_max_runtime(self, core::option::Option<core::time::Duration>) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_normalize_digits(self, bool) -> Self
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_stall_timeout(self, core::time::Duration) -> Self
+impl core::default::Default for ai6::directorates::medical::watchdog::WatchdogConfig
+pub fn ai6::directorates::medical::watchdog::WatchdogConfig::default() -> Self
+#[non_exhaustive] pub struct ai6::WatchdogOverrides
+pub ai6::WatchdogOverrides::blocked_after: core::option::Option<core::time::Duration>
+pub ai6::WatchdogOverrides::history: core::option::Option<usize>
+pub ai6::WatchdogOverrides::loop_min_lines: core::option::Option<usize>
+pub ai6::WatchdogOverrides::loop_timeout: core::option::Option<core::time::Duration>
+pub ai6::WatchdogOverrides::max_runtime: core::option::Option<core::time::Duration>
+pub ai6::WatchdogOverrides::normalize_digits: core::option::Option<bool>
+pub ai6::WatchdogOverrides::stall_timeout: core::option::Option<core::time::Duration>
+impl ai6::directorates::medical::watchdog::WatchdogOverrides
+pub fn ai6::directorates::medical::watchdog::WatchdogOverrides::apply_to(&self, &ai6::directorates::medical::watchdog::WatchdogConfig) -> ai6::directorates::medical::watchdog::WatchdogConfig
+pub const ai6::DEFAULT_BLOCKED_AFTER: core::time::Duration
+pub const ai6::DEFAULT_CABLE_TTL: f64
+pub const ai6::DEFAULT_LEASE: core::time::Duration
+pub const ai6::DEFAULT_LINE_HISTORY: usize
+pub const ai6::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
+pub const ai6::DEFAULT_LOOP_MIN_LINES: usize
+pub const ai6::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
+pub const ai6::DEFAULT_SECRET_LEASE_TTL: core::time::Duration
+pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
+pub const ai6::DEFAULT_TERMINAL: &str
+pub const ai6::MAX_CABLE_BODY_BYTES: usize
+pub const ai6::MAX_CABLE_FANOUT: usize
+pub const ai6::MAX_CABLE_TTL: f64
+pub const ai6::MAX_LOADOUT_BYTES: usize
+pub const ai6::MAX_SECRET_LEASE_TTL: core::time::Duration
+pub const ai6::MAX_STATION_MISSION_CAPACITY: usize
+pub const ai6::READ_TIMED_OUT: i64
+pub trait ai6::AgentHandler: core::marker::Send + core::marker::Sync
+pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub trait ai6::AgentSession: core::marker::Send + core::marker::Sync
+pub fn ai6::AgentSession::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::AgentSession::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::AgentSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::AgentSession::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentSession::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::AgentSession::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::agent::AgentSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+pub trait ai6::AgentTerminal: core::marker::Send + core::marker::Sync
+pub fn ai6::AgentTerminal::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::AgentTerminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
+pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::AgentTerminal for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub trait ai6::Authenticator: core::marker::Send + core::marker::Sync
+pub fn ai6::Authenticator::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authenticator for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Authenticator>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Authenticator>::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authenticator for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Authenticator>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Authenticator>::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+pub trait ai6::Authorizer: core::marker::Send + core::marker::Sync
+pub fn ai6::Authorizer::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authorizer for ai6::directorates::m::access::RoleAuthorizer
+pub fn ai6::directorates::m::access::RoleAuthorizer::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authorizer for ai6::directorates::m::access::RoleAuthorizerProvider
+pub fn ai6::directorates::m::access::RoleAuthorizerProvider::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authorizer for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Authorizer>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Authorizer>::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Authorizer for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Authorizer>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Authorizer>::authorize(&self, ai6::directorates::m::access::AuthorizationRequest) -> core::result::Result<ai6::directorates::m::access::AuthorizationDecision, guatiao::library::kind::ProviderError>
+pub trait ai6::Directory: core::marker::Send + core::marker::Sync
+pub fn ai6::Directory::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Directory for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Directory>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Directory>::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Directory for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Directory>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Directory>::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+pub trait ai6::SecretBackend: core::marker::Send + core::marker::Sync
+pub fn ai6::SecretBackend::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
+pub fn ai6::SecretBackend::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
+pub trait ai6::Terminal: core::marker::Send + core::marker::Sync
+pub fn ai6::Terminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::Terminal for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::Terminal for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub trait ai6::TerminalSession: core::marker::Send + core::marker::Sync
+pub fn ai6::TerminalSession::exit_status(&self, i64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::TerminalSession::exit_status_in(&self, i64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::TerminalSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::TerminalSession::kill(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::TerminalSession::pid(&self) -> i64
+pub fn ai6::TerminalSession::read(&self, &mut [u8], i64) -> core::result::Result<i64, guatiao::library::kind::ProviderError>
+pub fn ai6::TerminalSession::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::TerminalSession::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::terminal::TerminalSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::exit_status(&self, i64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::exit_status_in(&self, i64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::kill(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::pid(&self) -> i64
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::read(&self, &mut [u8], i64) -> core::result::Result<i64, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
+pub async fn ai6::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::serve_with_capacity<F>(core::net::socket_addr::SocketAddr, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::serve_with_config_dir<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], &std::path::Path, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::serve_with_config_dir_and_capacity<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], &std::path::Path, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::serve_with_options<F>(ai6::station::server::ServeConfig, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::serve_with_plugins<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn ai6::serve_with_plugins_and_capacity<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static

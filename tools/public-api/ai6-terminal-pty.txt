@@ -1,0 +1,9 @@
+pub mod ai6_terminal_pty
+pub struct ai6_terminal_pty::Pty
+impl ai6::directorates::q::terminal::Terminal for ai6_terminal_pty::Pty
+pub fn ai6_terminal_pty::Pty::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_terminal_pty::Pty
+pub const ai6_terminal_pty::Pty::KINDS: &'static [&'static str]
+pub fn ai6_terminal_pty::Pty::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[no_mangle] pub static ai6_terminal_pty::guatiao_declares: [u8; 19]
+#[no_mangle] pub unsafe c fn ai6_terminal_pty::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

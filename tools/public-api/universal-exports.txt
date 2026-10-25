@@ -1,0 +1,116 @@
+pub mod universal_exports
+#[non_exhaustive] pub enum universal_exports::AttachMode
+pub universal_exports::AttachMode::Read
+pub universal_exports::AttachMode::Write
+#[non_exhaustive] pub enum universal_exports::GatewayError
+pub universal_exports::GatewayError::Backpressure
+pub universal_exports::GatewayError::Conflict
+pub universal_exports::GatewayError::Forbidden
+pub universal_exports::GatewayError::InvalidConfiguration
+pub universal_exports::GatewayError::InvalidCredential
+pub universal_exports::GatewayError::InvalidFrame
+pub universal_exports::GatewayError::NotFound
+pub universal_exports::GatewayError::TooLarge
+pub universal_exports::GatewayError::Unauthorized
+impl core::error::Error for universal_exports::GatewayError
+impl core::fmt::Display for universal_exports::GatewayError
+pub fn universal_exports::GatewayError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct universal_exports::AccessProviders
+impl universal_exports::AccessProviders
+pub fn universal_exports::AccessProviders::from_reverse_proxy(alloc::sync::Arc<dyn ai6::directorates::m::access::Directory>, alloc::sync::Arc<dyn ai6::directorates::m::access::Authorizer>, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn universal_exports::AccessProviders::new(alloc::sync::Arc<dyn ai6::directorates::m::access::Authenticator>, alloc::sync::Arc<dyn ai6::directorates::m::access::Directory>, alloc::sync::Arc<dyn ai6::directorates::m::access::Authorizer>) -> Self
+pub fn universal_exports::AccessProviders::with_proxy_identity(self, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::fmt::Debug for universal_exports::AccessProviders
+pub fn universal_exports::AccessProviders::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct universal_exports::AgentInput
+pub universal_exports::AgentInput::frame: alloc::vec::Vec<u8>
+pub universal_exports::AgentInput::mission_id: ai6_diptel::MissionId
+pub universal_exports::AgentInput::operation_id: ai6_diptel::OperationId
+pub universal_exports::AgentInput::session_id: ai6_diptel::SessionId
+impl core::fmt::Debug for universal_exports::AgentInput
+pub fn universal_exports::AgentInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct universal_exports::AttachGrant
+pub universal_exports::AttachGrant::mission_id: ai6_diptel::MissionId
+pub universal_exports::AttachGrant::mode: universal_exports::AttachMode
+pub universal_exports::AttachGrant::operation_id: ai6_diptel::OperationId
+pub universal_exports::AttachGrant::session_id: ai6_diptel::SessionId
+pub struct universal_exports::Attachment
+pub universal_exports::Attachment::events: tokio::sync::broadcast::Receiver<alloc::vec::Vec<u8>>
+pub universal_exports::Attachment::mode: universal_exports::AttachMode
+pub universal_exports::Attachment::replay: alloc::vec::Vec<alloc::vec::Vec<u8>>
+impl core::fmt::Debug for universal_exports::Attachment
+pub fn universal_exports::Attachment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct universal_exports::BoardMission
+pub universal_exports::BoardMission::brief: core::option::Option<universal_exports::MissionBrief>
+pub universal_exports::BoardMission::mission_id: alloc::string::String
+pub universal_exports::BoardMission::operation_id: alloc::string::String
+pub universal_exports::BoardMission::sessions: alloc::vec::Vec<universal_exports::BoardSession>
+#[non_exhaustive] pub struct universal_exports::BoardSession
+pub universal_exports::BoardSession::mission_id: alloc::string::String
+pub universal_exports::BoardSession::operation_id: alloc::string::String
+pub universal_exports::BoardSession::sequence: u64
+pub universal_exports::BoardSession::session_id: alloc::string::String
+pub universal_exports::BoardSession::state: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::BoardStation
+pub universal_exports::BoardStation::capacity: usize
+pub universal_exports::BoardStation::headquarters: bool
+pub universal_exports::BoardStation::healthy: bool
+pub universal_exports::BoardStation::operations: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::BoardStation::roles: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::BoardStation::running: usize
+pub universal_exports::BoardStation::seen: f64
+pub universal_exports::BoardStation::station_id: alloc::string::String
+pub struct universal_exports::Gateway
+impl universal_exports::Gateway
+pub async fn universal_exports::Gateway::attach(&self, &ai6_diptel::SessionId, &str, u64) -> core::result::Result<universal_exports::Attachment, universal_exports::GatewayError>
+pub fn universal_exports::Gateway::authenticate_m(&self, &str) -> core::result::Result<(), universal_exports::GatewayError>
+pub async fn universal_exports::Gateway::board_missions(&self) -> alloc::vec::Vec<universal_exports::BoardMission>
+pub async fn universal_exports::Gateway::board_sessions(&self) -> alloc::vec::Vec<universal_exports::BoardSession>
+pub async fn universal_exports::Gateway::disconnect(&self, universal_exports::Attachment)
+pub async fn universal_exports::Gateway::disconnect_connection(&self, &ai6_diptel::SessionId, &str)
+pub async fn universal_exports::Gateway::exchange_attach_token(&self, &str) -> core::result::Result<alloc::string::String, universal_exports::GatewayError>
+pub async fn universal_exports::Gateway::ingest(&self, &str, &ai6_diptel::SessionId, u64, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
+pub async fn universal_exports::Gateway::issue_attach_token(&self, &str, universal_exports::AttachGrant) -> core::result::Result<alloc::string::String, universal_exports::GatewayError>
+pub fn universal_exports::Gateway::new(universal_exports::GatewayConfig) -> Self
+pub async fn universal_exports::Gateway::next_sequence(&self, &str, &ai6_diptel::SessionId) -> core::result::Result<u64, universal_exports::GatewayError>
+pub fn universal_exports::Gateway::public_origin(&self) -> &str
+pub async fn universal_exports::Gateway::publish_lifecycle(&self, &str, ai6_diptel::LifecycleEvent) -> core::result::Result<(), universal_exports::GatewayError>
+pub async fn universal_exports::Gateway::publish_terminal_output(&self, &str, ai6_diptel::SessionId, u64, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
+pub async fn universal_exports::Gateway::receive_agent_input(&self) -> core::option::Option<universal_exports::AgentInput>
+pub async fn universal_exports::Gateway::register_session(&self, &str, ai6_diptel::OperationId, ai6_diptel::MissionId, ai6_diptel::SessionId) -> core::result::Result<(), universal_exports::GatewayError>
+pub fn universal_exports::Gateway::router(self) -> axum::routing::Router
+pub async fn universal_exports::Gateway::serve_loopback<F>(self, u16, F) -> core::result::Result<(), core::io::error::Error> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn universal_exports::Gateway::submit_input(&self, &ai6_diptel::SessionId, &str, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
+pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, ai6::directorates::i::intake::IntakeRegistry, universal_exports::AccessProviders) -> Self
+pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, ai6::directorates::i::intake::IntakeRegistry) -> Self
+impl core::fmt::Debug for universal_exports::Gateway
+pub fn universal_exports::Gateway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct universal_exports::GatewayConfig
+impl universal_exports::GatewayConfig
+pub fn universal_exports::GatewayConfig::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, universal_exports::GatewayLimits, core::time::Duration, core::time::Duration) -> core::result::Result<Self, universal_exports::GatewayError>
+pub fn universal_exports::GatewayConfig::public_origin(&self) -> &str
+impl core::fmt::Debug for universal_exports::GatewayConfig
+pub fn universal_exports::GatewayConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct universal_exports::GatewayLimits
+pub universal_exports::GatewayLimits::fanout_capacity: usize
+pub universal_exports::GatewayLimits::input_queue_capacity: usize
+pub universal_exports::GatewayLimits::max_clients_per_session: usize
+pub universal_exports::GatewayLimits::max_frame_bytes: usize
+pub universal_exports::GatewayLimits::max_input_frames_per_second: u32
+pub universal_exports::GatewayLimits::max_sessions: usize
+pub universal_exports::GatewayLimits::scrollback_events: usize
+impl core::default::Default for universal_exports::GatewayLimits
+pub fn universal_exports::GatewayLimits::default() -> Self
+#[non_exhaustive] pub struct universal_exports::MissionBrief
+pub universal_exports::MissionBrief::agent_id: core::option::Option<alloc::string::String>
+pub universal_exports::MissionBrief::effort: core::option::Option<alloc::string::String>
+pub universal_exports::MissionBrief::environment_keys: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::MissionBrief::handler_provider: alloc::string::String
+pub universal_exports::MissionBrief::model: core::option::Option<alloc::string::String>
+pub universal_exports::MissionBrief::prompt: alloc::string::String
+pub universal_exports::MissionBrief::role_id: core::option::Option<alloc::string::String>
+pub universal_exports::MissionBrief::terminal_provider: alloc::string::String
+pub universal_exports::MissionBrief::working_directory: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::StationBoard
+pub universal_exports::StationBoard::headquarters_station: core::option::Option<alloc::string::String>
+pub universal_exports::StationBoard::stations: alloc::vec::Vec<universal_exports::BoardStation>

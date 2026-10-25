@@ -1,0 +1,23 @@
+pub mod ai6_access_peer
+pub struct ai6_access_peer::Peers
+impl ai6_access_peer::Peers
+pub fn ai6_access_peer::Peers::open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, alloc::string::String>
+impl ai6::directorates::m::access::Authenticator for ai6_access_peer::Peers
+pub fn ai6_access_peer::Peers::authenticate(&self, ai6::directorates::m::access::Attempt) -> core::result::Result<ai6::directorates::m::access::Verdict, guatiao::library::kind::ProviderError>
+impl ai6::directorates::m::access::Directory for ai6_access_peer::Peers
+pub fn ai6_access_peer::Peers::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6_access_peer::PeersConfig> for ai6_access_peer::Peers
+pub type ai6_access_peer::Peers::Error = guatiao::library::kind::ProviderError
+pub fn ai6_access_peer::Peers::try_from(ai6_access_peer::PeersConfig) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for ai6_access_peer::Peers
+pub fn ai6_access_peer::Peers::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::library::kind::parts::ProviderDecl for ai6_access_peer::Peers
+pub const ai6_access_peer::Peers::KINDS: &'static [&'static str]
+pub fn ai6_access_peer::Peers::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6_access_peer::PeersConfig
+pub ai6_access_peer::PeersConfig::path: alloc::string::String
+impl core::convert::TryFrom<ai6_access_peer::PeersConfig> for ai6_access_peer::Peers
+pub type ai6_access_peer::Peers::Error = guatiao::library::kind::ProviderError
+pub fn ai6_access_peer::Peers::try_from(ai6_access_peer::PeersConfig) -> core::result::Result<Self, Self::Error>
+#[no_mangle] pub static ai6_access_peer::guatiao_declares: [u8; 55]
+#[no_mangle] pub unsafe c fn ai6_access_peer::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>
