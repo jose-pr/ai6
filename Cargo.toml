@@ -4,6 +4,7 @@ members = [
     "crates/ai6",
     "crates/ai6-diptel",
     "crates/providers/agents/*",
+    "crates/providers/terminals/*",
 ]
 
 [workspace.package]

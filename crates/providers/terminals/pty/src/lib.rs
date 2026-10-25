@@ -2,13 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! `coagent_terminal_pty_portable_pty`: a `coagent_terminal` provider on
-//! `portable-pty`, which is `openpty` on Unix and ConPTY on Windows.
+//! `ai6-terminal-pty`: the `pty` terminal provider, on `portable-pty`, which is
+//! `openpty` on Unix and ConPTY on Windows. The session logic is shared; what differs
+//! per platform (owning the child's process tree, translating input) is in `unix.rs`
+//! and `windows.rs` behind one `os` interface.
 //!
 //! Output is read on a thread into a channel, so `read` can time out: a blocking
 //! master read is not reliably interrupted by killing the child. The child's exit
 //! is asked of the child itself, never inferred from EOF, because a pseudo-console
 //! can stay readable after its program has exited.
+
+#![doc = include_str!("../README.md")]
+
+ai6::guatiao::providers!(Pty);
+
+#[cfg(unix)]
+#[path = "unix.rs"]
+mod os;
+#[cfg(windows)]
+#[path = "windows.rs"]
+mod os;
 
 use std::io::{Read, Write};
 use std::sync::Mutex;
@@ -16,26 +29,31 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
-use coagent_terminal_kind::guatiao::library::{Object, ProviderError};
-use coagent_terminal_kind::guatiao::{FromValue, Status, ToValue, Value};
-use coagent_terminal_kind::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
+use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
+use ai6::guatiao::library::{Object, ProviderError};
+use ai6::guatiao::{FromValue, Status, ToValue, Value};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+
+use os::ProcessTree;
 
 const READ_CHUNK: usize = 65536;
 const EXIT_POLL: Duration = Duration::from_millis(10);
 
-#[derive(Default, coagent_terminal_kind::guatiao::Provider)]
-#[provider(Terminal, name = "portable-pty", crate = ::coagent_terminal_kind::guatiao)]
-pub struct PortablePty;
+#[derive(Default, ai6::guatiao::Provider)]
+#[provider(
+    Terminal,
+    id = "pty",
+    name = "pty",
+    crate = ::ai6::guatiao
+)]
+pub struct Pty;
 
-impl Terminal for PortablePty {
+impl Terminal for Pty {
     fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
         let spec = Spec::from_value(spec).map_err(|e| refuse(Status::GUATIAO_ERR_BAD_VALUE, e))?;
         Ok(PtySession::start(&spec)?.into_object())
     }
 }
-
-coagent_terminal_kind::guatiao::providers!(PortablePty);
 
 struct PtySession {
     pid: i64,
@@ -46,6 +64,7 @@ struct PtySession {
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
+    tree: ProcessTree,
     exit: Mutex<Option<ExitInfo>>,
 }
 
@@ -73,6 +92,15 @@ impl PtySession {
             cmd.cwd(dir);
         }
         let child = pair.slave.spawn_command(cmd).map_err(internal)?;
+        let tree = match ProcessTree::adopt(child.process_id()) {
+            Ok(tree) => tree,
+            Err(error) => {
+                let mut child = child;
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(internal(error));
+            }
+        };
         // The child owns the slave now; holding it here would keep the pty open past its exit.
         drop(pair.slave);
         let pid = child.process_id().map(i64::from).unwrap_or(-1);
@@ -105,6 +133,7 @@ impl PtySession {
             writer: Mutex::new(writer),
             master: Mutex::new(pair.master),
             child: Mutex::new(child),
+            tree,
             exit: Mutex::new(None),
         })
     }
@@ -149,8 +178,9 @@ impl TerminalSession for PtySession {
 
     fn write(&self, data: &[u8]) -> Result<(), ProviderError> {
         let mut writer = lock(&self.writer)?;
+        let input = os::translate_input(data);
         writer
-            .write_all(data)
+            .write_all(&input)
             .and_then(|()| writer.flush())
             .map_err(internal)
     }
@@ -163,11 +193,7 @@ impl TerminalSession for PtySession {
     }
 
     fn kill(&self) -> Result<(), ProviderError> {
-        // Once reaped, the pid may belong to an unrelated process.
-        if self.poll_exit()?.is_some() {
-            return Ok(());
-        }
-        kill_tree(self.pid);
+        self.tree.kill().map_err(internal)?;
         // An error here means it already exited, which is what was asked.
         let _ = lock(&self.child)?.kill();
         Ok(())
@@ -200,23 +226,6 @@ impl Drop for PtySession {
         }
     }
 }
-
-/// `portable-pty` starts the child as a session leader on Unix, so its process group
-/// id is its pid and the group holds everything it started.
-#[cfg(unix)]
-fn kill_tree(pid: i64) {
-    if let Ok(pid) = libc::pid_t::try_from(pid)
-        && pid > 0
-    {
-        // SAFETY: killpg takes plain integers and touches no memory.
-        unsafe { libc::killpg(pid, libc::SIGKILL) };
-    }
-}
-
-/// Scaffold: ends the direct child only, through `Child::kill`. Descendants survive
-/// until a Job Object holds the tree.
-#[cfg(not(unix))]
-fn kill_tree(_pid: i64) {}
 
 fn exit_info(status: &portable_pty::ExitStatus) -> ExitInfo {
     match status.signal() {
