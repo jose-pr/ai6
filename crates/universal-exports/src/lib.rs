@@ -3147,7 +3147,7 @@ async fn next_agent_input(
         HeaderValue::from_static("application/vnd.ai6.guatiao"),
     );
     response.headers_mut().insert(
-        "x-ai6-station-id",
+        "x-ai6-operation-id",
         HeaderValue::from_str(input.operation_id.as_str()).map_err(|_| ApiError::internal())?,
     );
     response.headers_mut().insert(
