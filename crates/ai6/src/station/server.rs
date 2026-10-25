@@ -45,6 +45,7 @@ use crate::station::publisher::MissionPublication;
 #[cfg(feature = "publisher")]
 use crate::station::publisher::{self, Config as PublisherConfig, Publisher, SessionTelemetry};
 use crate::station::safehouse::SafeHouse;
+use crate::station::sources::SourceDesk;
 use crate::{MissionId, SessionId};
 
 /// The loopback address used by the daemon's private health endpoint.
@@ -928,6 +929,7 @@ fn reserve_existing_session_resume(
 }
 
 async fn scheduler_loop(state: DaemonState) {
+    let desk = Arc::new(SourceDesk::new());
     let mut next_station_check_in = Instant::now();
     while !state.stopping.load(Ordering::Acquire) {
         if Instant::now() >= next_station_check_in {
@@ -936,12 +938,26 @@ async fn scheduler_loop(state: DaemonState) {
         }
         schedule_recovered_once(&state).await;
         schedule_queued_once(&state).await;
-        schedule_intake_once(&state);
+        let is_headquarters = schedule_intake_once(&state);
+        if is_headquarters && SourceDesk::has_sources(&state.roster) && desk.begin() {
+            let (desk, plugins, roster, registry) = (
+                desk.clone(),
+                state.plugins.clone(),
+                state.roster.clone(),
+                state.intake.clone(),
+            );
+            // Provider calls block on the network, so they never run on an async worker.
+            tokio::task::spawn_blocking(move || {
+                desk.run(&plugins, &roster, &registry);
+                desk.end();
+            });
+        }
         tokio::time::sleep(SCHEDULER_INTERVAL).await;
     }
 }
 
-fn schedule_intake_once(state: &DaemonState) {
+/// Claims, recovers and places briefs; returns whether this Station holds the Headquarters lease.
+fn schedule_intake_once(state: &DaemonState) -> bool {
     let station = state.station_id.as_str();
     let is_headquarters = state.station.roles.contains(&StationRole::Control)
         && state
@@ -957,7 +973,7 @@ fn schedule_intake_once(state: &DaemonState) {
     }
 
     let Ok(leases) = state.intake.leases() else {
-        return;
+        return is_headquarters;
     };
     for lease in leases.iter().filter(|lease| lease.station() == station) {
         if let Err(error) = ensure_leased_mission(state, lease) {
@@ -978,13 +994,13 @@ fn schedule_intake_once(state: &DaemonState) {
     }
 
     if !is_headquarters {
-        return;
+        return false;
     }
     let Ok(briefs) = state.intake.list_new() else {
-        return;
+        return true;
     };
     let Ok(mut leases) = state.intake.leases() else {
-        return;
+        return true;
     };
     for brief in briefs {
         let Ok(mission_id) = mission_id_for_brief(&brief) else {
@@ -1047,6 +1063,7 @@ fn schedule_intake_once(state: &DaemonState) {
         }
         leases.push(lease);
     }
+    true
 }
 
 async fn schedule_recovered_once(state: &DaemonState) {
@@ -1565,6 +1582,8 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
         "state": format!("{:?}", mission.state).to_lowercase(),
         "mission_id": mission.mission_id.as_str(),
         "session_ids": mission.session_ids,
+        "agent": mission.agent_id,
+        "branch": mission.safe_house.as_ref().map(|safe_house| safe_house.branch.clone()),
     });
     finish_intake_claim(state, lease, &outcome, mission.state == MissionState::Done)
 }

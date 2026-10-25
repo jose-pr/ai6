@@ -54,6 +54,18 @@ pub(crate) struct CoverAudit {
     pub(crate) fail_on_blow: bool,
 }
 
+/// How much of the work's origin a cover policy lets a Mission disclose outside the Operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Disclosure {
+    /// Nothing says an Agent did the work.
+    Hidden,
+    /// The work may say AI helped, but not which model or Agent.
+    Assisted,
+    /// The Agent, its model and provider Sessions may be named.
+    Full,
+}
+
 /// A validated cover policy.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -73,6 +85,17 @@ impl Cover {
     /// Returns the cover's name.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns what a message sent outside the Operation may reveal under this cover.
+    pub fn disclosure(&self) -> Disclosure {
+        if self.model {
+            Disclosure::Full
+        } else if self.announce || !self.trailers.is_empty() {
+            Disclosure::Assisted
+        } else {
+            Disclosure::Hidden
+        }
     }
 
     /// Builds the instructions added to the Agent's initial Mission context.

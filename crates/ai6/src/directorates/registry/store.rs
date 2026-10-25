@@ -18,8 +18,8 @@ use crate::directorates::m::roster::AgentRole;
 use crate::directorates::registry::cables::{Cable, CableError, CableState};
 
 const BRIEF_VERSION: u32 = 1;
-const MAX_BRIEF_BYTES: u64 = 1_048_576;
-const MAX_BRIEFS: usize = 1_000;
+pub(super) const MAX_BRIEF_BYTES: u64 = 1_048_576;
+pub(super) const MAX_BRIEFS: usize = 1_000;
 const MAX_STATION_RECORD_BYTES: u64 = 1_048_576;
 const MAX_STATIONS: usize = 1_000;
 const MAX_STATION_SETTINGS_BYTES: u64 = 4_096;
@@ -112,7 +112,7 @@ impl Brief {
         parts.join("\n\n")
     }
 
-    fn validate(&self) -> io::Result<()> {
+    pub(super) fn validate(&self) -> io::Result<()> {
         if self.title.trim().is_empty() {
             return Err(invalid_data("a brief needs a title"));
         }
@@ -521,7 +521,7 @@ pub enum LeaseRecovery {
 /// Read-only view of the file-backed Registry `new/` queue.
 #[derive(Debug, Clone)]
 pub struct FileRegistry {
-    root: PathBuf,
+    pub(super) root: PathBuf,
 }
 
 impl FileRegistry {
@@ -2077,7 +2077,7 @@ fn validate_cable_id(id: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
+pub(super) fn hex_digest(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -2118,7 +2118,7 @@ fn cable_error(error: CableError) -> io::Error {
     invalid_data(error.to_string())
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
@@ -2250,7 +2250,7 @@ fn write_headquarters(path: &Path, lease: &HeadquartersLease) -> io::Result<()> 
     write_atomic(path, &bytes)
 }
 
-fn registry_lock(root: &Path) -> io::Result<File> {
+pub(super) fn registry_lock(root: &Path) -> io::Result<File> {
     fs::create_dir_all(root)?;
     let path = root.join(".ai6-registry.lock");
     let file = OpenOptions::new()
@@ -2329,7 +2329,7 @@ fn nonempty_env(name: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn safe_component(value: &str) -> String {
+pub(super) fn safe_component(value: &str) -> String {
     let mut result = String::with_capacity(value.len());
     let mut replacing = false;
     for character in value.chars() {
@@ -2356,7 +2356,7 @@ fn default_version() -> u32 {
     BRIEF_VERSION
 }
 
-fn invalid_data(message: impl Into<String>) -> io::Error {
+pub(super) fn invalid_data(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 

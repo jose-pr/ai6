@@ -45,6 +45,10 @@ pub use directorates::registry::cables::{
     CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_BODY_BYTES,
     MAX_CABLE_FANOUT, MAX_CABLE_TTL,
 };
+pub use directorates::registry::sources::{
+    CxReport, FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, Source, SourceBatch, SourceConfig,
+    SourceItem, SourcePoll, source_brief,
+};
 pub use directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, HeadquartersLease, Lease, LeaseRecovery,
     MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,

@@ -11,3 +11,5 @@ pub mod publisher;
 pub mod safehouse;
 #[cfg(feature = "daemon")]
 pub mod server;
+#[cfg(feature = "daemon")]
+pub(crate) mod sources;
