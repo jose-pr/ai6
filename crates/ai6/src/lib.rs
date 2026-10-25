@@ -19,6 +19,11 @@ pub use directorates::m::access::{
     RolePolicyError, Rule, SCOPE_KINDS, Verdict, Waiting, load_role_authorizer, role_authorizer,
     role_authorizer_from_toml,
 };
+pub use directorates::m::approvals::{
+    ActionScope, BUILTIN_KINDS, DEFAULT_APPROVAL_TTL, DEFAULT_PROTECTED, DEFAULT_REQUEST_TTL,
+    GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement,
+    clearance_at_least,
+};
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
 pub use directorates::m::placement::{
     AgentFacts, ExecutionMode, OperationPolicy, Placement, PlacementChoice, PlacementRejection,
@@ -64,6 +69,10 @@ pub use directorates::q::{
     McpServer, QError, QErrorKind, SandboxError, SandboxProfile, SandboxRequest, SecretBackend,
     SecretBackendFailure, SecretBroker, SecretError, SecretLease, SecretLeaseRequest,
     SecretRequest, SecretValue, claude_mcp_config,
+};
+pub use directorates::registry::approvals::{
+    Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,
+    Revocation, Ruling,
 };
 pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,

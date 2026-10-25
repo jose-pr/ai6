@@ -2071,7 +2071,7 @@ impl FileRegistry {
     }
 }
 
-fn validate_registry_key(key: &str) -> io::Result<()> {
+pub(super) fn validate_registry_key(key: &str) -> io::Result<()> {
     if key.is_empty()
         || !key.chars().all(|character| {
             character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-')

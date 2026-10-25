@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::directorates::m::approvals::{GreenInkDefinition, GreenInkPolicy};
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
@@ -21,7 +22,8 @@ use crate::directorates::registry::store::validate_station_id;
 
 const AGENTS_FILE: &str = "agents.toml";
 const OPERATIONS_FILE: &str = "operations.toml";
-const CLEARANCES: &[&str] = &["desk", "field", "00"];
+/// The clearances, lowest first.
+pub(crate) const CLEARANCES: &[&str] = &["desk", "field", "00"];
 
 /// A resolved Agent configuration.
 #[non_exhaustive]
@@ -137,6 +139,8 @@ pub struct Operation {
     pub exposure: ExposurePolicy,
     /// When an Agent working here is quarantined.
     pub quarantine: QuarantinePolicy,
+    /// Which irreversible steps need a person's approval; strict unless configured.
+    pub green_ink: GreenInkPolicy,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
@@ -504,6 +508,7 @@ struct OperationDefinition {
     budget: BudgetDefinition,
     exposure: ExposureDefinition,
     quarantine: QuarantineDefinition,
+    green_ink: GreenInkDefinition,
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
 }
@@ -569,6 +574,9 @@ impl OperationDefinition {
         let quarantine = self.quarantine.resolve().map_err(|message| {
             error(format!("{}: Operation {id:?}: {message}", source.display()))
         })?;
+        let green_ink = self.green_ink.resolve().map_err(|message| {
+            error(format!("{}: Operation {id:?}: {message}", source.display()))
+        })?;
         let operation = Operation {
             id,
             name: self.name,
@@ -618,6 +626,7 @@ impl OperationDefinition {
             budget,
             exposure,
             quarantine,
+            green_ink,
             sources: self.sources,
             sleepers: self.sleepers,
         };
@@ -1282,6 +1291,37 @@ sources = {{ jira = \"GUA\" }}\n",
                 .as_deref(),
             Some("copy")
         );
+    }
+
+    #[test]
+    fn green_ink_is_strict_by_default_and_an_operation_may_choose_licensed() {
+        use crate::directorates::m::approvals::{ActionScope, Requirement};
+        let directory = TestDirectory::new();
+        directory.write(
+            "operations.toml",
+            "[operation.A]\n[operation.B.green_ink]\npreset = \"licensed\"\nrequest_ttl_secs = 60\n\
+             [operation.C.green_ink]\nunattended = { field = [\"nuke\"] }\n",
+        );
+        let push = ActionScope::try_new("push", "origin:main").unwrap();
+        let roster = Roster::load(&directory.0);
+        let message = roster.as_ref().unwrap_err().to_string();
+        assert!(
+            message.contains("Operation \"C\"") && message.contains("nuke"),
+            "{message}"
+        );
+
+        directory.write(
+            "operations.toml",
+            "[operation.A]\n[operation.B.green_ink]\npreset = \"licensed\"\nrequest_ttl_secs = 60\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        let strict = &roster.operation("A").unwrap().green_ink;
+        assert_eq!(strict.requirement("00", &push), Requirement::GreenInk);
+        assert!(strict.weakenings().is_empty());
+        let licensed = &roster.operation("B").unwrap().green_ink;
+        assert_eq!(licensed.requirement("00", &push), Requirement::NotRequired);
+        assert_eq!(licensed.requirement("field", &push), Requirement::GreenInk);
+        assert_eq!(licensed.request_ttl(), std::time::Duration::from_secs(60));
     }
 
     #[test]
