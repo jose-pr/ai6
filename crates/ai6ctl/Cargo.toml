@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "Read-only operator command for the AI6 Moneypenny API"
+description = "Operator command for the AI6 Universal Exports API"
 readme = "README.md"
 exclude = [".*", "*.local.*"]
 

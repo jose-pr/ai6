@@ -1,22 +1,24 @@
-//! Read-only command-line client for the Universal Exports public API.
+//! Operator command-line client for the Universal Exports public API.
 
 use std::net::IpAddr;
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use clap::{Parser, Subcommand};
-use reqwest::{Client, Url};
+use clap::{Args, Parser, Subcommand};
+use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
 
 const DEFAULT_SERVER: &str = "http://127.0.0.1:7082";
 const SERVER_ENV: &str = "AI6_EXPORTS_URL";
 const ACCESS_TOKEN_ENV: &str = "AI6_ACCESS_TOKEN";
+const DEFAULT_CONTROL_WAIT_SECS: u64 = 10;
+const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Parser)]
 #[command(
     name = "ai6ctl",
-    about = "Inspect AI6 Stations, Agent roles, Missions and Sessions through the Universal Exports API",
-    after_help = "Read commands require a user bearer token in AI6_ACCESS_TOKEN. Never use M or terminal-attachment credentials."
+    about = "Inspect and control AI6 Stations, Agent roles, Missions and Sessions through the Universal Exports API",
+    after_help = "Commands other than health require a user bearer token in AI6_ACCESS_TOKEN. Never use M or terminal-attachment credentials."
 )]
 struct Cli {
     /// Universal Exports API origin.
@@ -49,13 +51,17 @@ enum Command {
         #[arg(long)]
         operation: Option<String>,
     },
-    /// Show one Mission and its registered provider Sessions.
+    /// Show one Mission and its provider Sessions, or cancel, retry or resume it.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Mission {
         /// AI6 Mission ID.
-        mission_id: String,
-        /// Select a Operation when the Mission ID is not unique in the visible board.
+        #[arg(required = true)]
+        mission_id: Option<String>,
+        /// Select an Operation when the Mission ID is not unique in the visible board.
         #[arg(long)]
         operation: Option<String>,
+        #[command(subcommand)]
+        control: Option<MissionCommand>,
     },
     /// List Sessions, optionally filtered by Operation, Mission or state.
     Sessions {
@@ -69,11 +75,90 @@ enum Command {
         #[arg(long)]
         state: Option<String>,
     },
-    /// Show one provider Session by its Session ID.
+    /// Show one provider Session by its Session ID, or interrupt it.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Session {
         /// Provider-issued Session ID.
-        session_id: String,
+        #[arg(required = true)]
+        session_id: Option<String>,
+        #[command(subcommand)]
+        control: Option<SessionCommand>,
     },
+}
+
+/// Mission lifecycle controls; the Station holding the Mission decides whether they apply.
+#[derive(Debug, Subcommand)]
+enum MissionCommand {
+    /// Stop the Mission's live Session, if any, and abandon the Mission.
+    Cancel {
+        /// AI6 Mission ID.
+        mission_id: String,
+        #[command(flatten)]
+        target: MissionTarget,
+    },
+    /// Queue a stalled or finished Mission again as a new attempt.
+    Retry {
+        /// AI6 Mission ID.
+        mission_id: String,
+        /// Give the new attempt to this qualified Agent instead of the one it had.
+        #[arg(long)]
+        agent: Option<String>,
+        #[command(flatten)]
+        target: MissionTarget,
+    },
+    /// Resume a parked, blocked or stalled Mission now.
+    Resume {
+        /// AI6 Mission ID.
+        mission_id: String,
+        /// Send this message to the Agent as it resumes.
+        #[arg(long)]
+        message: Option<String>,
+        #[command(flatten)]
+        target: MissionTarget,
+    },
+}
+
+/// Session controls.
+#[derive(Debug, Subcommand)]
+enum SessionCommand {
+    /// Stop the Session's current turn; its Mission stays, blocked, until resumed.
+    Interrupt {
+        /// Provider-issued Session ID.
+        session_id: String,
+        #[command(flatten)]
+        request: ControlOptions,
+    },
+}
+
+#[derive(Debug, Args)]
+struct MissionTarget {
+    /// The Mission's Operation; found from the visible board when omitted.
+    #[arg(long)]
+    operation: Option<String>,
+    #[command(flatten)]
+    request: ControlOptions,
+}
+
+#[derive(Debug, Args)]
+struct ControlOptions {
+    /// Repeating a request with the same key returns the first one instead of asking again.
+    #[arg(long)]
+    idempotency_key: Option<String>,
+    /// Seconds to wait for the Station's outcome; 0 returns once the control is queued.
+    #[arg(long, default_value_t = DEFAULT_CONTROL_WAIT_SECS)]
+    wait: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ControlStatus {
+    control_id: String,
+    operation_id: String,
+    mission_id: String,
+    action: String,
+    station_id: String,
+    status: String,
+    state: Option<String>,
+    reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,9 +272,88 @@ async fn run() -> Result<(), String> {
             }));
         }
         Command::Mission {
+            control: Some(command),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let (mission_id, target, action, extra) = match command {
+                MissionCommand::Cancel { mission_id, target } => {
+                    (mission_id, target, "cancel", None)
+                }
+                MissionCommand::Retry {
+                    mission_id,
+                    agent,
+                    target,
+                } => (
+                    mission_id,
+                    target,
+                    "retry",
+                    agent.map(|agent| ("agent", agent)),
+                ),
+                MissionCommand::Resume {
+                    mission_id,
+                    message,
+                    target,
+                } => (
+                    mission_id,
+                    target,
+                    "resume",
+                    message.map(|message| ("message", message)),
+                ),
+            };
+            let operation = match target.operation {
+                Some(operation) => operation,
+                None => mission_operation(&client, &server, &token, &mission_id).await?,
+            };
+            let mut body = serde_json::json!({ "action": action });
+            if let Some((key, value)) = extra {
+                body[key] = serde_json::Value::String(value);
+            }
+            let status = control(
+                &client,
+                &server,
+                &token,
+                (&operation, &mission_id),
+                body,
+                &target.request,
+            )
+            .await?;
+            print_control(&status);
+            control_verdict(&status)?;
+        }
+        Command::Session {
+            control:
+                Some(SessionCommand::Interrupt {
+                    session_id,
+                    request,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let session = board(&client, &server, &token)
+                .await?
+                .into_iter()
+                .find(|session| session.session_id == session_id)
+                .ok_or_else(|| "Session was not found".to_owned())?;
+            let body = serde_json::json!({ "action": "interrupt", "session_id": session_id });
+            let status = control(
+                &client,
+                &server,
+                &token,
+                (&session.operation_id, &session.mission_id),
+                body,
+                &request,
+            )
+            .await?;
+            print_control(&status);
+            control_verdict(&status)?;
+        }
+        Command::Mission {
             mission_id,
             operation,
+            control: None,
         } => {
+            let mission_id = mission_id.ok_or_else(|| "a Mission ID is required".to_owned())?;
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let matches = missions(&client, &server, &token)
                 .await?
@@ -231,7 +395,11 @@ async fn run() -> Result<(), String> {
             });
             print_sessions(selected);
         }
-        Command::Session { session_id } => {
+        Command::Session {
+            session_id,
+            control: None,
+        } => {
+            let session_id = session_id.ok_or_else(|| "a Session ID is required".to_owned())?;
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let sessions = board(&client, &server, &token).await?;
             let Some(session) = sessions
@@ -363,6 +531,165 @@ async fn agent_roles(
         .json()
         .await
         .map_err(|_| "Universal Exports returned an invalid Agent role list".to_owned())
+}
+
+/// The Operation of a Mission on the visible board.
+async fn mission_operation(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    mission_id: &str,
+) -> Result<String, String> {
+    let mut operations = missions(client, server, access_token)
+        .await?
+        .into_iter()
+        .filter(|mission| mission.mission_id == mission_id)
+        .map(|mission| mission.operation_id)
+        .collect::<Vec<_>>();
+    operations.dedup();
+    match operations.as_slice() {
+        [operation] => Ok(operation.clone()),
+        [] => Err("Mission is not on the visible board; pass --operation".to_owned()),
+        _ => Err("Mission ID is visible in multiple Operations; pass --operation".to_owned()),
+    }
+}
+
+/// Asks for a control and, unless told not to wait, follows it until the Station reports.
+async fn control(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    (operation, mission): (&str, &str),
+    mut body: serde_json::Value,
+    options: &ControlOptions,
+) -> Result<ControlStatus, String> {
+    body["idempotency_key"] = serde_json::Value::String(
+        options
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(idempotency_key),
+    );
+    let response = control_request(client, server, access_token, operation, mission)?
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+    let mut status = control_response(response).await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(options.wait);
+    while matches!(status.status.as_str(), "queued" | "delivered")
+        && tokio::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(CONTROL_POLL_INTERVAL).await;
+        let response = control_status_request(client, server, access_token, &status)?
+            .send()
+            .await
+            .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        status = control_response(response).await?;
+    }
+    Ok(status)
+}
+
+async fn control_response(response: reqwest::Response) -> Result<ControlStatus, String> {
+    let status = response.status();
+    if !status.is_success() {
+        let detail = match status {
+            StatusCode::FORBIDDEN => " (mission.control is required)",
+            StatusCode::CONFLICT => {
+                " (the idempotency key was used for another request, or the Session moved on)"
+            }
+            StatusCode::SERVICE_UNAVAILABLE => " (no Station can take the control now)",
+            _ => "",
+        };
+        return Err(format!("Universal Exports returned HTTP {status}{detail}"));
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "Universal Exports returned an invalid control status".to_owned())
+}
+
+/// A key unique to this invocation; pass `--idempotency-key` to make a repeat safe.
+fn idempotency_key() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    format!("ai6ctl-{}-{nanos}", std::process::id())
+}
+
+fn control_request(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    operation: &str,
+    mission: &str,
+) -> Result<reqwest::RequestBuilder, String> {
+    let mut url = server.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+        .extend([
+            "v1",
+            "user",
+            "operations",
+            operation,
+            "missions",
+            mission,
+            "actions",
+        ]);
+    Ok(client.post(url).bearer_auth(access_token))
+}
+
+fn control_status_request(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    status: &ControlStatus,
+) -> Result<reqwest::RequestBuilder, String> {
+    let mut url = server.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+        .extend([
+            "v1",
+            "user",
+            "operations",
+            &status.operation_id,
+            "missions",
+            &status.mission_id,
+            "actions",
+            &status.control_id,
+        ]);
+    Ok(client.get(url).bearer_auth(access_token))
+}
+
+fn print_control(status: &ControlStatus) {
+    println!("CONTROL\tACTION\tMISSION\tSTATION\tSTATUS\tSTATE\tREASON");
+    println!(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        plain(&status.control_id),
+        plain(&status.action),
+        plain(&status.mission_id),
+        plain(&status.station_id),
+        plain(&status.status),
+        status
+            .state
+            .as_deref()
+            .map_or_else(|| "-".to_owned(), plain),
+        status
+            .reason
+            .as_deref()
+            .map_or_else(|| "-".to_owned(), plain),
+    );
+}
+
+/// Fails the command when the Station rejected the control or no Station took it in time.
+fn control_verdict(status: &ControlStatus) -> Result<(), String> {
+    match status.status.as_str() {
+        "rejected" => Err(format!(
+            "the Station rejected the control: {}",
+            status.reason.as_deref().map_or_else(String::new, plain)
+        )),
+        "expired" => Err("no Station acted on the control before it expired".to_owned()),
+        _ => Ok(()),
+    }
 }
 
 fn board_request(client: &Client, server: &Url, access_token: &str) -> reqwest::RequestBuilder {
@@ -621,6 +948,61 @@ mod tests {
                 .unwrap(),
             "Bearer user-token"
         );
+    }
+
+    #[test]
+    fn control_requests_encode_the_mission_path_and_use_a_user_bearer() {
+        let server = server_url("https://exports.example").unwrap();
+        let request = control_request(&Client::new(), &server, "user-token", "op/alpha", "m 1")
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(
+            request.url().path(),
+            "/v1/user/operations/op%2Falpha/missions/m%201/actions"
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .unwrap(),
+            "Bearer user-token"
+        );
+    }
+
+    #[test]
+    fn mission_and_session_keep_their_show_form_beside_their_controls() {
+        let show = Cli::try_parse_from(["ai6ctl", "mission", "mission-007"]).unwrap();
+        assert!(matches!(
+            show.command,
+            Command::Mission {
+                mission_id: Some(_),
+                control: None,
+                ..
+            }
+        ));
+        let cancel =
+            Cli::try_parse_from(["ai6ctl", "mission", "cancel", "mission-007", "--wait", "0"])
+                .unwrap();
+        assert!(matches!(
+            cancel.command,
+            Command::Mission {
+                control: Some(MissionCommand::Cancel { .. }),
+                ..
+            }
+        ));
+        let interrupt =
+            Cli::try_parse_from(["ai6ctl", "session", "interrupt", "provider-session-007"])
+                .unwrap();
+        assert!(matches!(
+            interrupt.command,
+            Command::Session {
+                control: Some(SessionCommand::Interrupt { .. }),
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from(["ai6ctl", "mission"]).is_err());
     }
 
     #[test]
