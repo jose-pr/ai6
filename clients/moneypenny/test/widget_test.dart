@@ -808,7 +808,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('station-alpha \u00b7 local \u00b7 007'), findsOneWidget);
     expect(
-      find.text('station-alpha \u00b7 build-box \u00b7 007 \u00b7 remote-hands'),
+      find.text(
+        'station-alpha \u00b7 build-box \u00b7 007 \u00b7 remote-hands',
+      ),
       findsOneWidget,
     );
     expect(
