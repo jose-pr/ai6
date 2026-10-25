@@ -7,6 +7,7 @@ members = [
     "crates/ai6-diptel",
     "crates/providers/access/*",
     "crates/providers/agents/*",
+    "crates/providers/safehouses/*",
     "crates/providers/terminals/*",
 ]
 

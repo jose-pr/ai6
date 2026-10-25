@@ -1,0 +1,20 @@
+[package]
+name = "ai6-safehouse-git"
+description = "An AI6 safe-house provider that gives each Mission a Git worktree on its own branch"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+exclude = [".*", "*.local.*"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+ai6 = { path = "../../../ai6", default-features = false }
+
+[dev-dependencies]
+tempfile.workspace = true
