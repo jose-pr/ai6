@@ -124,6 +124,7 @@ pub struct BoardSession {
     pub mission_id: String,
     pub session_id: String,
     pub state: Option<String>,
+    pub reason: Option<String>,  // why AI6 holds that state: "green-ink", "budget"
     pub sequence: u64,
     pub updated_at: Option<f64>, // Unix seconds of the latest lifecycle event
     pub exposure: Vec<String>,   // untrusted input the Session read, from its Registry record
@@ -207,7 +208,8 @@ pub struct LaunchManifest {
 `BoardSession` has no `state`, sequence `0` and no `updated_at` until the Session's first
 lifecycle event. `state` is the Mission's state as that Session last reported it; an
 earlier attempt keeps the state it last reported (often `queued` after a retry), so the
-Mission's current state is the one of its Session with the latest `updated_at`. `exposure` lists where the Session read untrusted input (`brief:source`,
+Mission's current state is the one of its Session with the latest `updated_at`. `reason` is the
+lifecycle event's reason, if any, and clears with the next state. `exposure` lists where the Session read untrusted input (`brief:source`,
 `cable:SENDER`, `tool:NAME`, `review`) and is empty for a clean Session. `BoardMission` groups registered Sessions by Station and
 Mission ID; queued Missions without a registered provider Session are not present.
 `brief` is present when AI6 published the exact Mission prompt and sanitized launch
@@ -484,7 +486,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available and its `usage` (tokens and cost per Session and UTC day) once a provider has reported any. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret. |
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. |
-| `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role actions; Station grants include `station.read`, `station.configure` and `audit.read`. Every action is computed by the Authorizer, not inferred from directory groups. |
+| `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role and `approval.decide`/`approval.class` actions; Station grants include `station.read`, `station.configure` and `audit.read`. Every action is computed by the Authorizer, not inferred from directory groups. |
 | `GET /v1/user/audit?operation_id=<id>&station_id=<id>&limit=<n>` | Requires a user bearer and `audit.read`; the optional Operation and Station filters are mutually exclusive. Returns at most 500 newest metadata-only records, filtered by the Authorizer for each resource. Records contain actor, action, resource scope, target and time; prompts, terminal output and secrets are excluded. |
 | `GET /v1/user/operations/{operation_id}/timeline?cursor=&mission=&limit=` | Requires `audit.read` on the Operation; returns a `TimelinePage` (see Activity timeline). |
 | `GET /v1/user/operations/{operation_id}/agent-roles` | Requires `agent.read`; returns the Headquarters Station catalog merged with validated Operation-scoped Registry overrides. Each role includes `operation_override` provenance. |
@@ -493,6 +495,12 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/operations/{operation_id}/quarantine` | Requires `agent.read`; lists the Agent quarantines that apply to the Operation (its own and those covering every Operation) with reason, who raised them and when. |
 | `POST /v1/user/operations/{operation_id}/quarantine/{agent_id}` | Requires `agent.configure`; body `{"reason": "..."}` (1-512 characters); quarantines the Agent in this Operation and records an `agent.quarantine` audit event. |
 | `POST /v1/user/operations/{operation_id}/quarantine/{agent_id}/release` | Requires `agent.configure`; lifts this Operation's quarantine of the Agent (`404` when there is none; a quarantine of every Operation is released on a Station) and records `agent.quarantine.release`. |
+| `GET /v1/user/operations/{operation_id}/green-ink` | Requires `approval.decide`; returns the Operation's `ai6::ApprovalRequest`s waiting for a decision, oldest first (expired ones are recorded as such and left out). |
+| `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/approve` | Requires `approval.decide`; body `{"expires_in_secs"?: 1..=31536000 (default 3600), "note"?: up to 1,024 characters}`, unknown fields refused. Signs as the caller and returns the `ai6::Approval`; the same decision again returns it, `409` when it was rejected or expired, `404` for an unknown request. Audited as `green_ink.approved` (target: request ID). |
+| `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/reject` | Requires `approval.decide`; body `{"reason"?: ...}`; as approve, audited as `green_ink.rejected`. The reason reaches the Agent. |
+| `GET /v1/user/operations/{operation_id}/class-authorizations` | Requires `approval.class`; returns every `ai6::ClassAuthorization` of the Operation, oldest first, revoked and expired ones included. |
+| `POST /v1/user/operations/{operation_id}/class-authorizations` | Requires `approval.class`; body `{"kinds", "target_pattern", "agents"?, "roles"?, "clearance_min"?, "max_uses"?, "expires_in_secs"}` (at least one Agent or role; `"*"` is every Agent). Signs as the caller, returns `201` and the record, audited as `class_authorization.created`. |
+| `DELETE /v1/user/operations/{operation_id}/class-authorizations/{id}` | Requires `approval.class`; revokes it (again is harmless) and returns the record, audited as `class_authorization.revoked`. |
 | `GET /v1/user/stations/{station_id}/settings` | Requires `station.read`; returns the live concurrent Mission limit, whether it has an explicit Registry override, and whether the Station has the execution role. |
 | `PUT /v1/user/stations/{station_id}/settings` | Requires `station.configure`; execution Stations only; validates a 1–1,024 concurrent Mission limit, persists it in the shared Registry, and records a Station-scoped metadata-only audit event. |
 | `POST /v1/user/attach-grants` | Requires a user bearer; checks `session.read` or `session.input` at the registered Operation before issuing an attach token. |

@@ -79,6 +79,53 @@ is `expired`. Repeating a request with the same `idempotency_key` returns the fi
 the outcome; Moneypenny offers them in each Mission card's menu, with the reason any action
 is unavailable. Closing a Session view never sends a control.
 
+## Green ink
+
+Before an irreversible step (a push to a protected branch or tag, a merge, a release, a
+deletion, a change of clearance) an Agent asks for green ink: a person's recorded approval
+of exactly that step. It calls `request_approval` on its Session's AI6 tool endpoint with
+the `kind` of step, its `target` (for a push, `REMOTE:REF` such as
+`origin:refs/heads/main`), a `reason` and a retry key, and is answered at once:
+
+| Status | Meaning |
+| --- | --- |
+| `not_required` | The Operation's [green ink policy](operations.md#green-ink) lets this Agent's clearance take the step. |
+| `approved` | A live class authorisation covers it, or a person already signed it; `expires_at` says until when. |
+| `pending` | A person decides. The Mission is `blocked` with reason `green-ink` until then. |
+| `rejected`, `expired` | Do not take the step. A request nobody decides within 24 hours (`request_ttl_secs`) expires as refused. |
+
+While a request is pending the Mission's [Watchdog](watchdog.md) is paused: waiting for a
+person is not a stall, and terminal output or an operator message does not end the wait.
+If the Agent's turn ends meanwhile, the Session closes and the Mission stays blocked.
+
+An operator with `approval.decide` on the Operation sees the waiting steps in Moneypenny's
+Administration → Green ink, or from `GET /v1/user/operations/{operation_id}/green-ink`,
+and approves one for a chosen time (one hour unless chosen) or rejects it with a reason.
+The signer is always the signed-in person. The Station holding the Mission tells the Agent
+the outcome, the step and the expiry (in a message to its live Session, or by resuming the
+Session with it), and the Mission is `working` again once nothing it asked for is pending.
+
+```bash
+curl -f -X POST "$AI6_EXPORTS_URL/v1/user/operations/G/green-ink/$REQUEST_ID/approve" \
+  -H "authorization: Bearer $AI6_ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"expires_in_secs": 1800, "note": "Push the release branch only."}'
+```
+
+A **class authorisation** approves a kind of step in advance: step kinds, a target glob
+(`origin:refs/heads/ai6/*`), the Agents (`*` for any) or roles it covers, the lowest
+clearance, an optional use limit and an expiry. A matching request is approved at once and
+the use is counted and audited as `class_authorization.used` by `class:<id>`. A Session that
+has read untrusted input never uses one under the default exposure policy (the `approvals`
+restriction, see [Exposure](medical.md#exposure)). Operators with `approval.class` grant,
+list and revoke them from `/v1/user/operations/{operation_id}/class-authorizations` or
+Moneypenny's Class authorisations tab.
+
+Decisions and class authorisations are audited (`green_ink.approved`,
+`green_ink.rejected`, `class_authorization.created`, `class_authorization.revoked`); the
+reason text is not. AI6 does not yet stop a step an Agent takes without green ink: the
+request is how a well-behaved Agent asks, not a lock.
+
 ## Activity timeline
 
 An operator with `audit.read` on an Operation reads what changed across it, newest first,
@@ -90,6 +137,7 @@ from `GET /v1/user/operations/{operation_id}/timeline` or Moneypenny's Timeline 
 | `control` | Universal Exports | A cancel, retry, resume or interrupt was applied, rejected or expired, and the state after. |
 | `cable` | the sending Station | An Agent sent a Cable: sender, scope and recipient count. |
 | `sleeper` | the Registry | A Sleeper was authorized or revoked, and by whom. |
+| `green_ink` | the Station | An Agent asked for green ink (`requested`), or was told the decision (`approved`, `rejected`, `expired`): the step, its target and the request, and who signed. |
 | `audit` | Universal Exports | Mission requests and controls, proposal decisions, Agent role, quarantine and Station settings changes. |
 
 Each item names its Station, Mission and Session where it has one, so the view filters by

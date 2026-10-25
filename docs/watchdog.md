@@ -47,6 +47,11 @@ queued ─► working ⇄ blocked ─► done | failed | abandoned
 `blocked` is a recoverable prompt wait. `stalled` closes the active operation while
 preserving the Mission record and any changed safe-house work for recovery.
 
+A Mission `blocked` with reason `green-ink` waits for a person to sign a step its Agent
+asked for (see [Green ink](missions.md#green-ink)). The watchdog is paused meanwhile:
+nothing stalls, loops or runs out its maximum runtime while it waits, and the time spent
+waiting does not count toward that runtime. The decision resumes it with fresh deadlines.
+
 An Agent whose Sessions keep stalling or looping is stopped across Missions: three stalls or
 loops within 24 hours [quarantine](medical.md#quarantine) it (the count, the window and the
 trigger are Operation settings). A Session stopped by a [budget](medical.md#budgets) is

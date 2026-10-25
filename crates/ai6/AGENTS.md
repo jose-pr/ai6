@@ -47,7 +47,8 @@ What AI6 adds:
 
 ```rust
 pub const SCOPE_KINDS: [&str; 3] = ["station", "operation", "theater"];
-pub const ACTIONS: &[&str];   // agent.configure, agent.read, audit.read, mission.control,
+pub const ACTIONS: &[&str];   // agent.configure, agent.read, approval.class,
+                              // approval.decide, audit.read, mission.control,
                               // mission.create, mission.read, session.input,
                               // session.read, station.configure, station.read
 pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
@@ -114,6 +115,9 @@ impl Watchdog {
     pub fn with_config(config: WatchdogConfig) -> Self;
     pub fn max_runtime(&self) -> Option<Duration>;
     pub fn is_max_runtime_exceeded(&self) -> bool;
+    pub fn pause(&self);       // waiting on a person: never stalled, looping, blocked or past max runtime
+    pub fn resume(&self);      // fresh deadlines; paused time does not count toward max runtime
+    pub fn is_paused(&self) -> bool;
 }
 impl ServeConfig {
     pub fn with_watchdog(self, watchdog: WatchdogConfig) -> Self;
@@ -241,6 +245,7 @@ pub struct Operation {
     pub budget: Budget,                           // no limit unless configured
     pub exposure: ExposurePolicy,                 // strict unless configured
     pub quarantine: QuarantinePolicy,             // 3 stalls/loops, 2 budget stops, 1 blown cover per 24 h
+    pub green_ink: GreenInkPolicy,                // strict unless configured; see Green ink
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
 }
@@ -831,6 +836,104 @@ A quarantined sender's Cables are accepted but held (`CableState::Held`) until a
 authorized release, whatever the receiver's inbound mode. `Roster::select_agent_excluding`
 is `select_agent` that also skips the named Agents; the Station passes the quarantined ones.
 
+## Green ink (`ai6::directorates::m::approvals`, `ai6::directorates::registry::approvals`)
+
+A person's approval of one irreversible step. Policy:
+
+```rust
+pub const BUILTIN_KINDS: [&str; 5];        // push, merge, release, delete, clearance
+pub const DEFAULT_PROTECTED: [&str; 4];    // refs/heads/{main,master,release/*}, refs/tags/*
+pub const DEFAULT_REQUEST_TTL: Duration;   // 24 h: an undecided request then expires as refused
+pub const DEFAULT_APPROVAL_TTL: Duration;  // 1 h: an approval whose signer chose no lifetime
+pub const GREEN_INK_REASON: &str;          // "green-ink", the blocked_reason of a waiting Mission
+#[non_exhaustive] pub struct ActionScope { pub kind: String /* 1-32 of a-z0-9-_ */, pub target: String /* 1-256, no controls */ }
+impl ActionScope {
+    pub fn try_new(kind, target) -> io::Result<Self>;   // InvalidInput out of bounds
+    pub fn pushed_ref(&self) -> String;                 // "[REMOTE:]REF"; bare name -> refs/heads/NAME
+}
+#[non_exhaustive] pub enum Requirement { NotRequired, GreenInk, Refused }
+#[non_exhaustive] pub enum GreenInkPreset { Strict /* default */, Licensed }   // serde lowercase
+pub struct GreenInkPolicy;   // Default = Strict
+impl GreenInkPolicy {
+    pub fn preset(preset: GreenInkPreset) -> Self;
+    pub fn requirement(&self, clearance: &str, scope: &ActionScope) -> Requirement;
+    pub fn is_protected(&self, reference: &str) -> bool;   // full ref, glob match
+    pub fn kinds(&self) / requesters(&self) -> impl Iterator<Item = &str>;
+    pub fn protected(&self) -> &[String];
+    pub fn request_ttl(&self) -> Duration;
+    pub fn weakenings(&self) -> Vec<String>;   // every setting looser than strict
+}
+pub struct GreenInkDefinition;   // [operation.ID.green_ink]; resolve() -> Result<GreenInkPolicy, String>
+pub fn clearance_at_least(have: &str, min: &str) -> bool;   // desk < field < 00; unknown is false
+```
+
+`strict` asks for every governed kind at every clearance and refuses requests from `desk`;
+`licensed` also lets `00` push and merge unattended. A push needs green ink only to a
+protected ref. Keys: `preset`, `kinds` (added to the built-ins), `requesters`
+(clearances that may ask), `unattended = { CLEARANCE = [KIND, ..] }` (replaces the
+preset's list per clearance named), `protected` (ref globs, replacing the default) and
+`request_ttl_secs`. An invalid value fails the roster load naming the key; a Station logs
+each weakening at start.
+
+Records, under the Registry lock: `approvals/pending/OP/ID.json`,
+`approvals/decided/OP/ID.json`, `approvals/missions/OP/MISSION.json` (a Mission's request
+IDs, at most 64), `class-authorizations/OP/ID.json`.
+
+```rust
+pub const EXPIRY_SIGNER: &str;   // "expiry"
+#[non_exhaustive] pub struct ApprovalRequest { pub id: String /* green-ink-<sha256> */, pub operation: String,
+    pub mission: MissionId, pub session: SessionId, pub agent: String, pub scope: ActionScope,
+    pub reason: String /* 1-2048, newlines allowed; never audited */, pub requested_at: f64, pub expires_at: f64 }
+impl ApprovalRequest {
+    pub fn try_new(operation, mission, session, agent, scope, reason, idempotency_key: &str) -> io::Result<Self>;
+    pub fn expiring(self, requested_at: f64, ttl: Duration) -> Self;   // required before storing
+}
+#[non_exhaustive] pub enum Decision { Approved, Rejected, Expired }   // serde snake_case; as_str()
+pub struct Revocation { pub by: String, pub at: f64 }
+#[non_exhaustive] pub struct Approval { pub request: ApprovalRequest, pub decision: Decision,
+    pub signer: String /* person, "class:ID" or "expiry" */, pub at: f64, pub expires_at: Option<f64>,
+    pub note: Option<String>, pub revoked: Option<Revocation>, pub notified_at: Option<f64> }
+impl Approval { pub fn is_live(&self, now: f64) -> bool }   // approved, not revoked, not expired
+#[non_exhaustive] pub struct Ruling { pub decision, pub signer, pub at, pub expires_at, pub note }
+impl Ruling { pub fn approve(signer, at, expires_at) -> Self; pub fn reject(signer, at, note: Option<String>) -> Self;
+              pub fn with_note(self, note) -> Self }
+pub enum ApprovalStatus { Pending(ApprovalRequest), Decided(Approval) }   // request(), name()
+#[non_exhaustive] pub struct ClassAuthorization { pub id: String /* class-<uuid> */, pub operation: String,
+    pub kinds: Vec<String>, pub target_pattern: String /* glob */, pub agents: Vec<String> /* "*" = any */,
+    pub roles: Vec<String>, pub clearance_min: String /* "field" */, pub max_uses: Option<u32>, pub uses: u32,
+    pub expires_at: f64, pub signer: String, pub created_at: f64, pub revoked: Option<Revocation> }
+impl ClassAuthorization {
+    pub fn new(operation, kinds, target_pattern, signer, created_at, expires_at) -> Self;
+    pub fn for_agents(self, Vec<String>) / for_roles(self, Vec<String>) / with_clearance_min(self, c) / with_max_uses(self, u32) -> Self;
+    pub fn is_live(&self, now: f64) -> bool;
+    pub fn covers(&self, agent: &str, role: Option<&str>, clearance: &str, scope: &ActionScope) -> bool;
+    pub fn validate(&self) -> io::Result<()>;   // needs a kind, an Agent or role, a glob, an expiry after the grant
+}
+impl FileRegistry {
+    pub fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus>;   // same ID returns the record
+    pub fn approval(&self, operation, id, now: f64) -> io::Result<Option<ApprovalStatus>>;
+    pub fn pending_approvals(&self, operation, now: f64) -> io::Result<Vec<ApprovalRequest>>;   // oldest first
+    pub fn mission_approvals(&self, operation, mission, now: f64) -> io::Result<Vec<ApprovalStatus>>;
+    pub fn live_approval(&self, operation, mission, scope: &ActionScope, now: f64) -> io::Result<Option<Approval>>;
+    pub fn decide_approval(&self, operation, id, ruling: &Ruling) -> io::Result<Approval>;
+    pub fn revoke_approval(&self, operation, id, by, at: f64) -> io::Result<Approval>;
+    pub fn mark_approval_notified(&self, operation, id, at: f64) -> io::Result<()>;
+    pub fn approve_by_class(&self, request, role: Option<&str>, clearance: &str, now: f64) -> io::Result<Option<Approval>>;
+    pub fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()>;
+    pub fn class_authorizations(&self, operation) -> io::Result<Vec<ClassAuthorization>>;   // oldest first
+    pub fn revoke_class_authorization(&self, operation, id, by, at: f64) -> io::Result<ClassAuthorization>;
+}
+```
+
+Every read that takes `now` first records pending requests past their expiry as `Expired`.
+`decide_approval` returns `NotFound` for an unknown request, `AlreadyExists` when it was
+decided otherwise or expired, and `InvalidInput` for an approval without a later expiry or
+a refusal with one; the same decision again returns the record. `approve_by_class` counts
+one use of the first live covering class authorisation (oldest first) and stores the
+approval as already told; it returns `None` for a request already stored. Nothing here
+stops a step taken without green ink: the harness gate and leased credentials are not
+implemented.
+
 ## Sources (`ai6::directorates::registry::sources`)
 
 A Source is a Guatiao kind (`ai6_source`) for a tracker or CI system. All models are
@@ -1395,6 +1498,19 @@ scoped held-Cable listing/release, acknowledgement and linked replies. Held meta
 the body; an explicit Release grant is required and current Receive grants are checked
 again before release. The endpoint and live Cable identity are removed when
 the Agent operation closes. Missing Cable grants continue to deny every action.
+The same endpoint offers `request_approval {kind, target, reason, idempotency_key}`, which
+answers at once with `{request_id?, status, expires_at?, message?}`: `not_required` when the
+Operation's green ink policy lets the Agent's clearance take the step, `approved` when a live
+class authorisation covers it (never for a Session exposed under the `approvals`
+restriction; the use is audited as `class_authorization.used` by `class:ID`), `rejected` or
+`expired` for a decided request, otherwise `pending`. A pending request blocks the Mission
+with `blocked_reason = "green-ink"` and pauses its Watchdog; terminal output and operator
+messages do not end that wait, and a turn that completes while it lasts ends the Session
+without finishing the Mission. Each scheduler pass delivers decisions from the Registry:
+an `AgentMessage` to a live Session, or a resume whose message carries the decisions when
+the Session ended, then the Mission returns to Working once nothing it asked for is
+pending. Requests and deliveries are `green_ink` timeline events; the lifecycle carries the
+reason (`green-ink`, `budget`) to Universal Exports.
 On graceful shutdown, event workers interrupt and close active Sessions and move Working
 Missions to Blocked while preserving their safe houses. Mission records persist across
 daemon restarts, and a blocked Mission can reattach to its provider Session through its

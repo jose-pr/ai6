@@ -94,9 +94,11 @@ tools = ["WebFetch", "WebSearch", "Browse"]
 | `approvals` | Its requests for authorization always go to a human, never to a class authorization |
 | `secrets` | It is given no new secret leases |
 
-`strict` applies all four; `restrict` replaces that set. The Station enforces `proposals` and
-`cables` itself; `approvals` and `secrets` are carried by `ExposureGate::restricts` for the
-parts of AI6 that issue authorizations and leases to ask.
+`strict` applies all four; `restrict` replaces that set. The Station enforces `proposals`,
+`cables` and `approvals` (a [green ink](missions.md#green-ink) request from an exposed
+Session waits for a person even when a class authorisation would cover it) itself;
+`secrets` is carried by `ExposureGate::restricts` for the part of AI6 that issues leases to
+ask.
 
 ## Quarantine
 

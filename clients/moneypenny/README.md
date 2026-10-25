@@ -27,6 +27,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   audit), filtered by Operation and Mission, with older pages on request and new activity
   added on top every ten seconds; it needs `audit.read`.
 - Administration: Operation-scoped Agent roles (purpose and policy) and Station capacity.
+- Green ink: the irreversible steps Agents wait to take (scope, Agent, Mission, reason,
+  expiry), each approved for a chosen time with an optional note or rejected with a reason
+  (`approval.decide`), and the Operation's class authorisations with their uses, revoking
+  the live ones (`approval.class`). A Session held for green ink shows `BLOCKED · GREEN INK`.
 - Audit log for operators with `audit.read`; operator menu with identity, effective
   permissions per Operation, theme and sign-out.
 

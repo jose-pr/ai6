@@ -84,9 +84,11 @@ secret's value reaches the Session only as a Mission-scoped lease, never in a ma
 agent reads can steer it, so clearance is least privilege, credentials are per Mission,
 and Cable bodies and briefs are untrusted text.
 
-**Green ink.** The real chief of SIS signs in green ink. AI6 will use the name for
-recorded human approvals of irreversible steps (a push to a protected branch, a release,
-a deletion).
+**Green ink.** The real chief of SIS signs in green ink. In AI6 it is a person's recorded
+approval of one irreversible step (a push to a protected branch, a release, a deletion):
+the Agent asks and waits, an operator signs or refuses, and the Agent is told. A **class
+authorisation**, the real UK term for standing approval of a class of activity, signs a kind
+of step in advance. AI6 does not yet stop a step taken without green ink.
 
 ## Built from the same lore
 
@@ -129,5 +131,7 @@ a deletion).
 | **Loadout** | what Q issues an Agent: tools, sandbox and secret names |
 | **Cover / blown** | an Operation's commit attribution policy / a commit that broke it |
 | **Clearance** | `desk`, `field` or `00`: what an Agent may do without asking |
+| **Green ink** | a person's recorded approval of one irreversible step an Agent asked to take (`request_approval`; an Operation's `green_ink` policy) |
+| **Class authorisation** | a standing approval of a kind of step on matching targets, for named Agents or roles, until it expires, runs out of uses or is revoked |
 | **HUMINT / SIGINT** | briefs from people / briefs from signals such as CI failures and alerts |
 | **Exfiltration route** | how work leaves a safe house: with `git`, the kept branch and its commits |

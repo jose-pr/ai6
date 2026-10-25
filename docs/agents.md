@@ -91,7 +91,8 @@ AI6's **Cable** relay supports Agent unicast and permission-scoped Station, Thea
 Global and named-channel broadcasts. Its MCP tools provide peer discovery, sending,
 inbox reads, acknowledgements, replies and explicitly authorized held-Cable release. An
 authorized 00 Agent also has the `propose_mission` tool for submitting work to M; this does
-not make the proposal a Cable or scheduler input.
+not make the proposal a Cable or scheduler input. Every Agent has `request_approval`, which
+asks a person for [green ink](missions.md#green-ink) before an irreversible step.
 The relay supplies sender identity outside the tool schema and rechecks recipient
 permissions at delivery. Cables are durable messages; terminal output and live stream
 events are DipTels.
@@ -111,8 +112,8 @@ permission contract.
 | Clearance | May |
 | --- | --- |
 | `desk` | Read, plan and propose; nothing leaves the worktree |
-| `field` | Change its worktree and run tests; irreversible actions require M authorization |
-| `00` | Act unattended within the configured Operation policy |
+| `field` | Change its worktree and run tests; irreversible actions require [green ink](missions.md#green-ink) |
+| `00` | Act unattended within the configured Operation policy (by default it still asks for green ink; `preset = "licensed"` lets it push and merge) |
 
 An Operation refuses an Agent above its clearance or outside its roster. M retains
 authorization authority; Agent role policy is guidance only. Q Branch controls which

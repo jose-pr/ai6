@@ -135,6 +135,35 @@ Credentials are never configured: a source names the environment variable that h
 token (`token_env`), and the Station reads it when it polls. A bare string is shorthand for
 the provider's main target, as in `sources = { jira = "GUA" }`.
 
+## Green ink
+
+`green_ink` says which irreversible steps an Agent must ask a person to sign
+([Green ink](missions.md#green-ink)). The default, `strict`, asks for every governed step
+at every clearance and lets no `desk` Agent ask; `licensed` also lets `00` Agents push and
+merge without asking. Every key overrides the preset:
+
+```toml
+[operation.G.green_ink]
+preset = "licensed"
+kinds = ["deploy"]                       # added to push, merge, release, delete, clearance
+requesters = ["field", "00"]             # clearances that may ask
+unattended = { "00" = ["push", "merge"], field = [] }   # per clearance named
+protected = ["refs/heads/main", "refs/heads/release/*", "refs/tags/*"]
+request_ttl_secs = 86400                 # an undecided request then expires as refused
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `preset` | `strict` | Starting point for the keys left out |
+| `kinds` | none | Step kinds the Operation governs besides the built-ins; an Agent may not ask for an ungoverned kind |
+| `requesters` | `["field", "00"]` | Clearances whose Agents may ask |
+| `unattended` | none (`licensed`: `00 = ["push", "merge"]`) | Kinds a clearance takes without asking; each clearance named replaces its list |
+| `protected` | `refs/heads/main`, `refs/heads/master`, `refs/heads/release/*`, `refs/tags/*` | Ref globs a `push` needs green ink for; a push elsewhere does not |
+| `request_ttl_secs` | `86400` | How long a request waits for a decision |
+
+An invalid value fails the load with an error naming the key. A Station prints each setting
+looser than `strict` when it starts.
+
 ## Sleepers
 
 `sleepers` holds standing orders that queue a brief on a cron schedule, once an operator

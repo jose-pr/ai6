@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Green ink: a person's recorded approval of one irreversible step. An Agent calls the
+  `request_approval` tool on its Session's AI6 endpoint with the step's kind (`push`,
+  `merge`, `release`, `delete`, `clearance` or one its Operation adds) and target. The
+  Operation's `[operation.ID.green_ink]` policy (preset `strict` by default, or `licensed`,
+  where `00` pushes and merges unattended; every key overridable) answers `not_required`,
+  a live class authorisation answers `approved`, and otherwise the request is `pending`:
+  the Mission is `blocked` with reason `green-ink`, its Watchdog paused, until an operator
+  with the new `approval.decide` permission approves it for a chosen time or rejects it
+  (`GET /v1/user/operations/{id}/green-ink`, `POST .../{request}/approve|reject`). The
+  Station tells the Agent the decision and the Mission works again; a request nobody
+  decides expires as refused after 24 hours. Class authorisations (`approval.class`,
+  `/v1/user/operations/{id}/class-authorizations`) approve a kind of step on a target glob
+  for named Agents or roles, up to a use limit, and are revoked there. Records live in the
+  Registry (`ai6::ApprovalRequest`, `Approval`, `ClassAuthorization`); decisions are audited
+  and requests appear on the timeline. Moneypenny has Green ink and Class authorisations
+  tabs under Administration. AI6 does not yet stop a step taken without green ink.
+- The DipTel lifecycle frame carries an optional `reason` (`green-ink`, `budget`), shown on
+  the board beside the Session's state.
+
 - Operator controls. With the new `mission.control` permission an operator cancels,
   retries, resumes or interrupts a Mission through
   `POST /v1/user/operations/{operation_id}/missions/{mission_id}/actions` (idempotent by
