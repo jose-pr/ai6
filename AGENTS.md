@@ -13,7 +13,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | `crates/universal-exports/` | Universal Exports: the authenticated public API gateway and `universal-exports` command |
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The read-only operator command |
-| `crates/providers/{agents,terminals,safehouses,access}/` | Guatiao providers: Claude/Codex handlers, the `pty` terminal, the `git` and `copy` safe houses, access providers |
+| `crates/providers/{agents,terminals,safehouses,sources,access}/` | Guatiao providers: Claude/Codex handlers, the `pty` terminal, the `git` and `copy` safe houses, GitHub and Jira Sources, access providers |
 | `clients/moneypenny/` | Moneypenny, the Flutter desktop/web operator app |
 | `examples/config/` | A runnable Operation and Agent roster |
 | `docs/`, `mkdocs.yml` | Narrative guides; the Rust API reference is published under `/rust/` |

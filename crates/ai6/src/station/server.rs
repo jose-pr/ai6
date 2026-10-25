@@ -4519,6 +4519,8 @@ mod tests {
             serde_json::from_slice(&fs::read(done.join("manual--brief-1.outcome.json")).unwrap())
                 .unwrap();
         assert_eq!(outcome["state"], "done");
+        assert_eq!(outcome["mission_id"], mission_id);
+        assert_eq!(outcome["agent"], "007");
         assert!(!claimed.exists());
 
         state.stopping.store(true, Ordering::Release);

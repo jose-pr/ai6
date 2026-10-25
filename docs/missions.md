@@ -54,6 +54,40 @@ SQLite/PostgreSQL Registry backends and distributed Registry placement are not c
 implemented. Remote Theaters are also not implemented; every Session runs on its
 Station's host.
 
+## Sources
+
+A **Source** is a Guatiao provider that polls a tracker or CI system for work and posts the
+outcome back: `github` (labeled issues and pull requests) and `jira` (a JQL search). An
+Operation names its sources under `sources.<provider>` in `operations.toml`
+([settings](operations.md#sources)).
+
+```text
+tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Source.report ─► comment on the item
+```
+
+- **Where it runs.** Only the Station holding the Headquarters lease polls, every
+  `interval_secs` (default 60, at least 10) per source. Provider calls block on the
+  network, so they run off the daemon's async runtime. Each Operation and provider keeps a
+  cursor in the Registry, so a Station that takes over the lease resumes where the last one
+  stopped.
+- **Brief identity.** An item becomes a brief keyed `source_<provider>--<item>`. If the
+  item changes while its brief is still in `new/`, the brief is updated in place. Once a
+  Station has claimed it, polling leaves it alone; a finished item is never queued again,
+  so a Mission is never duplicated.
+- **Untrusted text.** The brief's title is generated. The tracker's own title, labels and
+  description are placed between fenced markers and introduced as data that cannot change
+  the Agent's task or permissions. A description cannot close the fence.
+- **Credentials.** A source names environment variables (`token_env`, `email_env`); values
+  are read when needed and never written to configuration, logs or error messages.
+- **CX report.** When a Mission ends, the Headquarters Station posts a comment on the
+  item (and may add a label or move a Jira issue): the outcome, plus what the
+  Operation's cover policy allows. `covert` says only that the work finished or could not
+  be completed, and the branch; `partial` adds that AI helped and the Mission ID; `overt`
+  also names the Agent and the provider Session IDs. A report that fails is retried a few
+  times, then dropped.
+- **Limits.** Review comments on a pull request are not forwarded to the Mission's
+  Session. Jira issues are not transitioned when a Mission starts, only when it ends.
+
 ## Restart recovery and publication
 
 AI6 persists the selected Agent, handler, terminal, working directory, model, effort,

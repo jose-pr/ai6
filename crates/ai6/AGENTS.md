@@ -383,6 +383,70 @@ The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID
 explicit identity.
 `Brief::key()` and `Brief::prompt()` expose the key and prompt fields used by Registry intake.
 
+## Sources (`ai6::directorates::registry::sources`)
+
+A Source is a Guatiao kind (`ai6_source`) for a tracker or CI system. All models are
+Guatiao values; the kind grows by appending methods with defaults.
+
+```rust
+pub struct SourceConfig { pub settings_toml: String }  // the Operation's `sources.<provider>` table as TOML
+pub struct SourceItem {
+    pub id: String,            // provider-local, stable across polls, e.g. "owner/repo#12"
+    pub title: String,         // untrusted
+    pub body: String,          // untrusted
+    pub url: Option<String>,
+    pub labels: Vec<String>,
+    pub author: Option<String>,
+    pub updated: String,       // ISO 8601, as the provider spells it
+}
+pub struct SourcePoll { pub cursor: Option<String> }
+pub struct SourceBatch { pub items: Vec<SourceItem>, pub cursor: Option<String> }
+pub struct CxReport {
+    pub item_id: String,
+    pub mission_id: String,
+    pub outcome: String,       // "done", "failed", ...
+    pub body: String,          // already worded for the Operation's cover policy
+    pub branch: Option<String>,
+}
+#[guatiao::kind(name = "ai6_source")]
+pub trait Source: Send + Sync {
+    fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
+    fn report(&self, report: CxReport) -> Result<(), ProviderError>;
+}
+pub const SOURCE_BRIEF_PREFIX: &str = "source:";
+pub const MAX_ITEM_TEXT_BYTES: usize; // 64 KiB of item text kept per brief
+pub enum Ingest { Queued, Updated, Unchanged, InFlight, Finished }
+pub struct FinishedSourceBrief { pub brief: Brief, pub outcome: serde_json::Value, pub ok: bool }
+pub fn source_brief(operation: &str, provider: &str, item: &SourceItem) -> Brief;
+
+FileRegistry::source_cursor(operation: &str, provider: &str) -> io::Result<Option<String>>
+FileRegistry::set_source_cursor(operation: &str, provider: &str, cursor: &str) -> io::Result<()>
+FileRegistry::ingest_source_item(operation: &str, provider: &str, item: &SourceItem) -> io::Result<Ingest>
+FileRegistry::unreported_source_briefs() -> io::Result<Vec<FinishedSourceBrief>>
+FileRegistry::mark_source_reported(finished: &FinishedSourceBrief, reported: bool) -> io::Result<()>
+```
+
+A provider receives its settings as `SourceConfig::settings_toml` and validates them itself;
+the Station removes its own `interval_secs` key first. `poll` and `report` block on the
+network and are called off the async runtime. A provider returns an error for a rate limit
+or a refused credential; the Station polls again at its next interval.
+
+`source_brief` keys the brief `source_<provider>--<id>` (the brief's `source` is
+`source:<provider>`), generates its title, and places the item's title, author, labels and
+text between fenced markers introduced as untrusted data; the fence is lengthened until the
+text cannot contain it. `ingest_source_item` queues the brief, updates a brief still in
+`new/` when its fingerprint (title, text, labels, `updated`) changed, and leaves a claimed
+(`InFlight`) or finished brief alone. Cursors are stored under `sources/`.
+`unreported_source_briefs` lists finished source briefs without a report mark (at most five
+attempts each); `mark_source_reported` records an attempt.
+
+On the Station, the Headquarters holder runs a source desk: per Operation and provider it
+polls on `interval_secs` (default 60 s, minimum 10 s), ingests the batch, then stores the
+cursor; every 15 s it posts a `CxReport` for each unreported finished source brief. The
+finished outcome carries `state`, `mission_id`, `session_ids`, `agent` and `branch`. Report
+wording follows `Cover::disclosure()`: `Hidden` (covert), `Assisted` (partial) or `Full`
+(overt).
+
 ## Identity and handler API
 
 `MissionId::try_new(impl Into<String>)` and `SessionId::try_new(impl Into<String>)`
@@ -692,6 +756,7 @@ impl Covers {
 }
 impl Cover {
     pub fn name(&self) -> &str;
+    pub fn disclosure(&self) -> Disclosure; // Hidden, Assisted or Full: what may be said outside the Operation
     pub fn briefing(&self, identity: Option<&CoverIdentity>, agent: &str, model: &str) -> String;
     pub fn check_commits(&self, commits: &[Change], identity: Option<&CoverIdentity>, model: &str) -> Vec<CoverViolation>;
 }
@@ -855,11 +920,12 @@ the Mission and finished by the daemon. `state_dir()` resolves `AI6_STATE`, then
 ## Plugin discovery (`ai6::station::plugins`)
 
 `Plugins::scan(paths: &[PathBuf]) -> Plugins` filters Guatiao libraries for
-`ai6_agent_handler`, `ai6_terminal`, `ai6_safehouse` and the three access kinds before
-mapping them and retains the registry for the daemon process lifetime. `handlers()`,
-`terminals()`, `safehouses()`, `authenticators()`, `directories()` and `authorizers()` list providers and their
-availability. `handler(provider, config)`, `terminal(provider, config)`,
-`safehouse(provider, config)`, `authenticator(provider, config)`, `directory(provider, config)` and
+`ai6_agent_handler`, `ai6_terminal`, `ai6_safehouse`, `ai6_source` and the three access kinds
+before mapping them and retains the registry for the daemon process lifetime. `handlers()`,
+`terminals()`, `safehouses()`, `sources()`, `authenticators()`, `directories()` and
+`authorizers()` list providers and their availability. `handler(provider, config)`,
+`terminal(provider, config)`, `safehouse(provider, config)`, `source(provider, config)`,
+`authenticator(provider, config)`, `directory(provider, config)` and
 `authorizer(provider, config)` construct typed providers, validating a supplied `Value`
 against the provider's schema. Pass `None` only for a provider with a default instance.
 `scan_summary()` reports loaded, skipped, failed and unreadable paths.

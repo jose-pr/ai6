@@ -58,6 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   creation and proposal review, role administration, Station capacity settings,
   metadata-only audit, attach grants with read-first WebSocket terminals and expiring
   write leases. Configured with `AI6_EXPORTS_*` variables.
+- Sources: the `Source` Guatiao kind (`ai6_source`) polls a tracker or CI system for work
+  and posts each Mission's outcome (the CX report) back. The Station holding the
+  Headquarters lease polls each `sources.<provider>` of every Operation on an interval,
+  keeps a cursor per Operation and provider in the Registry, and queues items as briefs
+  keyed `source_<provider>--<item>`: a changed item updates its queued brief, and a claimed
+  or finished one is never queued again. Tracker text is fenced in the brief as untrusted
+  data. Reports are worded by the Operation's cover policy.
+- Source providers `ai6-source-github` (labeled issues and pull requests, comment and
+  label back) and `ai6-source-jira` (JQL on Cloud or Server/Data Center, comment and
+  workflow transition back).
 - `ai6-diptel`: the native and WebAssembly wire contract for Session lifecycle, terminal
   bytes and resize frames, with test vectors.
 - `ai6ctl`: a read-only operator command for health, Stations, Agent roles, Missions and

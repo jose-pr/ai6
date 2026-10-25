@@ -1,0 +1,16 @@
+pub mod ai6_source_github
+pub struct ai6_source_github::Github
+impl ai6_source_github::Github
+pub fn ai6_source_github::Github::from_settings(&str) -> core::result::Result<Self, alloc::string::String>
+impl ai6::directorates::registry::sources::Source for ai6_source_github::Github
+pub fn ai6_source_github::Github::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
+pub fn ai6_source_github::Github::report(&self, ai6::directorates::registry::sources::CxReport) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6::directorates::registry::sources::SourceConfig> for ai6_source_github::Github
+pub type ai6_source_github::Github::Error = guatiao::library::kind::ProviderError
+pub fn ai6_source_github::Github::try_from(ai6::directorates::registry::sources::SourceConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_source_github::Github
+pub const ai6_source_github::Github::KINDS: &'static [&'static str]
+pub fn ai6_source_github::Github::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub const ai6_source_github::PROVIDER_ID: &str
+#[no_mangle] pub static ai6_source_github::guatiao_declares: [u8; 17]
+#[no_mangle] pub unsafe c fn ai6_source_github::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

@@ -15,7 +15,7 @@ and the [guides](https://jose-pr.github.io/ai6/).
 
 ## Features
 
-- AgentHandler, terminal and access contracts as Guatiao kinds, usable without the daemon.
+- AgentHandler, terminal, Source and access contracts as Guatiao kinds, usable without the daemon.
 - A Station daemon: private loopback API, Registry-leased intake, Mission scheduling,
   durable Mission records and automatic provider-Session reattachment after a restart.
 - Agent selection by role and priority; when an Agent's handler is unavailable, the next
@@ -83,6 +83,7 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
 | `ai6::directorates::m::access` | Authenticator, Directory and Authorizer kinds and the built-in `RoleAuthorizer` |
 | `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
+| `ai6::directorates::registry::sources` | The Source kind (trackers and CI), brief ingestion, cursors and CX reports |
 | `ai6::directorates::registry::cables` | Permission-scoped Agent-to-Agent Cable relay |
 | `ai6::directorates::q` | Loadouts, Mission-scoped secret leases, MCP config and sandbox arguments |
 | `ai6::directorates::q::terminal` | Terminal and terminal-session kinds and the Session bridge |
