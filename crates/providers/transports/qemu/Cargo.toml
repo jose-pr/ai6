@@ -1,0 +1,25 @@
+[package]
+name = "ai6-transport-qemu"
+description = "An AI6 transport provider for a QEMU guest through its guest agent: commands and files"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+exclude = [".*", "*.local.*"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+ai6 = { path = "../../../ai6", default-features = false }
+data-encoding = { workspace = true, features = ["alloc"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+ai6 = { path = "../../../ai6", features = ["daemon"] }
+tempfile.workspace = true
