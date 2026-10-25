@@ -58,6 +58,9 @@ pub struct TimelineEvent {
 
 impl TimelineEvent {
     /// An event with a fresh ID and nothing correlated yet.
+    ///
+    /// IDs are time-ordered (UUIDv7, monotonic within a process), so events recorded in the
+    /// same second still sort in the order they happened.
     pub fn new(
         kind: impl Into<String>,
         action: impl Into<String>,
@@ -65,7 +68,7 @@ impl TimelineEvent {
         at: f64,
     ) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: uuid::Uuid::now_v7().to_string(),
             at,
             kind: kind.into(),
             action: action.into(),
@@ -254,6 +257,27 @@ fn event_files(root: &Path) -> io::Result<Vec<std::path::PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn events_in_the_same_second_keep_the_order_they_were_recorded_in() {
+        let directory = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(directory.path());
+        let actions = (0..20)
+            .map(|index| format!("step{index}"))
+            .collect::<Vec<_>>();
+        for action in &actions {
+            registry
+                .record_event(&TimelineEvent::new("lifecycle", action.clone(), "G", 100.0))
+                .unwrap();
+        }
+        let recorded = registry
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .map(|event| event.action)
+            .collect::<Vec<_>>();
+        assert_eq!(recorded, actions);
+    }
 
     #[test]
     fn events_are_kept_per_operation_in_time_order_and_bounded() {
