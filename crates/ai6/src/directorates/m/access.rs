@@ -28,6 +28,7 @@ pub const ACTIONS: &[&str] = &[
     "agent.configure",
     "agent.read",
     "audit.read",
+    "mission.control",
     "mission.create",
     "mission.read",
     "session.input",

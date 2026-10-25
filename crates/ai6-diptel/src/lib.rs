@@ -13,9 +13,12 @@ use guatiao::{Alloc, Bytes, Map, Value};
 pub const MAX_ID_BYTES: usize = 256;
 /// The largest terminal data frame accepted by this protocol.
 pub const MAX_TERMINAL_BYTES: usize = 1024 * 1024;
+/// The largest operator message a control carries, in UTF-8 bytes.
+pub const MAX_CONTROL_MESSAGE_BYTES: usize = 16 * 1024;
 const LIFECYCLE_CHANNEL: u64 = 1;
 const TERMINAL_CHANNEL: u64 = 2;
 const RESIZE_CHANNEL: u64 = 3;
+const CONTROL_CHANNEL: u64 = 4;
 
 /// An invalid or over-limit protocol identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,14 +74,21 @@ macro_rules! identity {
     };
 }
 
+/// A validated identifier for one operator control request.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ControlId(String);
+
 identity!(OperationId);
 identity!(MissionId);
 identity!(SessionId);
+identity!(ControlId);
 
-/// The lifecycle state shown for an agent Session.
+/// The lifecycle state shown for an agent Session: the state of the Mission it serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionState {
+    /// The Mission is queued for another attempt; this Session will not run again.
+    Queued,
     /// The agent operation is running.
     Working,
     /// The operation is waiting on an external condition.
@@ -94,6 +104,219 @@ pub enum SessionState {
     Done,
     /// The agent operation exited unsuccessfully.
     Failed,
+    /// An operator or AI6 withdrew the Mission.
+    Abandoned,
+}
+
+impl SessionState {
+    /// The wire spelling of the state.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Working => "working",
+            Self::Blocked => "blocked",
+            Self::Stalled => "stalled",
+            Self::Parked => "parked",
+            Self::Quarantined => "quarantined",
+            Self::Done => "done",
+            Self::Failed => "failed",
+            Self::Abandoned => "abandoned",
+        }
+    }
+
+    /// Parses a wire spelling; `None` for an unknown state.
+    pub fn parse(state: &str) -> Option<Self> {
+        Some(match state {
+            "queued" => Self::Queued,
+            "working" => Self::Working,
+            "blocked" => Self::Blocked,
+            "stalled" => Self::Stalled,
+            "parked" => Self::Parked,
+            "quarantined" => Self::Quarantined,
+            "done" => Self::Done,
+            "failed" => Self::Failed,
+            "abandoned" => Self::Abandoned,
+            _ => return None,
+        })
+    }
+}
+
+/// What an operator asks of a Mission or of its live Session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ControlAction {
+    /// Stop the live Session, if any, and abandon the Mission; its safe house is finished
+    /// with the work kept.
+    Cancel,
+    /// Queue a stalled or finished Mission again as a new attempt, optionally for another
+    /// qualified Agent.
+    Retry,
+    /// Resume a parked, blocked or stalled Mission now, optionally with a message.
+    Resume,
+    /// Stop the Session's current turn; the Mission stays, blocked, until resumed.
+    Interrupt,
+}
+
+impl ControlAction {
+    /// Every action, in display order.
+    pub const ALL: [Self; 4] = [Self::Cancel, Self::Retry, Self::Resume, Self::Interrupt];
+
+    /// The wire spelling of the action.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cancel => "cancel",
+            Self::Retry => "retry",
+            Self::Resume => "resume",
+            Self::Interrupt => "interrupt",
+        }
+    }
+
+    /// Parses a wire spelling; `None` for an unknown action.
+    pub fn parse(action: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| candidate.as_str() == action)
+    }
+}
+
+/// A control field was empty, too long or held control characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct InvalidControl;
+
+impl fmt::Display for InvalidControl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("control fields must be non-empty, bounded and free of control characters")
+    }
+}
+
+impl core::error::Error for InvalidControl {}
+
+/// One operator control, as Universal Exports hands it to the Station holding the Mission.
+///
+/// The Station is the authority: it checks the Mission, the Operation and its own Session
+/// lease before acting, and reports the outcome back.
+#[derive(Clone, PartialEq, Eq)]
+pub struct MissionControl {
+    control_id: ControlId,
+    operation_id: OperationId,
+    mission_id: MissionId,
+    session_id: Option<SessionId>,
+    action: ControlAction,
+    agent: Option<String>,
+    message: Option<String>,
+}
+
+impl fmt::Debug for MissionControl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MissionControl")
+            .field("control_id", &self.control_id)
+            .field("operation_id", &self.operation_id)
+            .field("mission_id", &self.mission_id)
+            .field("session_id", &self.session_id)
+            .field("action", &self.action)
+            .field("agent", &self.agent)
+            .field(
+                "message",
+                &self
+                    .message
+                    .as_ref()
+                    .map(|message| format!("[REDACTED; {} bytes]", message.len())),
+            )
+            .finish()
+    }
+}
+
+impl MissionControl {
+    /// A control with no Session, Agent or message.
+    pub fn new(
+        control_id: ControlId,
+        operation_id: OperationId,
+        mission_id: MissionId,
+        action: ControlAction,
+    ) -> Self {
+        Self {
+            control_id,
+            operation_id,
+            mission_id,
+            session_id: None,
+            action,
+            agent: None,
+            message: None,
+        }
+    }
+
+    /// Names the provider Session the control expects to be the Mission's current one.
+    #[must_use]
+    pub fn with_session(mut self, session_id: SessionId) -> Self {
+        self.session_id = Some(session_id);
+        self
+    }
+
+    /// Names the Agent a retry is given to.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidControl`] for an empty codename, one over [`MAX_ID_BYTES`] or one with
+    /// control characters.
+    pub fn with_agent(mut self, agent: impl Into<String>) -> Result<Self, InvalidControl> {
+        let agent = agent.into();
+        if agent.trim().is_empty() || agent.len() > MAX_ID_BYTES || agent.contains(char::is_control)
+        {
+            return Err(InvalidControl);
+        }
+        self.agent = Some(agent);
+        Ok(self)
+    }
+
+    /// Adds the message a resume sends to the Agent.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidControl`] for a blank message or one over [`MAX_CONTROL_MESSAGE_BYTES`].
+    pub fn with_message(mut self, message: impl Into<String>) -> Result<Self, InvalidControl> {
+        let message = message.into();
+        if message.trim().is_empty() || message.len() > MAX_CONTROL_MESSAGE_BYTES {
+            return Err(InvalidControl);
+        }
+        self.message = Some(message);
+        Ok(self)
+    }
+
+    /// The control's identity, unique per request.
+    pub fn control_id(&self) -> &ControlId {
+        &self.control_id
+    }
+
+    /// The Operation the requester was authorized for.
+    pub fn operation_id(&self) -> &OperationId {
+        &self.operation_id
+    }
+
+    /// The Mission the control acts on.
+    pub fn mission_id(&self) -> &MissionId {
+        &self.mission_id
+    }
+
+    /// The provider Session expected to be the Mission's current one, when known.
+    pub fn session_id(&self) -> Option<&SessionId> {
+        self.session_id.as_ref()
+    }
+
+    /// What the operator asked for.
+    pub const fn action(&self) -> ControlAction {
+        self.action
+    }
+
+    /// The Agent a retry is given to, when the operator chose one.
+    pub fn agent(&self) -> Option<&str> {
+        self.agent.as_deref()
+    }
+
+    /// The message a resume sends to the Agent; operator text, never logged.
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
 }
 
 /// A session's identity and current board state.
@@ -227,7 +450,7 @@ pub fn lifecycle_frames(
     value.set("operation_id", event.operation_id.as_str());
     value.set("mission_id", event.mission_id.as_str());
     value.set("session_id", event.session_id.as_str());
-    value.set("state", state_name(event.state));
+    value.set("state", event.state.as_str());
     value.set("sequence", event.sequence);
     frames(LIFECYCLE_CHANNEL, &schema, &value.into())
 }
@@ -271,7 +494,37 @@ pub fn resize_frames(
     frames(RESIZE_CHANNEL, &schema, &value.into())
 }
 
-/// One validated lifecycle or terminal frame received from a gateway.
+/// Creates a guatiao schema announcement and value frame for an operator control.
+pub fn control_frames(
+    control: &MissionControl,
+) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError> {
+    let schema = SchemaBuilder::new()
+        .field(FieldBuilder::new("control_id", KindBuilder::string()).required())
+        .field(FieldBuilder::new("operation_id", KindBuilder::string()).required())
+        .field(FieldBuilder::new("mission_id", KindBuilder::string()).required())
+        .field(FieldBuilder::new("session_id", KindBuilder::string()))
+        .field(FieldBuilder::new("action", KindBuilder::string()).required())
+        .field(FieldBuilder::new("agent", KindBuilder::string()))
+        .field(FieldBuilder::new("message", KindBuilder::string()))
+        .finish()?;
+    let mut value = Map::new();
+    value.set("control_id", control.control_id.as_str());
+    value.set("operation_id", control.operation_id.as_str());
+    value.set("mission_id", control.mission_id.as_str());
+    if let Some(session_id) = &control.session_id {
+        value.set("session_id", session_id.as_str());
+    }
+    value.set("action", control.action.as_str());
+    if let Some(agent) = &control.agent {
+        value.set("agent", agent.as_str());
+    }
+    if let Some(message) = &control.message {
+        value.set("message", message.as_str());
+    }
+    frames(CONTROL_CHANNEL, &schema, &value.into())
+}
+
+/// One validated lifecycle, terminal or control frame received from a gateway.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IncomingFrame {
     /// A Mission or provider Session changed lifecycle state.
@@ -280,6 +533,8 @@ pub enum IncomingFrame {
     Terminal(TerminalData),
     /// A terminal geometry change from an attached viewer.
     Resize(TerminalResize),
+    /// An operator control for the Station holding a Mission.
+    Control(MissionControl),
     /// The remote side closed a channel.
     Closed(u64),
 }
@@ -321,7 +576,7 @@ impl FrameReceiver {
             Received::Value { channel, value } if channel == LIFECYCLE_CHANNEL => {
                 let map = Map::try_from(value)
                     .map_err(|_| FrameDecodeError("lifecycle frame must be a map".into()))?;
-                let state = parse_state(&text(&map, "state")?)
+                let state = SessionState::parse(&text(&map, "state")?)
                     .ok_or_else(|| FrameDecodeError("unknown lifecycle state".into()))?;
                 let event = LifecycleEvent {
                     operation_id: OperationId::new(text(&map, "operation_id")?)
@@ -371,6 +626,11 @@ impl FrameReceiver {
                 .map_err(|error| FrameDecodeError(error.to_string()))?;
                 Ok(Some(IncomingFrame::Resize(event)))
             }
+            Received::Value { channel, value } if channel == CONTROL_CHANNEL => {
+                let map = Map::try_from(value)
+                    .map_err(|_| FrameDecodeError("control frame must be a map".into()))?;
+                Ok(Some(IncomingFrame::Control(decode_control(&map)?)))
+            }
             Received::Value { channel, .. } => Err(FrameDecodeError(format!(
                 "unsupported Universal Exports channel {channel}"
             ))),
@@ -392,17 +652,35 @@ fn number(map: &Map, key: &str) -> Result<u64, FrameDecodeError> {
     u64::from_value(value).map_err(|_| FrameDecodeError(format!("{key} must be a number")))
 }
 
-fn parse_state(state: &str) -> Option<SessionState> {
-    match state {
-        "working" => Some(SessionState::Working),
-        "blocked" => Some(SessionState::Blocked),
-        "stalled" => Some(SessionState::Stalled),
-        "parked" => Some(SessionState::Parked),
-        "quarantined" => Some(SessionState::Quarantined),
-        "done" => Some(SessionState::Done),
-        "failed" => Some(SessionState::Failed),
-        _ => None,
+fn optional_text(map: &Map, key: &str) -> Result<Option<String>, FrameDecodeError> {
+    map.get(key)
+        .map(|value| {
+            String::from_value(value).map_err(|_| FrameDecodeError(format!("{key} must be text")))
+        })
+        .transpose()
+}
+
+fn decode_control(map: &Map) -> Result<MissionControl, FrameDecodeError> {
+    let invalid = |error: InvalidIdentity| FrameDecodeError(error.to_string());
+    let action = ControlAction::parse(&text(map, "action")?)
+        .ok_or_else(|| FrameDecodeError("unknown control action".into()))?;
+    let mut control = MissionControl::new(
+        ControlId::new(text(map, "control_id")?).map_err(invalid)?,
+        OperationId::new(text(map, "operation_id")?).map_err(invalid)?,
+        MissionId::new(text(map, "mission_id")?).map_err(invalid)?,
+        action,
+    );
+    if let Some(session_id) = optional_text(map, "session_id")? {
+        control = control.with_session(SessionId::new(session_id).map_err(invalid)?);
     }
+    let invalid_control = |error: InvalidControl| FrameDecodeError(error.to_string());
+    if let Some(agent) = optional_text(map, "agent")? {
+        control = control.with_agent(agent).map_err(invalid_control)?;
+    }
+    if let Some(message) = optional_text(map, "message")? {
+        control = control.with_message(message).map_err(invalid_control)?;
+    }
+    Ok(control)
 }
 
 fn frames(
@@ -414,18 +692,6 @@ fn frames(
         channel::announce(channel_id, schema)?,
         channel::send(channel_id, value)?,
     ))
-}
-
-fn state_name(state: SessionState) -> &'static str {
-    match state {
-        SessionState::Working => "working",
-        SessionState::Blocked => "blocked",
-        SessionState::Stalled => "stalled",
-        SessionState::Parked => "parked",
-        SessionState::Quarantined => "quarantined",
-        SessionState::Done => "done",
-        SessionState::Failed => "failed",
-    }
 }
 
 /// A terminal resize request.
@@ -708,6 +974,78 @@ mod tests {
         assert_eq!(hex, expected);
     }
 
+    fn sample_control() -> MissionControl {
+        MissionControl::new(
+            ControlId::new("control-1").unwrap(),
+            OperationId::new("station-a").unwrap(),
+            MissionId::new("mission-17").unwrap(),
+            ControlAction::Retry,
+        )
+        .with_session(SessionId::new("provider-run-3").unwrap())
+        .with_agent("008")
+        .unwrap()
+    }
+
+    #[test]
+    fn a_control_round_trips_and_its_message_stays_out_of_debug_output() {
+        let control = sample_control();
+        let resume = MissionControl::new(
+            ControlId::new("control-2").unwrap(),
+            OperationId::new("station-a").unwrap(),
+            MissionId::new("mission-17").unwrap(),
+            ControlAction::Resume,
+        )
+        .with_message("carry on with the review")
+        .unwrap();
+        let mut receiver = FrameReceiver::new();
+        for expected in [control, resume.clone()] {
+            let (schema, value) = control_frames(&expected).unwrap();
+            assert_eq!(receiver.accept(&schema).unwrap(), None);
+            assert_eq!(
+                receiver.accept(&value).unwrap(),
+                Some(IncomingFrame::Control(expected))
+            );
+        }
+        let debug = format!("{resume:?}");
+        assert!(debug.contains("[REDACTED; 24 bytes]"));
+        assert!(!debug.contains("carry on"));
+    }
+
+    #[test]
+    fn control_fields_are_bounded() {
+        let control = sample_control();
+        assert!(control.clone().with_agent("").is_err());
+        assert!(control.clone().with_agent("00\n7").is_err());
+        assert!(control.clone().with_message("  ").is_err());
+        assert!(
+            control
+                .with_message("x".repeat(MAX_CONTROL_MESSAGE_BYTES + 1))
+                .is_err()
+        );
+        assert_eq!(ControlAction::parse("pause"), None);
+        for action in ControlAction::ALL {
+            assert_eq!(ControlAction::parse(action.as_str()), Some(action));
+        }
+    }
+
+    #[test]
+    fn every_session_state_round_trips_its_wire_spelling() {
+        for state in [
+            SessionState::Queued,
+            SessionState::Working,
+            SessionState::Blocked,
+            SessionState::Stalled,
+            SessionState::Parked,
+            SessionState::Quarantined,
+            SessionState::Done,
+            SessionState::Failed,
+            SessionState::Abandoned,
+        ] {
+            assert_eq!(SessionState::parse(state.as_str()), Some(state));
+        }
+        assert_eq!(SessionState::parse("paused"), None);
+    }
+
     #[test]
     fn committed_wire_vectors_match_the_rust_encoder() {
         let event = LifecycleEvent {
@@ -729,6 +1067,7 @@ mod tests {
         let lifecycle_frames = lifecycle_frames(&event).unwrap();
         let terminal_frames = terminal_frames(&terminal).unwrap();
         let resize_frames = resize_frames(&resize).unwrap();
+        let control_frames = control_frames(&sample_control()).unwrap();
         let expected = include_str!("../tests/vectors/frames.txt");
         for line in expected.lines() {
             let (name, encoded) = line.split_once('=').unwrap();
@@ -739,6 +1078,8 @@ mod tests {
                 "terminal_value" => &terminal_frames.1,
                 "resize_schema" => &resize_frames.0,
                 "resize_value" => &resize_frames.1,
+                "control_schema" => &control_frames.0,
+                "control_value" => &control_frames.1,
                 "lifecycle_value_quarantined" => continue,
                 _ => panic!("unknown vector name"),
             };

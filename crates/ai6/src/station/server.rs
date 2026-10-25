@@ -2,6 +2,8 @@
 
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
+#[cfg(feature = "publisher")]
+mod controls;
 mod medical;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
@@ -544,6 +546,8 @@ where
     let app = app.route("/internal/publisher", get(publisher_health));
     let app = app.with_state(state.clone());
     let scheduler = tokio::spawn(scheduler_loop(state.clone()));
+    #[cfg(feature = "publisher")]
+    let controls = controls::spawn(&state)?;
     let stopping = state.stopping.clone();
     let served = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
@@ -553,6 +557,10 @@ where
         .await;
     state.stopping.store(true, Ordering::Release);
     let _ = tokio::time::timeout(Duration::from_secs(2), scheduler).await;
+    #[cfg(feature = "publisher")]
+    if let Some(controls) = controls {
+        let _ = tokio::time::timeout(Duration::from_secs(2), controls).await;
+    }
     let event_pumps = std::mem::take(
         &mut *state
             .event_pumps
@@ -2660,7 +2668,7 @@ async fn start_mission(
     }
     if session_hold(&state, &mission_id).is_some() {
         initial_context.push(
-            "This Mission continues an earlier attempt that stopped at a provider usage limit. \
+            "This Mission continues an earlier attempt that stopped before finishing. \
              Its work is in your working directory: inspect it, then continue the task."
                 .to_owned(),
         );
@@ -3821,7 +3829,8 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
         MissionState::Blown => Some("failed"),
         MissionState::Parked => Some("parked"),
         MissionState::Quarantined => Some("quarantined"),
-        MissionState::Queued | MissionState::Abandoned => None,
+        MissionState::Queued => Some("queued"),
+        MissionState::Abandoned => Some("abandoned"),
     }
 }
 
@@ -5137,7 +5146,7 @@ mod tests {
     }
 
     /// A state with Missions `mission-1` and `mission-2` queued for Agent 007 of Operation G.
-    fn test_state(root: &Path, operation_settings: &str, agents: &str) -> DaemonState {
+    pub(super) fn test_state(root: &Path, operation_settings: &str, agents: &str) -> DaemonState {
         let checkout = root.join("checkout");
         fs::create_dir_all(&checkout).unwrap();
         fs::write(
@@ -5278,7 +5287,11 @@ mod tests {
         wait_for_state(state, "mission-1", MissionState::Blocked).await;
     }
 
-    async fn wait_for_state(state: &DaemonState, mission_id: &str, wanted: MissionState) {
+    pub(super) async fn wait_for_state(
+        state: &DaemonState,
+        mission_id: &str,
+        wanted: MissionState,
+    ) {
         tokio::time::timeout(Duration::from_secs(5), async {
             while state
                 .missions
@@ -7149,7 +7162,7 @@ mod tests {
         .unwrap_or_else(|_| panic!("Mission {mission_id} never reached the expected usage"))
     }
 
-    async fn start_mission_by_id(state: &DaemonState, mission_id: &str) {
+    pub(super) async fn start_mission_by_id(state: &DaemonState, mission_id: &str) {
         let _ = start_mission(
             State(state.clone()),
             axum::extract::Path(mission_id.to_owned()),
@@ -7326,7 +7339,7 @@ mod tests {
         }
     }
 
-    fn mission_state(state: &DaemonState, mission_id: &str) -> Mission {
+    pub(super) fn mission_state(state: &DaemonState, mission_id: &str) -> Mission {
         state
             .missions
             .lock()

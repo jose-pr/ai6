@@ -459,6 +459,41 @@ impl MissionStore {
         Ok(updated)
     }
 
+    /// Queues a stalled or finished Mission again as a new attempt, for `agent_id` when
+    /// given and otherwise for the Agent it had. It keeps its Sessions and safe house, so the
+    /// next attempt continues the work; a quarantined Mission waits for its release instead.
+    pub fn retry(
+        &mut self,
+        mission_id: &str,
+        agent_id: Option<String>,
+    ) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if !matches!(
+            mission.state,
+            MissionState::Stalled
+                | MissionState::Done
+                | MissionState::Failed
+                | MissionState::Blown
+                | MissionState::Abandoned
+        ) {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Queued,
+            });
+        }
+        mission.state = MissionState::Queued;
+        mission.parked_until = None;
+        mission.blocked_reason = None;
+        if agent_id.is_some() {
+            mission.agent_id = agent_id;
+        }
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
     /// Associates a provider-issued Session ID with the Mission that operation serves.
     pub fn attach_session(
         &mut self,
@@ -901,6 +936,37 @@ mod tests {
         assert_eq!(handed_off.agent_id.as_deref(), Some("008"));
         assert_eq!(handed_off.parked_until, None);
         assert!(book.due_parked(i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn a_retry_queues_a_stalled_or_finished_mission_and_keeps_its_sessions() {
+        let mut book = book();
+        working_mission(&mut book, "retry-1");
+        let session = SessionId::try_new("provider-session-1").unwrap();
+        book.attach_session("retry-1", session.clone()).unwrap();
+        book.transition("retry-1", MissionState::Failed).unwrap();
+
+        let retried = book.retry("retry-1", None).unwrap();
+        assert_eq!(retried.state, MissionState::Queued);
+        assert_eq!(retried.agent_id.as_deref(), Some("007"));
+        assert_eq!(retried.session_ids, [session]);
+
+        book.transition("retry-1", MissionState::Working).unwrap();
+        book.transition("retry-1", MissionState::Stalled).unwrap();
+        let handed = book.retry("retry-1", Some("008".to_owned())).unwrap();
+        assert_eq!(handed.agent_id.as_deref(), Some("008"));
+
+        // Queued, live, parked and quarantined work is not retried.
+        assert!(matches!(
+            book.retry("retry-1", None),
+            Err(MissionError::InvalidTransition { .. })
+        ));
+        working_mission(&mut book, "retry-2");
+        assert!(book.retry("retry-2", None).is_err());
+        book.park("retry-2", 10).unwrap();
+        assert!(book.retry("retry-2", None).is_err());
+        book.quarantine("retry-2").unwrap();
+        assert!(book.retry("retry-2", None).is_err());
     }
 
     #[test]

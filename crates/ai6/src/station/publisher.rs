@@ -15,8 +15,9 @@ use crate::MissionId;
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::q::terminal::TerminalInputTarget;
 use ai6_diptel::{
-    FrameReceiver, IncomingFrame, MissionId as GatewayMissionId, OperationId,
-    SessionId as GatewaySessionId, TerminalData, TerminalDirection, TerminalResize, resize_frames,
+    ControlAction, ControlId, FrameReceiver, IncomingFrame, MAX_CONTROL_MESSAGE_BYTES,
+    MissionControl, MissionId as GatewayMissionId, OperationId, SessionId as GatewaySessionId,
+    TerminalData, TerminalDirection, TerminalResize, control_frames, resize_frames,
     terminal_frames,
 };
 
@@ -25,6 +26,10 @@ const PUBLISH_QUEUE_LIMIT: usize = 64;
 const MAX_TERMINAL_BYTES: usize = 1024 * 1024;
 const MAX_PRE_BIND_TERMINAL_BYTES: usize = MAX_TERMINAL_BYTES;
 const INPUT_RETRY_DELAY: Duration = Duration::from_millis(100);
+/// How long Universal Exports holds a control poll open; kept under the request timeout.
+const CONTROL_WAIT_MS: u64 = 1_000;
+const CONTROL_QUEUE_LIMIT: usize = 16;
+const CONTROL_REPORT_ATTEMPTS: usize = 3;
 
 /// Universal Exports gateway credentials and origin for the daemon's event publisher.
 pub struct Config {
@@ -130,13 +135,51 @@ enum Command {
 
 /// One daemon-owned publisher thread, bounded so gateway outages cannot stall a Session.
 pub(crate) struct Publisher {
+    origin: Url,
+    token: String,
     sender: SyncSender<Command>,
     running: Arc<AtomicBool>,
     healthy: Arc<AtomicBool>,
     error: Arc<Mutex<Option<&'static str>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
     input_worker: Mutex<Option<JoinHandle<()>>>,
+    control_worker: Mutex<Option<JoinHandle<()>>>,
     input_targets: Arc<Mutex<BTreeMap<SessionId, InputTargetRegistration>>>,
+}
+
+/// One operator control taken from Universal Exports and the channel its outcome goes back on.
+pub(crate) struct ControlDelivery {
+    pub(crate) control: MissionControl,
+    pub(crate) outcome: tokio::sync::oneshot::Sender<ControlOutcome>,
+}
+
+/// What the Station did with a control, as reported to Universal Exports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct ControlOutcome {
+    /// `applied` or `rejected`.
+    pub(crate) outcome: &'static str,
+    /// The Mission's state afterwards, when the Station has the Mission.
+    pub(crate) state: Option<&'static str>,
+    /// Why a control was rejected; AI6's own wording, never provider or Agent text.
+    pub(crate) reason: Option<String>,
+}
+
+impl ControlOutcome {
+    pub(crate) fn applied(state: &'static str) -> Self {
+        Self {
+            outcome: "applied",
+            state: Some(state),
+            reason: None,
+        }
+    }
+
+    pub(crate) fn rejected(state: Option<&'static str>, reason: impl Into<String>) -> Self {
+        Self {
+            outcome: "rejected",
+            state,
+            reason: Some(reason.into()),
+        }
+    }
 }
 
 struct InputTargetRegistration {
@@ -147,6 +190,8 @@ struct InputTargetRegistration {
 
 impl Publisher {
     pub(crate) fn start(config: Config) -> std::io::Result<Arc<Self>> {
+        let origin = config.origin.clone();
+        let token = config.token.clone();
         let input_origin = config.origin.clone();
         let input_token = config.token.clone();
         let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -201,14 +246,58 @@ impl Publisher {
             }
         };
         Ok(Arc::new(Self {
+            origin,
+            token,
             sender,
             running,
             healthy,
             error,
             worker: Mutex::new(Some(worker)),
             input_worker: Mutex::new(Some(input_worker)),
+            control_worker: Mutex::new(None),
             input_targets,
         }))
+    }
+
+    /// Starts taking the controls Universal Exports queued for `station_id`.
+    ///
+    /// Controls are handed over one at a time: the next is taken only after the previous
+    /// outcome is reported. Dropping the receiver reports any taken control as rejected.
+    pub(crate) fn receive_controls(
+        &self,
+        station_id: &str,
+    ) -> std::io::Result<tokio::sync::mpsc::Receiver<ControlDelivery>> {
+        let mut worker = self
+            .control_worker
+            .lock()
+            .map_err(|_| std::io::Error::other("control worker lock was poisoned"))?;
+        if worker.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "this Station already takes its controls",
+            ));
+        }
+        let (deliveries, receiver) = tokio::sync::mpsc::channel(CONTROL_QUEUE_LIMIT);
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(
+                REQUEST_TIMEOUT + Duration::from_millis(CONTROL_WAIT_MS),
+            ))
+            .max_redirects(0)
+            .build()
+            .into();
+        let link = ControlLink {
+            origin: self.origin.clone(),
+            token: self.token.clone(),
+            station: station_id.to_owned(),
+            agent,
+        };
+        let running = self.running.clone();
+        *worker = Some(
+            thread::Builder::new()
+                .name("ai6-publisher-controls".to_owned())
+                .spawn(move || take_controls(&link, &running, &deliveries))?,
+        );
+        Ok(receiver)
     }
 
     pub(crate) fn session(
@@ -308,6 +397,141 @@ impl Drop for Publisher {
             && let Some(worker) = worker.take()
         {
             let _ = worker.join();
+        }
+        if let Ok(worker) = self.control_worker.get_mut()
+            && let Some(worker) = worker.take()
+        {
+            let _ = worker.join();
+        }
+    }
+}
+
+/// Where and as whom the control worker talks to Universal Exports.
+struct ControlLink {
+    origin: Url,
+    token: String,
+    station: String,
+    agent: ureq::Agent,
+}
+
+fn take_controls(
+    link: &ControlLink,
+    running: &AtomicBool,
+    deliveries: &tokio::sync::mpsc::Sender<ControlDelivery>,
+) {
+    let Ok(mut endpoint) = link.origin.join("v1/station/controls/next") else {
+        return;
+    };
+    endpoint
+        .query_pairs_mut()
+        .append_pair("station", &link.station)
+        .append_pair("wait_ms", &CONTROL_WAIT_MS.to_string());
+    let Some(schema) = control_schema() else {
+        return;
+    };
+    while running.load(Ordering::Acquire) {
+        let response = link
+            .agent
+            .get(endpoint.as_str())
+            .header("Authorization", &format!("Bearer {}", link.token))
+            .call();
+        let Ok(mut response) = response else {
+            thread::sleep(INPUT_RETRY_DELAY);
+            continue;
+        };
+        match response.status().as_u16() {
+            200 => {}
+            204 => continue,
+            _ => {
+                thread::sleep(INPUT_RETRY_DELAY);
+                continue;
+            }
+        }
+        let Ok(frame) = response
+            .body_mut()
+            .with_config()
+            .limit((MAX_CONTROL_MESSAGE_BYTES + 64 * 1024) as u64)
+            .read_to_vec()
+        else {
+            continue;
+        };
+        let Some(control) = decode_control_frame(&schema, &frame) else {
+            continue;
+        };
+        let control_id = control.control_id().clone();
+        let (reply, outcome) = tokio::sync::oneshot::channel();
+        if deliveries
+            .blocking_send(ControlDelivery {
+                control,
+                outcome: reply,
+            })
+            .is_err()
+        {
+            report_control(
+                link,
+                &control_id,
+                &ControlOutcome::rejected(None, "the Station is stopping"),
+            );
+            return;
+        }
+        let outcome = outcome
+            .blocking_recv()
+            .unwrap_or_else(|_| ControlOutcome::rejected(None, "the Station is stopping"));
+        report_control(link, &control_id, &outcome);
+    }
+}
+
+/// The control channel's schema; it does not depend on the control's values.
+fn control_schema() -> Option<Vec<u8>> {
+    let template = MissionControl::new(
+        ControlId::new("schema").ok()?,
+        OperationId::new("schema").ok()?,
+        GatewayMissionId::new("schema").ok()?,
+        ControlAction::Cancel,
+    );
+    Some(control_frames(&template).ok()?.0)
+}
+
+fn decode_control_frame(schema: &[u8], frame: &[u8]) -> Option<MissionControl> {
+    let mut receiver = FrameReceiver::new();
+    receiver.accept(schema).ok()?;
+    match receiver.accept(frame).ok()?? {
+        IncomingFrame::Control(control) => Some(control),
+        _ => None,
+    }
+}
+
+#[derive(Serialize)]
+struct ControlReport<'a> {
+    station: &'a str,
+    #[serde(flatten)]
+    outcome: &'a ControlOutcome,
+}
+
+fn report_control(link: &ControlLink, control_id: &ControlId, outcome: &ControlOutcome) {
+    let Ok(mut url) = link.origin.join("v1/station/controls/") else {
+        return;
+    };
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments
+            .pop_if_empty()
+            .push(control_id.as_str())
+            .push("result");
+    }
+    for _ in 0..CONTROL_REPORT_ATTEMPTS {
+        let sent = link
+            .agent
+            .post(url.as_str())
+            .header("Authorization", &format!("Bearer {}", link.token))
+            .send_json(ControlReport {
+                station: &link.station,
+                outcome,
+            });
+        // Universal Exports refuses a report for a control it finished or forgot; retrying
+        // cannot help.
+        match sent {
+            Ok(_) | Err(ureq::Error::StatusCode(_)) => return,
+            Err(_) => thread::sleep(INPUT_RETRY_DELAY),
         }
     }
 }
@@ -558,6 +782,7 @@ fn decode_input_frame(frame: &[u8]) -> Option<(SessionId, u64, TerminalInput)> {
         IncomingFrame::Lifecycle(_)
         | IncomingFrame::Terminal(_)
         | IncomingFrame::Resize(_)
+        | IncomingFrame::Control(_)
         | IncomingFrame::Closed(_) => None,
     }
 }
@@ -1220,6 +1445,124 @@ mod tests {
         assert_eq!(
             inputs.recv_timeout(Duration::from_secs(3)).unwrap(),
             RecordedInput::Resize(40, 120)
+        );
+        gateway.join().unwrap();
+    }
+
+    #[test]
+    fn a_queued_control_reaches_the_station_and_its_outcome_is_reported() {
+        let control = MissionControl::new(
+            ControlId::new("control-1").unwrap(),
+            OperationId::new("operation-a").unwrap(),
+            GatewayMissionId::new("mission-a").unwrap(),
+            ControlAction::Resume,
+        )
+        .with_message("carry on")
+        .unwrap();
+        let (_, frame) = control_frames(&control).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, requests) = mpsc::channel();
+        let gateway = thread::spawn(move || {
+            let mut served = false;
+            loop {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_line = String::new();
+                reader.read_line(&mut request_line).unwrap();
+                let mut headers = String::new();
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    headers.push_str(&line);
+                }
+                let body_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or_default();
+                let mut body = vec![0; body_length];
+                reader.read_exact(&mut body).unwrap();
+                let path = request_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_owned();
+                if path.starts_with("/v1/station/controls/next?") && !served {
+                    served = true;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.ai6.guatiao\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        frame.len()
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                    stream.write_all(&frame).unwrap();
+                    sender
+                        .send(Request {
+                            path,
+                            headers,
+                            body,
+                        })
+                        .unwrap();
+                } else if path == "/v1/station/controls/control-1/result" {
+                    stream
+                        .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                        .unwrap();
+                    sender
+                        .send(Request {
+                            path,
+                            headers,
+                            body,
+                        })
+                        .unwrap();
+                    break;
+                } else if path.starts_with("/v1/station/controls/next?") {
+                    stream
+                        .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                        .unwrap();
+                } else {
+                    stream
+                        .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .unwrap();
+                }
+            }
+        });
+
+        let config = Config::try_new(&format!("http://{address}"), "test-token").unwrap();
+        let publisher = Publisher::start(config).unwrap();
+        let mut deliveries = publisher.receive_controls("station-7").unwrap();
+        assert!(publisher.receive_controls("station-7").is_err());
+        let delivery = deliveries.blocking_recv().unwrap();
+        assert_eq!(delivery.control, control);
+        delivery
+            .outcome
+            .send(ControlOutcome::applied("working"))
+            .unwrap();
+
+        let poll = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            poll.path,
+            "/v1/station/controls/next?station=station-7&wait_ms=1000"
+        );
+        assert!(poll.headers.contains("Bearer test-token"));
+        let report = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&report.body).unwrap(),
+            serde_json::json!({
+                "station": "station-7",
+                "outcome": "applied",
+                "state": "working",
+                "reason": null
+            })
         );
         gateway.join().unwrap();
     }

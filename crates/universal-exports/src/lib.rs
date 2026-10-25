@@ -3,6 +3,7 @@
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+mod controls;
 mod login_limit;
 
 use core::future::Future;
@@ -38,6 +39,8 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use uuid::Uuid;
 
+use controls::ControlBook;
+pub use controls::ControlStatus;
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
 
@@ -380,6 +383,8 @@ pub struct Gateway {
     registry: Option<FileRegistry>,
     access: Option<AccessProviders>,
     login_guard: std::sync::Arc<LoginGuard>,
+    controls: Arc<std::sync::Mutex<ControlBook>>,
+    control_ready: Arc<tokio::sync::Notify>,
 }
 
 impl fmt::Debug for Gateway {
@@ -445,6 +450,8 @@ impl Gateway {
             registry: None,
             access: None,
             login_guard,
+            controls: Arc::default(),
+            control_ready: Arc::default(),
         }
     }
 
@@ -1021,6 +1028,14 @@ impl Gateway {
                 "/v1/operations/{operation_id}/missions/{mission_id}",
                 get(mission_detail),
             )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/actions",
+                post(controls::request_control),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}",
+                get(controls::control_status),
+            )
             .route("/v1/user/attach-grants", post(issue_user_attach_token))
             .route("/v1/auth/login", post(login))
             .route("/v1/auth/logout", post(logout))
@@ -1047,6 +1062,14 @@ impl Gateway {
                 axum::routing::delete(revoke_access_token),
             )
             .route("/v1/station/inputs/next", get(next_agent_input))
+            .route(
+                "/v1/station/controls/next",
+                get(controls::next_station_control),
+            )
+            .route(
+                "/v1/station/controls/{control_id}/result",
+                post(controls::report_station_control),
+            )
             .route("/v1/attach", post(exchange_attach_token))
             .route("/v1/socket/{session_id}", get(websocket_attach))
             .layer(axum::extract::DefaultBodyLimit::max(max_frame_bytes))
@@ -2074,6 +2097,7 @@ async fn user_profile(
             for action in [
                 "mission.read",
                 "mission.create",
+                "mission.control",
                 "session.read",
                 "session.input",
                 "audit.read",
@@ -3024,16 +3048,7 @@ async fn publish_lifecycle(
     Path((session, sequence)): Path<(String, u64)>,
     Json(request): Json<LifecycleRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let state = match request.state.as_str() {
-        "working" => SessionState::Working,
-        "blocked" => SessionState::Blocked,
-        "stalled" => SessionState::Stalled,
-        "parked" => SessionState::Parked,
-        "quarantined" => SessionState::Quarantined,
-        "done" => SessionState::Done,
-        "failed" => SessionState::Failed,
-        _ => return Err(ApiError::bad_request()),
-    };
+    let state = SessionState::parse(&request.state).ok_or_else(ApiError::bad_request)?;
     gateway
         .publish_lifecycle(
             bearer(&headers)?,
@@ -3476,7 +3491,9 @@ fn validate_input_frame(session_id: &SessionId, frame: &[u8]) -> Result<u64, Gat
             Ok(resize.sequence())
         }
         IncomingFrame::Terminal(_) | IncomingFrame::Resize(_) => Err(GatewayError::Forbidden),
-        IncomingFrame::Lifecycle(_) | IncomingFrame::Closed(_) => Err(GatewayError::InvalidFrame),
+        IncomingFrame::Lifecycle(_) | IncomingFrame::Control(_) | IncomingFrame::Closed(_) => {
+            Err(GatewayError::InvalidFrame)
+        }
     }
 }
 
@@ -3496,10 +3513,7 @@ fn validate_lifecycle_value(
     if station != operation_id.as_str()
         || mission != mission_id.as_str()
         || session != session_id.as_str()
-        || !matches!(
-            state,
-            "working" | "blocked" | "stalled" | "parked" | "quarantined" | "done" | "failed"
-        )
+        || SessionState::parse(state).is_none()
         || sequence != expected_sequence
     {
         return Err(GatewayError::Forbidden);
