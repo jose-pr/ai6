@@ -50,6 +50,7 @@ pub universal_exports::BoardMission::usage: core::option::Option<ai6::directorat
 pub universal_exports::BoardSession::exposure: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardSession::mission_id: alloc::string::String
 pub universal_exports::BoardSession::operation_id: alloc::string::String
+pub universal_exports::BoardSession::reason: core::option::Option<alloc::string::String>
 pub universal_exports::BoardSession::sequence: u64
 pub universal_exports::BoardSession::session_id: alloc::string::String
 pub universal_exports::BoardSession::state: core::option::Option<alloc::string::String>

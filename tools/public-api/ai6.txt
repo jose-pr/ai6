@@ -57,6 +57,44 @@ pub const ai6::directorates::m::access::SCOPE_KINDS: [&str; 3]
 pub fn ai6::directorates::m::access::load_role_authorizer(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::directorates::m::access::role_authorizer() -> coqui_roles::RoleAuthorizerBuilder
 pub fn ai6::directorates::m::access::role_authorizer_from_toml(&str) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
+pub mod ai6::directorates::m::approvals
+#[non_exhaustive] pub enum ai6::directorates::m::approvals::GreenInkPreset
+pub ai6::directorates::m::approvals::GreenInkPreset::Licensed
+pub ai6::directorates::m::approvals::GreenInkPreset::Strict
+#[non_exhaustive] pub enum ai6::directorates::m::approvals::Requirement
+pub ai6::directorates::m::approvals::Requirement::GreenInk
+pub ai6::directorates::m::approvals::Requirement::NotRequired
+pub ai6::directorates::m::approvals::Requirement::Refused
+#[non_exhaustive] pub struct ai6::directorates::m::approvals::ActionScope
+pub ai6::directorates::m::approvals::ActionScope::kind: alloc::string::String
+pub ai6::directorates::m::approvals::ActionScope::target: alloc::string::String
+impl ai6::directorates::m::approvals::ActionScope
+pub fn ai6::directorates::m::approvals::ActionScope::pushed_ref(&self) -> alloc::string::String
+pub fn ai6::directorates::m::approvals::ActionScope::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::io::error::Result<Self>
+pub fn ai6::directorates::m::approvals::ActionScope::validate(&self) -> core::io::error::Result<()>
+pub struct ai6::directorates::m::approvals::GreenInkDefinition
+impl ai6::directorates::m::approvals::GreenInkDefinition
+pub fn ai6::directorates::m::approvals::GreenInkDefinition::resolve(&self) -> core::result::Result<ai6::directorates::m::approvals::GreenInkPolicy, alloc::string::String>
+pub struct ai6::directorates::m::approvals::GreenInkPolicy
+impl ai6::directorates::m::approvals::GreenInkPolicy
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::is_protected(&self, &str) -> bool
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::kinds(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::preset(ai6::directorates::m::approvals::GreenInkPreset) -> Self
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::protected(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::request_ttl(&self) -> core::time::Duration
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::requesters(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::requirement(&self, &str, &ai6::directorates::m::approvals::ActionScope) -> ai6::directorates::m::approvals::Requirement
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+impl core::cmp::PartialEq for ai6::directorates::m::approvals::GreenInkPolicy
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::eq(&self, &Self) -> bool
+impl core::default::Default for ai6::directorates::m::approvals::GreenInkPolicy
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::default() -> Self
+pub const ai6::directorates::m::approvals::BUILTIN_KINDS: [&str; 5]
+pub const ai6::directorates::m::approvals::DEFAULT_APPROVAL_TTL: core::time::Duration
+pub const ai6::directorates::m::approvals::DEFAULT_PROTECTED: [&str; 4]
+pub const ai6::directorates::m::approvals::DEFAULT_REQUEST_TTL: core::time::Duration
+pub const ai6::directorates::m::approvals::GREEN_INK_REASON: &str
+pub fn ai6::directorates::m::approvals::clearance_at_least(&str, &str) -> bool
 pub mod ai6::directorates::m::cover
 #[non_exhaustive] pub enum ai6::directorates::m::cover::Disclosure
 pub ai6::directorates::m::cover::Disclosure::Assisted
@@ -315,6 +353,7 @@ pub ai6::directorates::m::roster::Operation::cover: alloc::string::String
 pub ai6::directorates::m::roster::Operation::cover_identity: core::option::Option<ai6::directorates::m::roster::CoverIdentity>
 pub ai6::directorates::m::roster::Operation::description: alloc::string::String
 pub ai6::directorates::m::roster::Operation::exposure: ai6::directorates::medical::exposure::ExposurePolicy
+pub ai6::directorates::m::roster::Operation::green_ink: ai6::directorates::m::approvals::GreenInkPolicy
 pub ai6::directorates::m::roster::Operation::id: alloc::string::String
 pub ai6::directorates::m::roster::Operation::limit_fallback_secs: u64
 pub ai6::directorates::m::roster::Operation::max_concurrent: core::option::Option<usize>
@@ -588,10 +627,13 @@ pub mod ai6::directorates::medical::watchdog
 pub struct ai6::directorates::medical::watchdog::Watchdog
 impl ai6::directorates::medical::watchdog::Watchdog
 pub fn ai6::directorates::medical::watchdog::Watchdog::is_max_runtime_exceeded(&self) -> bool
+pub fn ai6::directorates::medical::watchdog::Watchdog::is_paused(&self) -> bool
 pub fn ai6::directorates::medical::watchdog::Watchdog::is_stalled(&self) -> bool
 pub fn ai6::directorates::medical::watchdog::Watchdog::max_runtime(&self) -> core::option::Option<core::time::Duration>
 pub fn ai6::directorates::medical::watchdog::Watchdog::new(core::time::Duration) -> Self
+pub fn ai6::directorates::medical::watchdog::Watchdog::pause(&self)
 pub fn ai6::directorates::medical::watchdog::Watchdog::record_activity(&self)
+pub fn ai6::directorates::medical::watchdog::Watchdog::resume(&self)
 pub fn ai6::directorates::medical::watchdog::Watchdog::timeout(&self) -> core::time::Duration
 pub fn ai6::directorates::medical::watchdog::Watchdog::with_config(ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
 impl core::default::Default for ai6::directorates::medical::watchdog::Watchdog
@@ -1012,6 +1054,80 @@ pub fn ai6::directorates::q::SecretBackend::acquire(&self, &ai6::SecretRequest, 
 pub fn ai6::directorates::q::SecretBackend::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
 pub fn ai6::directorates::q::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub mod ai6::directorates::registry
+pub mod ai6::directorates::registry::approvals
+pub enum ai6::directorates::registry::approvals::ApprovalStatus
+pub ai6::directorates::registry::approvals::ApprovalStatus::Decided(ai6::directorates::registry::approvals::Approval)
+pub ai6::directorates::registry::approvals::ApprovalStatus::Pending(ai6::directorates::registry::approvals::ApprovalRequest)
+impl ai6::directorates::registry::approvals::ApprovalStatus
+pub fn ai6::directorates::registry::approvals::ApprovalStatus::name(&self) -> &'static str
+pub fn ai6::directorates::registry::approvals::ApprovalStatus::request(&self) -> &ai6::directorates::registry::approvals::ApprovalRequest
+#[non_exhaustive] pub enum ai6::directorates::registry::approvals::Decision
+pub ai6::directorates::registry::approvals::Decision::Approved
+pub ai6::directorates::registry::approvals::Decision::Expired
+pub ai6::directorates::registry::approvals::Decision::Rejected
+impl ai6::directorates::registry::approvals::Decision
+pub fn ai6::directorates::registry::approvals::Decision::as_str(self) -> &'static str
+#[non_exhaustive] pub struct ai6::directorates::registry::approvals::Approval
+pub ai6::directorates::registry::approvals::Approval::at: f64
+pub ai6::directorates::registry::approvals::Approval::decision: ai6::directorates::registry::approvals::Decision
+pub ai6::directorates::registry::approvals::Approval::expires_at: core::option::Option<f64>
+pub ai6::directorates::registry::approvals::Approval::note: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::approvals::Approval::notified_at: core::option::Option<f64>
+pub ai6::directorates::registry::approvals::Approval::request: ai6::directorates::registry::approvals::ApprovalRequest
+pub ai6::directorates::registry::approvals::Approval::revoked: core::option::Option<ai6::directorates::registry::approvals::Revocation>
+pub ai6::directorates::registry::approvals::Approval::signer: alloc::string::String
+impl ai6::directorates::registry::approvals::Approval
+pub fn ai6::directorates::registry::approvals::Approval::is_live(&self, f64) -> bool
+#[non_exhaustive] pub struct ai6::directorates::registry::approvals::ApprovalRequest
+pub ai6::directorates::registry::approvals::ApprovalRequest::agent: alloc::string::String
+pub ai6::directorates::registry::approvals::ApprovalRequest::expires_at: f64
+pub ai6::directorates::registry::approvals::ApprovalRequest::id: alloc::string::String
+pub ai6::directorates::registry::approvals::ApprovalRequest::mission: ai6::directorates::m::identity::MissionId
+pub ai6::directorates::registry::approvals::ApprovalRequest::operation: alloc::string::String
+pub ai6::directorates::registry::approvals::ApprovalRequest::reason: alloc::string::String
+pub ai6::directorates::registry::approvals::ApprovalRequest::requested_at: f64
+pub ai6::directorates::registry::approvals::ApprovalRequest::scope: ai6::directorates::m::approvals::ActionScope
+pub ai6::directorates::registry::approvals::ApprovalRequest::session: ai6::directorates::m::identity::SessionId
+impl ai6::directorates::registry::approvals::ApprovalRequest
+pub fn ai6::directorates::registry::approvals::ApprovalRequest::expiring(self, f64, core::time::Duration) -> Self
+pub fn ai6::directorates::registry::approvals::ApprovalRequest::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, ai6::directorates::m::identity::SessionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::approvals::ActionScope, impl core::convert::Into<alloc::string::String>, &str) -> core::io::error::Result<Self>
+#[non_exhaustive] pub struct ai6::directorates::registry::approvals::ClassAuthorization
+pub ai6::directorates::registry::approvals::ClassAuthorization::agents: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::approvals::ClassAuthorization::clearance_min: alloc::string::String
+pub ai6::directorates::registry::approvals::ClassAuthorization::created_at: f64
+pub ai6::directorates::registry::approvals::ClassAuthorization::expires_at: f64
+pub ai6::directorates::registry::approvals::ClassAuthorization::id: alloc::string::String
+pub ai6::directorates::registry::approvals::ClassAuthorization::kinds: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::approvals::ClassAuthorization::max_uses: core::option::Option<u32>
+pub ai6::directorates::registry::approvals::ClassAuthorization::operation: alloc::string::String
+pub ai6::directorates::registry::approvals::ClassAuthorization::revoked: core::option::Option<ai6::directorates::registry::approvals::Revocation>
+pub ai6::directorates::registry::approvals::ClassAuthorization::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::approvals::ClassAuthorization::signer: alloc::string::String
+pub ai6::directorates::registry::approvals::ClassAuthorization::target_pattern: alloc::string::String
+pub ai6::directorates::registry::approvals::ClassAuthorization::uses: u32
+impl ai6::directorates::registry::approvals::ClassAuthorization
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::covers(&self, &str, core::option::Option<&str>, &str, &ai6::directorates::m::approvals::ActionScope) -> bool
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::for_agents(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::for_roles(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::is_live(&self, f64) -> bool
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::new(impl core::convert::Into<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64, f64) -> Self
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::validate(&self) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::with_clearance_min(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::with_max_uses(self, u32) -> Self
+pub struct ai6::directorates::registry::approvals::Revocation
+pub ai6::directorates::registry::approvals::Revocation::at: f64
+pub ai6::directorates::registry::approvals::Revocation::by: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::approvals::Ruling
+pub ai6::directorates::registry::approvals::Ruling::at: f64
+pub ai6::directorates::registry::approvals::Ruling::decision: ai6::directorates::registry::approvals::Decision
+pub ai6::directorates::registry::approvals::Ruling::expires_at: core::option::Option<f64>
+pub ai6::directorates::registry::approvals::Ruling::note: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::approvals::Ruling::signer: alloc::string::String
+impl ai6::directorates::registry::approvals::Ruling
+pub fn ai6::directorates::registry::approvals::Ruling::approve(impl core::convert::Into<alloc::string::String>, f64, f64) -> Self
+pub fn ai6::directorates::registry::approvals::Ruling::reject(impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::approvals::Ruling::with_note(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub const ai6::directorates::registry::approvals::EXPIRY_SIGNER: &str
 pub mod ai6::directorates::registry::cables
 #[non_exhaustive] pub enum ai6::directorates::registry::cables::CableAction
 pub ai6::directorates::registry::cables::CableAction::Discover
@@ -1413,6 +1529,19 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal
 pub fn ai6::directorates::registry::store::FileRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
+pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
+pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
+impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
@@ -1723,6 +1852,12 @@ pub ai6::AgentMode::Local
 pub ai6::AgentMode::RemoteHands
 impl ai6::directorates::m::theaters::AgentMode
 pub fn ai6::directorates::m::theaters::AgentMode::as_str(self) -> &'static str
+pub enum ai6::ApprovalStatus
+pub ai6::ApprovalStatus::Decided(ai6::directorates::registry::approvals::Approval)
+pub ai6::ApprovalStatus::Pending(ai6::directorates::registry::approvals::ApprovalRequest)
+impl ai6::directorates::registry::approvals::ApprovalStatus
+pub fn ai6::directorates::registry::approvals::ApprovalStatus::name(&self) -> &'static str
+pub fn ai6::directorates::registry::approvals::ApprovalStatus::request(&self) -> &ai6::directorates::registry::approvals::ApprovalRequest
 #[non_exhaustive] pub enum ai6::BudgetLevel
 pub ai6::BudgetLevel::Limit
 pub ai6::BudgetLevel::Warn
@@ -1766,6 +1901,12 @@ pub ai6::CableState::Failed
 pub ai6::CableState::Held
 pub ai6::CableState::Queued
 pub ai6::CableState::Refused
+#[non_exhaustive] pub enum ai6::Decision
+pub ai6::Decision::Approved
+pub ai6::Decision::Expired
+pub ai6::Decision::Rejected
+impl ai6::directorates::registry::approvals::Decision
+pub fn ai6::directorates::registry::approvals::Decision::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::Egress
 pub ai6::Egress::Direct
 pub ai6::Egress::Isolated
@@ -1791,6 +1932,9 @@ pub ai6::ExposurePreset::Strict
 pub enum ai6::Fire
 pub ai6::Fire::AlreadyFired
 pub ai6::Fire::Queued
+#[non_exhaustive] pub enum ai6::GreenInkPreset
+pub ai6::GreenInkPreset::Licensed
+pub ai6::GreenInkPreset::Strict
 #[non_exhaustive] pub enum ai6::IncidentKind
 pub ai6::IncidentKind::Blown
 pub ai6::IncidentKind::Budget
@@ -1811,6 +1955,10 @@ pub ai6::QErrorKind::Io
 pub ai6::QErrorKind::Parse
 pub ai6::QErrorKind::Schema
 pub ai6::QErrorKind::TooLarge
+#[non_exhaustive] pub enum ai6::Requirement
+pub ai6::Requirement::GreenInk
+pub ai6::Requirement::NotRequired
+pub ai6::Requirement::Refused
 #[non_exhaustive] pub enum ai6::Restriction
 pub ai6::Restriction::Approvals
 pub ai6::Restriction::Cables
@@ -1889,6 +2037,13 @@ pub fn ai6::directorates::m::identity::AccessTokenRecord::token_id(&self) -> &st
 pub fn ai6::directorates::m::identity::AccessTokenRecord::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64, f64, core::option::Option<f64>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
 impl core::fmt::Debug for ai6::directorates::m::identity::AccessTokenRecord
 pub fn ai6::directorates::m::identity::AccessTokenRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::ActionScope
+pub ai6::ActionScope::kind: alloc::string::String
+pub ai6::ActionScope::target: alloc::string::String
+impl ai6::directorates::m::approvals::ActionScope
+pub fn ai6::directorates::m::approvals::ActionScope::pushed_ref(&self) -> alloc::string::String
+pub fn ai6::directorates::m::approvals::ActionScope::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::io::error::Result<Self>
+pub fn ai6::directorates::m::approvals::ActionScope::validate(&self) -> core::io::error::Result<()>
 pub struct ai6::AgentEvent
 pub ai6::AgentEvent::data: core::option::Option<alloc::vec::Vec<u8>>
 pub ai6::AgentEvent::kind: alloc::string::String
@@ -1932,6 +2087,30 @@ pub ai6::AgentStart::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::AgentStart::model: core::option::Option<alloc::string::String>
 pub ai6::AgentStart::prompt: alloc::string::String
 pub ai6::AgentStart::working_directory: alloc::string::String
+#[non_exhaustive] pub struct ai6::Approval
+pub ai6::Approval::at: f64
+pub ai6::Approval::decision: ai6::directorates::registry::approvals::Decision
+pub ai6::Approval::expires_at: core::option::Option<f64>
+pub ai6::Approval::note: core::option::Option<alloc::string::String>
+pub ai6::Approval::notified_at: core::option::Option<f64>
+pub ai6::Approval::request: ai6::directorates::registry::approvals::ApprovalRequest
+pub ai6::Approval::revoked: core::option::Option<ai6::directorates::registry::approvals::Revocation>
+pub ai6::Approval::signer: alloc::string::String
+impl ai6::directorates::registry::approvals::Approval
+pub fn ai6::directorates::registry::approvals::Approval::is_live(&self, f64) -> bool
+#[non_exhaustive] pub struct ai6::ApprovalRequest
+pub ai6::ApprovalRequest::agent: alloc::string::String
+pub ai6::ApprovalRequest::expires_at: f64
+pub ai6::ApprovalRequest::id: alloc::string::String
+pub ai6::ApprovalRequest::mission: ai6::directorates::m::identity::MissionId
+pub ai6::ApprovalRequest::operation: alloc::string::String
+pub ai6::ApprovalRequest::reason: alloc::string::String
+pub ai6::ApprovalRequest::requested_at: f64
+pub ai6::ApprovalRequest::scope: ai6::directorates::m::approvals::ActionScope
+pub ai6::ApprovalRequest::session: ai6::directorates::m::identity::SessionId
+impl ai6::directorates::registry::approvals::ApprovalRequest
+pub fn ai6::directorates::registry::approvals::ApprovalRequest::expiring(self, f64, core::time::Duration) -> Self
+pub fn ai6::directorates::registry::approvals::ApprovalRequest::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, ai6::directorates::m::identity::SessionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::approvals::ActionScope, impl core::convert::Into<alloc::string::String>, &str) -> core::io::error::Result<Self>
 pub struct ai6::AuditRecord
 pub ai6::AuditRecord::action: alloc::string::String
 pub ai6::AuditRecord::actor: alloc::string::String
@@ -2155,6 +2334,29 @@ pub ai6::Change::id: alloc::string::String
 pub ai6::Change::message: alloc::string::String
 pub struct ai6::ChangeLog
 pub ai6::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
+#[non_exhaustive] pub struct ai6::ClassAuthorization
+pub ai6::ClassAuthorization::agents: alloc::vec::Vec<alloc::string::String>
+pub ai6::ClassAuthorization::clearance_min: alloc::string::String
+pub ai6::ClassAuthorization::created_at: f64
+pub ai6::ClassAuthorization::expires_at: f64
+pub ai6::ClassAuthorization::id: alloc::string::String
+pub ai6::ClassAuthorization::kinds: alloc::vec::Vec<alloc::string::String>
+pub ai6::ClassAuthorization::max_uses: core::option::Option<u32>
+pub ai6::ClassAuthorization::operation: alloc::string::String
+pub ai6::ClassAuthorization::revoked: core::option::Option<ai6::directorates::registry::approvals::Revocation>
+pub ai6::ClassAuthorization::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::ClassAuthorization::signer: alloc::string::String
+pub ai6::ClassAuthorization::target_pattern: alloc::string::String
+pub ai6::ClassAuthorization::uses: u32
+impl ai6::directorates::registry::approvals::ClassAuthorization
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::covers(&self, &str, core::option::Option<&str>, &str, &ai6::directorates::m::approvals::ActionScope) -> bool
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::for_agents(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::for_roles(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::is_live(&self, f64) -> bool
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::new(impl core::convert::Into<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64, f64) -> Self
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::validate(&self) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::with_clearance_min(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::approvals::ClassAuthorization::with_max_uses(self, u32) -> Self
 pub struct ai6::CoverIdentity
 pub ai6::CoverIdentity::email: alloc::string::String
 pub ai6::CoverIdentity::name: alloc::string::String
@@ -2253,6 +2455,19 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal
 pub fn ai6::directorates::registry::store::FileRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
+pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
+pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
+impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
@@ -2299,6 +2514,23 @@ pub struct ai6::ForwardSpec
 pub ai6::ForwardSpec::remote_host: alloc::string::String
 pub ai6::ForwardSpec::remote_port: u16
 pub ai6::ForwardSpec::target: alloc::string::String
+pub struct ai6::GreenInkDefinition
+impl ai6::directorates::m::approvals::GreenInkDefinition
+pub fn ai6::directorates::m::approvals::GreenInkDefinition::resolve(&self) -> core::result::Result<ai6::directorates::m::approvals::GreenInkPolicy, alloc::string::String>
+pub struct ai6::GreenInkPolicy
+impl ai6::directorates::m::approvals::GreenInkPolicy
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::is_protected(&self, &str) -> bool
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::kinds(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::preset(ai6::directorates::m::approvals::GreenInkPreset) -> Self
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::protected(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::request_ttl(&self) -> core::time::Duration
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::requesters(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::requirement(&self, &str, &ai6::directorates::m::approvals::ActionScope) -> ai6::directorates::m::approvals::Requirement
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+impl core::cmp::PartialEq for ai6::directorates::m::approvals::GreenInkPolicy
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::eq(&self, &Self) -> bool
+impl core::default::Default for ai6::directorates::m::approvals::GreenInkPolicy
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::default() -> Self
 #[non_exhaustive] pub struct ai6::HeadquartersLease
 impl ai6::directorates::registry::store::HeadquartersLease
 pub fn ai6::directorates::registry::store::HeadquartersLease::expires(&self) -> f64
@@ -2397,6 +2629,7 @@ pub ai6::Operation::cover: alloc::string::String
 pub ai6::Operation::cover_identity: core::option::Option<ai6::directorates::m::roster::CoverIdentity>
 pub ai6::Operation::description: alloc::string::String
 pub ai6::Operation::exposure: ai6::directorates::medical::exposure::ExposurePolicy
+pub ai6::Operation::green_ink: ai6::directorates::m::approvals::GreenInkPolicy
 pub ai6::Operation::id: alloc::string::String
 pub ai6::Operation::limit_fallback_secs: u64
 pub ai6::Operation::max_concurrent: core::option::Option<usize>
@@ -2489,6 +2722,9 @@ pub struct ai6::ReadSpec
 pub ai6::ReadSpec::limit: u64
 pub ai6::ReadSpec::offset: u64
 pub ai6::ReadSpec::path: alloc::string::String
+pub struct ai6::Revocation
+pub ai6::Revocation::at: f64
+pub ai6::Revocation::by: alloc::string::String
 pub struct ai6::Roster
 impl ai6::directorates::m::roster::Roster
 pub fn ai6::directorates::m::roster::Roster::agent(&self, core::option::Option<&str>, &str) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
@@ -2504,6 +2740,16 @@ pub struct ai6::RosterError(_)
 impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::Ruling
+pub ai6::Ruling::at: f64
+pub ai6::Ruling::decision: ai6::directorates::registry::approvals::Decision
+pub ai6::Ruling::expires_at: core::option::Option<f64>
+pub ai6::Ruling::note: core::option::Option<alloc::string::String>
+pub ai6::Ruling::signer: alloc::string::String
+impl ai6::directorates::registry::approvals::Ruling
+pub fn ai6::directorates::registry::approvals::Ruling::approve(impl core::convert::Into<alloc::string::String>, f64, f64) -> Self
+pub fn ai6::directorates::registry::approvals::Ruling::reject(impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::approvals::Ruling::with_note(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::RunSpec
 pub ai6::RunSpec::argv: alloc::vec::Vec<alloc::string::String>
 pub ai6::RunSpec::cwd: core::option::Option<alloc::string::String>
@@ -2849,10 +3095,13 @@ pub fn ai6::directorates::medical::usage::UsageTracker::observe(&mut self, &ai6:
 pub struct ai6::Watchdog
 impl ai6::directorates::medical::watchdog::Watchdog
 pub fn ai6::directorates::medical::watchdog::Watchdog::is_max_runtime_exceeded(&self) -> bool
+pub fn ai6::directorates::medical::watchdog::Watchdog::is_paused(&self) -> bool
 pub fn ai6::directorates::medical::watchdog::Watchdog::is_stalled(&self) -> bool
 pub fn ai6::directorates::medical::watchdog::Watchdog::max_runtime(&self) -> core::option::Option<core::time::Duration>
 pub fn ai6::directorates::medical::watchdog::Watchdog::new(core::time::Duration) -> Self
+pub fn ai6::directorates::medical::watchdog::Watchdog::pause(&self)
 pub fn ai6::directorates::medical::watchdog::Watchdog::record_activity(&self)
+pub fn ai6::directorates::medical::watchdog::Watchdog::resume(&self)
 pub fn ai6::directorates::medical::watchdog::Watchdog::timeout(&self) -> core::time::Duration
 pub fn ai6::directorates::medical::watchdog::Watchdog::with_config(ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
 impl core::default::Default for ai6::directorates::medical::watchdog::Watchdog
@@ -2899,6 +3148,8 @@ pub ai6::WriteSpec::path: alloc::string::String
 pub const ai6::ACTIONS: &[&str]
 pub const ai6::BRIEF_EXPOSURE_KEY: &str
 pub const ai6::BRIEF_SOURCE: &str
+pub const ai6::BUILTIN_KINDS: [&str; 5]
+pub const ai6::DEFAULT_APPROVAL_TTL: core::time::Duration
 pub const ai6::DEFAULT_BLOCKED_AFTER: core::time::Duration
 pub const ai6::DEFAULT_BUDGET_STOPS: u32
 pub const ai6::DEFAULT_CABLE_TTL: f64
@@ -2909,14 +3160,18 @@ pub const ai6::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::DEFAULT_LOOP_MIN_LINES: usize
 pub const ai6::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
 pub const ai6::DEFAULT_MAX_OUTPUT: u64
+pub const ai6::DEFAULT_PROTECTED: [&str; 4]
 pub const ai6::DEFAULT_READ_LIMIT: u64
+pub const ai6::DEFAULT_REQUEST_TTL: core::time::Duration
 pub const ai6::DEFAULT_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::DEFAULT_STALLS: u32
 pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
 pub const ai6::DEFAULT_TERMINAL: &str
 pub const ai6::DEFAULT_WARN_AT_PERMILLE: u16
 pub const ai6::DEFAULT_WINDOW_SECS: u64
+pub const ai6::EXPIRY_SIGNER: &str
 pub const ai6::GONE_DARK_AFTER: core::time::Duration
+pub const ai6::GREEN_INK_REASON: &str
 pub const ai6::LIMIT_EVENT: &str
 pub const ai6::LOCAL_THEATER: &str
 pub const ai6::MAX_CABLE_BODY_BYTES: usize
@@ -3075,6 +3330,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::cable_source(&str) -> alloc::string::String
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
+pub fn ai6::clearance_at_least(&str, &str) -> bool
 pub fn ai6::describe(&guatiao::library::kind::ProviderError) -> alloc::string::String
 pub fn ai6::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
 pub fn ai6::is_sha256_pin(&str) -> bool

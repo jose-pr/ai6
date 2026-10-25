@@ -63,6 +63,7 @@ pub fn ai6_diptel::InvalidSize::fmt(&self, &mut core::fmt::Formatter<'_>) -> cor
 pub struct ai6_diptel::LifecycleEvent
 pub ai6_diptel::LifecycleEvent::mission_id: ai6_diptel::MissionId
 pub ai6_diptel::LifecycleEvent::operation_id: ai6_diptel::OperationId
+pub ai6_diptel::LifecycleEvent::reason: core::option::Option<alloc::string::String>
 pub ai6_diptel::LifecycleEvent::sequence: u64
 pub ai6_diptel::LifecycleEvent::session_id: ai6_diptel::SessionId
 pub ai6_diptel::LifecycleEvent::state: ai6_diptel::SessionState
@@ -123,8 +124,10 @@ pub const fn ai6_diptel::TerminalResize::sequence(&self) -> u64
 pub fn ai6_diptel::TerminalResize::session_id(&self) -> &ai6_diptel::SessionId
 pub const ai6_diptel::MAX_CONTROL_MESSAGE_BYTES: usize
 pub const ai6_diptel::MAX_ID_BYTES: usize
+pub const ai6_diptel::MAX_REASON_BYTES: usize
 pub const ai6_diptel::MAX_TERMINAL_BYTES: usize
 pub fn ai6_diptel::control_frames(&ai6_diptel::MissionControl) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::lifecycle_frames(&ai6_diptel::LifecycleEvent) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::resize_frames(&ai6_diptel::TerminalResize) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::terminal_frames(&ai6_diptel::TerminalData) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
+pub fn ai6_diptel::valid_reason(&str) -> bool
