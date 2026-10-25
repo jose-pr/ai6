@@ -18,10 +18,16 @@ pub use directorates::m::access::{
     Verdict,
 };
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
-pub use directorates::m::roster::{AgentRole, CoverIdentity, Operation, Roster, RosterError};
+pub use directorates::m::roster::{
+    AgentRole, CoverIdentity, Operation, Roster, RosterError, Workspace,
+};
 pub use directorates::medical::watchdog::{
     DEFAULT_BLOCKED_AFTER, DEFAULT_LINE_HISTORY, DEFAULT_LOOP_MIN_LINES, DEFAULT_STALL_TIMEOUT,
     Watchdog, WatchdogConfig, WatchdogOverrides,
+};
+pub use directorates::q::safehouse::{
+    Change, ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession,
+    SafeHouseSpec,
 };
 pub use directorates::q::terminal::{
     AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalBridge, TerminalSession,

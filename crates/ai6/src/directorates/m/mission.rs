@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
-use crate::station::safehouse::SafeHouseReport;
+use crate::directorates::q::safehouse::SafeHouseReport;
 use crate::{MissionId, SessionId};
 
 /// Lifecycle state for a Mission.
@@ -493,6 +493,7 @@ mod tests {
         let report = CoverReport {
             policy: "covert".to_owned(),
             commits: 1,
+            checkable: true,
             blown: true,
             violations: vec![crate::directorates::m::cover::CoverViolation {
                 commit: "abcdef123456".to_owned(),

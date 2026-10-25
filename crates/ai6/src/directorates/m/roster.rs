@@ -102,18 +102,12 @@ pub struct Operation {
     pub config: Option<PathBuf>,
     /// Allowed Agent codenames or aliases; empty allows every Agent.
     pub roster: Vec<String>,
-    /// Repositories that belong to this Operation.
-    pub repos: Vec<String>,
     /// Highest Agent clearance allowed at this Operation.
     pub clearance: String,
     /// Optional concurrent operation limit.
     pub max_concurrent: Option<usize>,
-    /// Whether Missions should receive a dedicated worktree.
-    pub safe_houses: bool,
-    /// Branch template used when a safe house is created.
-    pub branch: String,
-    /// Base revision used to create a safe house.
-    pub base: String,
+    /// Where Missions work: the safe-house provider and its settings.
+    pub workspace: Workspace,
     /// Station labels required before a Station may run this Operation's Missions.
     pub station_labels: BTreeMap<String, String>,
     /// Cover policy used when work is committed.
@@ -124,6 +118,35 @@ pub struct Operation {
     pub on_blown: String,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
+}
+
+/// How an Operation's Missions get their working directory (`workspace = { .. }`).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Workspace {
+    /// The safe-house provider ID. `None` picks `git` when the Operation's path is a Git
+    /// checkout, and otherwise works in the Operation's directory with no safe house.
+    pub provider: Option<String>,
+    /// Where the work comes from; defaults to the Operation's `path`.
+    pub source: Option<PathBuf>,
+    /// Revision a safe house starts from.
+    pub base: String,
+    /// Branch name template; `{id}`, `{slug}` and `{operation}` are filled in.
+    pub branch: String,
+    /// Whether each Mission gets its own copy. `false` works in the source in place.
+    pub isolate: bool,
+}
+
+impl Operation {
+    /// The provider that makes this Operation's safe houses, or `None` when Missions work
+    /// in the Operation's directory without one.
+    pub fn safe_house_provider(&self) -> Option<String> {
+        if let Some(provider) = &self.workspace.provider {
+            return Some(provider.clone());
+        }
+        let source = self.workspace.source.as_ref().or(self.path.as_ref())?;
+        source.join(".git").exists().then(|| "git".to_owned())
+    }
 }
 
 /// Git author identity configured by an Operation.
@@ -419,13 +442,14 @@ struct OperationDefinition {
     theater: Option<String>,
     config: Option<String>,
     roster: Vec<String>,
-    repos: Vec<String>,
     clearance: String,
     max_concurrent: Option<usize>,
-    #[serde(default = "default_safe_houses")]
-    safe_houses: bool,
-    branch: String,
-    base: String,
+    workspace: WorkspaceDefinition,
+    // Keys of the earlier workspace settings, kept only to refuse them by name.
+    repos: Option<toml::Value>,
+    safe_houses: Option<toml::Value>,
+    branch: Option<toml::Value>,
+    base: Option<toml::Value>,
     station_labels: BTreeMap<String, String>,
     cover: String,
     cover_identity: Option<CoverIdentity>,
@@ -433,12 +457,56 @@ struct OperationDefinition {
     sources: toml::Table,
 }
 
-fn default_safe_houses() -> bool {
-    true
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct WorkspaceDefinition {
+    provider: Option<String>,
+    source: Option<String>,
+    base: String,
+    branch: String,
+    isolate: bool,
+}
+
+impl Default for WorkspaceDefinition {
+    fn default() -> Self {
+        Self {
+            provider: None,
+            source: None,
+            base: String::new(),
+            branch: String::new(),
+            isolate: true,
+        }
+    }
+}
+
+impl OperationDefinition {
+    fn refuse_replaced_keys(&self, id: &str, source: &Path) -> Result<(), RosterError> {
+        for (key, replacement) in [
+            ("repos", "workspace = { source = \"..\" }"),
+            ("safe_houses", "workspace = { isolate = true | false }"),
+            ("branch", "workspace = { branch = \"..\" }"),
+            ("base", "workspace = { base = \"..\" }"),
+        ] {
+            let present = match key {
+                "repos" => self.repos.is_some(),
+                "safe_houses" => self.safe_houses.is_some(),
+                "branch" => self.branch.is_some(),
+                _ => self.base.is_some(),
+            };
+            if present {
+                return Err(error(format!(
+                    "{}: Operation {id:?}: `{key}` is no longer an Operation key; use {replacement}",
+                    source.display()
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl OperationDefinition {
     fn resolve(self, id: String, source: &Path) -> Result<Operation, RosterError> {
+        self.refuse_replaced_keys(&id, source)?;
         let path = self.path.map(|path| expand_path(&path));
         let config = self.config.map(|path| expand_path(&path));
         let operation = Operation {
@@ -449,23 +517,26 @@ impl OperationDefinition {
             theater: self.theater,
             config,
             roster: self.roster,
-            repos: self.repos,
             clearance: if self.clearance.is_empty() {
                 "field".to_owned()
             } else {
                 self.clearance
             },
             max_concurrent: self.max_concurrent,
-            safe_houses: self.safe_houses,
-            branch: if self.branch.is_empty() {
-                "{id}-{slug}".to_owned()
-            } else {
-                self.branch
-            },
-            base: if self.base.is_empty() {
-                "HEAD".to_owned()
-            } else {
-                self.base
+            workspace: Workspace {
+                provider: self.workspace.provider,
+                source: self.workspace.source.map(|path| expand_path(&path)),
+                base: if self.workspace.base.is_empty() {
+                    "HEAD".to_owned()
+                } else {
+                    self.workspace.base
+                },
+                branch: if self.workspace.branch.is_empty() {
+                    "{id}-{slug}".to_owned()
+                } else {
+                    self.workspace.branch
+                },
+                isolate: self.workspace.isolate,
             },
             station_labels: self.station_labels,
             cover: if self.cover.is_empty() {
@@ -488,6 +559,18 @@ impl OperationDefinition {
                 operation.id
             ))
         })?;
+        if operation
+            .workspace
+            .provider
+            .as_deref()
+            .is_some_and(|provider| provider.trim().is_empty())
+        {
+            return Err(error(format!(
+                "{}: Operation {:?}: workspace.provider must not be empty",
+                source.display(),
+                operation.id
+            )));
+        }
         if !matches!(operation.on_blown.as_str(), "flag" | "fail") {
             return Err(error(format!(
                 "{}: Operation {:?}: on_blown must be flag or fail",
@@ -755,7 +838,7 @@ mod tests {
         directory.write(
             "operations.toml",
             &format!(
-                "[operation.G]\nname = \"project\"\npath = {:?}\nrepos = [\"https://example.invalid/repo\"]\nroster = [\"JamesBond\"]\nclearance = \"00\"
+                "[operation.G]\nname = \"project\"\npath = {:?}\nworkspace = {{ provider = \"git\", source = \"/srv/project\", base = \"main\", branch = \"ai6/{{id}}\", isolate = false }}\nroster = [\"JamesBond\"]\nclearance = \"00\"
 station_labels = {{ station = \"dev\" }}
 cover_identity = {{ name = \"Station\", email = \"station@example.invalid\" }}
 sources = {{ jira = \"GUA\" }}\n",
@@ -773,8 +856,14 @@ sources = {{ jira = \"GUA\" }}\n",
 
         let roster = Roster::load(&directory.0).unwrap();
         let operation = roster.operation("G").unwrap();
-        assert!(operation.safe_houses);
-        assert_eq!(operation.repos, ["https://example.invalid/repo"]);
+        assert_eq!(operation.workspace.provider.as_deref(), Some("git"));
+        assert_eq!(
+            operation.workspace.source.as_deref(),
+            Some(Path::new("/srv/project"))
+        );
+        assert_eq!(operation.workspace.base, "main");
+        assert_eq!(operation.workspace.branch, "ai6/{id}");
+        assert!(!operation.workspace.isolate);
         assert_eq!(operation.cover_identity.as_ref().unwrap().name, "Station");
         assert_eq!(operation.sources["jira"].as_str(), Some("GUA"));
         let agent = roster.agent(Some("project"), "JamesBond").unwrap();
@@ -924,6 +1013,71 @@ sources = {{ jira = \"GUA\" }}\n",
         assert!(roster.agent(Some("not-registered"), "007").is_err());
         assert!(roster.agent(Some("G"), "007").is_err());
         assert!(roster.agent(Some("G"), "006").is_err());
+    }
+
+    #[test]
+    fn replaced_workspace_keys_are_refused_by_name() {
+        for (key, line) in [
+            ("repos", "repos = [\"https://example.invalid/repo\"]"),
+            ("safe_houses", "safe_houses = false"),
+            ("branch", "branch = \"{id}\""),
+            ("base", "base = \"main\""),
+        ] {
+            let directory = TestDirectory::new();
+            directory.write("operations.toml", &format!("[operation.G]\n{line}\n"));
+            let message = Roster::load(&directory.0).unwrap_err().to_string();
+            assert!(
+                message.contains(&format!("`{key}` is no longer an Operation key"))
+                    && message.contains("workspace"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_defaults_to_git_only_for_a_git_checkout() {
+        let directory = TestDirectory::new();
+        let checkout = directory.0.join("checkout");
+        let plain = directory.0.join("plain");
+        fs::create_dir_all(checkout.join(".git")).unwrap();
+        fs::create_dir_all(&plain).unwrap();
+        directory.write(
+            "operations.toml",
+            &format!(
+                "[operation.A]\npath = {:?}\n[operation.B]\npath = {:?}\n[operation.C]\npath = {:?}\nworkspace = {{ provider = \"copy\" }}\n[operation.D]\npath = {:?}\nworkspace = {{ isolat = true }}\n",
+                checkout.to_string_lossy(),
+                plain.to_string_lossy(),
+                plain.to_string_lossy(),
+                plain.to_string_lossy()
+            ),
+        );
+        assert!(Roster::load(&directory.0).is_err(), "misspelled key");
+        directory.write(
+            "operations.toml",
+            &format!(
+                "[operation.A]\npath = {:?}\n[operation.B]\npath = {:?}\n[operation.C]\npath = {:?}\nworkspace = {{ provider = \"copy\" }}\n",
+                checkout.to_string_lossy(),
+                plain.to_string_lossy(),
+                plain.to_string_lossy()
+            ),
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        let a = roster.operation("A").unwrap();
+        assert_eq!(a.safe_house_provider().as_deref(), Some("git"));
+        assert!(a.workspace.isolate);
+        assert_eq!(
+            (a.workspace.base.as_str(), a.workspace.branch.as_str()),
+            ("HEAD", "{id}-{slug}")
+        );
+        assert_eq!(roster.operation("B").unwrap().safe_house_provider(), None);
+        assert_eq!(
+            roster
+                .operation("C")
+                .unwrap()
+                .safe_house_provider()
+                .as_deref(),
+            Some("copy")
+        );
     }
 
     #[test]

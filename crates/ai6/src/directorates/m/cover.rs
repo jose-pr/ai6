@@ -7,22 +7,9 @@ use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
 
 use crate::directorates::m::roster::CoverIdentity;
+use crate::directorates::q::safehouse::Change;
 
 const COVERS_FILE: &str = "covers.toml";
-
-/// One commit inspected by a Operation cover policy.
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CoverCommit {
-    /// The full commit identifier.
-    pub sha: String,
-    /// Commit author in `Name <email>` form.
-    pub author: String,
-    /// Commit committer in `Name <email>` form.
-    pub committer: String,
-    /// Full commit message.
-    pub message: String,
-}
 
 /// One rule violated by one commit.
 #[non_exhaustive]
@@ -44,10 +31,18 @@ pub struct CoverReport {
     pub policy: String,
     /// Number of commits inspected.
     pub commits: usize,
+    /// Whether the safe house kept a history to inspect. `false` means the policy could
+    /// not be checked, which is not the same as passing it.
+    #[serde(default = "checkable")]
+    pub checkable: bool,
     /// Whether any commit violated the policy.
     pub blown: bool,
     /// Policy violations, in commit and rule order.
     pub violations: Vec<CoverViolation>,
+}
+
+fn checkable() -> bool {
+    true
 }
 
 /// Snapshot of the cover settings needed to audit a Mission after restart.
@@ -125,13 +120,13 @@ impl Cover {
     /// Checks commit identity and message content against this cover.
     pub fn check_commits(
         &self,
-        commits: &[CoverCommit],
+        commits: &[Change],
         identity: Option<&CoverIdentity>,
         model: &str,
     ) -> Vec<CoverViolation> {
         let mut violations = Vec::new();
         for commit in commits {
-            let short_sha = commit.sha.chars().take(12).collect::<String>();
+            let short_sha = commit.id.chars().take(12).collect::<String>();
             if let Some(identity) = identity.filter(|_| !self.agent_author) {
                 let expected = format!("{} <{}>", identity.name, identity.email);
                 for (role, value) in [("author", &commit.author), ("committer", &commit.committer)]
@@ -432,9 +427,9 @@ mod tests {
         }
     }
 
-    fn commit(message: &str, author: &str) -> CoverCommit {
-        CoverCommit {
-            sha: "a".repeat(40),
+    fn commit(message: &str, author: &str) -> Change {
+        Change {
+            id: "a".repeat(40),
             author: author.to_owned(),
             committer: author.to_owned(),
             message: message.to_owned(),

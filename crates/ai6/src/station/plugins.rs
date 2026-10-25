@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::directorates::m::access::{
     Authenticator, Authorizer, Directory, RoleAuthorizerProvider,
 };
+use crate::directorates::q::safehouse::SafeHouseProvider;
 use crate::directorates::q::terminal::Terminal;
 use crate::directorates::section_00::agent::AgentHandler;
 
@@ -90,14 +91,14 @@ impl fmt::Display for PluginBuildError {
 
 impl core::error::Error for PluginBuildError {}
 
-/// The process-lifetime host for loaded AgentHandler and Terminal libraries.
+/// The process-lifetime host for loaded AgentHandler, Terminal and SafeHouseProvider libraries.
 pub struct Plugins {
     registry: ManuallyDrop<Registry>,
     summary: PluginScanSummary,
 }
 
 impl Plugins {
-    /// Scans each directory or library path for AI6 handlers, access providers or terminals.
+    /// Scans each directory or library path for AI6 handlers, access providers, terminals or safe houses.
     ///
     /// The registry stays mapped for the daemon lifetime because instances and sessions
     /// may call code from the loaded libraries after construction.
@@ -116,6 +117,7 @@ impl Plugins {
                     kind,
                     "ai6_agent_handler"
                         | "ai6_terminal"
+                        | "ai6_safehouse"
                         | "lineupmux_authenticator"
                         | "lineupmux_directory"
                         | "lineupmux_authorizer"
@@ -172,6 +174,11 @@ impl Plugins {
         providers(&self.registry, <dyn Terminal>::NAME)
     }
 
+    /// Returns the safe-house providers and their reported availability.
+    pub fn safehouses(&self) -> Vec<ProviderInfo> {
+        providers(&self.registry, <dyn SafeHouseProvider>::NAME)
+    }
+
     /// Returns the configured credential authenticators.
     pub fn authenticators(&self) -> Vec<ProviderInfo> {
         providers(&self.registry, <dyn Authenticator>::NAME)
@@ -203,6 +210,15 @@ impl Plugins {
         config: Option<&Value>,
     ) -> Result<Box<dyn Terminal>, PluginBuildError> {
         build::<dyn Terminal>(&self.registry, provider, config)
+    }
+
+    /// Constructs a SafeHouseProvider from its provider ID and optional Guatiao config.
+    pub fn safehouse(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+    ) -> Result<Box<dyn SafeHouseProvider>, PluginBuildError> {
+        build::<dyn SafeHouseProvider>(&self.registry, provider, config)
     }
 
     /// Constructs an Authenticator from its provider ID and optional Guatiao config.
@@ -312,6 +328,10 @@ mod tests {
         assert!(matches!(
             plugins.terminal("pty", None),
             Err(PluginBuildError::NotFound { provider }) if provider == "pty"
+        ));
+        assert!(matches!(
+            plugins.safehouse("worktree", None),
+            Err(PluginBuildError::NotFound { provider }) if provider == "worktree"
         ));
         assert!(matches!(
             plugins.authenticator("password", None),

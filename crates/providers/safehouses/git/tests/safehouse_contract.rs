@@ -91,9 +91,8 @@ fn a_mission_works_in_a_worktree_and_its_commits_are_reported_through_the_kind()
 
 #[test]
 fn a_malformed_spec_is_refused_as_a_bad_value() {
-    let error = Git
-        .open(&"not a spec".to_value().unwrap())
-        .err()
-        .expect("a string is not a spec");
+    let Err(error) = Git.open(&"not a spec".to_value().unwrap()) else {
+        panic!("a string is not a spec");
+    };
     assert_eq!(error.status, ai6::guatiao::Status::GUATIAO_ERR_BAD_VALUE);
 }

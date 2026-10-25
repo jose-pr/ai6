@@ -29,6 +29,7 @@ use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
+use crate::directorates::q::safehouse::{SafeHouseReport, SafeHouseSpec};
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::registry::cables::{
     CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
@@ -43,7 +44,7 @@ use crate::station::plugins;
 use crate::station::publisher::MissionPublication;
 #[cfg(feature = "publisher")]
 use crate::station::publisher::{self, Config as PublisherConfig, Publisher, SessionTelemetry};
-use crate::station::safehouse::{self, SafeHouse};
+use crate::station::safehouse::SafeHouse;
 use crate::{MissionId, SessionId};
 
 /// The loopback address used by the daemon's private health endpoint.
@@ -1876,6 +1877,7 @@ struct WorkingArea {
 
 fn resolve_working_area(
     roster: &Roster,
+    plugins: &plugins::Plugins,
     operation_id: Option<&str>,
     requested: Option<&str>,
     state_root: Option<&Path>,
@@ -1916,49 +1918,84 @@ fn resolve_working_area(
             checkout.display()
         ));
     }
-    if operation.safe_houses {
-        if requested.is_some() {
-            return Err(format!(
-                "Operation {:?} workdirs are allocated by AI6 safe-house policy",
-                operation.id
-            ));
+    let has_provider = operation.safe_house_provider().is_some();
+    let isolate = has_provider && operation.workspace.isolate;
+    if isolate && requested.is_some() {
+        return Err(format!(
+            "Operation {:?} workdirs are allocated by AI6 safe-house policy",
+            operation.id
+        ));
+    }
+    let in_place = match requested {
+        Some(path) => {
+            let requested = Path::new(path);
+            if !requested.is_absolute() || !requested.is_dir() || !requested.starts_with(checkout) {
+                return Err(format!(
+                    "working_directory must be an existing absolute directory inside Operation {:?}",
+                    operation.id
+                ));
+            }
+            path.to_owned()
         }
-        let root = match state_root {
-            Some(path) => path.to_path_buf(),
-            None => crate::station::safehouse::state_dir().map_err(|error| error.to_string())?,
-        };
-        let safe_house = SafeHouse::create(
-            checkout,
-            root,
-            &operation.id,
-            &mission.mission_id,
-            &mission.prompt,
-            &operation.branch,
-            &operation.base,
-        )
+        None => checkout.to_string_lossy().into_owned(),
+    };
+    let safe_house = open_safe_house(
+        plugins,
+        operation,
+        &mission.mission_id,
+        &mission.prompt,
+        state_root,
+        isolate,
+        None,
+    )?;
+    let path = match safe_house.as_ref().filter(|house| house.is_isolated()) {
+        Some(house) => house.path().to_string_lossy().into_owned(),
+        None => in_place,
+    };
+    Ok(WorkingArea { path, safe_house })
+}
+
+/// Opens an Operation's safe house through its provider; `None` when it has no provider.
+/// `reopen` re-attaches to a safe house an earlier run left behind.
+fn open_safe_house(
+    plugins: &plugins::Plugins,
+    operation: &roster::Operation,
+    mission_id: &MissionId,
+    title: &str,
+    state_root: Option<&Path>,
+    isolate: bool,
+    reopen: Option<SafeHouseReport>,
+) -> Result<Option<SafeHouse>, String> {
+    let Some(provider_id) = operation.safe_house_provider() else {
+        return Ok(None);
+    };
+    let source = operation
+        .workspace
+        .source
+        .as_ref()
+        .or(operation.path.as_ref())
+        .ok_or_else(|| format!("Operation {:?} has no local checkout path", operation.id))?;
+    let root = match state_root {
+        Some(path) => path.to_path_buf(),
+        None => crate::station::safehouse::state_dir().map_err(|error| error.to_string())?,
+    };
+    let provider = plugins
+        .safehouse(&provider_id, None)
         .map_err(|error| error.to_string())?;
-        return Ok(WorkingArea {
-            path: safe_house.path.to_string_lossy().into_owned(),
-            safe_house: Some(safe_house),
-        });
-    }
-    if let Some(path) = requested {
-        let requested = Path::new(path);
-        if !requested.is_absolute() || !requested.is_dir() || !requested.starts_with(checkout) {
-            return Err(format!(
-                "working_directory must be an existing absolute directory inside Operation {:?}",
-                operation.id
-            ));
-        }
-        return Ok(WorkingArea {
-            path: path.to_owned(),
-            safe_house: None,
-        });
-    }
-    Ok(WorkingArea {
-        path: checkout.to_string_lossy().into_owned(),
-        safe_house: None,
-    })
+    let spec = SafeHouseSpec {
+        operation_id: operation.id.clone(),
+        mission_id: mission_id.as_str().to_owned(),
+        title: title.to_owned(),
+        source: source.to_string_lossy().into_owned(),
+        base: operation.workspace.base.clone(),
+        branch: operation.workspace.branch.clone(),
+        isolate,
+        state_root: root.to_string_lossy().into_owned(),
+        reopen,
+    };
+    SafeHouse::open(provider.as_ref(), &spec)
+        .map(Some)
+        .map_err(|error| error.to_string())
 }
 
 fn configure_station_cover(
@@ -2002,12 +2039,10 @@ fn station_cover_audit(
     let operation = roster
         .operation(operation_id)
         .map_err(|error| error.to_string())?;
-    let base = safe_house
-        .map(|safe_house| safe_house.base.clone())
-        .or_else(|| operation.path.as_deref().and_then(safehouse::head));
-    let Some(base) = base else {
+    let Some(safe_house) = safe_house else {
         return Ok(None);
     };
+    let base = safe_house.base().unwrap_or_default().to_owned();
     let cover = roster
         .cover(&operation.cover)
         .map_err(|error| error.to_string())?;
@@ -2126,12 +2161,14 @@ async fn start_mission(
         .handler(&handler_provider, None)
         .map_err(provider_error)?;
     let roster = state.roster.clone();
+    let plugins = state.plugins.clone();
     let operation_id = mission.operation_id.clone();
     let requested_directory = request.working_directory.clone();
     let area_mission = mission.clone();
     let area = tokio::task::spawn_blocking(move || {
         resolve_working_area(
             &roster,
+            &plugins,
             operation_id.as_deref(),
             requested_directory.as_deref(),
             None,
@@ -2330,7 +2367,7 @@ async fn start_mission(
             } else {
                 working
             };
-            if let Some(safe_house) = &area.safe_house {
+            if let Some(safe_house) = area.safe_house.as_ref().filter(|house| house.is_isolated()) {
                 missions.set_safe_house(&mission_id, safe_house.active_report())
             } else {
                 Ok(working)
@@ -2463,27 +2500,56 @@ async fn resume_mission(
                 .ok_or_else(|| {
                     conflict("No durable AgentHandler settings are available to resume")
                 })?;
-            let safe_house = match (&mission.operation_id, &mission.safe_house) {
-                (Some(operation_id), Some(report)) if report.kept => {
-                    let operation = state
-                        .roster
-                        .operation(operation_id)
-                        .map_err(configuration_error)?;
-                    let repository = operation
-                        .path
-                        .clone()
-                        .ok_or_else(|| configuration_error("Operation has no local checkout"))?;
-                    let report = report.clone();
-                    Some(
-                        tokio::task::spawn_blocking(move || SafeHouse::reopen(repository, &report))
+            let safe_house = match &mission.operation_id {
+                Some(operation_id) => {
+                    let configured = state.roster.operation(operation_id);
+                    let reopen = match (&mission.safe_house, &configured) {
+                        (Some(report), _) if report.kept => Some((report.clone(), true)),
+                        // Work in place has no report; the cover audit remembers where it began.
+                        (_, Ok(configured)) if !configured.workspace.isolate => {
+                            operation.cover.as_ref().map(|audit| {
+                                (
+                                    SafeHouseReport {
+                                        path: operation.working_directory.clone(),
+                                        branch: None,
+                                        base: Some(audit.base.clone())
+                                            .filter(|base| !base.is_empty()),
+                                        kept: true,
+                                        changes: Vec::new(),
+                                    },
+                                    false,
+                                )
+                            })
+                        }
+                        _ => None,
+                    };
+                    match reopen {
+                        Some((report, isolate)) => {
+                            let configured = configured.map_err(configuration_error)?.clone();
+                            let plugins = state.plugins.clone();
+                            let mission_id = mission.mission_id.clone();
+                            let title = mission.prompt.clone();
+                            tokio::task::spawn_blocking(move || {
+                                open_safe_house(
+                                    &plugins,
+                                    &configured,
+                                    &mission_id,
+                                    &title,
+                                    None,
+                                    isolate,
+                                    Some(report),
+                                )
+                            })
                             .await
                             .map_err(|error| {
                                 runtime_error(format!("safe-house recovery worker failed: {error}"))
                             })?
-                            .map_err(configuration_error)?,
-                    )
+                            .map_err(configuration_error)?
+                        }
+                        None => None,
+                    }
                 }
-                _ => None,
+                None => None,
             };
             (
                 operation.handler_provider.clone(),
@@ -3134,13 +3200,17 @@ fn finish_operation(
                 .roster
                 .cover(&audit.policy)
                 .map_err(|error| error.to_string())?;
-            let commits = match &operation.safe_house {
-                Some(safe_house) => safe_house.cover_commits(),
-                None => {
-                    safehouse::commits_since(Path::new(&operation.working_directory), &audit.base)
-                }
-            }
-            .map_err(|error| error.to_string())?;
+            let safe_house = operation
+                .safe_house
+                .as_ref()
+                .ok_or_else(|| "no safe house to read the Mission's changes from".to_owned())?;
+            // Without history there is nothing to inspect: report that, never a pass.
+            let checkable = safe_house.supports_history();
+            let commits = if checkable {
+                safe_house.changes().map_err(|error| error.to_string())?
+            } else {
+                Vec::new()
+            };
             let violations = cover.check_commits(
                 &commits,
                 audit.identity.as_ref(),
@@ -3149,6 +3219,7 @@ fn finish_operation(
             let report = CoverReport {
                 policy: audit.policy.clone(),
                 commits: commits.len(),
+                checkable,
                 blown: !violations.is_empty(),
                 violations,
             };
@@ -3166,7 +3237,7 @@ fn finish_operation(
         }
     }
 
-    if let Some(safe_house) = operation.safe_house {
+    if let Some(safe_house) = operation.safe_house.filter(SafeHouse::is_isolated) {
         match safe_house.finish() {
             Ok(report) => {
                 if let Ok(mut missions) = state.missions.lock() {
@@ -3303,6 +3374,7 @@ async fn finalize_mission_resources(
         drop(session);
         operation
             .safe_house
+            .filter(SafeHouse::is_isolated)
             .map(|safe_house| safe_house.finish().map_err(|error| error.to_string()))
             .transpose()
     })
@@ -3328,7 +3400,7 @@ async fn start_failure(
     safe_house: Option<SafeHouse>,
 ) -> ApiErrorResponse {
     let mut message = error.to_string();
-    if let Some(safe_house) = safe_house {
+    if let Some(safe_house) = safe_house.filter(SafeHouse::is_isolated) {
         match tokio::task::spawn_blocking(move || safe_house.finish()).await {
             Ok(Ok(report)) if report.kept => {
                 if let Ok(mut missions) = state.missions.lock() {
@@ -3486,7 +3558,6 @@ mod tests {
     use std::collections::VecDeque;
     use std::fs;
     use std::path::Path;
-    use std::process::Command;
     use std::sync::Mutex;
 
     use super::*;
@@ -3531,13 +3602,16 @@ mod tests {
 
         assert_eq!(event.kind, "completed");
     }
+    use crate::directorates::q::safehouse::{
+        ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseSession,
+    };
     use crate::directorates::q::terminal::{ExitInfo, Terminal, TerminalSession};
     use crate::directorates::registry::cables::{
         CableAction, CableGrant, CablePolicy, CableScope, CableTarget,
     };
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError, Registry};
-    use crate::guatiao::{Provider, Status, ToValue, Value};
+    use crate::guatiao::{FromValue, Provider, Status, ToValue, Value};
 
     fn no_op_cables() -> Arc<CableRelay> {
         Arc::new(CableRelay::new(
@@ -3917,10 +3991,98 @@ mod tests {
         }
     }
 
+    #[derive(Default, Provider)]
+    #[provider(SafeHouseProvider, id = "mock-safehouse", name = "Mock Safe House", crate = crate::guatiao)]
+    struct MockSafeHouseProvider;
+
+    impl SafeHouseProvider for MockSafeHouseProvider {
+        fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
+            let spec = SafeHouseSpec::from_value(spec)
+                .map_err(|error| test_provider_error(&error.to_string()))?;
+            let path = Path::new(&spec.state_root)
+                .join("safe-houses")
+                .join(&spec.mission_id);
+            fs::create_dir_all(&path).map_err(|error| test_provider_error(&error.to_string()))?;
+            Ok(MockSafeHouse {
+                info: SafeHouseInfo {
+                    path: path.to_string_lossy().into_owned(),
+                    branch: Some(
+                        spec.branch
+                            .replace("{operation}", &spec.operation_id)
+                            .replace("{id}", &spec.mission_id)
+                            .replace("{slug}", &spec.title),
+                    ),
+                    base: Some("base0".to_owned()),
+                    supports_history: true,
+                    isolated: true,
+                },
+            }
+            .into_object())
+        }
+    }
+
+    /// A provider that keeps no history and works where the source is.
+    #[derive(Default, Provider)]
+    #[provider(SafeHouseProvider, id = "mock-plain", name = "Mock Plain", crate = crate::guatiao)]
+    struct MockPlainProvider;
+
+    impl SafeHouseProvider for MockPlainProvider {
+        fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
+            let spec = SafeHouseSpec::from_value(spec)
+                .map_err(|error| test_provider_error(&error.to_string()))?;
+            Ok(MockSafeHouse {
+                info: SafeHouseInfo {
+                    path: spec.source,
+                    branch: None,
+                    base: None,
+                    supports_history: false,
+                    isolated: false,
+                },
+            }
+            .into_object())
+        }
+    }
+
+    struct MockSafeHouse {
+        info: SafeHouseInfo,
+    }
+
+    impl SafeHouseSession for MockSafeHouse {
+        fn info(&self) -> Result<Value, ProviderError> {
+            self.info
+                .to_value()
+                .map_err(|error| test_provider_error(&error.to_string()))
+        }
+
+        fn changes(&self) -> Result<Value, ProviderError> {
+            ChangeLog::default()
+                .to_value()
+                .map_err(|error| test_provider_error(&error.to_string()))
+        }
+
+        fn finish(&self) -> Result<Value, ProviderError> {
+            let _ = fs::remove_dir_all(&self.info.path);
+            SafeHouseReport {
+                path: self.info.path.clone(),
+                branch: self.info.branch.clone(),
+                base: self.info.base.clone(),
+                kept: false,
+                changes: Vec::new(),
+            }
+            .to_value()
+            .map_err(|error| test_provider_error(&error.to_string()))
+        }
+    }
+
     crate::guatiao::local_providers!(
         id = "ai6-server-test-providers",
         version = "0.0.0",
-        providers = [MockHandler, MockTerminalProvider]
+        providers = [
+            MockHandler,
+            MockTerminalProvider,
+            MockSafeHouseProvider,
+            MockPlainProvider
+        ]
     );
 
     fn test_provider_error(message: &str) -> ProviderError {
@@ -3954,7 +4116,7 @@ mod tests {
         fs::write(
             root.join("operations.toml"),
             format!(
-                "[operation.G]\npath = {:?}\nsafe_houses = false\nmax_concurrent = {station_limit}\n",
+                "[operation.G]\npath = {:?}\nmax_concurrent = {station_limit}\n",
                 checkout.to_string_lossy()
             ),
         )
@@ -4085,7 +4247,7 @@ mod tests {
         fs::write(
             dir.join("operations.toml"),
             format!(
-                "[operation.G]\npath = {:?}\nsafe_houses = false\nmax_concurrent = 2\n",
+                "[operation.G]\npath = {:?}\nmax_concurrent = 2\n",
                 checkout.to_string_lossy()
             ),
         )
@@ -4209,7 +4371,7 @@ mod tests {
         fs::write(
             dir.join("operations.toml"),
             format!(
-                "[operation.G]\npath = {:?}\nsafe_houses = false\nmax_concurrent = 1\n",
+                "[operation.G]\npath = {:?}\nmax_concurrent = 1\n",
                 checkout.to_string_lossy()
             ),
         )
@@ -4561,7 +4723,7 @@ station_labels = { gpu = \"yes\" }\n",
         fs::write(
             dir.join("operations.toml"),
             format!(
-                "[operation.G]\nname = \"test\"\npath = {:?}\nsafe_houses = false\nroster = [\"007\"]\n",
+                "[operation.G]\nname = \"test\"\npath = {:?}\nroster = [\"007\"]\n",
                 working_directory.to_string_lossy()
             ),
         )
@@ -5197,34 +5359,16 @@ station_labels = { gpu = \"yes\" }\n",
         let root = std::env::temp_dir().join(format!("ai6-operation-worktree-{unique}"));
         let checkout = root.join("checkout");
         fs::create_dir_all(&checkout).unwrap();
-        let git = |args: &[&str]| {
-            let result = Command::new("git")
-                .arg("-C")
-                .arg(&checkout)
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(
-                result.status.success(),
-                "git {args:?}: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-        };
-        git(&["init", "--quiet"]);
-        git(&["config", "user.name", "AI6 Tests"]);
-        git(&["config", "user.email", "ai6@example.invalid"]);
-        fs::write(checkout.join("seed.txt"), "seed\n").unwrap();
-        git(&["add", "seed.txt"]);
-        git(&["commit", "--quiet", "-m", "seed"]);
         fs::write(
             root.join("operations.toml"),
             format!(
-                "[operation.G]\nname = \"project\"\npath = {:?}\nbranch = \"{{operation}}/{{id}}-{{slug}}\"\n",
+                "[operation.G]\nname = \"project\"\npath = {:?}\nworkspace = {{ provider = \"mock-safehouse\", branch = \"{{operation}}/{{id}}-{{slug}}\" }}\n",
                 checkout.to_string_lossy()
             ),
         )
         .unwrap();
         let roster = Roster::load(&root).unwrap();
+        let plugins = test_plugins();
         let mission = MissionStore::default()
             .create(
                 MissionId::try_new("mission-4").unwrap(),
@@ -5236,6 +5380,7 @@ station_labels = { gpu = \"yes\" }\n",
             .unwrap();
         let area = resolve_working_area(
             &roster,
+            &plugins,
             Some("G"),
             None,
             Some(&root.join("state")),
@@ -5243,16 +5388,94 @@ station_labels = { gpu = \"yes\" }\n",
         )
         .unwrap();
         let house = area.safe_house.unwrap();
-        assert_eq!(area.path, house.path.to_string_lossy());
-        assert!(house.path.is_dir());
-        let canonical_state = root.join("state").canonicalize().unwrap();
-        let canonical_worktree = house.path.canonicalize().unwrap();
-        assert!(canonical_worktree.starts_with(canonical_state));
-        assert!(!house.path.starts_with(&checkout));
-        assert_eq!(house.branch, "G/mission-4-inspect-service");
-        let reopened = SafeHouse::reopen(&checkout, &house.active_report()).unwrap();
-        assert_eq!(reopened, house);
-        assert!(!reopened.finish().unwrap().kept);
+        assert_eq!(area.path, house.path().to_string_lossy());
+        assert!(house.path().is_dir());
+        assert!(house.path().starts_with(root.join("state")));
+        assert!(!house.path().starts_with(&checkout));
+        assert_eq!(house.branch(), Some("G/mission-4-Inspect service"));
+        assert!(house.is_isolated() && house.supports_history());
+        assert!(house.changes().unwrap().is_empty());
+        let audit = station_cover_audit(&roster, Some("G"), Some(&house))
+            .unwrap()
+            .unwrap();
+        assert_eq!(audit.base, "base0");
+        assert!(!house.finish().unwrap().kept);
+        assert!(!house.path().exists());
+
+        let refused = resolve_working_area(
+            &roster,
+            &plugins,
+            Some("G"),
+            Some(checkout.to_str().unwrap()),
+            Some(&root.join("state")),
+            &mission,
+        );
+        assert!(refused.is_err(), "isolated workdirs are allocated by AI6");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_workspace_without_a_provider_works_in_place_and_has_no_cover_audit() {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = root.path().join("checkout");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            root.path().join("operations.toml"),
+            format!("[operation.G]\npath = {:?}\n", checkout.to_string_lossy()),
+        )
+        .unwrap();
+        let roster = Roster::load(root.path()).unwrap();
+        let mission = MissionStore::default()
+            .create(
+                MissionId::try_new("mission-5").unwrap(),
+                Some("G".to_owned()),
+                "Inspect".to_owned(),
+                None,
+                None,
+            )
+            .unwrap();
+        let area = resolve_working_area(&roster, &test_plugins(), Some("G"), None, None, &mission)
+            .unwrap();
+        assert_eq!(area.path, checkout.to_string_lossy());
+        assert!(area.safe_house.is_none());
+        assert!(
+            station_cover_audit(&roster, Some("G"), area.safe_house.as_ref())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_provider_without_history_leaves_cover_not_checkable() {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = root.path().join("checkout");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            root.path().join("operations.toml"),
+            format!(
+                "[operation.G]\npath = {:?}\nworkspace = {{ provider = \"mock-plain\", isolate = false }}\n",
+                checkout.to_string_lossy()
+            ),
+        )
+        .unwrap();
+        let roster = Roster::load(root.path()).unwrap();
+        let mission = MissionStore::default()
+            .create(
+                MissionId::try_new("mission-6").unwrap(),
+                Some("G".to_owned()),
+                "Inspect".to_owned(),
+                None,
+                None,
+            )
+            .unwrap();
+        let area = resolve_working_area(&roster, &test_plugins(), Some("G"), None, None, &mission)
+            .unwrap();
+        let house = area.safe_house.unwrap();
+        assert_eq!(area.path, checkout.to_string_lossy());
+        assert!(!house.is_isolated() && !house.supports_history());
+        let audit = station_cover_audit(&roster, Some("G"), Some(&house))
+            .unwrap()
+            .unwrap();
+        assert!(audit.base.is_empty());
     }
 }
