@@ -41,7 +41,12 @@ fn a_mission_works_in_a_copy_and_reports_no_history() {
     assert!(info.branch.is_none() && info.base.is_none());
     let copy = Path::new(&info.path);
     assert!(!copy.starts_with(&source));
-    assert!(copy.starts_with(fs::canonicalize(&state).unwrap()) || copy.starts_with(&state));
+    // Canonicalize both sides: Windows temp paths may be 8.3 short names or verbatim.
+    assert!(
+        fs::canonicalize(copy)
+            .unwrap()
+            .starts_with(fs::canonicalize(&state).unwrap())
+    );
     assert_eq!(fs::read_to_string(copy.join("a.txt")).unwrap(), "a\n");
     assert_eq!(
         fs::read_to_string(copy.join("nested").join("b.txt")).unwrap(),
