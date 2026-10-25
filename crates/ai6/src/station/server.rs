@@ -939,7 +939,7 @@ async fn scheduler_loop(state: DaemonState) {
         schedule_recovered_once(&state).await;
         schedule_queued_once(&state).await;
         let is_headquarters = schedule_intake_once(&state);
-        if is_headquarters && SourceDesk::has_sources(&state.roster) && desk.begin() {
+        if is_headquarters && SourceDesk::has_work(&state.roster) && desk.begin() {
             let (desk, plugins, roster, registry) = (
                 desk.clone(),
                 state.plugins.clone(),

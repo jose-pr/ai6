@@ -1,18 +1,19 @@
-//! Source polling and CX reports, run by the Station that holds the Headquarters lease.
+//! Source polling, CX reports and sleepers, run by the Station that holds the Headquarters lease.
 //!
 //! Each Operation lists its Sources under `sources.<provider>` in `operations.toml`. The
 //! desk polls each one on an interval, queues what it finds as briefs, and posts the
 //! outcome of every finished Mission back to the item it came from. Cursors live in the
 //! Registry, so a Station that takes over the Headquarters lease resumes where the last
-//! one stopped.
+//! one stopped. Authorized sleepers queue their briefs from the same pass.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::directorates::m::cover::Disclosure;
 use crate::directorates::m::roster::{Operation, Roster};
+use crate::directorates::registry::sleepers::Fire;
 use crate::directorates::registry::sources::{
     CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll,
 };
@@ -26,6 +27,8 @@ pub(crate) const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 pub(crate) const MIN_POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// How often finished Missions are checked for reports that still need posting.
 const REPORT_INTERVAL: Duration = Duration::from_secs(15);
+/// How often sleepers are checked against the clock.
+const SLEEPER_INTERVAL: Duration = Duration::from_secs(20);
 
 /// Constructs the provider for a provider ID and an Operation's settings.
 type SourceBuilder<'a> = dyn Fn(&str, &toml::Table) -> Result<Box<dyn Source>, String> + 'a;
@@ -283,11 +286,69 @@ fn report_one(
         .map_err(|error| error.to_string())
 }
 
-/// Runs polls and reports on a schedule; one pass at a time.
+/// Queues the brief of every authorized sleeper whose latest window has not fired.
+///
+/// Returns how many briefs were queued. A sleeper without an approval of its current
+/// definition is skipped and named once in `warned`.
+pub(crate) fn fire_due_sleepers(
+    registry: &FileRegistry,
+    roster: &Roster,
+    now: i64,
+    warned: &mut BTreeSet<String>,
+) -> usize {
+    let mut queued = 0;
+    for operation in roster.operations() {
+        for (name, sleeper) in &operation.sleepers {
+            let approval = match registry.sleeper_authorization(&operation.id, name) {
+                Ok(Some(approval)) if approval.fingerprint == sleeper.fingerprint() => approval,
+                Ok(_) => {
+                    if warned.insert(format!("{}/{name}", operation.id)) {
+                        eprintln!(
+                            "ai6: sleeper {name} of Operation {} waits for `ai6 sleeper authorize {} {name}`",
+                            operation.id, operation.id
+                        );
+                    }
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!("ai6: sleeper {name} of Operation {}: {error}", operation.id);
+                    continue;
+                }
+            };
+            let Some(window) = sleeper.due_window(now, approval.at) else {
+                continue;
+            };
+            match registry.fire_sleeper(&operation.id, name, sleeper, window) {
+                Ok(Fire::Queued) => {
+                    queued += 1;
+                    eprintln!(
+                        "ai6: sleeper {name} of Operation {} queued a brief",
+                        operation.id
+                    );
+                }
+                Ok(Fire::AlreadyFired) => {}
+                Err(error) => {
+                    eprintln!("ai6: sleeper {name} of Operation {}: {error}", operation.id);
+                }
+            }
+        }
+    }
+    queued
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64)
+}
+
+/// Runs polls, reports and sleepers on a schedule; one pass at a time.
 pub(crate) struct SourceDesk {
     busy: AtomicBool,
     due: Mutex<BTreeMap<(String, String), Instant>>,
     next_report: Mutex<Instant>,
+    next_sleepers: Mutex<Instant>,
+    warned: Mutex<BTreeSet<String>>,
 }
 
 impl SourceDesk {
@@ -296,6 +357,8 @@ impl SourceDesk {
             busy: AtomicBool::new(false),
             due: Mutex::new(BTreeMap::new()),
             next_report: Mutex::new(Instant::now()),
+            next_sleepers: Mutex::new(Instant::now()),
+            warned: Mutex::new(BTreeSet::new()),
         }
     }
 
@@ -308,11 +371,11 @@ impl SourceDesk {
         self.busy.store(false, Ordering::Release);
     }
 
-    /// Whether any Operation has a source, so an idle Station spawns nothing.
-    pub(crate) fn has_sources(roster: &Roster) -> bool {
+    /// Whether any Operation has a source or a sleeper, so an idle Station spawns nothing.
+    pub(crate) fn has_work(roster: &Roster) -> bool {
         roster
             .operations()
-            .any(|operation| !operation.sources.is_empty())
+            .any(|operation| !operation.sources.is_empty() || !operation.sleepers.is_empty())
     }
 
     /// Polls every source that is due and posts pending reports. Blocks on the network.
@@ -380,6 +443,20 @@ impl SourceDesk {
             .unwrap_or(false);
         if report_due {
             report_finished(registry, roster, build);
+        }
+        let sleepers_due = self
+            .next_sleepers
+            .lock()
+            .map(|mut next| {
+                let due = *next <= now;
+                if due {
+                    *next = now + SLEEPER_INTERVAL;
+                }
+                due
+            })
+            .unwrap_or(false);
+        if sleepers_due && let Ok(mut warned) = self.warned.lock() {
+            fire_due_sleepers(registry, roster, unix_seconds(), &mut warned);
         }
     }
 }
@@ -599,6 +676,98 @@ mod tests {
         assert_eq!(mine[0].branch.as_deref(), Some("agent/fix"));
         assert!(mine[0].body.contains("007"));
         assert!(mine[0].body.contains("sess-1"));
+    }
+
+    /// 2026-10-25T10:00:00Z, a Sunday.
+    const NOW: i64 = 1_792_922_400;
+
+    #[test]
+    fn an_authorized_sleeper_queues_one_brief_per_window_across_failover() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("operations.toml"),
+            "[operation.G]\nclearance = \"field\"\n\
+             [operation.G.sleepers.deps]\nschedule = \"0 3 * * *\"\ntitle = \"Update dependencies\"\n\
+             prompt = \"Update the lockfile.\"\n",
+        )
+        .unwrap();
+        let roster = Roster::load(dir.path()).unwrap();
+        let sleeper = roster.operation("G").unwrap().sleepers["deps"].clone();
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let mut warned = BTreeSet::new();
+
+        // Nothing fires before an operator approves this exact definition.
+        assert_eq!(fire_due_sleepers(&registry, &roster, NOW, &mut warned), 0);
+        assert_eq!(warned.len(), 1);
+
+        let window = sleeper.due_window(NOW, 0).unwrap();
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", window - 60)
+            .unwrap();
+        assert_eq!(fire_due_sleepers(&registry, &roster, NOW, &mut warned), 1);
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, NOW + 600, &mut warned),
+            0
+        );
+
+        // A Station that takes over the Headquarters lease evaluates the same window.
+        let takeover = FileRegistry::open(state.path());
+        let mut fresh = BTreeSet::new();
+        assert_eq!(
+            fire_due_sleepers(&takeover, &roster, NOW + 1200, &mut fresh),
+            0
+        );
+        assert_eq!(takeover.list_new().unwrap().len(), 1);
+
+        // Tomorrow's window is a new brief.
+        assert_eq!(
+            fire_due_sleepers(&takeover, &roster, NOW + 86_400, &mut fresh),
+            1
+        );
+        assert_eq!(takeover.list_new().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn editing_a_sleeper_withdraws_its_approval() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |prompt: &str| {
+            fs::write(
+                dir.path().join("operations.toml"),
+                format!(
+                    "[operation.G]\n[operation.G.sleepers.deps]\nschedule = \"0 3 * * *\"\n\
+                     title = \"t\"\nprompt = \"{prompt}\"\n"
+                ),
+            )
+            .unwrap();
+            Roster::load(dir.path()).unwrap()
+        };
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let approved = write("one");
+        let sleeper = approved.operation("G").unwrap().sleepers["deps"].clone();
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", 0)
+            .unwrap();
+        let edited = write("two");
+        let mut warned = BTreeSet::new();
+        assert_eq!(fire_due_sleepers(&registry, &edited, NOW, &mut warned), 0);
+        assert_eq!(fire_due_sleepers(&registry, &approved, NOW, &mut warned), 1);
+    }
+
+    #[test]
+    fn a_bad_schedule_fails_the_roster_load() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("operations.toml"),
+            "[operation.G]\n[operation.G.sleepers.deps]\nschedule = \"every night\"\ntitle = \"t\"\n",
+        )
+        .unwrap();
+        let error = Roster::load(dir.path()).unwrap_err().to_string();
+        assert!(
+            error.contains("sleeper") && error.contains("schedule"),
+            "{error}"
+        );
     }
 
     fn finished(ok: bool) -> FinishedSourceBrief {

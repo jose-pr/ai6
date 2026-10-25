@@ -28,6 +28,34 @@ enum Command {
         #[command(subcommand)]
         command: PeerCommand,
     },
+    /// Authorize or revoke standing orders (sleepers) configured in operations.toml.
+    Sleeper {
+        /// AI6 configuration directory containing operations.toml.
+        #[arg(long, global = true)]
+        config_dir: Option<PathBuf>,
+        #[command(subcommand)]
+        command: SleeperCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SleeperCommand {
+    /// List every sleeper and whether its current definition is authorized.
+    List,
+    /// Authorize the sleeper as it is written now; editing it later withdraws this.
+    Authorize {
+        /// Operation ID or name.
+        operation: String,
+        /// Sleeper name.
+        name: String,
+    },
+    /// Withdraw a sleeper's authorization.
+    Revoke {
+        /// Operation ID or name.
+        operation: String,
+        /// Sleeper name.
+        name: String,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -110,6 +138,19 @@ async fn main() -> ExitCode {
             }
             Err(error) => {
                 eprintln!("ai6: peer operation failed: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Sleeper {
+            config_dir,
+            command,
+        } => match sleeper_command(config_dir, command) {
+            Ok(output) => {
+                print!("{output}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("ai6: sleeper operation failed: {error}");
                 ExitCode::FAILURE
             }
         },
@@ -209,6 +250,77 @@ fn station_identity() -> Result<ai6::StationIdentity, ai6::StationIdentityError>
     let state_dir =
         ai6::station::safehouse::state_dir().map_err(|_| ai6::StationIdentityError::Path)?;
     ai6::StationIdentity::open_or_create(&state_dir)
+}
+
+fn sleeper_command(config_dir: Option<PathBuf>, command: SleeperCommand) -> Result<String, String> {
+    let config_dir = match config_dir {
+        Some(path) => path,
+        None => ai6::directorates::m::roster::config_dir().map_err(|e| e.to_string())?,
+    };
+    let roster = ai6::Roster::load(&config_dir).map_err(|e| e.to_string())?;
+    let registry = ai6::FileRegistry::from_environment().map_err(|e| e.to_string())?;
+    let find = |operation: &str, name: &str| -> Result<(String, ai6::Sleeper), String> {
+        let operation = roster.operation(operation).map_err(|e| e.to_string())?;
+        let sleeper = operation
+            .sleepers
+            .get(name)
+            .ok_or_else(|| format!("Operation {} has no sleeper {name:?}", operation.id))?;
+        Ok((operation.id.clone(), sleeper.clone()))
+    };
+    match command {
+        SleeperCommand::List => {
+            let mut output = String::new();
+            for operation in roster.operations() {
+                for (name, sleeper) in &operation.sleepers {
+                    let state = match registry
+                        .sleeper_authorization(&operation.id, name)
+                        .map_err(|e| e.to_string())?
+                    {
+                        Some(approval) if approval.fingerprint == sleeper.fingerprint() => {
+                            format!("authorized by {}", approval.authorized_by)
+                        }
+                        Some(_) => "changed since it was authorized".to_owned(),
+                        None => "waiting for authorization".to_owned(),
+                    };
+                    output.push_str(&format!(
+                        "{} {name}  [{}]  {}  {state}\n",
+                        operation.id, sleeper.schedule, sleeper.title
+                    ));
+                }
+            }
+            if output.is_empty() {
+                output.push_str("No sleepers are configured.\n");
+            }
+            Ok(output)
+        }
+        SleeperCommand::Authorize { operation, name } => {
+            let (operation, sleeper) = find(&operation, &name)?;
+            let by = std::env::var("USER")
+                .or_else(|_| std::env::var("USERNAME"))
+                .unwrap_or_else(|_| "operator".to_owned());
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs() as i64);
+            registry
+                .authorize_sleeper(&operation, &name, &sleeper, &by, now)
+                .map_err(|e| e.to_string())?;
+            Ok(format!(
+                "Authorized sleeper {name} of Operation {operation}: [{}] {}\n",
+                sleeper.schedule, sleeper.title
+            ))
+        }
+        SleeperCommand::Revoke { operation, name } => {
+            let (operation, _) = find(&operation, &name)?;
+            let had = registry
+                .revoke_sleeper(&operation, &name)
+                .map_err(|e| e.to_string())?;
+            Ok(if had {
+                format!("Revoked sleeper {name} of Operation {operation}\n")
+            } else {
+                format!("Sleeper {name} of Operation {operation} was not authorized\n")
+            })
+        }
+    }
 }
 
 fn peer_command(command: PeerCommand) -> Result<String, ai6::StationIdentityError> {

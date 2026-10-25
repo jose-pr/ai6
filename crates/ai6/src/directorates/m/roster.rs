@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
+use crate::directorates::registry::sleepers::Sleeper;
 
 const AGENTS_FILE: &str = "agents.toml";
 const OPERATIONS_FILE: &str = "operations.toml";
@@ -118,6 +119,8 @@ pub struct Operation {
     pub on_blown: String,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
+    /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
+    pub sleepers: BTreeMap<String, Sleeper>,
 }
 
 /// How an Operation's Missions get their working directory (`workspace = { .. }`).
@@ -455,6 +458,7 @@ struct OperationDefinition {
     cover_identity: Option<CoverIdentity>,
     on_blown: String,
     sources: toml::Table,
+    sleepers: BTreeMap<String, Sleeper>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -551,7 +555,28 @@ impl OperationDefinition {
                 self.on_blown
             },
             sources: self.sources,
+            sleepers: self.sleepers,
         };
+        for (name, sleeper) in &operation.sleepers {
+            let valid_name = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
+            if !valid_name {
+                return Err(error(format!(
+                    "{}: Operation {:?}: sleeper name {name:?} may use only letters, digits, '-' and '_'",
+                    source.display(),
+                    operation.id
+                )));
+            }
+            sleeper.validate().map_err(|e| {
+                error(format!(
+                    "{}: Operation {:?}: sleeper {name:?}: {e}",
+                    source.display(),
+                    operation.id
+                ))
+            })?;
+        }
         validate_clearance(&operation.clearance).map_err(|e| {
             error(format!(
                 "{}: Operation {:?}: {e}",
