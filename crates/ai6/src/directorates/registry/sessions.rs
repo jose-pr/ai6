@@ -13,6 +13,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::directorates::medical::exposure::Exposure;
+
 use super::store::{
     FileRegistry, invalid_data, read_headquarters, registry_lock, unix_time, write_atomic,
 };
@@ -20,6 +22,7 @@ use super::store::{
 const MAX_SESSION_RECORD_BYTES: u64 = 65_536;
 const MAX_SESSIONS: usize = 100_000;
 const MAX_SESSION_ID_BYTES: usize = 128;
+const MAX_EXPOSURES_PER_SESSION: usize = 32;
 
 /// Where a Session stands, as far as the Registry knows.
 #[non_exhaustive]
@@ -61,6 +64,10 @@ pub struct SessionRecord {
     pub lease_expires: f64,
     /// The fencing token of the current lease; it only grows.
     pub fence: u64,
+    /// The untrusted input the Session has read; it only grows and a later attempt at the
+    /// Mission inherits it. Empty in records written before exposure was tracked.
+    #[serde(default)]
+    pub exposure: Vec<Exposure>,
 }
 
 impl SessionRecord {
@@ -71,7 +78,7 @@ impl SessionRecord {
 }
 
 /// A Session to record, built with defaults for the optional parts.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NewSession {
     session_id: String,
     mission_id: String,
@@ -80,6 +87,7 @@ pub struct NewSession {
     theater: Option<String>,
     attempt: u32,
     predecessor: Option<String>,
+    exposure: Vec<Exposure>,
 }
 
 impl NewSession {
@@ -97,7 +105,14 @@ impl NewSession {
             theater: None,
             attempt: 1,
             predecessor: None,
+            exposure: Vec::new(),
         }
+    }
+
+    /// Records the exposure the Session starts with, inherited from its Mission.
+    pub fn with_exposure(mut self, exposure: Vec<Exposure>) -> Self {
+        self.exposure = exposure;
+        self
     }
 
     /// Records the provider's Session ID when it is already known.
@@ -126,9 +141,16 @@ pub struct SessionUpdate {
     provider_session_id: Option<String>,
     status: Option<SessionStatus>,
     parked_until: Option<f64>,
+    exposure: Vec<Exposure>,
 }
 
 impl SessionUpdate {
+    /// Adds exposures the record does not have yet; an exposure is never removed.
+    pub fn exposed(mut self, exposure: Vec<Exposure>) -> Self {
+        self.exposure = exposure;
+        self
+    }
+
     /// Records the provider's Session ID.
     pub fn provider_session(mut self, id: impl Into<String>) -> Self {
         self.provider_session_id = Some(id.into());
@@ -264,6 +286,7 @@ impl FileRegistry {
             parked_until: None,
             lease_expires: now + ttl.as_secs_f64(),
             fence: self.headquarters_term()?.max(1),
+            exposure: new.exposure,
         };
         write_session(&path, &record)?;
         Ok(record)
@@ -274,6 +297,34 @@ impl FileRegistry {
         validate_session_id(id)?;
         let _lock = registry_lock(&self.root)?;
         read_session(&self.session_path(id))
+    }
+
+    /// Every way any Session of a Mission was exposed, earliest first, one entry per source.
+    ///
+    /// A later attempt inherits this, so exposure cannot be shed by starting again.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Session records cannot be read.
+    pub fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
+        let mut merged: Vec<Exposure> = Vec::new();
+        for record in self
+            .sessions()?
+            .into_iter()
+            .filter(|record| record.mission_id == mission_id)
+        {
+            for exposure in record.exposure {
+                match merged
+                    .iter_mut()
+                    .find(|known| known.source == exposure.source)
+                {
+                    Some(known) => known.at = known.at.min(exposure.at),
+                    None => merged.push(exposure),
+                }
+            }
+        }
+        merged.sort_by(|left, right| left.at.total_cmp(&right.at));
+        Ok(merged)
     }
 
     /// Lists every Session record in stable ID order.
@@ -404,6 +455,16 @@ impl FileRegistry {
         }
         if let Some(provider) = update.provider_session_id {
             record.provider_session_id = Some(provider);
+        }
+        for exposure in update.exposure {
+            if record.exposure.len() < MAX_EXPOSURES_PER_SESSION
+                && !record
+                    .exposure
+                    .iter()
+                    .any(|known| known.source == exposure.source)
+            {
+                record.exposure.push(exposure);
+            }
         }
         if let Some(status) = update.status {
             record.status = status;

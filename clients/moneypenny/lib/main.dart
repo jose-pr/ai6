@@ -102,6 +102,7 @@ class MissionBoard extends ChangeNotifier {
           sessionId: 'preview-session-008',
           state: 'blocked',
           sequence: 7,
+          exposure: ['tool:WebFetch'],
         ),
         SessionSummary(
           operationId: 'L',
@@ -1183,6 +1184,7 @@ class SessionSummary {
     required this.sessionId,
     required this.state,
     required this.sequence,
+    this.exposure = const [],
   });
 
   final String operationId;
@@ -1191,12 +1193,16 @@ class SessionSummary {
   final String? state;
   final int sequence;
 
+  /// The untrusted input the Session has read (`brief:source`, `tool:WebFetch`, ...).
+  final List<String> exposure;
+
   SessionSummary copyWith({String? state, int? sequence}) => SessionSummary(
     operationId: operationId,
     missionId: missionId,
     sessionId: sessionId,
     state: state ?? this.state,
     sequence: sequence ?? this.sequence,
+    exposure: exposure,
   );
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
@@ -1205,6 +1211,10 @@ class SessionSummary {
     sessionId: json['session_id'] as String,
     state: json['state'] as String?,
     sequence: json['sequence'] as int,
+    exposure: [
+      for (final source in (json['exposure'] as List<dynamic>? ?? const []))
+        source as String,
+    ],
   );
 }
 
@@ -3394,6 +3404,16 @@ class _SessionRow extends StatelessWidget {
                 ],
               ),
             ),
+            if (session.exposure.isNotEmpty) ...[
+              Tooltip(
+                message: 'Read untrusted input: ${session.exposure.join(', ')}',
+                child: const Chip(
+                  label: Text('EXPOSED'),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
             Chip(
               label: Text(state.toUpperCase()),
               visualDensity: VisualDensity.compact,

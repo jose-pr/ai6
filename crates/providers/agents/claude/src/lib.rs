@@ -425,6 +425,7 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
         data: None,
         limit: None,
         usage: None,
+        tools: Vec::new(),
     }
 }
 
@@ -500,11 +501,14 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
             data: Some(line),
             limit: Some(limit),
             usage: decode_usage(value),
+            tools: Vec::new(),
         });
     }
+    let tools = decode_tools(value);
     let kind = match event_type {
         "result" => "completed",
         "error" => "failed",
+        "assistant" if !tools.is_empty() => "tool",
         "assistant" | "stream_event" => "text",
         other => other,
     };
@@ -524,7 +528,24 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
         data: Some(line),
         limit: None,
         usage: decode_usage(value),
+        tools,
     })
+}
+
+/// The tools an `assistant` message calls: the `name` of each `tool_use` content block.
+fn decode_tools(value: &Value) -> Vec<String> {
+    if value.get("type").and_then(Value::as_str) != Some("assistant") {
+        return Vec::new();
+    }
+    value
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .filter_map(|block| block.get("name").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderError> {
@@ -1202,6 +1223,25 @@ mod tests {
             .usage
             .unwrap();
         assert_eq!((usage.input, usage.cost_micro_usd), (0, 1_500_000));
+    }
+
+    #[test]
+    fn an_assistant_message_names_the_tools_it_calls() {
+        let value = json!({
+            "type": "assistant",
+            "message": { "content": [
+                { "type": "text", "text": "Fetching the page" },
+                { "type": "tool_use", "id": "toolu_1", "name": "WebFetch", "input": {} },
+                { "type": "tool_use", "id": "toolu_2", "name": "mcp__ai6-cables__read_cables", "input": {} }
+            ] }
+        });
+        let event = decode_event(&value, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, "tool");
+        assert_eq!(event.text.as_deref(), Some("Fetching the page"));
+        assert_eq!(event.tools, ["WebFetch", "mcp__ai6-cables__read_cables"]);
+        let plain = json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": "hi" }] } });
+        let event = decode_event(&plain, b"{}".to_vec()).unwrap();
+        assert_eq!((event.kind.as_str(), event.tools.len()), ("text", 0));
     }
 
     #[test]

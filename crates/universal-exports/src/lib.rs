@@ -543,6 +543,7 @@ impl Gateway {
                 session_id: session_id.to_string(),
                 state: session.lifecycle_state.clone(),
                 sequence: session.lifecycle_sequence,
+                exposure: Vec::new(),
             })
             .collect::<Vec<_>>();
         sessions.sort_by(|left, right| {
@@ -1609,9 +1610,24 @@ async fn authorized_board_sessions(
         .authorizer
         .clone();
     let sessions = gateway.board_sessions().await;
+    let registry = gateway.registry.clone();
     let visible = tokio::task::spawn_blocking(move || {
+        // Exposure lives in the shared Session records, keyed by the provider's Session ID.
+        let exposure: BTreeMap<String, Vec<String>> = registry
+            .and_then(|registry| registry.sessions().ok())
+            .into_iter()
+            .flatten()
+            .filter(|record| !record.exposure.is_empty())
+            .filter_map(|record| {
+                let sources = record.exposure.into_iter().map(|e| e.source).collect();
+                Some((record.provider_session_id?, sources))
+            })
+            .collect();
         let mut visible = Vec::new();
-        for session in sessions {
+        for mut session in sessions {
+            if let Some(sources) = exposure.get(&session.session_id) {
+                session.exposure.clone_from(sources);
+            }
             let decision = authorizer
                 .authorize(AuthorizationRequest {
                     person: person.clone(),
@@ -2667,6 +2683,9 @@ pub struct BoardSession {
     pub state: Option<String>,
     /// Sequence of the latest lifecycle event, or zero before one arrives.
     pub sequence: u64,
+    /// The untrusted input the Session has read (`brief:source`, `cable:SENDER`,
+    /// `tool:NAME`, `review`), from its Registry record; empty when it has read none.
+    pub exposure: Vec<String>,
 }
 
 /// One registered Mission with the provider Sessions known to Universal Exports.
@@ -4928,6 +4947,18 @@ mod tests {
             .unwrap();
         assert_eq!(hidden_mission.status(), StatusCode::NOT_FOUND);
 
+        let registry = FileRegistry::open(directory.path());
+        registry
+            .open_session(
+                ai6::NewSession::new("record-g", "mission-g", "worker")
+                    .with_provider_session("session-g")
+                    .with_exposure(vec![ai6::Exposure {
+                        source: "tool:WebFetch".to_owned(),
+                        at: 1_790_000_000.0,
+                    }]),
+                std::time::Duration::from_secs(60),
+            )
+            .unwrap();
         let viewer_board = client
             .get(format!("{base}/v1/board"))
             .bearer_auth(&viewer_token)
@@ -4938,6 +4969,10 @@ mod tests {
         let viewer_board: serde_json::Value = viewer_board.json().await.unwrap();
         assert_eq!(viewer_board.as_array().unwrap().len(), 1);
         assert_eq!(viewer_board[0]["operation_id"], "G");
+        assert_eq!(
+            viewer_board[0]["exposure"],
+            serde_json::json!(["tool:WebFetch"])
+        );
 
         let viewer_missions = client
             .get(format!("{base}/v1/missions"))

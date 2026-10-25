@@ -4,10 +4,16 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use super::{DaemonState, queue_event, session_hold, sync_session_record};
+use crate::directorates::m::mission::Mission;
+use crate::directorates::medical::exposure::{
+    BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, Exposure, ExposureGate, tool_source,
+};
 use crate::directorates::medical::usage::{
     Budget, BudgetBreach, BudgetLevel, BudgetScope, MissionUsage, UsageTotals, UsageTracker,
 };
-use crate::directorates::registry::store::AuditRecord;
+use crate::directorates::registry::sessions::SessionUpdate;
+use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
+use crate::directorates::registry::store::{AuditRecord, Brief};
 use crate::directorates::section_00::agent::{AgentEvent, AgentSession, TokenUsage};
 
 /// The `blocked_reason` of a Mission a budget stopped.
@@ -15,6 +21,9 @@ pub(super) const BUDGET_REASON: &str = "budget";
 
 /// The event kind that reports a budget warning or stop.
 pub(super) const BUDGET_EVENT: &str = "budget";
+
+/// The event kind that reports a new way a Session was exposed; its text is the source.
+pub(super) const EXPOSED_EVENT: &str = "exposed";
 
 /// What one recorded usage report left behind.
 pub(super) struct Recorded {
@@ -166,6 +175,7 @@ fn announce(
             data: None,
             limit: None,
             usage: None,
+            tools: Vec::new(),
         },
     );
     let record = AuditRecord {
@@ -181,6 +191,120 @@ fn announce(
     };
     if let Err(error) = state.intake.record_audit(&record) {
         eprintln!("ai6: budget audit record was not written: {error}");
+    }
+}
+
+/// The exposure gate for a Mission's next Session: the Operation's policy, starting from
+/// what the Mission came from and what any earlier Session of it read.
+pub(super) fn open_gate(state: &DaemonState, mission: &Mission) -> ExposureGate {
+    let policy = mission
+        .operation_id
+        .as_deref()
+        .and_then(|id| state.roster.operation(id).ok())
+        .map(|operation| operation.exposure.clone())
+        .unwrap_or_default();
+    let now = state.clock.now() as f64;
+    let mut inherited = state
+        .intake
+        .mission_exposure(mission.mission_id.as_str())
+        .unwrap_or_else(|error| {
+            eprintln!(
+                "ai6: earlier exposure of Mission {:?} unreadable: {error}",
+                mission.mission_id.as_str()
+            );
+            Vec::new()
+        });
+    for source in &mission.exposure {
+        if !inherited.iter().any(|known| &known.source == source) {
+            inherited.push(Exposure {
+                source: source.clone(),
+                at: now,
+            });
+        }
+    }
+    ExposureGate::new(policy, inherited)
+}
+
+/// What a Mission made from `brief` has already read: the Source item's text, or the
+/// exposure the proposing Session carried into the proposal.
+pub(super) fn brief_exposure(brief: &Brief) -> Vec<String> {
+    let mut sources = Vec::new();
+    if brief.source.starts_with(SOURCE_BRIEF_PREFIX) {
+        sources.push(BRIEF_SOURCE.to_owned());
+    }
+    if let Some(inherited) = brief
+        .data
+        .get(BRIEF_EXPOSURE_KEY)
+        .and_then(serde_json::Value::as_array)
+    {
+        sources.extend(
+            inherited
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|source| !source.is_empty() && source.len() <= 128)
+                .map(str::to_owned),
+        );
+    }
+    sources.truncate(32);
+    sources
+}
+
+/// Marks the Session exposed by any tool in `event` the Operation lists.
+pub(super) fn expose_by_tools(state: &DaemonState, gate: &ExposureGate, event: &AgentEvent) {
+    for tool in &event.tools {
+        if gate.policy().exposed_by_tool(tool) {
+            gate.mark(&tool_source(tool), state.clock.now() as f64);
+        }
+    }
+}
+
+/// Writes exposure that changed to the Session's Registry record and announces each new
+/// source as an `exposed` event. `announced` counts the sources already announced.
+pub(super) fn sync_exposure(
+    state: &DaemonState,
+    mission_id: &str,
+    gate: &ExposureGate,
+    announced: &mut usize,
+) {
+    let Some(exposures) = gate.take_changes() else {
+        return;
+    };
+    for exposure in exposures.iter().skip(*announced) {
+        queue_event(
+            state,
+            mission_id,
+            AgentEvent {
+                kind: EXPOSED_EVENT.to_owned(),
+                text: Some(exposure.source.clone()),
+                data: None,
+                limit: None,
+                usage: None,
+                tools: Vec::new(),
+            },
+        );
+    }
+    *announced = exposures.len();
+    persist_exposure(state, mission_id, &exposures);
+}
+
+/// Adds `exposures` to the Mission's Session record, when this Station holds one.
+pub(super) fn persist_exposure(state: &DaemonState, mission_id: &str, exposures: &[Exposure]) {
+    if exposures.is_empty() {
+        return;
+    }
+    let Some(hold) = session_hold(state, mission_id) else {
+        return;
+    };
+    if let Err(error) = state.intake.update_session(
+        &hold.id,
+        &state.station_id,
+        hold.fence,
+        SessionUpdate::default().exposed(exposures.to_vec()),
+    ) {
+        eprintln!(
+            "ai6: exposure of Session {:?} not recorded: {error}",
+            hold.id
+        );
     }
 }
 

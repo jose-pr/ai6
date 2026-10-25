@@ -1,5 +1,6 @@
 //! Per-Session authenticated MCP tools for the AI6 Cable relay.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use axum::extract::State;
@@ -19,7 +20,11 @@ use subtle::ConstantTimeEq;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use super::unix_now;
 use crate::directorates::m::identity::{MissionId, SessionId};
+use crate::directorates::medical::exposure::{
+    BRIEF_EXPOSURE_KEY, ExposureGate, Restriction, cable_source,
+};
 use crate::directorates::registry::cables::{
     CableEndpoint, CablePrincipal, CableRelay, CableScope, CableSendRequest, CableTarget,
 };
@@ -39,11 +44,29 @@ pub(super) struct Endpoint {
 }
 
 impl Endpoint {
+    #[cfg(test)]
     pub(super) async fn start(
         relay: Arc<CableRelay>,
         identity: CablePrincipal,
         intake: Arc<FileRegistry>,
         allow_mission_proposals: bool,
+    ) -> std::io::Result<Self> {
+        Self::start_with_exposure(
+            relay,
+            identity,
+            intake,
+            allow_mission_proposals,
+            ExposureGate::default(),
+        )
+        .await
+    }
+
+    pub(super) async fn start_with_exposure(
+        relay: Arc<CableRelay>,
+        identity: CablePrincipal,
+        intake: Arc<FileRegistry>,
+        allow_mission_proposals: bool,
+        exposure: ExposureGate,
     ) -> std::io::Result<Self> {
         let principal = Arc::new(RwLock::new(None));
         let token = Uuid::new_v4().to_string();
@@ -54,12 +77,14 @@ impl Endpoint {
                 let relay = relay.clone();
                 let principal = principal.clone();
                 let intake = intake.clone();
+                let exposure = exposure.clone();
                 move || {
                     Ok(CableTools::new(
                         relay.clone(),
                         principal.clone(),
                         intake.clone(),
                         allow_mission_proposals,
+                        exposure.clone(),
                     ))
                 }
             },
@@ -384,6 +409,207 @@ mod tests {
         receiver_client.cancel().await.unwrap();
     }
 
+    async fn call(
+        client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
+        tool: &'static str,
+        arguments: serde_json::Value,
+    ) -> String {
+        let request = CallToolRequestParams::new(tool)
+            .with_arguments(serde_json::from_value(arguments).unwrap());
+        let result = client.call_tool(request).await.unwrap();
+        let Some(ContentBlock::Text(text)) = result.content.first() else {
+            panic!("{tool} should return text");
+        };
+        text.text.to_string()
+    }
+
+    #[tokio::test]
+    async fn an_exposed_session_only_replies_and_its_reply_exposes_the_reader() {
+        use crate::directorates::medical::exposure::{BRIEF_SOURCE, ExposureGate, ExposurePolicy};
+        use crate::directorates::registry::sessions::NewSession;
+
+        let directory = tempfile::tempdir().unwrap();
+        let station =
+            CableTarget::try_new(CableScope::Station, Some("station-a".to_owned())).unwrap();
+        let grants = ["007", "008"]
+            .into_iter()
+            .flat_map(|agent| {
+                [CableAction::Send, CableAction::Receive].map(|action| {
+                    CableGrant::try_new(agent.to_owned(), action, station.clone()).unwrap()
+                })
+            })
+            .collect();
+        let registry = Arc::new(FileRegistry::open(directory.path()));
+        let relay = Arc::new(CableRelay::new(
+            registry.clone(),
+            CablePolicy::try_new(grants, BTreeMap::new()).unwrap(),
+            Vec::new,
+            BTreeMap::new(),
+        ));
+        // 007's Mission came from a Source item; its Session record says so.
+        let exposed_gate = ExposureGate::new(ExposurePolicy::default(), Vec::new());
+        exposed_gate.mark(BRIEF_SOURCE, 1.0);
+        registry
+            .open_session(
+                NewSession::new("session-record-7", "mission-7", "station-a")
+                    .with_exposure(exposed_gate.exposures()),
+                std::time::Duration::from_secs(60),
+            )
+            .unwrap();
+        let clean_gate = ExposureGate::new(ExposurePolicy::default(), Vec::new());
+        let mut exposed = Endpoint::start_with_exposure(
+            relay.clone(),
+            endpoint_identity("007", "mission-7"),
+            registry.clone(),
+            false,
+            exposed_gate.clone(),
+        )
+        .await
+        .unwrap();
+        let mut clean = Endpoint::start_with_exposure(
+            relay,
+            endpoint_identity("008", "mission-8"),
+            registry,
+            false,
+            clean_gate.clone(),
+        )
+        .await
+        .unwrap();
+        exposed
+            .bind_session(Some(&SessionId::try_new("session-7").unwrap()))
+            .unwrap();
+        clean
+            .bind_session(Some(&SessionId::try_new("session-8").unwrap()))
+            .unwrap();
+        let connect = |endpoint: &Endpoint| {
+            StreamableHttpClientTransport::from_config(
+                StreamableHttpClientTransportConfig::with_uri(endpoint.url.clone())
+                    .auth_header(endpoint.token.clone()),
+            )
+        };
+        let exposed_client = ().serve(connect(&exposed)).await.unwrap();
+        let clean_client = ().serve(connect(&clean)).await.unwrap();
+
+        // A clean Session starts a conversation; the exposed one may answer it only.
+        let sent = call(
+            &clean_client,
+            "send_cable",
+            serde_json::json!({
+                "scope": "agent", "target": "007", "body": "status?", "idempotency_key": "k1"
+            }),
+        )
+        .await;
+        let cable_id = serde_json::from_str::<serde_json::Value>(&sent).unwrap()["cable_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let refused = call(
+            &exposed_client,
+            "send_cable",
+            serde_json::json!({
+                "scope": "agent", "target": "008", "body": "unprompted", "idempotency_key": "k2"
+            }),
+        )
+        .await;
+        assert!(
+            refused.contains("exposed") && refused.contains(BRIEF_SOURCE),
+            "{refused}"
+        );
+
+        let inbox = call(&exposed_client, "read_cables", serde_json::json!({})).await;
+        assert!(inbox.contains("status?"));
+        assert_eq!(
+            exposed_gate.exposures().len(),
+            1,
+            "a clean sender in the same Operation adds no exposure"
+        );
+        assert!(!clean_gate.is_exposed());
+        let replied = call(
+            &exposed_client,
+            "reply_to_cable",
+            serde_json::json!({ "cable_id": cable_id, "body": "fine", "idempotency_key": "k3" }),
+        )
+        .await;
+        assert!(replied.contains("cable_id"), "{replied}");
+
+        // Whoever reads the exposed Session's reply is exposed by it.
+        let reply = call(&clean_client, "read_cables", serde_json::json!({})).await;
+        assert!(reply.contains("fine"));
+        let sources: Vec<_> = clean_gate
+            .exposures()
+            .into_iter()
+            .map(|exposure| exposure.source)
+            .collect();
+        assert_eq!(sources, ["cable:007"]);
+        exposed_client.cancel().await.unwrap();
+        clean_client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn observe_marks_an_exposed_session_without_restricting_it() {
+        use crate::directorates::medical::exposure::{
+            ExposureGate, ExposurePolicy, ExposurePreset, REVIEW,
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let station =
+            CableTarget::try_new(CableScope::Station, Some("station-a".to_owned())).unwrap();
+        let grants = ["007", "008"]
+            .into_iter()
+            .flat_map(|agent| {
+                [CableAction::Send, CableAction::Receive].map(|action| {
+                    CableGrant::try_new(agent.to_owned(), action, station.clone()).unwrap()
+                })
+            })
+            .collect();
+        let registry = Arc::new(FileRegistry::open(directory.path()));
+        let relay = Arc::new(CableRelay::new(
+            registry.clone(),
+            CablePolicy::try_new(grants, BTreeMap::new()).unwrap(),
+            Vec::new,
+            BTreeMap::new(),
+        ));
+        let gate = ExposureGate::new(ExposurePolicy::preset(ExposurePreset::Observe), Vec::new());
+        gate.mark(REVIEW, 1.0);
+        let mut peer = Endpoint::start(
+            relay.clone(),
+            endpoint_identity("008", "mission-8"),
+            registry.clone(),
+            false,
+        )
+        .await
+        .unwrap();
+        peer.bind_session(Some(&SessionId::try_new("session-8").unwrap()))
+            .unwrap();
+        let mut endpoint = Endpoint::start_with_exposure(
+            relay,
+            endpoint_identity("007", "mission-7"),
+            registry,
+            false,
+            gate,
+        )
+        .await
+        .unwrap();
+        endpoint
+            .bind_session(Some(&SessionId::try_new("session-7").unwrap()))
+            .unwrap();
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(endpoint.url.clone())
+                .auth_header(endpoint.token.clone()),
+        );
+        let client = ().serve(transport).await.unwrap();
+        let sent = call(
+            &client,
+            "send_cable",
+            serde_json::json!({
+                "scope": "agent", "target": "008", "body": "hello", "idempotency_key": "k1"
+            }),
+        )
+        .await;
+        assert!(sent.contains("cable_id"), "{sent}");
+        client.cancel().await.unwrap();
+    }
+
     #[tokio::test]
     async fn scoped_mcp_approver_lists_and_releases_a_held_cable() {
         let directory = tempfile::tempdir().unwrap();
@@ -554,6 +780,7 @@ struct CableTools {
     principal: Arc<RwLock<Option<CablePrincipal>>>,
     intake: Arc<FileRegistry>,
     allow_mission_proposals: bool,
+    exposure: ExposureGate,
     tool_router: ToolRouter<Self>,
 }
 
@@ -563,12 +790,14 @@ impl CableTools {
         principal: Arc<RwLock<Option<CablePrincipal>>>,
         intake: Arc<FileRegistry>,
         allow_mission_proposals: bool,
+        exposure: ExposureGate,
     ) -> Self {
         Self {
             relay,
             principal,
             intake,
             allow_mission_proposals,
+            exposure,
             tool_router: Self::tool_router(),
         }
     }
@@ -675,7 +904,21 @@ impl CableTools {
             stations: Vec::new(),
             priority: args.priority,
             url: None,
-            data: Default::default(),
+            data: if self.exposure.restricts(Restriction::Proposals) {
+                // The proposal inherits the proposer's exposure and is never auto-promoted.
+                BTreeMap::from([(
+                    BRIEF_EXPOSURE_KEY.to_owned(),
+                    serde_json::json!(
+                        self.exposure
+                            .exposures()
+                            .into_iter()
+                            .map(|exposure| exposure.source)
+                            .collect::<Vec<_>>()
+                    ),
+                )])
+            } else {
+                BTreeMap::new()
+            },
             created: String::new(),
             version: 1,
         };
@@ -744,6 +987,17 @@ impl CableTools {
         let Ok(principal) = self.principal() else {
             return "Cable identity is unavailable".to_owned();
         };
+        if self.exposure.restricts(Restriction::Cables) {
+            return format!(
+                "This Session is exposed to untrusted input ({}), so it may only reply to a delivered Cable with reply_to_cable",
+                self.exposure
+                    .exposures()
+                    .iter()
+                    .map(|exposure| exposure.source.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         let scope = match args.scope.as_str() {
             "agent" => CableScope::Agent,
             "station" => CableScope::Station,
@@ -781,7 +1035,23 @@ impl CableTools {
         };
         let limit = args.0.limit.unwrap_or(20).clamp(1, 1000);
         let relay = self.relay.clone();
-        match tokio::task::spawn_blocking(move || relay.inbox(&principal, limit)).await {
+        let (exposure, intake) = (self.exposure.clone(), self.intake.clone());
+        let read = move || {
+            let deliveries = relay.inbox(&principal, limit)?;
+            for delivery in &deliveries {
+                let from_elsewhere = delivery.from_operation != principal.operation();
+                let from_exposed = delivery.mission_id.as_deref().is_some_and(|mission| {
+                    intake
+                        .mission_exposure(mission)
+                        .is_ok_and(|exposed| !exposed.is_empty())
+                });
+                if from_elsewhere || from_exposed {
+                    exposure.mark(&cable_source(&delivery.from_agent), unix_now());
+                }
+            }
+            Ok::<_, crate::directorates::registry::cables::CableRelayError>(deliveries)
+        };
+        match tokio::task::spawn_blocking(read).await {
             Ok(Ok(deliveries)) => serde_json::to_string(&deliveries)
                 .unwrap_or_else(|_| "Cable result could not be encoded".to_owned()),
             Ok(Err(_)) | Err(_) => "Cable inbox is unavailable".to_owned(),

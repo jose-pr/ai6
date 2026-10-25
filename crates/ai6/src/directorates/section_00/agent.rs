@@ -118,6 +118,8 @@ pub struct AgentEvent {
     pub limit: Option<UsageLimit>,
     /// Token usage and cost the provider reported with this event.
     pub usage: Option<TokenUsage>,
+    /// Names of the tools the event calls, as the harness names them (`WebFetch`).
+    pub tools: Vec<String>,
 }
 
 /// Starts or resumes the configured Agent implementation.

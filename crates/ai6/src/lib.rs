@@ -31,6 +31,10 @@ pub use directorates::m::theaters::{
     LOCAL_THEATER, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind, TheaterSummary,
     Theaters,
 };
+pub use directorates::medical::exposure::{
+    BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure, ExposureDefinition,
+    ExposureGate, ExposurePolicy, ExposurePreset, REVIEW, Restriction, cable_source, tool_source,
+};
 pub use directorates::medical::usage::{
     Budget, BudgetBreach, BudgetDefinition, BudgetLevel, BudgetPreset, BudgetScope,
     DEFAULT_WARN_AT_PERMILLE, MissionUsage, UsageTotals, UsageTracker, micro_usd, utc_day,

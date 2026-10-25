@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
+use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
 use crate::directorates::registry::sleepers::Sleeper;
@@ -131,6 +132,8 @@ pub struct Operation {
     pub limit_fallback_secs: u64,
     /// Spending limits for this Operation's Missions; none is set unless configured.
     pub budget: Budget,
+    /// What a Session may do once it has read untrusted input; strict unless configured.
+    pub exposure: ExposurePolicy,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
@@ -483,6 +486,7 @@ struct OperationDefinition {
     on_limit: OnLimit,
     limit_fallback_secs: Option<u64>,
     budget: BudgetDefinition,
+    exposure: ExposureDefinition,
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
 }
@@ -542,6 +546,9 @@ impl OperationDefinition {
         let budget = self.budget.resolve().map_err(|message| {
             error(format!("{}: Operation {id:?}: {message}", source.display()))
         })?;
+        let exposure = self.exposure.resolve().map_err(|message| {
+            error(format!("{}: Operation {id:?}: {message}", source.display()))
+        })?;
         let operation = Operation {
             id,
             name: self.name,
@@ -589,6 +596,7 @@ impl OperationDefinition {
                 .limit_fallback_secs
                 .unwrap_or(DEFAULT_LIMIT_FALLBACK_SECS),
             budget,
+            exposure,
             sources: self.sources,
             sleepers: self.sleepers,
         };

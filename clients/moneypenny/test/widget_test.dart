@@ -736,6 +736,7 @@ void main() {
               'session_id': 'claude-session-789',
               'state': 'parked',
               'sequence': 3,
+              'exposure': ['brief:source', 'tool:WebFetch'],
             },
           ]),
           200,
@@ -755,6 +756,11 @@ void main() {
     expect(find.text('WORKING'), findsOneWidget);
     expect(find.text('BLOCKED'), findsOneWidget);
     expect(find.text('PARKED'), findsOneWidget);
+    expect(find.text('EXPOSED'), findsOneWidget);
+    expect(
+      find.byTooltip('Read untrusted input: brief:source, tool:WebFetch'),
+      findsOneWidget,
+    );
 
     await tester.tap(navLabel('Stations'));
     await tester.pumpAndSettle();

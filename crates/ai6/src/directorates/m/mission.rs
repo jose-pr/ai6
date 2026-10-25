@@ -67,6 +67,10 @@ pub struct Mission {
     /// Agent or the terminal is what is waiting. Cleared by the next state change.
     #[serde(default)]
     pub blocked_reason: Option<String>,
+    /// Untrusted input the Mission itself came from (`brief:source`, or the exposure of the
+    /// Session that proposed it); every Session of the Mission starts exposed by it.
+    #[serde(default)]
+    pub exposure: Vec<String>,
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -190,6 +194,7 @@ impl MissionStore {
             revision: 1,
             parked_until: None,
             blocked_reason: None,
+            exposure: Vec::new(),
         };
         let mut next = self.missions.clone();
         next.insert(key, mission.clone());
@@ -315,6 +320,23 @@ impl MissionStore {
         let updated = mission.clone();
         self.commit(next)?;
         Ok(updated)
+    }
+
+    /// Records the untrusted input the Mission came from; it only grows.
+    pub fn expose(&mut self, mission_id: &str, sources: &[String]) -> Result<(), MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        let before = mission.exposure.len();
+        for source in sources {
+            if !mission.exposure.contains(source) {
+                mission.exposure.push(source.clone());
+            }
+        }
+        if mission.exposure.len() == before {
+            return Ok(());
+        }
+        mission.revision += 1;
+        self.commit(next)
     }
 
     /// Blocks an active Mission because AI6 stopped it, recording `reason`.

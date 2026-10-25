@@ -374,6 +374,26 @@ fn decode_usage(message: &Value) -> Option<TokenUsage> {
     })
 }
 
+/// The tool an `item/started` notification begins: a web search, or an MCP or dynamic
+/// tool call, named the way Claude Code names it (`WebSearch`, or the tool's own name).
+fn decode_tools(message: &Value) -> Vec<String> {
+    if message.get("method").and_then(Value::as_str) != Some("item/started") {
+        return Vec::new();
+    }
+    let item = message.pointer("/params/item");
+    let name = match item
+        .and_then(|item| item.get("type"))
+        .and_then(Value::as_str)
+    {
+        Some("webSearch") => Some("WebSearch"),
+        Some("mcpToolCall" | "dynamicToolCall") => item
+            .and_then(|item| item.get("tool"))
+            .and_then(Value::as_str),
+        _ => None,
+    };
+    name.map(str::to_owned).into_iter().collect()
+}
+
 fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent> {
     let method = message.get("method")?.as_str().unwrap_or("event");
     if let Some((limit, text)) = decode_limit(message, hint) {
@@ -383,6 +403,7 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
             data: serde_json::to_vec(message).ok(),
             limit: Some(limit),
             usage: None,
+            tools: Vec::new(),
         });
     }
     let kind = match method {
@@ -402,6 +423,7 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
         data: serde_json::to_vec(message).ok(),
         limit: None,
         usage: decode_usage(message),
+        tools: decode_tools(message),
     })
 }
 
@@ -1145,6 +1167,25 @@ mod tests {
                 cumulative: false,
             })
         );
+    }
+
+    #[test]
+    fn a_started_web_search_or_tool_call_names_its_tool() {
+        let search = json!({
+            "method": "item/started",
+            "params": { "item": { "type": "webSearch", "id": "i1", "query": "rust" } }
+        });
+        assert_eq!(decode_event(&search, None).unwrap().tools, ["WebSearch"]);
+        let call = json!({
+            "method": "item/started",
+            "params": { "item": { "type": "mcpToolCall", "server": "docs", "tool": "fetch_page" } }
+        });
+        assert_eq!(decode_event(&call, None).unwrap().tools, ["fetch_page"]);
+        let command = json!({
+            "method": "item/started",
+            "params": { "item": { "type": "commandExecution", "command": "ls" } }
+        });
+        assert!(decode_event(&command, None).unwrap().tools.is_empty());
     }
 
     #[test]
