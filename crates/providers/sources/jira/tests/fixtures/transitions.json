@@ -1,0 +1,7 @@
+{
+  "transitions": [
+    { "id": "11", "name": "To Do" },
+    { "id": "31", "name": "In Review" },
+    { "id": "41", "name": "Done" }
+  ]
+}

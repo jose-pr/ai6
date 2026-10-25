@@ -152,6 +152,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai6-source-jira"
+version = "0.1.0"
+dependencies = [
+ "ai6",
+ "data-encoding",
+ "serde",
+ "serde_json",
+ "toml",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "ai6-terminal-pty"
 version = "0.1.0"
 dependencies = [

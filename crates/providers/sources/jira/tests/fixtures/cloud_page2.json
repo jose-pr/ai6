@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "id": "10002",
+      "key": "GUA-14",
+      "fields": {
+        "summary": "Document the cursor",
+        "description": null,
+        "labels": ["ai6-ready"],
+        "reporter": { "displayName": "Pat Writer" },
+        "updated": "2026-10-04T11:15:40.000+0000"
+      }
+    }
+  ],
+  "isLast": true
+}
