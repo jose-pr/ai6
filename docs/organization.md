@@ -92,7 +92,7 @@ a deletion).
 | Name | Canon | Would own |
 | --- | --- | --- |
 | **Chief of Staff** | novel, film (Bill Tanner) | Vetting briefs and budgets before M accepts them |
-| **Station Chief** | real (CIA Chief of Station, SIS head of station) | A long-lived agent per Station: local logistics, Theater setup, safe houses |
+| **Head of Station** | novel (*The Man with the Golden Gun*: "Heads of Station"), real (SIS) | A long-lived agent per Station: local logistics, Theater setup, safe houses |
 | **Sleepers** | real tradecraft | Standing orders: a trigger (CI failed, a label added, a schedule) wakes an Agent with a set brief |
 | **Bona fides** | real (proof something is genuine) | Provenance and signatures for briefs, providers and hooks |
 | **CX report** | real (SIS reporting) | The outcome report sent back to whoever asked: an issue comment, a PR summary |

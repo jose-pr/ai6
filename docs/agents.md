@@ -82,7 +82,7 @@ intake until M explicitly authorizes and promotes them. Universal Exports' authe
 proposal; approval follows M's normal assignment and scheduling path. Proposal submission
 does not start a child Session. Clearance does not grant authorization, override Operation
 cover or Agent eligibility, or bypass Q leases,
-Station policy, or the Cable relay. Q, I and Station Chiefs retain their own capability
+Station policy, or the Cable relay. Q Branch, the Registry and Heads of Station retain their own capability
 boundaries. The Chief of Staff is a separate planned M adviser for vetting briefs and budgets.
 
 ## Cables
