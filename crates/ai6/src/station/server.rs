@@ -6478,6 +6478,7 @@ mod tests {
                 "mock-agent",
                 "mock-drip",
                 "mock-limit",
+                "mock-lines",
                 "mock-recorder",
                 "mock-spend"
             ])
@@ -8612,7 +8613,9 @@ mod tests {
             .insert(
                 Theater::new(LOCAL_THEATER, TheaterAccess::Local).with_runner(
                     crate::RunnerSettings::default()
-                        .with_state_dir(runner_dir.to_string_lossy().into_owned()),
+                        .with_state_dir(runner_dir.to_string_lossy().into_owned())
+                        // The test's own runner serves; never start this test binary as one.
+                        .with_command(root.join("no-runner-command").to_string_lossy()),
                 ),
             )
             .unwrap();
