@@ -6,7 +6,7 @@
 
 # Agent config and personal overrides, at any depth.
 .agents
-CLAUDE*
+/CLAUDE*
 .claude
 *.local.*
 
@@ -24,6 +24,7 @@ htmlcov/
 .venv/
 dist/
 build/
+/site/
 
 # Rust
 target/

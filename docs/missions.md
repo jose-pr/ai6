@@ -1,95 +1,70 @@
 # Missions and intake
 
-coagent ships no tracker integration. Jira, GitHub issues, a webhook, a schedule: you
-supply those, as a program in any language, a Python package, a skill or an overlay. I
-Branch owns only the socket they plug into: a **brief** format, an **registry**, the
-**source** contract, and **reports** back.
+AI6 does not bundle tracker integrations. A user or external integration supplies a
+Mission brief through the Universal Exports API or the file-backed I Branch Registry. The Rust
+daemon validates the brief, resolves its Operation and Agent policy, and schedules the
+Mission at an eligible Station.
 
 ```text
-source ─► brief ─► registry/new ─► M claims it ─► station ─► profile ─► agent runs
-                                                                         │
-           source ◄─ report ◄── registry/done|failed ◄── outcome ◄──────────┘
+source ─► brief ─► I Branch registry ─► AI6 Station ─► AgentHandler ─► provider Session
+                                                │
+                                                └─► outcome and DipTels to Universal Exports
 ```
 
-## A brief
+## Mission and Session identities
+
+A **Mission ID** identifies one unit of work and may group multiple agent Sessions. A
+**Session ID** comes from the provider and remains stable when AI6 resumes that same
+agent operation. An external tracker task ID is input metadata; it is not an AI6 Mission
+ID.
 
 ```json
 {
-  "id": "GUA-12",
-  "source": "jira",
   "title": "Fix the flaky watchdog test",
-  "body": "It fails one run in ten on macOS.",
-  "station": "G",
-  "role": "implement",
-  "tags": ["ci"],
-  "priority": 5,
-  "url": "https://example.atlassian.net/browse/GUA-12",
-  "data": {"anything": "the source wants back"}
+  "prompt": "It fails one run in ten on macOS.",
+  "operation_id": "G"
 }
 ```
 
-Only `title` is required. `station` is an id, name or alias; `profile` names an agent
-outright, otherwise M picks the best one for `role` and `tags` that the station accepts.
-Unknown keys are refused, so a typo is an error; extras go under `data`.
+## Queue a Mission through Universal Exports
 
-## Three ways in
-
-| Way in | How |
-| --- | --- |
-| **Drop a brief** | write it into the registry's `new/` (a temporary name, then a rename), or `python -m coagent_i submit brief.json` |
-| **Be polled** | a `[[source]]` in `sources.toml` whose command prints briefs as JSON |
-| **Be a package** | a Python object in the `coagent.intake` entry-point group |
-
-```toml
-# ~/.config/coagent/sources.toml
-[[source]]
-name = "jira"
-command = ["jira-briefs", "--jql", "project = GUA AND labels = agent"]
-report = ["jira-report"]          # the outcome as JSON on stdin
-station = "G"                     # for briefs that name none
-timeout = 60
-env = { JIRA_SITE = "example.atlassian.net" }
-```
-
-A source's command prints a JSON list of briefs, an object with `briefs`, or one JSON
-object per line. Its `report` command receives `{"brief": .., "outcome": ..}`, where the
-outcome carries `state`, `returncode`, `reason`, `runtime`, `agent`, `profile`, `station`
-and, for a mission in a safe house, `safe_house`: its path, branch and commits.
-
-## The registry
-
-A directory (default `~/.local/state/coagent/registry`, or `COAGENT_REGISTRY`) with one
-subdirectory per state: `new`, `claimed`, `done`, `failed`. Claiming is a rename, so two
-supervisors never take the same brief; every brief is filed once per `source--id` key.
+An authorized user needs `mission.create` for the target Operation. The gateway returns
+the queued Mission ID without echoing the prompt:
 
 ```bash
-python -m coagent_i poll            # every source once
-python -m coagent_i list            # waiting, best first
-python -m coagent_i list --state done
+curl -f -X POST "$AI6_EXPORTS_URL/v1/user/operations/G/missions" \
+  -H "authorization: Bearer $AI6_ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"title":"Fix the flaky watchdog test","prompt":"Investigate the intermittent failure."}'
 ```
 
-## Running missions
+The Moneypenny app's Operations view offers the same action. The AI6 daemon claims the brief
+from the shared file-backed I Branch registry, then resolves the Agent role, Operation
+cover, Station capacity and provider handler before it starts a Session.
 
-```bash
-python -m coagent_m.watchdog launch --next          # the best waiting brief
-python -m coagent_m.watchdog launch --brief b.json  # one brief from a file
-```
+## File-backed intake
 
-M resolves the station, picks the profile, cuts a safe house, runs the agent with the
-brief's title and body as its prompt, files the outcome and the transcript beside the
-brief, and reports it to the brief's source. A brief no profile at its station suits is
-filed as `failed` with state `refused`, and still reported.
+The I Branch registry defaults to the platform AI6 state directory and can be overridden
+with `AI6_REGISTRY`. Briefs in `new/` are claimed atomically and filed under `claimed/`,
+then `done/` or `failed/`. The stable brief identity combines its source and external
+record ID. User-supplied integrations can write validated brief JSON into `new/` or call
+the Universal Exports API.
 
-## Serving
+SQLite/PostgreSQL Registry backends and distributed Registry placement are not currently
+implemented. Remote Theaters are also not implemented; every Session runs on its
+Station's host.
 
-```bash
-python -m coagent_m.watchdog serve --max 4 --poll 60    # until interrupted
-python -m coagent_m.watchdog serve --once               # until nothing is left to start
-```
+## Restart recovery and publication
 
-`serve` keeps taking the best waiting brief while there is capacity: `--max` missions at
-once overall, a station's `max_concurrent`, and a profile's `max_concurrent`. A brief
-over capacity stays waiting until a slot frees, so a busy station never blocks another.
-With `--poll`, it polls the intake sources that often. Interrupting it stops new
-missions and waits for the running ones. Several `serve` processes on different theaters
-share the work and survive one another: see [offices](offices.md).
+AI6 persists the selected Agent, handler, terminal, working directory, model, effort,
+provider Session ID and cover settings for a started Mission. Environment values are
+not stored. On restart, the scheduler retries reattachment using the saved provider
+Session ID and verified Station safe house. A handler must return the same Session ID or
+AI6 refuses the resume.
+
+A Station can publish lifecycle and terminal events to Universal Exports. When
+enabled, it consumes the gateway's authenticated input/resize queue and routes frames to
+the matching live provider Session. Configure `AI6_EXPORTS_URL` and
+`AI6_EXPORTS_TOKEN` together; leave both unset to disable publication. Events use a
+bounded background worker and finite request timeouts, so a gateway outage does not block
+the provider Session. Terminal bytes remain binary.

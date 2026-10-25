@@ -1,6 +1,6 @@
 # Contributor License Agreement
 
-Thank you for your interest in contributing to **coagent** (the "Project"),
+Thank you for your interest in contributing to **AI6** (the "Project"),
 maintained by jose-pr (the "Maintainer").
 
 This agreement documents the rights granted by contributors to the

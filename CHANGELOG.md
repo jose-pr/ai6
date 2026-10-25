@@ -9,72 +9,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Monorepo layout: `m/` (supervisor), `moneypenny/` (web viewport), `q/` (armory).
-- `coagent_m.watchdog`: runs a sub-agent on a pty in its own process group and sends
-  the group SIGKILL after 300 s with no output (`input_hang` when it is quiet at a
-  prompt, `silent` otherwise) or 300 s of output with no new line (`loop`). Reports
-  `working`, `blocked`, `stalled`, `done` and `failed` transitions, and takes operator
-  input through `Watchdog.send()`.
-- `python -m coagent_m.watchdog run -- CMD` and `demo`.
-- `coagent_m.terminal`: terminal providers behind one contract (`Provider`, `Session`,
-  `Registry`), ranked by priority. Built in: `posix-pty`, `pipes` (any OS) and `conpty`
-  (Windows; a scaffold that reports itself unavailable). Others load from the
-  `coagent.terminals` entry-point group or, with the `guatiao` extra, from guatiao
-  libraries on `COAGENT_TERMINAL_PLUGINS`.
-- The watchdog runs on any provider (`AgentSpec.terminal`, `run --terminal`), answers
-  cursor-position queries (`ESC[6n` → `ESC[24;1R`) and removes them from the output.
-- Rust crates: `coagent-terminal-kind` (the `coagent_terminal` guatiao kinds),
-  `coagent-terminal-pty` (a plugin on `portable-pty`) and `coagent-native` (guatiao's C
-  ABI for the Python binding).
-- `coagent_m.hooks`: global, project and agent hooks that add environment, add
-  context (`COAGENT_CONTEXT_FILE`), rewrite the command line and receive events, as
-  Python objects or programs (`hooks.toml`). A project's hooks load only when the
-  project is trusted.
-- `coagent_m.profiles`: launchers and agent profiles (`profiles.toml`) with aliases,
-  `extends`, roles and tags; `AgentSpec.from_profile()`; `launch --profile` /
-  `launch --role`, `profiles`, `hooks` and `providers` commands.
-- `coagent_m.stations`: projects registered in `stations.toml` by id (the station's one
-  cover name) and project name, with a checkout path, roster, clearance (`desk`, `field`, `00`) and budget. A
-  project's `.coagent/` is read only when it is a station (or `COAGENT_TRUST_PROJECT=1`);
-  `Scope.PROJECT` is now `Scope.STATION`. Profiles gain `clearance`; `choose()` and
-  `AgentSpec.from_profile()` take a station; `launch --station` and `stations` commands.
-- `coagent-i` (`i/`): mission briefs, a file registry (`new`, `claimed`, `done`, `failed`)
-  and the contract user-supplied intake sources fill: command sources and
-  `coagent.intake` entry points that poll for briefs and hear outcomes back;
-  `python -m coagent_i submit|list|sources|poll`.
-- `launch --next` and `launch --brief FILE`: run a brief at its station with the profile
-  it names or the best one for its role, file the outcome and report it to its source.
-- `00/roster.example.toml` and `docs/organization.md`.
-- A safe house (a git worktree) per mission (`coagent_m.safehouse`), on a branch named from the brief;
-  stations gain `safe_houses`, `branch` and `base`.
-- `coagent_m.missions`: `MissionRunner` (assign, worktree, run, file with transcript,
-  report) and `Scheduler`; `serve` runs briefs while there is capacity overall, per
-  station and per profile. `Registry.finish(transcript=)` and `Registry.transcript()`.
-- Remote theaters (`theaters.toml`): each is an `ssh:<id>` terminal provider that forwards
-  only what M added to the environment and kills the whole remote session. Stations
-  gain `theater` and `config`; their safe houses are cut on the theater by git over ssh.
-- Cover (`coagent_m.cover`): stations gain `cover` (`covert`, `partial`, `overt` or one
-  from `covers.toml`), `identity` and `on_blown`. Agents commit as the identity, are told
-  the policy, and every commit they make is checked; a breach is reported as a blown
-  cover, or fails the mission.
-- Stations no longer take `aliases`: the id is the station's one cover name.
-- Adapters: a launcher may name an `adapter` (with `options`) instead of a `command`,
-  found through the `coagent.adapters` entry-point group; argv elements `{context}` and
-  `{context_file}` are filled once hooks have run; a mission's report gains the
-  adapter's `debrief`.
-- `coagent-00` (`00/`): the `claude` adapter for Claude Code: print or interactive mode,
-  clearance as `--permission-mode`, cover as the `attribution` setting, context as
-  `--append-system-prompt`, and a debrief from the final `result` record.
-- Offices: several `serve` processes share one store; the office holding the leader
-  lease is M (places briefs, recovers lost offices' briefs, enforces budgets across
-  offices); offices are `control`, `execution` or both, labelled `office`, `host`, `os`
-  and `--label`; stations gain `selector`. Claims carry leases with heartbeats; a lost
-  office's briefs are re-run up to `--max-attempts`, then filed `lost`.
-- `coagent_i.SqlRegistry` (`sql` and `postgres` extras): the registry in SQLite or PostgreSQL;
-  `open_registry()` picks it for a URL. `Registry` gains leases, `renew`, `expired`,
-  `recover`, `heartbeat`, `offices`, `elect`, `leader`, `read`, `attempts`.
-- The documentation site (MkDocs Material) with guides, the Python API reference and the
-  Rust reference, deployed by `docs.yml`.
-- Licensed under the Mozilla Public License 2.0, with a contributor licence agreement.
+- `ai6`: the Station daemon and AI6's public contracts in one Rust crate. Directorates
+  under `ai6::directorates` (M, I Branch, Q Branch, 00 Section, Medical) and the Station
+  runtime under `ai6::station` (server, provider host, safe houses, publisher, identity).
+  The `ai6` command provides `serve`, `identity` and `peer waiting|accept`.
+- Station daemon: a private loopback API for providers and the Mission lifecycle;
+  Registry-leased intake with lease renewal and recovery; Mission records persisted in
+  `missions.json` and reattached to provider Sessions after a restart; Station check-ins
+  with roles (`control`, `execution`), labels and capacity; Headquarters Station election.
+- Agents and roles: an Agent (`[agent.<codename>]`) owns its handler, model and effort and
+  lists the roles it is qualified for; a role (`[role.<id>]`) is a purpose and a policy.
+  M posts the highest-priority qualified Agent whose handler is available, so the next
+  qualified Agent is the backup. Operators can override roles per Operation.
+- The Station picks the terminal provider automatically, preferring `pty` when several
+  are available; `ai6 serve --terminal ID` pins one. Agents do not choose a terminal.
+- Safe houses: an isolated Git worktree per Mission, removed when untouched and kept with
+  a report when it holds work.
+- Cover policies (`covert`, `partial`, `overt`, or `covers.toml`) with an Operation
+  author identity; Mission commits are audited and a violation marks the Mission `blown`
+  when the Operation sets `on_blown = "fail"`.
+- Session watchdog: stall, repeated-output loop and blocked-prompt detection, with daemon
+  options and per-Agent `[agent.<id>.limits]` overrides.
+- Cables: a permission-scoped agent-to-agent relay (Agent unicast; Station, Theater,
+  Global and named-channel broadcasts) with deliver/hold/refuse receiver policies, quotas,
+  metadata-only audit, and per-Session MCP tools (`cables-mcp` feature).
+- 00 coordination: a `00`-clearance Session can propose child Missions, which wait until
+  an operator approves them.
+- Q Branch: bounded loadout catalogs, Mission-scoped secret leases, Claude MCP
+  configuration and bubblewrap argument translation.
+- Station identities (`station-tls` feature): persistent certificates, SHA-256
+  fingerprints, pinned-peer or CA mutual TLS and a waiting/accepted peer store.
+- Access kinds: Authenticator, Directory and Authorizer as Guatiao kinds, the built-in
+  first-match `RoleAuthorizer`, and providers `ai6-access-key`, `ai6-access-ldap`,
+  `ai6-access-local`, `ai6-access-peer` and `ai6-access-proxy`.
+- Agent handlers `ai6-agent-claude` (Claude Code stream-json) and `ai6-agent-codex` (Codex
+  app-server), and the `ai6-terminal-pty` terminal provider (openpty on Unix, ConPTY with
+  Job Objects on Windows).
+- `universal-exports`: the authenticated public API gateway: login through an
+  Authenticator or a trusted reverse-proxy identity, revocable user tokens shared through
+  the Registry, per-Operation authorization, Station, Mission and Session views, Mission
+  creation and proposal review, role administration, Station capacity settings,
+  metadata-only audit, attach grants with read-first WebSocket terminals and expiring
+  write leases. Configured with `AI6_EXPORTS_*` variables.
+- `ai6-diptel`: the native and WebAssembly wire contract for Session lifecycle, terminal
+  bytes and resize frames, with test vectors.
+- `ai6ctl`: a read-only operator command for health, Stations, Agent roles, Missions and
+  Sessions.
+- Moneypenny: the Flutter desktop and web operator app, with Stations and the
+  Headquarters Station, the Operation → Mission → Session board, Mission briefs, live
+  terminals, administration, audit and an operator menu.
+- `examples/config`, the documentation site with the Rust API reference, public API
+  snapshots, and test, docs and release workflows.
 
-[Unreleased]: https://github.com/jose-pr/coagent/commits/main
+### Changed
+
+- The project is renamed from coagent to AI6.
+- The Python packages are replaced by the Rust workspace; Python is no longer needed at
+  runtime.
+- Projects are configured as Operations in `operations.toml` (formerly `stations.toml`);
+  Agents and roles in `agents.toml`. A Station is now the node running the daemon.
+
+### Removed
+
+- The Python packages `coagent-00`, `coagent-i` and `coagent-m`, their commands and their
+  `COAGENT_*` environment variables, and the `q/` placeholder.
+
+[Unreleased]: https://github.com/jose-pr/ai6/commits/main

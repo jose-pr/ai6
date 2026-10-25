@@ -1,49 +1,46 @@
-# Terminals and plugins
+# Terminals and providers
 
-An agent runs on a terminal, so it behaves as it would for a person, and a person can
-take over without restarting it. The terminal comes from a **provider**.
+An AgentHandler runs inside an AI6 terminal Session so the watchdog can observe its output
+and an authorized operator can attach without restarting the provider Session.
 
-## Providers
+## The Station chooses the terminal
 
-| Provider | Where | Notes |
+Which terminal a Session gets depends on where it runs, not on the Agent or its handler:
+every terminal provider fulfils the same contract. Without a pin, a Station uses an
+available terminal provider, preferring `pty` (`ai6::DEFAULT_TERMINAL`) when several are
+available. `ai6 serve --terminal ID`, or `StationConfig::with_terminal` in Rust, pins one.
+A resumed Session reuses the terminal it started with.
+
+## Shipped provider
+
+| Provider | Platforms | Behavior |
 | --- | --- | --- |
-| `coagent_terminal_pty_portable_pty` | Linux, macOS; Windows to come | the Rust plugin on `portable-pty`, priority 30 |
-| `posix-pty` | Linux, macOS, BSD | the standard library's `pty`, priority 20 |
-| `conpty` | Windows | scaffold: always reports itself unavailable for now |
-| `pipes` | any OS | no terminal at all; for headless agents, priority 0 |
-| `ssh:<theater>` | any theater with sshd | one per [registered theater](theaters.md), priority 10 |
+| `pty` | Linux, macOS, Windows | `openpty` on Unix; ConPTY and a Job Object on Windows |
 
-```bash
-$ python -m coagent_m.watchdog providers
-  30  coagent_terminal_pty_portable_pty ok
-  20  conpty               unavailable: ConPTY exists only on Windows
-  20  posix-pty            ok
-   0  pipes                ok
+`ai6-terminal-pty` is one crate: the session logic is shared, and the platform parts
+(owning the child's process tree, translating input) live in `src/unix.rs` and
+`src/windows.rs`. Build it with the daemon:
+
+```console
+cargo build -p ai6 --features cli -p ai6-terminal-pty
 ```
 
-Every provider kills the agent together with every process it started (a process group
-on POSIX; a Job Object on Windows, to come). A mission picks a provider with the
-profile's `terminal`, or gets the best one available.
+Pass the build output directory with `--plugin-path` when starting `ai6 serve`. AI6
+discovers Guatiao providers and reports unavailable ones in its diagnostics.
 
-## Plugins in any language
+## Adding a terminal provider
 
-A terminal plugin is a [guatiao](https://github.com/Boriken-Dev/guatiao) library serving
-the `coagent_terminal` kind: a provider with one slot, `spawn`, answering a session
-object (`pid`, `read`, `write`, `resize`, `kill`, `exit_status`). Write one in Rust
-against `coagent-terminal-kind`, or in any language guatiao binds. Python packages can
-also add providers through the `coagent.terminals` entry-point group.
+A terminal provider implements Guatiao's `ai6_terminal` kind, the
+`ai6::directorates::q::terminal` contract: `spawn`, read and write, resize, kill and exit
+status. Put it under `crates/providers/terminals/<name>/`; the library holds its own
+Guatiao entry point, so no forwarding-only plugin crate is needed. Every provider must
+terminate the whole agent process tree: a process group on POSIX, a Job Object on
+Windows.
 
-```bash
-cargo build -p coagent-native -p coagent-terminal-pty
-export GUATIAO_LIBRARY=$PWD/target/debug/libcoagent_native.so   # .dylib on macOS
-export COAGENT_TERMINAL_PLUGINS=$PWD/target/debug
-pip install -e "m[guatiao]"
-```
+## Cursor handshake
 
-## The cursor handshake
+A shell under a pty can ask for the cursor position (`ESC[6n`) and wait for an emulator.
+Without an attached viewer, AI6's terminal bridge answers the query itself and removes it
+from the output, so an attached terminal does not answer a second time.
 
-A shell under a pty, and ConPTY at start-up, asks where the cursor is (`ESC[6n`) and
-waits for the answer. With no emulator attached that looks exactly like a hung agent, so
-the watchdog answers every query itself — always row 24, column 1, because the real size
-may not have reached the terminal yet — and removes it from the stream so an attached
-viewer does not answer a second time.
+Remote terminals over SSH are not implemented yet; see [Theaters](theaters.md).

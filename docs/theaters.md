@@ -1,44 +1,27 @@
-# Remote theaters
+# Theaters
 
-A theater (of operations) is a machine missions run on, reached over ssh. M can
-keep agents on Linux, macOS and Windows machines at once, from one place.
+A **Theater** is where a Session actually runs: the host or environment whose processes
+and files the agent harness uses. A Station is the node that places and supervises the
+Session; the Theater is the place it runs. They are separate on purpose, the way a
+Kubernetes node is separate from the container runtime it drives.
 
-```toml
-# ~/.config/coagent/theaters.toml
-[theater.lab]
-ssh = "builder@lab.example.internal"   # anything ssh accepts as a destination
-os = "linux"                           # linux, macos, windows
-port = 22
-identity = "~/.ssh/coagent_lab"
-options = { ServerAliveInterval = "15" }
-safe_houses = "/srv/coagent/safe-houses"   # where mission safe houses go on the theater
-tags = ["gpu"]
-```
+## Today: the Station's own host
 
-Each theater is a terminal provider, `ssh:<id>`:
+Every Session runs on its Station's host, in a terminal provider the Station picks
+(preferring `pty`, or the one pinned with `ai6 serve --terminal`). An Operation with a local `path` gets a safe
+house (a Git worktree) under the Station's state directory for each Mission. An
+Operation can only run on a Station that has its checkout and whose labels match its
+`selector`.
 
-- the agent runs through `ssh -tt` on the best local terminal, so the remote side gets a
-  real pty (ConPTY on a Windows theater) and the watchdog, the cursor handshake, hooks and
-  transcripts work exactly as they do locally;
-- only the environment M and its hooks **added** is forwarded — the supervisor's own
-  environment stays on the supervisor's machine;
-- on a POSIX theater the remote command reports its session in an escape sequence no
-  terminal shows, then becomes the agent, so `kill` ends every process in that session
-  over a second connection. Dropping the connection alone would only send a hangup.
+## Not yet: remote Theaters
 
-On a Windows theater commands run, but a kill only drops the connection for now.
+An Operation can name a `theater` instead of a local `path`, but the Station refuses to
+admit its Missions: there is no remote terminal provider yet. Remote Theaters need:
 
-## A station on a theater
+- an SSH terminal provider with process-tree termination on the remote side;
+- remote safe-house creation and cleanup;
+- forwarding of the per-Session Cable MCP endpoint;
+- a durable way for a Session to outlive a dropped connection, so a Station can
+  reattach after it restarts.
 
-```toml
-[station.L]
-name = "guatiao"
-theater = "lab"
-path = "/srv/src/guatiao"          # the checkout, on the theater
-config = "~/coagent/stations/L"    # a local directory with the station's hooks and profiles
-```
-
-The station's missions run on the theater whatever terminal their profile names. Safe houses
-are cut on the theater under its `safe_houses`, by git over ssh; without a `safe_houses`,
-missions run in the checkout itself. Hooks run on the supervisor's machine and see
-`COAGENT_THEATER`; the agent sees it too.
+Do not point a production Operation at a remote Theater and expect it to execute.

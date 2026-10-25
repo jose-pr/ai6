@@ -1,122 +1,127 @@
 # Organization
 
-coagent is organized the way the fictional Secret Intelligence Service of the James Bond
-novels and films is. The names are a convention, not decoration: each one says who owns
-a decision, and the fiction's rules turn out to be good rules for running coding agents.
+AI6 borrows its names from the Secret Intelligence Service of the James Bond novels and
+films, and from real public intelligence vocabulary where Bond has no word. The names
+are a convention, not decoration: each one says who owns a decision, and the fiction's
+rules turn out to be good rules for running coding agents.
 
-## Divisions
+## Directorates and posts
 
-| Division | Here | Owns |
+| Name | Here | Owns |
 | --- | --- | --- |
-| **M** (the Chief) | `m/` | policy, mission authorization, scheduling, stations, assigning agents; a role one office holds at a time, and another takes over |
-| **Management offices** | `m/` (`serve`) | M's offices on many theaters: control (may be M), execution (run missions), or both |
-| **Chief of Staff** | `m/` (planned) | vetting incoming briefs and budgets before M sees them |
-| **Miss Moneypenny** | `moneypenny/` | information flow, the board, scheduling view, office security (who may attach) |
-| **00 Section** | `00/` | the agents that execute work |
-| **Q Branch** | `q/` | gear: credentials, sandboxes, tools that act |
-| **R** (Q's deputy) | `q/` (planned) | acceptance of new gear before Q issues it |
-| **I Branch** | `i/` | intelligence and communications: briefs, intake, the wire format, briefings, debriefs |
-| **G** (Graphology) | `i/` (planned) | provenance: is a brief, plugin or hook file really from who it claims |
-| **Medical & Psychological** | `m/` | agent health: the watchdog today; budgets, exposure and quarantine next |
-| **Stations** | configuration | the projects missions are run for |
+| **M** | `ai6::directorates::m` | Decisions: the roster, Agent selection, clearance, cover, the Mission lifecycle and the access kinds |
+| **I Branch** | `ai6::directorates::i` | Intelligence and records: the Registry (briefs, leases, check-ins, audit) and the Cable relay |
+| **Q Branch** | `ai6::directorates::q` | Gear: terminals, loadouts, Mission-scoped secret leases, MCP configuration, sandbox arguments |
+| **00 Section** | `ai6::directorates::section_00`, `crates/providers/agents/` | The AgentHandler contract and the Claude and Codex handlers |
+| **Medical** | `ai6::directorates::medical` | Agent health: the watchdog for stalls, loops and blocked prompts |
+| **Station** | `ai6::station`, `ai6 serve` | A node running the daemon: its server, provider host, safe houses, publisher and identity |
+| **Universal Exports** | `crates/universal-exports` | The public front: the only address operators and clients reach |
+| **Moneypenny** | `clients/moneypenny` | The operator app: board, briefs, terminals, administration, audit |
+| **DipTel** | `crates/ai6-diptel` | The wire contract for Session lifecycle and terminal frames |
 
-No division depends on another except on I Branch's formats.
+Directorates decide; the Station is where their decisions run. In the novels Universal
+Export is the plate on the door of the London headquarters, the one address outsiders
+use, which is the gateway's job; Moneypenny is who operators actually deal with.
 
-## People and clearance
+## Work and infrastructure
 
-| Role | Clearance | Meaning here |
-| --- | --- | --- |
-| Desk officer | `desk` | reads, plans and proposes; nothing leaves its worktree |
-| Case officer | `field` | changes its worktree and runs tests under *standard operational immunity*; anything irreversible needs M's authorization |
-| 00 agent | `00` | the *licence to kill*: may act unattended, including irreversible steps |
-| Station Chief | per station | an optional lead agent for one station (below) |
-| Sleeper | any | a standing order, dormant until triggered (below) |
+```text
+Work            Operation ──► Mission ──► Session
+Infrastructure  Station ──────────────────► Theater   (where a Session runs)
+```
+
+- **Operation**: a global project and its policy. Stations serve Operations; they do not
+  own them. An Operation's `selector` names the Station labels its Missions need.
+- **Mission**: one brief under an Operation; its Mission ID may group several Sessions.
+- **Session**: one provider-issued, resumable agent run. Never call it a Task.
+- **Station**: a node running `ai6 serve`, with the `control` role, the `execution` role
+  or both. The elected **Headquarters Station (HQS)** holds M's authority by lease.
+- **Theater**: the host or environment a Session runs in. Today that is always the
+  Station's own host; remote Theaters reached over SSH are designed, not built.
+- **Safe house**: a Mission's isolated Git worktree inside its Theater.
+
+**Campaign** (above Operations), **Objective** (a Mission's intended outcome), **Task**
+and **Step** (planning detail inside a Mission) are words for briefs and plans; AI6 does
+not store them as records.
+
+## Agents, roles and clearance
+
+**Codenames are slots; models are their occupants.** An Agent (`[agent.007]`) is a
+codename that owns its harness, model and effort. Missions, plans and roles name a
+codename, never a model; replacing the model behind `007` is a change to one Agent.
+
+**A role is a job, not a model.** `[role.case-officer]` holds a `purpose` and a `policy`
+only. An Agent lists the roles it is qualified for. M posts the highest-priority
+qualified Agent whose handler is available.
+
+**A backup for every 00.** The next qualified Agent is the backup: when `007`'s handler is
+unavailable, `008` takes the Mission. Role names follow real intelligence job titles
+(case officer, targeter, analyst, reports officer); they grant nothing.
+
+| Clearance | May |
+| --- | --- |
+| `desk` | Read, plan and propose; nothing leaves the worktree |
+| `field` | Change its worktree and run tests; irreversible steps need M's authorization |
+| `00` | Act unattended within the Operation's policy (the *licence to kill*) |
+
+**The 00 coordinator.** An Operation may give an Agent with `00` clearance the job of
+coordinating its Missions. Such a Session can propose child Missions; proposals wait in a
+separate inbox until an operator with `mission.create` approves them in Moneypenny.
+Clearance never grants policy authority or bypasses cover, Q leases or Station policy.
 
 ## Conventions
 
-**Codenames are slots; models are their occupants.** A 00 number is recycled property
-of the Crown: when an agent retires, the next qualified one inherits the number. Missions,
-plans and roles name a codename (`007`), never a model. Replacing the model behind `007`
-is a change to one profile.
-
-**Promotion is earned and signed.** A profile is promoted to `00` only on a recorded
-track record (missions completed at `field` without incident) and a human approval.
-
-**Retirement.** A profile past its date (a model at end of life, or one that keeps
-failing) is retired to desk duty: kept for reading and advice, never sent into the field.
-
-**A backup for every 00.** M keeps a replacement in mind for each agent (008 for 007),
-used when the first choice is unavailable, over budget or refused by the station.
-
-**Green ink.** Orders from the Chief's office are written in green ink. Here that means
-human approvals for irreversible steps (a push to a protected branch, a release, a
-deletion), each kept as a signed record of who approved what, when, for which mission.
-
-**Universal Exports.** Field agents travel as employees of a trading company. Agents
-here act under the station's **cover**: an identity (the author their commits carry) and
-a policy saying how openly the work may admit an agent did it — `covert` (nothing),
-`partial` (a generic "AI helped", never the model or the agent), `overt` (full
-disclosure), or one of your own. Every commit is checked against it; a commit that
-breaks it is a **blown** cover. See [stations](stations.md#cover).
+**Cover.** Agents act under the Operation's cover: an author identity for commits and a
+policy for how openly the work may admit an agent did it: `covert` (nothing), `partial`
+(a generic "AI helped", never the model or the Agent), `overt` (full disclosure), or one
+of your own. Every Mission's commits are checked; a commit that breaks cover is **blown**.
 
 **The Leather Goods Department.** Q's shipments travel under a plain manifest: a loadout
-lists what an agent is issued, by name, and never contains a secret's value.
+lists what an Agent is issued, by name, and never a secret's value.
 
-**Assume any agent can be turned.** 006 was a trusted peer until he was not. Any agent
-can be steered by what it reads (prompt injection), so clearance is least privilege,
-credentials are per station, and a session that read untrusted input is treated as
-exposed.
+**Assume any agent can be turned.** 006 was a trusted peer until he was not. Anything an
+agent reads can steer it, so clearance is least privilege, credentials are per Mission,
+and Cable bodies and briefs are untrusted text.
 
-## Stations
+**Green ink.** The real chief of SIS signs in green ink. AI6 will use the name for
+recorded human approvals of irreversible steps (a push to a protected branch, a release,
+a deletion).
 
-A station is a project, by id (`G`, `GT`, `B2`: a letter is the convention, not a
-limit), which is its one cover name, and by project name. It holds the project's checkout, the agents posted
-there, the highest clearance a mission there may use, its budget, and settings for
-intake sources. Registering a project as a station is what makes its own `.coagent/`
-configuration readable.
+## Planned posts
 
-**Station Chief.** An optional lead agent per station: it knows the station's repos and
-CI, coordinates with friendly agencies (other bots and services on the project), breaks
-missions into tasks, and provides visiting 00 agents with safe houses (worktrees) and
-logistics (environment). M still authorizes and schedules.
-
-**Sleepers.** A standing order at a station: a trigger (CI turned red, a label added, a
-schedule) wakes a named profile with a set brief. Sleepers are delivered through I
-Branch's intake like any other brief.
-
-## Medical & Psychological Section
-
-Agents wear out in recognisable ways, and the section's job is to notice:
-
-- **stalls and loops**: the watchdog kills them today;
-- **exhaustion**: a context window or token budget running out;
-- **burnout**: a profile failing repeatedly, quarantined until a person looks;
-- **exposure**: a session that read untrusted input (an issue body, a web page) is
-  marked, and what it may do next is restricted;
-- **debriefs**: every mission ends with a record I Branch keeps.
+| Name | Canon | Would own |
+| --- | --- | --- |
+| **Chief of Staff** | novel, film (Bill Tanner) | Vetting briefs and budgets before M accepts them |
+| **Station Chief** | real (CIA Chief of Station, SIS head of station) | A long-lived agent per Station: local logistics, Theater setup, safe houses |
+| **Sleepers** | real tradecraft | Standing orders: a trigger (CI failed, a label added, a schedule) wakes an Agent with a set brief |
+| **Bona fides** | real (proof something is genuine) | Provenance and signatures for briefs, providers and hooks |
+| **CX report** | real (SIS reporting) | The outcome report sent back to whoever asked: an issue comment, a PR summary |
+| **Liaison** | real | A2A federation with agent systems outside AI6 |
 
 ## Field dictionary
 
-Where the code has one of these things, it uses the field name: theaters (`theaters.toml`,
-`coagent_m.theaters`), safe houses (`coagent_m.safehouse`, a station's `safe_houses`) and
-offices (`serve --office`, the registry's `office=`). The rest are plain names; these are what
-they stand for.
-
-| Term | In coagent |
+| Term | In AI6 |
 | --- | --- |
-| **Briefing room** | where a mission's parameters are handed over: the brief, plus the context hooks inject (`COAGENT_CONTEXT_FILE`) |
-| **Theater (of operations)** | the machine a mission runs on: this one, or one registered in `theaters.toml` |
-| **Drop zone** | where an agent is inserted: the theater, the path and the terminal it is started on |
-| **Safe house** | the mission's git worktree (`SafeHouse`): deniable, disposable, removed when the agent left nothing |
-| **Registry** | the shared store every site uses (`coagent_i.Registry`): briefs, leases, check-ins; a file directory or a SQL database |
-| **Dead drop** | how the registry is used: briefs and outcomes exchanged without the two sides ever meeting |
-| **Live drop** | handing a brief straight in (`submit -`, `launch --brief`) |
-| **Exfiltration route** | how work leaves the safe house: the kept branch and its commits, named in the report |
-| **Going rogue / off-grid** | a session M has lost contact with (a dropped connection) or an agent acting outside its clearance |
-| **Burned / blown** | credentials or a cover identity that leaked: Q revokes them and issues new ones |
-| **HUMINT** | briefs written by people: tickets, requests |
-| **SIGINT** | signals turned into briefs: CI failures, alerts, webhooks |
-| **Bespoke assets** | tools issued to one agent for one mission |
-| **The Quartermaster's inventory** | Q's record of what was issued to whom |
-| **The Managing Director's office** | headquarters configuration (`~/.config/coagent/`) |
-| **Blades** | the informal channel where operators talk to M |
+| **Agent** | a codename that owns a harness, model and effort: `[agent.007]` in `agents.toml` |
+| **Role** | a job description an Agent can be qualified for: `[role.case-officer]` (purpose and policy) |
+| **Operation** | a global project and its policy (`operations.toml`, `operation_id`) |
+| **Mission / Mission ID** | one brief and unit of work under an Operation (`mission_id`) |
+| **Session / Session ID** | one provider-issued agent run, unchanged when resumed (`session_id`) |
+| **Station** | a node running the daemon (`ai6 serve --station`, `station_id`) |
+| **Headquarters Station (HQS)** | the control Station holding the current Headquarters lease |
+| **Fallback Station** | a control Station ready to take over when the HQS lease lapses |
+| **Relocation** | Headquarters authority moving to a fallback Station |
+| **Outstation** | an execution-only Station |
+| **Check-in / gone dark** | a Station's recurring Registry record / a Station whose check-ins lapsed |
+| **Theater** | the host or environment a Session runs in (an Operation's `theater`) |
+| **Safe house** | a Mission's Git worktree (`SafeHouse`) |
+| **Registry** | I Branch's shared store for briefs, leases, check-ins and audit |
+| **Brief / debrief** | a Mission's request / the outcome I Branch files when it ends |
+| **Dead drop** | how the Registry works: briefs and outcomes exchanged without the sides meeting |
+| **Cable** | a durable, addressed agent-to-agent message with a relay-authenticated sender |
+| **DipTel** | a live frame: Session lifecycle, terminal output or input |
+| **Loadout** | what Q issues an Agent: tools, sandbox and secret names |
+| **Cover / blown** | an Operation's commit attribution policy / a commit that broke it |
+| **Clearance** | `desk`, `field` or `00`: what an Agent may do without asking |
+| **HUMINT / SIGINT** | briefs from people / briefs from signals such as CI failures and alerts |
+| **Exfiltration route** | how work leaves a safe house: the kept branch and its commits |

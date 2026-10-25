@@ -1,90 +1,63 @@
-# Stations
+# Stations and failover
 
-A station is a project M runs missions for, registered in the global `stations.toml`:
+A **Station** is a node running the `ai6` daemon. It checks in to the shared Registry
+with its roles, labels, capacity, active work and the Operation checkouts it has. One
+control Station holds the Headquarters lease at a time and is the **Headquarters Station
+(HQS)**; M's authority follows that lease.
 
-```toml
-[station.G]
-name = "guatiao"
-path = "~/devel/guatiao"
-repos = ["https://github.com/Boriken-Dev/guatiao"]   # a station may span many repos
-roster = ["007", "006"]                              # absent: every profile
-clearance = "field"                                  # the highest a mission here may use
-max_concurrent = 3
-intake = { jira = "GUA" }                            # for intake sources; M ignores it
+Start a Station with both roles:
+
+```console
+ai6 serve --station hq-1 --role control --role execution
 ```
 
-The id is any short code (a letter is the convention, not the limit), and a station
-answers to its id and to its project name. Registering a project is what makes its
-`.coagent/` (its hooks and profiles) readable: a directory no station holds is never
-read. Configuration runs headquarters → station → agent, the narrowest winning.
+A standby control Station takes over the Headquarters lease if it expires
+(*relocation* to a *fallback Station*):
 
-## Clearance at a station
-
-A station's `clearance` is the highest a mission there may use, and its `roster`, when
-set, is the only profiles it takes. `launch --role` and `launch --next` pick the best
-profile the station accepts; naming a profile the station refuses is an error that says
-why. See [agents](agents.md).
-
-## Safe houses
-
-Each mission at a station gets its own safe house: a git worktree, cut from the
-station's checkout at `base` onto a new branch named by `branch` (`{id}`, `{slug}`, `{station}`; default
-`{id}-{slug}`). Safe houses live under M's state directory
-(`$XDG_STATE_HOME/coagent/safe-houses/`), never inside the checkout. When the mission
-ends, a safe house the agent left untouched is removed with its branch; one with commits
-or changes is kept, and its path, branch and commits go into the mission's report. Set
-`safe_houses = false` to run missions in the checkout itself.
-
-```toml
-[station.G]
-path = "~/devel/guatiao"
-branch = "agent/{id}-{slug}"
-base = "origin/main"
+```console
+ai6 serve --station hq-2 --role control
 ```
 
-## Commands
+An execution-only Station (an *outstation*) runs work but cannot hold the lease:
 
-```bash
-python -m coagent_m.watchdog stations            # what is registered
-python -m coagent_m.watchdog launch --station G --role implement "fix the build"
+```console
+ai6 serve --station lab-gpu --role execution --label gpu=yes
 ```
 
-## Cover
+The default roles are `control` and `execution`. Every Station is also labeled with its
+Station ID, host and operating system; `--label KEY=VALUE` adds more.
 
-Universal Exports: what the work an agent leaves behind may say about who did it.
+## Serving Operations
 
-```toml
-[station.G]
-cover = "partial"                                            # covert (default), partial, overt, or your own
-identity = { name = "Field Office", email = "office@example.com" }
-on_blown = "fail"                                            # or "flag" (default): report only
-```
+Operations are global: they live in `operations.toml`, and no Station owns one. A Station
+runs an Operation's Missions when its labels satisfy the Operation's `selector` and, for
+a local Operation, when it has the checkout. One Station can serve many Operations, and
+one Operation can be served by many Stations.
 
-M sets git's author and committer to the station's `identity` for the agent, tells the
-agent its cover in its context (`COAGENT_COVER` names it), and after the mission checks
-every commit it made — in its safe house, or in the checkout from the commit it started at.
-The report carries `cover: {policy, commits, blown, violations}`; with `on_blown = "fail"`
-a blown cover fails the mission (state `blown`).
+## Terminal
 
-| Cover | Author | Attribution trailers | The model's name | "Generated with" notices |
-| --- | --- | --- | --- | --- |
-| `covert` | the identity only | none | never | never |
-| `partial` | the identity only | `Assisted-by` (suggested: `Assisted-by: AI`) | never | never |
-| `overt` | anyone | any | allowed | allowed |
+The Station, not the Agent, decides which terminal provider harnesses run in. It uses
+an available provider, preferring `pty`; `ai6 serve --terminal ID` pins one. See
+[Terminals](terminals.md).
 
-Define your own in `~/.config/coagent/covers.toml`, field by field:
+## Shared Registry
 
-```toml
-[cover.house]
-description = "AI help is acknowledged in a house footer, nothing more."
-agent_author = false                 # the agent may not author or commit as itself
-trailers = ["Assisted-by"]           # attribution trailers allowed; "*" for any
-suggest = "Assisted-by: AI ({profile})"
-model = false                        # may the model be named
-announce = false                     # may messages say "generated with"
-footer = "Universal Exports"         # every commit message must end with this
-forbid = ['internal\.example\.com']   # patterns never allowed
-```
+Stations sharing a file Registry (`AI6_REGISTRY`) coordinate check-ins, leases and
+Headquarters election. Lease expiry uses wall-clock time, so Stations need synchronized
+clocks. Check-ins expire after 45 seconds; a Station whose check-ins lapse has *gone dark*
+and its leased briefs are recovered by another Station. The Registry is file-backed; a SQL
+backend is not supported.
 
-Trailers that are about the change rather than its author (`Fixes`, `Refs`,
-`Signed-off-by`) are never checked.
+## Capacity and visibility
+
+Operators granted `station.configure` can change a Station's maximum concurrent Missions
+(1–1,024) in Moneypenny's Administration view; the change applies to new Missions and is
+audited. `GET /v1/stations` on Universal Exports returns the signed-in user's authorized
+view of Station health, roles, capacity, the Operations each Station serves and the
+current Headquarters Station; host and process details are omitted.
+
+## Station identity
+
+With the `station-tls` feature, each Station has a persistent certificate:
+`ai6 identity` prints its fingerprint, `ai6 peer waiting` lists peers a listener refused,
+and `ai6 peer accept FINGERPRINT` pins one.

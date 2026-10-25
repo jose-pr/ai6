@@ -1,72 +1,36 @@
-# coagent
+# AI6
 
-**C.O.A.G.E.N.T.** — **C**ontrol plane for **O**rchestrated, **A**utonomous **G**lobal
-**E**xecution & **N**etwork **T**erminals.
+AI6 is a self-hosted control plane for coding agents. You register **Operations**
+(projects and their policy), hand it **Missions** (briefs), and its **Stations** (nodes
+running the `ai6` daemon) post an Agent to each Mission and run it as a provider
+**Session** of Claude Code or Codex, in an isolated Git worktree, under a watchdog.
+Operators follow and steer the work through **Universal Exports**, the authenticated
+public API, from the **Moneypenny** desktop and web app or the `ai6ctl` command.
 
-A **self-hosted supervisor for fleets of coding agents, where every agent is a real
-terminal a person can step into.** Missions arrive from whatever you track work in, M
-assigns each to the right agent for the project it belongs to, gives it its own git
-worktree, and kills it the moment it hangs at a prompt or loops, with every process it
-started. Nothing waits forever on a `[y/N]` nobody will see.
+## Build and run
 
-## Installation
+From the repository root:
 
-From a checkout, with Python 3.9 or newer:
-
-```bash
-git clone https://github.com/jose-pr/coagent.git && cd coagent
-python3 -m venv .pyvenv/local
-.pyvenv/local/bin/pip install -e "m[dev]" -e "i[dev]"
+```console
+cargo build --workspace --all-features
+cargo run -p ai6 --features cli -- serve --config-dir ./examples/config --plugin-path ./target/debug
+cargo run -p universal-exports --features cli -- --help
+cargo run -p ai6ctl -- --help
 ```
 
-| Extra/flag | Adds | Needed for |
-| --- | --- | --- |
-| `coagent-m[guatiao]` | `guatiao` (pinned to a commit) | terminal plugins in any language, such as the Rust `portable-pty` one |
-| `coagent-m[conpty]` | `pywinpty` (Windows) | the Windows pseudo-console provider, once implemented |
-| `coagent-i` | — | missions: briefs, the registry, intake sources, `launch --next` |
-
-## 30-second tour
-
-Three mock agents — healthy, looping, hung at a prompt — with a 3-second window standing
-in for the 300-second default:
-
-```bash
-python -m coagent_m.watchdog demo --timeout 3
-```
-
-Register a project as a station and give M an agent for it:
-
-```toml
-# ~/.config/coagent/stations.toml
-[station.G]
-name = "guatiao"
-path = "~/devel/guatiao"
-
-# ~/.config/coagent/profiles.toml
-[launcher.cli]
-command = ["agent-cli", "--model", "{model}"]
-
-[profile.007]
-aliases = ["JamesBond"]
-launcher = "cli"
-model = "<model-id>"
-roles = ["implement"]
-```
-
-Hand M a mission from anything that can write JSON, and let her take it:
-
-```bash
-echo '{"id": "GUA-12", "title": "Fix the flaky test", "station": "G", "role": "implement"}' \
-  | python -m coagent_i submit
-python -m coagent_m.watchdog launch --next
-```
+The Moneypenny app needs the Flutter `main` SDK; see
+[its README](https://github.com/jose-pr/ai6/blob/main/clients/moneypenny/README.md).
 
 ## Learn more
 
-- [Architecture](architecture.md): the five divisions and how they stay apart.
-- [Organization](organization.md): the conventions the names carry.
-- Guides: [stations](stations.md), [missions and intake](missions.md),
-  [agents](agents.md), [hooks](hooks.md), [terminals](terminals.md),
-  [the watchdog](watchdog.md).
-- API reference: [M](api/m.md), [I Branch](api/i.md), and the Rust crates.
-- [Changelog](changelog.md)
+- [Architecture](architecture.md): work versus infrastructure, the runtime, and what is
+  not implemented yet.
+- [Organization](organization.md): the directorates, the names and what each one owns.
+- Guides: [Operations](operations.md), [Stations](stations.md),
+  [Theaters](theaters.md), [Missions and intake](missions.md), [Agents](agents.md),
+  [Terminals](terminals.md), [the Watchdog](watchdog.md), [Hooks](hooks.md) and
+  [Examples](examples.md).
+- Rust API: [ai6](https://jose-pr.github.io/ai6/rust/ai6/),
+  [universal-exports](https://jose-pr.github.io/ai6/rust/universal_exports/),
+  [ai6-diptel](https://jose-pr.github.io/ai6/rust/ai6_diptel/).
+- [Changelog](changelog.md).

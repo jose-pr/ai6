@@ -1,83 +1,176 @@
 # Architecture
 
+AI6 has two independent shapes: the **work** (what is being done) and the
+**infrastructure** (where it runs). Neither contains the other.
+
 ```text
-  trackers, webhooks, skills (yours)       operators (browser)
-          │ briefs (JSON)                        │ HTTPS + WSS
-          ▼                                      ▼
-┌──────────────────────────────┐    ┌──────────────────────────────┐
-│ I  (i/)  I Branch            │    │ Moneypenny  (moneypenny/)    │
-│  registry · intake sources      │◄──►│  gateway · board · attach    │
-│  wire frames · briefings     │    │  one swimlane per station    │
-│  debriefs                    │    └──────────────────────────────┘
-└──────────────────────────────┘
-          │ briefs ▲ reports                     │ frames (I's wire format)
-          ▼        │                             ▼
-┌────────────────────────────────────────────────────────────────┐
-│ M  (m/)  M's Office                                            │
-│  stations · authorization · scheduling                         │
-│  watchdog · terminals · hooks                                  │
-│  profiles: who runs which mission                              │
-└────────────────────────────────────────────────────────────────┘
-          │ loadout                              │ spawn on a terminal
-          ▼                                      ▼
-┌──────────────────────────────┐    ┌──────────────────────────────┐
-│ Q  (q/)  Q Branch            │    │ 00  (00/)  00 Section        │
-│  credentials per station     │───►│  roster · CLI adapters       │
-│  sandboxes · tools that act  │    │  run in a station's worktree │
-└──────────────────────────────┘    └──────────────────────────────┘
+Work            Operation ──► Mission ──► Session
+                (global)      (brief)     (one provider run, provider-issued Session ID)
+                                             │ placed on
+Infrastructure  Station ──────────────────► Theater
+                (node running `ai6`)         (the host or environment the harness runs in)
 ```
 
-## How the divisions decouple
+- An **Operation** is a global project and its policy: checkout, roster, clearance,
+  cover, budget and a `selector` of Station labels. Stations serve Operations; no
+  Station owns one.
+- A **Mission** is one brief under an Operation. Its **Mission ID** may group several
+  **Sessions**; a Session ID comes from the provider and survives a resume.
+- A **Station** is a node running the `ai6` daemon, with the `control` role, the
+  `execution` role, or both. Control Stations elect the **Headquarters Station (HQS)**,
+  which holds M's authority through a lease. An execution-only Station is an
+  *outstation*.
+- A **Theater** is where a Session actually runs. Today every Session runs on its
+  Station's own host, in the Station's terminal provider; remote Theaters are designed
+  but not implemented.
 
-No division depends on another, except on I Branch's formats: the brief, the wire
-frames and the report. Each can be rewritten without touching the rest.
+For orientation only, the closest Kubernetes concepts are: Station ≈ node and kubelet,
+HQS ≈ elected control plane, Registry ≈ etcd, Operation ≈ namespace with a placement
+policy, Mission ≈ Job, Session ≈ a Pod's run, Theater ≈ the container runtime or sandbox
+host, Universal Exports ≈ the API server's front, `ai6ctl` ≈ `kubectl`. These are not
+AI6 names.
 
-1. **Terminals are providers behind one contract in M.** A session exposes the same
-   operations whatever runs it: *spawn, read output, write input, resize, kill the
-   tree, exit status*. Built in are a POSIX pty, plain pipes and (as a scaffold) the
-   Windows pseudo-console. Any other comes from the `coagent.terminals` entry-point
-   group or as a guatiao library serving the `coagent_terminal` kind, in any language;
-   the first is Rust on `portable-pty`. A `tmux` provider would give each agent a pane,
-   so `ssh <theater> -t tmux attach -r -t agent-42` keeps working beside the web view, and a
-   `systemd` one a transient unit with cgroup limits. The watchdog only ever sees bytes
-   and timestamps, so its rules are the same for every provider.
-2. **Moneypenny and M speak I's wire format, not each other.** M sends framed messages
-   (`output`, `event`, `input`, `resize`, each with a session id) and the gateway fans
-   one session out to any number of browsers, replays a scrollback ring to each new
-   viewer, and forwards input only from the viewer holding the session's **write
-   lease**. Browsers never reach M or a terminal provider directly.
-3. **Q is consulted at spawn time and then gets out of the way.** M asks Q for a
-   *loadout*: environment, credentials with a TTL, the MCP servers to start, and the
-   sandbox. Q equips, I informs: tools that change things are Q's, sources that only
-   inform (docs, search, a code index) are I's, and the loadout issues both. Secrets
-   reach the agent's environment and never its worktree, the event log or the terminal
-   stream.
-4. **I takes missions in from anything.** A brief is one JSON document; the registry is a
-   directory; a source is any program that prints briefs or any Python object in the
-   `coagent.intake` group, and it can hear back how its brief ended.
-5. **00 is data plus adapters.** M reads the roster to assign agents; an adapter knows
-   one CLI's flags, context file and signals. Swapping agent CLIs touches only `00/`
-   and the roster.
+## Runtime
 
-The frames are [guatiao](https://github.com/Boriken-Dev/guatiao) values on its wire
-format, declared once in a Rust crate in `i/`, compiled natively into the gateway and to
-wasm into the browser client, and read from Python through guatiao's bindings. No end
-hand-rolls a codec, so no two ends can disagree about the protocol, and the same encoding
-also runs over WebTransport. The board is Rust compiled to wasm. The terminal widget
-stays xterm.js with its WebGL renderer, behind a small interop shim: it already draws on
-the GPU, and its input handling (IME, selection, screen readers) is ahead of any Rust
-terminal. So wasm buys a shared codec and a Rust UI, not a faster terminal.
+```text
+ operators ── Moneypenny app / ai6ctl ── HTTPS/WSS ──► Universal Exports (public API)
+                                                         │ M bearer, DipTel frames
+ people, trackers ── briefs ──► Registry (I Branch)      ▼
+                                   ▲         ┌──────────────────────────────┐
+                                   └─leases──┤ Station: ai6 serve           │
+                                             │  directorates: M I Q 00 Med. │
+                                             │  station: server, plugins,   │
+                                             │   safe houses, publisher     │
+                                             └──────────────┬───────────────┘
+                                                            │ Guatiao providers
+                                    AgentHandler (Claude, Codex), terminal (pty)
+```
 
-The web side has its own security rules, borrowed from ttyd's model. Attach is
-authorized per station, session and mode (`read` or `write`) with a short-lived token
-minted by the gateway. WebSockets are same-origin and TLS-only. Operator input counts as
-activity for the watchdog, so a person driving an agent is never killed for being slow.
+**The Station** (`ai6` crate) runs the directorates' decisions. Its private loopback API
+serves provider discovery and the Mission lifecycle; the scheduler leases briefs from the
+Registry, selects an Agent, creates a safe house and starts a Session. Mission records
+persist, so a restarted Station reattaches to provider Sessions by their Session ID.
+
+**Universal Exports** (`universal-exports` crate) is the only public entry point. It
+authenticates users (Authenticator and Directory providers, or a trusted reverse-proxy
+identity), applies the authorization policy per Operation, issues attach grants and
+write leases, fans out DipTels with bounded replay, and records metadata-only audit.
+Browsers and `ai6ctl` never connect to a Station or a provider.
+
+**DipTels** (`ai6-diptel` crate) are the wire contract between a Station, Universal
+Exports and the Moneypenny app: Guatiao values for Session lifecycle, terminal bytes and
+geometry, used natively and from WebAssembly.
+
+**Moneypenny** (`clients/moneypenny`) is the Flutter desktop and web operator app.
+
+## How the directorates decouple
+
+1. **00 Section owns the harness boundary.** `AgentHandler`
+   (`ai6::directorates::section_00`) starts or resumes a provider Session, delivers initial
+   context, accepts later messages and decodes events. Claude and Codex handlers are
+   Guatiao providers in `crates/providers/agents/`.
+2. **Q Branch owns gear.** Terminals (`ai6::directorates::q::terminal`, provider `pty`),
+   validated loadouts, Mission-scoped secret leases, Claude MCP configuration and
+   bubblewrap argument translation. The loadout catalog is not yet applied at provider
+   startup. Secrets never enter a worktree, event log or terminal stream.
+3. **I Branch owns intelligence and records.** The file-backed Registry holds briefs,
+   leases, Station check-ins, the Headquarters lease, audit, role overrides and
+   access-token digests; the Cable relay delivers agent-to-agent messages.
+4. **M owns decisions.** The roster, Agent selection, clearance, cover and the Mission
+   lifecycle (`ai6::directorates::m`), and the access kinds whose policy Universal Exports
+   enforces.
+5. **Medical watches health.** The watchdog detects stalls, loops and blocked prompts.
+6. **The Station runs it all** (`ai6::station`): server, provider host, safe houses,
+   publisher and mTLS identity.
+
+Frames are [guatiao](https://github.com/Boriken-Dev/guatiao) values declared once in
+`ai6-diptel`; no endpoint hand-rolls a codec. Attach is authorized per Operation,
+Mission, Session and mode (`read` or `write`) with a short-lived token; WebSockets are
+same-origin and TLS-only, and operator input counts as watchdog activity.
+
+## Not implemented yet
+
+- Remote Theaters: starting Sessions over SSH, remote safe houses and Cable MCP
+  forwarding.
+- Central placement: Stations sharing a Registry each lease the briefs they can run
+  themselves; the Headquarters lease does not yet drive placement. The Registry is
+  file-backed only (no SQL backend).
+- The Q loadout catalog is parsed and validated but not yet applied when a provider
+  starts.
+- External A2A interoperability (see below).
+
+## Agent Cables
+
+Agent-to-agent messages are **Cables**; terminal output, guatiao wire frames and live
+stream events remain **DipTels**. The `ai6::directorates::i::cables` relay stores durable Cable envelopes,
+resolves audiences and enforces explicit grants. The Rust AI6 daemon starts per-Session
+MCP endpoints for managed Claude and Codex handlers when `cables-mcp` is enabled.
+
+A Cable has a relay-generated ID and timestamp, a sender principal supplied by M's trusted
+adapter from the managed Session, an explicit typed recipient, bounded plain-text body, idempotency key,
+delivery state and TTL. It may carry the enclosing Mission ID, the provider-issued
+Session ID, and conversation/reply IDs for correlation. The Session ID is descriptive,
+never proof of identity. Callers cannot choose their sender identity or attach files;
+file and resource access require separate authorization.
+
+An `agent` recipient is unicast. `station`, `theater`, `global` and named `channel`
+recipients are broadcasts with bounded audiences resolved by the relay at acceptance.
+Station delivery requires Station membership and a send grant. Theater and custom
+channel delivery require explicit grants for each sender and receiver; Global requires
+an exceptional explicit grant and is never a default. The relay rechecks receiver policy
+at delivery. Each receiver may `deliver`, `hold`, or `refuse`. Held Cables remain hidden
+from recipient inboxes. An approver needs an explicit `release` grant for the Cable's exact
+audience scope to list body-free held metadata and release it; the relay checks each
+recipient's current receive grant again, refusing any whose grant was revoked. Hidden
+recipients are not disclosed by denial errors.
+
+The lifecycle is `queued`, `delivered`, `held`, `refused`, `acked`, `expired` or
+`failed`. Retries preserve the Cable ID and are idempotent. The default TTL is 15 minutes
+and the maximum is 24 hours; broadcast membership is snapshotted when accepted. A live
+recipient is bound to its current Session; a known offline Agent gets an Agent-level
+queued delivery that any of its Sessions may read before expiry. The relay uses shared
+Registry token buckets by sender Agent and target scope: defaults are 2 sends/second with a
+burst of 20 per Agent, and 10 sends/second with a burst of 50 per scope. Identical retries
+reuse the original audience snapshot and do not consume another token. Bounded fan-out, a
+one-hop limit and body-size caps control storms and replay. M emits metadata-only audit
+callbacks for accepted/denied sends, retries, delivery, acknowledgement and release. Each record
+contains Agent, Operation, Station, Mission/Session IDs, target scope, decision and timestamp; it
+never contains the Cable body. The embedding site chooses its audit sink. Incoming text is
+untrusted and cannot grant tools, clearance, secrets or authority; each receiving agent's
+own permissions still apply.
+
+The MCP tools expose authorized discovery, unicast, broadcast, inbox reads,
+held-Cable approvals, acknowledgements and replies. `list_held_cables` returns sender,
+target, recipient and expiry metadata but never a held message body. `release_cable` requires
+the same explicit scope grant, rechecks recipient receive grants and moves authorized
+recipients into their inboxes. Rust AI6's optional `cables-mcp` feature creates a separate
+loopback listener per managed Agent Session, returns no tools until the provider-issued
+Session ID is bound, and closes the listener when the Session ends. Claude receives an
+environment-substituted `--mcp-config`; Codex app-server receives per-process config
+overrides. Both read bearer credentials from the launch environment, never from argv or
+persisted configuration. Remote SSH tunneling is not implemented.
+MCP is the agent-to-tool interface. [A2A](https://a2a-protocol.org/latest/) remains a
+future cross-harness interoperability boundary, while AI6's relay remains authoritative
+for local identity and scope permissions. [Claude Code's cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)
+is a reference for delivered/held/refused outcomes and receiver-side controls, not an AI6
+transport dependency. See the [A2A coding-harness analysis](https://shashikantjagtap.net/a2a-for-coding-harnesses-the-protocol-most-teams-still-build-privately/)
+for the interoperability motivation.
+
+**Protocol decision:** AI6 will not expose A2A yet. Its current MCP Cable surface serves
+managed Agents through M's local relay, while no authenticated cross-harness directory or
+peer trust exchange exists. Revisit A2A when a deployment needs discovery and message/task
+exchange with agents outside its AI6 Registry; an adapter must preserve relay authorization
+and map no external identity into AI6 authority. An A2A `Task ID` remains an external
+protocol identifier: it is not AI6's **Mission ID** (a unit of work that can group multiple
+Sessions) or a provider-issued **Session ID** (one resumable agent run). Inbox
+delivery currently uses polling through `read_cables` at agent-selected checkpoints; it
+does not wake an idle provider session.
 
 ## Terminal handshakes
 
 A shell under a pty, and ConPTY at start-up, asks where the cursor is (`ESC[6n`) and
-waits. With no emulator attached that looks exactly like a hung agent, so the watchdog
-answers every query itself, always with row 24, column 1, and removes it from the
+waits. With no emulator attached that looks exactly like a hung agent, so the terminal
+bridge answers every query itself, always with row 24, column 1, and removes it from the
 stream so an attached viewer's emulator does not answer a second time.
 
 ## Prior art
@@ -91,15 +184,18 @@ stream so an attached viewer's emulator does not answer a second time.
 | herdr | Many processes multiplexed into one view with their states visible at a glance |
 | [tmux](https://github.com/tmux/tmux), [systemd-run](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html) | Session persistence and detach; transient units with cgroup limits |
 | [Model Context Protocol](https://modelcontextprotocol.io/) | The tool interface Q arms agents with |
-| [Boriken-Dev/guatiao](https://github.com/Boriken-Dev/guatiao) | Not prior art but a dependency: the wire format and framing for M ↔ gateway ↔ browser, from Rust, wasm and Python |
+| [Boriken-Dev/guatiao](https://github.com/Boriken-Dev/guatiao) | Not prior art but a dependency: the provider ABI and the DipTel wire format |
 
 ## Repository layout
 
 | Path | Language | What |
 | --- | --- | --- |
-| `m/` | Python | M's Office: package `coagent_m` |
-| `m/crates/` | Rust | The terminal kind, the `portable-pty` plugin and the native library M loads |
-| `00/` | data, adapters | The 00 Section: the example roster; CLI adapters to come |
-| `q/` | Python | Q Branch: credentials, sandboxes, acting tools, loadouts |
-| `i/` | Python, Rust | I Branch: package `coagent_i` (briefs, registry, intake); the wire crate to come |
-| `moneypenny/` | Rust: the gateway, and the browser client compiled to wasm | The team viewport |
+| `crates/ai6/` | Rust | The Station daemon and AI6 contracts: directorates and `station` modules, `ai6` command |
+| `crates/universal-exports/` | Rust | The authenticated public API gateway and its command |
+| `crates/ai6-diptel/` | Rust | The DipTel wire contract, native and WebAssembly |
+| `crates/ai6ctl/` | Rust | The read-only operator command |
+| `crates/providers/agents/` | Rust | Claude and Codex AgentHandler providers |
+| `crates/providers/terminals/pty/` | Rust | The `pty` terminal provider (openpty / ConPTY) |
+| `crates/providers/access/` | Rust | Key, LDAP, local, peer-certificate and reverse-proxy access providers |
+| `clients/moneypenny/` | Dart/Flutter | The Moneypenny operator app for desktop and web |
+| `examples/config/` | TOML | A runnable Operation and Agent roster |

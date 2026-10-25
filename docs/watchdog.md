@@ -1,48 +1,58 @@
-# The watchdog
+# The Watchdog
 
-M's Medical Section, in its first form: it watches an agent's output and ends the run
-when the agent is no longer working.
+The Rust AI6 daemon monitors provider events, terminal output and accepted operator
+messages for each Agent Session. Provider events and terminal bytes count as activity;
+an accepted follow-up message resets both inactivity and repeated-output timing.
 
-| Kill reason | When |
-| --- | --- |
-| `input_hang` | no output and no operator input for `stall_timeout`, at something shaped like a prompt |
-| `silent` | the same, with no prompt |
-| `loop` | output keeps arriving, but no line has been new for `loop_timeout` |
-| `max_runtime` | the optional hard cap |
+After ten quiet seconds at a recognized terminal prompt, AI6 moves the Mission to
+`blocked` so an operator can respond. If the Session then remains inactive for five
+minutes, AI6 marks it `stalled`, interrupts and closes the provider Session, and ends
+the active operation. New terminal output moves a blocked Mission back to `working`.
 
-Lines are compared after stripping ANSI escapes, and `\r` counts as a line break, so a
-spinner redrawing in place counts as repetition. Typing into an agent counts as activity,
-so a person driving it is never killed for being slow.
+The Rust monitor also detects repeated terminal lines. It strips ANSI control sequences,
+treats carriage returns and line feeds as line boundaries, and tracks a bounded least-
+recently-used history of non-empty lines. Fifty repeated lines with no novel line for five
+minutes stalls the Mission and closes its operation. The monitor bounds partial lines to
+4 KiB and retains at most 4,096 line digests.
+
+## Defaults
+
+| Limit | Rust daemon default |
+| --- | ---: |
+| Quiet period before `stalled` | 300 s |
+| Quiet period before `blocked` at a prompt | 10 s |
+| Repeated lines before loop tracking applies | 50 |
+| Novel-output period before loop `stalled` | 300 s |
+| Maximum remembered line digests | 4,096 |
+| Maximum Session runtime | Disabled |
+| Digit normalization for loop matching | Disabled |
+
+`WatchdogConfig` exposes these settings to Rust callers, and `ServeConfig::with_watchdog`
+applies one configuration to Sessions started by that daemon. `ai6 serve` exposes the same
+limits through `--stall-timeout`, `--loop-timeout`, `--loop-min-lines`, `--blocked-after`,
+`--max-runtime`, `--history` and `--normalize-digits`; timeout values accept fractional,
+non-negative seconds. Each Agent can override selected settings in its `[agent.<id>.limits]`
+table; values layer over daemon settings and merge through Agent inheritance.
 
 ## Lifecycle
 
 ```text
-pending ─► working ⇄ blocked ─► done | failed
-              │         │
-              └────┬────┘
-                   ▼
-                stalled   (input_hang · silent · loop · max_runtime)
+queued ─► working ⇄ blocked ─► done | failed | abandoned
+             │         │
+             └────┬────┘
+                  ▼
+               stalled
 ```
 
-*Blocked* means the output ends in a prompt and has been quiet for `blocked_after`: a
-warning on the board, not a kill, so an operator can attach and answer in time.
+`blocked` is a recoverable prompt wait. `stalled` closes the active operation while
+preserving the Mission record and any changed safe-house work for recovery.
 
-## Limits
+## Run the watchdog
 
-| Limit | Default |
-| --- | --- |
-| `stall_timeout` | 300 s |
-| `loop_timeout` | 300 s |
-| `loop_min_lines` | 50 repeated lines |
-| `blocked_after` | 10 s |
-| `max_runtime` | none |
-| `normalize_digits` | off: `retry 1` and `retry 2` are different lines |
+The Rust watchdog runs as part of the daemon:
 
-A profile's `limits` table overrides them per agent.
-
-## Commands
-
-```bash
-python -m coagent_m.watchdog run -- some-agent --flag     # supervise any command
-python -m coagent_m.watchdog demo --timeout 3             # three mock agents
+```console
+cargo run -p ai6 --features cli -- serve --help
 ```
+
+The watchdog runs inside `ai6 serve`; it is not a separate supervisor command.

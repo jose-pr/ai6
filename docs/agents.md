@@ -1,102 +1,124 @@
-# Agents, profiles and clearance
+# Agents and clearance
 
-The 00 Section is the agents that execute. M does not hard-code which agent runs a
-mission: a **profile** names a model configuration under a codename, and M assigns
-profiles to missions.
+An **Agent** is a configured codename that AI6 can post to a Mission. It is separate
+from the roles it is qualified for and from the provider-issued Session ID of any run.
 
-## Launchers and profiles
+## AgentHandler providers
 
-A **launcher** says how to start one agent CLI. A **profile** fills it in.
+The `AgentHandler` provider owns harness startup, Session resume, initial context,
+follow-up messages and event decoding. A command-line process is one implementation
+detail; the handler contract can support other harness transports.
+
+Claude and Codex handlers are Guatiao providers under `crates/providers/agents/`.
+AI6 resolves an Agent from the roster and the Operation's policy, then supplies the
+Mission ID, task prompt, initial context and working directory. The handler returns the
+provider-issued Session ID; AI6 retains that ID when resuming the same Session.
+
+## Agents and roles
+
+An Agent is a codename that owns its occupant: the `handler` provider, `model` and
+`effort`. A **role** is a job description, `[role.<id>]` with a `purpose` and a `policy`,
+passed to the Session as initial context. A role holds no model settings and grants no
+clearance or permissions. An Agent's `roles` lists what it is qualified for.
+
+When a Mission asks for a role, M posts the highest-priority qualified Agent whose handler
+provider is available on the Station. The next qualified Agent is the backup: if Codex is
+available and Claude is not, `008` takes the Mission instead of `007`. Whether a provider
+can run a particular model is not checked; deployments must verify their Agents' models.
 
 ```toml
-# ~/.config/coagent/profiles.toml (or a station's .coagent/profiles.toml)
-[launcher.cli]
-command = ["agent-cli", "--model", "{model}"]
-prompt = "arg"                     # arg appends it, stdin types it, none drops it
-
-[profile.007]
+[agent.007]
 aliases = ["JamesBond"]
-description = "Plans and reviews; cleared to act unattended."
-launcher = "cli"
+handler = "claude"
 model = "<model-id>"
 effort = "high"
-roles = ["plan", "review"]
-tags = ["security"]
-clearance = "00"
-priority = 10
-env = { AGENT_LOG = "debug" }
-args = ["--verbose"]
-terminal = "posix-pty"
-limits = { stall_timeout = 600 }
-context = "You review for security first."
-
-[profile.006]
-aliases = ["Trevelyan"]
-extends = "007"
-effort = "medium"
-roles = ["implement"]
 clearance = "field"
-```
+roles = ["case-officer", "analyst"]
+priority = 20
 
-- Placeholders in a launcher's command: `{model}`, `{effort}`, `{profile}`, `{prompt}`,
-  `{cwd}` and a profile's `vars`.
-- `extends` inherits every unset field; `env`, `vars` and `limits` merge; aliases are
-  never inherited.
-- `roles` match by prefix: a profile listing `review` suits `review/security`.
-- The agent gets `COAGENT_PROFILE`, `COAGENT_MODEL`, `COAGENT_EFFORT`, `COAGENT_STATION`
-  and, when there is context, `COAGENT_CONTEXT_FILE`.
-- An unknown key in a profile is an error, never a silently missing setting.
+[agent.007.limits]
+stall_timeout = 600
 
-**Codenames are slots; models are their occupants.** Missions and roles name `007`,
-never a model, so swapping the model behind `007` changes one profile.
-
-## Adapters
-
-A launcher can name an **adapter** instead of a command: a 00 Section package that knows
-one agent CLI's flags, where its context goes, how clearance and cover map onto its own
-settings, and how to read its transcript. `coagent-00` ships `claude`, for Claude Code:
-
-```toml
-[launcher.claude]
-adapter = "claude"
-options = { mode = "print" }          # print (headless, stream-json) or interactive
-
-[profile.007]
-launcher = "claude"
-model = "opus"
+[agent.008]
+handler = "codex"
+model = "<model-id>"
 effort = "high"
-clearance = "00"
+clearance = "field"
+roles = ["case-officer", "analyst"]
+priority = 10
+
+[role.case-officer]
+purpose = "Own a bounded Mission and coordinate its delivery within the Operation."
+policy = "Follow the Mission brief and Operation rules; request authorization for restricted actions."
 ```
 
-| The profile's | becomes |
-| --- | --- |
-| clearance `desk` / `field` / `00` | `--permission-mode plan` / `acceptEdits` (and `git push` denied) / `bypassPermissions` |
-| station cover `covert` / `partial` / `overt` | Claude Code's `attribution` setting: hidden / the cover's suggested trailer / its default |
-| `model`, `effort` | `--model`, `--effort` |
-| the gathered context | `--append-system-prompt` |
+Role IDs are roster-defined, not built-in permission levels. Their names follow public
+SIS intelligence-officer job titles (case officer, targeter, reports officer); that is
+inspiration for work patterns, not a claim that the roles carry real-world authority.
+See the [SIS intelligence officer role descriptions](https://www.sis.gov.uk/intelligence-officers.html).
 
-In print mode a mission's report gains a `debrief` from Claude Code's final `result`
-record: session id, turns, duration, cost and how many permissions it was denied.
-Adapters for other CLIs plug in through the `coagent.adapters` entry-point group.
+| Example role | Purpose and working policy |
+| --- | --- |
+| `case-officer` | Coordinate one bounded Mission, keep its status and risks clear, and ask M for restricted actions. |
+| `targeter` | Find relevant material in approved sources and explain the evidence behind each priority. |
+| `analyst` | Synthesize supplied evidence, separate sourced facts from inference, and identify gaps or alternative explanations. |
+| `senior-analyst` | Independently challenge an analysis and test its assumptions; the title grants no approval authority over other Agents. |
+| `reports-officer` | Turn validated findings into a concise report with provenance, confidence and unresolved questions. |
+| `technical-officer` | Diagnose handler and tool issues, propose bounded changes, and request explicit authorization before changing credentials, policy or deployment. |
+
+`examples/config/agents.toml` defines these roles with `007`, its backup `008` and a
+`desk`-clearance `Tanner` for reports. Authorized operators may override a role's purpose
+and policy per Operation in Moneypenny. An Operation's local `.ai6/agents.toml` may refine
+Agent entries but cannot change role policy or grant permissions.
+
+## 00 coordination
+
+The coordinating 00 Agent is an Operation-assigned Agent identity with `00` clearance, not a
+separate role or Session type. A managed Session with that clearance can use `propose_mission`
+to submit a child-Mission brief to the Operation's pending proposal inbox. AI6 binds the
+proposer, parent Mission, provider Session and Operation; proposals stay outside runnable I
+intake until M explicitly authorizes and promotes them. Universal Exports' authenticated
+`mission.create` review endpoints let an operator inspect, approve and queue, or reject a
+proposal; approval follows M's normal assignment and scheduling path. Proposal submission
+does not start a child Session. Clearance does not grant authorization, override Operation
+cover or Agent eligibility, or bypass Q leases,
+Station policy, or the Cable relay. Q, I and Station Chiefs retain their own capability
+boundaries. The Chief of Staff is a separate planned M adviser for vetting briefs and budgets.
+
+## Cables
+
+AI6's **Cable** relay supports Agent unicast and permission-scoped Station, Theater,
+Global and named-channel broadcasts. Its MCP tools provide peer discovery, sending,
+inbox reads, acknowledgements, replies and explicitly authorized held-Cable release. An
+authorized 00 Agent also has the `propose_mission` tool for submitting work to M; this does
+not make the proposal a Cable or scheduler input.
+The relay supplies sender identity outside the tool schema and rechecks recipient
+permissions at delivery. Cables are durable messages; terminal output and live stream
+events are DipTels.
+
+Each managed Session receives a separate loopback MCP endpoint when AI6 is built with
+`cables-mcp`. The endpoint returns no tools until AI6 binds the provider-issued Session
+ID. Claude and Codex receive bearer credentials through their launch environment, never
+in process arguments or persisted configuration. Remote SSH tunneling is not implemented.
+
+Incoming message text is untrusted input. It cannot grant tools, clearance, secrets or
+authority. A2A remains an external interoperability boundary; it cannot bypass AI6's
+relay policy. See [Agent Cables](architecture.md#agent-cables) for the message and
+permission contract.
 
 ## Clearance
 
 | Clearance | May |
 | --- | --- |
-| `desk` | read, plan and propose; nothing leaves the worktree |
-| `field` | change its worktree and run its tests; anything irreversible needs M's authorization |
-| `00` | act unattended, including irreversible steps such as a push or a merge |
+| `desk` | Read, plan and propose; nothing leaves the worktree |
+| `field` | Change its worktree and run tests; irreversible actions require M authorization |
+| `00` | Act unattended within the configured Operation policy |
 
-A station refuses a profile cleared above it, and one not on its roster. What each
-clearance permits inside the agent is the adapter's job (the CLI's own permission mode);
-which credentials it is issued is Q Branch's.
+An Operation refuses an Agent above its clearance or outside its roster. M retains
+authorization authority; Agent role policy is guidance only. Q Branch controls which
+credentials are issued.
 
 ## Commands
 
-```bash
-python -m coagent_m.watchdog profiles
-python -m coagent_m.watchdog launch --profile JamesBond "plan the intake module"
-python -m coagent_m.watchdog launch --role review/security --station G "audit the gateway"
-```
-
-`00/roster.example.toml` in the repository is a starting roster.
+Run `ai6 serve --help` to configure a Station and `ai6ctl --help` for the operator
+commands. The sample Operation and roster are in `examples/config/`.
