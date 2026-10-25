@@ -61,6 +61,21 @@ String stationBoardResponse() => jsonEncode({
             'ambient credential on the Theater: an SSH agent (SSH_AUTH_SOCK)',
           ],
         },
+        {
+          'id': 'scratch',
+          'access': 'ephemeral',
+          'provider': 'ephemeral-container',
+          'labels': {},
+          'agents': 'remote-hands',
+        },
+        {
+          'id': 'scratch-mission-007',
+          'access': 'transport',
+          'provider': 'container',
+          'labels': {},
+          'agents': 'remote-hands',
+          'made_for': 'mission-007',
+        },
       ],
     },
   ],
@@ -881,6 +896,22 @@ void main() {
         'unmet: claude>=2.1: not installed\n'
         'found git git version 2.47.0\n'
         'weakened: ambient credential on the Theater: an SSH agent (SSH_AUTH_SOCK)',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byTooltip(
+        'ephemeral ephemeral-container\n'
+        'a fresh Theater is made for each Mission\n'
+        'agents remote-hands · egress direct',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byTooltip(
+        'transport container\n'
+        'made for Mission mission-007\n'
+        'agents remote-hands · egress direct',
       ),
       findsOneWidget,
     );

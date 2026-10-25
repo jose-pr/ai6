@@ -1336,6 +1336,7 @@ fn station_theaters(info: &BTreeMap<String, serde_json::Value>) -> Vec<BoardThea
             weakened: theater.weakened,
             requires: theater.requires,
             report: theater.report,
+            made_for: theater.made_for,
         })
         .collect()
 }
@@ -3128,6 +3129,9 @@ pub struct BoardTheater {
     /// What the Station's last probe found there: versions, free space, unmet requirements.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<ai6::ProbeReport>,
+    /// The Mission an ephemeral Theater was made for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub made_for: Option<String>,
 }
 
 /// Mission instructions and non-secret launch metadata published by AI6.

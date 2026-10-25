@@ -1286,6 +1286,7 @@ class TheaterSummary {
     this.weakened = const [],
     this.requires,
     this.report,
+    this.madeFor,
   });
 
   final String id;
@@ -1314,6 +1315,9 @@ class TheaterSummary {
 
   /// What the Station's last probe found there.
   final TheaterReport? report;
+
+  /// The Mission an ephemeral Theater was made for.
+  final String? madeFor;
 
   /// The Theater declares requirements that are unchecked or unmet.
   bool get unfit => requires != null && (report == null || !report!.fit);
@@ -1345,6 +1349,7 @@ class TheaterSummary {
     report: json['report'] == null
         ? null
         : TheaterReport.fromJson(json['report'] as Map<String, dynamic>),
+    madeFor: json['made_for'] as String?,
   );
 
   String get description {
@@ -1353,6 +1358,8 @@ class TheaterSummary {
     final tags = labels.entries.map((e) => '${e.key}=${e.value}').join(', ');
     return [
       tags.isEmpty ? where : '$where · $tags',
+      if (access == 'ephemeral') 'a fresh Theater is made for each Mission',
+      if (madeFor != null) 'made for Mission $madeFor',
       if (unavailable != null) 'unreachable: $unavailable',
       if (capabilities != null) capabilities!.description,
       ...?capabilities?.notes,
