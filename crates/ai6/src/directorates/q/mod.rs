@@ -4,6 +4,7 @@ mod mcp;
 mod sandbox;
 mod secrets;
 
+pub mod safehouse;
 pub mod terminal;
 
 pub use mcp::claude_mcp_config;
