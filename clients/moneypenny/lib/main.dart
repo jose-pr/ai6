@@ -859,34 +859,120 @@ class StationSummary {
   );
 }
 
-/// A host or sandbox a Station reaches; `ssh` Theaters are listed but not yet
-/// chosen for Sessions.
+/// What a Station's transport can do on a Theater.
+class TheaterCapabilities {
+  const TheaterCapabilities({
+    this.terminal = false,
+    this.run = false,
+    this.files = false,
+    this.forward = false,
+    this.os,
+    this.arch,
+  });
+
+  final bool terminal;
+  final bool run;
+  final bool files;
+  final bool forward;
+  final String? os;
+  final String? arch;
+
+  factory TheaterCapabilities.fromJson(Map<String, dynamic> json) =>
+      TheaterCapabilities(
+        terminal: json['terminal'] as bool? ?? false,
+        run: json['run'] as bool? ?? false,
+        files: json['files'] as bool? ?? false,
+        forward: json['forward'] as bool? ?? false,
+        os: json['os'] as String?,
+        arch: json['arch'] as String?,
+      );
+
+  /// The abilities that are present, then the host's platform.
+  String get description {
+    final can = [
+      if (terminal) 'terminal',
+      if (run) 'run',
+      if (files) 'files',
+      if (forward) 'forward',
+    ];
+    final platform = [os, arch].whereType<String>().join('/');
+    return [
+      can.isEmpty ? 'no abilities reported' : can.join(', '),
+      if (platform.isNotEmpty) platform,
+    ].join(' · ');
+  }
+}
+
+/// A host or sandbox a Station reaches through a transport (`local`, `ssh` or another
+/// provider), with what that transport can do there.
 class TheaterSummary {
   const TheaterSummary({
     required this.id,
     required this.access,
     this.host,
+    this.provider,
     this.labels = const {},
+    this.capabilities,
+    this.agents = 'auto',
+    this.egress = 'direct',
+    this.harnesses = const [],
+    this.unavailable,
+    this.weakened = const [],
   });
 
   final String id;
   final String access;
   final String? host;
+  final String? provider;
   final Map<String, String> labels;
+  final TheaterCapabilities? capabilities;
+
+  /// Where the harness may run: `auto`, `local` or `remote-hands`.
+  final String agents;
+
+  /// How the Theater reaches the provider's API: `direct`, `proxy`, `station` or `none`.
+  final String egress;
+  final List<String> harnesses;
+
+  /// Why the Station cannot reach the Theater now, when it cannot.
+  final String? unavailable;
+
+  /// Settings looser than their defaults.
+  final List<String> weakened;
 
   factory TheaterSummary.fromJson(Map<String, dynamic> json) => TheaterSummary(
     id: json['id'] as String,
     access: json['access'] as String,
     host: json['host'] as String?,
+    provider: json['provider'] as String?,
     labels: ((json['labels'] as Map<String, dynamic>?) ?? const {}).map(
       (key, value) => MapEntry(key, value as String),
     ),
+    capabilities: json['capabilities'] == null
+        ? null
+        : TheaterCapabilities.fromJson(
+            json['capabilities'] as Map<String, dynamic>,
+          ),
+    agents: json['agents'] as String? ?? 'auto',
+    egress: json['egress'] as String? ?? 'direct',
+    harnesses: ((json['harnesses'] as List<dynamic>?) ?? const [])
+        .cast<String>(),
+    unavailable: json['unavailable'] as String?,
+    weakened: ((json['weakened'] as List<dynamic>?) ?? const []).cast<String>(),
   );
 
   String get description {
-    final where = host == null ? access : '$access $host';
+    final via = provider ?? host;
+    final where = via == null ? access : '$access $via';
     final tags = labels.entries.map((e) => '${e.key}=${e.value}').join(', ');
-    return tags.isEmpty ? where : '$where · $tags';
+    return [
+      tags.isEmpty ? where : '$where · $tags',
+      if (unavailable != null) 'unreachable: $unavailable',
+      if (capabilities != null) capabilities!.description,
+      'agents $agents · egress $egress',
+      if (harnesses.isNotEmpty) 'harnesses ${harnesses.join(', ')}',
+      ...weakened.map((setting) => 'weakened: $setting'),
+    ].join('\n');
   }
 }
 
@@ -895,18 +981,28 @@ class PlacementChoice {
     required this.station,
     required this.theater,
     required this.agent,
+    this.mode = 'field',
   });
 
   final String station;
   final String theater;
   final String agent;
 
+  /// `field` runs the harness on the Theater; `remote-hands` runs it on the Station and
+  /// acts on the Theater through the transport.
+  final String mode;
+
   factory PlacementChoice.fromJson(Map<String, dynamic> json) =>
       PlacementChoice(
         station: json['station'] as String,
         theater: json['theater'] as String,
         agent: json['agent'] as String,
+        mode: json['mode'] as String? ?? 'field',
       );
+
+  String get description =>
+      '$station \u00b7 $theater \u00b7 $agent'
+      '${mode == 'field' ? '' : ' \u00b7 $mode'}';
 }
 
 class PlacementRejection {
@@ -2852,10 +2948,7 @@ class _PlacementResult extends StatelessWidget {
               : 'Would run on, best first',
           style: Theme.of(context).textTheme.titleSmall,
         ),
-        for (final choice in preview.choices)
-          Text(
-            '${choice.station} \u00b7 ${choice.theater} \u00b7 ${choice.agent}',
-          ),
+        for (final choice in preview.choices) Text(choice.description),
         if (preview.rejections.isNotEmpty) ...[
           const SizedBox(height: 8),
           Text('Ruled out', style: Theme.of(context).textTheme.titleSmall),
@@ -3044,7 +3137,9 @@ class _StationCard extends StatelessWidget {
                     message: theater.description,
                     child: Chip(
                       avatar: Icon(
-                        theater.access == 'local'
+                        theater.unavailable != null
+                            ? Icons.link_off
+                            : theater.access == 'local'
                             ? Icons.computer
                             : Icons.cloud_outlined,
                         size: 15,

@@ -21,15 +21,15 @@ pub use directorates::m::access::{
 };
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
 pub use directorates::m::placement::{
-    AgentFacts, OperationPolicy, Placement, PlacementChoice, PlacementRejection, PlacementRequest,
-    StationFacts, place,
+    AgentFacts, ExecutionMode, OperationPolicy, Placement, PlacementChoice, PlacementRejection,
+    PlacementRequest, StationFacts, execution_mode, place,
 };
 pub use directorates::m::roster::{
     AgentRole, CoverIdentity, Operation, Roster, RosterError, Workspace,
 };
 pub use directorates::m::theaters::{
-    LOCAL_THEATER, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind, TheaterSummary,
-    Theaters,
+    AgentMode, Egress, EgressKind, LOCAL_THEATER, SshAccess, Theater, TheaterAccess, TheaterError,
+    TheaterKind, TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
 };
 pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure, ExposureDefinition,
@@ -53,6 +53,11 @@ pub use directorates::q::safehouse::{
 };
 pub use directorates::q::terminal::{
     AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalBridge, TerminalSession,
+};
+pub use directorates::q::transport::{
+    Capabilities, DEFAULT_MAX_OUTPUT, DEFAULT_READ_LIMIT, DirEntry, DirListing, FileData, Forward,
+    ForwardInfo, ForwardSpec, Output, ReadSpec, RunSpec, Transport, TransportClient,
+    TransportConfig, TransportForward, WriteSpec, describe, is_unsupported, unsupported,
 };
 pub use directorates::q::{
     DEFAULT_SECRET_LEASE_TTL, Loadout, LoadoutCatalog, MAX_LOADOUT_BYTES, MAX_SECRET_LEASE_TTL,

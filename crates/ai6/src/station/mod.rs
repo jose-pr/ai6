@@ -13,3 +13,5 @@ pub mod safehouse;
 pub mod server;
 #[cfg(feature = "daemon")]
 pub(crate) mod sources;
+#[cfg(feature = "daemon")]
+pub(crate) mod transports;

@@ -1211,7 +1211,15 @@ fn station_theaters(info: &BTreeMap<String, serde_json::Value>) -> Vec<BoardThea
             id: theater.id,
             access: theater.access.as_str().to_owned(),
             host: theater.host,
+            provider: theater.provider,
             labels: theater.labels,
+            capabilities: theater.capabilities,
+            agents: theater.agents.as_str().to_owned(),
+            egress: theater.egress.as_str().to_owned(),
+            harnesses: theater.harnesses,
+            workdir: theater.workdir,
+            unavailable: theater.unavailable,
+            weakened: theater.weakened,
         })
         .collect()
 }
@@ -2885,13 +2893,37 @@ pub struct BoardStation {
 pub struct BoardTheater {
     /// Theater identifier.
     pub id: String,
-    /// How the Station reaches it: `local` or `ssh`.
+    /// How the Station reaches it: `local`, `ssh` or `transport`.
     pub access: String,
     /// SSH host, for an `ssh` Theater.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    /// The transport provider, for a `transport` Theater.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     /// Theater labels.
     pub labels: BTreeMap<String, String>,
+    /// What the Station's transport can do on the Theater: `terminal`, `run`, `files`,
+    /// `forward`, and the host's `os` and `arch` when known. Absent from a Station that
+    /// does not report it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<ai6::Capabilities>,
+    /// Where the harness may run: `auto`, `local` or `remote-hands`.
+    pub agents: String,
+    /// How the Theater reaches the provider's API: `direct`, `proxy`, `station` or `none`.
+    pub egress: String,
+    /// Harnesses installed on the Theater, as declared.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub harnesses: Vec<String>,
+    /// The directory a remote-hands Mission works in when its Operation names no path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workdir: Option<String>,
+    /// Why the Station cannot reach the Theater now, when it cannot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
+    /// Settings looser than their defaults.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub weakened: Vec<String>,
 }
 
 /// Mission instructions and non-secret launch metadata published by AI6.
@@ -4382,7 +4414,15 @@ mod tests {
             "theaters".to_owned(),
             serde_json::json!([
                 {"id": "local", "access": "local", "labels": {}},
-                {"id": "build-box", "access": "ssh", "host": "build.example.net", "labels": {"os": "linux"}}
+                {
+                    "id": "build-box", "access": "ssh", "host": "build.example.net",
+                    "labels": {"os": "linux"},
+                    "capabilities": {
+                        "terminal": true, "run": true, "files": true, "forward": true,
+                        "os": "linux", "arch": "x86_64"
+                    },
+                    "harnesses": ["claude"]
+                }
             ]),
         );
         worker_info.insert("handlers".to_owned(), serde_json::json!(["claude"]));
@@ -5047,10 +5087,17 @@ mod tests {
         assert_eq!(
             preview["choices"],
             serde_json::json!([{
-                "station": "worker", "theater": "local", "agent": "007", "handler": "claude"
+                "station": "worker", "theater": "local", "agent": "007", "handler": "claude",
+                "mode": "field"
             }])
         );
         let rejections = preview["rejections"].as_array().unwrap();
+        assert!(rejections.iter().any(|r| {
+            r["theater"] == "build-box"
+                && r["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("has no `workdir`"))
+        }));
         assert!(
             rejections
                 .iter()
@@ -5085,8 +5132,16 @@ mod tests {
         assert_eq!(
             station_board["stations"][0]["theaters"],
             serde_json::json!([
-                {"id": "local", "access": "local", "labels": {}},
-                {"id": "build-box", "access": "ssh", "host": "build.example.net", "labels": {"os": "linux"}}
+                {"id": "local", "access": "local", "labels": {}, "agents": "auto", "egress": "direct"},
+                {
+                    "id": "build-box", "access": "ssh", "host": "build.example.net",
+                    "labels": {"os": "linux"},
+                    "capabilities": {
+                        "terminal": true, "run": true, "files": true, "forward": true,
+                        "os": "linux", "arch": "x86_64"
+                    },
+                    "agents": "auto", "egress": "direct", "harnesses": ["claude"]
+                }
             ])
         );
         assert!(

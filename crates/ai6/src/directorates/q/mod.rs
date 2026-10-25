@@ -6,6 +6,7 @@ mod secrets;
 
 pub mod safehouse;
 pub mod terminal;
+pub mod transport;
 
 pub use mcp::claude_mcp_config;
 pub use sandbox::{SandboxError, SandboxRequest};

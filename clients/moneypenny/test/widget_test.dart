@@ -27,6 +27,16 @@ String stationBoardResponse() => jsonEncode({
           'access': 'ssh',
           'host': 'build.example.net',
           'labels': {'os': 'linux'},
+          'capabilities': {
+            'terminal': true,
+            'run': true,
+            'files': true,
+            'forward': false,
+            'os': 'linux',
+            'arch': 'x86_64',
+          },
+          'agents': 'remote-hands',
+          'egress': 'none',
         },
       ],
     },
@@ -693,6 +703,14 @@ void main() {
                   'theater': 'local',
                   'agent': '007',
                   'handler': 'claude',
+                  'mode': 'field',
+                },
+                {
+                  'station': 'station-alpha',
+                  'theater': 'build-box',
+                  'agent': '007',
+                  'handler': 'claude',
+                  'mode': 'remote-hands',
                 },
               ],
               'rejections': [
@@ -777,9 +795,21 @@ void main() {
     expect(find.textContaining('2/4 sessions'), findsOneWidget);
     expect(find.text('Theater local'), findsOneWidget);
     expect(find.text('Theater build-box'), findsOneWidget);
+    expect(
+      find.byTooltip(
+        'ssh build.example.net \u00b7 os=linux\n'
+        'terminal, run, files \u00b7 linux/x86_64\n'
+        'agents remote-hands \u00b7 egress none',
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Preview placement'));
     await tester.pumpAndSettle();
     expect(find.text('station-alpha \u00b7 local \u00b7 007'), findsOneWidget);
+    expect(
+      find.text('station-alpha \u00b7 build-box \u00b7 007 \u00b7 remote-hands'),
+      findsOneWidget,
+    );
     expect(
       find.text('station-beta: it is at capacity (2 of 2 Missions)'),
       findsOneWidget,

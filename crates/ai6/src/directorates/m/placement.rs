@@ -16,7 +16,10 @@ use globset::Glob;
 use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::roster::{Agent, Roster, RosterError};
-use crate::directorates::m::theaters::{LOCAL_THEATER, TheaterKind, TheaterSummary};
+use crate::directorates::m::theaters::{
+    AgentMode, EgressKind, LOCAL_THEATER, TheaterKind, TheaterSummary,
+};
+use crate::directorates::q::transport::Capabilities;
 use crate::directorates::registry::store::StationRecord;
 
 /// What placement needs to know about an Operation and the Agents posted to it.
@@ -206,18 +209,44 @@ pub struct PlacementRequest {
     pub deciding_station: Option<String>,
 }
 
+/// Where the agent harness runs relative to the Theater it works on.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExecutionMode {
+    /// The harness runs on the Theater itself, in a terminal there.
+    #[default]
+    Field,
+    /// The harness runs on the Station; its shell and file tools act on the Theater through
+    /// the transport.
+    RemoteHands,
+}
+
+impl ExecutionMode {
+    /// The name used on the wire.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Field => "field",
+            Self::RemoteHands => "remote-hands",
+        }
+    }
+}
+
 /// One place a Mission may run.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlacementChoice {
     /// The Station that would supervise the Session.
     pub station: String,
-    /// The Theater the harness would run in.
+    /// The Theater the harness would work on.
     pub theater: String,
     /// The Agent that would be inserted.
     pub agent: String,
     /// The Agent's handler provider.
     pub handler: Option<String>,
+    /// Whether the harness would run on the Theater or act on it from the Station.
+    #[serde(default)]
+    pub mode: ExecutionMode,
 }
 
 /// One thing that was ruled out, and why. Absent fields mean the reason applies to every
@@ -302,21 +331,25 @@ pub fn place(
         let mut theaters: Vec<&TheaterSummary> = station.theaters.iter().collect();
         theaters.sort_by_key(|theater| (theater.id != LOCAL_THEATER, &theater.id));
         for theater in theaters {
-            if let Some(reason) = theater_rejection(policy, station, theater) {
-                placement.rejections.push(PlacementRejection {
-                    station: Some(station.station.clone()),
-                    theater: Some(theater.id.clone()),
-                    agent: None,
-                    reason,
-                });
-                continue;
-            }
+            let mode = match theater_verdict(policy, station, theater) {
+                Ok(mode) => mode,
+                Err(reason) => {
+                    placement.rejections.push(PlacementRejection {
+                        station: Some(station.station.clone()),
+                        theater: Some(theater.id.clone()),
+                        agent: None,
+                        reason,
+                    });
+                    continue;
+                }
+            };
             for agent in &usable {
                 placement.choices.push(PlacementChoice {
                     station: station.station.clone(),
                     theater: theater.id.clone(),
                     agent: agent.id.clone(),
                     handler: agent.handler.clone(),
+                    mode,
                 });
             }
         }
@@ -411,22 +444,18 @@ fn station_rejection(
     None
 }
 
-fn theater_rejection(
+/// How a Session would run on `theater`, or the reason it may not.
+fn theater_verdict(
     policy: &OperationPolicy,
     station: &StationFacts,
     theater: &TheaterSummary,
-) -> Option<String> {
+) -> Result<ExecutionMode, String> {
     if let Some(bound) = &policy.theater
         && bound != &theater.id
     {
-        return Some(format!("the Operation runs only in Theater {bound:?}"));
+        return Err(format!("the Operation runs only in Theater {bound:?}"));
     }
-    if theater.access == TheaterKind::Ssh {
-        return Some(
-            "SSH Theaters are recorded but not chosen yet: the harness must run under a supervisor on the Theater that outlives the Station's SSH link, and no such runner exists"
-                .to_owned(),
-        );
-    }
+    let mode = execution_mode(theater)?;
     // The Theater's own labels win over the Station's, so a Theater can refine them.
     let mut labels = station.labels.clone();
     labels.extend(theater.labels.clone());
@@ -444,23 +473,123 @@ fn theater_rejection(
         })
         .collect();
     if !unmet.is_empty() {
-        return Some(format!(
+        return Err(format!(
             "labels do not satisfy station_labels: {}",
             unmet.join(", ")
         ));
     }
-    if policy.checkout && !station.checkouts.contains(&policy.operation) {
-        return Some(format!(
-            "this Station has no checkout of Operation {:?}",
-            policy.operation
-        ));
+    if policy.checkout {
+        match mode {
+            ExecutionMode::Field if !station.checkouts.contains(&policy.operation) => {
+                return Err(format!(
+                    "this Station has no checkout of Operation {:?}",
+                    policy.operation
+                ));
+            }
+            // The checkout is on the Theater, which the Station cannot inspect: the
+            // Operation must say where it is by binding to the Theater, or the Theater
+            // must say where its Missions work.
+            ExecutionMode::RemoteHands
+                if policy.theater.as_deref() != Some(theater.id.as_str())
+                    && theater.workdir.is_none() =>
+            {
+                return Err(format!(
+                    "Operation {:?} has a checkout and this Theater has no `workdir`: bind the Operation to the Theater or set the Theater's `workdir`",
+                    policy.operation
+                ));
+            }
+            _ => {}
+        }
     }
-    None
+    Ok(mode)
+}
+
+/// What the Station's own host can do when it has not said: everything but forwarding.
+fn assumed_own_host() -> Capabilities {
+    Capabilities {
+        terminal: true,
+        run: true,
+        files: true,
+        ..Capabilities::default()
+    }
+}
+
+/// How a Session would run on `theater`, or the capability that is missing.
+///
+/// Field mode runs the harness on the Theater and needs `terminal` and `files`, a harness
+/// and a route to the provider's API. Until a runner can supervise a harness on a remote
+/// host, only the Station's own host qualifies. Remote-hands mode runs the harness on the
+/// Station and needs only the transport's `run`. `agents` can force either.
+pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String> {
+    if let Some(reason) = &theater.unavailable {
+        return Err(format!("the Station cannot reach it: {reason}"));
+    }
+    let own_host = theater.access == TheaterKind::Local;
+    let capabilities = match (&theater.capabilities, own_host) {
+        (Some(capabilities), _) => capabilities.clone(),
+        (None, true) => assumed_own_host(),
+        (None, false) => {
+            return Err(
+                "the Station did not report what this Theater's transport can do".to_owned(),
+            );
+        }
+    };
+
+    let mut field_missing = Vec::new();
+    if !own_host {
+        field_missing.push(
+            "a runner on the Theater to supervise the harness (only the Station's own host runs one)"
+                .to_owned(),
+        );
+    }
+    if !capabilities.terminal {
+        field_missing.push("the `terminal` capability".to_owned());
+    }
+    if !capabilities.files {
+        field_missing.push("the `files` capability".to_owned());
+    }
+    match theater.egress {
+        EgressKind::Isolated => {
+            field_missing.push("a route to the provider's API (egress is `none`)".to_owned());
+        }
+        EgressKind::Station if !capabilities.forward => field_missing
+            .push("the `forward` capability that egress = \"station\" relies on".to_owned()),
+        _ => {}
+    }
+    let hands_missing = (!capabilities.run).then_some("the `run` capability");
+
+    let reasons = |field: &[String], hands: Option<&str>| {
+        format!(
+            "field mode needs {}; remote-hands mode needs {}",
+            field.join(", "),
+            hands.unwrap_or("nothing more"),
+        )
+    };
+    match theater.agents {
+        AgentMode::Local => match field_missing.as_slice() {
+            [] => Ok(ExecutionMode::Field),
+            missing => Err(format!("agents = \"local\" needs {}", missing.join(", "))),
+        },
+        AgentMode::RemoteHands => match hands_missing {
+            None => Ok(ExecutionMode::RemoteHands),
+            Some(missing) => Err(format!("agents = \"remote-hands\" needs {missing}")),
+        },
+        AgentMode::Auto => {
+            if field_missing.is_empty() {
+                Ok(ExecutionMode::Field)
+            } else if hands_missing.is_none() {
+                Ok(ExecutionMode::RemoteHands)
+            } else {
+                Err(reasons(&field_missing, hands_missing))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::m::theaters::{SshAccess, Theater, TheaterAccess};
 
     fn agent(id: &str, handler: &str, priority: i64) -> AgentFacts {
         AgentFacts {
@@ -713,35 +842,48 @@ mod tests {
         }));
     }
 
+    fn remote(id: &str, capabilities: Option<Capabilities>) -> TheaterSummary {
+        let mut summary =
+            Theater::new(id, TheaterAccess::Ssh(SshAccess::new("b.example"))).summary();
+        summary.capabilities = capabilities;
+        summary
+    }
+
+    fn runs() -> Capabilities {
+        Capabilities {
+            terminal: true,
+            run: true,
+            files: true,
+            ..Capabilities::default()
+        }
+    }
+
+    fn mode_of(theater: &TheaterSummary) -> Result<ExecutionMode, String> {
+        execution_mode(theater)
+    }
+
     #[test]
-    fn theater_binding_labels_and_ssh_access_decide_the_theater() {
-        let ssh = TheaterSummary {
-            id: "box".to_owned(),
-            access: TheaterKind::Ssh,
-            host: Some("b.example".to_owned()),
-            labels: BTreeMap::from([("gpu".to_owned(), "yes".to_owned())]),
-        };
+    fn theater_binding_labels_and_capabilities_decide_the_theater() {
+        let mut ssh = remote("box", None);
+        ssh.labels.insert("gpu".to_owned(), "yes".to_owned());
+        let mut lab = Theater::new("lab", TheaterAccess::Local).summary();
+        lab.labels.insert("gpu".to_owned(), "yes".to_owned());
         let mut multi = station("a", 0);
         multi.theaters.push(ssh);
-        multi.theaters.push(TheaterSummary {
-            id: "lab".to_owned(),
-            access: TheaterKind::Local,
-            host: None,
-            labels: BTreeMap::from([("gpu".to_owned(), "yes".to_owned())]),
-        });
+        multi.theaters.push(lab);
 
-        // Unbound: local first; the ssh Theater is rejected with the reason.
+        // Unbound: local first; a Theater whose transport reported nothing is rejected.
         let placement = place(&policy(), &PlacementRequest::default(), &[multi.clone()]);
         assert_eq!(placement.choices[0].theater, "local");
-        let ssh_reason = placement
+        assert_eq!(placement.choices[0].mode, ExecutionMode::Field);
+        let reason = placement
             .rejections
             .iter()
             .find(|r| r.theater.as_deref() == Some("box"))
             .unwrap();
-        assert!(
-            ssh_reason
-                .reason
-                .starts_with("SSH Theaters are recorded but not chosen yet")
+        assert_eq!(
+            reason.reason,
+            "the Station did not report what this Theater's transport can do"
         );
 
         // Bound to the ssh Theater: nothing is eligible, and each Theater says why.
@@ -765,6 +907,151 @@ mod tests {
             .map(|c| c.theater.as_str())
             .collect();
         assert_eq!(chosen, ["lab", "lab"]);
+    }
+
+    #[test]
+    fn auto_prefers_field_mode_on_the_stations_own_host_and_remote_hands_elsewhere() {
+        assert_eq!(
+            mode_of(&TheaterSummary::local()),
+            Ok(ExecutionMode::Field),
+            "an own host that reported nothing is assumed able"
+        );
+        assert_eq!(
+            mode_of(&remote("box", Some(runs()))),
+            Ok(ExecutionMode::RemoteHands),
+            "no runner supervises a harness on a remote host yet"
+        );
+        let run_only = Capabilities {
+            run: true,
+            ..Capabilities::default()
+        };
+        assert_eq!(
+            mode_of(&remote("phone", Some(run_only))),
+            Ok(ExecutionMode::RemoteHands)
+        );
+    }
+
+    #[test]
+    fn a_theater_that_cannot_run_commands_cannot_host_remote_hands() {
+        let files_only = Capabilities {
+            files: true,
+            ..Capabilities::default()
+        };
+        let reason = mode_of(&remote("box", Some(files_only))).unwrap_err();
+        assert!(reason.contains("remote-hands mode needs the `run` capability"));
+        assert!(reason.contains("a runner on the Theater"));
+    }
+
+    #[test]
+    fn declared_facts_force_a_mode_and_a_rejection_names_the_missing_capability() {
+        let with = |mut summary: TheaterSummary, agents, egress| {
+            summary.agents = agents;
+            summary.egress = egress;
+            summary
+        };
+        // The own host can be told to use remote hands, for a harness that must not touch it.
+        assert_eq!(
+            mode_of(&with(
+                TheaterSummary::local(),
+                AgentMode::RemoteHands,
+                EgressKind::Direct
+            )),
+            Ok(ExecutionMode::RemoteHands)
+        );
+        // No route to the provider's API: field mode is out, remote hands stays.
+        assert_eq!(
+            mode_of(&with(
+                TheaterSummary::local(),
+                AgentMode::Auto,
+                EgressKind::Isolated
+            )),
+            Ok(ExecutionMode::RemoteHands)
+        );
+        // `agents = "local"` is never silently downgraded.
+        let reason = mode_of(&with(
+            TheaterSummary::local(),
+            AgentMode::Local,
+            EgressKind::Isolated,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            reason,
+            "agents = \"local\" needs a route to the provider's API (egress is `none`)"
+        );
+        let reason = mode_of(&with(
+            remote("box", Some(runs())),
+            AgentMode::Local,
+            EgressKind::Direct,
+        ))
+        .unwrap_err();
+        assert!(reason.starts_with("agents = \"local\" needs a runner on the Theater"));
+        // Egress through the Station relies on the transport's forward.
+        let reason = mode_of(&with(
+            TheaterSummary::local(),
+            AgentMode::Local,
+            EgressKind::Station,
+        ))
+        .unwrap_err();
+        assert!(reason.contains("`forward` capability"));
+        let mut forwards = TheaterSummary::local();
+        forwards.egress = EgressKind::Station;
+        forwards.capabilities = Some(Capabilities {
+            forward: true,
+            ..runs()
+        });
+        assert_eq!(mode_of(&forwards), Ok(ExecutionMode::Field));
+        // `agents = "remote-hands"` needs `run`.
+        let mut hands = remote("box", Some(Capabilities::default()));
+        hands.agents = AgentMode::RemoteHands;
+        assert_eq!(
+            mode_of(&hands).unwrap_err(),
+            "agents = \"remote-hands\" needs the `run` capability"
+        );
+    }
+
+    #[test]
+    fn remote_hands_choices_carry_their_mode_and_need_to_know_where_to_work() {
+        let mut box_theater = remote("box", Some(runs()));
+        box_theater.labels.insert("zone".to_owned(), "b".to_owned());
+        let mut station = station("a", 0);
+        station.theaters.push(box_theater);
+
+        // The Operation has a checkout on the Station; the Theater is not bound and has no
+        // `workdir`, so the Mission would not know where to work.
+        let placement = place(&policy(), &PlacementRequest::default(), &[station.clone()]);
+        assert!(placement.choices.iter().all(|c| c.theater == "local"));
+        assert!(placement.rejections.iter().any(|r| {
+            r.theater.as_deref() == Some("box") && r.reason.contains("has no `workdir`")
+        }));
+
+        // Bound to the Theater, the Operation's path is the working directory there.
+        let mut bound = policy();
+        bound.theater = Some("box".to_owned());
+        let placement = place(&bound, &PlacementRequest::default(), &[station.clone()]);
+        let best = placement.best().unwrap();
+        assert_eq!(
+            (best.theater.as_str(), best.mode),
+            ("box", ExecutionMode::RemoteHands)
+        );
+
+        // A `workdir` on the Theater is enough for an unbound Operation.
+        station.theaters.last_mut().unwrap().workdir = Some("/srv/work".to_owned());
+        let placement = place(&policy(), &PlacementRequest::default(), &[station.clone()]);
+        assert!(placement.choices.iter().any(|c| c.theater == "box"));
+
+        // The Station's own checkout is irrelevant in remote-hands mode.
+        station.checkouts.clear();
+        let placement = place(&bound, &PlacementRequest::default(), &[station]);
+        assert_eq!(placement.best().unwrap().theater, "box");
+    }
+
+    #[test]
+    fn an_older_choice_without_a_mode_reads_as_field() {
+        let choice: PlacementChoice = serde_json::from_value(serde_json::json!({
+            "station": "a", "theater": "local", "agent": "007", "handler": "claude"
+        }))
+        .unwrap();
+        assert_eq!(choice.mode, ExecutionMode::Field);
     }
 
     #[test]

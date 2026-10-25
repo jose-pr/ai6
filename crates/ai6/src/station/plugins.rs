@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
 use crate::directorates::q::safehouse::SafeHouseProvider;
 use crate::directorates::q::terminal::Terminal;
+use crate::directorates::q::transport::Transport;
 use crate::directorates::registry::sources::Source;
 use crate::directorates::section_00::agent::AgentHandler;
 
@@ -84,14 +85,14 @@ impl fmt::Display for PluginBuildError {
 
 impl core::error::Error for PluginBuildError {}
 
-/// The process-lifetime host for loaded AgentHandler, Terminal, SafeHouseProvider and Source libraries.
+/// The process-lifetime host for loaded AgentHandler, Terminal, Transport, SafeHouseProvider and Source libraries.
 pub struct Plugins {
     registry: ManuallyDrop<Registry>,
     summary: PluginScanSummary,
 }
 
 impl Plugins {
-    /// Scans each directory or library path for AI6 handlers, access providers, terminals, safe houses or sources.
+    /// Scans each directory or library path for AI6 handlers, access providers, terminals, transports, safe houses or sources.
     ///
     /// The registry stays mapped for the daemon lifetime because instances and sessions
     /// may call code from the loaded libraries after construction.
@@ -106,7 +107,11 @@ impl Plugins {
                 kind.starts_with(KIND_PREFIX)
                     || matches!(
                         kind,
-                        "ai6_agent_handler" | "ai6_terminal" | "ai6_safehouse" | "ai6_source"
+                        "ai6_agent_handler"
+                            | "ai6_terminal"
+                            | "ai6_safehouse"
+                            | "ai6_transport"
+                            | "ai6_source"
                     )
             }) {
                 Ok(())
@@ -163,6 +168,11 @@ impl Plugins {
     /// Returns the safe-house providers and their reported availability.
     pub fn safehouses(&self) -> Vec<ProviderInfo> {
         providers(&self.registry, <dyn SafeHouseProvider>::NAME)
+    }
+
+    /// Returns the transport providers and their reported availability.
+    pub fn transports(&self) -> Vec<ProviderInfo> {
+        providers(&self.registry, <dyn Transport>::NAME)
     }
 
     /// Returns the Source providers and their reported availability.
@@ -224,6 +234,15 @@ impl Plugins {
         config: Option<&Value>,
     ) -> Result<Box<dyn SafeHouseProvider>, PluginBuildError> {
         build::<dyn SafeHouseProvider>(&self.registry, provider, config)
+    }
+
+    /// Constructs a Transport from its provider ID and optional Guatiao config.
+    pub fn transport(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+    ) -> Result<Box<dyn Transport>, PluginBuildError> {
+        build::<dyn Transport>(&self.registry, provider, config)
     }
 
     /// Constructs a Source from its provider ID and Guatiao config.
@@ -348,6 +367,10 @@ mod tests {
         assert!(matches!(
             plugins.safehouse("worktree", None),
             Err(PluginBuildError::NotFound { provider }) if provider == "worktree"
+        ));
+        assert!(matches!(
+            plugins.transport("ssh", None),
+            Err(PluginBuildError::NotFound { provider }) if provider == "ssh"
         ));
         assert!(matches!(
             plugins.source("github", None),

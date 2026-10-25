@@ -57,6 +57,7 @@ use crate::station::publisher::MissionPublication;
 use crate::station::publisher::{self, Config as PublisherConfig, Publisher, SessionTelemetry};
 use crate::station::safehouse::SafeHouse;
 use crate::station::sources::SourceDesk;
+use crate::station::transports::Transports;
 use crate::{MissionId, SessionId};
 
 /// The loopback address used by the daemon's private health endpoint.
@@ -441,8 +442,15 @@ where
         scope_burst,
     )
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+    let plugins = Arc::new(plugins::Plugins::scan(&config.plugin_paths));
+    let transports = Arc::new(Transports::build(&config.station.theaters, &plugins));
+    for theater in config.station.theaters.reachable() {
+        for weakened in theater.weakenings() {
+            eprintln!("ai6: Theater {:?} is weakened: {weakened}", theater.id);
+        }
+    }
     let state = DaemonState {
-        plugins: Arc::new(plugins::Plugins::scan(&config.plugin_paths)),
+        plugins,
         roster,
         intake,
         missions,
@@ -450,6 +458,7 @@ where
         cables: Arc::new(cables),
         station_id,
         station: config.station,
+        transports,
         starting: Arc::new(Mutex::new(BTreeSet::new())),
         max_concurrent_missions: config.max_concurrent_missions,
         watchdog: config.watchdog.clone(),
@@ -845,6 +854,7 @@ struct DaemonState {
     cables: Arc<CableRelay>,
     station_id: String,
     station: StationConfig,
+    transports: Arc<Transports>,
     #[cfg(feature = "publisher")]
     publisher: Option<Arc<Publisher>>,
     starting: Arc<Mutex<BTreeSet<String>>>,
@@ -1456,7 +1466,7 @@ fn publish_station_check_in(state: &DaemonState) {
     );
     info.insert(
         "theaters".to_owned(),
-        serde_json::json!(state.station.theaters.summaries()),
+        serde_json::json!(state.transports.summaries(station_terminal(state).is_ok())),
     );
     if let Err(error) = state.intake.check_in(&state.station_id, info) {
         eprintln!("ai6: Station check-in failed: {error}");
@@ -4243,6 +4253,13 @@ mod tests {
         tempfile::tempdir().unwrap().keep()
     }
 
+    fn no_transports() -> Arc<Transports> {
+        Arc::new(Transports::build(
+            &Theaters::default(),
+            &plugins::Plugins::scan(&[]),
+        ))
+    }
+
     fn no_op_cables() -> Arc<CableRelay> {
         Arc::new(CableRelay::new(
             Arc::new(FileRegistry::open(scratch_registry_dir())),
@@ -4281,6 +4298,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -4436,6 +4454,7 @@ mod tests {
             cables: Arc::new(relay),
             station_id: "local".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -4930,6 +4949,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -5438,6 +5458,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -5561,6 +5582,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -5593,8 +5615,15 @@ mod tests {
         assert_eq!(stations[0].info()["operations"], serde_json::json!(["G"]));
         assert_eq!(
             stations[0].info()["theaters"],
-            serde_json::json!([{"id": "local", "access": "local", "labels": {}}]),
-            "a Station always reaches its own host as the local Theater"
+            serde_json::json!([{
+                "id": "local", "access": "local", "labels": {},
+                "agents": "auto", "egress": "direct",
+                "capabilities": {
+                    "terminal": true, "run": false, "files": true, "forward": false,
+                    "os": std::env::consts::OS, "arch": std::env::consts::ARCH
+                }
+            }]),
+            "a Station always reaches its own host as the local Theater, and says what it can do"
         );
         assert_eq!(
             stations[0].info()["operation_policies"]["G"]["checkout"],
@@ -5768,6 +5797,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "hq".to_owned(),
             station: StationConfig::default().with_roles([StationRole::Control]),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -5829,6 +5859,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -5937,6 +5968,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -6159,6 +6191,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -6253,6 +6286,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -6435,6 +6469,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -6715,6 +6750,7 @@ mod tests {
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
             #[cfg(feature = "publisher")]
             publisher: None,
             starting: Arc::new(Mutex::new(BTreeSet::new())),
