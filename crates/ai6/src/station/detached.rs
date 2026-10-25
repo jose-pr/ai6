@@ -27,8 +27,9 @@ const POLL: Duration = Duration::from_millis(200);
 const SCRIPT_TIMEOUT_MS: u64 = 30_000;
 
 /// Makes the harness's directory: ends a harness an earlier start of the same Mission left,
-/// then writes the environment (standard input), the input FIFO, the output file and the
-/// wrapper script, and prints the directory's absolute path.
+/// then makes the environment and input FIFOs, the output file and the wrapper script, and
+/// prints the directory's absolute path. The environment passes through a FIFO, so no value
+/// (a leased credential among them) is ever written to the Theater's disk.
 const SETUP: &str = r#"set -e
 umask 077
 mkdir -p "$1"
@@ -40,7 +41,7 @@ for old in "$2"-*; do
 done
 mkdir "$3"
 cd "$3"
-cat > env
+mkfifo env
 mkfifo in
 : > out
 cat > run.sh <<'WRAPPER'
@@ -49,6 +50,7 @@ shift
 echo $$ > pid
 ai6_dir=$(pwd -P)
 . ./env
+rm -f ./env
 cd "$ai6_cwd" || { echo 127 > "$ai6_dir/exit"; exit 127; }
 exec 3<>"$ai6_dir/in"
 "$@" <&3 >>"$ai6_dir/out" 2>&1
@@ -58,7 +60,8 @@ WRAPPER
 pwd -P
 "#;
 
-/// Starts the wrapper detached from this link and prints the harness session's process ID.
+/// Starts the wrapper detached from this link, hands it the environment (standard input)
+/// through its FIFO, and prints the harness session's process ID.
 const LAUNCH: &str = r#"cd "$1" || exit 44
 shift
 if command -v setsid >/dev/null 2>&1; then
@@ -66,6 +69,7 @@ if command -v setsid >/dev/null 2>&1; then
 else
   nohup sh ./run.sh "$@" </dev/null >/dev/null 2>&1 &
 fi
+cat > env
 i=0
 while [ ! -s pid ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
 cat pid
@@ -191,18 +195,15 @@ impl Terminal for DetachedTerminal {
             self.prefix,
             &uuid::Uuid::new_v4().simple().to_string()[..12]
         );
-        let dir = self.script(
-            SETUP,
-            [ROOT.to_owned(), self.prefix.clone(), name],
-            Some(environment_file(&spec)?),
-        )?;
+        let environment = environment_file(&spec)?;
+        let dir = self.script(SETUP, [ROOT.to_owned(), self.prefix.clone(), name], None)?;
         let mut arguments = vec![
             dir.clone(),
             spec.cwd.clone().unwrap_or_else(|| ".".to_owned()),
         ];
         arguments.extend(spec.argv.iter().cloned());
         let pid = self
-            .script(LAUNCH, arguments, None)?
+            .script(LAUNCH, arguments, Some(environment))?
             .parse::<i64>()
             .map_err(|_| refuse("the detached wrapper did not report the harness's process"))?;
         Ok(DetachedSession {
