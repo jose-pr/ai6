@@ -1,0 +1,30 @@
+name: moneypenny
+description: AI6 Mission board for desktop and web.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.15.0-72.0.dev
+
+dependencies:
+  flutter:
+    sdk: flutter
+  guatiao:
+    git:
+      url: https://github.com/Boriken-Dev/guatiao.git
+      ref: c68361008a0e58c644fb0a3c4cfe107114cf22e9
+      path: bindings/dart/guatiao
+  http: ^1.6.0
+  material_ui: ^1.1.0
+  shared_preferences: ^2.5.5
+  web: ^1.1.2
+  web_socket_channel: ^3.0.3
+  xterm2: ^5.4.0
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
