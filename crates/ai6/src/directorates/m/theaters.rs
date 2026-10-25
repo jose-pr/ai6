@@ -17,7 +17,7 @@
 //! `access` names a transport, the way in: `"local"`, `{ ssh = { … } }`, or
 //! `{ transport = { provider = "…", config = { … } } }` for any other transport provider.
 //! The transport reports what it can do (see
-//! [`Capabilities`](crate::directorates::q::transport::Capabilities)). The other keys state
+//! [`Capabilities`]). The other keys state
 //! facts a transport cannot probe: `agents` says where the harness may run, `egress` how the
 //! Theater reaches the provider's API, `harnesses` which harnesses are installed there, and
 //! `workdir` where a Mission works when its Operation does not name a path on that Theater.
