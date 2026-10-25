@@ -72,7 +72,7 @@ pub struct TransportConfig {
 }
 
 /// A command to run to completion. Crosses as a value.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Default)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct RunSpec {
     /// The program and its arguments, one element each; never re-split by a shell.
@@ -89,6 +89,20 @@ pub struct RunSpec {
     /// Bytes of each output stream kept; the rest is dropped and reported as truncated.
     #[map(default = DEFAULT_MAX_OUTPUT)]
     pub max_output: u64,
+}
+
+impl Default for RunSpec {
+    /// An empty command that keeps [`DEFAULT_MAX_OUTPUT`] bytes of each stream.
+    fn default() -> Self {
+        Self {
+            argv: Vec::new(),
+            cwd: None,
+            env: None,
+            stdin: None,
+            timeout_ms: 0,
+            max_output: DEFAULT_MAX_OUTPUT,
+        }
+    }
 }
 
 /// What a finished (or timed-out) command left behind. Crosses as a value.
