@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Universal Exports `GET /v1/user/operations/{id}/placement-preview` (needs `mission.read`)
   returns the eligible Station, Theater and Agent choices and the reason for each rejection,
   and Moneypenny's Stations view has a placement preview panel.
+- Recovery. Every Session now has a record in the shared Registry (`sessions/`): AI6 Session
+  ID, provider Session ID, Station, Theater, attempt and predecessor, status. A Station acts
+  on a Session only while it holds the record's lease and presents its fencing token, which
+  is drawn from the new Headquarters election term (`HeadquartersLease::term`) and always
+  grows; a stale token is refused and the Station closes its harness and abandons the
+  Mission. Records and leases from before this change still load. Moving a Session to
+  another Station or Theater is not implemented.
+- Provider usage limits. The Claude and Codex handlers report a usage or rate limit, with
+  its reset time when given, as an `AgentEvent` of kind `limit` (`AgentEvent::limit`,
+  `UsageLimit`, `LIMIT_EVENT`). The Mission becomes `parked` with `parked_until` and the same
+  provider Session resumes when the quota resets (also across a daemon restart). An
+  Operation sets `on_limit = "wait"` (default) or `"backup"` (post the next qualified Agent
+  on another handler as a new attempt in the same safe house) and `limit_fallback_secs`
+  (default 1800, used when no reset time is reported). `parked` is a Session state in
+  `ai6-diptel`, the gateway and Moneypenny.
 
 - `ai6`: the Station daemon and AI6's public contracts in one Rust crate. Directorates
   under `ai6::directorates` (M, the Registry, Q Branch, 00 Section, Medical) and the Station

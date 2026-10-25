@@ -17,6 +17,8 @@ provider-issued Session ID for resume.
 - Connects to the AI6 per-Session Cable MCP endpoint using environment-substituted
   Streamable HTTP configuration; the bearer token is not included in process arguments.
 - Converts provider stream events into AI6 `AgentEvent` values.
+- Reports a usage or rate limit, with its reset time when Claude gives one, as an `AgentEvent`
+  of kind `limit` so AI6 can park the Session instead of failing it.
 
 ## Installation
 

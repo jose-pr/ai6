@@ -54,6 +54,61 @@ SQLite/PostgreSQL Registry backends and distributed Registry placement are not c
 implemented. Remote Theaters are also not implemented; every Session runs on its
 Station's host.
 
+## Recovery
+
+Work should survive a refused quota and a lost lease. Two mechanisms exist today.
+
+### Session records and fencing
+
+Besides the Station's own `missions.json`, every Session has a record in the shared
+Registry (`sessions/`). It holds AI6's Session ID (distinct from the provider's), the
+provider Session ID, the Station that supervises it, its Theater, the attempt number and the
+ID of the Session it replaced, and its status (`active`, `parked` or `ended`). Another
+Station that opens the same Registry sees the same records.
+
+A Station acts on a Session only while it holds the record's **lease**, and every write
+presents the **fencing token** the lease was granted with. The token comes from the
+Headquarters election term and always grows past the previous holder's, so a Station that
+was paused, lost its lease and woke up again is refused: it closes its harness, abandons
+the Mission and leaves the safe house for the new holder. A live lease held by another
+Station also refuses a resume. The daemon renews its leases with each Station check-in
+(15 seconds; a lease lasts 60). A Mission started before records were shared gets a record
+the next time it resumes.
+
+Moving a running Session to another Station, or to another Theater when its own is lost,
+is not implemented: a Session's records and lease are the groundwork for it, and
+provider transcripts stay with the Theater that holds them.
+
+### Provider limits: park and resume
+
+A provider can refuse work until a quota resets (a five-hour or weekly window). The Claude
+and Codex AgentHandlers recognise that, read the reset time when the provider reports one,
+and end the turn with a `limit` event instead of `completed` or `failed`. The daemon then
+closes the harness and **parks** the Mission:
+
+```json
+{ "state": "parked", "parked_until": 1790000015 }
+```
+
+`parked_until` is the reset time plus 15 seconds of grace, in Unix seconds. A Mission
+parked by a provider that gave no reset time, or a time already past, waits
+`limit_fallback_secs` (30 minutes by default) instead of retrying in a loop. The safe house
+stays in place. When the time comes the daemon resumes the **same provider Session** and
+tells it to carry on; the Mission returns to `working`. Parking survives a daemon restart,
+and an operator can resume a parked Mission early with the ordinary resume request.
+
+An Operation chooses the response with `on_limit` ([settings](operations.md#provider-limits)):
+
+- `wait` (the default) parks as above.
+- `backup` posts the next qualified Agent, as [Organization](organization.md) describes,
+  among those whose handler differs from the limited one. The Mission is queued again for
+  that Agent as a **new attempt** (a new Session record whose predecessor is the limited
+  one), starting a new provider Session in the same safe house with a note that an earlier
+  attempt stopped at a limit. With no such Agent available it parks instead.
+
+The Moneypenny board shows `parked` as a Session state, and the stream of Mission events
+carries the `limit` event.
+
 ## Sources
 
 A **Source** is a Guatiao provider that polls a tracker or CI system for work and posts the

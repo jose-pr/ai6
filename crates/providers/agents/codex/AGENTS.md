@@ -18,6 +18,14 @@ terminal. The AI6 Session ID is Codex's resumable thread ID; the handler passes 
 The handler sends the Mission working directory and verifies the returned thread ID
 before accepting the resumed Session. A missing or different thread ID closes the
 app-server process and fails resume.
+A usage limit is emitted as an event of kind `limit` (`ai6::LIMIT_EVENT`) with
+`AgentEvent::limit` set, instead of `completed` or `failed`. It is recognised from an
+`error` notification, a `turn/failed` notification or a failed `turn/completed` whose error
+carries a `codexErrorInfo` naming a usage or rate limit. The reset time is the error's
+`resetsAt` (Unix seconds) when present, otherwise the reset of the quota window the account
+last reported as used up (`account/rateLimits/updated` with `usedPercent` of 100 or more;
+a 300-minute window is `five_hour`, a 10,080-minute one `weekly`). These shapes come from
+recorded protocol fixtures, not from a live account.
 Terminal end-of-file is reported as a provider error so AI6 can fail and finalize the
 Mission instead of polling an exited process indefinitely.
 When AI6 supplies `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, app-server receives

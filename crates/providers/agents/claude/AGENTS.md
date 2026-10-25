@@ -21,6 +21,16 @@ and only then returns the resumed operation or sends its optional follow-up mess
 End-of-file before a completion event emits one `failed` event; a read timeout returns
 `None`.
 
+A usage or rate limit is emitted as an event of kind `limit` (`ai6::LIMIT_EVENT`) with
+`AgentEvent::limit` set, never as `completed`. Two stream shapes are recognised: a
+`rate_limit_event` whose `rate_limit_info.status` is `rejected` (reset time from `resetsAt`,
+window from `rateLimitType`), and an error `result` whose text names the limit
+(`usage limit`, `limit reached` or `hit your limit`). For the latter the reset time is the
+number after a trailing `|` (`... usage limit reached|1790000000`); a limit stated only as a
+local clock time ("resets 3pm") leaves `resets_at` as `None` rather than guessing a date.
+Seconds and milliseconds are both accepted. Other `rate_limit_event` statuses pass through
+unchanged. These shapes come from recorded protocol fixtures, not from a live account.
+
 When AI6 supplies both `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, the handler adds
 the authenticated Streamable HTTP Cable server through `--mcp-config`. The config contains
 environment placeholders; the bearer token never appears in argv. If either variable is

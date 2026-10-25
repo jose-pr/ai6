@@ -193,6 +193,8 @@ pub struct Operation {
     pub cover: String,
     pub cover_identity: Option<CoverIdentity>,
     pub on_blown: String,
+    pub on_limit: OnLimit,                        // Wait (default) or Backup; see Provider limits
+    pub limit_fallback_secs: u64,                 // park time when a limit has no reset time; default 1800
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
 }
@@ -368,6 +370,23 @@ least-loaded Station (the deciding Station wins a tie, then Station ID), the `lo
 Theater first, then Agent priority. Reasons that apply to an Agent everywhere (not the
 requested Agent, no handler configured, role or tag mismatch) have no `station`.
 
+## Provider limits (`ai6::directorates::m::limits`)
+
+```rust
+pub const DEFAULT_LIMIT_FALLBACK_SECS: u64 = 1800;
+pub const RESET_GRACE_SECS: i64 = 15;
+#[non_exhaustive] pub enum OnLimit { Wait /* default */, Backup }   // serde: "wait" | "backup"
+impl OnLimit { pub fn as_str(self) -> &'static str }
+pub fn parked_until(now: i64, resets_at: Option<i64>, fallback_secs: u64) -> i64
+```
+
+`parked_until` honours a reset time in the future plus `RESET_GRACE_SECS`; a missing or
+already-past one waits `fallback_secs` so a limit that outlives its stated reset cannot
+loop. An Operation sets `on_limit = "wait" | "backup"` and `limit_fallback_secs` (above
+zero) in `operations.toml`; an unknown value or zero fails the roster load. `Wait` parks the
+Mission and resumes the same provider Session; `Backup` posts the next qualified Agent
+whose handler differs from the limited one as a new attempt, and parks when none exists.
+
 ## Registry store (`ai6::directorates::registry::store`)
 
 ```rust
@@ -486,7 +505,10 @@ valid records in stable filename order and skips malformed, stale or oversized f
 Records are bounded to 1 MiB and scans to 1,000 Stations. `elect` returns `true` when it
 acquires or renews the lease and `false` when another Station still holds it. An expired
 record moves to `headquarters/lease.lapsed.<station>` before the new lease is written.
-`headquarters` returns the current record even when its lease has expired. Headquarters
+`headquarters` returns the current record even when its lease has expired.
+`HeadquartersLease::term() -> u64` is the election term: it grows by one whenever a
+different Station takes the lease, is unchanged by the holder renewing it, and reads as 0 in
+a lease written before terms existed. Headquarters
 leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating Stations
 need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`,
 local Operation paths, available `handlers`, reachable `theaters` and each Operation's
@@ -503,6 +525,55 @@ explicit identity.
 `Brief::key()` and `Brief::prompt()` expose the key and prompt fields used by Registry intake.
 `Brief.stations` (default empty) limits a Mission to those Stations; it can only narrow the
 Operation's `stations` list. The scheduler places each brief with `placement::place`.
+
+## Session records (`ai6::directorates::registry::sessions`)
+
+The shared record of every Agent Session, under `sessions/<id>.json` in the Registry. A
+Station's `missions.json` dies with it; this record does not.
+
+```rust
+#[non_exhaustive] pub enum SessionStatus { Active, Parked, Ended }
+#[non_exhaustive] pub struct SessionRecord {
+    pub session_id: String,                  // AI6's ID (not the provider's)
+    pub mission_id: String,
+    pub provider_session_id: Option<String>,
+    pub station: String,                     // the lease holder
+    pub theater: Option<String>,
+    pub attempt: u32,                        // from 1
+    pub predecessor: Option<String>,         // AI6 ID of the Session this one replaced
+    pub status: SessionStatus,
+    pub parked_until: Option<f64>,           // Unix seconds
+    pub lease_expires: f64,
+    pub fence: u64,                          // fencing token of the current lease
+}
+impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }
+pub struct NewSession   // NewSession::new(session_id, mission_id, station)
+                        //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
+pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStatus) .parked_until(f64)
+#[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, HeldBy(String), Stale, Io(io::Error) }
+
+impl FileRegistry {
+    pub fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>
+    pub fn session(&self, id: &str) -> io::Result<Option<SessionRecord>>
+    pub fn sessions(&self) -> io::Result<Vec<SessionRecord>>          // stable ID order
+    pub fn take_session(&self, id: &str, station: &str, ttl: Duration) -> Result<SessionRecord, SessionError>
+    pub fn renew_session(&self, id: &str, station: &str, fence: u64, ttl: Duration) -> Result<SessionRecord, SessionError>
+    pub fn update_session(&self, id: &str, station: &str, fence: u64, update: SessionUpdate) -> Result<SessionRecord, SessionError>
+}
+```
+
+A Station acts on a Session only while it holds the lease. `open_session` creates the
+record held by `new`'s Station; `take_session` renews the lease for the current holder, takes
+a lapsed one, and returns `HeldBy` while another Station's lease is live (`Ended` once the
+Session is over). A new holder's `fence` is the larger of the Headquarters term and the
+previous token plus one, so it only grows. `renew_session` and `update_session` present the
+token and holder: any mismatch is `Stale`, and nothing is written. IDs are 1-128 letters,
+digits, `-`, `_` or `.`, not starting with `.`; records are bounded to 64 KiB. Times are
+wall-clock Unix seconds, so Stations need synchronized clocks. The daemon records a Session
+when it starts, takes the lease again to resume it, mirrors Mission state into the record,
+renews its leases with the Station check-in, and closes and abandons a Mission whose token
+is refused. The daemon's launch record keeps the lease and fence in `missions.json`
+(`session`); records without one still load.
 
 ## Sources (`ai6::directorates::registry::sources`)
 
@@ -867,6 +938,18 @@ and records to 2 MiB. SQL Registry storage is not implemented.
 message submission and event decoding. AI6 supplies an `AgentTerminal` object bridge
 over its selected `Terminal` provider.
 
+```rust
+pub const LIMIT_EVENT: &str = "limit";
+pub struct UsageLimit { pub resets_at: Option<i64> /* Unix seconds */, pub window: Option<String> }
+pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Option<Vec<u8>>, pub limit: Option<UsageLimit> }
+```
+
+A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
+`limit` set, in place of the `completed` or `failed` event the same output would
+otherwise produce; `limit` is `None` on every other event. `resets_at` is `None` when the
+provider names no reset time. The daemon parks the Mission (or posts a backup Agent) and
+closes the Session.
+
 ## Terminal API (`ai6::directorates::q::terminal`)
 
 `Spec`, `ExitInfo`, `Terminal`, `AgentTerminal` and `TerminalSession` define the
@@ -880,8 +963,15 @@ The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in te
 with an AI6-owned `MissionId`, records safe-house disposition and optional `CoverReport`,
 and increments a revision for changes. Repeating the current state is a no-op and does not
 increment the revision. `MissionState` serializes as `queued`, `working`, `blocked`,
-`stalled`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy violation
-when the Operation uses `on_blown = "fail"`.
+`stalled`, `parked`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy
+violation when the Operation uses `on_blown = "fail"`. `parked` means a provider usage limit
+paused the work: `Mission.parked_until` (Unix seconds, default `None` in older records) is
+when it resumes. `MissionStore::park(id, until)` parks a `Working`, `Blocked`, `Stalled` or
+already parked Mission (parking again moves the time; `transition` refuses `Parked` because
+it needs a time); `due_parked(now)` lists parked Missions at or past their time;
+`requeue_for(id, agent_id)` queues an interrupted Mission again for another Agent. A
+parked Mission leaves `Parked` through `Working`, `Failed`, `Abandoned` or `requeue_for`,
+and any transition clears `parked_until`.
 `MissionStore::set_cover_report(mission_id, report)` persists the cover audit. A Mission
 returns this value as its optional `cover` field beside `safe_house`. `Mission.role_id`
 stores the canonical configured Agent role independently of `agent_id` and provider
@@ -1004,7 +1094,9 @@ the Agent operation closes. Missing Cable grants continue to deny every action.
 On graceful shutdown, event workers interrupt and close active Sessions and move Working
 Missions to Blocked while preserving their safe houses. Mission records persist across
 daemon restarts, and a blocked Mission can reattach to its provider Session through its
-handler. `ai6::directorates::m::roster`
+handler. A parked Mission resumes through the same path once `parked_until` passes
+(`POST .../resume` also resumes it early). Recovery is described under Session records and
+Provider limits above. `ai6::directorates::m::roster`
 loads global `operations.toml` and `agents.toml`; local `.ai6/agents.toml` is read only for
 a registered Operation. Agent watchdog `limits` inherit and merge by field, then override the
 daemon's `WatchdogConfig`. A local Operation whose `workspace` names a safe-house provider

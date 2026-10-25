@@ -12,7 +12,9 @@ ai6 serve --station hq-1 --role control --role execution
 ```
 
 A standby control Station takes over the Headquarters lease if it expires
-(*relocation* to a *fallback Station*):
+(*relocation* to a *fallback Station*). The lease carries an election **term** that grows
+each time a different Station takes it; Session leases draw their fencing tokens from it
+([Recovery](missions.md#recovery)):
 
 ```console
 ai6 serve --station hq-2 --role control

@@ -68,6 +68,25 @@ on_blown = "fail" # or "flag"
 The identity is applied as the Git author and committer. AI6 checks Mission commits
 against the configured cover policy and records any violations in the Mission report.
 
+## Provider limits
+
+When a provider refuses work until a quota resets (a usage or rate limit), the Operation
+decides what happens to the Mission:
+
+```toml
+[operation.G]
+on_limit = "wait"          # or "backup"
+limit_fallback_secs = 1800 # how long to park when the provider gives no reset time
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `on_limit` | `wait` | `wait` parks the Mission and resumes the same provider Session when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new attempt in the same safe house, and parks only when there is none |
+| `limit_fallback_secs` | `1800` | Seconds to park when the provider reports no reset time (or one already past). Must be above zero |
+
+Both are overridable per Operation and an unknown `on_limit` value fails the load. See
+[Recovery](missions.md#recovery).
+
 ## Sources
 
 `sources` lists where an Operation's work comes from. Each key names a Source provider and

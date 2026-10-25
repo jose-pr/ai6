@@ -86,10 +86,12 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::theaters` | Theaters (`theaters.toml`): the hosts a Station reaches, local or over SSH |
 | `ai6::directorates::m::placement` | Placement: eligible (Station, Theater, Agent) choices with a reason for every rejection |
 | `ai6::directorates::m::mission` | Durable Mission lifecycle, provider Session association and resume settings |
+| `ai6::directorates::m::limits` | `OnLimit` and the parking rule for provider usage limits |
 | `ai6::directorates::m::identity` | Validated `MissionId`, provider-issued `SessionId` and access-token records |
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
 | `ai6::directorates::m::access` | Authenticator, Directory and Authorizer kinds and the built-in `RoleAuthorizer` |
 | `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
+| `ai6::directorates::registry::sessions` | Shared, fenced Session records: lease, fencing token, attempt and predecessor |
 | `ai6::directorates::registry::sleepers` | Sleepers: cron standing orders, their authorization and per-window briefs |
 | `ai6::directorates::registry::sources` | The Source kind (trackers and CI), brief ingestion, cursors and CX reports |
 | `ai6::directorates::registry::cables` | Permission-scoped Agent-to-Agent Cable relay |
@@ -113,6 +115,10 @@ the Agent's handler in the Station's terminal provider. Mission records persist 
 in `missions.json` under the state directory; on startup, Missions that were working
 become blocked and the scheduler reattaches them through their provider Session ID.
 Graceful shutdown interrupts active Sessions and keeps their safe houses for recovery.
+Each Session also has a record in the shared Registry, held by a lease whose fencing token
+refuses a Station that lost it. When a provider usage limit stops a Session the Mission is
+parked until the quota resets and resumes the same provider Session; an Operation may instead
+set `on_limit = "backup"` to post the next qualified Agent as a new attempt.
 
 The scheduler leases briefs from the file-backed Registry, uses each brief's
 `source--id` key as the Mission ID, selects an Agent by role, tags and priority among
