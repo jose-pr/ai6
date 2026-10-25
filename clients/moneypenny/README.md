@@ -23,6 +23,9 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   Agent), resumes (optionally with a message) or interrupts, offering only what the
   Mission's current state allows and saying why the rest are unavailable; it needs
   `mission.control`, and the outcome the Station reports shows on the card.
+- Timeline: an Operation's activity newest first (lifecycle, controls, Cables, Sleepers,
+  audit), filtered by Operation and Mission, with older pages on request and new activity
+  added on top every ten seconds; it needs `audit.read`.
 - Administration: Operation-scoped Agent roles (purpose and policy) and Station capacity.
 - Audit log for operators with `audit.read`; operator menu with identity, effective
   permissions per Operation, theme and sign-out.

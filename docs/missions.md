@@ -79,6 +79,26 @@ is `expired`. Repeating a request with the same `idempotency_key` returns the fi
 the outcome; Moneypenny offers them in each Mission card's menu, with the reason any action
 is unavailable. Closing a Session view never sends a control.
 
+## Activity timeline
+
+An operator with `audit.read` on an Operation reads what changed across it, newest first,
+from `GET /v1/user/operations/{operation_id}/timeline` or Moneypenny's Timeline view:
+
+| Kind | Recorded by | What it says |
+| --- | --- | --- |
+| `lifecycle` | Universal Exports | A Mission's state changed, on which Session and Station. |
+| `control` | Universal Exports | A cancel, retry, resume or interrupt was applied, rejected or expired, and the state after. |
+| `cable` | the sending Station | An Agent sent a Cable: sender, scope and recipient count. |
+| `sleeper` | the Registry | A Sleeper was authorized or revoked, and by whom. |
+| `audit` | Universal Exports | Mission requests and controls, proposal decisions, Agent role, quarantine and Station settings changes. |
+
+Each item names its Station, Mission and Session where it has one, so the view filters by
+Mission (`?mission=`). It never holds a prompt, a resume message, a Cable's body or target,
+terminal bytes or a secret, and a Cable shows only in its sender's Operation; live terminal
+output stays on the Session's own stream. Pages hold at most 200 items and follow an opaque
+`cursor`; activity arriving meanwhile goes on top without shifting older pages. The
+Registry keeps the newest 10,000 activity events.
+
 ## File-backed intake
 
 The Registry defaults to the platform AI6 state directory and can be overridden

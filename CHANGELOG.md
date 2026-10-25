@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   menu with the reason any is unavailable. DipTel gains the `queued` and `abandoned`
   states, and board Sessions carry `updated_at`, so a client finds a Mission's current
   Session.
+- An Operation activity timeline. `GET /v1/user/operations/{operation_id}/timeline`
+  (`audit.read`) pages newest first through lifecycle transitions, control outcomes,
+  Cables sent and Sleeper authorizations from a new Registry activity log
+  (`ai6::TimelineEvent`, the newest 10,000 kept) merged with the Operation's audit records,
+  correlated by Station, Mission and Session, filterable by Mission and continued by an
+  opaque cursor. Items are metadata only. Moneypenny shows it in a Timeline view.
 
 - A Station's identity defaults to `<host>-<random>`, created on first start and kept in
   `station-id` in the AI6 state directory, so a restarted daemon stays the same Station;

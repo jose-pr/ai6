@@ -109,6 +109,7 @@ configured access policy.
 | `Attachment`, `AgentInput` | Bounded viewer replay/live stream and queued terminal input or resize. |
 | `GatewayError` | Refusals for auth, scope, bounds, malformed frames and backpressure. |
 | `ControlStatus` | One operator control (cancel, retry, resume, interrupt) and what the Station did with it. |
+| `TimelinePage`, `TimelineItem` | One page of an Operation's correlated, metadata-only activity timeline. |
 | `Gateway::router` | Axum routes for the Station channel, attach token exchange and WebSocket sessions. |
 | `Gateway::serve_loopback(port, shutdown)` | Loopback listener with caller-owned graceful shutdown. |
 
@@ -138,6 +139,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Require `mission.control`; audit and queue a cancel, retry, resume or interrupt for the Station holding the Mission. Body: `{"action":"retry","agent":"008","idempotency_key":"…"}` (`agent` only with `retry`, `message` only with `resume`, optional `session_id`). Returns `202` and a `ControlStatus`, or `200` and the first one for a repeated key. |
 | `GET` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}` | Require `mission.read`; return the control's status: `queued`, `delivered`, `applied`, `rejected` or `expired`, with the Mission state and reason the Station reported. |
 | `GET` | `/v1/user/audit?operation_id=<id>&limit=<n>` | Return up to 500 newest metadata-only audit records authorized by `audit.read` for each Operation. |
+| `GET` | `/v1/user/operations/{operation_id}/timeline?cursor=<c>&mission=<id>&limit=<n>` | Require `audit.read`; return one newest-first page (default 50, at most 200) of the Operation's lifecycle transitions, control outcomes, Cables sent, Sleeper authorizations and audit records, correlated by Station, Mission and Session, with `next_cursor` for the older page. |
 | `GET` | `/v1/user/operations/{operation_id}/agent-roles` | Require `agent.read`; return the Headquarters Station role catalog merged with this Operation's validated overrides. Each role has `operation_override` to identify whether it replaces the Station definition. |
 | `PUT` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; validate and store a role purpose and policy in the shared Registry. |
 | `DELETE` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; remove the Operation override, fall back to the Station definition and record a metadata-only audit event. |
@@ -190,6 +192,14 @@ whether the Mission can take it. Controls live in gateway memory: at most 1,024 
 (the oldest finished go first), 64 may wait per Station, and one no Station finishes
 within two minutes is `expired`. A resume's message reaches only the Station; it is not in
 the status or the audit record.
+
+The timeline merges two durable Registry sources: activity events (the lifecycle
+transitions and control outcomes this gateway records, Cables and Sleeper approvals the
+Stations record) and audit records, including the records of each Station hosting the
+Operation when the caller also has `audit.read` on that Station. Items hold identities,
+names and states only: never prompts, resume messages, Cable bodies or targets, terminal
+bytes or secrets. A Cable appears only in its sender's Operation. The cursor is opaque;
+newer activity arriving between pages does not shift or repeat older items.
 
 The gateway refuses request bodies and websocket frames above the configured
 limit. Its configured history, fanout, input queue and per-viewer socket buffers

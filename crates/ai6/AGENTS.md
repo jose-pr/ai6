@@ -620,6 +620,9 @@ is read-only. `claim_new(key)` moves one queued brief to `claimed/` under the sh
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
 record_audit(entry: &AuditRecord) -> io::Result<PathBuf>
 list_audit(limit: usize) -> io::Result<Vec<AuditRecord>>
+audit_records() -> io::Result<Vec<AuditRecord>>
+record_event(event: &TimelineEvent) -> io::Result<()>
+timeline_events(operation: &str) -> io::Result<Vec<TimelineEvent>>
 station_settings(station: &str) -> io::Result<Option<StationSettings>>
 set_station_settings(station: &str, settings: &StationSettings) -> io::Result<()>
 submit_brief(brief: &Brief) -> io::Result<PathBuf>
@@ -644,9 +647,46 @@ methods. Provider Session identity is bound by AI6, never supplied in the propos
 `record_audit` stores a validated metadata-only `AuditRecord` under `audit/` and rejects
 duplicate IDs. Each entry is bounded to 16 KiB and the listing scans at most 10,000
 records. `list_audit` returns newest entries first and requires a result limit from 1 to
-500. Operation events contain actor, action, Operation, target and Unix timestamp;
+500; `audit_records` returns every stored record unsorted. Operation events contain actor,
+action, Operation, target and Unix timestamp;
 Station events use the explicit `resource = "station:<id>"` scope. Request prompts,
 terminal data and credential values are not audit fields.
+
+The activity timeline (`ai6::directorates::registry::timeline`) records what the audit log
+does not:
+
+```rust
+pub const MAX_TIMELINE_EVENTS: usize = 10_000;
+#[non_exhaustive]
+pub struct TimelineEvent {
+    pub id: String, pub at: f64,            // fresh UUID; Unix seconds
+    pub kind: String,                       // "lifecycle" | "control" | "cable" | "sleeper"
+    pub action: String,                     // a state, "<action>.<outcome>", "sent", "authorized", "revoked"
+    pub operation: String,                  // whose timeline shows it
+    pub station: Option<String>, pub mission: Option<String>,
+    pub session: Option<String>, pub actor: Option<String>,
+    pub detail: BTreeMap<String, String>,   // at most 8 safe names and IDs
+}
+impl TimelineEvent {
+    pub fn new(kind, action, operation, at: f64) -> Self;
+    pub fn station(self, ..) -> Self; pub fn mission(self, ..) -> Self;
+    pub fn session(self, ..) -> Self; pub fn actor(self, ..) -> Self;
+    pub fn detail(self, key, value) -> Self;
+}
+```
+
+`record_event` refuses (`InvalidInput`) a kind, action or detail key that is not a bounded
+lowercase name (`a-z0-9._-`, 64 bytes), an identity or detail value that is blank, over 256
+bytes or holds control characters, more than 8 details, or a non-positive time; it stores the
+event under `timeline/` named by time, and past `MAX_TIMELINE_EVENTS` removes the oldest.
+`timeline_events(operation)` returns one Operation's events oldest first, skipping unreadable
+files. `submit_cable` records a `cable`/`sent` event for a new Cable under the sender's
+Operation (sender Station and Agent, Mission and Session, details `cable`, `scope`,
+`recipients`; never the body or the target name), and `authorize_sleeper` /
+`revoke_sleeper` record `sleeper`/`authorized` and `revoked` (detail `sleeper`). Universal
+Exports records lifecycle transitions and control outcomes. A failed timeline write never
+fails the Cable or authorization it describes. Events never hold prompts, messages, Cable
+bodies, terminal bytes or secrets.
 
 `StationSettings::try_new(station, capacity)` accepts a Station ID and a maximum
 concurrent Mission count from 1 through 1,024. `FileRegistry::station_settings(station)`

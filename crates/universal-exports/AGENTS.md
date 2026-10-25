@@ -274,6 +274,54 @@ action, Agent, message and Session returns the first status with `200`, with any
 `409`. Every accepted request is audited as `mission.cancel`, `mission.retry`,
 `mission.resume` or `session.interrupt` with the Mission ID as target.
 
+## Activity timeline
+
+```rust
+pub const DEFAULT_TIMELINE_PAGE: usize = 50;
+pub const MAX_TIMELINE_PAGE: usize = 200;
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TimelinePage {
+    pub operation_id: String,
+    pub items: Vec<TimelineItem>,      // newest first
+    pub next_cursor: Option<String>,   // opaque; absent on the last page
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TimelineItem {
+    pub id: String,                    // "event:<id>" | "audit:<id>"
+    pub at: f64,                       // Unix seconds
+    pub kind: String,                  // "lifecycle" | "control" | "cable" | "sleeper" | "audit"
+    pub action: String,                // state, "<action>.<outcome>", "sent", "authorized", "revoked" or audit action
+    pub operation_id: String,
+    pub station_id: Option<String>,
+    pub mission_id: Option<String>,
+    pub session_id: Option<String>,
+    pub actor: Option<String>,         // person ID or Agent codename
+    pub target: Option<String>,        // an audit record's target
+    pub detail: BTreeMap<String, String>,
+}
+```
+
+`GET /v1/user/operations/{operation_id}/timeline` (query `cursor`, `mission`, `limit`;
+unknown parameters refused) needs `audit.read` on the Operation; another Operation's is
+`403`. It merges `ai6::FileRegistry::timeline_events(operation)` with the audit records
+whose Operation it is and, for each Station that hosts the Operation and whose `audit.read`
+the caller also holds, that Station's records (shown with `station_id`). Audit records of
+`mission.create.requested`, `mission.cancel`, `mission.retry`, `mission.resume` and
+`session.interrupt` carry their target as `mission_id`. `mission=` keeps items of that
+Mission. Order is `at` descending, then `id` descending; `cursor` returns the items after
+that position, so newer activity never shifts older pages. `limit` outside 1-200, an
+unknown or malformed cursor and an invalid Mission ID are `400`. Every text field is cut
+to 256 characters without control characters.
+
+The gateway records a `lifecycle` event for each state change it ingests (a repeated state
+is not one; the Station comes from the published launch manifest) and a `control` event
+(`<action>.<status>`, actor the requester, details `control`, `state`, `agent`, `reason`)
+when a Station reports a control. Neither write can fail the publication or report.
+
 ## Gateway state
 
 ```rust
@@ -438,6 +486,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. |
 | `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role actions; Station grants include `station.read`, `station.configure` and `audit.read`. Every action is computed by the Authorizer, not inferred from directory groups. |
 | `GET /v1/user/audit?operation_id=<id>&station_id=<id>&limit=<n>` | Requires a user bearer and `audit.read`; the optional Operation and Station filters are mutually exclusive. Returns at most 500 newest metadata-only records, filtered by the Authorizer for each resource. Records contain actor, action, resource scope, target and time; prompts, terminal output and secrets are excluded. |
+| `GET /v1/user/operations/{operation_id}/timeline?cursor=&mission=&limit=` | Requires `audit.read` on the Operation; returns a `TimelinePage` (see Activity timeline). |
 | `GET /v1/user/operations/{operation_id}/agent-roles` | Requires `agent.read`; returns the Headquarters Station catalog merged with validated Operation-scoped Registry overrides. Each role includes `operation_override` provenance. |
 | `PUT /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; validates and stores the role override and records only actor/action/Operation/role ID/time in audit. |
 | `DELETE /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; removes the override, falls back to the Station definition and records a metadata-only audit event. |
