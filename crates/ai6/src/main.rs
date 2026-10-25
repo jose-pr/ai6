@@ -93,7 +93,7 @@ struct ServeArgs {
     /// Normalize digit runs when comparing terminal lines for loops.
     #[arg(long, default_value_t = false)]
     normalize_digits: bool,
-    /// Shared Registry identity for this daemon (defaults to host and process ID).
+    /// Station identity in the shared Registry (default: kept in the state directory across restarts).
     #[arg(long)]
     station: Option<String>,
     /// Station roles: control elects Headquarters; execution runs assigned Missions.

@@ -1325,11 +1325,42 @@ fn renew_session_leases(state: &DaemonState) {
     }
 }
 
+/// The default Station identity, stable across restarts: read from `station-id` in the
+/// AI6 state directory, or created there as `<host>-<random>` on first start. A restarted
+/// daemon must keep its identity to renew its own Session leases and Registry records.
 fn daemon_station_id() -> String {
     let host = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .unwrap_or_else(|_| "localhost".to_owned());
-    format!("{host}-{}", std::process::id())
+    let fresh = || {
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        format!("{host}-{}", &suffix[..8])
+    };
+    let Ok(dir) = crate::station::safehouse::state_dir() else {
+        return fresh();
+    };
+    persisted_station_id(&dir, fresh)
+}
+
+fn persisted_station_id(dir: &Path, fresh: impl FnOnce() -> String) -> String {
+    let path = dir.join("station-id");
+    if let Ok(text) = fs::read_to_string(&path) {
+        let id = text.trim().to_owned();
+        if crate::directorates::registry::store::validate_station_id(&id).is_ok() {
+            return id;
+        }
+    }
+    let id = fresh();
+    let _ = fs::create_dir_all(dir).and_then(|()| {
+        fs::write(
+            &path,
+            format!(
+                "{id}
+"
+            ),
+        )
+    });
+    id
 }
 
 fn publish_station_check_in(state: &DaemonState) {
@@ -4656,6 +4687,15 @@ mod tests {
             .register_local("ai6-server-test-providers", library)
             .expect("mock providers should register");
         plugins::Plugins::from_registry(registry)
+    }
+
+    #[test]
+    fn the_default_station_id_survives_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = persisted_station_id(dir.path(), || "host-aaaa1111".to_owned());
+        let second = persisted_station_id(dir.path(), || "host-bbbb2222".to_owned());
+        assert_eq!(first, "host-aaaa1111");
+        assert_eq!(second, first);
     }
 
     #[test]

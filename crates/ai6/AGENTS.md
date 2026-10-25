@@ -914,7 +914,8 @@ denies every action. `[[grants]]` entries name `agent`, `action`, `scope`, and o
 `name`; `[inbound]` selects `deliver`, `hold`, or `refuse` by Agent; `[channels]` maps
 channel names to Agent lists. `max_fanout`, `sender_rate`, `sender_burst`, `scope_rate`,
 and `scope_burst` bound routing. `ServeConfig::with_station_id` or `AI6_STATION_ID` supplies
-the Station identity; the default is the host and process ID.
+the Station identity; the default is `<host>-<random>`, created once and kept in `station-id`
+in the AI6 state directory so a restarted daemon stays the same Station.
 
 `FileRegistry::submit_cable(&cable)` stores the envelope under `cables/` with atomic
 replacement and the same `.ai6-registry.lock` used by Registry claims. A retry with the

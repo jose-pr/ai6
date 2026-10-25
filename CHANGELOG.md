@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A Station's identity defaults to `<host>-<random>`, created on first start and kept in
+  `station-id` in the AI6 state directory, so a restarted daemon stays the same Station;
+  `--station` or `AI6_STATION_ID` override it.
 - Theaters: a Station reads `theaters.toml` (`[theater.<id>]` with `access = "local"` or an
   `ssh` host, plus labels), always reaches its own host as the implicit `local` Theater and
   publishes its Theaters at check-in. A Session's launch record carries `station_id` and
