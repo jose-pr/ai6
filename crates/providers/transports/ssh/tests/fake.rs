@@ -405,6 +405,62 @@ fn a_reverse_forward_carries_a_connection_from_the_host_to_the_station() {
 }
 
 #[test]
+fn a_reverse_forward_listens_again_on_its_port_when_the_connection_is_remade() {
+    need_shell!();
+    let server = FakeSsh::start();
+    let ssh = client(server.settings(""));
+    let service = TcpListener::bind("127.0.0.1:0").unwrap();
+    let target = service.local_addr().unwrap().to_string();
+    let echo = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = service.accept().unwrap();
+            let mut buffer = [0u8; 64];
+            let count = stream.read(&mut buffer).unwrap();
+            stream.write_all(&buffer[..count]).unwrap();
+        }
+    });
+    let forward = ssh
+        .forward(&ForwardSpec {
+            remote_host: "127.0.0.1".to_owned(),
+            remote_port: 0,
+            target,
+        })
+        .unwrap();
+    let port = forward.info().remote_port;
+    let through = |text: &[u8]| {
+        let mut host_side = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        host_side
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        host_side.write_all(text).unwrap();
+        let mut reply = [0u8; 64];
+        let count = host_side.read(&mut reply).unwrap();
+        reply[..count].to_vec()
+    };
+    assert_eq!(through(b"before"), b"before");
+
+    // The link drops; the host stops listening with it.
+    server.disconnect_all();
+    eventually(|| std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
+
+    // The next operation reconnects, and the forward is back on the same port.
+    let spec = RunSpec {
+        argv: vec!["true".to_owned()],
+        ..RunSpec::default()
+    };
+    assert_eq!(ssh.run(&spec).unwrap().code, Some(0));
+    assert_eq!(server.seen.lock().unwrap().connections, 2);
+    assert_eq!(through(b"after"), b"after");
+    echo.join().unwrap();
+
+    forward.close().unwrap();
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
+        "closing the forward stops the host listening on the new connection"
+    );
+}
+
+#[test]
 fn capabilities_roundtrip_as_published() {
     let server = FakeSsh::start();
     let capabilities = client(server.settings("")).capabilities().unwrap();

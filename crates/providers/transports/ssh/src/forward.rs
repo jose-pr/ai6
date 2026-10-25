@@ -9,11 +9,14 @@ use ai6::{ForwardInfo, ForwardSpec, TransportForward};
 use tokio::runtime::Handle;
 
 use crate::refuse;
-use crate::session::{Conn, Link};
+use crate::session::{Forwards, Link, Slot};
 
 pub(crate) struct Forward {
     runtime: Handle,
-    conn: Arc<Conn>,
+    /// The link's connection now: a forward outlives a reconnect, so it is cancelled on
+    /// whichever connection holds it when it closes.
+    slot: Slot,
+    forwards: Arc<Forwards>,
     info: ForwardInfo,
     open: AtomicBool,
 }
@@ -42,10 +45,12 @@ pub(crate) async fn open(link: &Link, spec: &ForwardSpec) -> Result<Forward, Pro
             format!("the host chose the invalid port {port}"),
         )
     })?;
-    conn.forwards.add(port, spec.target.clone());
+    link.forwards
+        .add(spec.remote_host.clone(), port, spec.target.clone());
     Ok(Forward {
         runtime: Handle::current(),
-        conn,
+        slot: link.slot(),
+        forwards: link.forwards.clone(),
         info: ForwardInfo {
             remote_host: spec.remote_host.clone(),
             remote_port,
@@ -60,11 +65,14 @@ impl Forward {
             return None;
         }
         let port = u32::from(self.info.remote_port);
-        self.conn.forwards.remove(port);
-        let conn = self.conn.clone();
+        self.forwards.remove(port);
+        let slot = self.slot.clone();
         let host = self.info.remote_host.clone();
         Some(self.runtime.spawn(async move {
-            let _ = conn.handle.cancel_tcpip_forward(host, port).await;
+            let conn = slot.lock().await.clone();
+            if let Some(conn) = conn.filter(|conn| !conn.is_closed()) {
+                let _ = conn.handle.cancel_tcpip_forward(host, port).await;
+            }
         }))
     }
 }

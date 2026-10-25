@@ -47,15 +47,16 @@ impl HostKey {
     }
 }
 
-/// Reverse forwards currently registered: the host's listening port to the Station address.
+/// Reverse forwards currently registered: the host's listening address and port to the
+/// Station address. They outlive a connection: a new one asks the host for each again.
 #[derive(Default)]
 pub(crate) struct Forwards {
-    targets: Mutex<BTreeMap<u32, String>>,
+    targets: Mutex<BTreeMap<u32, (String, String)>>,
 }
 
 impl Forwards {
-    pub(crate) fn add(&self, port: u32, target: String) {
-        lock(&self.targets).insert(port, target);
+    pub(crate) fn add(&self, host: String, port: u32, target: String) {
+        lock(&self.targets).insert(port, (host, target));
     }
 
     pub(crate) fn remove(&self, port: u32) {
@@ -63,7 +64,17 @@ impl Forwards {
     }
 
     fn target(&self, port: u32) -> Option<String> {
-        lock(&self.targets).get(&port).cloned()
+        lock(&self.targets)
+            .get(&port)
+            .map(|(_, target)| target.clone())
+    }
+
+    /// The host addresses and ports to listen on again after a reconnect.
+    fn listening(&self) -> Vec<(String, u32)> {
+        lock(&self.targets)
+            .iter()
+            .map(|(port, (host, _))| (host.clone(), *port))
+            .collect()
     }
 }
 
@@ -157,7 +168,6 @@ fn fingerprint(key: &PublicKeyOrCertificate) -> String {
 /// One authenticated connection, shared by every operation until it closes.
 pub(crate) struct Conn {
     pub(crate) handle: Handle<Client>,
-    pub(crate) forwards: Arc<Forwards>,
     sftp: tokio::sync::Mutex<Option<Arc<SftpSession>>>,
 }
 
@@ -205,9 +215,12 @@ impl Conn {
 pub(crate) struct Link {
     settings: Settings,
     pub(crate) host_key: Arc<HostKey>,
-    forwards: Arc<Forwards>,
-    conn: tokio::sync::Mutex<Option<Arc<Conn>>>,
+    pub(crate) forwards: Arc<Forwards>,
+    conn: Arc<tokio::sync::Mutex<Option<Arc<Conn>>>>,
 }
+
+/// The connection a link holds now, shared with the forwards it opened.
+pub(crate) type Slot = Arc<tokio::sync::Mutex<Option<Arc<Conn>>>>;
 
 impl Link {
     pub(crate) fn new(settings: Settings) -> Self {
@@ -215,7 +228,7 @@ impl Link {
             settings,
             host_key: Arc::new(HostKey::default()),
             forwards: Arc::new(Forwards::default()),
-            conn: tokio::sync::Mutex::new(None),
+            conn: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -223,7 +236,12 @@ impl Link {
         &self.settings
     }
 
-    /// The live connection, made (or remade) when there is none.
+    pub(crate) fn slot(&self) -> Slot {
+        self.conn.clone()
+    }
+
+    /// The live connection, made (or remade) when there is none. A remade connection asks
+    /// the host to listen again for every reverse forward still open, on the same port.
     pub(crate) async fn conn(&self) -> Result<Arc<Conn>, ProviderError> {
         let mut slot = self.conn.lock().await;
         if let Some(conn) = slot.as_ref()
@@ -232,6 +250,11 @@ impl Link {
             return Ok(conn.clone());
         }
         let conn = Arc::new(self.connect().await?);
+        for (host, port) in self.forwards.listening() {
+            // A port the host will not give back leaves that forward closed, as a dropped
+            // link does; the caller can open another.
+            let _ = conn.handle.tcpip_forward(host, port).await;
+        }
         *slot = Some(conn.clone());
         Ok(conn)
     }
@@ -322,7 +345,6 @@ impl Link {
             )),
             Ok(Ok((handle, true))) => Ok(Conn {
                 handle,
-                forwards: self.forwards.clone(),
                 sftp: tokio::sync::Mutex::new(None),
             }),
         }

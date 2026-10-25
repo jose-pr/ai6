@@ -257,6 +257,15 @@ struct Connection {
     forwards: HashMap<u32, tokio::task::JoinHandle<()>>,
 }
 
+/// A connection's forwards stop listening when it ends, as an OpenSSH server's do.
+impl Drop for Connection {
+    fn drop(&mut self) {
+        for accept in self.forwards.values() {
+            accept.abort();
+        }
+    }
+}
+
 impl russh::server::Handler for Connection {
     type Error = russh::Error;
 
