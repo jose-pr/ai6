@@ -83,7 +83,8 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | Path | Purpose |
 | --- | --- |
 | `ai6::directorates::m::roster` | Operations, Agents (inheritance, aliases, clearance, priority) and Agent roles |
-| `ai6::directorates::m::theaters` | Theaters (`theaters.toml`): the hosts a Station reaches, local or over SSH |
+| `ai6::directorates::m::theaters` | Theaters (`theaters.toml`): the hosts a Station reaches, through a transport |
+| `ai6::directorates::q::transport` | The Transport kind: how a Station reaches a Theater (terminal, run, files, forward) and the contract suite for it |
 | `ai6::directorates::m::placement` | Placement: eligible (Station, Theater, Agent) choices with a reason for every rejection |
 | `ai6::directorates::m::mission` | Durable Mission lifecycle, provider Session association and resume settings |
 | `ai6::directorates::m::limits` | `OnLimit` and the parking rule for provider usage limits |

@@ -20,9 +20,10 @@ Infrastructure  Station ──────────────────�
   `execution` role, or both. Control Stations elect the **Headquarters Station (HQS)**,
   which holds M's authority through a lease. An execution-only Station is an
   *outstation*.
-- A **Theater** is where a Session actually runs. Today every Session runs on its
-  Station's own host, in the Station's terminal provider; remote Theaters are designed
-  but not implemented.
+- A **Theater** is where a Session actually works, reached through a **transport** (`local`,
+  `ssh`, or another provider that declares what it can do). A harness runs *on* the Theater
+  in field mode, which today means the Station's own host in its terminal provider, or on the
+  Station in remote-hands mode, acting on the Theater through the transport.
 
 For orientation only, the closest Kubernetes concepts are: Station ≈ node and kubelet,
 HQS ≈ elected control plane, Registry ≈ etcd, Operation ≈ namespace with a placement
@@ -90,8 +91,9 @@ same-origin and TLS-only, and operator input counts as watchdog activity.
 
 ## Not implemented yet
 
-- Remote Theaters: starting Sessions over SSH, remote safe houses and Cable MCP
-  forwarding.
+- Field mode on a remote Theater (a runner there that supervises the harness), remote safe
+  houses, and container, VM and Android transports. Remote Theaters work in remote-hands
+  mode only.
 - Central placement: Stations sharing a Registry each lease the briefs they can run
   themselves; the Headquarters lease does not yet drive placement. The Registry is
   file-backed only (no SQL backend).
@@ -196,6 +198,7 @@ stream so an attached viewer's emulator does not answer a second time.
 | `crates/ai6ctl/` | Rust | The read-only operator command |
 | `crates/providers/agents/` | Rust | Claude and Codex AgentHandler providers |
 | `crates/providers/terminals/pty/` | Rust | The `pty` terminal provider (openpty / ConPTY) |
+| `crates/providers/transports/` | Rust | The `local` and `ssh` transport providers: how a Station reaches a Theater |
 | `crates/providers/safehouses/` | Rust | The `git` (worktree) and `copy` (plain directory) safe-house providers |
 | `coqui-access` (shared, git dependency) | Rust | Access kinds, the role authorizer and the key, LDAP, local, peer-certificate and reverse-proxy access providers, loaded as plugin libraries |
 | `coqui-peer-tls` (shared, git dependency) | Rust | Station identity, fingerprints, trust store and mutual TLS |

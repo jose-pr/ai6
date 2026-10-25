@@ -17,7 +17,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   publishes its Theaters at check-in. A Session's launch record carries `station_id` and
   `theater_id` separately (older records still load). `GET /v1/stations` lists each
   Station's Theaters, and Moneypenny shows them and the Station and Theater of each Session.
-  An SSH Theater is recorded and shown but not yet chosen for Sessions.
+- Transports. A Station reaches a Theater through a transport, a new provider kind
+  (`ai6_transport`, `ai6::directorates::q::transport`) with optional, capability-gated
+  operations: open a terminal, run a command, read, write and list files, and forward a port
+  from the host back to the Station. Each transport declares its `Capabilities`
+  (`terminal`, `run`, `files`, `forward`, `os`, `arch`); a contract suite beside the kind
+  checks any transport against what it declares. Theaters gain `agents` (`auto`, `local` or
+  `remote-hands`), `egress` (`direct`, a proxy, `station` or `none`), `harnesses`, `workdir`
+  and `access = { transport = { provider, config } }` for any other transport provider.
+  Stations publish each Theater's capabilities and declared facts, and `GET /v1/stations`
+  and Moneypenny's Theater tooltips show them; a Theater that cannot be reached is shown
+  with the reason and ruled out of placement.
+- Two new transport providers. `ai6-transport-local` runs commands and reads and writes
+  files on the Station's own host. `ai6-transport-ssh` reaches a host over SSH with a
+  built-in pure-Rust client (`russh`, `ring`), so it needs no installed `ssh` and behaves the
+  same on every OS: commands, pty terminals, SFTP files and reverse forwards, reconnecting
+  on its own. The host key is pinned (`host_key = "sha256:HEX"`); first contact without a pin
+  is refused, naming the key to pin, unless `trust_on_first_use = true`, which the Station
+  logs and `GET /v1/stations` reports as a weakening. Keys stay in files: only a key path is
+  configured, and a passphrase-protected key is refused.
+- Remote-hands mode. Placement now chooses field mode (the harness runs on the Theater) or
+  remote-hands mode (the harness runs on the Station and acts on the Theater through its
+  transport) from the Theater's capabilities and its `agents` and `egress` settings, and
+  every rejection names the missing capability. In remote-hands mode the harness's own shell
+  and file tools are switched off (Claude Code `--disallowedTools`; Codex runs in a read-only
+  sandbox that asks nothing) and four Theater tools (`theater_run`, `theater_read`,
+  `theater_write`, `theater_list`) on a per-Session authenticated MCP endpoint act on the
+  Theater instead. Placement choices, launch records, the published Mission brief and
+  Moneypenny carry the mode. Field mode on a remote Theater still needs a runner there and is
+  not implemented.
 - Placement is now M's decision (`ai6::directorates::m::placement`, extracted from the
   Station scheduler). It filters by Station role, health, capacity, labels, checkout, Theater
   and available handler, orders by load then Agent priority, and gives a reason for every

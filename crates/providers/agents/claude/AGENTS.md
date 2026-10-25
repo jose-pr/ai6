@@ -44,6 +44,14 @@ the authenticated Streamable HTTP Cable server through `--mcp-config`. The confi
 environment placeholders; the bearer token never appears in argv. If either variable is
 absent, no AI6 MCP configuration is added.
 
+When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
+remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
+The handler then registers that server as `ai6-theater` (same placeholder scheme), allows
+its tools (`--allowedTools mcp__ai6-theater`) and denies Claude's own shell and file tools
+(`--disallowedTools Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,Grep,LS`) so
+nothing it does lands on the Station. Both flags are variadic, so each is followed by another
+flag. This applies to resume as well.
+
 ## Gotchas
 
 The Claude executable must be available to the terminal environment. Tests use protocol

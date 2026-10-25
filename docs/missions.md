@@ -51,8 +51,8 @@ record ID. User-supplied integrations can write validated brief JSON into `new/`
 the Universal Exports API.
 
 SQLite/PostgreSQL Registry backends and distributed Registry placement are not currently
-implemented. Remote Theaters are also not implemented; every Session runs on its
-Station's host.
+implemented. A Session runs on its Station's host, or, for a Theater reached only through a
+transport, on the Station in remote-hands mode (see [Theaters](theaters.md)).
 
 ## Recovery
 

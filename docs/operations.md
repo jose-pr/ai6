@@ -23,8 +23,8 @@ sources = { jira = "GUA" }
 
 The Operation ID (`G`) and project name (`guatiao`) both resolve to the same registered
 Operation. `path` is the local checkout. `theater` binds the Operation to one
-[Theater](theaters.md) by ID; Sessions run on a Theater a Station reaches with local access,
-and an SSH Theater is not chosen yet. `roster` limits which Agents may be assigned; when omitted or empty, every
+[Theater](theaters.md) by ID; when it is bound to a remote Theater, `path` is read on that
+Theater. `roster` limits which Agents may be assigned; when omitted or empty, every
 configured Agent is eligible. `clearance` sets the highest authority available to its
 Missions. `station_labels` is matched against the labels of an execution Station and its
 Theater. `stations` optionally lists the Stations allowed to run the Operation's Missions;

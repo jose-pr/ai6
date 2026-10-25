@@ -306,38 +306,75 @@ resumes.
 
 ## Theaters (`ai6::directorates::m::theaters`)
 
-A Theater is where a Session's harness runs; a Station reaches it. Each Station reads its
-own `theaters.toml` (`[theater.<id>]` with `access = "local"` or
-`access = { ssh = { host, user, port, identity } }`, and `labels`). The Station's own host
-is always reachable as the implicit `local` Theater; declaring `[theater.local]` only adds
-labels. An `ssh` Theater is recorded and published, but placement does not choose it yet.
+A Theater is where a Session works; a Station reaches it through a transport. Each Station
+reads its own `theaters.toml` (`[theater.<id>]` with `access`, `labels`, `agents`, `egress`,
+`harnesses` and `workdir`; `docs/theaters.md` has the table). The Station's own host is
+always reachable as the implicit `local` Theater; declaring `[theater.local]` only adds
+labels and facts.
 
 ```rust
 pub const LOCAL_THEATER: &str; // "local"
 #[non_exhaustive]
-pub enum TheaterAccess { Local, Ssh(SshAccess) }
+pub enum TheaterAccess { Local, Ssh(SshAccess), Transport(TransportAccess) }
+impl TheaterAccess {
+    /// The transport provider ID and its settings as TOML text (a `TransportConfig`).
+    pub fn transport(&self) -> Result<(String, String), TheaterError>;
+}
 #[non_exhaustive]
-pub struct SshAccess { pub host: String, pub user: Option<String>, pub port: Option<u16>, pub identity: Option<String> }
+pub struct SshAccess {
+    pub host: String, pub user: Option<String>, pub port: Option<u16>, pub identity: Option<String>,
+    pub host_key: Option<String>,            // "sha256:HEX" of the host's public key
+    pub trust_on_first_use: bool,            // weaker than a pin; reported
+    pub connect_timeout_secs: Option<u64>,
+}
 impl SshAccess {
     pub fn new(host: impl Into<String>) -> Self;
     pub fn with_user(self, user: impl Into<String>) -> Self;
     pub fn with_port(self, port: u16) -> Self;
     pub fn with_identity(self, identity: impl Into<String>) -> Self;
+    pub fn with_host_key(self, host_key: impl Into<String>) -> Self;
+    pub fn trusting_on_first_use(self) -> Self;
+    pub fn with_connect_timeout_secs(self, secs: u64) -> Self;
 }
 #[non_exhaustive]
-pub struct Theater { pub id: String, pub access: TheaterAccess, pub labels: BTreeMap<String, String> }
+pub struct TransportAccess { pub provider: String, pub config: serde_json::Map<String, serde_json::Value> }
+impl TransportAccess {
+    pub fn new(provider: impl Into<String>) -> Self;
+    pub fn with_setting(self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Self;
+}
+#[non_exhaustive]
+pub enum AgentMode { Auto, Local, RemoteHands }        // default Auto; as_str() -> "auto" | "local" | "remote-hands"
+#[non_exhaustive]
+pub enum Egress { Direct, Proxy(String), Station, Isolated }  // TOML: "direct", { proxy = URL }, "station", "none"
+impl Egress { pub fn kind(&self) -> EgressKind; }
+#[non_exhaustive]
+pub enum EgressKind { Direct, Proxy, Station, Isolated }      // the URL-free kind that is published
+#[non_exhaustive]
+pub struct Theater {
+    pub id: String, pub access: TheaterAccess, pub labels: BTreeMap<String, String>,
+    pub agents: AgentMode, pub egress: Egress, pub harnesses: Vec<String>, pub workdir: Option<String>,
+}
 impl Theater {
     pub fn new(id: impl Into<String>, access: TheaterAccess) -> Self;
     pub fn with_label(self, key: impl Into<String>, value: impl Into<String>) -> Self;
-    pub fn summary(&self) -> TheaterSummary;
+    pub fn with_agents(self, agents: AgentMode) -> Self;
+    pub fn with_egress(self, egress: Egress) -> Self;
+    pub fn with_harness(self, harness: impl Into<String>) -> Self;
+    pub fn with_workdir(self, workdir: impl Into<String>) -> Self;
+    pub fn weakenings(&self) -> Vec<String>;    // settings looser than their defaults
+    pub fn summary(&self) -> TheaterSummary;     // no capabilities: the Station adds them
 }
 #[non_exhaustive]
-pub enum TheaterKind { Local, Ssh }          // as_str() -> "local" | "ssh"
+pub enum TheaterKind { Local, Ssh, Transport }   // as_str() -> "local" | "ssh" | "transport"
 #[non_exhaustive]
-pub struct TheaterSummary {                  // what a Station publishes; no user, port or key path
-    pub id: String, pub access: TheaterKind, pub host: Option<String>, pub labels: BTreeMap<String, String>,
+pub struct TheaterSummary {                  // what a Station publishes; no user, port, key path or proxy URL
+    pub id: String, pub access: TheaterKind, pub host: Option<String>, pub provider: Option<String>,
+    pub labels: BTreeMap<String, String>, pub capabilities: Option<Capabilities>,
+    pub agents: AgentMode, pub egress: EgressKind, pub harnesses: Vec<String>,
+    pub workdir: Option<String>, pub unavailable: Option<String>, pub weakened: Vec<String>,
 }
 impl TheaterSummary { pub fn local() -> Self; }
+pub fn is_sha256_pin(pin: &str) -> bool;    // "sha256:" and 64 hex digits
 pub struct Theaters { /* declared Theaters */ }   // Default: none declared
 impl Theaters {
     pub fn load(root: impl AsRef<Path>) -> Result<Self, TheaterError>; // missing file: none declared
@@ -346,15 +383,79 @@ impl Theaters {
     pub fn merge(&mut self, other: Theaters);                           // other wins on a shared ID
     pub fn reachable(&self) -> Vec<Theater>;                            // declared + implicit `local`
     pub fn find(&self, id: &str) -> Option<Theater>;
-    pub fn summaries(&self) -> Vec<TheaterSummary>;
+    pub fn summaries(&self) -> Vec<TheaterSummary>;                     // without capabilities
 }
 pub struct TheaterError(String);             // Display, Error
 ```
 
-Theater IDs use letters, digits, `.`, `_` and `-`. An SSH host or user must be a word that
-does not start with `-`, and a port is 1 through 65535. `ServeConfig` loads `theaters.toml`
-from the configuration directory; `StationConfig::with_theater` adds one in code and wins on
-a shared ID. A Session's launch record carries `station_id` and `theater_id` separately.
+Theater IDs use letters, digits, `.`, `_` and `-`. An SSH host, user, a transport provider
+and a harness must be words that do not start with `-`; a port is 1 through 65535; a
+`host_key` is `sha256:` and 64 hex digits. `ServeConfig` loads `theaters.toml` from the
+configuration directory; `StationConfig::with_theater` adds one in code and wins on a shared
+ID. A Session's launch record carries `station_id`, `theater_id` and `mode` separately.
+
+A Station builds one transport per Theater at start (`TransportClient` over the provider the
+Theater's `access` names; no host is contacted), publishes each Theater's `Capabilities` in
+`TheaterSummary::capabilities`, and probes a remote Theater in the background until it answers
+(`unavailable` carries the reason until then). On its own host the Station sets `terminal`
+from its Terminal provider; a `local` Theater without a loaded `local` transport library
+still hosts a harness (field mode) but offers no `run`. Weakened settings are logged at start.
+
+## Transports (`ai6::directorates::q::transport`)
+
+How a Station reaches a Theater, as a Guatiao kind (`ai6_transport`; the forward handle is the
+object kind `ai6_transport_forward`). Slot order is the ABI: `capabilities` is required and
+every other operation is an appended slot with a default body that answers
+`GUATIAO_ERR_UNSUPPORTED`, so a transport implements only what it can do. Calls block.
+
+```rust
+pub trait Transport: Send + Sync {
+    fn capabilities(&self) -> Result<Value, ProviderError>;           // Capabilities; never contacts the host
+    fn probe(&self) -> Result<Value, ProviderError>;                   // contacts the host; default = capabilities
+    fn open_terminal(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>; // terminal::Spec
+    fn run(&self, spec: &Value) -> Result<Value, ProviderError>;       // RunSpec -> Output
+    fn read_file(&self, spec: &Value) -> Result<Value, ProviderError>; // ReadSpec -> FileData
+    fn write_file(&self, spec: &Value) -> Result<(), ProviderError>;   // WriteSpec
+    fn list_dir(&self, path: &str) -> Result<Value, ProviderError>;    // DirListing, sorted by name
+    fn forward(&self, spec: &Value) -> Result<Object<dyn TransportForward>, ProviderError>; // ForwardSpec
+}
+pub trait TransportForward: Send + Sync { fn info(&self) -> Result<Value, ProviderError>; fn close(&self) -> Result<(), ProviderError>; }
+pub struct Capabilities { pub terminal: bool, pub run: bool, pub files: bool, pub forward: bool,
+    pub os: Option<String>, pub arch: Option<String>, pub notes: Vec<String> }
+pub struct TransportConfig { pub settings_toml: String }   // a provider with settings; it parses them and refuses unknown keys
+pub struct RunSpec { pub argv: Vec<String>, pub cwd: Option<String>, pub env: Option<BTreeMap<String, String>>,
+    pub stdin: Option<Bytes>, pub timeout_ms: u64 /* 0 waits */, pub max_output: u64 /* per stream; DEFAULT_MAX_OUTPUT */ }
+pub struct Output { pub code: Option<i64>, pub signal: Option<i64>, pub stdout: Bytes, pub stderr: Bytes,
+    pub timed_out: bool, pub truncated: bool }
+pub struct ReadSpec { pub path: String, pub offset: u64, pub limit: u64 /* DEFAULT_READ_LIMIT */ }
+pub struct FileData { pub data: Bytes, pub size: u64 }   // size of the whole file
+pub struct WriteSpec { pub path: String, pub data: Bytes, pub append: bool, pub create_dirs: bool }
+pub struct DirEntry { pub name: String, pub kind: String /* file | dir | link | other */, pub size: u64 }
+pub struct ForwardSpec { pub remote_host: String /* 127.0.0.1 */, pub remote_port: u16 /* 0: host chooses */, pub target: String /* host:port on the Station */ }
+pub struct ForwardInfo { pub remote_host: String, pub remote_port: u16 }
+pub struct TransportClient;  // typed wrapper: new(Box<dyn Transport>), capabilities, probe, open_terminal, run, read_file, write_file, list_dir, forward
+pub fn unsupported(what: &str) -> ProviderError;  pub fn is_unsupported(&ProviderError) -> bool;
+pub fn describe(&ProviderError) -> String;         // the provider's own words
+pub mod contract { pub struct Host<'a> { pub shell: &'a [&'a str], pub expand: fn(&str) -> String, pub scratch: &'a str }
+    pub fn check(transport: Box<dyn Transport>, host: &Host<'_>); }   // the suite every transport passes
+```
+
+A model grows by fields that default; the floor hashes of both kinds are pinned in a test. A
+missing file or directory is `GUATIAO_ERR_NOT_FOUND`. `contract::check` runs a transport
+against its own `Capabilities`: what it claims works, what it does not claim answers
+`GUATIAO_ERR_UNSUPPORTED`.
+
+Providers: `ai6-transport-local` (`run`, `files`) and `ai6-transport-ssh` (`terminal`, `run`,
+`files`, `forward`), each with its own API header. `Plugins::transports()` and
+`Plugins::transport(provider, config)` find and build them.
+
+### Remote-hands tools
+
+When a Mission is placed in remote-hands mode, the Station starts a per-Session MCP endpoint
+(feature `cables-mcp`, `127.0.0.1`, bearer token) with `theater_run`, `theater_read`,
+`theater_write` and `theater_list`, and puts `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN`
+in the handler's environment. A handler that sees both is in remote-hands mode: it must switch
+off its own shell and file tools and register that server (the Claude and Codex handlers do).
 
 ## Placement (`ai6::directorates::m::placement`)
 
@@ -395,7 +496,11 @@ pub struct PlacementRequest {
     pub deciding_station: Option<String>, // wins a tie on load
 }
 #[non_exhaustive]
-pub struct PlacementChoice { pub station: String, pub theater: String, pub agent: String, pub handler: Option<String> }
+pub struct PlacementChoice { pub station: String, pub theater: String, pub agent: String, pub handler: Option<String>, pub mode: ExecutionMode }
+#[non_exhaustive]
+pub enum ExecutionMode { Field, RemoteHands }   // default Field; as_str() -> "field" | "remote-hands"
+/// How a Session would run on `theater`, or the capability that is missing.
+pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String>;
 #[non_exhaustive]
 pub struct PlacementRejection { pub station: Option<String>, pub theater: Option<String>, pub agent: Option<String>, pub reason: String }
 #[non_exhaustive]
@@ -408,8 +513,16 @@ pub fn place(policy: &OperationPolicy, request: &PlacementRequest, stations: &[S
 rejection for everything ruled out; the `reason` is a sentence an operator can act on.
 Checks, in order: the Operation's `stations` list, the Mission's `stations`, the `execution`
 role, health (a check-in no older than `DEFAULT_LEASE`), capacity, then per Theater: the
-Operation's `theater` binding, SSH access (not chosen yet), `station_labels` (matched as
-globs against the Station's labels overlaid by the Theater's) and the Operation's checkout.
+Operation's `theater` binding, reachability and capabilities (`execution_mode`),
+`station_labels` (matched as globs against the Station's labels overlaid by the Theater's)
+and the Operation's checkout (in field mode; in remote-hands mode the Operation must be bound
+to the Theater or the Theater must set a `workdir`).
+
+`execution_mode` is field mode when the Theater is the Station's own host with `terminal` and
+`files` and a route to the provider's API (`egress` not `none`; `forward` for `station`), and
+`agents` is not `remote-hands`; otherwise remote-hands mode when the transport can `run`;
+`agents = "local"` or `"remote-hands"` allow only that mode. A Theater that reported no
+capabilities is rejected unless it is the Station's own host. The reason names what is missing.
 A posted Agent is skipped for a missing handler on that Station (a Station that reported no
 handlers is not excluded), so the next qualified Agent is the backup. Order is the
 least-loaded Station (the deciding Station wins a tie, then Station ID), the `local`
@@ -557,7 +670,7 @@ different Station takes the lease, is unchanged by the holder renewing it, and r
 a lease written before terms existed. Headquarters
 leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating Stations
 need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`,
-local Operation paths, available `handlers`, reachable `theaters` and each Operation's
+local Operation paths, available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
 placement policy (`operation_policies`, omitted with a log line when over 512 KiB) with
 each Station check-in every 15 seconds, alongside host and
 platform metadata. `StationConfig` defaults to both `Control` and `Execution`, no
@@ -1227,7 +1340,11 @@ changes are kept and included in the Mission report. `workspace.isolate = false`
 the Operation's directory instead. The earlier Operation keys `repos`, `safe_houses`,
 `branch` and `base` are refused at load time with a message naming the `workspace` field
 that replaced them.
-Remote Theaters are not implemented: Missions run on the Station's own host.
+A Mission whose Operation is bound to a Theater that only a transport reaches runs on the
+Station in remote-hands mode: the harness starts in `<state>/remote-hands/<mission>` (kept
+when the Mission ends), has no safe house and so no cover check, and acts on the Theater
+through the Theater tools. A `working_directory` is refused there. Field mode on a remote
+Theater is not implemented.
 This private listener is for
 daemon health, provider discovery and Universal Exports-to-daemon operations; user-facing
 Station and Mission operations belong to Universal Exports's authenticated API.

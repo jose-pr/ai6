@@ -124,12 +124,12 @@ Infrastructure  Station ──────────────────�
 
 An **Operation** is a global project and its policy; Stations serve it, none owns it. A
 **Mission** is one brief; a **Session** is one resumable provider run. A **Station** is a
-node running `ai6 serve`; a **Theater** is the host a Session runs on, today always its
-Station's own. The directorates (M, the Registry, Q Branch, 00 Section, Medical) decide; the
+node running `ai6 serve`; a **Theater** is the host a Session works on, reached through a
+transport (`local`, `ssh`). The directorates (M, the Registry, Q Branch, 00 Section, Medical) decide; the
 Station runs their decisions; Universal Exports is the only public door. See
 [Architecture](https://jose-pr.github.io/ai6/architecture/) and
-[Organization](https://jose-pr.github.io/ai6/organization/). Remote Theaters and a SQL
-Registry are not implemented yet.
+[Organization](https://jose-pr.github.io/ai6/organization/). Field mode on a remote Theater and
+a SQL Registry are not implemented yet.
 
 ```toml
 [operation.G]

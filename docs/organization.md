@@ -36,8 +36,9 @@ Infrastructure  Station ──────────────────�
 - **Session**: one provider-issued, resumable agent run. Never call it a Task.
 - **Station**: a node running `ai6 serve`, with the `control` role, the `execution` role
   or both. The elected **Headquarters Station (HQS)** holds M's authority by lease.
-- **Theater**: the host or environment a Session runs in. Today that is always the
-  Station's own host; remote Theaters reached over SSH are designed, not built.
+- **Theater**: the host or environment a Session works on, reached through a transport
+  (`local`, `ssh`, ...). The harness runs on the Station's own host, or on the Station while
+  acting on a remote Theater through the transport (remote-hands mode).
 - **Safe house**: a Mission's isolated workspace inside its Theater, made by a safe-house provider (`git` cuts a worktree).
 
 **Campaign** (above Operations), **Objective** (a Mission's intended outcome), **Task**

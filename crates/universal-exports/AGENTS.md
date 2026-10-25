@@ -163,9 +163,17 @@ pub struct BoardStation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BoardTheater {
     pub id: String,
-    pub access: String,              // "local" or "ssh"
+    pub access: String,              // "local", "ssh" or "transport"
     pub host: Option<String>,        // ssh host only; user, port and key path are never published
+    pub provider: Option<String>,    // transport provider of a "transport" Theater
     pub labels: BTreeMap<String, String>,
+    pub capabilities: Option<ai6::Capabilities>, // terminal, run, files, forward, os, arch, notes
+    pub agents: String,              // "auto" | "local" | "remote-hands"
+    pub egress: String,              // "direct" | "proxy" | "station" | "none"; never a proxy URL
+    pub harnesses: Vec<String>,
+    pub workdir: Option<String>,     // where a remote-hands Mission works without an Operation path
+    pub unavailable: Option<String>, // why the Station cannot reach it now
+    pub weakened: Vec<String>,       // settings looser than their defaults
 }
 
 #[non_exhaustive]
@@ -190,7 +198,8 @@ pub struct LaunchManifest {
     pub effort: Option<String>,
     pub environment_keys: Vec<String>,
     pub station_id: Option<String>,  // Station that supervises the Session (absent in older registrations)
-    pub theater_id: Option<String>,  // Theater the harness runs in
+    pub theater_id: Option<String>,  // Theater the harness works on
+    pub mode: Option<String>,        // "field" | "remote-hands"; absent in older registrations
 }
 ```
 
@@ -211,7 +220,8 @@ seconds; stale check-ins remain visible as offline. `headquarters_station` and e
 Station's `headquarters` marker are populated only for an unexpired elected Headquarters
 lease. The route filters Operations using `mission.read` and omits host and process
 metadata. Each Station lists the Theaters it reaches (`theaters`; a Station that published
-none reaches only its own `local` host).
+none reaches only its own `local` host) with what the transport can do there, and
+placement choices carry their `mode`.
 
 `GET /v1/user/operations/{operation_id}/placement-preview` answers where a Mission for the
 Operation would run, and why the other places would not (see `ai6::place`). It requires

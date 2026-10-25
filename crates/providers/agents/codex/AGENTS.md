@@ -38,6 +38,13 @@ Mission instead of polling an exited process indefinitely.
 When AI6 supplies `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, app-server receives
 per-process config overrides for the Cable endpoint and token environment-variable name.
 The bearer token itself is not placed in process arguments.
+When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
+remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
+App-server then also receives overrides for an `ai6-theater` server, and `thread/start` and
+`thread/resume` carry `sandbox = "read-only"` and `approvalPolicy = "never"`, because Codex's
+shell tool cannot be switched off: the sandbox keeps anything from being written on the
+Station. The two parameter names follow the app-server protocol and are not exercised against
+a live Codex.
 
 ## Gotchas
 
