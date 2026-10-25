@@ -1,0 +1,23 @@
+pub mod ai6_theater_container
+pub struct ai6_theater_container::ContainerTheaters
+impl ai6_theater_container::ContainerTheaters
+pub fn ai6_theater_container::ContainerTheaters::with_engine(alloc::sync::Arc<dyn ai6_theater_container::Engine>, &str) -> core::result::Result<Self, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::ephemeral::TheaterProvider for ai6_theater_container::ContainerTheaters
+pub fn ai6_theater_container::ContainerTheaters::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_theater_container::ContainerTheaters::create(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_theater_container::ContainerTheaters::destroy(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6_theater_container::ContainerTheaters::list(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6::directorates::q::ephemeral::TheaterProviderConfig> for ai6_theater_container::ContainerTheaters
+pub type ai6_theater_container::ContainerTheaters::Error = guatiao::library::kind::ProviderError
+pub fn ai6_theater_container::ContainerTheaters::try_from(ai6::directorates::q::ephemeral::TheaterProviderConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_theater_container::ContainerTheaters
+pub const ai6_theater_container::ContainerTheaters::KINDS: &'static [&'static str]
+pub fn ai6_theater_container::ContainerTheaters::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub const ai6_theater_container::CREATED_LABEL: &str
+pub const ai6_theater_container::MISSION_LABEL: &str
+pub const ai6_theater_container::TEMPLATE_LABEL: &str
+#[no_mangle] pub static ai6_theater_container::guatiao_declares: [u8; 27]
+pub trait ai6_theater_container::Engine: core::marker::Send + core::marker::Sync
+pub fn ai6_theater_container::Engine::run(&self, &[alloc::string::String]) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+pub fn ai6_theater_container::container_name(&str) -> alloc::string::String
+#[no_mangle] pub unsafe c fn ai6_theater_container::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

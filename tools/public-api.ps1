@@ -21,6 +21,7 @@ $packages = @(
     'ai6-transport-adb',
     'ai6-transport-container',
     'ai6-transport-qemu',
+    'ai6-theater-container',
     'ai6-safehouse-git',
     'ai6-safehouse-copy',
     'ai6-source-github',

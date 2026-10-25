@@ -75,7 +75,10 @@ pub universal_exports::BoardTheater::harnesses: alloc::vec::Vec<alloc::string::S
 pub universal_exports::BoardTheater::host: core::option::Option<alloc::string::String>
 pub universal_exports::BoardTheater::id: alloc::string::String
 pub universal_exports::BoardTheater::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub universal_exports::BoardTheater::made_for: core::option::Option<alloc::string::String>
 pub universal_exports::BoardTheater::provider: core::option::Option<alloc::string::String>
+pub universal_exports::BoardTheater::report: core::option::Option<ai6::directorates::q::provision::ProbeReport>
+pub universal_exports::BoardTheater::requires: core::option::Option<ai6::directorates::q::provision::Requirements>
 pub universal_exports::BoardTheater::unavailable: core::option::Option<alloc::string::String>
 pub universal_exports::BoardTheater::weakened: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardTheater::workdir: core::option::Option<alloc::string::String>
