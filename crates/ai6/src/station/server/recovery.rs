@@ -391,7 +391,8 @@ pub(super) struct Notes {
 }
 
 impl Notes {
-    /// Notes `event`, one line each; a line that repeats the last one is not noted again.
+    /// Notes what `event` said or did, one line each; a line that repeats the last one is not
+    /// noted again.
     pub(super) fn record(&mut self, event: &AgentEvent) {
         let text = event
             .text
@@ -401,7 +402,11 @@ impl Notes {
         let line = match (text, event.tools.is_empty()) {
             (Some(text), _) => format!("{}: {text}", event.kind),
             (None, false) => format!("{}: {}", event.kind, event.tools.join(", ")),
-            (None, true) => event.kind.clone(),
+            // A bare kind says something only when it is a state the Session stopped in.
+            (None, true) if matches!(event.kind.as_str(), "blocked" | "stalled") => {
+                event.kind.clone()
+            }
+            (None, true) => return,
         };
         if self.lines.back() == Some(&line) {
             return;
@@ -886,6 +891,7 @@ mod tests {
         notes.record(&event("text", Some("editing the parser"), &[]));
         notes.record(&event("tool", None, &["Edit", "Bash"]));
         notes.record(&event("blocked", None, &[]));
+        notes.record(&event("system", None, &[]));
         assert_eq!(
             notes.lines,
             ["text: editing the parser", "tool: Edit, Bash", "blocked"]
