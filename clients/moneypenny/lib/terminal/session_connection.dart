@@ -155,7 +155,13 @@ class SessionConnection extends ChangeNotifier {
         if (event.channel == 1) {
           final state = frame['state'];
           if (state is String) {
-            board.applyLifecycle(session.sessionId, state, sequence);
+            final reason = frame['reason'];
+            board.applyLifecycle(
+              session.sessionId,
+              state,
+              sequence,
+              reason: reason is String ? reason : null,
+            );
           }
         } else if (event.channel == 2 && frame['direction'] == 'output') {
           final bytes = frame['bytes'];

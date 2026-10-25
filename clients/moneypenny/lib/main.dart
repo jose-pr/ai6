@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guatiao/guatiao.dart' as guatiao;
 
 import 'controls/mission_actions.dart';
+import 'green_ink/green_ink_page.dart';
 import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
 import 'timeline/timeline_page.dart';
@@ -571,6 +572,154 @@ class MissionBoard extends ChangeNotifier {
     );
   }
 
+  List<String> _operationsWith(String action) {
+    if (demo) return const ['G'];
+    return (userSession?.operations
+              .where((operation) => operation.actions.contains(action))
+              .map((operation) => operation.operationId)
+              .toList() ??
+          <String>[])
+      ..sort();
+  }
+
+  /// Operations whose green ink requests this account may decide (`approval.decide`).
+  List<String> get greenInkOperations => _operationsWith('approval.decide');
+
+  /// Operations whose class authorisations this account manages (`approval.class`).
+  List<String> get classAuthorizationOperations =>
+      _operationsWith('approval.class');
+
+  Future<http.Response> _userRequest(
+    String method,
+    String path, {
+    Object? body,
+  }) async {
+    final token = accessToken;
+    if (token == null) throw StateError('Sign in first.');
+    final request = http.Request(method, apiOrigin.resolve(path))
+      ..headers['authorization'] = 'Bearer $token';
+    if (body != null) {
+      request.headers['content-type'] = 'application/json';
+      request.body = jsonEncode(body);
+    }
+    return http.Response.fromStream(await _client.send(request));
+  }
+
+  /// The steps waiting for green ink in an Operation, oldest first.
+  Future<List<GreenInkRequestSummary>> loadGreenInk(String operationId) async {
+    if (demo) {
+      return [
+        GreenInkRequestSummary(
+          id: 'green-ink-preview',
+          operationId: operationId,
+          missionId: 'mission-007',
+          sessionId: 'preview-session-007',
+          agent: '007',
+          kind: 'push',
+          target: 'origin:refs/heads/main',
+          reason: 'The release branch passed review; push it to main.',
+          requestedAt: 1_798_000_000,
+          expiresAt: 1_798_086_400,
+        ),
+      ];
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/green-ink',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the green ink inbox.');
+    }
+    return [
+      for (final request in jsonDecode(response.body) as List<dynamic>)
+        GreenInkRequestSummary.fromJson(request as Map<String, dynamic>),
+    ];
+  }
+
+  /// Signs or refuses one request; an approval lasts `expiresInSecs` (one hour when null).
+  Future<void> decideGreenInk({
+    required String operationId,
+    required String requestId,
+    required bool approve,
+    int? expiresInSecs,
+    String? note,
+  }) async {
+    if (demo) {
+      throw StateError('Green ink decisions are unavailable in preview.');
+    }
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/green-ink/${Uri.encodeComponent(requestId)}/'
+          '${approve ? 'approve' : 'reject'}',
+      body: approve
+          ? {'expires_in_secs': ?expiresInSecs, 'note': ?note}
+          : {'reason': ?note},
+    );
+    switch (response.statusCode) {
+      case 200:
+        await refresh();
+      case 403:
+        throw StateError(
+          'Your account lacks approval.decide in this Operation.',
+        );
+      case 404 || 409:
+        throw StateError('The request was already decided or has expired.');
+      default:
+        throw StateError('The gateway refused the green ink decision.');
+    }
+  }
+
+  /// An Operation's class authorisations, oldest first.
+  Future<List<ClassAuthorizationSummary>> loadClassAuthorizations(
+    String operationId,
+  ) async {
+    if (demo) {
+      return [
+        ClassAuthorizationSummary(
+          id: 'class-preview',
+          kinds: const ['push'],
+          targetPattern: 'origin:refs/heads/ai6/*',
+          agents: const ['007'],
+          roles: const [],
+          clearanceMin: 'field',
+          maxUses: 10,
+          uses: 3,
+          expiresAt: 1_798_086_400,
+          signer: 'operator-007',
+        ),
+      ];
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/class-authorizations',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused class authorisations.');
+    }
+    return [
+      for (final record in jsonDecode(response.body) as List<dynamic>)
+        ClassAuthorizationSummary.fromJson(record as Map<String, dynamic>),
+    ];
+  }
+
+  Future<void> revokeClassAuthorization({
+    required String operationId,
+    required String id,
+  }) async {
+    if (demo) throw StateError('Revoking is unavailable in preview.');
+    final response = await _userRequest(
+      'DELETE',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/class-authorizations/${Uri.encodeComponent(id)}',
+    );
+    if (response.statusCode != 200) {
+      throw StateError(
+        'The gateway refused to revoke the class authorisation.',
+      );
+    }
+  }
+
   bool get canReadAudit =>
       (userSession?.operations.any(
             (operation) => operation.actions.contains('audit.read'),
@@ -950,11 +1099,20 @@ class MissionBoard extends ChangeNotifier {
     return 'ai6_attach=${cookie.group(1)}';
   }
 
-  void applyLifecycle(String sessionId, String state, int sequence) {
+  void applyLifecycle(
+    String sessionId,
+    String state,
+    int sequence, {
+    String? reason,
+  }) {
     final index = sessions.indexWhere((item) => item.sessionId == sessionId);
     if (index < 0 || sequence <= sessions[index].sequence) return;
     final updated = sessions.toList();
-    updated[index] = sessions[index].copyWith(state: state, sequence: sequence);
+    updated[index] = sessions[index].copyWith(
+      state: state,
+      sequence: sequence,
+      reason: reason,
+    );
     sessions = List.unmodifiable(updated);
     notifyListeners();
   }
@@ -1455,6 +1613,7 @@ class SessionSummary {
     required this.sessionId,
     required this.state,
     required this.sequence,
+    this.reason,
     this.updatedAt,
     this.exposure = const [],
   });
@@ -1463,6 +1622,10 @@ class SessionSummary {
   final String missionId;
   final String sessionId;
   final String? state;
+
+  /// Why AI6 holds the Session in its state: `green-ink` while a step waits for a person's
+  /// approval, `budget` after a spending limit.
+  final String? reason;
   final int sequence;
 
   /// When the gateway last received this Session's state, as Unix seconds; the most
@@ -1472,23 +1635,27 @@ class SessionSummary {
   /// The untrusted input the Session has read (`brief:source`, `tool:WebFetch`, ...).
   final List<String> exposure;
 
-  SessionSummary copyWith({String? state, int? sequence}) => SessionSummary(
-    operationId: operationId,
-    missionId: missionId,
-    sessionId: sessionId,
-    state: state ?? this.state,
-    sequence: sequence ?? this.sequence,
-    updatedAt: state == null
-        ? updatedAt
-        : DateTime.now().millisecondsSinceEpoch / 1000,
-    exposure: exposure,
-  );
+  /// A new state replaces the reason with [reason]; without one the reason stays.
+  SessionSummary copyWith({String? state, int? sequence, String? reason}) =>
+      SessionSummary(
+        operationId: operationId,
+        missionId: missionId,
+        sessionId: sessionId,
+        state: state ?? this.state,
+        reason: state == null ? this.reason : reason,
+        sequence: sequence ?? this.sequence,
+        updatedAt: state == null
+            ? updatedAt
+            : DateTime.now().millisecondsSinceEpoch / 1000,
+        exposure: exposure,
+      );
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
     operationId: json['operation_id'] as String,
     missionId: json['mission_id'] as String,
     sessionId: json['session_id'] as String,
     state: json['state'] as String?,
+    reason: json['reason'] as String?,
     sequence: json['sequence'] as int,
     updatedAt: (json['updated_at'] as num?)?.toDouble(),
     exposure: [
@@ -1774,7 +1941,9 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         board.userSession?.stations.any(
               (station) => station.actions.contains('station.read'),
             ) ==
-            true)
+            true ||
+        board.greenInkOperations.isNotEmpty ||
+        board.classAuthorizationOperations.isNotEmpty)
       _ControlSection.administration,
     if (board.timelineOperations.isNotEmpty) _ControlSection.timeline,
     if (board.demo || board.canReadAudit) _ControlSection.audit,
@@ -2047,15 +2216,21 @@ class AdministrationPage extends StatelessWidget {
     final canReadStationSettings =
         board.demo || board.readableStations.isNotEmpty;
     final canReviewProposals = board.proposalOperations.isNotEmpty;
+    final canSign = board.greenInkOperations.isNotEmpty;
+    final canManageClasses = board.classAuthorizationOperations.isNotEmpty;
     final pages = <Widget>[
       if (canReadRoles) AgentRolesPage(board: board),
       if (canReadStationSettings) StationSettingsPage(board: board),
       if (canReviewProposals) MissionProposalsPage(board: board),
+      if (canSign) GreenInkPage(board: board),
+      if (canManageClasses) ClassAuthorizationsPage(board: board),
     ];
     final labels = <String>[
       if (canReadRoles) 'Agent roles',
       if (canReadStationSettings) 'Station settings',
       if (canReviewProposals) 'Mission proposals',
+      if (canSign) 'Green ink',
+      if (canManageClasses) 'Class authorisations',
     ];
     if (pages.isEmpty) {
       return const Center(
@@ -3725,7 +3900,12 @@ class _SessionRow extends StatelessWidget {
               const SizedBox(width: 6),
             ],
             Chip(
-              label: Text(state.toUpperCase()),
+              label: Text(
+                [
+                  state,
+                  ?session.reason?.replaceAll('-', ' '),
+                ].join(' · ').toUpperCase(),
+              ),
               visualDensity: VisualDensity.compact,
             ),
             if (desktopWindows) ...[
