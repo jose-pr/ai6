@@ -9,6 +9,7 @@ pub ai6_diptel::SessionState::Blocked
 pub ai6_diptel::SessionState::Done
 pub ai6_diptel::SessionState::Failed
 pub ai6_diptel::SessionState::Parked
+pub ai6_diptel::SessionState::Quarantined
 pub ai6_diptel::SessionState::Stalled
 pub ai6_diptel::SessionState::Working
 #[non_exhaustive] pub enum ai6_diptel::TerminalDirection

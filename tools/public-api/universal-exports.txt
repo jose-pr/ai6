@@ -45,7 +45,9 @@ pub universal_exports::BoardMission::brief: core::option::Option<universal_expor
 pub universal_exports::BoardMission::mission_id: alloc::string::String
 pub universal_exports::BoardMission::operation_id: alloc::string::String
 pub universal_exports::BoardMission::sessions: alloc::vec::Vec<universal_exports::BoardSession>
+pub universal_exports::BoardMission::usage: core::option::Option<ai6::directorates::medical::usage::MissionUsage>
 #[non_exhaustive] pub struct universal_exports::BoardSession
+pub universal_exports::BoardSession::exposure: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardSession::mission_id: alloc::string::String
 pub universal_exports::BoardSession::operation_id: alloc::string::String
 pub universal_exports::BoardSession::sequence: u64
