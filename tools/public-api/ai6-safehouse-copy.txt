@@ -1,0 +1,9 @@
+pub mod ai6_safehouse_copy
+pub struct ai6_safehouse_copy::Copier
+impl ai6::directorates::q::safehouse::SafeHouseProvider for ai6_safehouse_copy::Copier
+pub fn ai6_safehouse_copy::Copier::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_safehouse_copy::Copier
+pub const ai6_safehouse_copy::Copier::KINDS: &'static [&'static str]
+pub fn ai6_safehouse_copy::Copier::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[no_mangle] pub static ai6_safehouse_copy::guatiao_declares: [u8; 20]
+#[no_mangle] pub unsafe c fn ai6_safehouse_copy::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

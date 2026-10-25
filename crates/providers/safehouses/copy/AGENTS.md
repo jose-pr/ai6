@@ -1,0 +1,37 @@
+# `ai6-safehouse-copy` — API header
+
+Header-file-style reference for the `ai6-safehouse-copy` crate: the `copy` safe-house
+provider for AI6, so it can be used without reading its source. It ships inside the package
+and is self-contained. Development documentation lives with the source at
+<https://github.com/jose-pr/ai6>.
+
+No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) only. The crate
+root exports `Copier`, which implements
+`ai6::directorates::q::safehouse::SafeHouseProvider`; the library is both an `rlib` and the
+Guatiao `cdylib` a Station loads. Provider ID: `copy`. No unsafe code, no external command.
+
+## Behaviour of `open(SafeHouseSpec)`
+
+- **Isolated** (`isolate = true`): `source` is copied recursively to
+  `<state_root>/safe-houses/<operation>/<mission>` (names reduced to safe characters plus a
+  hash). Symbolic links are skipped, so the copy never reaches outside the source.
+  `state_root` must lie outside `source`, and the Mission path must not already exist.
+  `base` and `branch` are ignored.
+- **Re-attach** (`reopen = Some(report)`): the report must be `kept` and name the existing
+  copy this Mission would get; nothing is copied.
+- **In place** (`isolate = false`): the session works in `source` and never removes it.
+
+## Session behaviour
+
+- `info()`: the path, no branch, no base, `supports_history = false` and `isolated`.
+- `changes()`: always empty. With no history the daemon records the Mission's cover report
+  as `checkable = false`, never as a pass.
+- `finish()`: the copy is always kept, because without history an untouched copy cannot be
+  told from a changed one (`kept = true` while the path exists); the report has no changes.
+
+## Gotchas
+
+- A malformed spec is `GUATIAO_ERR_BAD_VALUE`; a filesystem failure is `GUATIAO_ERR_INTERNAL`.
+- Copies are not removed by AI6; delete finished ones under `<state>/safe-houses/`.
+- After renaming or removing a provider library, clean the plugin directory: a Station
+  loads every provider library it finds.

@@ -17,6 +17,7 @@ $packages = @(
     'ai6-agent-codex',
     'ai6-terminal-pty',
     'ai6-safehouse-git',
+    'ai6-safehouse-copy',
     'ai6-access-key',
     'ai6-access-ldap',
     'ai6-access-local',
