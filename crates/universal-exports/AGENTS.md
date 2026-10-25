@@ -553,7 +553,7 @@ The optional `cli` feature builds the service command:
   the login limits above.
 
 `universal-exports` returns `0` after graceful shutdown, `1` when configuration or
-listener startup fails, and `2` for invalid arguments. The read-only operator client is
+listener startup fails, and `2` for invalid arguments. The operator command-line client is
 the separate `ai6ctl` crate.
 
 ## Environment variables

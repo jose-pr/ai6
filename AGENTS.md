@@ -12,7 +12,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | `crates/ai6/` | The Station daemon and AI6 contracts: `ai6::directorates::{m,registry,q,section_00,medical}` decide, `ai6::station` runs; `ai6` command |
 | `crates/universal-exports/` | Universal Exports: the authenticated public API gateway and `universal-exports` command |
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
-| `crates/ai6ctl/` | The read-only operator command |
+| `crates/ai6ctl/` | The operator command: reads, and cancels, retries, resumes and interrupts Missions |
 | `crates/providers/{agents,terminals,transports,safehouses,sources}/` | Guatiao providers: Claude/Codex handlers, the `pty` terminal, the `local`, `ssh`, `adb`, `container` and `qemu` transports, the `git` and `copy` safe houses, GitHub and Jira Sources |
 | `clients/moneypenny/` | Moneypenny, the Flutter desktop/web operator app |
 | `examples/config/` | A runnable Operation and Agent roster |
