@@ -179,17 +179,19 @@ impl TerminalSession for TerminalSessionBridge {
 
     fn read(&self, dst: &mut [u8], timeout_ms: i64) -> Result<i64, ProviderError> {
         let read = self.session.read(dst, timeout_ms)?;
-        if let Ok(length) = usize::try_from(read)
-            && length > 0
-            && length <= dst.len()
-        {
-            if let Some(watchdog) = &self.watchdog {
-                watchdog.record_terminal_output(&dst[..length]);
-            }
-            #[cfg(feature = "publisher")]
-            if let Some(telemetry) = &self.telemetry {
-                telemetry.publish_terminal(&dst[..length]);
-            }
+        let Some(output) = usize::try_from(read)
+            .ok()
+            .filter(|&length| length > 0 && length <= dst.len())
+            .map(|length| &dst[..length])
+        else {
+            return Ok(read);
+        };
+        if let Some(watchdog) = &self.watchdog {
+            watchdog.record_terminal_output(output);
+        }
+        #[cfg(feature = "publisher")]
+        if let Some(telemetry) = &self.telemetry {
+            telemetry.publish_terminal(output);
         }
         Ok(read)
     }
