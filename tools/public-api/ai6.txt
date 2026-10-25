@@ -224,6 +224,60 @@ pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsR
 pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::directorates::q::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::transition(&mut self, &str, ai6::directorates::m::mission::MissionState) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub mod ai6::directorates::m::placement
+#[non_exhaustive] pub struct ai6::directorates::m::placement::AgentFacts
+pub ai6::directorates::m::placement::AgentFacts::handler: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::AgentFacts::id: alloc::string::String
+pub ai6::directorates::m::placement::AgentFacts::priority: i64
+pub ai6::directorates::m::placement::AgentFacts::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::AgentFacts::tags: alloc::vec::Vec<alloc::string::String>
+impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
+pub fn ai6::directorates::m::placement::AgentFacts::from(&ai6::directorates::m::roster::Agent) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::placement::OperationPolicy
+pub ai6::directorates::m::placement::OperationPolicy::agents: alloc::vec::Vec<ai6::directorates::m::placement::AgentFacts>
+pub ai6::directorates::m::placement::OperationPolicy::checkout: bool
+pub ai6::directorates::m::placement::OperationPolicy::operation: alloc::string::String
+pub ai6::directorates::m::placement::OperationPolicy::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::placement::OperationPolicy::stations: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::OperationPolicy::theater: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::placement::OperationPolicy
+pub fn ai6::directorates::m::placement::OperationPolicy::from_roster(&ai6::directorates::m::roster::Roster, &str) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::placement::OperationPolicy::new(impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::placement::Placement
+pub ai6::directorates::m::placement::Placement::choices: alloc::vec::Vec<ai6::directorates::m::placement::PlacementChoice>
+pub ai6::directorates::m::placement::Placement::rejections: alloc::vec::Vec<ai6::directorates::m::placement::PlacementRejection>
+impl ai6::directorates::m::placement::Placement
+pub fn ai6::directorates::m::placement::Placement::best(&self) -> core::option::Option<&ai6::directorates::m::placement::PlacementChoice>
+#[non_exhaustive] pub struct ai6::directorates::m::placement::PlacementChoice
+pub ai6::directorates::m::placement::PlacementChoice::agent: alloc::string::String
+pub ai6::directorates::m::placement::PlacementChoice::handler: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementChoice::station: alloc::string::String
+pub ai6::directorates::m::placement::PlacementChoice::theater: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::m::placement::PlacementRejection
+pub ai6::directorates::m::placement::PlacementRejection::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementRejection::reason: alloc::string::String
+pub ai6::directorates::m::placement::PlacementRejection::station: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementRejection::theater: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::placement::PlacementRequest
+pub ai6::directorates::m::placement::PlacementRequest::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementRequest::deciding_station: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementRequest::role: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementRequest::stations: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementRequest::tags: alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::placement::StationFacts
+pub ai6::directorates::m::placement::StationFacts::capacity: usize
+pub ai6::directorates::m::placement::StationFacts::checkouts: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::StationFacts::handlers: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::directorates::m::placement::StationFacts::healthy: bool
+pub ai6::directorates::m::placement::StationFacts::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::placement::StationFacts::load: usize
+pub ai6::directorates::m::placement::StationFacts::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::StationFacts::silent_for: u64
+pub ai6::directorates::m::placement::StationFacts::station: alloc::string::String
+pub ai6::directorates::m::placement::StationFacts::theaters: alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
+impl ai6::directorates::m::placement::StationFacts
+pub fn ai6::directorates::m::placement::StationFacts::from_record(&ai6::directorates::registry::store::StationRecord, f64, core::time::Duration, usize) -> Self
+pub fn ai6::directorates::m::placement::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub mod ai6::directorates::m::roster
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Agent
 pub ai6::directorates::m::roster::Agent::aliases: alloc::vec::Vec<alloc::string::String>
@@ -240,6 +294,8 @@ pub ai6::directorates::m::roster::Agent::model: core::option::Option<alloc::stri
 pub ai6::directorates::m::roster::Agent::priority: i64
 pub ai6::directorates::m::roster::Agent::roles: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Agent::tags: alloc::vec::Vec<alloc::string::String>
+impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
+pub fn ai6::directorates::m::placement::AgentFacts::from(&ai6::directorates::m::roster::Agent) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::AgentRole
 pub ai6::directorates::m::roster::AgentRole::id: alloc::string::String
 pub ai6::directorates::m::roster::AgentRole::policy: alloc::string::String
@@ -264,6 +320,7 @@ pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::stri
 pub ai6::directorates::m::roster::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
 pub ai6::directorates::m::roster::Operation::sources: toml::table::Table
 pub ai6::directorates::m::roster::Operation::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::roster::Operation::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::theater: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::workspace: ai6::directorates::m::roster::Workspace
 impl ai6::directorates::m::roster::Operation
@@ -289,6 +346,54 @@ pub ai6::directorates::m::roster::Workspace::isolate: bool
 pub ai6::directorates::m::roster::Workspace::provider: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Workspace::source: core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::m::roster::config_dir() -> core::result::Result<std::path::PathBuf, ai6::directorates::m::roster::RosterError>
+pub mod ai6::directorates::m::theaters
+#[non_exhaustive] pub enum ai6::directorates::m::theaters::TheaterAccess
+pub ai6::directorates::m::theaters::TheaterAccess::Local
+pub ai6::directorates::m::theaters::TheaterAccess::Ssh(ai6::directorates::m::theaters::SshAccess)
+#[non_exhaustive] pub enum ai6::directorates::m::theaters::TheaterKind
+pub ai6::directorates::m::theaters::TheaterKind::Local
+pub ai6::directorates::m::theaters::TheaterKind::Ssh
+impl ai6::directorates::m::theaters::TheaterKind
+pub fn ai6::directorates::m::theaters::TheaterKind::as_str(self) -> &'static str
+#[non_exhaustive] pub struct ai6::directorates::m::theaters::SshAccess
+pub ai6::directorates::m::theaters::SshAccess::host: alloc::string::String
+pub ai6::directorates::m::theaters::SshAccess::identity: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::SshAccess::port: core::option::Option<u16>
+pub ai6::directorates::m::theaters::SshAccess::user: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::theaters::SshAccess
+pub fn ai6::directorates::m::theaters::SshAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_identity(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_port(self, u16) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_user(self, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::theaters::Theater
+pub ai6::directorates::m::theaters::Theater::access: ai6::directorates::m::theaters::TheaterAccess
+pub ai6::directorates::m::theaters::Theater::id: alloc::string::String
+pub ai6::directorates::m::theaters::Theater::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl ai6::directorates::m::theaters::Theater
+pub fn ai6::directorates::m::theaters::Theater::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::theaters::TheaterAccess) -> Self
+pub fn ai6::directorates::m::theaters::Theater::summary(&self) -> ai6::directorates::m::theaters::TheaterSummary
+pub fn ai6::directorates::m::theaters::Theater::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct ai6::directorates::m::theaters::TheaterError(_)
+impl core::error::Error for ai6::directorates::m::theaters::TheaterError
+impl core::fmt::Display for ai6::directorates::m::theaters::TheaterError
+pub fn ai6::directorates::m::theaters::TheaterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::theaters::TheaterSummary
+pub ai6::directorates::m::theaters::TheaterSummary::access: ai6::directorates::m::theaters::TheaterKind
+pub ai6::directorates::m::theaters::TheaterSummary::host: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::TheaterSummary::id: alloc::string::String
+pub ai6::directorates::m::theaters::TheaterSummary::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl ai6::directorates::m::theaters::TheaterSummary
+pub fn ai6::directorates::m::theaters::TheaterSummary::local() -> Self
+pub struct ai6::directorates::m::theaters::Theaters
+impl ai6::directorates::m::theaters::Theaters
+pub fn ai6::directorates::m::theaters::Theaters::find(&self, &str) -> core::option::Option<ai6::directorates::m::theaters::Theater>
+pub fn ai6::directorates::m::theaters::Theaters::insert(&mut self, ai6::directorates::m::theaters::Theater) -> core::result::Result<(), ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::Theaters::load(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::Theaters::merge(&mut self, ai6::directorates::m::theaters::Theaters)
+pub fn ai6::directorates::m::theaters::Theaters::parse(&str) -> core::result::Result<Self, ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::Theaters::reachable(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::Theater>
+pub fn ai6::directorates::m::theaters::Theaters::summaries(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
+pub const ai6::directorates::m::theaters::LOCAL_THEATER: &str
 pub mod ai6::directorates::medical
 pub mod ai6::directorates::medical::watchdog
 pub struct ai6::directorates::medical::watchdog::Watchdog
@@ -865,6 +970,7 @@ pub ai6::directorates::registry::store::Brief::operation: core::option::Option<a
 pub ai6::directorates::registry::store::Brief::priority: i64
 pub ai6::directorates::registry::store::Brief::role: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::store::Brief::source: alloc::string::String
+pub ai6::directorates::registry::store::Brief::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::store::Brief::tags: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::store::Brief::title: alloc::string::String
 pub ai6::directorates::registry::store::Brief::url: core::option::Option<alloc::string::String>
@@ -1170,6 +1276,7 @@ impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
 impl core::default::Default for ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::default() -> Self
 pub const ai6::station::server::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
@@ -1268,6 +1375,14 @@ pub fn ai6::station::identity::StationIdentityError::fmt(&self, &mut core::fmt::
 #[non_exhaustive] pub enum ai6::StationRole
 pub ai6::StationRole::Control
 pub ai6::StationRole::Execution
+#[non_exhaustive] pub enum ai6::TheaterAccess
+pub ai6::TheaterAccess::Local
+pub ai6::TheaterAccess::Ssh(ai6::directorates::m::theaters::SshAccess)
+#[non_exhaustive] pub enum ai6::TheaterKind
+pub ai6::TheaterKind::Local
+pub ai6::TheaterKind::Ssh
+impl ai6::directorates::m::theaters::TheaterKind
+pub fn ai6::directorates::m::theaters::TheaterKind::as_str(self) -> &'static str
 pub enum ai6::TlsTrust
 pub ai6::TlsTrust::Ca
 pub ai6::TlsTrust::Ca::ca_file: std::path::PathBuf
@@ -1299,6 +1414,14 @@ pub struct ai6::AgentEvent
 pub ai6::AgentEvent::data: core::option::Option<alloc::vec::Vec<u8>>
 pub ai6::AgentEvent::kind: alloc::string::String
 pub ai6::AgentEvent::text: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::AgentFacts
+pub ai6::AgentFacts::handler: core::option::Option<alloc::string::String>
+pub ai6::AgentFacts::id: alloc::string::String
+pub ai6::AgentFacts::priority: i64
+pub ai6::AgentFacts::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::AgentFacts::tags: alloc::vec::Vec<alloc::string::String>
+impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
+pub fn ai6::directorates::m::placement::AgentFacts::from(&ai6::directorates::m::roster::Agent) -> Self
 pub struct ai6::AgentMessage
 pub ai6::AgentMessage::text: alloc::string::String
 pub struct ai6::AgentResume
@@ -1359,6 +1482,7 @@ pub ai6::Brief::operation: core::option::Option<alloc::string::String>
 pub ai6::Brief::priority: i64
 pub ai6::Brief::role: core::option::Option<alloc::string::String>
 pub ai6::Brief::source: alloc::string::String
+pub ai6::Brief::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::Brief::tags: alloc::vec::Vec<alloc::string::String>
 pub ai6::Brief::title: alloc::string::String
 pub ai6::Brief::url: core::option::Option<alloc::string::String>
@@ -1705,10 +1829,21 @@ pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
 pub ai6::Operation::sources: toml::table::Table
 pub ai6::Operation::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::Operation::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::Operation::theater: core::option::Option<alloc::string::String>
 pub ai6::Operation::workspace: ai6::directorates::m::roster::Workspace
 impl ai6::directorates::m::roster::Operation
 pub fn ai6::directorates::m::roster::Operation::safe_house_provider(&self) -> core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::OperationPolicy
+pub ai6::OperationPolicy::agents: alloc::vec::Vec<ai6::directorates::m::placement::AgentFacts>
+pub ai6::OperationPolicy::checkout: bool
+pub ai6::OperationPolicy::operation: alloc::string::String
+pub ai6::OperationPolicy::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::OperationPolicy::stations: alloc::vec::Vec<alloc::string::String>
+pub ai6::OperationPolicy::theater: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::placement::OperationPolicy
+pub fn ai6::directorates::m::placement::OperationPolicy::from_roster(&ai6::directorates::m::roster::Roster, &str) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::placement::OperationPolicy::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::PeerTrustStore
 impl ai6::station::identity::PeerTrustStore
 pub fn ai6::station::identity::PeerTrustStore::accept(&self, &ai6::station::identity::StationFingerprint) -> core::result::Result<(), ai6::station::identity::StationIdentityError>
@@ -1724,6 +1859,27 @@ pub ai6::Person::id: alloc::string::String
 pub ai6::Person::name: alloc::string::String
 impl core::fmt::Debug for ai6::directorates::m::access::Person
 pub fn ai6::directorates::m::access::Person::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::Placement
+pub ai6::Placement::choices: alloc::vec::Vec<ai6::directorates::m::placement::PlacementChoice>
+pub ai6::Placement::rejections: alloc::vec::Vec<ai6::directorates::m::placement::PlacementRejection>
+impl ai6::directorates::m::placement::Placement
+pub fn ai6::directorates::m::placement::Placement::best(&self) -> core::option::Option<&ai6::directorates::m::placement::PlacementChoice>
+#[non_exhaustive] pub struct ai6::PlacementChoice
+pub ai6::PlacementChoice::agent: alloc::string::String
+pub ai6::PlacementChoice::handler: core::option::Option<alloc::string::String>
+pub ai6::PlacementChoice::station: alloc::string::String
+pub ai6::PlacementChoice::theater: alloc::string::String
+#[non_exhaustive] pub struct ai6::PlacementRejection
+pub ai6::PlacementRejection::agent: core::option::Option<alloc::string::String>
+pub ai6::PlacementRejection::reason: alloc::string::String
+pub ai6::PlacementRejection::station: core::option::Option<alloc::string::String>
+pub ai6::PlacementRejection::theater: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::PlacementRequest
+pub ai6::PlacementRequest::agent: core::option::Option<alloc::string::String>
+pub ai6::PlacementRequest::deciding_station: core::option::Option<alloc::string::String>
+pub ai6::PlacementRequest::role: core::option::Option<alloc::string::String>
+pub ai6::PlacementRequest::stations: alloc::vec::Vec<alloc::string::String>
+pub ai6::PlacementRequest::tags: alloc::vec::Vec<alloc::string::String>
 pub struct ai6::QError
 impl ai6::directorates::q::QError
 pub const fn ai6::directorates::q::QError::column(&self) -> core::option::Option<usize>
@@ -1929,13 +2085,37 @@ pub ai6::Spec::cols: u16
 pub ai6::Spec::cwd: core::option::Option<alloc::string::String>
 pub ai6::Spec::env: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
 pub ai6::Spec::rows: u16
+#[non_exhaustive] pub struct ai6::SshAccess
+pub ai6::SshAccess::host: alloc::string::String
+pub ai6::SshAccess::identity: core::option::Option<alloc::string::String>
+pub ai6::SshAccess::port: core::option::Option<u16>
+pub ai6::SshAccess::user: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::theaters::SshAccess
+pub fn ai6::directorates::m::theaters::SshAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_identity(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_port(self, u16) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_user(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::StationConfig
 impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
 impl core::default::Default for ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::default() -> Self
+#[non_exhaustive] pub struct ai6::StationFacts
+pub ai6::StationFacts::capacity: usize
+pub ai6::StationFacts::checkouts: alloc::vec::Vec<alloc::string::String>
+pub ai6::StationFacts::handlers: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::StationFacts::healthy: bool
+pub ai6::StationFacts::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::StationFacts::load: usize
+pub ai6::StationFacts::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::StationFacts::silent_for: u64
+pub ai6::StationFacts::station: alloc::string::String
+pub ai6::StationFacts::theaters: alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
+impl ai6::directorates::m::placement::StationFacts
+pub fn ai6::directorates::m::placement::StationFacts::from_record(&ai6::directorates::registry::store::StationRecord, f64, core::time::Duration, usize) -> Self
 pub struct ai6::StationFingerprint(_)
 impl ai6::station::identity::StationFingerprint
 pub fn ai6::station::identity::StationFingerprint::as_str(&self) -> &str
@@ -1979,6 +2159,34 @@ pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::box
 impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+#[non_exhaustive] pub struct ai6::Theater
+pub ai6::Theater::access: ai6::directorates::m::theaters::TheaterAccess
+pub ai6::Theater::id: alloc::string::String
+pub ai6::Theater::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl ai6::directorates::m::theaters::Theater
+pub fn ai6::directorates::m::theaters::Theater::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::theaters::TheaterAccess) -> Self
+pub fn ai6::directorates::m::theaters::Theater::summary(&self) -> ai6::directorates::m::theaters::TheaterSummary
+pub fn ai6::directorates::m::theaters::Theater::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct ai6::TheaterError(_)
+impl core::error::Error for ai6::directorates::m::theaters::TheaterError
+impl core::fmt::Display for ai6::directorates::m::theaters::TheaterError
+pub fn ai6::directorates::m::theaters::TheaterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::TheaterSummary
+pub ai6::TheaterSummary::access: ai6::directorates::m::theaters::TheaterKind
+pub ai6::TheaterSummary::host: core::option::Option<alloc::string::String>
+pub ai6::TheaterSummary::id: alloc::string::String
+pub ai6::TheaterSummary::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl ai6::directorates::m::theaters::TheaterSummary
+pub fn ai6::directorates::m::theaters::TheaterSummary::local() -> Self
+pub struct ai6::Theaters
+impl ai6::directorates::m::theaters::Theaters
+pub fn ai6::directorates::m::theaters::Theaters::find(&self, &str) -> core::option::Option<ai6::directorates::m::theaters::Theater>
+pub fn ai6::directorates::m::theaters::Theaters::insert(&mut self, ai6::directorates::m::theaters::Theater) -> core::result::Result<(), ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::Theaters::load(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::Theaters::merge(&mut self, ai6::directorates::m::theaters::Theaters)
+pub fn ai6::directorates::m::theaters::Theaters::parse(&str) -> core::result::Result<Self, ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::Theaters::reachable(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::Theater>
+pub fn ai6::directorates::m::theaters::Theaters::summaries(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
 pub struct ai6::Watchdog
 impl ai6::directorates::medical::watchdog::Watchdog
 pub fn ai6::directorates::medical::watchdog::Watchdog::is_max_runtime_exceeded(&self) -> bool
@@ -2034,6 +2242,7 @@ pub const ai6::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
 pub const ai6::DEFAULT_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
 pub const ai6::DEFAULT_TERMINAL: &str
+pub const ai6::LOCAL_THEATER: &str
 pub const ai6::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::MAX_CABLE_TTL: f64
@@ -2156,6 +2365,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal:
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
+pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub async fn ai6::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::serve_with_capacity<F>(core::net::socket_addr::SocketAddr, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::serve_with_config_dir<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], &std::path::Path, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
