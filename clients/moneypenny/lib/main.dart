@@ -16,6 +16,7 @@ import 'package:guatiao/guatiao.dart' as guatiao;
 import 'controls/mission_actions.dart';
 import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
+import 'timeline/timeline_page.dart';
 
 const _apiOverride = String.fromEnvironment('MONEYPENNY_API');
 const _demoMode = bool.fromEnvironment('MONEYPENNY_DEMO');
@@ -496,6 +497,78 @@ class MissionBoard extends ChangeNotifier {
       throw StateError('The gateway refused the Mission proposal decision.');
     }
     await refresh();
+  }
+
+  /// Operations whose activity timeline this account may read (`audit.read`).
+  List<String> get timelineOperations =>
+      (userSession?.operations
+                .where((operation) => operation.actions.contains('audit.read'))
+                .map((operation) => operation.operationId)
+                .toList() ??
+            <String>[])
+        ..sort();
+
+  /// One page of an Operation's activity timeline, newest first.
+  Future<TimelinePageSummary> loadTimeline({
+    required String operationId,
+    String? missionId,
+    String? cursor,
+    int limit = 50,
+  }) async {
+    if (demo) {
+      return TimelinePageSummary(
+        items:
+            [
+                  TimelineItemSummary(
+                    id: 'event:preview-2',
+                    at: 1_798_000_120,
+                    kind: 'control',
+                    action: 'resume.applied',
+                    operationId: operationId,
+                    stationId: 'station-control-01',
+                    missionId: 'mission-007',
+                    actor: 'operator-007',
+                    detail: const {'state': 'working'},
+                  ),
+                  TimelineItemSummary(
+                    id: 'event:preview-1',
+                    at: 1_798_000_060,
+                    kind: 'lifecycle',
+                    action: 'blocked',
+                    operationId: operationId,
+                    stationId: 'station-control-01',
+                    missionId: 'mission-007',
+                    sessionId: 'preview-session-008',
+                  ),
+                ]
+                .where(
+                  (item) => missionId == null || item.missionId == missionId,
+                )
+                .toList(growable: false),
+      );
+    }
+    final token = accessToken;
+    if (token == null) throw StateError('Sign in before viewing the timeline.');
+    final response = await _client.get(
+      apiOrigin
+          .resolve(
+            '/v1/user/operations/${Uri.encodeComponent(operationId)}/timeline',
+          )
+          .replace(
+            queryParameters: {
+              'limit': '$limit',
+              'mission': ?missionId,
+              'cursor': ?cursor,
+            },
+          ),
+      headers: {'authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the Operation timeline.');
+    }
+    return TimelinePageSummary.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
   }
 
   bool get canReadAudit =>
@@ -1703,6 +1776,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
             ) ==
             true)
       _ControlSection.administration,
+    if (board.timelineOperations.isNotEmpty) _ControlSection.timeline,
     if (board.demo || board.canReadAudit) _ControlSection.audit,
   ];
 
@@ -1710,6 +1784,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     _ControlSection.stations => 'Stations',
     _ControlSection.operations => 'Operations',
     _ControlSection.administration => 'Administration',
+    _ControlSection.timeline => 'Timeline',
     _ControlSection.audit => 'Audit log',
   };
 
@@ -1724,6 +1799,9 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
       }
       if (section == _ControlSection.audit) {
         return AuditLogPage(board: widget.board);
+      }
+      if (section == _ControlSection.timeline) {
+        return OperationTimelinePage(board: widget.board);
       }
       if (section == _ControlSection.stations) {
         return ListView(
@@ -1912,12 +1990,13 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   }
 }
 
-enum _ControlSection { stations, operations, administration, audit }
+enum _ControlSection { stations, operations, administration, timeline, audit }
 
 IconData _sectionIcon(_ControlSection section) => switch (section) {
   _ControlSection.stations => Icons.hub_outlined,
   _ControlSection.operations => Icons.workspaces_outline,
   _ControlSection.administration => Icons.settings_suggest_outlined,
+  _ControlSection.timeline => Icons.timeline,
   _ControlSection.audit => Icons.fact_check_outlined,
 };
 
