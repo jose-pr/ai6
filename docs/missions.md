@@ -63,7 +63,8 @@ Work should survive a refused quota and a lost lease. Two mechanisms exist today
 Besides the Station's own `missions.json`, every Session has a record in the shared
 Registry (`sessions/`). It holds AI6's Session ID (distinct from the provider's), the
 provider Session ID, the Station that supervises it, its Theater, the attempt number and the
-ID of the Session it replaced, and its status (`active`, `parked` or `ended`). Another
+ID of the Session it replaced, its exposure to untrusted input, and its status (`active`,
+`parked` or `ended`). Another
 Station that opens the same Registry sees the same records.
 
 A Station acts on a Session only while it holds the record's **lease**, and every write
@@ -108,6 +109,22 @@ An Operation chooses the response with `on_limit` ([settings](operations.md#prov
 
 The Moneypenny board shows `parked` as a Session state, and the stream of Mission events
 carries the `limit` event.
+
+### Budgets, exposure and quarantine
+
+[Medical](medical.md) adds three things to a Mission:
+
+- **Usage.** Tokens and cost reported by the provider are recorded per Session and Mission
+  in the shared Registry, and `GET /v1/operations/{operation_id}/missions/{mission_id}`
+  returns them as `usage`. A [budget](medical.md#budgets) that is reached stops the Session
+  and leaves the Mission `blocked` with `blocked_reason: "budget"`; raise the limit and resume.
+- **Exposure.** A Session that read a Source item, called a web tool or read a Cable from an
+  exposed Session is marked on the board (`exposure`, shown as an `EXPOSED` chip in Moneypenny)
+  and, under the default `strict` policy, restricted. See [Exposure](medical.md#exposure).
+- **Quarantine.** A Mission whose Agent is [quarantined](medical.md#quarantine) is
+  `quarantined`: its safe house is kept, it is not resumed, and releasing the Agent returns it
+  to the queue with the next qualified Agent. `quarantined` is a Session state in the board,
+  `ai6ctl` and Moneypenny.
 
 ## Sources
 

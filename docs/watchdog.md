@@ -47,6 +47,15 @@ queued ─► working ⇄ blocked ─► done | failed | abandoned
 `blocked` is a recoverable prompt wait. `stalled` closes the active operation while
 preserving the Mission record and any changed safe-house work for recovery.
 
+An Agent whose Sessions keep stalling or looping is stopped across Missions: three stalls or
+loops within 24 hours [quarantine](medical.md#quarantine) it (the count, the window and the
+trigger are Operation settings). A Session stopped by a [budget](medical.md#budgets) is
+`blocked` with reason `budget`, and a Mission whose Agent is quarantined is `quarantined`:
+
+```text
+working | blocked | stalled | parked ─► quarantined ─► queued (next Agent) | abandoned
+```
+
 ## Run the watchdog
 
 The Rust watchdog runs as part of the daemon:

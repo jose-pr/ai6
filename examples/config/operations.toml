@@ -3,3 +3,20 @@ name = "AI6"
 path = "."
 workspace = { provider = "git", base = "HEAD", branch = "ai6/{id}-{slug}", isolate = true }
 roster = ["007", "008", "Tanner"]
+
+# Spending limits are off unless set (preset = "strict" sets conservative ones).
+[operation.G.budget]
+mission_cost_usd = 10.0
+operation_cost_usd_per_day = 50.0
+warn_at = 0.8
+
+# Exposure is always recorded; strict (the default) also restricts an exposed Session.
+[operation.G.exposure]
+preset = "strict"
+
+# An Agent is quarantined after this many incidents within the window (0 turns one off).
+[operation.G.quarantine]
+stalls = 3
+budget_stops = 2
+blown = true
+window_hours = 24

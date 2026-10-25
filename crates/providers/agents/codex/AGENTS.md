@@ -26,6 +26,13 @@ carries a `codexErrorInfo` naming a usage or rate limit. The reset time is the e
 last reported as used up (`account/rateLimits/updated` with `usedPercent` of 100 or more;
 a 300-minute window is `five_hour`, a 10,080-minute one `weekly`). These shapes come from
 recorded protocol fixtures, not from a live account.
+A `thread/tokenUsage/updated` notification carries `AgentEvent::usage` from
+`params.tokenUsage.last` (the latest model request; the thread total survives a resume, so it
+is not used): `inputTokens` minus `cachedInputTokens` as input, the cached ones as cache reads,
+`outputTokens` as output, `cumulative` false. Codex reports no cost, so `cost_micro_usd` is
+0 and Codex Sessions are limited by tokens only. An `item/started` notification for a web
+search (`WebSearch`) or an MCP or dynamic tool call (the tool's name) sets
+`AgentEvent::tools`. These shapes follow the app-server protocol schema, not a live account.
 Terminal end-of-file is reported as a provider error so AI6 can fail and finalize the
 Mission instead of polling an exited process indefinitely.
 When AI6 supplies `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, app-server receives

@@ -39,6 +39,7 @@ nav:
       - Agents and clearance: agents.md
       - Terminals: terminals.md
       - The watchdog: watchdog.md
+      - Medical: medical.md
       - Hooks: hooks.md
       - Examples: examples.md
   - API Reference:

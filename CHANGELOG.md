@@ -43,6 +43,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (default 1800, used when no reset time is reported). `parked` is a Session state in
   `ai6-diptel`, the gateway and Moneypenny.
 
+- Medical: usage and budgets. The Claude and Codex handlers report tokens and cost from the
+  provider's own events (`AgentEvent::usage`, `TokenUsage`); the Station keeps a per-Mission
+  ledger in the shared Registry (`usage/`), returned as `usage` by the Mission detail of
+  Universal Exports. `[operation.ID.budget]` and `[agent.ID.budget]` set `session_tokens`,
+  `mission_tokens`, `mission_cost_usd`, `operation_cost_usd_per_day` and `warn_at`; nothing is
+  limited unless set or `preset = "strict"` is chosen. Crossing `warn_at` emits a `budget`
+  event and an audit record; reaching a limit blocks the Mission with `blocked_reason`
+  `budget` (resumable once the limit is raised). A Mission cost limit also becomes Claude
+  Code's `--max-budget-usd`.
+- Medical: exposure. A Session is marked when its Mission came from a Source item, it calls a
+  tool the Operation lists (`WebFetch` and `WebSearch` by default), or it reads a Cable from
+  another Operation or an exposed Session. The mark is kept in the Session record, inherited
+  by later attempts, shown on the board (`exposure`) and as an `EXPOSED` chip in Moneypenny.
+  `[operation.ID.exposure]` picks `strict` (default: an exposed Session sends Cables only as
+  replies, and its Mission proposals carry its exposure) or `observe`, and can choose
+  restrictions and tools individually.
+- Medical: quarantine. An Agent that stalls or loops three times, hits a budget stop twice, or
+  blows its cover (`[operation.ID.quarantine]`, 24 hours, each trigger can be set to 0) is
+  quarantined in the Registry: its Sessions stop on every Station, its Missions become
+  `quarantined` (safe houses kept), its Cables are held and the roster skips it. An operator
+  quarantines or releases with `ai6 quarantine list|add|release` or the Universal Exports
+  `quarantine` routes (`agent.configure`); a released Mission returns to the queue with the
+  next qualified Agent. `quarantined` is a Session state in `ai6-diptel`, the gateway,
+  `ai6ctl` and Moneypenny, and `ai6ctl` lists a Session's exposure.
+
 - `ai6`: the Station daemon and AI6's public contracts in one Rust crate. Directorates
   under `ai6::directorates` (M, the Registry, Q Branch, 00 Section, Medical) and the Station
   runtime under `ai6::station` (server, provider host, safe houses, publisher, identity).

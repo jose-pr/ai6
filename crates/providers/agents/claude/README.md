@@ -19,6 +19,8 @@ provider-issued Session ID for resume.
 - Converts provider stream events into AI6 `AgentEvent` values.
 - Reports a usage or rate limit, with its reset time when Claude gives one, as an `AgentEvent`
   of kind `limit` so AI6 can park the Session instead of failing it.
+- Reports the tokens and cost of a finished turn, names the tools an assistant message calls,
+  and passes a Mission spend ceiling to Claude Code as `--max-budget-usd`.
 
 ## Installation
 

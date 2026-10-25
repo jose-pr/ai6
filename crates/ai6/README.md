@@ -119,6 +119,11 @@ Each Session also has a record in the shared Registry, held by a lease whose fen
 refuses a Station that lost it. When a provider usage limit stops a Session the Mission is
 parked until the quota resets and resumes the same provider Session; an Operation may instead
 set `on_limit = "backup"` to post the next qualified Agent as a new attempt.
+Medical records what Sessions consume and enforces optional budgets (a Mission that reaches
+one is blocked, not failed), marks Sessions that read untrusted input and restricts them under
+the default `strict` policy, and quarantines an Agent that keeps stalling, loops, blows its
+cover or overspends: its Missions stop on every Station and new work goes to the next
+qualified Agent until an operator releases it (`ai6 quarantine`).
 
 The scheduler leases briefs from the file-backed Registry, uses each brief's
 `source--id` key as the Mission ID, selects an Agent by role, tags and priority among

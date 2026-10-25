@@ -87,6 +87,32 @@ limit_fallback_secs = 1800 # how long to park when the provider gives no reset t
 Both are overridable per Operation and an unknown `on_limit` value fails the load. See
 [Recovery](missions.md#recovery).
 
+## Budgets, exposure and quarantine
+
+Three optional tables set how [Medical](medical.md) treats the Operation's Agents. None sets
+a spending limit unless you write one.
+
+```toml
+[operation.G.budget]
+mission_cost_usd = 5.0
+operation_cost_usd_per_day = 40.0
+# preset = "strict" sets conservative limits for every key you leave out
+
+[operation.G.exposure]
+preset = "strict"   # or "observe": record exposure, restrict nothing
+tools = ["WebFetch", "WebSearch"]
+
+[operation.G.quarantine]
+stalls = 3          # 0 turns a trigger off
+budget_stops = 2
+blown = true
+window_hours = 24
+```
+
+The same `[agent.<id>.budget]` table sets limits for one Agent. Every key, its default and
+what it does is on the [Medical](medical.md) page; an invalid value fails the load with an
+error naming the key.
+
 ## Sources
 
 `sources` lists where an Operation's work comes from. Each key names a Source provider and

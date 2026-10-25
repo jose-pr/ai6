@@ -29,6 +29,10 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
   authorized `GET /v1/board` response.
 - `ai6ctl session <SESSION_ID>` prints one provider Session.
 
+Session listings end with an `EXPOSURE` column: the untrusted input the Session read,
+comma separated, or `-`. A Session state is free text from the board and includes
+`parked` and `quarantined`.
+
 Mission lists include only Missions with a provider Session registered at the gateway.
 
 ## Environment variables

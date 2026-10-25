@@ -125,6 +125,7 @@ pub struct BoardSession {
     pub session_id: String,
     pub state: Option<String>,
     pub sequence: u64,
+    pub exposure: Vec<String>,   // untrusted input the Session read, from its Registry record
 }
 
 #[non_exhaustive]
@@ -134,6 +135,7 @@ pub struct BoardMission {
     pub mission_id: String,
     pub sessions: Vec<BoardSession>,
     pub brief: Option<LaunchManifest>,
+    pub usage: Option<MissionUsage>,   // tokens and cost from the Registry ledger
 }
 
 #[non_exhaustive]
@@ -193,7 +195,8 @@ pub struct LaunchManifest {
 ```
 
 `BoardSession` has no `state` and sequence `0` until the Session's first
-lifecycle event. `BoardMission` groups registered Sessions by Station and
+lifecycle event. `exposure` lists where the Session read untrusted input (`brief:source`,
+`cable:SENDER`, `tool:NAME`, `review`) and is empty for a clean Session. `BoardMission` groups registered Sessions by Station and
 Mission ID; queued Missions without a registered provider Session are not present.
 `brief` is present when AI6 published the exact Mission prompt and sanitized launch
 manifest during Session registration. It contains environment variable names only;
@@ -331,7 +334,7 @@ too, and their configured capacity counts toward the aggregate budget.
 they construct guatiao values with the shared protocol crate, announce each
 channel schema on first use, then submit the value through the same validation
 and fanout path. Lifecycle state accepts `working`, `blocked`, `stalled`, `parked` (a provider usage limit),
-`done` and `failed`. The HTTP routes use JSON for lifecycle metadata and raw
+`quarantined` (the Agent is quarantined), `done` and `failed`. The HTTP routes use JSON for lifecycle metadata and raw
 bytes for terminal output; both remain bearer-authenticated as M.
 
 `submit_input` accepts a guatiao terminal input or resize value for the same provider
@@ -376,7 +379,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/stations` | Requires a user bearer; returns visible Station health, hosted Operations and current Headquarters Station. |
 | `GET /v1/user/operations/{operation_id}/placement-preview` | Requires `mission.read` at the Operation; returns the eligible (Station, Theater, Agent) choices, best first, and a reason for each rejection. Optional `agent`, `role`, `stations`, `tags` query parameters narrow it. |
 | `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. |
-| `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission and its AI6-published brief when available. |
+| `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available and its `usage` (tokens and cost per Session and UTC day) once a provider has reported any. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret. |
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. |
 | `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role actions; Station grants include `station.read`, `station.configure` and `audit.read`. Every action is computed by the Authorizer, not inferred from directory groups. |
@@ -384,6 +387,9 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/operations/{operation_id}/agent-roles` | Requires `agent.read`; returns the Headquarters Station catalog merged with validated Operation-scoped Registry overrides. Each role includes `operation_override` provenance. |
 | `PUT /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; validates and stores the role override and records only actor/action/Operation/role ID/time in audit. |
 | `DELETE /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; removes the override, falls back to the Station definition and records a metadata-only audit event. |
+| `GET /v1/user/operations/{operation_id}/quarantine` | Requires `agent.read`; lists the Agent quarantines that apply to the Operation (its own and those covering every Operation) with reason, who raised them and when. |
+| `POST /v1/user/operations/{operation_id}/quarantine/{agent_id}` | Requires `agent.configure`; body `{"reason": "..."}` (1-512 characters); quarantines the Agent in this Operation and records an `agent.quarantine` audit event. |
+| `POST /v1/user/operations/{operation_id}/quarantine/{agent_id}/release` | Requires `agent.configure`; lifts this Operation's quarantine of the Agent (`404` when there is none; a quarantine of every Operation is released on a Station) and records `agent.quarantine.release`. |
 | `GET /v1/user/stations/{station_id}/settings` | Requires `station.read`; returns the live concurrent Mission limit, whether it has an explicit Registry override, and whether the Station has the execution role. |
 | `PUT /v1/user/stations/{station_id}/settings` | Requires `station.configure`; execution Stations only; validates a 1–1,024 concurrent Mission limit, persists it in the shared Registry, and records a Station-scoped metadata-only audit event. |
 | `POST /v1/user/attach-grants` | Requires a user bearer; checks `session.read` or `session.input` at the registered Operation before issuing an attach token. |

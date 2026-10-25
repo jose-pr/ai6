@@ -18,6 +18,8 @@ initialization, thread start/resume, turn submission and event decoding.
 - Sends later messages as turns and emits provider events as AI6 `AgentEvent` values.
 - Reports a usage-limit error, with the reset time of the exhausted quota window, as an
   `AgentEvent` of kind `limit` so AI6 can park the Session instead of failing it.
+- Reports token usage per model request (Codex reports no cost) and names the web-search and
+  tool calls a turn makes.
 - Uses per-process app-server configuration to connect to the AI6 Cable MCP endpoint;
   the bearer token is read from the launch environment.
 

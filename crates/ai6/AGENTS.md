@@ -138,6 +138,57 @@ publishes lifecycle updates through Universal Exports when configured. Each `[ag
 table can override selected daemon defaults; numeric duration values are finite, non-negative
 seconds, may be fractional and merge field by field through `extends` inheritance.
 
+## Usage, budgets, exposure and quarantine (`ai6::directorates::medical`)
+
+Medical beside the watchdog; the operator-facing description is the Medical guide in the
+docs. Everything here is plain data and decisions; the Station applies them.
+
+```rust
+// usage — token and cost accounting, and budgets
+pub struct UsageTotals { pub input: u64, pub output: u64, pub cache_read: u64,
+                         pub cache_write: u64, pub cost_micro_usd: u64 }   // serde, default 0
+impl UsageTotals { pub fn add(&mut self, other: &Self); pub fn tokens(&self) -> u64 /* input+output+cache_write */ }
+pub struct UsageTracker;   // default(); .observe(&TokenUsage) -> UsageTotals (the addition)
+pub struct MissionUsage { pub total: UsageTotals, pub sessions: BTreeMap<String, UsageTotals>,
+                          pub daily_cost_micro_usd: BTreeMap<String /* UTC YYYY-MM-DD */, u64> }
+pub struct Budget { pub session_tokens: Option<u64>, pub mission_tokens: Option<u64>,
+                    pub mission_cost_micro_usd: Option<u64>,
+                    pub operation_cost_micro_usd_per_day: Option<u64>,
+                    pub warn_at_permille: Option<u16> /* default 800 */ }
+impl Budget {
+    pub fn preset(p: BudgetPreset) -> Self;           // Observe (no limits) | Strict
+    pub fn is_limited(&self) -> bool;
+    pub fn merge(&self, child: &Self) -> Self;        // child's set fields win
+    pub fn check(&self, session: &UsageTotals, mission: &UsageTotals,
+                 operation_day_cost: Option<u64>) -> Vec<BudgetBreach>;   // Warn or Limit per scope
+}
+pub struct BudgetDefinition;  // the TOML table; .resolve() -> Result<Budget, String> naming the key
+pub fn micro_usd(dollars: f64) -> u64;  pub fn utc_day(unix_seconds: i64) -> String;
+
+// exposure — which Sessions read untrusted input
+pub struct Exposure { pub source: String /* brief:source | cable:X | tool:X | review */, pub at: f64 }
+pub enum Restriction { Proposals, Approvals, Cables, Secrets }
+pub struct ExposurePolicy;   // default() = strict; ::preset(Strict | Observe); .restricts(r); .exposed_by_tool(name)
+pub struct ExposureDefinition;   // [operation.ID.exposure]: preset, restrict = [..], tools = [..]
+pub struct ExposureGate;     // clone-shared per Session: new(policy, inherited), mark(source, at) -> bool,
+                             // exposures(), is_exposed(), restricts(r), take_changes()
+
+// quarantine — when an Agent is stopped everywhere
+pub enum IncidentKind { Stall, Loop, Blown, Budget }
+pub struct Incident { pub kind: IncidentKind, pub at: f64, pub operation: Option<String>, pub mission: String }
+pub struct QuarantinePolicy { pub window_secs: u64 /* 86400 */, pub stalls: u32 /* 3 */,
+                              pub budget_stops: u32 /* 2 */, pub blown: bool /* true */ }
+impl QuarantinePolicy { pub fn reason(&self, incidents: &[Incident], now: f64) -> Option<String> }
+pub struct QuarantineDefinition;   // [operation.ID.quarantine]; 0 turns a count trigger off
+```
+
+`Operation::{budget, exposure, quarantine}` and `Agent::budget` carry the resolved values
+(`[operation.ID.budget]`, `[agent.ID.budget]`, `[operation.ID.exposure]`,
+`[operation.ID.quarantine]`). Unset budget keys are not enforced; `preset = "strict"` sets
+2,000,000 session tokens, 5,000,000 Mission tokens, $10 per Mission and $50 per Operation
+per UTC day. A budget value that is negative, non-numeric (or fractional for token counts)
+fails the roster load with an error naming the key.
+
 ## Operations and Agent roster (`ai6::directorates::m::roster`)
 
 ```rust
@@ -156,6 +207,7 @@ pub struct Agent {
     pub context: String,
     pub env: BTreeMap<String, String>,
     pub limits: WatchdogOverrides,
+    pub budget: Budget,                           // layered over the Operation's
     pub max_concurrent: Option<usize>,
 }
 #[non_exhaustive]
@@ -186,6 +238,9 @@ pub struct Operation {
     pub on_blown: String,
     pub on_limit: OnLimit,                        // Wait (default) or Backup; see Provider limits
     pub limit_fallback_secs: u64,                 // park time when a limit has no reset time; default 1800
+    pub budget: Budget,                           // no limit unless configured
+    pub exposure: ExposurePolicy,                 // strict unless configured
+    pub quarantine: QuarantinePolicy,             // 3 stalls/loops, 2 budget stops, 1 blown cover per 24 h
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
 }
@@ -536,17 +591,21 @@ Station's `missions.json` dies with it; this record does not.
     pub parked_until: Option<f64>,           // Unix seconds
     pub lease_expires: f64,
     pub fence: u64,                          // fencing token of the current lease
+    pub exposure: Vec<Exposure>,             // untrusted input read; only grows; default empty
 }
 impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }
 pub struct NewSession   // NewSession::new(session_id, mission_id, station)
                         //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
+                        //   .with_exposure(Vec<Exposure>)
 pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStatus) .parked_until(f64)
+                          //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
 #[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, HeldBy(String), Stale, Io(io::Error) }
 
 impl FileRegistry {
     pub fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>
     pub fn session(&self, id: &str) -> io::Result<Option<SessionRecord>>
     pub fn sessions(&self) -> io::Result<Vec<SessionRecord>>          // stable ID order
+    pub fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>  // every Session of the Mission, earliest first
     pub fn take_session(&self, id: &str, station: &str, ttl: Duration) -> Result<SessionRecord, SessionError>
     pub fn renew_session(&self, id: &str, station: &str, fence: u64, ttl: Duration) -> Result<SessionRecord, SessionError>
     pub fn update_session(&self, id: &str, station: &str, fence: u64, update: SessionUpdate) -> Result<SessionRecord, SessionError>
@@ -565,6 +624,33 @@ when it starts, takes the lease again to resume it, mirrors Mission state into t
 renews its leases with the Station check-in, and closes and abandons a Mission whose token
 is refused. The daemon's launch record keeps the lease and fence in `missions.json`
 (`session`); records without one still load.
+
+## Usage ledger and quarantine records (`ai6::directorates::registry::{usage, quarantine}`)
+
+```rust
+impl FileRegistry {
+    // usage/<operation>/<mission>.json; additions are made under the Registry lock
+    pub fn record_usage(&self, operation: Option<&str>, mission: &str, session: &str,
+                        delta: &UsageTotals, now: i64) -> io::Result<MissionUsage>
+    pub fn mission_usage(&self, operation: Option<&str>, mission: &str) -> io::Result<Option<MissionUsage>>
+    pub fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64>  // micro-dollars, UTC day
+
+    // quarantine/<agent>--<operation or _all>.json, plus quarantine/incidents/<agent>.json
+    pub fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine>   // an existing record is kept
+    pub fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
+    pub fn quarantines(&self) -> io::Result<Vec<Quarantine>>
+    pub fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
+    pub fn record_incident(&self, agent: &str, incident: Incident) -> io::Result<Vec<Incident>>  // history, 7 days kept
+}
+#[non_exhaustive] pub struct Quarantine { pub agent: String, pub operation: Option<String> /* None: every Operation */,
+                                          pub reason: String, pub by: String, pub at: f64 }
+impl Quarantine { pub fn new(agent, operation, reason, by, at) -> Self;
+                  pub fn covers(&self, agent: &str, operation: Option<&str>) -> bool }
+```
+
+A quarantined sender's Cables are accepted but held (`CableState::Held`) until an
+authorized release, whatever the receiver's inbound mode. `Roster::select_agent_excluding`
+is `select_agent` that also skips the named Agents; the Station passes the quarantined ones.
 
 ## Sources (`ai6::directorates::registry::sources`)
 
@@ -955,7 +1041,13 @@ over its selected `Terminal` provider.
 ```rust
 pub const LIMIT_EVENT: &str = "limit";
 pub struct UsageLimit { pub resets_at: Option<i64> /* Unix seconds */, pub window: Option<String> }
-pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Option<Vec<u8>>, pub limit: Option<UsageLimit> }
+pub struct TokenUsage { pub input: u64, pub output: u64, pub cache_read: u64, pub cache_write: u64,
+                        pub cost_micro_usd: u64, pub cumulative: bool }
+pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Option<Vec<u8>>,
+                        pub limit: Option<UsageLimit>, pub usage: Option<TokenUsage>,
+                        pub tools: Vec<String> }
+// AgentStart and AgentResume carry `max_cost_micro_usd: Option<u64>`: a spend ceiling a
+// harness may enforce itself (Claude Code gets `--max-budget-usd`); AI6 enforces budgets anyway.
 ```
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
@@ -963,6 +1055,14 @@ A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVEN
 otherwise produce; `limit` is `None` on every other event. `resets_at` is `None` when the
 provider names no reset time. The daemon parks the Mission (or posts a backup Agent) and
 closes the Session.
+
+`usage` is what the provider reported with the event (Claude Code on `result`, Codex on its
+token-usage notification); `cumulative` says whether the figures are running totals for the
+provider process (`true`) or only what the last step added. `UsageTracker` turns either into
+additions, so a resumed process is never counted twice. `tools` names the tools an event
+calls (kind `tool` for Claude Code), which is how a call to a listed tool exposes a Session.
+The daemon also queues `budget` (warning or limit), `exposed` (text: the source) and
+`quarantined` events for the Mission.
 
 ## Terminal API (`ai6::directorates::q::terminal`)
 
@@ -977,7 +1077,7 @@ The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in te
 with an AI6-owned `MissionId`, records safe-house disposition and optional `CoverReport`,
 and increments a revision for changes. Repeating the current state is a no-op and does not
 increment the revision. `MissionState` serializes as `queued`, `working`, `blocked`,
-`stalled`, `parked`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy
+`stalled`, `parked`, `quarantined`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy
 violation when the Operation uses `on_blown = "fail"`. `parked` means a provider usage limit
 paused the work: `Mission.parked_until` (Unix seconds, default `None` in older records) is
 when it resumes. `MissionStore::park(id, until)` parks a `Working`, `Blocked`, `Stalled` or
@@ -986,6 +1086,13 @@ it needs a time); `due_parked(now)` lists parked Missions at or past their time;
 `requeue_for(id, agent_id)` queues an interrupted Mission again for another Agent. A
 parked Mission leaves `Parked` through `Working`, `Failed`, `Abandoned` or `requeue_for`,
 and any transition clears `parked_until`.
+`quarantined` means Medical or an operator stopped the work because its Agent is
+quarantined: `MissionStore::quarantine(id)` moves a `Working`, `Blocked`, `Stalled` or
+`Parked` Mission there (repeating it is a no-op), it leaves only through `requeue_for`
+(back to `Queued`, for the next Agent) or `Abandoned`, and `reassign(id, agent)` gives a
+queued Mission another Agent. `block_for(id, reason)` blocks an active Mission and records
+`Mission.blocked_reason` (`"budget"`; cleared by the next state change); `expose(id, sources)`
+records `Mission.exposure`, the untrusted input the Mission itself came from.
 `MissionStore::set_cover_report(mission_id, report)` persists the cover audit. A Mission
 returns this value as its optional `cover` field beside `safe_house`. `Mission.role_id`
 stores the canonical configured Agent role independently of `agent_id` and provider
@@ -1221,4 +1328,7 @@ against the provider's schema. Pass `None` only for a provider with a default in
 - `ai6 sleeper [--config-dir PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:
   show and approve an Operation's standing orders. It reads the Registry from
   `AI6_REGISTRY` or the platform state directory, like the Station.
+- `ai6 quarantine list|add <AGENT> <REASON> [--operation ID | --all]|release <AGENT> (--operation ID | --all)`:
+  stop an Agent, or lift that, through the Registry; a Station applies the change within a
+  scheduler tick.
 - User-facing management goes through Universal Exports and the separate `ai6ctl` command.

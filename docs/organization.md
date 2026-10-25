@@ -13,7 +13,7 @@ rules turn out to be good rules for running coding agents.
 | **Registry** | `ai6::directorates::registry` | The shared record (briefs, leases, check-ins, audit, access tokens) and the Cable relay; real SIS and MI5 usage |
 | **Q Branch** | `ai6::directorates::q` | Gear: terminals, loadouts, Mission-scoped secret leases, MCP configuration, sandbox arguments |
 | **00 Section** | `ai6::directorates::section_00`, `crates/providers/agents/` | The AgentHandler contract and the Claude and Codex handlers |
-| **Medical** | `ai6::directorates::medical` | Agent health: the watchdog for stalls, loops and blocked prompts |
+| **Medical** | `ai6::directorates::medical` | Agent health: the watchdog for stalls, loops and blocked prompts; token and cost [usage and budgets](medical.md#budgets); [exposure](medical.md#exposure) to untrusted input; [quarantine](medical.md#quarantine) |
 | **Station** | `ai6::station`, `ai6 serve` | A node running the daemon: its server, provider host, safe houses, publisher and identity |
 | **Universal Exports** | `crates/universal-exports` | The public front: the only address operators and clients reach |
 | **Moneypenny** | `clients/moneypenny` | The operator app: board, briefs, terminals, administration, audit |
