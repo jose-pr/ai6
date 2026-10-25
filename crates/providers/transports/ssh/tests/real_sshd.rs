@@ -468,14 +468,17 @@ fn the_ssh_transport_works_against_a_real_openssh_server() {
     let port = forward.info().remote_port;
     let out = run(
         &pinned,
-        &format!("exec 3<>/dev/tcp/127.0.0.1/{port}; printf tunnel >&3; head -c 6 <&3"),
+        // `/dev/tcp` is a bash feature; the remote login shell may be dash.
+        &format!("bash -c 'exec 3<>/dev/tcp/127.0.0.1/{port}; printf tunnel >&3; head -c 6 <&3'"),
     );
     assert_eq!(text(&out.stdout), "tunnel", "{}", text(&out.stderr));
     echo.join().unwrap();
     forward.close().unwrap();
     let out = run(
         &pinned,
-        &format!("(exec 3<>/dev/tcp/127.0.0.1/{port}) 2>/dev/null && echo open || echo closed"),
+        &format!(
+            "bash -c '(exec 3<>/dev/tcp/127.0.0.1/{port}) 2>/dev/null' && echo open || echo closed"
+        ),
     );
     assert_eq!(text(&out.stdout), "closed\n");
 }
