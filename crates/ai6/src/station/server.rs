@@ -4237,11 +4237,15 @@ mod tests {
     use crate::guatiao::{FromValue, Provider, Status, ToValue, Value};
     use std::sync::atomic::AtomicI64;
 
+    /// A Registry directory of its own for each test: a shared one carries incidents and
+    /// quarantines from earlier tests and runs.
+    fn scratch_registry_dir() -> PathBuf {
+        tempfile::tempdir().unwrap().keep()
+    }
+
     fn no_op_cables() -> Arc<CableRelay> {
         Arc::new(CableRelay::new(
-            Arc::new(FileRegistry::open(
-                std::env::temp_dir().join("ai6-empty-cable-tests"),
-            )),
+            Arc::new(FileRegistry::open(scratch_registry_dir())),
             CablePolicy::default(),
             Vec::new,
             BTreeMap::new(),
@@ -6149,9 +6153,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
-            intake: Arc::new(FileRegistry::open(
-                std::env::temp_dir().join("ai6-empty-registry"),
-            )),
+            intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
             missions: Arc::new(Mutex::new(missions)),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
@@ -6245,9 +6247,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
-            intake: Arc::new(FileRegistry::open(
-                std::env::temp_dir().join("ai6-empty-registry"),
-            )),
+            intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
             missions: Arc::new(Mutex::new(missions)),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
@@ -6429,9 +6429,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
-            intake: Arc::new(FileRegistry::open(
-                std::env::temp_dir().join("ai6-empty-registry"),
-            )),
+            intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
             missions: Arc::new(Mutex::new(missions)),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
@@ -6692,9 +6690,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
-            intake: Arc::new(FileRegistry::open(
-                std::env::temp_dir().join("ai6-empty-registry"),
-            )),
+            intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
             missions: Arc::new(Mutex::new(missions)),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
