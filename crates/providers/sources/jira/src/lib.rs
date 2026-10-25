@@ -124,8 +124,8 @@ impl Jira {
             return Err("set `project` or `jql`".to_owned());
         }
         if let Some(project) = &settings.project
-            && !(!project.is_empty()
-                && project
+            && (project.is_empty()
+                || !project
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '_'))
         {
