@@ -5,6 +5,7 @@
 
 mod controls;
 mod login_limit;
+mod timeline;
 
 use core::future::Future;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -43,6 +44,7 @@ use controls::ControlBook;
 pub use controls::ControlStatus;
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
+pub use timeline::{DEFAULT_TIMELINE_PAGE, MAX_TIMELINE_PAGE, TimelineItem, TimelinePage};
 
 const MAX_BUFFER_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const MAX_CLIENT_SLOTS: usize = 100_000;
@@ -791,6 +793,22 @@ impl Gateway {
             return Err(GatewayError::TooLarge);
         }
         let mut inner = self.inner.lock().await;
+        let transition = self.ingest_locked(&mut inner, session_id, sequence, frame)?;
+        drop(inner);
+        if let Some(transition) = transition {
+            timeline::record_transition(self, transition).await;
+        }
+        Ok(())
+    }
+
+    /// Validates, records and fans out one frame; returns the lifecycle transition it made.
+    fn ingest_locked(
+        &self,
+        inner: &mut Inner,
+        session_id: &SessionId,
+        sequence: u64,
+        frame: Vec<u8>,
+    ) -> Result<Option<timeline::Transition>, GatewayError> {
         let session = inner
             .sessions
             .get_mut(session_id)
@@ -826,7 +844,7 @@ impl Gateway {
             guatiao::value::wire::channel::Received::Schema(_)
         ) && session.schemas.get(&channel) == Some(&frame)
         {
-            return Ok(());
+            return Ok(None);
         }
         match &received {
             guatiao::value::wire::channel::Received::Value { channel: 1, value } => {
@@ -864,15 +882,27 @@ impl Gateway {
             }
             guatiao::value::wire::channel::Received::Value { .. } => {}
         }
+        let mut transition = None;
         if is_value {
             session.last_sequence = sequence;
             if let Some(state) = lifecycle_state {
+                let at = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+                // A repeated state is a re-publication, not a transition.
+                if session.lifecycle_state.as_deref() != Some(state.as_str()) {
+                    transition = Some(timeline::Transition {
+                        operation: session.operation_id.to_string(),
+                        mission: session.mission_id.to_string(),
+                        session: session_id.to_string(),
+                        state: state.clone(),
+                        station: None,
+                        at,
+                    });
+                }
                 session.lifecycle_state = Some(state);
                 session.lifecycle_sequence = sequence;
-                session.lifecycle_at = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .ok()
-                    .map(|elapsed| elapsed.as_secs_f64());
+                session.lifecycle_at = Some(at);
             }
             session.history.push_back((sequence, frame.clone()));
             while session.history.len() > self.config.limits.scrollback_events {
@@ -880,7 +910,17 @@ impl Gateway {
             }
         }
         let _ = session.events.send(frame);
-        Ok(())
+        if let Some(transition) = &mut transition {
+            transition.station = inner
+                .missions
+                .iter()
+                .find(|((operation, mission), _)| {
+                    operation.as_str() == transition.operation
+                        && mission.as_str() == transition.mission
+                })
+                .and_then(|(_, brief)| brief.station_id.clone());
+        }
+        Ok(transition)
     }
 
     /// Queues one browser frame for the Station after confirming an active write lease.
@@ -1042,6 +1082,10 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}",
                 get(controls::control_status),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/timeline",
+                get(timeline::operation_timeline),
             )
             .route("/v1/user/attach-grants", post(issue_user_attach_token))
             .route("/v1/auth/login", post(login))

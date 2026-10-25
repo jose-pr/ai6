@@ -87,6 +87,7 @@ pub use directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, HeadquartersLease, Lease,
     LeaseRecovery, MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,
 };
+pub use directorates::registry::timeline::{MAX_TIMELINE_EVENTS, TimelineEvent};
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
     TokenUsage, UsageLimit,

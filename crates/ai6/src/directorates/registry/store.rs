@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::registry::cables::{Cable, CableError, CableState};
+use crate::directorates::registry::timeline::{TimelineEvent, record_event_locked};
 
 const BRIEF_VERSION: u32 = 1;
 pub(super) const MAX_BRIEF_BYTES: u64 = 1_048_576;
@@ -1182,6 +1183,33 @@ impl FileRegistry {
         }
         let bytes = serde_json::to_vec(cable).map_err(io::Error::other)?;
         write_atomic(&path, &bytes)?;
+        // The timeline gets the Cable's metadata only: never its body or the target name
+        // the sending Agent chose.
+        let mut event = TimelineEvent::new(
+            "cable",
+            "sent",
+            cable.sender_operation(),
+            cable.created_at(),
+        )
+        .station(cable.sender_station())
+        .actor(cable.sender_agent())
+        .detail("cable", cable.id())
+        .detail(
+            "scope",
+            serde_json::to_value(cable.target().scope())
+                .ok()
+                .and_then(|scope| scope.as_str().map(str::to_owned))
+                .unwrap_or_default(),
+        )
+        .detail("recipients", cable.recipients().len().to_string());
+        if let Some(mission) = cable.mission_id() {
+            event = event.mission(mission);
+        }
+        if let Some(session) = cable.session_id() {
+            event = event.session(session);
+        }
+        // The Cable is sent either way; its timeline entry is a record, not a condition.
+        let _ = record_event_locked(&self.root, &event);
         Ok(cable.clone())
     }
 
@@ -1535,6 +1563,19 @@ impl FileRegistry {
                 format!("audit result limit must be between 1 and {MAX_AUDIT_RESULTS}"),
             ));
         }
+        let mut records = self.audit_records()?;
+        records.sort_by(|left, right| {
+            right
+                .at
+                .total_cmp(&left.at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        records.truncate(limit);
+        Ok(records)
+    }
+
+    /// Returns every stored audit event, in no particular order; at most 10,000 exist.
+    pub fn audit_records(&self) -> io::Result<Vec<AuditRecord>> {
         let directory = self.root.join("audit");
         let entries = match fs::read_dir(directory) {
             Ok(entries) => entries,
@@ -1576,13 +1617,6 @@ impl FileRegistry {
                 records.push(entry);
             }
         }
-        records.sort_by(|left, right| {
-            right
-                .at
-                .total_cmp(&left.at)
-                .then_with(|| right.id.cmp(&left.id))
-        });
-        records.truncate(limit);
         Ok(records)
     }
 
@@ -3169,6 +3203,28 @@ mod tests {
         assert_eq!(
             registry.submit_cable(&conflict).unwrap_err().kind(),
             io::ErrorKind::AlreadyExists
+        );
+
+        // One timeline entry for the one Cable sent: its metadata, never its body.
+        let operation = registry
+            .get_cable("cable-1")
+            .unwrap()
+            .unwrap()
+            .sender_operation()
+            .to_owned();
+        let events = registry.timeline_events(&operation).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            (events[0].kind.as_str(), events[0].action.as_str()),
+            ("cable", "sent")
+        );
+        assert_eq!(events[0].actor.as_deref(), Some("007"));
+        assert_eq!(events[0].detail["cable"], "cable-1");
+        assert_eq!(events[0].detail["recipients"], "1");
+        assert!(
+            !serde_json::to_string(&events)
+                .unwrap()
+                .contains("Review this")
         );
     }
 

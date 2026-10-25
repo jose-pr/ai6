@@ -15,8 +15,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::store::{
-    Brief, FileRegistry, hex_digest, invalid_data, registry_lock, safe_component, write_atomic,
+    Brief, FileRegistry, hex_digest, invalid_data, registry_lock, safe_component, unix_time,
+    write_atomic,
 };
+use super::timeline::{TimelineEvent, record_event_locked};
 
 /// The Brief `source` of every brief a sleeper queues.
 pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
@@ -324,7 +326,13 @@ impl FileRegistry {
             at,
         };
         let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
-        write_atomic(&self.sleeper_path(operation, name), &bytes)
+        write_atomic(&self.sleeper_path(operation, name), &bytes)?;
+        let event = TimelineEvent::new("sleeper", "authorized", operation, at as f64)
+            .actor(authorized_by)
+            .detail("sleeper", name);
+        // The approval stands either way; its timeline entry is a record, not a condition.
+        let _ = record_event_locked(self.root(), &event);
+        Ok(())
     }
 
     /// Returns the stored approval, if any.
@@ -354,7 +362,14 @@ impl FileRegistry {
     pub fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool> {
         let _lock = registry_lock(&self.root)?;
         match fs::remove_file(self.sleeper_path(operation, name)) {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                if let Ok(at) = unix_time() {
+                    let event = TimelineEvent::new("sleeper", "revoked", operation, at)
+                        .detail("sleeper", name);
+                    let _ = record_event_locked(self.root(), &event);
+                }
+                Ok(true)
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(error),
         }
@@ -599,6 +614,15 @@ mod tests {
         assert_ne!(edited.fingerprint(), stored.fingerprint);
         assert!(registry.revoke_sleeper("G", "deps").unwrap());
         assert!(!registry.revoke_sleeper("G", "deps").unwrap());
+        let events = registry.timeline_events("G").unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (event.action.as_str(), event.detail["sleeper"].as_str()))
+                .collect::<Vec<_>>(),
+            [("authorized", "deps"), ("revoked", "deps")]
+        );
+        assert_eq!(events[0].actor.as_deref(), Some("operator"));
         assert!(
             registry
                 .authorize_sleeper(

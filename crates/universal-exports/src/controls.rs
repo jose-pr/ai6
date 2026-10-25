@@ -563,9 +563,10 @@ pub(crate) async fn report_station_control(
     });
     let wall = unix_timestamp()?;
     let station = report.station.clone();
-    gateway
+    let finished = gateway
         .with_controls(|book| book.finish(&control_id, &station, &report, wall))?
         .map_err(ApiError::from)?;
+    crate::timeline::record_control(&gateway, &finished).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -668,6 +669,14 @@ pub(crate) mod tests {
                 subject = "person:operator-007"
                 scope = "operation:G"
                 role = "operator"
+
+                [role.station-auditor]
+                actions = ["audit.read"]
+
+                [[rule]]
+                subject = "person:operator-007"
+                scope = "station:worker"
+                role = "station-auditor"
             "#,
         )
         .unwrap();
