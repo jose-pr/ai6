@@ -30,7 +30,8 @@ pub use directorates::m::placement::{
     PlacementRequest, StationFacts, execution_mode, place,
 };
 pub use directorates::m::roster::{
-    AgentRole, CoverIdentity, Operation, Roster, RosterError, Workspace,
+    AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS, OnLost, Operation, Roster, RosterError,
+    Workspace,
 };
 pub use directorates::m::theaters::{
     AgentMode, Egress, EgressKind, LOCAL_THEATER, RunnerSettings, SshAccess, Theater,
@@ -54,8 +55,8 @@ pub use directorates::medical::watchdog::{
     Watchdog, WatchdogConfig, WatchdogOverrides,
 };
 pub use directorates::q::safehouse::{
-    Change, ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession,
-    SafeHouseSpec,
+    Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseInfo, SafeHouseProvider,
+    SafeHouseReport, SafeHouseSession, SafeHouseSpec,
 };
 pub use directorates::q::terminal::{
     AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalBridge, TerminalSession,
@@ -84,7 +85,8 @@ pub use directorates::registry::cables::{
 };
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
-    NewSession, SessionError, SessionRecord, SessionStatus, SessionUpdate,
+    MAX_RECENT_EVENT_CHARS, MAX_RECENT_EVENTS, NewSession, SessionError, SessionLaunch,
+    SessionRecord, SessionStatus, SessionUpdate,
 };
 pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization,

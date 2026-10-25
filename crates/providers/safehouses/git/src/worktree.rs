@@ -12,7 +12,9 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ai6::directorates::q::safehouse::{Change, SafeHouseReport, SafeHouseSpec};
+use ai6::directorates::q::safehouse::{
+    Change, CheckpointSpec, SafeHouseCheckpoint, SafeHouseReport, SafeHouseSpec,
+};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -52,26 +54,20 @@ impl Worktree {
             ));
         }
 
-        let branch = branch_name(
-            &spec.branch,
-            &spec.mission_id,
-            &spec.title,
-            &spec.operation_id,
-        );
+        let (branch, commit, base) = match &spec.checkpoint {
+            Some(checkpoint) => resume_point(&repository, checkpoint)?,
+            None => {
+                let commit = resolve(&repository, &spec.base)?;
+                let branch = branch_name(
+                    &spec.branch,
+                    &spec.mission_id,
+                    &spec.title,
+                    &spec.operation_id,
+                );
+                (branch, commit.clone(), commit)
+            }
+        };
         git(&repository, &["check-ref-format", "--branch", &branch])?;
-        let commit = git(
-            &repository,
-            &[
-                "rev-parse",
-                "--verify",
-                &format!("{}^{{commit}}", spec.base),
-            ],
-        )?
-        .trim()
-        .to_owned();
-        if commit.is_empty() {
-            return Err(format!("Git did not resolve base {:?}", spec.base));
-        }
 
         let path = root
             .join("safe-houses")
@@ -98,8 +94,71 @@ impl Worktree {
             repository,
             path,
             branch: Some(branch),
-            base: commit,
+            base,
             isolated: true,
+        })
+    }
+
+    /// Saves the work so far as one commit on top of `HEAD`, holding the uncommitted changes
+    /// too, and pushes it to the safe house's branch on `spec.remote`. The worktree, its
+    /// index and `HEAD` are left as they are: the Agent keeps working undisturbed.
+    pub(crate) fn checkpoint(&self, spec: &CheckpointSpec) -> Result<SafeHouseCheckpoint, Failure> {
+        let branch = self
+            .branch
+            .as_ref()
+            .ok_or("a safe house in place has no branch of its own to save to")?;
+        let head = resolve(&self.path, "HEAD")?;
+        let tree = {
+            // A private index, so the Agent's own staging area is untouched.
+            let index = PrivateIndex::new();
+            let env = [("GIT_INDEX_FILE", index.0.to_string_lossy().into_owned())];
+            git_with(&self.path, &["read-tree", "HEAD"], &env)?;
+            git_with(&self.path, &["add", "--all"], &env)?;
+            git_with(&self.path, &["write-tree"], &env)?
+                .trim()
+                .to_owned()
+        };
+        let head_tree = git(&self.path, &["rev-parse", "HEAD^{tree}"])?
+            .trim()
+            .to_owned();
+        let commit = if tree == head_tree {
+            head
+        } else {
+            let mut env = Vec::new();
+            if let (Some(name), Some(email)) = (&spec.author_name, &spec.author_email) {
+                for (key, value) in [
+                    ("GIT_AUTHOR_NAME", name),
+                    ("GIT_AUTHOR_EMAIL", email),
+                    ("GIT_COMMITTER_NAME", name),
+                    ("GIT_COMMITTER_EMAIL", email),
+                ] {
+                    env.push((key, value.clone()));
+                }
+            }
+            git_with(
+                &self.path,
+                &["commit-tree", &tree, "-p", &head, "-m", &spec.message],
+                &env,
+            )?
+            .trim()
+            .to_owned()
+        };
+        // Each checkpoint replaces the last on the branch; it holds everything the last did.
+        git(
+            &self.path,
+            &[
+                "push",
+                "--quiet",
+                "--force",
+                &spec.remote,
+                &format!("{commit}:refs/heads/{branch}"),
+            ],
+        )?;
+        Ok(SafeHouseCheckpoint {
+            remote: spec.remote.clone(),
+            branch: branch.clone(),
+            commit,
+            base: Some(self.base.clone()),
         })
     }
 
@@ -246,6 +305,66 @@ impl Worktree {
     }
 }
 
+/// The commit `revision` names in `cwd`.
+fn resolve(cwd: &Path, revision: &str) -> Result<String, Failure> {
+    let commit = git(
+        cwd,
+        &["rev-parse", "--verify", &format!("{revision}^{{commit}}")],
+    )?
+    .trim()
+    .to_owned();
+    if commit.is_empty() {
+        return Err(format!("Git did not resolve {revision:?}"));
+    }
+    Ok(commit)
+}
+
+/// Where a safe house that continues `checkpoint` starts: its branch, the commit to check
+/// out, and the base its changes are counted from. The checkpoint's branch is fetched from
+/// its remote; its recorded commit is used when present, else the branch's newest one.
+fn resume_point(
+    repository: &Path,
+    checkpoint: &SafeHouseCheckpoint,
+) -> Result<(String, String, String), Failure> {
+    git(
+        repository,
+        &[
+            "fetch",
+            "--quiet",
+            &checkpoint.remote,
+            &format!("refs/heads/{}", checkpoint.branch),
+        ],
+    )?;
+    let commit =
+        resolve(repository, &checkpoint.commit).or_else(|_| resolve(repository, "FETCH_HEAD"))?;
+    let base = checkpoint
+        .base
+        .as_deref()
+        .filter(|base| git(repository, &["merge-base", "--is-ancestor", base, &commit]).is_ok())
+        .map_or_else(|| commit.clone(), str::to_owned);
+    Ok((checkpoint.branch.clone(), commit, base))
+}
+
+/// A temporary index file, removed when dropped.
+struct PrivateIndex(PathBuf);
+
+impl PrivateIndex {
+    fn new() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self(std::env::temp_dir().join(format!(
+            "ai6-safehouse-{}-{unique}.index",
+            std::process::id()
+        )))
+    }
+}
+
+impl Drop for PrivateIndex {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 /// The canonical top of the Git work tree at `source`.
 fn checkout(source: &str) -> Result<PathBuf, Failure> {
     let source = Path::new(source);
@@ -347,11 +466,16 @@ fn path_segment(value: &str) -> String {
 }
 
 pub(crate) fn git(cwd: &Path, args: &[&str]) -> Result<String, Failure> {
+    git_with(cwd, args, &[])
+}
+
+fn git_with(cwd: &Path, args: &[&str], env: &[(&str, String)]) -> Result<String, Failure> {
     let name = args.first().copied().unwrap_or("command");
     let mut child = Command::new("git")
         .arg("-C")
         .arg(cwd)
         .args(args)
+        .envs(env.iter().map(|(key, value)| (*key, value.as_str())))
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -479,6 +603,7 @@ mod tests {
                 isolate: true,
                 state_root: self.0.to_string_lossy().into_owned(),
                 reopen: None,
+                checkpoint: None,
             }
         }
     }
@@ -640,6 +765,120 @@ mod tests {
         .unwrap();
         assert_eq!(again.base, house.base);
         assert_eq!(again.changes().unwrap().len(), 1);
+    }
+
+    fn checkpoint_spec(remote: &Path) -> CheckpointSpec {
+        CheckpointSpec {
+            remote: remote.to_string_lossy().into_owned(),
+            message: "Checkpoint of work in progress".to_owned(),
+            author_name: Some("Field Station".to_owned()),
+            author_email: Some("station@example.invalid".to_owned()),
+        }
+    }
+
+    #[test]
+    fn a_checkpoint_pushes_committed_and_uncommitted_work_and_leaves_the_worktree_alone() {
+        let temp = Temp::new();
+        let repo = temp.repo();
+        let remote = temp.0.join("remote.git");
+        temp.git(&temp.0, &["init", "--quiet", "--bare", "remote.git"]);
+        let house = Worktree::open(&temp.spec(&repo, "mission-8", "{id}")).unwrap();
+        fs::write(house.path.join("done.txt"), "done\n").unwrap();
+        temp.git(&house.path, &["add", "done.txt"]);
+        temp.git(&house.path, &["commit", "--quiet", "-m", "done part"]);
+        fs::write(house.path.join("staged.txt"), "staged\n").unwrap();
+        temp.git(&house.path, &["add", "staged.txt"]);
+        fs::write(house.path.join("loose.txt"), "loose\n").unwrap();
+        let head = resolve(&house.path, "HEAD").unwrap();
+        let status = git(&house.path, &["status", "--porcelain"]).unwrap();
+
+        let saved = house.checkpoint(&checkpoint_spec(&remote)).unwrap();
+        assert_eq!(saved.branch, "mission-8");
+        assert_eq!(saved.base.as_deref(), Some(house.base.as_str()));
+        assert_ne!(saved.commit, head);
+        // The Agent's worktree, staging and HEAD are as they were.
+        assert_eq!(resolve(&house.path, "HEAD").unwrap(), head);
+        assert_eq!(
+            git(&house.path, &["status", "--porcelain"]).unwrap(),
+            status
+        );
+
+        // The remote branch holds everything, under the cover identity.
+        let pushed = resolve(&remote, "refs/heads/mission-8").unwrap();
+        assert_eq!(pushed, saved.commit);
+        let files = git(&remote, &["ls-tree", "--name-only", &pushed]).unwrap();
+        for file in ["done.txt", "loose.txt", "seed.txt", "staged.txt"] {
+            assert!(files.lines().any(|line| line == file), "{file}: {files}");
+        }
+        let author = git(
+            &remote,
+            &["log", "-1", "--format=%an <%ae>|%cn <%ce>", &pushed],
+        )
+        .unwrap();
+        assert_eq!(
+            author.trim(),
+            "Field Station <station@example.invalid>|Field Station <station@example.invalid>"
+        );
+
+        // Nothing new since the last checkpoint pushes HEAD itself.
+        fs::remove_file(house.path.join("loose.txt")).unwrap();
+        temp.git(&house.path, &["reset", "--quiet"]);
+        fs::remove_file(house.path.join("staged.txt")).unwrap();
+        let clean = house.checkpoint(&checkpoint_spec(&remote)).unwrap();
+        assert_eq!(clean.commit, head);
+        assert_eq!(resolve(&remote, "refs/heads/mission-8").unwrap(), head);
+    }
+
+    #[test]
+    fn a_safe_house_on_another_checkout_starts_from_a_checkpoint() {
+        let temp = Temp::new();
+        let repo = temp.repo();
+        let remote = temp.0.join("remote.git");
+        temp.git(&temp.0, &["init", "--quiet", "--bare", "remote.git"]);
+        temp.git(
+            &repo,
+            &[
+                "push",
+                "--quiet",
+                remote.to_str().unwrap(),
+                "HEAD:refs/heads/main",
+            ],
+        );
+        let house = Worktree::open(&temp.spec(&repo, "mission-9", "{id}")).unwrap();
+        fs::write(house.path.join("half.txt"), "half done\n").unwrap();
+        let saved = house.checkpoint(&checkpoint_spec(&remote)).unwrap();
+
+        // Another Station has its own clone and its own state directory.
+        temp.git(
+            &temp.0,
+            &["clone", "--quiet", remote.to_str().unwrap(), "other"],
+        );
+        let other = temp.0.join("other");
+        let mut spec = temp.spec(&other, "mission-9", "{id}");
+        spec.state_root = temp.0.join("other-state").to_string_lossy().into_owned();
+        spec.checkpoint = Some(saved.clone());
+        let resumed = Worktree::open(&spec).unwrap();
+        assert_eq!(resumed.branch.as_deref(), Some("mission-9"));
+        assert_eq!(resumed.base, house.base);
+        assert_eq!(resolve(&resumed.path, "HEAD").unwrap(), saved.commit);
+        assert_eq!(
+            fs::read_to_string(resumed.path.join("half.txt")).unwrap(),
+            "half done\n"
+        );
+        // The checkpoint commit counts as the Mission's work.
+        assert_eq!(resumed.changes().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_safe_house_in_place_has_no_branch_to_checkpoint() {
+        let temp = Temp::new();
+        let repo = temp.repo();
+        let spec = SafeHouseSpec {
+            isolate: false,
+            ..temp.spec(&repo, "mission-10", "{id}")
+        };
+        let house = Worktree::open(&spec).unwrap();
+        assert!(house.checkpoint(&checkpoint_spec(&temp.0)).is_err());
     }
 
     #[test]

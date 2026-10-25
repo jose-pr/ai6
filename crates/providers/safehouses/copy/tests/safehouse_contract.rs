@@ -18,6 +18,7 @@ fn spec(source: &Path, state: &Path) -> SafeHouseSpec {
         isolate: true,
         state_root: state.to_string_lossy().into_owned(),
         reopen: None,
+        checkpoint: None,
     }
 }
 

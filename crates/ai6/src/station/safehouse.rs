@@ -11,8 +11,8 @@ use guatiao::library::Object;
 use guatiao::{FromValue, ToValue};
 
 use crate::directorates::q::safehouse::{
-    Change, ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession,
-    SafeHouseSpec,
+    Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseInfo, SafeHouseProvider,
+    SafeHouseReport, SafeHouseSession, SafeHouseSpec,
 };
 
 /// The state-directory environment variable used by AI6.
@@ -98,6 +98,14 @@ impl SafeHouse {
     pub fn finish(&self) -> Result<SafeHouseReport, SafeHouseError> {
         let report = self.session.finish().map_err(fail)?;
         SafeHouseReport::from_value(&report).map_err(fail)
+    }
+
+    /// Saves the work so far where another Station can fetch it, leaving the working
+    /// directory as it is.
+    pub fn checkpoint(&self, spec: &CheckpointSpec) -> Result<SafeHouseCheckpoint, SafeHouseError> {
+        let spec = spec.to_value().map_err(fail)?;
+        let saved = self.session.checkpoint(&spec).map_err(fail)?;
+        SafeHouseCheckpoint::from_value(&saved).map_err(fail)
     }
 
     /// Describes the safe house while it is still in use.
@@ -211,6 +219,7 @@ mod tests {
             isolate,
             state_root: "/state".to_owned(),
             reopen: None,
+            checkpoint: None,
         }
     }
 

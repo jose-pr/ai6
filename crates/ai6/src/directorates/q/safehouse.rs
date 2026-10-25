@@ -41,6 +41,40 @@ pub struct SafeHouseSpec {
     pub state_root: String,
     /// A report from an earlier open: re-attach to that safe house instead of creating one.
     pub reopen: Option<SafeHouseReport>,
+    /// Work an earlier attempt saved elsewhere: start the new safe house from its commit, on
+    /// its branch, instead of from `base`. A provider without checkpoints ignores it.
+    pub checkpoint: Option<SafeHouseCheckpoint>,
+}
+
+/// Work in progress saved where another Station can fetch it: a commit pushed to a branch.
+#[derive(
+    ToValue, FromValue, Schema, serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq,
+)]
+#[map(crate = ::guatiao)]
+pub struct SafeHouseCheckpoint {
+    /// The Git remote, by name or URL, the commit was pushed to.
+    pub remote: String,
+    /// The branch on the remote that holds the commit.
+    pub branch: String,
+    /// The commit: the safe house's history plus its uncommitted changes.
+    pub commit: String,
+    /// The revision the work started from, when the provider has revisions.
+    pub base: Option<String>,
+}
+
+/// How to save a checkpoint. Crosses as a value.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct CheckpointSpec {
+    /// The Git remote, by name or URL, to push to.
+    pub remote: String,
+    /// The message of the commit that holds uncommitted changes, already under the
+    /// Operation's cover policy.
+    pub message: String,
+    /// The author and committer name, when the Operation commits under a cover identity.
+    pub author_name: Option<String>,
+    /// The author and committer email, when the Operation commits under a cover identity.
+    pub author_email: Option<String>,
 }
 
 /// Where an open safe house is and what it can tell.
@@ -117,6 +151,16 @@ pub trait SafeHouseSession: Send + Sync {
     /// Removes an untouched isolated safe house and retains one that holds work; answers
     /// a [`SafeHouseReport`] as a value. Idempotent; a safe house in place is left alone.
     fn finish(&self) -> Result<Value, ProviderError>;
+    /// Saves the work so far where another Station can fetch it, as `spec` (a
+    /// [`CheckpointSpec`] as a value) says, without touching the working directory, and
+    /// answers a [`SafeHouseCheckpoint`] as a value. Unsupported unless the provider has it.
+    fn checkpoint(&self, spec: &Value) -> Result<Value, ProviderError> {
+        let _ = spec;
+        Err(ProviderError::new(
+            guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+            "this safe-house provider does not save checkpoints",
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -147,6 +191,7 @@ mod tests {
                 kept: true,
                 changes: vec!["abc1234 add work".to_owned()],
             }),
+            checkpoint: None,
         }
     }
 
@@ -160,6 +205,7 @@ mod tests {
             [
                 "base",
                 "branch",
+                "checkpoint",
                 "isolate",
                 "mission_id",
                 "operation_id",
@@ -169,6 +215,16 @@ mod tests {
                 "title"
             ]
         );
+    }
+
+    // A spec written before checkpoints existed still reads.
+    #[test]
+    fn a_spec_without_a_checkpoint_still_reads() {
+        use guatiao::{Map, TryAsMut};
+        let mut value = spec().to_value().unwrap();
+        let map: &mut Map = value.try_as_mut().unwrap();
+        map.remove("checkpoint");
+        assert_eq!(SafeHouseSpec::from_value(&value).unwrap(), spec());
     }
 
     #[test]

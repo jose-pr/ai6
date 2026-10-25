@@ -13,7 +13,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::directorates::m::placement::ExecutionMode;
 use crate::directorates::medical::exposure::Exposure;
+use crate::directorates::q::safehouse::SafeHouseCheckpoint;
 
 use super::store::{
     FileRegistry, invalid_data, read_headquarters, registry_lock, unix_time, write_atomic,
@@ -23,6 +25,10 @@ const MAX_SESSION_RECORD_BYTES: u64 = 65_536;
 const MAX_SESSIONS: usize = 100_000;
 const MAX_SESSION_ID_BYTES: usize = 128;
 const MAX_EXPOSURES_PER_SESSION: usize = 32;
+/// How many recent events a Session record keeps for a hand-off.
+pub const MAX_RECENT_EVENTS: usize = 20;
+/// The longest one recent event is kept, in characters.
+pub const MAX_RECENT_EVENT_CHARS: usize = 300;
 
 /// Where a Session stands, as far as the Registry knows.
 #[non_exhaustive]
@@ -35,6 +41,80 @@ pub enum SessionStatus {
     Parked,
     /// The Session finished; it can no longer be taken or written.
     Ended,
+    /// Its Station went dark and nothing could re-attach to the harness; a later attempt
+    /// replaces it. Closed like `Ended`.
+    Lost,
+}
+
+impl SessionStatus {
+    /// Whether the Session can no longer be taken or written.
+    pub fn is_closed(self) -> bool {
+        matches!(self, Self::Ended | Self::Lost)
+    }
+}
+
+/// How a Session's harness was launched: what another Station needs to re-attach to it.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionLaunch {
+    /// The AgentHandler provider.
+    pub handler: String,
+    /// The terminal provider the harness runs in.
+    pub terminal: String,
+    /// The working directory, on the Theater.
+    pub working_directory: String,
+    /// The model, when the Agent names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The effort, when the Agent names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// Whether the harness runs on the Theater or acts on it from the Station.
+    #[serde(default)]
+    pub mode: ExecutionMode,
+    /// The key of the Session on the Theater's runner, when a runner supervises the harness;
+    /// only such a Session can be re-attached by another Station.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<String>,
+}
+
+impl SessionLaunch {
+    /// A launch of `handler` in `terminal`, working in `working_directory`.
+    pub fn new(
+        handler: impl Into<String>,
+        terminal: impl Into<String>,
+        working_directory: impl Into<String>,
+    ) -> Self {
+        Self {
+            handler: handler.into(),
+            terminal: terminal.into(),
+            working_directory: working_directory.into(),
+            model: None,
+            effort: None,
+            mode: ExecutionMode::default(),
+            runner: None,
+        }
+    }
+
+    /// Records the model and effort.
+    pub fn with_model(mut self, model: Option<String>, effort: Option<String>) -> Self {
+        self.model = model;
+        self.effort = effort;
+        self
+    }
+
+    /// Records the execution mode.
+    pub fn with_mode(mut self, mode: ExecutionMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Records the runner's key for the Session.
+    pub fn with_runner(mut self, key: impl Into<String>) -> Self {
+        self.runner = Some(key.into());
+        self
+    }
 }
 
 /// One Agent Session as stored in the shared Registry.
@@ -68,12 +148,29 @@ pub struct SessionRecord {
     /// Mission inherits it. Empty in records written before exposure was tracked.
     #[serde(default)]
     pub exposure: Vec<Exposure>,
+    /// How the harness was launched; absent in records written before Sessions could be
+    /// re-attached by another Station.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<SessionLaunch>,
+    /// What the holder last saw the Session do, oldest first and bounded: the hand-off a
+    /// later attempt is briefed with when this one is lost.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent: Vec<String>,
+    /// The last checkpoint of the Session's safe house.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<SafeHouseCheckpoint>,
+    /// When the last checkpoint was saved, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpointed_at: Option<f64>,
+    /// Why the Session was lost; set only with [`SessionStatus::Lost`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lost: Option<String>,
 }
 
 impl SessionRecord {
     /// Whether the lease is still live at `now`, in Unix seconds.
     pub fn leased_at(&self, now: f64) -> bool {
-        self.status != SessionStatus::Ended && self.lease_expires >= now
+        !self.status.is_closed() && self.lease_expires >= now
     }
 }
 
@@ -88,6 +185,7 @@ pub struct NewSession {
     attempt: u32,
     predecessor: Option<String>,
     exposure: Vec<Exposure>,
+    launch: Option<SessionLaunch>,
 }
 
 impl NewSession {
@@ -106,7 +204,14 @@ impl NewSession {
             attempt: 1,
             predecessor: None,
             exposure: Vec::new(),
+            launch: None,
         }
+    }
+
+    /// Records how the harness was launched.
+    pub fn with_launch(mut self, launch: SessionLaunch) -> Self {
+        self.launch = Some(launch);
+        self
     }
 
     /// Records the exposure the Session starts with, inherited from its Mission.
@@ -142,9 +247,31 @@ pub struct SessionUpdate {
     status: Option<SessionStatus>,
     parked_until: Option<f64>,
     exposure: Vec<Exposure>,
+    launch: Option<SessionLaunch>,
+    recent: Option<Vec<String>>,
+    checkpoint: Option<(SafeHouseCheckpoint, f64)>,
 }
 
 impl SessionUpdate {
+    /// Records how the harness was launched, replacing what was recorded.
+    pub fn launch(mut self, launch: SessionLaunch) -> Self {
+        self.launch = Some(launch);
+        self
+    }
+
+    /// Replaces the recent events with the last [`MAX_RECENT_EVENTS`] of `recent`, each cut
+    /// to [`MAX_RECENT_EVENT_CHARS`].
+    pub fn recent(mut self, recent: Vec<String>) -> Self {
+        self.recent = Some(recent);
+        self
+    }
+
+    /// Records a checkpoint saved at `at`, in Unix seconds.
+    pub fn checkpoint(mut self, checkpoint: SafeHouseCheckpoint, at: f64) -> Self {
+        self.checkpoint = Some((checkpoint, at));
+        self
+    }
+
     /// Adds exposures the record does not have yet; an exposure is never removed.
     pub fn exposed(mut self, exposure: Vec<Exposure>) -> Self {
         self.exposure = exposure;
@@ -287,6 +414,11 @@ impl FileRegistry {
             lease_expires: now + ttl.as_secs_f64(),
             fence: self.headquarters_term()?.max(1),
             exposure: new.exposure,
+            launch: new.launch,
+            recent: Vec::new(),
+            checkpoint: None,
+            checkpointed_at: None,
+            lost: None,
         };
         write_session(&path, &record)?;
         Ok(record)
@@ -379,7 +511,7 @@ impl FileRegistry {
         let _lock = registry_lock(&self.root)?;
         let path = self.session_path(id);
         let mut record = read_session(&path)?.ok_or(SessionError::NotFound)?;
-        if record.status == SessionStatus::Ended {
+        if record.status.is_closed() {
             return Err(SessionError::Ended);
         }
         if record.station != station {
@@ -447,7 +579,7 @@ impl FileRegistry {
         if record.station != station || record.fence != fence {
             return Err(SessionError::Stale);
         }
-        if record.status == SessionStatus::Ended {
+        if record.status.is_closed() {
             return Err(SessionError::Ended);
         }
         if let Some(ttl) = renew {
@@ -455,6 +587,21 @@ impl FileRegistry {
         }
         if let Some(provider) = update.provider_session_id {
             record.provider_session_id = Some(provider);
+        }
+        if let Some(launch) = update.launch {
+            record.launch = Some(launch);
+        }
+        if let Some(recent) = update.recent {
+            let skip = recent.len().saturating_sub(MAX_RECENT_EVENTS);
+            record.recent = recent
+                .into_iter()
+                .skip(skip)
+                .map(|line| line.chars().take(MAX_RECENT_EVENT_CHARS).collect())
+                .collect();
+        }
+        if let Some((checkpoint, at)) = update.checkpoint {
+            record.checkpoint = Some(checkpoint);
+            record.checkpointed_at = Some(at);
         }
         for exposure in update.exposure {
             if record.exposure.len() < MAX_EXPOSURES_PER_SESSION
@@ -475,6 +622,58 @@ impl FileRegistry {
         }
         write_session(&path, &record)?;
         Ok(record)
+    }
+
+    /// Marks a Session whose holder stopped renewing its lease as lost, giving the reason.
+    ///
+    /// The fencing token moves on, so the holder's writes are refused if it comes back.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound`, `Ended` for a closed Session, `HeldBy` while its lease is live, or `Io`.
+    pub fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError> {
+        self.lose_session_at(id, reason, unix_time()?)
+    }
+
+    pub(crate) fn lose_session_at(
+        &self,
+        id: &str,
+        reason: &str,
+        now: f64,
+    ) -> Result<SessionRecord, SessionError> {
+        validate_session_id(id)?;
+        let _lock = registry_lock(&self.root)?;
+        let path = self.session_path(id);
+        let mut record = read_session(&path)?.ok_or(SessionError::NotFound)?;
+        if record.status.is_closed() {
+            return Err(SessionError::Ended);
+        }
+        if record.leased_at(now) {
+            return Err(SessionError::HeldBy(record.station));
+        }
+        record.status = SessionStatus::Lost;
+        record.parked_until = None;
+        record.lost = Some(reason.chars().take(MAX_RECENT_EVENT_CHARS).collect());
+        record.fence = self.headquarters_term()?.max(record.fence + 1);
+        write_session(&path, &record)?;
+        Ok(record)
+    }
+
+    /// The latest attempt at a Mission: the Session record with the highest attempt number.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Session records cannot be read.
+    pub fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>> {
+        Ok(self
+            .sessions()?
+            .into_iter()
+            .filter(|record| record.mission_id == mission_id)
+            .max_by(|left, right| {
+                left.attempt
+                    .cmp(&right.attempt)
+                    .then(left.lease_expires.total_cmp(&right.lease_expires))
+            }))
     }
 }
 
@@ -697,6 +896,127 @@ mod tests {
             ),
             Err(SessionError::Ended)
         ));
+    }
+
+    #[test]
+    fn only_a_lapsed_session_is_lost_and_its_holder_is_fenced_out() {
+        let (_root, registry) = registry();
+        let opened = registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        assert!(matches!(
+            registry.lose_session_at("s-1", "gone dark", NOW + 30.0),
+            Err(SessionError::HeldBy(holder)) if holder == "station-a"
+        ));
+
+        let lost = registry
+            .lose_session_at("s-1", "Station station-a went dark", NOW + 120.0)
+            .unwrap();
+        assert_eq!(lost.status, SessionStatus::Lost);
+        assert_eq!(lost.lost.as_deref(), Some("Station station-a went dark"));
+        assert!(lost.fence > opened.fence);
+        assert!(!lost.leased_at(NOW));
+
+        // The old holder is refused, and nobody can take or lose it again.
+        assert!(matches!(
+            registry.write_fenced(
+                "s-1",
+                "station-a",
+                opened.fence,
+                NOW + 130.0,
+                Some(TTL),
+                SessionUpdate::default()
+            ),
+            Err(SessionError::Stale)
+        ));
+        assert!(matches!(
+            registry.take_session_at("s-1", "station-b", TTL, NOW + 130.0),
+            Err(SessionError::Ended)
+        ));
+        assert!(matches!(
+            registry.lose_session_at("s-1", "again", NOW + 130.0),
+            Err(SessionError::Ended)
+        ));
+    }
+
+    #[test]
+    fn the_holder_records_launch_recent_events_and_checkpoints_within_bounds() {
+        let (_root, registry) = registry();
+        let launch = SessionLaunch::new("claude", "pty", "/srv/work")
+            .with_model(Some("sonnet".to_owned()), None)
+            .with_mode(ExecutionMode::Field)
+            .with_runner("key-1");
+        let opened = registry
+            .open_session_at(new_session().with_launch(launch.clone()), TTL, NOW)
+            .unwrap();
+        assert_eq!(opened.launch.as_ref(), Some(&launch));
+
+        let many = (0..MAX_RECENT_EVENTS + 5)
+            .map(|index| format!("event {index} {}", "x".repeat(MAX_RECENT_EVENT_CHARS)))
+            .collect::<Vec<_>>();
+        let checkpoint = SafeHouseCheckpoint {
+            remote: "origin".to_owned(),
+            branch: "mission-1".to_owned(),
+            commit: "c0ffee".to_owned(),
+            base: Some("base".to_owned()),
+        };
+        let written = registry
+            .write_fenced(
+                "s-1",
+                "station-a",
+                opened.fence,
+                NOW,
+                None,
+                SessionUpdate::default()
+                    .recent(many)
+                    .checkpoint(checkpoint.clone(), NOW + 1.0),
+            )
+            .unwrap();
+        assert_eq!(written.recent.len(), MAX_RECENT_EVENTS);
+        assert!(written.recent[0].starts_with("event 5 "));
+        assert!(
+            written
+                .recent
+                .iter()
+                .all(|line| line.chars().count() == MAX_RECENT_EVENT_CHARS)
+        );
+        assert_eq!(written.checkpoint, Some(checkpoint));
+        assert_eq!(written.checkpointed_at, Some(NOW + 1.0));
+        assert_eq!(registry.session("s-1").unwrap().unwrap(), written);
+    }
+
+    #[test]
+    fn the_latest_session_is_the_highest_attempt() {
+        let (_root, registry) = registry();
+        assert_eq!(registry.latest_session("mission-1").unwrap(), None);
+        registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        registry
+            .open_session_at(
+                NewSession::new("s-0", "mission-1", "station-b")
+                    .with_attempt(2, Some("s-1".to_owned())),
+                TTL,
+                NOW,
+            )
+            .unwrap();
+        registry
+            .open_session_at(NewSession::new("s-9", "mission-2", "station-b"), TTL, NOW)
+            .unwrap();
+        let latest = registry.latest_session("mission-1").unwrap().unwrap();
+        assert_eq!((latest.session_id.as_str(), latest.attempt), ("s-0", 2));
+    }
+
+    #[test]
+    fn records_written_before_adoption_still_load() {
+        let (_root, registry) = registry();
+        registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        let path = registry.session_path("s-1");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        for key in ["launch", "recent", "checkpoint", "checkpointed_at", "lost"] {
+            object.remove(key);
+        }
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let record = registry.session("s-1").unwrap().unwrap();
+        assert_eq!((record.launch, record.recent.len()), (None, 0));
     }
 
     #[test]

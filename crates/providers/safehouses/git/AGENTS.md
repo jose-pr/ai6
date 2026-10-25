@@ -26,6 +26,11 @@ runs with `GIT_TERMINAL_PROMPT=0`.
 - **In place** (`isolate = false`): the session works in `source`. The base is the commit
   checked out now, or `report.base` when re-attaching (verified as an ancestor of `HEAD`).
   There is no branch.
+- **From a checkpoint** (`checkpoint = Some(saved)` with `isolate = true` and no `reopen`):
+  `git fetch <saved.remote> refs/heads/<saved.branch>` in `source`, then a new worktree on a
+  new branch named `saved.branch` at `saved.commit` (or the fetched tip when that commit is
+  gone). The base is `saved.base` when it is an ancestor of the commit, else the commit
+  itself. A local branch of that name already in `source` is refused by Git.
 
 ## Session behaviour
 
@@ -36,6 +41,13 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   with its branch (`kept = false`); otherwise it is kept and the report lists
   `"<short id> <subject>"` per commit. An in-place session is never removed
   (`kept = true`). A path that has disappeared reports `kept = false`.
+- `checkpoint(CheckpointSpec)`: builds a tree of the worktree including uncommitted and
+  untracked (not ignored) files in a private index, commits it on top of `HEAD` with
+  `spec.message` (author and committer `spec.author_*` when both are set, else Git's
+  configured identity), and `git push --force <remote> <commit>:refs/heads/<branch>`. With
+  nothing uncommitted the commit is `HEAD` itself. The worktree, its index and `HEAD` are
+  untouched. Answers the remote, branch, commit and base. An in-place session has no branch
+  and is refused.
 
 ## Gotchas
 

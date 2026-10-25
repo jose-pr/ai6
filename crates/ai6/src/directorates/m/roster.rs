@@ -133,6 +133,8 @@ pub struct Operation {
     pub on_limit: OnLimit,
     /// Seconds to park when a limit reports no reset time.
     pub limit_fallback_secs: u64,
+    /// Response when a Session is lost with its Station and no other Station can adopt it.
+    pub on_lost: OnLost,
     /// Spending limits for this Operation's Missions; none is set unless configured.
     pub budget: Budget,
     /// What a Session may do once it has read untrusted input; strict unless configured.
@@ -162,6 +164,28 @@ pub struct Workspace {
     pub branch: String,
     /// Whether each Mission gets its own copy. `false` works in the source in place.
     pub isolate: bool,
+    /// The Git remote, by name or URL, a Mission's safe house is checkpointed to, so a
+    /// later attempt on another Station starts from its work. `None` (the default) pushes
+    /// nothing.
+    pub checkpoint_remote: Option<String>,
+    /// Seconds between checkpoints while a Session runs.
+    pub checkpoint_secs: u64,
+}
+
+/// Seconds between safe-house checkpoints when an Operation does not say.
+pub const DEFAULT_CHECKPOINT_SECS: u64 = 300;
+
+/// What happens to a Mission whose Session is lost with its Station (`on_lost`).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnLost {
+    /// Try again as a new attempt on another eligible Station, with a hand-off brief, until
+    /// the Registry's attempt limit.
+    #[default]
+    Retry,
+    /// File the Mission as failed.
+    Fail,
 }
 
 impl Operation {
@@ -505,6 +529,7 @@ struct OperationDefinition {
     on_blown: String,
     on_limit: OnLimit,
     limit_fallback_secs: Option<u64>,
+    on_lost: OnLost,
     budget: BudgetDefinition,
     exposure: ExposureDefinition,
     quarantine: QuarantineDefinition,
@@ -521,6 +546,8 @@ struct WorkspaceDefinition {
     base: String,
     branch: String,
     isolate: bool,
+    checkpoint_remote: Option<String>,
+    checkpoint_secs: Option<u64>,
 }
 
 impl Default for WorkspaceDefinition {
@@ -531,6 +558,8 @@ impl Default for WorkspaceDefinition {
             base: String::new(),
             branch: String::new(),
             isolate: true,
+            checkpoint_remote: None,
+            checkpoint_secs: None,
         }
     }
 }
@@ -605,6 +634,11 @@ impl OperationDefinition {
                     self.workspace.branch
                 },
                 isolate: self.workspace.isolate,
+                checkpoint_remote: self.workspace.checkpoint_remote,
+                checkpoint_secs: self
+                    .workspace
+                    .checkpoint_secs
+                    .unwrap_or(DEFAULT_CHECKPOINT_SECS),
             },
             station_labels: self.station_labels,
             stations: self.stations,
@@ -623,6 +657,7 @@ impl OperationDefinition {
             limit_fallback_secs: self
                 .limit_fallback_secs
                 .unwrap_or(DEFAULT_LIMIT_FALLBACK_SECS),
+            on_lost: self.on_lost,
             budget,
             exposure,
             quarantine,
@@ -683,6 +718,20 @@ impl OperationDefinition {
         if !matches!(operation.on_blown.as_str(), "flag" | "fail") {
             return Err(error(format!(
                 "{}: Operation {:?}: on_blown must be flag or fail",
+                source.display(),
+                operation.id
+            )));
+        }
+        if operation.workspace.checkpoint_secs == 0
+            || operation
+                .workspace
+                .checkpoint_remote
+                .as_deref()
+                .is_some_and(|remote| remote.trim().is_empty())
+        {
+            return Err(error(format!(
+                "{}: Operation {:?}: workspace.checkpoint_secs must be greater than zero and \
+                 workspace.checkpoint_remote must not be empty",
                 source.display(),
                 operation.id
             )));
@@ -1153,6 +1202,33 @@ sources = {{ jira = \"GUA\" }}\n",
         assert_eq!(backup.limit_fallback_secs, 90);
 
         for invalid in ["on_limit = \"retry\"", "limit_fallback_secs = 0"] {
+            directory.write("operations.toml", &format!("[operation.C]\n{invalid}\n"));
+            assert!(Roster::load(&directory.0).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_lost_session_is_retried_and_checkpoints_push_nothing_unless_configured() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "operations.toml",
+            "[operation.A]\n[operation.B]\non_lost = \"fail\"\nworkspace = { checkpoint_remote = \"origin\", checkpoint_secs = 60 }\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        let defaults = roster.operation("A").unwrap();
+        assert_eq!(defaults.on_lost, OnLost::Retry);
+        assert_eq!(defaults.workspace.checkpoint_remote, None);
+        assert_eq!(defaults.workspace.checkpoint_secs, DEFAULT_CHECKPOINT_SECS);
+        let set = roster.operation("B").unwrap();
+        assert_eq!(set.on_lost, OnLost::Fail);
+        assert_eq!(set.workspace.checkpoint_remote.as_deref(), Some("origin"));
+        assert_eq!(set.workspace.checkpoint_secs, 60);
+
+        for invalid in [
+            "on_lost = \"ignore\"",
+            "workspace = { checkpoint_secs = 0 }",
+            "workspace = { checkpoint_remote = \" \" }",
+        ] {
             directory.write("operations.toml", &format!("[operation.C]\n{invalid}\n"));
             assert!(Roster::load(&directory.0).is_err(), "{invalid}");
         }

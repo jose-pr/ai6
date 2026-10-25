@@ -13,7 +13,7 @@ ai6::guatiao::providers!(Git);
 mod worktree;
 
 use ai6::directorates::q::safehouse::{
-    ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseSession, SafeHouseSpec,
+    ChangeLog, CheckpointSpec, SafeHouseInfo, SafeHouseProvider, SafeHouseSession, SafeHouseSpec,
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status, ToValue, Value};
@@ -66,6 +66,16 @@ impl SafeHouseSession for GitSafeHouse {
             .finish()
             .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
         value(&report)
+    }
+
+    fn checkpoint(&self, spec: &Value) -> Result<Value, ProviderError> {
+        let spec = CheckpointSpec::from_value(spec)
+            .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
+        let saved = self
+            .0
+            .checkpoint(&spec)
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
+        value(&saved)
     }
 }
 

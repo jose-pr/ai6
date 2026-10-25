@@ -7,6 +7,7 @@ mod controls;
 #[cfg(feature = "cables-mcp")]
 mod green_ink;
 mod medical;
+mod recovery;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
 
@@ -44,7 +45,7 @@ use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::medical::quarantine::IncidentKind;
 use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
-use crate::directorates::q::safehouse::{SafeHouseReport, SafeHouseSpec};
+use crate::directorates::q::safehouse::{SafeHouseCheckpoint, SafeHouseReport, SafeHouseSpec};
 use crate::directorates::q::terminal::{Terminal, TerminalBridge};
 use crate::directorates::q::transport::TransportClient;
 use crate::directorates::registry::cables::{
@@ -1006,6 +1007,7 @@ async fn scheduler_loop(state: DaemonState) {
             publish_station_check_in(&state);
             next_station_check_in = Instant::now() + STATION_CHECK_IN_INTERVAL;
             renew_session_leases(&state);
+            recovery::checkpoint_due(&state);
         }
         medical::enforce_quarantines(&state);
         #[cfg(feature = "cables-mcp")]
@@ -1041,8 +1043,10 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
             .unwrap_or_default();
     if is_headquarters && let Ok(expired) = state.intake.expired() {
         for lease in expired {
-            if lease.station() != station {
-                let _ = state.intake.recover(&lease, INTAKE_MAX_ATTEMPTS, station);
+            if lease.station() != station
+                && let Some(max_attempts) = recovery::extract(state, &lease).max_attempts()
+            {
+                let _ = state.intake.recover(&lease, max_attempts, station);
             }
         }
     }
@@ -1051,6 +1055,10 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         return is_headquarters;
     };
     for lease in leases.iter().filter(|lease| lease.station() == station) {
+        if let recovery::Adoption::Pending = recovery::adopt(state, lease) {
+            let _ = state.intake.renew(lease.key(), station, DEFAULT_LEASE);
+            continue;
+        }
         if let Err(error) = ensure_leased_mission(state, lease) {
             let _ = finish_intake_claim(
                 state,
@@ -2677,6 +2685,7 @@ fn resolve_working_area(
     requested: Option<&str>,
     state_root: Option<&Path>,
     mission: &Mission,
+    checkpoint: Option<SafeHouseCheckpoint>,
 ) -> Result<WorkingArea, String> {
     let requested = requested.filter(|path| !path.trim().is_empty());
     let Some(operation_id) = operation_id else {
@@ -2736,6 +2745,7 @@ fn resolve_working_area(
         isolate,
         // A later attempt continues in the safe house the earlier one left.
         mission.safe_house.clone().filter(|report| report.kept),
+        checkpoint,
     )?;
     let path = match safe_house.as_ref().filter(|house| house.is_isolated()) {
         Some(house) => house.path().to_string_lossy().into_owned(),
@@ -2745,7 +2755,9 @@ fn resolve_working_area(
 }
 
 /// Opens an Operation's safe house through its provider; `None` when it has no provider.
-/// `reopen` re-attaches to a safe house an earlier run left behind.
+/// `reopen` re-attaches to a safe house an earlier run left behind on this Station;
+/// `checkpoint` starts from the work a lost attempt saved elsewhere.
+#[allow(clippy::too_many_arguments)]
 fn open_safe_house(
     plugins: &plugins::Plugins,
     operation: &roster::Operation,
@@ -2754,6 +2766,7 @@ fn open_safe_house(
     state_root: Option<&Path>,
     isolate: bool,
     reopen: Option<SafeHouseReport>,
+    checkpoint: Option<SafeHouseCheckpoint>,
 ) -> Result<Option<SafeHouse>, String> {
     let Some(provider_id) = operation.safe_house_provider() else {
         return Ok(None);
@@ -2780,6 +2793,8 @@ fn open_safe_house(
         branch: operation.workspace.branch.clone(),
         isolate,
         state_root: root.to_string_lossy().into_owned(),
+        // Only a new safe house starts from a checkpoint.
+        checkpoint: checkpoint.filter(|_| reopen.is_none() && isolate),
         reopen,
     };
     SafeHouse::open(provider.as_ref(), &spec)
@@ -2976,6 +2991,17 @@ async fn start_mission(
     let area_mission = mission.clone();
     let remote_hands = plan.mode == ExecutionMode::RemoteHands;
     let (area_theater, area_root) = (theater_id.clone(), plan.root.clone());
+    // An earlier attempt another Station recorded, when this Station holds none of its own.
+    let earlier = match session_hold(&state, &mission_id) {
+        Some(_) => None,
+        None => recovery::predecessor(&state, &mission.mission_id),
+    };
+    // A lost attempt's checkpoint, when there is no safe house here to continue in.
+    let checkpoint = earlier
+        .as_ref()
+        .filter(|record| record.status == SessionStatus::Lost && mission.safe_house.is_none())
+        .and_then(|record| record.checkpoint.clone());
+    let area_checkpoint = checkpoint.clone();
     let area = tokio::task::spawn_blocking(move || {
         if remote_hands {
             remote_hands_area(requested_directory.as_deref(), &area_mission)
@@ -2993,6 +3019,7 @@ async fn start_mission(
                 requested_directory.as_deref(),
                 None,
                 &area_mission,
+                area_checkpoint,
             )
         }
     })
@@ -3019,6 +3046,17 @@ async fn start_mission(
              Its work is in your working directory: inspect it, then continue the task."
                 .to_owned(),
         );
+    } else if let Some(lost) = earlier
+        .as_ref()
+        .filter(|record| record.status == SessionStatus::Lost)
+    {
+        // Only a provider with history starts from a checkpoint.
+        let from_checkpoint = checkpoint.is_some()
+            && area
+                .safe_house
+                .as_ref()
+                .is_some_and(|house| house.is_isolated() && house.supports_history());
+        initial_context.push(recovery::hand_off(lost, from_checkpoint));
     }
     initial_context.extend(request.initial_context);
     let mut environment = agent.env.clone();
@@ -3286,7 +3324,13 @@ async fn start_mission(
 
     let (attempt, predecessor) = previous_hold
         .as_ref()
-        .map_or((1, None), |hold| (hold.attempt + 1, Some(hold.id.clone())));
+        .map(|hold| (hold.attempt, hold.id.clone()))
+        .or_else(|| {
+            earlier
+                .as_ref()
+                .map(|record| (record.attempt, record.session_id.clone()))
+        })
+        .map_or((1, None), |(attempt, id)| (attempt + 1, Some(id)));
     let mut new_session = NewSession::new(
         uuid::Uuid::new_v4().to_string(),
         mission_id.as_str(),
@@ -3297,6 +3341,16 @@ async fn start_mission(
     .with_exposure(exposure.exposures());
     if let Some(provider) = &session_id {
         new_session = new_session.with_provider_session(provider.as_str());
+    }
+    // Read back after the runner reported its terminal, so another Station re-attaches to
+    // exactly what runs.
+    if let Some(manifest) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.operation(&mission_id))
+    {
+        new_session = new_session.with_launch(recovery::launch_of(&manifest));
     }
     let hold = match state.intake.open_session(new_session, DEFAULT_LEASE) {
         Ok(record) => SessionHold {
@@ -3512,6 +3566,7 @@ async fn resume_mission(
                                     None,
                                     isolate,
                                     Some(report),
+                                    None,
                                 )
                             })
                             .await
@@ -3858,6 +3913,7 @@ async fn resume_mission(
         .transition(&mission_id, MissionState::Working)
         .map_err(mission_error)?;
     sync_session_record(&state, &mission_id);
+    recovery::record_launch(&state, &mission_id);
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = &telemetry {
         telemetry.publish_lifecycle("working");
@@ -4067,6 +4123,7 @@ fn spawn_event_pump_with_monitor(
             .unwrap_or_default();
         let mut announced = exposure.exposures().len();
         medical::persist_exposure(&state, &mission_id, &exposure.exposures());
+        let mut notes = recovery::Notes::default();
         loop {
             medical::sync_exposure(&state, &mission_id, &exposure, &mut announced);
             if state.stopping.load(Ordering::Acquire) {
@@ -4094,6 +4151,8 @@ fn spawn_event_pump_with_monitor(
                 Ok((Some(event), session_id)) => {
                     monitor.record_activity();
                     attach_observed_session(&state, &mission_id, &session, session_id);
+                    notes.record(&event);
+                    notes.write_if_due(&state, &mission_id);
                     medical::expose_by_tools(&state, &exposure, &event);
                     medical::sync_exposure(&state, &mission_id, &exposure, &mut announced);
                     if let Some(reported) = &event.usage
@@ -4133,6 +4192,7 @@ fn spawn_event_pump_with_monitor(
                 }
                 Ok((None, session_id)) => {
                     attach_observed_session(&state, &mission_id, &session, session_id);
+                    notes.write_if_due(&state, &mission_id);
                 }
                 Err(error) => {
                     let event = AgentEvent {
@@ -5615,10 +5675,18 @@ mod tests {
     #[provider(SafeHouseProvider, id = "mock-safehouse", name = "Mock Safe House", crate = crate::guatiao)]
     struct MockSafeHouseProvider;
 
+    /// Every Mission a mock safe house was opened for, with the checkpoint it started from.
+    pub(super) static SAFE_HOUSE_OPENS: Mutex<Vec<(String, Option<SafeHouseCheckpoint>)>> =
+        Mutex::new(Vec::new());
+
     impl SafeHouseProvider for MockSafeHouseProvider {
         fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
             let spec = SafeHouseSpec::from_value(spec)
                 .map_err(|error| test_provider_error(&error.to_string()))?;
+            SAFE_HOUSE_OPENS
+                .lock()
+                .unwrap()
+                .push((spec.mission_id.clone(), spec.checkpoint.clone()));
             let path = Path::new(&spec.state_root)
                 .join("safe-houses")
                 .join(&spec.mission_id);
@@ -5688,6 +5756,20 @@ mod tests {
                 base: self.info.base.clone(),
                 kept: false,
                 changes: Vec::new(),
+            }
+            .to_value()
+            .map_err(|error| test_provider_error(&error.to_string()))
+        }
+
+        fn checkpoint(&self, spec: &Value) -> Result<Value, ProviderError> {
+            let spec = crate::directorates::q::safehouse::CheckpointSpec::from_value(spec)
+                .map_err(|error| test_provider_error(&error.to_string()))?;
+            let branch = self.info.branch.clone().unwrap_or_default();
+            SafeHouseCheckpoint {
+                remote: spec.remote,
+                commit: format!("checkpoint-of-{branch}"),
+                branch,
+                base: self.info.base.clone(),
             }
             .to_value()
             .map_err(|error| test_provider_error(&error.to_string()))
@@ -6142,10 +6224,14 @@ mod tests {
         let provider_ids: Vec<_> = done.session_ids.iter().map(SessionId::as_str).collect();
         assert_eq!(provider_ids, ["provider-session-limited"]);
         assert_eq!(session_hold(&state, "mission-1").unwrap().id, hold.id);
-        assert_eq!(
-            state.intake.session(&hold.id).unwrap().unwrap().status,
-            SessionStatus::Ended
-        );
+        // The record is closed just after the Mission book says Done.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state.intake.session(&hold.id).unwrap().unwrap().status != SessionStatus::Ended {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the Session record is closed");
     }
 
     #[tokio::test]
@@ -7560,6 +7646,7 @@ mod tests {
             None,
             Some(&root.join("state")),
             &mission,
+            None,
         )
         .unwrap();
         let house = area.safe_house.unwrap();
@@ -7584,6 +7671,7 @@ mod tests {
             Some(checkout.to_str().unwrap()),
             Some(&root.join("state")),
             &mission,
+            None,
         );
         assert!(refused.is_err(), "isolated workdirs are allocated by AI6");
         let _ = fs::remove_dir_all(root);
@@ -7609,8 +7697,16 @@ mod tests {
                 None,
             )
             .unwrap();
-        let area = resolve_working_area(&roster, &test_plugins(), Some("G"), None, None, &mission)
-            .unwrap();
+        let area = resolve_working_area(
+            &roster,
+            &test_plugins(),
+            Some("G"),
+            None,
+            None,
+            &mission,
+            None,
+        )
+        .unwrap();
         assert_eq!(area.path, checkout.to_string_lossy());
         assert!(area.safe_house.is_none());
         assert!(
@@ -7643,8 +7739,16 @@ mod tests {
                 None,
             )
             .unwrap();
-        let area = resolve_working_area(&roster, &test_plugins(), Some("G"), None, None, &mission)
-            .unwrap();
+        let area = resolve_working_area(
+            &roster,
+            &test_plugins(),
+            Some("G"),
+            None,
+            None,
+            &mission,
+            None,
+        )
+        .unwrap();
         let house = area.safe_house.unwrap();
         assert_eq!(area.path, checkout.to_string_lossy());
         assert!(!house.is_isolated() && !house.supports_history());
@@ -7711,6 +7815,7 @@ mod tests {
             isolate: false,
             state_root: ".".to_owned(),
             reopen: None,
+            checkpoint: None,
         };
         let house = SafeHouse::open(&MockPlainProvider, &spec).unwrap();
         state.sessions.lock().unwrap().insert(
@@ -8213,7 +8318,7 @@ mod tests {
     }
 
     /// What the Station handed the recording handler, one entry per start or resume.
-    static RECORDED_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new());
+    pub(super) static RECORDED_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new());
     pub(super) static RECORDED_RESUMES: Mutex<Vec<AgentResume>> = Mutex::new(Vec::new());
     /// Every message a mock Session was sent, with its provider Session ID.
     pub(super) static RECORDED_MESSAGES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
@@ -8474,8 +8579,8 @@ mod tests {
     }
 
     /// Ticks the drip harness emits before it completes, one every [`DRIP_INTERVAL`].
-    const DRIP_TICKS: u32 = 60;
-    const DRIP_INTERVAL: Duration = Duration::from_millis(50);
+    pub(super) const DRIP_TICKS: u32 = 60;
+    pub(super) const DRIP_INTERVAL: Duration = Duration::from_millis(50);
 
     /// A harness that says `tick N` for N in 1 through [`DRIP_TICKS`] at a steady pace and
     /// then completes, whoever is listening.
@@ -8569,7 +8674,7 @@ mod tests {
     }
 
     /// Serves a runner with the mock providers until the returned sender is dropped.
-    async fn start_test_runner(state_dir: &Path) -> tokio::sync::oneshot::Sender<()> {
+    pub(super) async fn start_test_runner(state_dir: &Path) -> tokio::sync::oneshot::Sender<()> {
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let config = crate::station::runner::RunnerConfig::new(state_dir);
         tokio::spawn(crate::station::runner::serve_with_plugins(
@@ -8624,7 +8729,7 @@ mod tests {
     }
 
     /// The tick numbers among `events`, and whether the Session completed.
-    fn ticks(events: &[AgentEvent]) -> (Vec<u32>, bool) {
+    pub(super) fn ticks(events: &[AgentEvent]) -> (Vec<u32>, bool) {
         let ticks = events
             .iter()
             .filter_map(|event| event.text.as_deref()?.strip_prefix("tick ")?.parse().ok())

@@ -140,6 +140,17 @@ impl Cover {
         lines.join("\n")
     }
 
+    /// The message of a safe-house checkpoint commit: it names no Agent or model, and ends
+    /// with the cover's footer when it has one, so the commit keeps the cover.
+    pub fn checkpoint_message(&self) -> String {
+        let subject = "Checkpoint of work in progress";
+        if self.footer.is_empty() {
+            subject.to_owned()
+        } else {
+            format!("{subject}\n\n{}", self.footer.trim_end())
+        }
+    }
+
     /// Checks commit identity and message content against this cover.
     pub fn check_commits(
         &self,
@@ -456,6 +467,24 @@ mod tests {
             author: author.to_owned(),
             committer: author.to_owned(),
             message: message.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_checkpoint_commit_keeps_every_cover() {
+        let covers = Covers::parse_toml(
+            "[cover.signed]\ndescription = \"x\"\nfooter = \"Filed by Field Station.\"\n",
+        )
+        .unwrap();
+        let author = "Field Station <station@example.invalid>";
+        for name in covers.names() {
+            let cover = covers.get(name).unwrap();
+            let checkpoint = commit(&cover.checkpoint_message(), author);
+            assert_eq!(
+                cover.check_commits(&[checkpoint], Some(&identity()), "model-x"),
+                Vec::new(),
+                "{name}"
+            );
         }
     }
 

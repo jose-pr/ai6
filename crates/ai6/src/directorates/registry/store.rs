@@ -2027,6 +2027,57 @@ impl FileRegistry {
         Ok(Some(LeaseRecovery::Failed))
     }
 
+    /// Gives an unchanged expired lease to another Station, which carries on the same claim:
+    /// the brief stays claimed and the attempt count is unchanged. `meta` entries are added
+    /// to the lease's metadata.
+    ///
+    /// Returns the new lease, or `None` for a changed, renewed or unexpired lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid lease settings or Registry I/O failures.
+    pub fn hand_over(
+        &self,
+        lease: &Lease,
+        station: &str,
+        duration: Duration,
+        meta: BTreeMap<String, serde_json::Value>,
+    ) -> io::Result<Option<Lease>> {
+        validate_registry_key(lease.key())?;
+        if station.trim().is_empty() || duration.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a Registry lease needs a station and positive duration",
+            ));
+        }
+        let _registry_lock = registry_lock(&self.root)?;
+        let now = unix_time()?;
+        if self.lease(lease.key())?.as_ref() != Some(lease)
+            || lease.expires >= now
+            || !self
+                .root
+                .join("claimed")
+                .join(format!("{}.json", lease.key()))
+                .is_file()
+        {
+            return Ok(None);
+        }
+        let mut handed = lease.clone();
+        handed.station = station.to_owned();
+        handed.expires = now + duration.as_secs_f64();
+        handed.meta.extend(meta);
+        let bytes =
+            serde_json::to_vec(&LeaseRecord::from_lease(&handed)).map_err(io::Error::other)?;
+        write_atomic(
+            &self
+                .root
+                .join("leases")
+                .join(format!("{}.json", lease.key())),
+            &bytes,
+        )?;
+        Ok(Some(handed))
+    }
+
     /// Files an outcome for a brief, refusing to finish a claim held by another station.
     ///
     /// The outcome must be a JSON object. When `station` is provided, a missing or differently
@@ -3146,6 +3197,64 @@ mod tests {
             }
             assert!(registry.lease(&key).unwrap().is_none());
         }
+    }
+
+    #[test]
+    fn an_expired_lease_is_handed_over_once_with_its_claim_and_attempt() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
+        let brief: Brief = serde_json::from_str(r#"{"title":"Inspect","id":"hand-over"}"#).unwrap();
+        registry.submit_brief(&brief).unwrap();
+        let meta = BTreeMap::from([("mission_id".to_owned(), serde_json::json!("m-1"))]);
+        let lease = registry
+            .claim_with_lease(None, "station-a", DEFAULT_LEASE, meta)
+            .unwrap()
+            .unwrap();
+        let extra = BTreeMap::from([("adopt".to_owned(), serde_json::json!("s-1"))]);
+
+        // A live lease stays with its holder.
+        assert_eq!(
+            registry
+                .hand_over(&lease, "station-b", DEFAULT_LEASE, extra.clone())
+                .unwrap(),
+            None
+        );
+
+        // The holder's last renewal runs out.
+        assert!(
+            registry
+                .renew(lease.key(), "station-a", Duration::from_nanos(1))
+                .unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        let expired = registry.lease(lease.key()).unwrap().unwrap();
+        let handed = registry
+            .hand_over(&expired, "station-b", DEFAULT_LEASE, extra.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(handed.station(), "station-b");
+        assert_eq!(handed.attempt(), lease.attempt());
+        assert_eq!(handed.meta()["mission_id"], "m-1");
+        assert_eq!(handed.meta()["adopt"], "s-1");
+        let stored = registry.lease(lease.key()).unwrap().unwrap();
+        assert_eq!(
+            (stored.station(), stored.attempt(), stored.meta()),
+            (handed.station(), handed.attempt(), handed.meta())
+        );
+        assert!(registry.read_claimed(lease.key()).unwrap().is_some());
+
+        // The old view of the lease no longer matches, so it is not handed over twice.
+        assert_eq!(
+            registry
+                .hand_over(&expired, "station-c", DEFAULT_LEASE, extra)
+                .unwrap(),
+            None
+        );
+        assert!(
+            registry
+                .renew(lease.key(), "station-b", DEFAULT_LEASE)
+                .unwrap()
+        );
     }
 
     #[test]
