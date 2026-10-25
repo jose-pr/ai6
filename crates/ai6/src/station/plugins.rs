@@ -339,11 +339,24 @@ where
                     }
                 }
             }),
-        None => offer
-            .boxed()
-            .ok_or_else(|| PluginBuildError::ConfigurationRequired {
-                provider: provider.to_owned(),
-            }),
+        None => {
+            if let Some(instance) = offer.boxed() {
+                return Ok(instance);
+            }
+            // A provider whose settings all have defaults is built with them.
+            let defaults =
+                guatiao::ToValue::to_value(&std::collections::BTreeMap::<String, String>::new());
+            defaults
+                .ok()
+                .and_then(|defaults| {
+                    let offer = registry.offer::<K>(provider)?.ok()?;
+                    offer.instantiate(&defaults).ok()
+                })
+                .map(Box::<K>::from)
+                .ok_or_else(|| PluginBuildError::ConfigurationRequired {
+                    provider: provider.to_owned(),
+                })
+        }
     }
 }
 

@@ -16,3 +16,6 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 ai6 = { path = "../../../ai6", default-features = false }
 serde_json.workspace = true
+
+[dev-dependencies]
+ai6 = { path = "../../../ai6", features = ["daemon"] }
