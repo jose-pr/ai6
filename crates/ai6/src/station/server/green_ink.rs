@@ -529,10 +529,10 @@ mod tests {
     use crate::directorates::registry::approvals::{ClassAuthorization, Ruling};
 
     /// 007 runs on the recording mock, which reports its Session blocked at once and then stays
-    /// quiet; its Watchdog stalls a quiet Session after 1.5 seconds, long enough for a
-    /// loaded runner to make the tool call before it.
+    /// quiet; its Watchdog stalls a quiet Session after 5 seconds, long enough for a
+    /// loaded Windows runner to make the MCP tool call before it.
     const AGENTS: &str = "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
-                          [agent.007.limits]\nstall_timeout = 1.5\n\
+                          [agent.007.limits]\nstall_timeout = 5\n\
                           [agent.desk]\nhandler = \"mock-recorder\"\nclearance = \"desk\"\n";
 
     /// A Station with one queued Mission of a unique ID for Agent 007 of Operation G.
@@ -638,8 +638,8 @@ mod tests {
         let watchdog = state.sessions.lock().unwrap()[&mission_id].watchdog.clone();
         assert!(watchdog.is_paused());
 
-        // Twice the stall timeout passes: waiting for a person is not a stall.
-        tokio::time::sleep(Duration::from_millis(3_200)).await;
+        // More than the stall timeout passes: waiting for a person is not a stall.
+        tokio::time::sleep(Duration::from_millis(5_500)).await;
         assert_eq!(mission(&state, &mission_id).state, MissionState::Blocked);
         let pending = state.intake.pending_approvals("G", now(&state)).unwrap();
         assert_eq!(pending.len(), 1);
