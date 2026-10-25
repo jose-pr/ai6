@@ -104,6 +104,7 @@ pub ai6::directorates::m::cover::Disclosure::Hidden
 impl ai6::directorates::m::cover::Cover
 pub fn ai6::directorates::m::cover::Cover::briefing(&self, core::option::Option<&ai6::directorates::m::roster::CoverIdentity>, &str, &str) -> alloc::string::String
 pub fn ai6::directorates::m::cover::Cover::check_commits(&self, &[ai6::directorates::q::safehouse::Change], core::option::Option<&ai6::directorates::m::roster::CoverIdentity>, &str) -> alloc::vec::Vec<ai6::directorates::m::cover::CoverViolation>
+pub fn ai6::directorates::m::cover::Cover::checkpoint_message(&self) -> alloc::string::String
 pub fn ai6::directorates::m::cover::Cover::disclosure(&self) -> ai6::directorates::m::cover::Disclosure
 pub fn ai6::directorates::m::cover::Cover::name(&self) -> &str
 #[non_exhaustive] pub struct ai6::directorates::m::cover::CoverError(_)
@@ -317,7 +318,12 @@ impl ai6::directorates::m::placement::StationFacts
 pub fn ai6::directorates::m::placement::StationFacts::from_record(&ai6::directorates::registry::store::StationRecord, f64, core::time::Duration, usize) -> Self
 pub fn ai6::directorates::m::placement::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
 pub fn ai6::directorates::m::placement::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
+pub mod ai6::directorates::m::recovery
+pub fn ai6::directorates::m::recovery::adopter(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts], &ai6::directorates::registry::sessions::SessionRecord) -> core::result::Result<ai6::directorates::m::placement::PlacementChoice, alloc::string::String>
 pub mod ai6::directorates::m::roster
+#[non_exhaustive] pub enum ai6::directorates::m::roster::OnLost
+pub ai6::directorates::m::roster::OnLost::Fail
+pub ai6::directorates::m::roster::OnLost::Retry
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Agent
 pub ai6::directorates::m::roster::Agent::aliases: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Agent::budget: ai6::directorates::medical::usage::Budget
@@ -360,6 +366,7 @@ pub ai6::directorates::m::roster::Operation::max_concurrent: core::option::Optio
 pub ai6::directorates::m::roster::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::on_blown: alloc::string::String
 pub ai6::directorates::m::roster::Operation::on_limit: ai6::directorates::m::limits::OnLimit
+pub ai6::directorates::m::roster::Operation::on_lost: ai6::directorates::m::roster::OnLost
 pub ai6::directorates::m::roster::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::directorates::m::roster::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
 pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::string::String>
@@ -389,9 +396,12 @@ pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::For
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Workspace
 pub ai6::directorates::m::roster::Workspace::base: alloc::string::String
 pub ai6::directorates::m::roster::Workspace::branch: alloc::string::String
+pub ai6::directorates::m::roster::Workspace::checkpoint_remote: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::Workspace::checkpoint_secs: u64
 pub ai6::directorates::m::roster::Workspace::isolate: bool
 pub ai6::directorates::m::roster::Workspace::provider: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Workspace::source: core::option::Option<std::path::PathBuf>
+pub const ai6::directorates::m::roster::DEFAULT_CHECKPOINT_SECS: u64
 pub fn ai6::directorates::m::roster::config_dir() -> core::result::Result<std::path::PathBuf, ai6::directorates::m::roster::RosterError>
 pub mod ai6::directorates::m::theaters
 #[non_exhaustive] pub enum ai6::directorates::m::theaters::AgentMode
@@ -692,6 +702,16 @@ pub ai6::directorates::q::safehouse::Change::id: alloc::string::String
 pub ai6::directorates::q::safehouse::Change::message: alloc::string::String
 pub struct ai6::directorates::q::safehouse::ChangeLog
 pub ai6::directorates::q::safehouse::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
+pub struct ai6::directorates::q::safehouse::CheckpointSpec
+pub ai6::directorates::q::safehouse::CheckpointSpec::author_email: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::CheckpointSpec::author_name: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::CheckpointSpec::message: alloc::string::String
+pub ai6::directorates::q::safehouse::CheckpointSpec::remote: alloc::string::String
+pub struct ai6::directorates::q::safehouse::SafeHouseCheckpoint
+pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::base: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::branch: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::commit: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::remote: alloc::string::String
 pub struct ai6::directorates::q::safehouse::SafeHouseInfo
 pub ai6::directorates::q::safehouse::SafeHouseInfo::base: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::SafeHouseInfo::branch: core::option::Option<alloc::string::String>
@@ -707,6 +727,7 @@ pub ai6::directorates::q::safehouse::SafeHouseReport::path: alloc::string::Strin
 pub struct ai6::directorates::q::safehouse::SafeHouseSpec
 pub ai6::directorates::q::safehouse::SafeHouseSpec::base: alloc::string::String
 pub ai6::directorates::q::safehouse::SafeHouseSpec::branch: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseSpec::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
 pub ai6::directorates::q::safehouse::SafeHouseSpec::isolate: bool
 pub ai6::directorates::q::safehouse::SafeHouseSpec::mission_id: alloc::string::String
 pub ai6::directorates::q::safehouse::SafeHouseSpec::operation_id: alloc::string::String
@@ -723,6 +744,8 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub trait ai6::directorates::q::safehouse::SafeHouseSession: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::changes(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -731,6 +754,8 @@ pub fn ai6::directorates::q::safehouse::SafeHouseSession::into_object(self) -> g
 impl ai6::directorates::q::safehouse::SafeHouseSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -1364,23 +1389,45 @@ pub fn ai6::directorates::registry::sessions::SessionError::fmt(&self, &mut core
 #[non_exhaustive] pub enum ai6::directorates::registry::sessions::SessionStatus
 pub ai6::directorates::registry::sessions::SessionStatus::Active
 pub ai6::directorates::registry::sessions::SessionStatus::Ended
+pub ai6::directorates::registry::sessions::SessionStatus::Lost
 pub ai6::directorates::registry::sessions::SessionStatus::Parked
+impl ai6::directorates::registry::sessions::SessionStatus
+pub fn ai6::directorates::registry::sessions::SessionStatus::is_closed(self) -> bool
 pub struct ai6::directorates::registry::sessions::NewSession
 impl ai6::directorates::registry::sessions::NewSession
 pub fn ai6::directorates::registry::sessions::NewSession::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_attempt(self, u32, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionLaunch
+pub ai6::directorates::registry::sessions::SessionLaunch::effort: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionLaunch::handler: alloc::string::String
+pub ai6::directorates::registry::sessions::SessionLaunch::mode: ai6::directorates::m::placement::ExecutionMode
+pub ai6::directorates::registry::sessions::SessionLaunch::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionLaunch::runner: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionLaunch::terminal: alloc::string::String
+pub ai6::directorates::registry::sessions::SessionLaunch::working_directory: alloc::string::String
+impl ai6::directorates::registry::sessions::SessionLaunch
+pub fn ai6::directorates::registry::sessions::SessionLaunch::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionRecord
 pub ai6::directorates::registry::sessions::SessionRecord::attempt: u32
+pub ai6::directorates::registry::sessions::SessionRecord::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
+pub ai6::directorates::registry::sessions::SessionRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
 pub ai6::directorates::registry::sessions::SessionRecord::fence: u64
+pub ai6::directorates::registry::sessions::SessionRecord::launch: core::option::Option<ai6::directorates::registry::sessions::SessionLaunch>
 pub ai6::directorates::registry::sessions::SessionRecord::lease_expires: f64
+pub ai6::directorates::registry::sessions::SessionRecord::lost: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::mission_id: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionRecord::parked_until: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::predecessor: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionRecord::recent: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::session_id: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionRecord::station: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionRecord::status: ai6::directorates::registry::sessions::SessionStatus
@@ -1389,10 +1436,15 @@ impl ai6::directorates::registry::sessions::SessionRecord
 pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
 pub struct ai6::directorates::registry::sessions::SessionUpdate
 impl ai6::directorates::registry::sessions::SessionUpdate
+pub fn ai6::directorates::registry::sessions::SessionUpdate::checkpoint(self, ai6::directorates::q::safehouse::SafeHouseCheckpoint, f64) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::exposed(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::parked_until(self, f64) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::recent(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::directorates::registry::sessions::SessionStatus) -> Self
+pub const ai6::directorates::registry::sessions::MAX_RECENT_EVENTS: usize
+pub const ai6::directorates::registry::sessions::MAX_RECENT_EVENT_CHARS: usize
 pub mod ai6::directorates::registry::sleepers
 pub enum ai6::directorates::registry::sleepers::Fire
 pub ai6::directorates::registry::sleepers::Fire::AlreadyFired
@@ -1513,6 +1565,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str,
 pub fn ai6::directorates::registry::store::FileRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<std::path::PathBuf>>
 pub fn ai6::directorates::registry::store::FileRegistry::from_environment() -> core::io::error::Result<Self>
 pub fn ai6::directorates::registry::store::FileRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::HeadquartersLease>>
 pub fn ai6::directorates::registry::store::FileRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -1572,6 +1625,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> c
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -1832,6 +1887,7 @@ pub fn ai6::station::safehouse::SafeHouse::active_report(&self) -> ai6::director
 pub fn ai6::station::safehouse::SafeHouse::base(&self) -> core::option::Option<&str>
 pub fn ai6::station::safehouse::SafeHouse::branch(&self) -> core::option::Option<&str>
 pub fn ai6::station::safehouse::SafeHouse::changes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::safehouse::Change>, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::checkpoint(&self, &ai6::directorates::q::safehouse::CheckpointSpec) -> core::result::Result<ai6::directorates::q::safehouse::SafeHouseCheckpoint, ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::finish(&self) -> core::result::Result<ai6::directorates::q::safehouse::SafeHouseReport, ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::is_isolated(&self) -> bool
 pub fn ai6::station::safehouse::SafeHouse::open(&dyn ai6::directorates::q::safehouse::SafeHouseProvider, &ai6::directorates::q::safehouse::SafeHouseSpec) -> core::result::Result<Self, ai6::station::safehouse::SafeHouseError>
@@ -1980,6 +2036,9 @@ pub ai6::Ingest::Updated
 #[non_exhaustive] pub enum ai6::LeaseRecovery
 pub ai6::LeaseRecovery::Failed
 pub ai6::LeaseRecovery::Requeued
+#[non_exhaustive] pub enum ai6::OnLost
+pub ai6::OnLost::Fail
+pub ai6::OnLost::Retry
 #[non_exhaustive] pub enum ai6::QErrorKind
 pub ai6::QErrorKind::InvalidUtf8
 pub ai6::QErrorKind::Io
@@ -2036,7 +2095,10 @@ pub fn ai6::directorates::registry::sessions::SessionError::fmt(&self, &mut core
 #[non_exhaustive] pub enum ai6::SessionStatus
 pub ai6::SessionStatus::Active
 pub ai6::SessionStatus::Ended
+pub ai6::SessionStatus::Lost
 pub ai6::SessionStatus::Parked
+impl ai6::directorates::registry::sessions::SessionStatus
+pub fn ai6::directorates::registry::sessions::SessionStatus::is_closed(self) -> bool
 #[non_exhaustive] pub enum ai6::StationRole
 pub ai6::StationRole::Control
 pub ai6::StationRole::Execution
@@ -2365,6 +2427,11 @@ pub ai6::Change::id: alloc::string::String
 pub ai6::Change::message: alloc::string::String
 pub struct ai6::ChangeLog
 pub ai6::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
+pub struct ai6::CheckpointSpec
+pub ai6::CheckpointSpec::author_email: core::option::Option<alloc::string::String>
+pub ai6::CheckpointSpec::author_name: core::option::Option<alloc::string::String>
+pub ai6::CheckpointSpec::message: alloc::string::String
+pub ai6::CheckpointSpec::remote: alloc::string::String
 #[non_exhaustive] pub struct ai6::ClassAuthorization
 pub ai6::ClassAuthorization::agents: alloc::vec::Vec<alloc::string::String>
 pub ai6::ClassAuthorization::clearance_min: alloc::string::String
@@ -2457,6 +2524,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str,
 pub fn ai6::directorates::registry::store::FileRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<std::path::PathBuf>>
 pub fn ai6::directorates::registry::store::FileRegistry::from_environment() -> core::io::error::Result<Self>
 pub fn ai6::directorates::registry::store::FileRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::HeadquartersLease>>
 pub fn ai6::directorates::registry::store::FileRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -2516,6 +2584,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> c
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -2650,6 +2720,7 @@ impl ai6::directorates::registry::sessions::NewSession
 pub fn ai6::directorates::registry::sessions::NewSession::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_attempt(self, u32, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::Operation
@@ -2667,6 +2738,7 @@ pub ai6::Operation::max_concurrent: core::option::Option<usize>
 pub ai6::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::Operation::on_blown: alloc::string::String
 pub ai6::Operation::on_limit: ai6::directorates::m::limits::OnLimit
+pub ai6::Operation::on_lost: ai6::directorates::m::roster::OnLost
 pub ai6::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
 pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
@@ -2800,6 +2872,11 @@ pub fn ai6::directorates::m::theaters::RunnerSettings::with_command(self, impl c
 pub fn ai6::directorates::m::theaters::RunnerSettings::with_plugin_path(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::RunnerSettings::with_state_dir(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::RunnerSettings::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct ai6::SafeHouseCheckpoint
+pub ai6::SafeHouseCheckpoint::base: core::option::Option<alloc::string::String>
+pub ai6::SafeHouseCheckpoint::branch: alloc::string::String
+pub ai6::SafeHouseCheckpoint::commit: alloc::string::String
+pub ai6::SafeHouseCheckpoint::remote: alloc::string::String
 pub struct ai6::SafeHouseInfo
 pub ai6::SafeHouseInfo::base: core::option::Option<alloc::string::String>
 pub ai6::SafeHouseInfo::branch: core::option::Option<alloc::string::String>
@@ -2815,6 +2892,7 @@ pub ai6::SafeHouseReport::path: alloc::string::String
 pub struct ai6::SafeHouseSpec
 pub ai6::SafeHouseSpec::base: alloc::string::String
 pub ai6::SafeHouseSpec::branch: alloc::string::String
+pub ai6::SafeHouseSpec::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
 pub ai6::SafeHouseSpec::isolate: bool
 pub ai6::SafeHouseSpec::mission_id: alloc::string::String
 pub ai6::SafeHouseSpec::operation_id: alloc::string::String
@@ -2918,15 +2996,33 @@ pub const ai6::directorates::m::identity::SessionId::KINDS: guatiao::value::conv
 pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
 impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
 pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6::SessionLaunch
+pub ai6::SessionLaunch::effort: core::option::Option<alloc::string::String>
+pub ai6::SessionLaunch::handler: alloc::string::String
+pub ai6::SessionLaunch::mode: ai6::directorates::m::placement::ExecutionMode
+pub ai6::SessionLaunch::model: core::option::Option<alloc::string::String>
+pub ai6::SessionLaunch::runner: core::option::Option<alloc::string::String>
+pub ai6::SessionLaunch::terminal: alloc::string::String
+pub ai6::SessionLaunch::working_directory: alloc::string::String
+impl ai6::directorates::registry::sessions::SessionLaunch
+pub fn ai6::directorates::registry::sessions::SessionLaunch::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::SessionRecord
 pub ai6::SessionRecord::attempt: u32
+pub ai6::SessionRecord::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
+pub ai6::SessionRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::SessionRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
 pub ai6::SessionRecord::fence: u64
+pub ai6::SessionRecord::launch: core::option::Option<ai6::directorates::registry::sessions::SessionLaunch>
 pub ai6::SessionRecord::lease_expires: f64
+pub ai6::SessionRecord::lost: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::mission_id: alloc::string::String
 pub ai6::SessionRecord::parked_until: core::option::Option<f64>
 pub ai6::SessionRecord::predecessor: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
+pub ai6::SessionRecord::recent: alloc::vec::Vec<alloc::string::String>
 pub ai6::SessionRecord::session_id: alloc::string::String
 pub ai6::SessionRecord::station: alloc::string::String
 pub ai6::SessionRecord::status: ai6::directorates::registry::sessions::SessionStatus
@@ -2935,9 +3031,12 @@ impl ai6::directorates::registry::sessions::SessionRecord
 pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
 pub struct ai6::SessionUpdate
 impl ai6::directorates::registry::sessions::SessionUpdate
+pub fn ai6::directorates::registry::sessions::SessionUpdate::checkpoint(self, ai6::directorates::q::safehouse::SafeHouseCheckpoint, f64) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::exposed(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::parked_until(self, f64) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::recent(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::directorates::registry::sessions::SessionStatus) -> Self
 pub struct ai6::Sleeper
 pub ai6::Sleeper::agent: core::option::Option<alloc::string::String>
@@ -3181,6 +3280,8 @@ pub fn ai6::directorates::medical::watchdog::WatchdogOverrides::apply_to(&self, 
 #[non_exhaustive] pub struct ai6::Workspace
 pub ai6::Workspace::base: alloc::string::String
 pub ai6::Workspace::branch: alloc::string::String
+pub ai6::Workspace::checkpoint_remote: core::option::Option<alloc::string::String>
+pub ai6::Workspace::checkpoint_secs: u64
 pub ai6::Workspace::isolate: bool
 pub ai6::Workspace::provider: core::option::Option<alloc::string::String>
 pub ai6::Workspace::source: core::option::Option<std::path::PathBuf>
@@ -3197,6 +3298,7 @@ pub const ai6::DEFAULT_APPROVAL_TTL: core::time::Duration
 pub const ai6::DEFAULT_BLOCKED_AFTER: core::time::Duration
 pub const ai6::DEFAULT_BUDGET_STOPS: u32
 pub const ai6::DEFAULT_CABLE_TTL: f64
+pub const ai6::DEFAULT_CHECKPOINT_SECS: u64
 pub const ai6::DEFAULT_EXPOSING_TOOLS: [&str; 2]
 pub const ai6::DEFAULT_LEASE: core::time::Duration
 pub const ai6::DEFAULT_LINE_HISTORY: usize
@@ -3222,6 +3324,8 @@ pub const ai6::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::MAX_CABLE_TTL: f64
 pub const ai6::MAX_LOADOUT_BYTES: usize
+pub const ai6::MAX_RECENT_EVENTS: usize
+pub const ai6::MAX_RECENT_EVENT_CHARS: usize
 pub const ai6::MAX_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::MAX_STATION_MISSION_CAPACITY: usize
 pub const ai6::MAX_TIMELINE_EVENTS: usize
@@ -3271,6 +3375,8 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub trait ai6::SafeHouseSession: core::marker::Send + core::marker::Sync
 pub fn ai6::SafeHouseSession::changes(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -3279,6 +3385,8 @@ pub fn ai6::SafeHouseSession::into_object(self) -> guatiao::library::kind::objec
 impl ai6::directorates::q::safehouse::SafeHouseSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>

@@ -41,6 +41,7 @@ pub universal_exports::Attachment::replay: alloc::vec::Vec<alloc::vec::Vec<u8>>
 impl core::fmt::Debug for universal_exports::Attachment
 pub fn universal_exports::Attachment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct universal_exports::BoardMission
+pub universal_exports::BoardMission::attempts: alloc::vec::Vec<universal_exports::MissionAttempt>
 pub universal_exports::BoardMission::brief: core::option::Option<universal_exports::LaunchManifest>
 pub universal_exports::BoardMission::mission_id: alloc::string::String
 pub universal_exports::BoardMission::operation_id: alloc::string::String
@@ -153,6 +154,16 @@ pub universal_exports::LoginLimits::per_address: core::num::nonzero::NonZeroU32
 pub universal_exports::LoginLimits::per_name: core::num::nonzero::NonZeroU32
 impl core::default::Default for universal_exports::LoginLimits
 pub fn universal_exports::LoginLimits::default() -> Self
+#[non_exhaustive] pub struct universal_exports::MissionAttempt
+pub universal_exports::MissionAttempt::attempt: u32
+pub universal_exports::MissionAttempt::checkpoint_branch: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::lost: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::predecessor: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::provider_session_id: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::session_id: alloc::string::String
+pub universal_exports::MissionAttempt::station: alloc::string::String
+pub universal_exports::MissionAttempt::status: alloc::string::String
+pub universal_exports::MissionAttempt::theater: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::PlacementPreview
 pub universal_exports::PlacementPreview::choices: alloc::vec::Vec<ai6::directorates::m::placement::PlacementChoice>
 pub universal_exports::PlacementPreview::operation_id: alloc::string::String
