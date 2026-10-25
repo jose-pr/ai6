@@ -43,6 +43,6 @@ A shell under a pty can ask for the cursor position (`ESC[6n`) and wait for an e
 Without an attached viewer, AI6's terminal bridge answers the query itself and removes it
 from the output, so an attached terminal does not answer a second time.
 
-A transport that reaches another host (`ssh`) opens a terminal there through the same
-contract, but a harness does not run on it yet: a Session on a remote Theater runs on the
+A transport that reaches another host and can open a terminal there (`ssh`) does so through
+the same contract, but a harness does not run on it yet: a Session on a remote Theater runs on the
 Station, acting on the Theater through the transport. See [Theaters](theaters.md).

@@ -80,6 +80,14 @@ Theater's declared facts (`GET /v1/stations`, and the Theater's tooltip in Money
 | --- | --- |
 | `local` | `run`, `files`; the Station adds `terminal` from its Terminal provider |
 | `ssh` | `terminal` (a pty), `run`, `files` (SFTP), `forward` (reverse); `os` and `arch` from a probe |
+| `adb` | `run`, `files`, `forward` (`adb reverse` to the Station's loopback); an Android device, so `agents = "remote-hands"` |
+| `container` | `run`, `files`; a running Docker or Podman container, files need a POSIX `sh` in it |
+| `qemu` | `run`, `files`; a QEMU guest through its guest agent, files need a POSIX `sh` in the guest |
+
+The `adb`, `container` and `qemu` transports are configured with
+`access = { transport = { provider = "adb", config = { serial = "emulator-5554" } } }` (and
+`{ container = "build", engine = "podman" }`, `{ address = "127.0.0.1:4555" }`); each
+provider's API header lists its settings.
 
 A Theater that has not answered yet is probed in the background, so a dead host never delays
 a check-in; until it answers the Theater is listed as unreachable with the reason, and
@@ -141,4 +149,5 @@ to ask why.
   history or cover check; it works in the directory it is given.
 - A Station-provided egress proxy (`egress = "station"`) is recorded and requires `forward`,
   but no proxy is started yet.
-- Container, VM and Android transports.
+- A terminal over the `adb`, `container` and `qemu` transports, and a QEMU guest agent that
+  can end a process it started (a timeout leaves it running in the guest).

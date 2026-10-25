@@ -1,0 +1,23 @@
+pub mod ai6_transport_container
+pub struct ai6_transport_container::Container
+impl ai6_transport_container::Container
+pub fn ai6_transport_container::Container::with_runner(alloc::sync::Arc<dyn ai6_transport_container::Runner>, impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+impl ai6::directorates::q::transport::Transport for ai6_transport_container::Container
+pub fn ai6_transport_container::Container::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_container::Container::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_container::Container::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_container::Container::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_container::Container::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_container::Container::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::transport::kit::Shell for ai6_transport_container::Container
+pub fn ai6_transport_container::Container::sh(&self, &str, core::option::Option<&[u8]>, u64) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6::directorates::q::transport::TransportConfig> for ai6_transport_container::Container
+pub type ai6_transport_container::Container::Error = guatiao::library::kind::ProviderError
+pub fn ai6_transport_container::Container::try_from(ai6::directorates::q::transport::TransportConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_transport_container::Container
+pub const ai6_transport_container::Container::KINDS: &'static [&'static str]
+pub fn ai6_transport_container::Container::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[no_mangle] pub static ai6_transport_container::guatiao_declares: [u8; 20]
+pub trait ai6_transport_container::Runner: core::marker::Send + core::marker::Sync
+pub fn ai6_transport_container::Runner::engine(&self, &[alloc::string::String], &ai6::directorates::q::transport::kit::ProcessInput<'_>) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+#[no_mangle] pub unsafe c fn ai6_transport_container::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

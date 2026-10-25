@@ -92,8 +92,8 @@ same-origin and TLS-only, and operator input counts as watchdog activity.
 ## Not implemented yet
 
 - Field mode on a remote Theater (a runner there that supervises the harness), remote safe
-  houses, and container, VM and Android transports. Remote Theaters work in remote-hands
-  mode only.
+  houses, and a terminal over the container, VM and Android transports. Remote Theaters work
+  in remote-hands mode only.
 - Central placement: Stations sharing a Registry each lease the briefs they can run
   themselves; the Headquarters lease does not yet drive placement. The Registry is
   file-backed only (no SQL backend).
@@ -198,7 +198,7 @@ stream so an attached viewer's emulator does not answer a second time.
 | `crates/ai6ctl/` | Rust | The read-only operator command |
 | `crates/providers/agents/` | Rust | Claude and Codex AgentHandler providers |
 | `crates/providers/terminals/pty/` | Rust | The `pty` terminal provider (openpty / ConPTY) |
-| `crates/providers/transports/` | Rust | The `local` and `ssh` transport providers: how a Station reaches a Theater |
+| `crates/providers/transports/` | Rust | The `local`, `ssh`, `adb`, `container` and `qemu` transport providers: how a Station reaches a Theater |
 | `crates/providers/safehouses/` | Rust | The `git` (worktree) and `copy` (plain directory) safe-house providers |
 | `coqui-access` (shared, git dependency) | Rust | Access kinds, the role authorizer and the key, LDAP, local, peer-certificate and reverse-proxy access providers, loaded as plugin libraries |
 | `coqui-peer-tls` (shared, git dependency) | Rust | Station identity, fingerprints, trust store and mutual TLS |

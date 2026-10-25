@@ -55,6 +55,9 @@ nav:
           - ai6-terminal-pty: https://jose-pr.github.io/ai6/rust/ai6_terminal_pty/index.html
           - ai6-transport-local: https://jose-pr.github.io/ai6/rust/ai6_transport_local/index.html
           - ai6-transport-ssh: https://jose-pr.github.io/ai6/rust/ai6_transport_ssh/index.html
+          - ai6-transport-adb: https://jose-pr.github.io/ai6/rust/ai6_transport_adb/index.html
+          - ai6-transport-container: https://jose-pr.github.io/ai6/rust/ai6_transport_container/index.html
+          - ai6-transport-qemu: https://jose-pr.github.io/ai6/rust/ai6_transport_qemu/index.html
           - ai6-safehouse-git: https://jose-pr.github.io/ai6/rust/ai6_safehouse_git/index.html
           - ai6-safehouse-copy: https://jose-pr.github.io/ai6/rust/ai6_safehouse_copy/index.html
           - ai6-source-github: https://jose-pr.github.io/ai6/rust/ai6_source_github/index.html

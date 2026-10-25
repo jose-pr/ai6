@@ -1,0 +1,24 @@
+pub mod ai6_transport_adb
+pub struct ai6_transport_adb::Adb
+impl ai6_transport_adb::Adb
+pub fn ai6_transport_adb::Adb::with_runner(alloc::sync::Arc<dyn ai6_transport_adb::Runner>) -> Self
+impl ai6::directorates::q::transport::Transport for ai6_transport_adb::Adb
+pub fn ai6_transport_adb::Adb::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_adb::Adb::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_adb::Adb::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_adb::Adb::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_adb::Adb::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_adb::Adb::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_adb::Adb::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::transport::kit::Shell for ai6_transport_adb::Adb
+pub fn ai6_transport_adb::Adb::sh(&self, &str, core::option::Option<&[u8]>, u64) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6::directorates::q::transport::TransportConfig> for ai6_transport_adb::Adb
+pub type ai6_transport_adb::Adb::Error = guatiao::library::kind::ProviderError
+pub fn ai6_transport_adb::Adb::try_from(ai6::directorates::q::transport::TransportConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_transport_adb::Adb
+pub const ai6_transport_adb::Adb::KINDS: &'static [&'static str]
+pub fn ai6_transport_adb::Adb::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[no_mangle] pub static ai6_transport_adb::guatiao_declares: [u8; 20]
+pub trait ai6_transport_adb::Runner: core::marker::Send + core::marker::Sync
+pub fn ai6_transport_adb::Runner::adb(&self, &[alloc::string::String], &ai6::directorates::q::transport::kit::ProcessInput<'_>) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+#[no_mangle] pub unsafe c fn ai6_transport_adb::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

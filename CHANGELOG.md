@@ -28,8 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Stations publish each Theater's capabilities and declared facts, and `GET /v1/stations`
   and Moneypenny's Theater tooltips show them; a Theater that cannot be reached is shown
   with the reason and ruled out of placement.
-- Two new transport providers. `ai6-transport-local` runs commands and reads and writes
-  files on the Station's own host. `ai6-transport-ssh` reaches a host over SSH with a
+- Five transport providers. `ai6-transport-local` runs commands and reads and writes
+  files on the Station's own host. `ai6-transport-adb` reaches an Android device through
+  `adb` (commands, files built from shell commands, `adb reverse` forwards),
+  `ai6-transport-container` a running Docker or Podman container through `exec`, and
+  `ai6-transport-qemu` a QEMU guest through its guest agent; the shell-based file operations
+  they share are in `ai6::directorates::q::transport::kit`. `ai6-transport-ssh` reaches a host over SSH with a
   built-in pure-Rust client (`russh`, `ring`), so it needs no installed `ssh` and behaves the
   same on every OS: commands, pty terminals, SFTP files and reverse forwards, reconnecting
   on its own. The host key is pinned (`host_key = "sha256:HEX"`); first contact without a pin
