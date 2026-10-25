@@ -424,6 +424,7 @@ struct SessionRecord {
     mission_id: MissionId,
     lifecycle_state: Option<String>,
     lifecycle_sequence: u64,
+    lifecycle_at: Option<f64>,
     history: VecDeque<(u64, Vec<u8>)>,
     schemas: HashMap<u64, Vec<u8>>,
     last_sequence: u64,
@@ -509,6 +510,7 @@ impl Gateway {
                 mission_id,
                 lifecycle_state: None,
                 lifecycle_sequence: 0,
+                lifecycle_at: None,
                 history: VecDeque::new(),
                 schemas: HashMap::new(),
                 last_sequence: 0,
@@ -550,6 +552,7 @@ impl Gateway {
                 session_id: session_id.to_string(),
                 state: session.lifecycle_state.clone(),
                 sequence: session.lifecycle_sequence,
+                updated_at: session.lifecycle_at,
                 exposure: Vec::new(),
             })
             .collect::<Vec<_>>();
@@ -866,6 +869,10 @@ impl Gateway {
             if let Some(state) = lifecycle_state {
                 session.lifecycle_state = Some(state);
                 session.lifecycle_sequence = sequence;
+                session.lifecycle_at = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|elapsed| elapsed.as_secs_f64());
             }
             session.history.push_back((sequence, frame.clone()));
             while session.history.len() > self.config.limits.scrollback_events {
@@ -2843,7 +2850,7 @@ struct LifecycleRequest {
 
 /// One provider Session entry returned by the public board API.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardSession {
     /// Project that owns the Mission.
     pub operation_id: String,
@@ -2855,6 +2862,9 @@ pub struct BoardSession {
     pub state: Option<String>,
     /// Sequence of the latest lifecycle event, or zero before one arrives.
     pub sequence: u64,
+    /// When the latest lifecycle event arrived, as Unix seconds; the most recently updated
+    /// Session of a Mission carries the Mission's current state.
+    pub updated_at: Option<f64>,
     /// The untrusted input the Session has read (`brief:source`, `cable:SENDER`,
     /// `tool:NAME`, `review`), from its Registry record; empty when it has read none.
     pub exposure: Vec<String>,
@@ -2862,7 +2872,7 @@ pub struct BoardSession {
 
 /// One registered Mission with the provider Sessions known to Universal Exports.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardMission {
     /// Project that owns the Mission.
     pub operation_id: String,
@@ -3712,6 +3722,7 @@ mod tests {
     async fn typed_m_publisher_encodes_failed_state_and_binary_terminal_output() {
         let gateway = gateway();
         let (station, mission, session) = register(&gateway).await;
+        assert_eq!(gateway.board_sessions().await[0].updated_at, None);
         gateway
             .publish_lifecycle(
                 "m-token-that-is-long-enough-for-testing",
@@ -3725,6 +3736,9 @@ mod tests {
             )
             .await
             .unwrap();
+        let board = gateway.board_sessions().await;
+        assert_eq!(board[0].state.as_deref(), Some("failed"));
+        assert!(board[0].updated_at.is_some_and(|at| at > 0.0));
         gateway
             .publish_terminal_output(
                 "m-token-that-is-long-enough-for-testing",
