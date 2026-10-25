@@ -23,7 +23,7 @@ default feature set remains dependency-light.
 
 The library root re-exports common contracts. Two public modules group the rest.
 `directorates` holds the decisions: `directorates::m` owns access, identity, Missions, the
-roster and cover; `directorates::i` owns the Registry (intake) and Cables; `directorates::q`
+roster and cover; `directorates::registry` owns the Registry (intake) and Cables; `directorates::q`
 owns loadouts, secret leases and terminal contracts; `directorates::section_00` owns the
 AgentHandler contract; `directorates::medical` owns Session monitoring. `station` holds the
 node that runs them: `station::server` (daemon service and `serve*`), `station::plugins`
@@ -119,7 +119,7 @@ pub struct WatchdogOverrides {
 impl WatchdogOverrides {
     pub fn apply_to(&self, base: &WatchdogConfig) -> WatchdogConfig;
 }
-impl InactivityMonitor {
+impl Watchdog {
     pub fn with_config(config: WatchdogConfig) -> Self;
     pub fn max_runtime(&self) -> Option<Duration>;
     pub fn is_max_runtime_exceeded(&self) -> bool;
@@ -133,7 +133,7 @@ impl ServeConfig {
 lines, a 10-second prompt timeout, no maximum runtime, 4,096 least-recently-used line
 digests and no digit normalization. Its `with_stall_timeout`, `with_loop_timeout`, `with_loop_min_lines`,
 `with_blocked_after`, `with_max_runtime`, `with_history` and `with_normalize_digits` builders
-set those limits. `InactivityMonitor::with_config` starts a monitor from the configuration;
+set those limits. `Watchdog::with_config` starts a monitor from the configuration;
 `ServeConfig::with_watchdog` applies it to daemon Sessions. Provider events and terminal
 output reset the inactivity deadline; accepted operator messages also reset prompt and
 repeated-line tracking. Terminal output is split on carriage returns and newlines, ANSI
@@ -191,13 +191,13 @@ pub struct Operation {
     pub safe_houses: bool,
     pub branch: String,
     pub base: String,
-    pub selector: BTreeMap<String, String>,
+    pub station_labels: BTreeMap<String, String>,
     pub cover: String,
-    pub identity: Option<OperationIdentity>,
+    pub cover_identity: Option<CoverIdentity>,
     pub on_blown: String,
-    pub intake: toml::Table,
+    pub sources: toml::Table,
 }
-pub struct OperationIdentity { pub name: String, pub email: String }
+pub struct CoverIdentity { pub name: String, pub email: String }
 #[non_exhaustive]
 pub struct RosterError(String);
 impl core::fmt::Display for RosterError;
@@ -224,7 +224,7 @@ pub fn config_dir() -> Result<PathBuf, RosterError>;
 
 `load` reads `operations.toml` and `agents.toml`; missing files produce an empty roster and
 invalid files fail closed. Operations are global: an Operation is not owned by a Station,
-and its `selector` lists the Station labels a Station must carry to run its Missions.
+and its `station_labels` lists the Station labels a Station must carry to run its Missions.
 
 An Agent is a codename; its `handler`, `model` and `effort` are the codename's current
 occupant. An `AgentRole` (`[role.<id>]`) is a job description only: a `purpose` and a
@@ -243,10 +243,10 @@ Agent matched. `operations` yields stable codename order. `config_dir` resolves
 `Agent.limits` is layered over the daemon-wide watchdog settings when a Mission starts or
 resumes.
 
-## I Branch intake (`ai6::directorates::i::intake`)
+## Registry store (`ai6::directorates::registry::store`)
 
 ```rust
-pub struct AuditEntry {
+pub struct AuditRecord {
     pub id: String,
     pub actor: String,
     pub action: String,
@@ -272,13 +272,13 @@ pub struct MissionProposal {
     pub brief: Brief,
     pub created_at: f64,
 }
-IntakeRegistry::submit_mission_proposal(&MissionProposal) -> io::Result<PathBuf>
-IntakeRegistry::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
-IntakeRegistry::promote_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<Brief>
-IntakeRegistry::reject_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<MissionProposal>
+FileRegistry::submit_mission_proposal(&MissionProposal) -> io::Result<PathBuf>
+FileRegistry::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
+FileRegistry::promote_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<Brief>
+FileRegistry::reject_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<MissionProposal>
 ```
 
-`IntakeRegistry::open(root)` reads the file-backed Registry's `new/` queue without
+`FileRegistry::open(root)` reads the file-backed Registry's `new/` queue without
 creating or changing files; `from_environment()` resolves `AI6_REGISTRY`, then
 `AI6_HOME/registry`, then the platform state directory. `list_new()` returns valid
 version-1 `Brief` values ordered by priority descending, creation time ascending, then
@@ -289,8 +289,8 @@ is read-only. `claim_new(key)` moves one queued brief to `claimed/` under the sh
 
 ```rust
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
-record_audit(entry: &AuditEntry) -> io::Result<PathBuf>
-list_audit(limit: usize) -> io::Result<Vec<AuditEntry>>
+record_audit(entry: &AuditRecord) -> io::Result<PathBuf>
+list_audit(limit: usize) -> io::Result<Vec<AuditRecord>>
 station_settings(station: &str) -> io::Result<Option<StationSettings>>
 set_station_settings(station: &str, settings: &StationSettings) -> io::Result<()>
 submit_brief(brief: &Brief) -> io::Result<PathBuf>
@@ -312,7 +312,7 @@ and never appear in `list_new()`. `promote_mission_proposal` moves an authorized
 Only Universal Exports's authenticated, Operation-authorized review endpoints call these decision
 methods. Provider Session identity is bound by AI6, never supplied in the proposed brief.
 
-`record_audit` stores a validated metadata-only `AuditEntry` under `audit/` and rejects
+`record_audit` stores a validated metadata-only `AuditRecord` under `audit/` and rejects
 duplicate IDs. Each entry is bounded to 16 KiB and the listing scans at most 10,000
 records. `list_audit` returns newest entries first and requires a result limit from 1 to
 500. Operation events contain actor, action, Operation, target and Unix timestamp;
@@ -320,7 +320,7 @@ Station events use the explicit `resource = "station:<id>"` scope. Request promp
 terminal data and credential values are not audit fields.
 
 `StationSettings::try_new(station, capacity)` accepts a Station ID and a maximum
-concurrent Mission count from 1 through 1,024. `IntakeRegistry::station_settings(station)`
+concurrent Mission count from 1 through 1,024. `FileRegistry::station_settings(station)`
 reads the validated current value; `set_station_settings(station, settings)` persists it
 under a collision-resistant Station-specific file and the shared Registry lock. A daemon
 uses the live value for new Mission admission and scheduling; absent settings retain its
@@ -366,13 +366,13 @@ leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating St
 need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`
 and local Operation paths with each Station check-in every 15 seconds, alongside host and
 platform metadata. `StationConfig` defaults to both `Control` and `Execution` and no
-pinned terminal; `with_roles` replaces the role set, `with_label` adds a selector label and
+pinned terminal; `with_roles` replaces the role set, `with_label` adds a placement label and
 `with_terminal` pins the terminal provider. Without a pin the Station uses an available
 terminal provider, preferring `DEFAULT_TERMINAL`. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
 distributed placement. Station and Agent limits count assignments in the shared Registry.
 The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID` set an
 explicit identity.
-`Brief::key()` and `Brief::prompt()` expose the key and prompt fields used by I Branch intake.
+`Brief::key()` and `Brief::prompt()` expose the key and prompt fields used by Registry intake.
 
 ## Identity and handler API
 
@@ -392,7 +392,7 @@ bounded and placed in `peers/waiting`; an operator lists and accepts them with t
 The default AI6 state location can be overridden with `AI6_STATE` or `AI6_HOME`.
 `AccessTokenRecord` is the versioned device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
-expiry and optional revocation times; its debug output redacts the digest. `IntakeRegistry`
+expiry and optional revocation times; its debug output redacts the digest. `FileRegistry`
 stores and validates records in the `access-tokens/` and `access-token-digests/`
 directories, returns only active records, and serializes revocation under the shared
 Registry lock.
@@ -553,7 +553,7 @@ allowlists fail closed because this profile cannot enforce them. Invalid UTF-8 p
 missing paths, escapes and duplicate destinations are rejected. The daemon does not yet
 apply this vector to AgentHandler startup.
 
-## Cables (`ai6::directorates::i::cables`)
+## Cables (`ai6::directorates::registry::cables`)
 
 `CableScope` defines Agent unicast and Station, Theater, global or named-channel
 broadcast. `CableTarget::try_new(scope, name)` requires a name except for global.
@@ -563,7 +563,7 @@ recipients, idempotency_key, id, created_at, expires_at)` creates the required f
 builder methods add the optional Theater, Mission, Session, conversation and reply
 identities. `Cable::try_new(draft)` validates a complete envelope. Bodies are limited to
 16 KiB UTF-8, expiry must be later than creation and no more than 24 hours later, and
-recipient `(agent, session_id)` pairs must be unique. Serde uses the version-1 I Branch
+recipient `(agent, session_id)` pairs must be unique. Serde uses the version-1 Registry
 field names and rejects missing, unknown or invalid fields. `Debug` redacts Cable bodies.
 `with_recipient_state(agent, session_id, state)` returns a new Cable for a permitted
 delivery transition, `None` for a recipient not in the audience, or `CableError` for an
@@ -574,7 +574,7 @@ Session; these value types do not authorize sends or resolve broadcast audiences
 trusted session adapters only; request objects have no sender identity. `CablePolicy`
 holds deny-by-default `CableGrant`s and per-Agent `CableInboundMode` values. A grant
 names an Agent (or `*`), a `CableAction` (`Send`, `Receive`, `Discover`, `Release`) and one exact
-`CableTarget`. `CableRelay::new(Arc<IntakeRegistry>, policy, endpoint_source, channels)`
+`CableTarget`. `CableRelay::new(Arc<FileRegistry>, policy, endpoint_source, channels)`
 uses the shared Registry, an authoritative Agent/Session directory and named channel
 members. `with_limits` configures bounded fan-out (1–1,000) and persistent sender/scope
 token buckets. `send(principal, CableSendRequest)` checks sender and every receiver,
@@ -604,8 +604,8 @@ channel names to Agent lists. `max_fanout`, `sender_rate`, `sender_burst`, `scop
 and `scope_burst` bound routing. `ServeConfig::with_station_id` or `AI6_STATION_ID` supplies
 the Station identity; the default is the host and process ID.
 
-`IntakeRegistry::submit_cable(&cable)` stores the envelope under `cables/` with atomic
-replacement and the same `.ai6-registry.lock` used by I Branch claims. A retry with the
+`FileRegistry::submit_cable(&cable)` stores the envelope under `cables/` with atomic
+replacement and the same `.ai6-registry.lock` used by Registry claims. A retry with the
 same sender and idempotency key returns the stored record when immutable request content
 matches; conflicting content returns `AlreadyExists`. `find_cable(sender, key)` and
 `get_cable(id)` read accepted records. `cable_inbox(agent, session_id, limit, now)` lists
@@ -635,19 +635,19 @@ The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in te
 
 ## Mission lifecycle (`ai6::directorates::m::mission`)
 
-`MissionBook` validates lifecycle transitions, associates provider `SessionId` values
+`MissionStore` validates lifecycle transitions, associates provider `SessionId` values
 with an AI6-owned `MissionId`, records safe-house disposition and optional `CoverReport`,
 and increments a revision for changes. Repeating the current state is a no-op and does not
 increment the revision. `MissionState` serializes as `queued`, `working`, `blocked`,
 `stalled`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy violation
 when the Operation uses `on_blown = "fail"`.
-`MissionBook::set_cover_report(mission_id, report)` persists the cover audit. A Mission
+`MissionStore::set_cover_report(mission_id, report)` persists the cover audit. A Mission
 returns this value as its optional `cover` field beside `safe_house`. `Mission.role_id`
 stores the canonical configured Agent role independently of `agent_id` and provider
 `session_ids`; selected handler/model/effort settings persist for reattachment.
-`MissionBook::open(path)` persists a versioned JSON snapshot atomically after
+`MissionStore::open(path)` persists a versioned JSON snapshot atomically after
 each mutation. The daemon opens `missions.json` under `safehouse::state_dir()`; this is
-runtime Mission state, separate from I Branch's durable intake registry. The snapshot
+runtime Mission state, separate from the durable Registry. The snapshot
 stores non-secret handler, terminal, work-directory, model and effort settings for each
 started Mission (the terminal is the one the Station chose at start), including the cover policy, starting commit and identity; environment values
 are never persisted. The snapshot format is version 3. On startup, `Working` Missions
@@ -682,8 +682,8 @@ impl Covers {
 }
 impl Cover {
     pub fn name(&self) -> &str;
-    pub fn briefing(&self, identity: Option<&OperationIdentity>, agent: &str, model: &str) -> String;
-    pub fn check_commits(&self, commits: &[CoverCommit], identity: Option<&OperationIdentity>, model: &str) -> Vec<CoverViolation>;
+    pub fn briefing(&self, identity: Option<&CoverIdentity>, agent: &str, model: &str) -> String;
+    pub fn check_commits(&self, commits: &[CoverCommit], identity: Option<&CoverIdentity>, model: &str) -> Vec<CoverViolation>;
 }
 ```
 
@@ -706,7 +706,7 @@ capacity, `StationConfig::default()` and no Universal Exports publisher.
 `with_publisher` set those options before calling `serve_with_options`.
 
 Each returns `std::io::Result<()>`; `F: Future<Output = ()> + Send + 'static`. The
-background scheduler starts assigned queued Missions and leases file-backed I Branch
+background scheduler starts assigned queued Missions and leases file-backed Registry
 briefs, resolving their Operation and Agent before creating durable Mission records.
 Global, Station and Agent concurrency limits apply to Session starts; transient failures
 retry after five seconds. Active leases renew every 30 seconds. Expired leases from other
@@ -776,11 +776,11 @@ Station and Mission operations belong to Universal Exports's authenticated API.
 `Config::try_new(origin, token)` accepts a bare HTTPS origin or an HTTP loopback origin;
 its `Debug` output redacts the token. `ServeConfig::with_publisher(config)` enables
 publication through `serve_with_options`. The `ai6` command reads
-`AI6_EXPORTS_URL` and `AI6_EXPORTS_TOKEN` together; leaving both unset disables
+`AI6_EXPORTS_URL` and `AI6_EXPORTS_STATION_TOKEN` together; leaving both unset disables
 publication, and setting only one is a startup error. Redirects are disabled. A bounded
 background thread orders Session registration, lifecycle updates and raw terminal chunks
 on one event cursor. A separate authenticated long-poll receives validated Guatiao input
-and resize frames from `/v1/m/inputs/next`; AI6 dispatches them only to the live terminal
+and resize frames from `/v1/station/inputs/next`; AI6 dispatches them only to the live terminal
 bound to the matching Station, Mission and provider Session. The gateway's user-scoped
 write grant and lease checks remain the authorization boundary. Requests time out after
 two seconds; outbound writes are not retried, while input polling retries after errors.

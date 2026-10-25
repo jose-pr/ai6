@@ -11,7 +11,7 @@ Every Session runs on its Station's host, in a terminal provider the Station pic
 (preferring `pty`, or the one pinned with `ai6 serve --terminal`). An Operation with a local `path` gets a safe
 house (a Git worktree) under the Station's state directory for each Mission. An
 Operation can only run on a Station that has its checkout and whose labels match its
-`selector`.
+`station_labels`.
 
 ## Not yet: remote Theaters
 

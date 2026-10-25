@@ -30,7 +30,7 @@ Station ID, host and operating system; `--label KEY=VALUE` adds more.
 ## Serving Operations
 
 Operations are global: they live in `operations.toml`, and no Station owns one. A Station
-runs an Operation's Missions when its labels satisfy the Operation's `selector` and, for
+runs an Operation's Missions when its labels satisfy the Operation's `station_labels` and, for
 a local Operation, when it has the checkout. One Station can serve many Operations, and
 one Operation can be served by many Stations.
 

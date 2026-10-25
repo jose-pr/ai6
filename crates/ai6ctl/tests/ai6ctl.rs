@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use ai6::{
     AgentRole, Attempt, Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer,
-    Directory, IntakeRegistry, Lookup, Person, Verdict, guatiao::library::ProviderError,
+    Directory, FileRegistry, Lookup, Person, Verdict, guatiao::library::ProviderError,
 };
 use ai6_diptel::{LifecycleEvent, MissionId, OperationId, SessionId, SessionState};
 use tokio::sync::oneshot;
@@ -67,7 +67,7 @@ async fn start_gateway() -> (String, oneshot::Sender<()>, String, tempfile::Temp
     )
     .unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let registry = IntakeRegistry::open(directory.path());
+    let registry = FileRegistry::open(directory.path());
     registry
         .check_in(
             "station-01",

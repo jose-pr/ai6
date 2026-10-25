@@ -45,7 +45,7 @@ arguments.
 
 ## Gotchas
 
-- Read-only by design: there is no command that writes, and no flag accepts M's bearer
+- Read-only by design: there is no command that writes, and no flag accepts the Station channel bearer
   or a terminal-attachment token.
 - The access token is read only from the environment, never from an argument, so it
   does not appear in shell history or process listings.

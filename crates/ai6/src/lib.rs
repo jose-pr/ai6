@@ -12,27 +12,16 @@ extern crate alloc;
 pub mod directorates;
 pub mod station;
 
-pub use directorates::i::cables::{
-    Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,
-    CableError, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy,
-    CablePrincipal, CableRecipient, CableRelay, CableRelayError, CableRelease, CableScope,
-    CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_BODY_BYTES,
-    MAX_CABLE_FANOUT, MAX_CABLE_TTL,
-};
-pub use directorates::i::intake::{
-    AuditEntry, Brief, DEFAULT_LEASE, HeadquartersLease, IntakeRegistry, Lease, LeaseRecovery,
-    MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,
-};
 pub use directorates::m::access::{
     Attempt, Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer, Directory,
     Lookup, Person, RoleAuthorizer, RoleAuthorizerConfig, RoleAuthorizerProvider, RolePolicyError,
     Verdict,
 };
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
-pub use directorates::m::roster::{AgentRole, Operation, OperationIdentity, Roster, RosterError};
+pub use directorates::m::roster::{AgentRole, CoverIdentity, Operation, Roster, RosterError};
 pub use directorates::medical::watchdog::{
     DEFAULT_BLOCKED_AFTER, DEFAULT_LINE_HISTORY, DEFAULT_LOOP_MIN_LINES, DEFAULT_STALL_TIMEOUT,
-    InactivityMonitor, WatchdogConfig, WatchdogOverrides,
+    Watchdog, WatchdogConfig, WatchdogOverrides,
 };
 pub use directorates::q::terminal::{
     AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalBridge, TerminalSession,
@@ -42,6 +31,17 @@ pub use directorates::q::{
     McpServer, QError, QErrorKind, SandboxError, SandboxProfile, SandboxRequest, SecretBackend,
     SecretBackendFailure, SecretBroker, SecretError, SecretLease, SecretLeaseRequest,
     SecretRequest, SecretValue, claude_mcp_config,
+};
+pub use directorates::registry::cables::{
+    Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,
+    CableError, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy,
+    CablePrincipal, CableRecipient, CableRelay, CableRelayError, CableRelease, CableScope,
+    CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_BODY_BYTES,
+    MAX_CABLE_FANOUT, MAX_CABLE_TTL,
+};
+pub use directorates::registry::store::{
+    AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, HeadquartersLease, Lease, LeaseRecovery,
+    MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,
 };
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart,

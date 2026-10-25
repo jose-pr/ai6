@@ -204,7 +204,7 @@ impl WatchdogConfig {
 
 /// Measures activity, prompt waits and repeated terminal output for an Agent Session.
 #[derive(Debug, Clone)]
-pub struct InactivityMonitor {
+pub struct Watchdog {
     config: WatchdogConfig,
     state: Arc<Mutex<ActivityState>>,
 }
@@ -220,13 +220,13 @@ struct ActivityState {
     output_revision: u64,
 }
 
-impl Default for InactivityMonitor {
+impl Default for Watchdog {
     fn default() -> Self {
         Self::new(DEFAULT_STALL_TIMEOUT)
     }
 }
 
-impl InactivityMonitor {
+impl Watchdog {
     /// Starts monitoring with a maximum quiet period.
     pub fn new(timeout: Duration) -> Self {
         Self::with_config(
@@ -502,7 +502,7 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<WatchdogConfig>();
         assert_send_sync::<WatchdogOverrides>();
-        assert_send_sync::<InactivityMonitor>();
+        assert_send_sync::<Watchdog>();
     }
 
     #[test]
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn activity_resets_the_inactivity_deadline() {
-        let monitor = InactivityMonitor::new(Duration::from_millis(10));
+        let monitor = Watchdog::new(Duration::from_millis(10));
         std::thread::sleep(Duration::from_millis(15));
         assert!(monitor.is_stalled());
 
@@ -543,7 +543,7 @@ mod tests {
 
     #[test]
     fn cloned_monitor_observes_activity_from_the_other_owner() {
-        let monitor = InactivityMonitor::new(Duration::from_millis(10));
+        let monitor = Watchdog::new(Duration::from_millis(10));
         let operator = monitor.clone();
         std::thread::sleep(Duration::from_millis(15));
         assert!(monitor.is_stalled());
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn ansi_color_and_carriage_return_do_not_hide_a_repeated_line() {
-        let monitor = InactivityMonitor::with_limits(
+        let monitor = Watchdog::with_limits(
             Duration::from_secs(1),
             Duration::from_millis(20),
             Duration::from_millis(20),
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn novel_terminal_lines_reset_the_loop_counter() {
-        let monitor = InactivityMonitor::with_limits(
+        let monitor = Watchdog::with_limits(
             Duration::from_secs(1),
             Duration::from_millis(20),
             Duration::from_millis(20),
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn prompt_tail_blocks_after_quiet_period_and_operator_input_resets_it() {
-        let monitor = InactivityMonitor::with_limits(
+        let monitor = Watchdog::with_limits(
             Duration::from_secs(1),
             Duration::from_secs(1),
             Duration::from_millis(20),
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn digit_normalization_groups_counter_output_as_a_repeated_line() {
-        let monitor = InactivityMonitor::with_config(
+        let monitor = Watchdog::with_config(
             WatchdogConfig::default()
                 .with_loop_min_lines(1)
                 .with_loop_timeout(Duration::ZERO)
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn line_history_limit_retains_recently_repeated_lines() {
-        let monitor = InactivityMonitor::with_config(
+        let monitor = Watchdog::with_config(
             WatchdogConfig::default()
                 .with_history(2)
                 .with_loop_min_lines(1)
@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn optional_maximum_runtime_survives_activity() {
-        let monitor = InactivityMonitor::with_config(
+        let monitor = Watchdog::with_config(
             WatchdogConfig::default().with_max_runtime(Some(Duration::from_millis(10))),
         );
         std::thread::sleep(Duration::from_millis(15));

@@ -10,7 +10,7 @@ use clap::{Args, Parser, Subcommand};
     name = "ai6",
     version,
     about = "The AI6 Mission daemon",
-    after_help = "Optional Universal Exports publication reads AI6_EXPORTS_URL and AI6_EXPORTS_TOKEN from the environment."
+    after_help = "Optional Universal Exports publication reads AI6_EXPORTS_URL and AI6_EXPORTS_STATION_TOKEN from the environment."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -240,13 +240,13 @@ fn peer_command(command: PeerCommand) -> Result<String, ai6::StationIdentityErro
 
 fn publisher_config() -> Result<Option<ai6::station::publisher::Config>, String> {
     let origin = environment_variable("AI6_EXPORTS_URL")?;
-    let token = environment_variable("AI6_EXPORTS_TOKEN")?;
+    let token = environment_variable("AI6_EXPORTS_STATION_TOKEN")?;
     match (origin, token) {
         (None, None) => Ok(None),
         (Some(origin), Some(token)) => ai6::station::publisher::Config::try_new(&origin, token)
             .map(Some)
             .map_err(|error| error.to_string()),
-        _ => Err("AI6_EXPORTS_URL and AI6_EXPORTS_TOKEN must be set together".to_owned()),
+        _ => Err("AI6_EXPORTS_URL and AI6_EXPORTS_STATION_TOKEN must be set together".to_owned()),
     }
 }
 

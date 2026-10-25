@@ -1,7 +1,7 @@
 # Operations
 
 An Operation is a registered project or workspace and its policy. Operations are global:
-no Station owns one, and any Station whose labels match the Operation's `selector` (and
+no Station owns one, and any Station whose labels match the Operation's `station_labels` (and
 that has its checkout) can run its Missions. The configuration owns the checkout, Agent
 roster, clearance ceiling, concurrency budget, safe-house policy and placement. AI6 reads Operations from `operations.toml` in its configuration directory.
 Only registered Operations may contribute a local `.ai6/agents.toml` override.
@@ -17,17 +17,17 @@ max_concurrent = 3
 safe_houses = true
 branch = "agent/{id}-{slug}"
 base = "origin/main"
-selector = { gpu = "yes", os = "linux" }
+station_labels = { gpu = "yes", os = "linux" }
 cover = "covert"
 on_blown = "flag"
-intake = { jira = "GUA" }
+sources = { jira = "GUA" }
 ```
 
 The Operation ID (`G`) and project name (`guatiao`) both resolve to the same registered
 Operation. `path` is the local checkout. `theater` names a remote execution environment instead;
 remote Theaters are not implemented yet, so such an Operation is not admitted. `roster` limits which Agents may be assigned; when omitted or empty, every
 configured Agent is eligible. `clearance` sets the highest authority available to its
-Missions. `selector` is matched against the labels of an execution Station.
+Missions. `station_labels` is matched against the labels of an execution Station.
 
 Each Mission can receive a dedicated Git worktree under the AI6 state directory. An
 untouched worktree is removed when the Mission ends; a worktree with changes or commits
@@ -41,7 +41,7 @@ Operations can set a cover policy and author identity for commits:
 ```toml
 [operation.G]
 cover = "partial" # covert, partial, overt or a configured policy
-identity = { name = "Field Office", email = "field@example.invalid" }
+cover_identity = { name = "Field Office", email = "field@example.invalid" }
 on_blown = "fail" # or "flag"
 ```
 

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `ai6`: the Station daemon and AI6's public contracts in one Rust crate. Directorates
-  under `ai6::directorates` (M, I Branch, Q Branch, 00 Section, Medical) and the Station
+  under `ai6::directorates` (M, the Registry, Q Branch, 00 Section, Medical) and the Station
   runtime under `ai6::station` (server, provider host, safe houses, publisher, identity).
   The `ai6` command provides `serve`, `identity` and `peer waiting|accept`.
 - Station daemon: a private loopback API for providers and the Mission lifecycle;

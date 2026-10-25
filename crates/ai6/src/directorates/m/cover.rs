@@ -6,7 +6,7 @@ use std::path::Path;
 use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
 
-use crate::directorates::m::roster::OperationIdentity;
+use crate::directorates::m::roster::CoverIdentity;
 
 const COVERS_FILE: &str = "covers.toml";
 
@@ -55,7 +55,7 @@ pub struct CoverReport {
 pub(crate) struct CoverAudit {
     pub(crate) policy: String,
     pub(crate) base: String,
-    pub(crate) identity: Option<OperationIdentity>,
+    pub(crate) identity: Option<CoverIdentity>,
     pub(crate) fail_on_blow: bool,
 }
 
@@ -81,12 +81,7 @@ impl Cover {
     }
 
     /// Builds the instructions added to the Agent's initial Mission context.
-    pub fn briefing(
-        &self,
-        identity: Option<&OperationIdentity>,
-        agent: &str,
-        model: &str,
-    ) -> String {
+    pub fn briefing(&self, identity: Option<&CoverIdentity>, agent: &str, model: &str) -> String {
         let mut lines = vec![
             format!("Cover: {}. {}", self.name, self.description)
                 .trim_end()
@@ -131,7 +126,7 @@ impl Cover {
     pub fn check_commits(
         &self,
         commits: &[CoverCommit],
-        identity: Option<&OperationIdentity>,
+        identity: Option<&CoverIdentity>,
         model: &str,
     ) -> Vec<CoverViolation> {
         let mut violations = Vec::new();
@@ -430,8 +425,8 @@ fn announcement_regex() -> &'static Regex {
 mod tests {
     use super::*;
 
-    fn identity() -> OperationIdentity {
-        OperationIdentity {
+    fn identity() -> CoverIdentity {
+        CoverIdentity {
             name: "Field Station".to_owned(),
             email: "station@example.invalid".to_owned(),
         }

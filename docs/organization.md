@@ -10,7 +10,7 @@ rules turn out to be good rules for running coding agents.
 | Name | Here | Owns |
 | --- | --- | --- |
 | **M** | `ai6::directorates::m` | Decisions: the roster, Agent selection, clearance, cover, the Mission lifecycle and the access kinds |
-| **I Branch** | `ai6::directorates::i` | Intelligence and records: the Registry (briefs, leases, check-ins, audit) and the Cable relay |
+| **Registry** | `ai6::directorates::registry` | The shared record (briefs, leases, check-ins, audit, access tokens) and the Cable relay; real SIS and MI5 usage |
 | **Q Branch** | `ai6::directorates::q` | Gear: terminals, loadouts, Mission-scoped secret leases, MCP configuration, sandbox arguments |
 | **00 Section** | `ai6::directorates::section_00`, `crates/providers/agents/` | The AgentHandler contract and the Claude and Codex handlers |
 | **Medical** | `ai6::directorates::medical` | Agent health: the watchdog for stalls, loops and blocked prompts |
@@ -31,7 +31,7 @@ Infrastructure  Station ──────────────────�
 ```
 
 - **Operation**: a global project and its policy. Stations serve Operations; they do not
-  own them. An Operation's `selector` names the Station labels its Missions need.
+  own them. An Operation's `station_labels` names the Station labels its Missions need.
 - **Mission**: one brief under an Operation; its Mission ID may group several Sessions.
 - **Session**: one provider-issued, resumable agent run. Never call it a Task.
 - **Station**: a node running `ai6 serve`, with the `control` role, the `execution` role
@@ -76,8 +76,8 @@ policy for how openly the work may admit an agent did it: `covert` (nothing), `p
 (a generic "AI helped", never the model or the Agent), `overt` (full disclosure), or one
 of your own. Every Mission's commits are checked; a commit that breaks cover is **blown**.
 
-**The Leather Goods Department.** Q's shipments travel under a plain manifest: a loadout
-lists what an Agent is issued, by name, and never a secret's value.
+**Q issues kit, not secrets.** A loadout lists what an Agent is issued, by name; a
+secret's value reaches the Session only as a Mission-scoped lease, never in a manifest.
 
 **Assume any agent can be turned.** 006 was a trusted peer until he was not. Anything an
 agent reads can steer it, so clearance is least privilege, credentials are per Mission,
@@ -115,8 +115,8 @@ a deletion).
 | **Check-in / gone dark** | a Station's recurring Registry record / a Station whose check-ins lapsed |
 | **Theater** | the host or environment a Session runs in (an Operation's `theater`) |
 | **Safe house** | a Mission's Git worktree (`SafeHouse`) |
-| **Registry** | I Branch's shared store for briefs, leases, check-ins and audit |
-| **Brief / debrief** | a Mission's request / the outcome I Branch files when it ends |
+| **Registry** | the shared store for briefs, leases, check-ins and audit (`FileRegistry`) |
+| **Brief / debrief** | a Mission's request / the outcome the Registry files when it ends |
 | **Dead drop** | how the Registry works: briefs and outcomes exchanged without the sides meeting |
 | **Cable** | a durable, addressed agent-to-agent message with a relay-authenticated sender |
 | **DipTel** | a live frame: Session lifecycle, terminal output or input |

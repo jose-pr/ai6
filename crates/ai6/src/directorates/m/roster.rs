@@ -115,21 +115,21 @@ pub struct Operation {
     /// Base revision used to create a safe house.
     pub base: String,
     /// Station labels required before a Station may run this Operation's Missions.
-    pub selector: BTreeMap<String, String>,
+    pub station_labels: BTreeMap<String, String>,
     /// Cover policy used when work is committed.
     pub cover: String,
-    /// Optional Git author identity used for this Operation.
-    pub identity: Option<OperationIdentity>,
+    /// Optional Git author the Operation's Agents commit under (their cover).
+    pub cover_identity: Option<CoverIdentity>,
     /// Response when a commit violates the cover policy.
     pub on_blown: String,
-    /// Intake-source settings owned by I Branch.
-    pub intake: toml::Table,
+    /// Work sources (trackers, CI) this Operation takes briefs from.
+    pub sources: toml::Table,
 }
 
 /// Git author identity configured by an Operation.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct OperationIdentity {
+pub struct CoverIdentity {
     /// Commit author name.
     pub name: String,
     /// Commit author email.
@@ -426,11 +426,11 @@ struct OperationDefinition {
     safe_houses: bool,
     branch: String,
     base: String,
-    selector: BTreeMap<String, String>,
+    station_labels: BTreeMap<String, String>,
     cover: String,
-    identity: Option<OperationIdentity>,
+    cover_identity: Option<CoverIdentity>,
     on_blown: String,
-    intake: toml::Table,
+    sources: toml::Table,
 }
 
 fn default_safe_houses() -> bool {
@@ -467,19 +467,19 @@ impl OperationDefinition {
             } else {
                 self.base
             },
-            selector: self.selector,
+            station_labels: self.station_labels,
             cover: if self.cover.is_empty() {
                 "covert".to_owned()
             } else {
                 self.cover
             },
-            identity: self.identity,
+            cover_identity: self.cover_identity,
             on_blown: if self.on_blown.is_empty() {
                 "flag".to_owned()
             } else {
                 self.on_blown
             },
-            intake: self.intake,
+            sources: self.sources,
         };
         validate_clearance(&operation.clearance).map_err(|e| {
             error(format!(
@@ -495,11 +495,11 @@ impl OperationDefinition {
                 operation.id
             )));
         }
-        if let Some(identity) = &operation.identity
+        if let Some(identity) = &operation.cover_identity
             && (identity.name.trim().is_empty() || identity.email.trim().is_empty())
         {
             return Err(error(format!(
-                "{}: Operation {:?}: identity needs name and email",
+                "{}: Operation {:?}: cover_identity needs name and email",
                 source.display(),
                 operation.id
             )));
@@ -755,7 +755,10 @@ mod tests {
         directory.write(
             "operations.toml",
             &format!(
-                "[operation.G]\nname = \"project\"\npath = {:?}\nrepos = [\"https://example.invalid/repo\"]\nroster = [\"JamesBond\"]\nclearance = \"00\"\nselector = {{ station = \"dev\" }}\nidentity = {{ name = \"Station\", email = \"station@example.invalid\" }}\nintake = {{ jira = \"GUA\" }}\n",
+                "[operation.G]\nname = \"project\"\npath = {:?}\nrepos = [\"https://example.invalid/repo\"]\nroster = [\"JamesBond\"]\nclearance = \"00\"
+station_labels = {{ station = \"dev\" }}
+cover_identity = {{ name = \"Station\", email = \"station@example.invalid\" }}
+sources = {{ jira = \"GUA\" }}\n",
                 checkout.to_string_lossy()
             ),
         );
@@ -772,8 +775,8 @@ mod tests {
         let operation = roster.operation("G").unwrap();
         assert!(operation.safe_houses);
         assert_eq!(operation.repos, ["https://example.invalid/repo"]);
-        assert_eq!(operation.identity.as_ref().unwrap().name, "Station");
-        assert_eq!(operation.intake["jira"].as_str(), Some("GUA"));
+        assert_eq!(operation.cover_identity.as_ref().unwrap().name, "Station");
+        assert_eq!(operation.sources["jira"].as_str(), Some("GUA"));
         let agent = roster.agent(Some("project"), "JamesBond").unwrap();
         assert_eq!(agent.id, "007");
         assert_eq!(agent.handler.as_deref(), Some("codex"));

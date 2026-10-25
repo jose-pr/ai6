@@ -20,21 +20,21 @@ use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
-use crate::directorates::i::cables::{
-    CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
-    CableRelayError, CableRelease, CableSendRequest, CableTarget,
-};
-use crate::directorates::i::intake::{Brief, DEFAULT_LEASE, IntakeRegistry, Lease};
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::identity::MAX_ID_BYTES;
 use crate::directorates::m::mission::{
-    Mission, MissionBook, MissionError, MissionOperation, MissionState,
+    LaunchManifest, Mission, MissionError, MissionState, MissionStore,
 };
 use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
-use crate::directorates::medical::watchdog::{InactivityMonitor, WatchdogConfig};
+use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
 use crate::directorates::q::terminal::TerminalBridge;
+use crate::directorates::registry::cables::{
+    CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
+    CableRelayError, CableRelease, CableSendRequest, CableTarget,
+};
+use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, FileRegistry, Lease};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart,
 };
@@ -302,7 +302,7 @@ where
     .await
 }
 
-fn recover_startup_missions(missions: &mut MissionBook) -> io::Result<BTreeSet<String>> {
+fn recover_startup_missions(missions: &mut MissionStore) -> io::Result<BTreeSet<String>> {
     let pending = missions
         .list()
         .into_iter()
@@ -349,7 +349,7 @@ where
         .take()
         .or_else(|| std::env::var("AI6_STATION_ID").ok())
         .unwrap_or_else(daemon_station_id);
-    crate::directorates::i::intake::validate_station_id(&station_id)?;
+    crate::directorates::registry::store::validate_station_id(&station_id)?;
     CableEndpoint::try_new(
         "validation-agent".to_owned(),
         "validation-operation".to_owned(),
@@ -372,8 +372,8 @@ where
     let mission_store = crate::station::safehouse::state_dir()
         .map_err(io::Error::other)?
         .join("missions.json");
-    let mut missions = MissionBook::open(mission_store)?;
-    let intake = IntakeRegistry::from_environment()?;
+    let mut missions = MissionStore::open(mission_store)?;
+    let intake = FileRegistry::from_environment()?;
     let startup_recovery = recover_startup_missions(&mut missions)?;
     let listener = TcpListener::bind(config.address).await?;
     #[cfg(feature = "publisher")]
@@ -558,7 +558,7 @@ async fn list_intake_briefs(
 
 fn cable_endpoints(
     roster: &Roster,
-    missions: &Mutex<MissionBook>,
+    missions: &Mutex<MissionStore>,
     sessions: &Mutex<BTreeMap<String, AgentOperation>>,
     station_id: &str,
 ) -> Vec<CableEndpoint> {
@@ -800,8 +800,8 @@ fn cable_error(error: CableRelayError) -> ApiErrorResponse {
 struct DaemonState {
     plugins: Arc<plugins::Plugins>,
     roster: Arc<Roster>,
-    intake: Arc<IntakeRegistry>,
-    missions: Arc<Mutex<MissionBook>>,
+    intake: Arc<FileRegistry>,
+    missions: Arc<Mutex<MissionStore>>,
     sessions: Arc<Mutex<BTreeMap<String, AgentOperation>>>,
     cables: Arc<CableRelay>,
     station_id: String,
@@ -1306,7 +1306,7 @@ fn place_brief(state: &DaemonState, operation_id: &str, leases: &[Lease]) -> Opt
         if capacity == 0 || station_load >= capacity {
             continue;
         }
-        if !station_matches_selector(info.get("labels"), &operation.selector) {
+        if !station_matches_labels(info.get("labels"), &operation.station_labels) {
             continue;
         }
         if needs_local_checkout
@@ -1333,7 +1333,7 @@ fn place_brief(state: &DaemonState, operation_id: &str, leases: &[Lease]) -> Opt
     selected.map(|(_, _, station)| station)
 }
 
-fn station_matches_selector(
+fn station_matches_labels(
     labels: Option<&serde_json::Value>,
     selector: &BTreeMap<String, String>,
 ) -> bool {
@@ -1667,7 +1667,7 @@ struct AgentOperation {
     cover: Option<CoverAudit>,
     safe_house: Option<SafeHouse>,
     session: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
-    watchdog: InactivityMonitor,
+    watchdog: Watchdog,
     session_id: Option<SessionId>,
     #[cfg(feature = "cables-mcp")]
     _cables_mcp: Option<cables_mcp::Endpoint>,
@@ -1978,14 +1978,14 @@ fn configure_station_cover(
         .cover(&operation.cover)
         .map_err(|error| error.to_string())?;
     environment.insert("AI6_COVER".to_owned(), cover.name().to_owned());
-    if let Some(identity) = &operation.identity {
+    if let Some(identity) = &operation.cover_identity {
         environment.insert("GIT_AUTHOR_NAME".to_owned(), identity.name.clone());
         environment.insert("GIT_AUTHOR_EMAIL".to_owned(), identity.email.clone());
         environment.insert("GIT_COMMITTER_NAME".to_owned(), identity.name.clone());
         environment.insert("GIT_COMMITTER_EMAIL".to_owned(), identity.email.clone());
     }
     Ok(Some(cover.briefing(
-        operation.identity.as_ref(),
+        operation.cover_identity.as_ref(),
         agent_id,
         model,
     )))
@@ -2014,7 +2014,7 @@ fn station_cover_audit(
     Ok(Some(CoverAudit {
         policy: cover.name().to_owned(),
         base,
-        identity: operation.identity.clone(),
+        identity: operation.cover_identity.clone(),
         fail_on_blow: operation.on_blown == "fail",
     }))
 }
@@ -2116,7 +2116,7 @@ async fn start_mission(
             .as_ref()
             .map(|operation_id| publisher.session(operation_id.clone(), mission.mission_id.clone()))
     });
-    let watchdog = InactivityMonitor::with_config(agent.limits.apply_to(&state.watchdog));
+    let watchdog = Watchdog::with_config(agent.limits.apply_to(&state.watchdog));
     let terminal = state
         .plugins
         .terminal(&terminal_provider, None)
@@ -2199,7 +2199,7 @@ async fn start_mission(
         None
     };
     let working_directory = area.path.clone();
-    let operation = MissionOperation {
+    let operation = LaunchManifest {
         handler_provider: handler_provider.clone(),
         terminal_provider: terminal_provider.clone(),
         working_directory: working_directory.clone(),
@@ -2531,7 +2531,7 @@ async fn resume_mission(
             telemetry
         })
     });
-    let watchdog = InactivityMonitor::with_config(resume_agent.limits.apply_to(&state.watchdog));
+    let watchdog = Watchdog::with_config(resume_agent.limits.apply_to(&state.watchdog));
     let terminal = state
         .plugins
         .terminal(&terminal_provider, None)
@@ -2796,7 +2796,7 @@ fn spawn_event_pump_with_monitor(
     state: DaemonState,
     mission_id: String,
     session: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
-    monitor: InactivityMonitor,
+    monitor: Watchdog,
 ) {
     if let Ok(mut sessions) = state.sessions.lock()
         && let Some(operation) = sessions.get_mut(&mission_id)
@@ -3531,17 +3531,17 @@ mod tests {
 
         assert_eq!(event.kind, "completed");
     }
-    use crate::directorates::i::cables::{
+    use crate::directorates::q::terminal::{ExitInfo, Terminal, TerminalSession};
+    use crate::directorates::registry::cables::{
         CableAction, CableGrant, CablePolicy, CableScope, CableTarget,
     };
-    use crate::directorates::q::terminal::{ExitInfo, Terminal, TerminalSession};
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError, Registry};
     use crate::guatiao::{Provider, Status, ToValue, Value};
 
     fn no_op_cables() -> Arc<CableRelay> {
         Arc::new(CableRelay::new(
-            Arc::new(IntakeRegistry::open(
+            Arc::new(FileRegistry::open(
                 std::env::temp_dir().join("ai6-empty-cable-tests"),
             )),
             CablePolicy::default(),
@@ -3573,8 +3573,8 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(plugins::Plugins::scan(&[])),
             roster: Arc::new(Roster::default()),
-            intake: Arc::new(IntakeRegistry::open(root.path())),
-            missions: Arc::new(Mutex::new(MissionBook::default())),
+            intake: Arc::new(FileRegistry::open(root.path())),
+            missions: Arc::new(Mutex::new(MissionStore::default())),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
@@ -3617,7 +3617,7 @@ mod tests {
         let mission_id = MissionId::try_new("mission-007").unwrap();
         let receiver_session_id = SessionId::try_new("session-008").unwrap();
         let receiver_mission_id = MissionId::try_new("mission-008").unwrap();
-        let mut missions = MissionBook::default();
+        let mut missions = MissionStore::default();
         missions
             .create(
                 mission_id.clone(),
@@ -3670,7 +3670,7 @@ mod tests {
                     session: Arc::new(Mutex::new(
                         MockSession::new(session.clone(), "working").into_object(),
                     )),
-                    watchdog: InactivityMonitor::default(),
+                    watchdog: Watchdog::default(),
                     session_id: Some(session),
                     #[cfg(feature = "cables-mcp")]
                     _cables_mcp: None,
@@ -3681,7 +3681,7 @@ mod tests {
         }
         let sessions = Arc::new(Mutex::new(operations));
 
-        let registry = Arc::new(IntakeRegistry::open(dir.path().join("registry")));
+        let registry = Arc::new(FileRegistry::open(dir.path().join("registry")));
         let station_target =
             CableTarget::try_new(CableScope::Station, Some("local".to_owned())).unwrap();
         let endpoint_roster = roster.clone();
@@ -3701,7 +3701,7 @@ mod tests {
                         .unwrap(),
                     CableGrant::try_new(
                         "007".to_owned(),
-                        crate::directorates::i::cables::CableAction::Release,
+                        crate::directorates::registry::cables::CableAction::Release,
                         CableTarget::try_new(CableScope::Station, Some("local".to_owned()))
                             .unwrap(),
                     )
@@ -3709,7 +3709,7 @@ mod tests {
                 ],
                 BTreeMap::from([(
                     "008".to_owned(),
-                    crate::directorates::i::cables::CableInboundMode::Hold,
+                    crate::directorates::registry::cables::CableInboundMode::Hold,
                 )]),
             )
             .unwrap(),
@@ -3726,7 +3726,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(plugins::Plugins::scan(&[])),
             roster,
-            intake: Arc::new(IntakeRegistry::open(dir.path().join("registry"))),
+            intake: Arc::new(FileRegistry::open(dir.path().join("registry"))),
             missions,
             sessions,
             cables: Arc::new(relay),
@@ -3779,7 +3779,7 @@ mod tests {
         .unwrap();
         assert_eq!(released.delivered, 1);
 
-        let receiver = crate::directorates::i::cables::CablePrincipal::try_new(
+        let receiver = crate::directorates::registry::cables::CablePrincipal::try_new(
             "008".to_owned(),
             "G".to_owned(),
             None,
@@ -3964,7 +3964,7 @@ mod tests {
             format!("[agent.007]\nhandler = \"mock-agent\"\nmax_concurrent = {agent_limit}\n"),
         )
         .unwrap();
-        let mut missions = MissionBook::default();
+        let mut missions = MissionStore::default();
         for id in ["mission-1", "mission-2"] {
             missions
                 .create(
@@ -3980,7 +3980,7 @@ mod tests {
         DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(root).unwrap()),
-            intake: Arc::new(IntakeRegistry::open(root.join("registry"))),
+            intake: Arc::new(FileRegistry::open(root.join("registry"))),
             missions: Arc::new(Mutex::new(missions)),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
@@ -4051,7 +4051,8 @@ mod tests {
             .unwrap()
             .clone();
         let agent = state.roster.agent(Some("G"), "007").unwrap();
-        let settings = crate::directorates::i::intake::StationSettings::try_new("test", 1).unwrap();
+        let settings =
+            crate::directorates::registry::store::StationSettings::try_new("test", 1).unwrap();
         state
             .intake
             .set_station_settings("test", &settings)
@@ -4064,7 +4065,8 @@ mod tests {
         assert_eq!(error.0, StatusCode::TOO_MANY_REQUESTS);
         drop(reservation);
 
-        let settings = crate::directorates::i::intake::StationSettings::try_new("test", 2).unwrap();
+        let settings =
+            crate::directorates::registry::store::StationSettings::try_new("test", 2).unwrap();
         state
             .intake
             .set_station_settings("test", &settings)
@@ -4093,7 +4095,7 @@ mod tests {
             "[agent.007]\nhandler = \"mock-agent\"\nmax_concurrent = 2\n",
         )
         .unwrap();
-        let mut missions = MissionBook::default();
+        let mut missions = MissionStore::default();
         for id in ["mission-1", "mission-2"] {
             missions
                 .create(
@@ -4108,7 +4110,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(&dir).unwrap()),
-            intake: Arc::new(IntakeRegistry::open(dir.join("registry"))),
+            intake: Arc::new(FileRegistry::open(dir.join("registry"))),
             missions: Arc::new(Mutex::new(missions)),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
@@ -4230,8 +4232,8 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(&dir).unwrap()),
-            intake: Arc::new(IntakeRegistry::open(dir.join("registry"))),
-            missions: Arc::new(Mutex::new(MissionBook::default())),
+            intake: Arc::new(FileRegistry::open(dir.join("registry"))),
+            missions: Arc::new(Mutex::new(MissionStore::default())),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
@@ -4354,7 +4356,8 @@ mod tests {
         fs::create_dir_all(&queued).unwrap();
         fs::write(
             dir.path().join("operations.toml"),
-            "[operation.G]\ntheater = \"remote\"\nselector = { gpu = \"yes\" }\n",
+            "[operation.G]\ntheater = \"remote\"
+station_labels = { gpu = \"yes\" }\n",
         )
         .unwrap();
         fs::write(
@@ -4377,7 +4380,7 @@ mod tests {
             r#"{"title":"Second target work","id":"target-2","source":"manual","operation":"G","agent":"007"}"#,
         )
         .unwrap();
-        let intake = Arc::new(IntakeRegistry::open(&registry_dir));
+        let intake = Arc::new(FileRegistry::open(&registry_dir));
         let info = |station: &str, roles: &[&str], gpu: Option<&str>, capacity: usize| {
             let mut labels = BTreeMap::from([
                 ("station".to_owned(), serde_json::json!(station)),
@@ -4421,7 +4424,7 @@ mod tests {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(dir.path()).unwrap()),
             intake,
-            missions: Arc::new(Mutex::new(MissionBook::default())),
+            missions: Arc::new(Mutex::new(MissionStore::default())),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "hq".to_owned(),
@@ -4476,8 +4479,8 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(&dir).unwrap()),
-            intake: Arc::new(IntakeRegistry::open(dir.join("registry"))),
-            missions: Arc::new(Mutex::new(MissionBook::default())),
+            intake: Arc::new(FileRegistry::open(dir.join("registry"))),
+            missions: Arc::new(Mutex::new(MissionStore::default())),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
@@ -4569,7 +4572,7 @@ mod tests {
         )
         .unwrap();
         let mission_path = dir.join("missions.json");
-        let intake = Arc::new(IntakeRegistry::open(dir.join("registry")));
+        let intake = Arc::new(FileRegistry::open(dir.join("registry")));
         intake
             .put_agent_role(
                 "G",
@@ -4584,7 +4587,7 @@ mod tests {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake,
-            missions: Arc::new(Mutex::new(MissionBook::open(&mission_path).unwrap())),
+            missions: Arc::new(Mutex::new(MissionStore::open(&mission_path).unwrap())),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
@@ -4722,7 +4725,7 @@ mod tests {
             .transition(mission_id.as_str(), MissionState::Working)
             .unwrap();
         state.sessions.lock().unwrap().clear();
-        let mut recovered = MissionBook::open(&mission_path).unwrap();
+        let mut recovered = MissionStore::open(&mission_path).unwrap();
         let startup_recovery = recover_startup_missions(&mut recovered).unwrap();
         assert_eq!(startup_recovery, BTreeSet::from([mission_id.to_string()]));
         assert_eq!(
@@ -4782,7 +4785,7 @@ mod tests {
     async fn shutdown_stops_event_workers_and_blocks_active_missions() {
         let mission_id = MissionId::try_new("mission-shutdown").unwrap();
         let session_id = SessionId::try_new("provider-session-shutdown").unwrap();
-        let mut missions = MissionBook::default();
+        let mut missions = MissionStore::default();
         missions
             .create(
                 mission_id.clone(),
@@ -4804,7 +4807,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
-            intake: Arc::new(IntakeRegistry::open(
+            intake: Arc::new(FileRegistry::open(
                 std::env::temp_dir().join("ai6-empty-registry"),
             )),
             missions: Arc::new(Mutex::new(missions)),
@@ -4836,7 +4839,7 @@ mod tests {
                 cover: None,
                 safe_house: None,
                 session: session.clone(),
-                watchdog: InactivityMonitor::default(),
+                watchdog: Watchdog::default(),
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
@@ -4872,7 +4875,7 @@ mod tests {
     async fn terminal_prompt_blocks_and_new_output_resumes_the_mission() {
         let mission_id = MissionId::try_new("mission-terminal-prompt").unwrap();
         let session_id = SessionId::try_new("provider-session-terminal-prompt").unwrap();
-        let mut missions = MissionBook::default();
+        let mut missions = MissionStore::default();
         missions
             .create(
                 mission_id.clone(),
@@ -4898,7 +4901,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
-            intake: Arc::new(IntakeRegistry::open(
+            intake: Arc::new(FileRegistry::open(
                 std::env::temp_dir().join("ai6-empty-registry"),
             )),
             missions: Arc::new(Mutex::new(missions)),
@@ -4918,7 +4921,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
         };
-        let monitor = InactivityMonitor::with_limits(
+        let monitor = Watchdog::with_limits(
             std::time::Duration::from_secs(5),
             std::time::Duration::ZERO,
             std::time::Duration::from_millis(20),
@@ -5054,7 +5057,7 @@ mod tests {
     async fn operator_message_resets_the_watchdog_before_the_session_stalls() {
         let mission_id = MissionId::try_new("mission-quiet").unwrap();
         let session_id = SessionId::try_new("provider-session-quiet").unwrap();
-        let mut missions = MissionBook::default();
+        let mut missions = MissionStore::default();
         missions
             .create(
                 mission_id.clone(),
@@ -5080,7 +5083,7 @@ mod tests {
         let state = DaemonState {
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
-            intake: Arc::new(IntakeRegistry::open(
+            intake: Arc::new(FileRegistry::open(
                 std::env::temp_dir().join("ai6-empty-registry"),
             )),
             missions: Arc::new(Mutex::new(missions)),
@@ -5112,7 +5115,7 @@ mod tests {
                 cover: None,
                 safe_house: None,
                 session: session.clone(),
-                watchdog: InactivityMonitor::default(),
+                watchdog: Watchdog::default(),
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
@@ -5125,7 +5128,7 @@ mod tests {
             state.clone(),
             mission_id.to_string(),
             session,
-            InactivityMonitor::new(std::time::Duration::from_secs(1)),
+            Watchdog::new(std::time::Duration::from_secs(1)),
         );
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert_eq!(
@@ -5222,7 +5225,7 @@ mod tests {
         )
         .unwrap();
         let roster = Roster::load(&root).unwrap();
-        let mission = MissionBook::default()
+        let mission = MissionStore::default()
             .create(
                 MissionId::try_new("mission-4").unwrap(),
                 Some("G".to_owned()),

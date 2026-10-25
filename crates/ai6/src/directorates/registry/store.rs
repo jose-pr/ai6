@@ -1,4 +1,5 @@
-//! I Branch's cross-language file-backed Mission intake registry.
+//! The file-backed Registry store: the brief queue, leases, Station check-ins, the
+//! Headquarters lease, audit records and access tokens.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -12,9 +13,9 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::directorates::i::cables::{Cable, CableError, CableState};
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::m::roster::AgentRole;
+use crate::directorates::registry::cables::{Cable, CableError, CableState};
 
 const BRIEF_VERSION: u32 = 1;
 const MAX_BRIEF_BYTES: u64 = 1_048_576;
@@ -39,7 +40,7 @@ const MAX_PROPOSAL_IDEMPOTENCY_KEY_BYTES: usize = 256;
 /// Default duration for a file-backed Registry claim.
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
 
-/// One queued I Branch brief with a bounded, versioned file representation.
+/// One queued brief with a bounded, versioned file representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Brief {
@@ -80,7 +81,7 @@ pub struct Brief {
 }
 
 impl Brief {
-    /// Filesystem-safe key within the I Branch Registry.
+    /// Filesystem-safe key within the Registry.
     pub fn key(&self) -> String {
         format!(
             "{}--{}",
@@ -235,7 +236,7 @@ impl MissionProposal {
 /// Metadata-only audit event stored in the shared file-backed I Registry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AuditEntry {
+pub struct AuditRecord {
     /// Unique file-safe event identity.
     pub id: String,
     /// Authenticated actor identity supplied by the gateway's Directory.
@@ -253,7 +254,7 @@ pub struct AuditEntry {
     pub at: f64,
 }
 
-impl AuditEntry {
+impl AuditRecord {
     fn validate(&self) -> io::Result<()> {
         if self.id.len() > 128 {
             return Err(io::Error::new(
@@ -517,13 +518,13 @@ pub enum LeaseRecovery {
     Failed,
 }
 
-/// Read-only view of the file-backed I Branch `new/` queue.
+/// Read-only view of the file-backed Registry `new/` queue.
 #[derive(Debug, Clone)]
-pub struct IntakeRegistry {
+pub struct FileRegistry {
     root: PathBuf,
 }
 
-impl IntakeRegistry {
+impl FileRegistry {
     /// Opens a Registry directory without creating or changing it.
     pub fn open(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -1308,7 +1309,7 @@ impl IntakeRegistry {
     /// Atomically consumes one token from every shared Cable quota bucket.
     ///
     /// Keys are SHA-256 hashed before being written to `cable-quotas.json`, matching I
-    /// I Branch Registry while keeping caller-provided keys out of the file.
+    /// Registry while keeping caller-provided keys out of the file.
     pub fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
         if !now.is_finite() || buckets.is_empty() {
             return Err(io::Error::new(
@@ -1490,7 +1491,7 @@ impl IntakeRegistry {
     }
 
     /// Stores one metadata-only audit event without retaining request content.
-    pub fn record_audit(&self, entry: &AuditEntry) -> io::Result<PathBuf> {
+    pub fn record_audit(&self, entry: &AuditRecord) -> io::Result<PathBuf> {
         entry.validate()?;
         let _registry_lock = registry_lock(&self.root)?;
         let directory = self.root.join("audit");
@@ -1511,7 +1512,7 @@ impl IntakeRegistry {
     }
 
     /// Returns the newest audit events, bounded to 500 metadata-only entries.
-    pub fn list_audit(&self, limit: usize) -> io::Result<Vec<AuditEntry>> {
+    pub fn list_audit(&self, limit: usize) -> io::Result<Vec<AuditRecord>> {
         if limit == 0 || limit > MAX_AUDIT_RESULTS {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -1552,7 +1553,7 @@ impl IntakeRegistry {
             let Ok(bytes) = fs::read(&path) else {
                 continue;
             };
-            let Ok(entry) = serde_json::from_slice::<AuditEntry>(&bytes) else {
+            let Ok(entry) = serde_json::from_slice::<AuditRecord>(&bytes) else {
                 continue;
             };
             if entry.validate().is_ok() {
@@ -2276,7 +2277,7 @@ fn registry_lock(root: &Path) -> io::Result<File> {
             Err(error) if Instant::now() >= deadline => {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    format!("timed out locking I Branch Registry: {error}"),
+                    format!("timed out locking the Registry: {error}"),
                 ));
             }
             Err(error) => return Err(error),
@@ -2297,7 +2298,7 @@ fn lock_is_contended(error: &io::Error) -> bool {
     false
 }
 
-/// Returns the I Branch default Registry location.
+/// Returns the default Registry location.
 pub fn default_registry_dir() -> io::Result<PathBuf> {
     if let Some(path) = nonempty_env("AI6_REGISTRY") {
         return Ok(path.into());
@@ -2362,7 +2363,9 @@ fn invalid_data(message: impl Into<String>) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::directorates::i::cables::{CableDraft, CableRecipient, CableScope, CableTarget};
+    use crate::directorates::registry::cables::{
+        CableDraft, CableRecipient, CableScope, CableTarget,
+    };
     use std::fs;
 
     fn test_cable(id: &str, key: &str, body: &str, session_id: &str) -> Cable {
@@ -2395,7 +2398,7 @@ mod tests {
     #[test]
     fn operation_agent_role_overrides_are_validated_and_isolated() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let first = test_agent_role("reviewer", "Review changes");
         registry.put_agent_role("operation-a", &first).unwrap();
 
@@ -2435,7 +2438,7 @@ mod tests {
     #[test]
     fn station_check_ins_follow_the_registry_record_contract() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let mut info = BTreeMap::new();
         info.insert("station_count".to_owned(), serde_json::json!(3));
         info.insert("station".to_owned(), serde_json::json!("forged"));
@@ -2475,7 +2478,7 @@ mod tests {
         )
         .unwrap();
         fs::write(directory.join("malformed.json"), b"not json").unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         registry.check_in("fresh", BTreeMap::new()).unwrap();
 
         let stations = registry.stations(DEFAULT_LEASE).unwrap();
@@ -2487,7 +2490,7 @@ mod tests {
     #[test]
     fn headquarters_election_has_one_winner_and_renews_the_winner() {
         let root = tempfile::tempdir().unwrap();
-        let first = IntakeRegistry::open(root.path());
+        let first = FileRegistry::open(root.path());
         let second = first.clone();
         let first_thread =
             std::thread::spawn(move || first.elect("station-a", DEFAULT_LEASE).unwrap());
@@ -2496,7 +2499,7 @@ mod tests {
         let won = [first_thread.join().unwrap(), second_thread.join().unwrap()];
 
         assert_eq!(won.iter().filter(|won| **won).count(), 1);
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let current = registry.headquarters().unwrap().unwrap();
         let winner = if won[0] { "station-a" } else { "station-b" };
         let loser = if won[0] { "station-b" } else { "station-a" };
@@ -2516,7 +2519,7 @@ mod tests {
             r#"{"station":"old-station","expires":0}"#,
         )
         .unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
 
         assert!(registry.elect("new/station", DEFAULT_LEASE).unwrap());
 
@@ -2533,7 +2536,7 @@ mod tests {
     #[test]
     fn site_check_in_rejects_invalid_identity_and_oversized_metadata() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         assert_eq!(
             registry
                 .check_in("bad\nsite", BTreeMap::new())
@@ -2556,7 +2559,7 @@ mod tests {
     #[test]
     fn station_settings_are_validated_persisted_and_isolated_by_identity() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let first = StationSettings::try_new("station/a", 7).unwrap();
         let second = StationSettings::try_new("station?a", 9).unwrap();
 
@@ -2602,7 +2605,7 @@ mod tests {
         fs::write(queue.join("a.json"), low).unwrap();
         fs::write(queue.join("b.json"), high_late).unwrap();
         fs::write(queue.join("c.json"), high_early).unwrap();
-        let briefs = IntakeRegistry::open(root.path()).list_new().unwrap();
+        let briefs = FileRegistry::open(root.path()).list_new().unwrap();
         assert_eq!(
             briefs
                 .iter()
@@ -2615,7 +2618,7 @@ mod tests {
     #[test]
     fn mission_proposals_are_idempotent_operation_scoped_and_not_runnable() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let proposal = MissionProposal::try_new(
             "operation-a",
             MissionId::try_new("parent-mission").unwrap(),
@@ -2658,7 +2661,7 @@ mod tests {
     #[test]
     fn mission_proposal_identity_cannot_be_reused_for_different_content() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let create = |title: &str| {
             MissionProposal::try_new(
                 "operation-a",
@@ -2700,7 +2703,7 @@ mod tests {
     #[test]
     fn proposal_approval_promotes_once_and_rejection_stays_out_of_intake() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let make_proposal = |retry_key: &str, title: &str| {
             MissionProposal::try_new(
                 "operation-a",
@@ -2777,7 +2780,7 @@ mod tests {
     #[test]
     fn submit_brief_writes_once_to_shared_queue() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let brief = Brief {
             title: "Review the control pane".to_owned(),
             body: "Check the Operation context.".to_owned(),
@@ -2811,8 +2814,8 @@ mod tests {
     #[test]
     fn audit_entries_are_metadata_only_bounded_and_sorted_newest_first() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
-        let older = AuditEntry {
+        let registry = FileRegistry::open(root.path());
+        let older = AuditRecord {
             id: "event-1".to_owned(),
             actor: "operator-007".to_owned(),
             action: "mission.create".to_owned(),
@@ -2821,7 +2824,7 @@ mod tests {
             target: "universal-exports--mission-1".to_owned(),
             at: 100.0,
         };
-        let newer = AuditEntry {
+        let newer = AuditRecord {
             id: "event-2".to_owned(),
             at: 101.0,
             ..older.clone()
@@ -2843,7 +2846,7 @@ mod tests {
         );
         assert_eq!(
             registry
-                .record_audit(&AuditEntry {
+                .record_audit(&AuditRecord {
                     target: "prompt\nsecret".to_owned(),
                     id: "event-3".to_owned(),
                     ..older
@@ -2867,8 +2870,8 @@ mod tests {
             r#"{"title":"Inspect","id":"brief-1"}"#,
         )
         .unwrap();
-        let first = IntakeRegistry::open(root.path());
-        let second = IntakeRegistry::open(root.path());
+        let first = FileRegistry::open(root.path());
+        let second = FileRegistry::open(root.path());
         let first_thread = std::thread::spawn(move || first.claim_new(None).unwrap());
         let second_thread = std::thread::spawn(move || second.claim_new(None).unwrap());
         let claims = [first_thread.join().unwrap(), second_thread.join().unwrap()];
@@ -2888,7 +2891,7 @@ mod tests {
             r#"{"title":"Inspect","id":"brief-1"}"#,
         )
         .unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let mut meta = BTreeMap::new();
         meta.insert("operation".to_owned(), serde_json::json!("operation-01"));
 
@@ -2951,7 +2954,7 @@ mod tests {
             r#"{"title":"Inspect","id":"brief-1"}"#,
         )
         .unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let brief = registry.list_new().unwrap().remove(0);
         registry
             .claim_with_lease(
@@ -3013,7 +3016,7 @@ mod tests {
                 format!(r#"{{"title":"Inspect","id":"{id}"}}"#),
             )
             .unwrap();
-            let registry = IntakeRegistry::open(root.path());
+            let registry = FileRegistry::open(root.path());
             registry
                 .claim_with_lease(None, "operation-01", DEFAULT_LEASE, BTreeMap::new())
                 .unwrap()
@@ -3069,8 +3072,8 @@ mod tests {
             r#"{"title":"Inspect","id":"brief-1"}"#,
         )
         .unwrap();
-        let first = IntakeRegistry::open(root.path());
-        let second = IntakeRegistry::open(root.path());
+        let first = FileRegistry::open(root.path());
+        let second = FileRegistry::open(root.path());
         let first_thread = std::thread::spawn(move || {
             first.claim_with_lease(None, "one", DEFAULT_LEASE, BTreeMap::new())
         });
@@ -3082,11 +3085,7 @@ mod tests {
             second_thread.join().unwrap().unwrap(),
         ];
         assert_eq!(claims.iter().filter(|claim| claim.is_some()).count(), 1);
-        assert!(
-            IntakeRegistry::open(root.path())
-                .lease("../outside")
-                .is_err()
-        );
+        assert!(FileRegistry::open(root.path()).lease("../outside").is_err());
     }
 
     #[test]
@@ -3102,7 +3101,7 @@ mod tests {
     #[test]
     fn cable_store_is_idempotent_and_rejects_conflicting_retries() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let cable = test_cable("cable-1", "send-1", "Review this", "session-8");
 
         assert_eq!(registry.submit_cable(&cable).unwrap(), cable);
@@ -3124,7 +3123,7 @@ mod tests {
     #[test]
     fn cable_inbox_and_delivery_updates_follow_session_and_expiry() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let cable = test_cable("cable-1", "send-1", "Review this", "session-8");
         registry.submit_cable(&cable).unwrap();
 
@@ -3201,7 +3200,7 @@ mod tests {
     #[test]
     fn cable_quotas_are_atomic_persisted_and_share_the_registry_format() {
         let root = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(root.path());
+        let registry = FileRegistry::open(root.path());
         let buckets = [("sender:007", 1.0, 2), ("scope:operation:G", 1.0, 1)];
 
         assert!(registry.take_cable_quotas(&buckets, 100.0).unwrap());
@@ -3240,7 +3239,7 @@ mod tests {
                 .is_some()
         );
         assert!(
-            !IntakeRegistry::open(root.path())
+            !FileRegistry::open(root.path())
                 .take_cable_quotas(&buckets, 101.0)
                 .unwrap()
         );
@@ -3249,8 +3248,8 @@ mod tests {
     #[test]
     fn access_tokens_are_shared_by_registries_and_revocation_is_immediate() {
         let root = tempfile::tempdir().unwrap();
-        let issuer = IntakeRegistry::open(root.path());
-        let verifier = IntakeRegistry::open(root.path());
+        let issuer = FileRegistry::open(root.path());
+        let verifier = FileRegistry::open(root.path());
         let secret = "ai6_device_secret_0123456789abcdef";
         let digest = Sha256::digest([b"ai6-access-token\0".as_slice(), secret.as_bytes()].concat())
             .iter()

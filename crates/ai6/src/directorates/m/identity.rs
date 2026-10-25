@@ -53,7 +53,7 @@ pub struct AccessTokenRecord {
 }
 
 impl AccessTokenRecord {
-    /// Validates and stores one access-token record in the I Branch Registry format.
+    /// Validates and stores one access-token record in the Registry format.
     pub fn try_new(
         token_id: impl Into<String>,
         digest: impl Into<String>,

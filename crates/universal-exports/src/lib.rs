@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ai6::{
-    AccessTokenRecord, AgentRole, Attempt, AuditEntry, Authenticator, AuthorizationRequest,
-    Authorizer, Brief, Directory, IntakeRegistry, Lookup, MissionProposal, Person, StationSettings,
+    AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
+    Authorizer, Brief, Directory, FileRegistry, Lookup, MissionProposal, Person, StationSettings,
     Verdict,
 };
 use ai6_diptel::{
@@ -40,11 +40,11 @@ const SITE_HEALTH_MAX_AGE: Duration = Duration::from_secs(45);
 
 /// Limits and trusted origin for one gateway instance.
 ///
-/// The M token is deliberately omitted from `Debug`; callers should load it
+/// The Station token is deliberately omitted from `Debug`; callers should load it
 /// from their scoped credential source and never log it.
 pub struct GatewayConfig {
     public_origin: String,
-    m_token: String,
+    station_token: String,
     limits: GatewayLimits,
     attach_token_ttl: Duration,
     write_lease_ttl: Duration,
@@ -63,7 +63,7 @@ pub struct GatewayLimits {
     pub max_frame_bytes: usize,
     /// Maximum browser input frames accepted per connection per second.
     pub max_input_frames_per_second: u32,
-    /// Capacity of the bounded queue between the gateway and M.
+    /// Capacity of the bounded queue between the gateway and its Stations.
     pub input_queue_capacity: usize,
     /// Capacity of each per-Session viewer fanout queue.
     pub fanout_capacity: usize,
@@ -156,13 +156,13 @@ impl GatewayConfig {
     /// Creates a gateway config and rejects unsafe or unbounded resource settings.
     pub fn new(
         public_origin: impl Into<String>,
-        m_token: impl Into<String>,
+        station_token: impl Into<String>,
         limits: GatewayLimits,
         attach_token_ttl: Duration,
         write_lease_ttl: Duration,
     ) -> Result<Self, GatewayError> {
         let public_origin = public_origin.into();
-        let m_token = m_token.into();
+        let station_token = station_token.into();
         let authority = public_origin.strip_prefix("https://").unwrap_or_default();
         let retained_bytes = limits.scrollback_events.checked_mul(limits.max_frame_bytes);
         let fanout_bytes = limits.fanout_capacity.checked_mul(limits.max_frame_bytes);
@@ -191,7 +191,7 @@ impl GatewayConfig {
         if authority.is_empty()
             || authority.contains(['/', '?', '#', '@'])
             || public_origin.len() > 2048
-            || m_token.len() < 32
+            || station_token.len() < 32
             || limits.max_sessions == 0
             || limits.max_clients_per_session == 0
             || limits.scrollback_events == 0
@@ -211,7 +211,7 @@ impl GatewayConfig {
         }
         Ok(Self {
             public_origin: public_origin.trim_end_matches('/').to_owned(),
-            m_token,
+            station_token,
             limits,
             attach_token_ttl,
             write_lease_ttl,
@@ -228,7 +228,7 @@ impl fmt::Debug for GatewayConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GatewayConfig")
             .field("public_origin", &self.public_origin)
-            .field("m_token", &"[REDACTED]")
+            .field("station_token", &"[REDACTED]")
             .field("limits", &self.limits)
             .field("attach_token_ttl", &self.attach_token_ttl)
             .field("write_lease_ttl", &self.write_lease_ttl)
@@ -317,7 +317,7 @@ impl fmt::Debug for Attachment {
 pub enum GatewayError {
     /// A required setting is absent or outside its accepted bound.
     InvalidConfiguration,
-    /// The caller did not authenticate as M.
+    /// The caller did not authenticate as a Station.
     Unauthorized,
     /// A grant does not match the registered Station, Mission or Session.
     Forbidden,
@@ -339,7 +339,7 @@ impl fmt::Display for GatewayError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::InvalidConfiguration => "gateway configuration is invalid",
-            Self::Unauthorized => "M authentication is required",
+            Self::Unauthorized => "Station authentication is required",
             Self::Forbidden => "the grant does not authorize this Station and Session",
             Self::NotFound => "the Station or Session was not found",
             Self::Conflict => "a bounded gateway resource is already occupied",
@@ -354,14 +354,14 @@ impl fmt::Display for GatewayError {
 
 impl std::error::Error for GatewayError {}
 
-/// Gateway state shared by the HTTP handler and M's local connection.
+/// Gateway state shared by the HTTP handler and the Station channel.
 #[derive(Clone)]
 pub struct Gateway {
     config: std::sync::Arc<GatewayConfig>,
     inner: std::sync::Arc<Mutex<Inner>>,
     input_tx: mpsc::Sender<AgentInput>,
     input_rx: std::sync::Arc<Mutex<mpsc::Receiver<AgentInput>>>,
-    registry: Option<IntakeRegistry>,
+    registry: Option<FileRegistry>,
     access: Option<AccessProviders>,
 }
 
@@ -377,7 +377,7 @@ impl fmt::Debug for Gateway {
 #[derive(Default)]
 struct Inner {
     sessions: HashMap<SessionId, SessionRecord>,
-    missions: HashMap<(OperationId, MissionId), MissionBrief>,
+    missions: HashMap<(OperationId, MissionId), LaunchManifest>,
     attach_tokens: HashMap<String, TimedGrant>,
     connection_tickets: HashMap<String, TimedGrant>,
     connections: HashMap<String, ActiveConnection>,
@@ -416,7 +416,7 @@ struct WriteLease {
 }
 
 impl Gateway {
-    /// Creates the bounded gateway state and the one authenticated-M input queue.
+    /// Creates the bounded gateway state and the one authenticated Station input queue.
     pub fn new(config: GatewayConfig) -> Self {
         let (input_tx, input_rx) = mpsc::channel(config.limits.input_queue_capacity);
         Self {
@@ -430,7 +430,7 @@ impl Gateway {
     }
 
     /// Creates a gateway backed by the shared I Registry for user access tokens.
-    pub fn with_registry(config: GatewayConfig, registry: IntakeRegistry) -> Self {
+    pub fn with_registry(config: GatewayConfig, registry: FileRegistry) -> Self {
         let mut gateway = Self::new(config);
         gateway.registry = Some(registry);
         gateway
@@ -439,7 +439,7 @@ impl Gateway {
     /// Creates a gateway backed by the shared Registry and configured user access providers.
     pub fn with_access(
         config: GatewayConfig,
-        registry: IntakeRegistry,
+        registry: FileRegistry,
         access: AccessProviders,
     ) -> Self {
         let mut gateway = Self::with_registry(config, registry);
@@ -447,24 +447,24 @@ impl Gateway {
         gateway
     }
 
-    /// Checks whether a presented secret is M's configured ingress credential.
-    pub fn authenticate_m(&self, presented: &str) -> Result<(), GatewayError> {
-        if constant_time_eq(self.config.m_token.as_bytes(), presented.as_bytes()) {
+    /// Checks whether a presented secret is the configured Station channel credential.
+    pub fn authenticate_station(&self, presented: &str) -> Result<(), GatewayError> {
+        if constant_time_eq(self.config.station_token.as_bytes(), presented.as_bytes()) {
             Ok(())
         } else {
             Err(GatewayError::Unauthorized)
         }
     }
 
-    /// Registers one active provider Session after authenticating M.
+    /// Registers one active provider Session after authenticating the Station.
     pub async fn register_session(
         &self,
-        m_token: &str,
+        station_token: &str,
         operation_id: OperationId,
         mission_id: MissionId,
         session_id: SessionId,
     ) -> Result<(), GatewayError> {
-        self.authenticate_m(m_token)?;
+        self.authenticate_station(station_token)?;
         let mut inner = self.inner.lock().await;
         if let Some(record) = inner.sessions.get(&session_id) {
             if record.operation_id == operation_id && record.mission_id == mission_id {
@@ -497,10 +497,10 @@ impl Gateway {
     /// Returns the next event cursor for an authenticated registered Session.
     pub async fn next_sequence(
         &self,
-        m_token: &str,
+        station_token: &str,
         session_id: &SessionId,
     ) -> Result<u64, GatewayError> {
-        self.authenticate_m(m_token)?;
+        self.authenticate_station(station_token)?;
         let inner = self.inner.lock().await;
         let session = inner
             .sessions
@@ -544,12 +544,12 @@ impl Gateway {
 
     async fn publish_mission_brief(
         &self,
-        m_token: &str,
+        station_token: &str,
         operation_id: OperationId,
         mission_id: MissionId,
-        brief: MissionBrief,
+        brief: LaunchManifest,
     ) -> Result<(), GatewayError> {
-        self.authenticate_m(m_token)?;
+        self.authenticate_station(station_token)?;
         let mut inner = self.inner.lock().await;
         // AI6 is authoritative: a resumed operation can publish a refreshed manifest.
         inner.missions.insert((operation_id, mission_id), brief);
@@ -570,19 +570,20 @@ impl Gateway {
     /// Encodes and publishes one lifecycle event for a registered provider Session.
     pub async fn publish_lifecycle(
         &self,
-        m_token: &str,
+        station_token: &str,
         event: LifecycleEvent,
     ) -> Result<(), GatewayError> {
         let (schema, value) = lifecycle_frames(&event).map_err(|_| GatewayError::InvalidFrame)?;
-        self.ingest(m_token, &event.session_id, 0, schema).await?;
-        self.ingest(m_token, &event.session_id, event.sequence, value)
+        self.ingest(station_token, &event.session_id, 0, schema)
+            .await?;
+        self.ingest(station_token, &event.session_id, event.sequence, value)
             .await
     }
 
-    /// Encodes and publishes raw terminal output without requiring M to encode guatiao.
+    /// Encodes and publishes raw terminal output without requiring the Station to encode guatiao.
     pub async fn publish_terminal_output(
         &self,
-        m_token: &str,
+        station_token: &str,
         session_id: SessionId,
         sequence: u64,
         bytes: Vec<u8>,
@@ -595,17 +596,18 @@ impl Gateway {
         )
         .map_err(|_| GatewayError::TooLarge)?;
         let (schema, value) = terminal_frames(&terminal).map_err(|_| GatewayError::InvalidFrame)?;
-        self.ingest(m_token, &session_id, 0, schema).await?;
-        self.ingest(m_token, &session_id, sequence, value).await
+        self.ingest(station_token, &session_id, 0, schema).await?;
+        self.ingest(station_token, &session_id, sequence, value)
+            .await
     }
 
     /// Mints an opaque, short-lived, single-use token for an existing Session.
     pub async fn issue_attach_token(
         &self,
-        m_token: &str,
+        station_token: &str,
         grant: AttachGrant,
     ) -> Result<String, GatewayError> {
-        self.authenticate_m(m_token)?;
+        self.authenticate_station(station_token)?;
         self.store_attach_token(grant).await
     }
 
@@ -733,15 +735,15 @@ impl Gateway {
         })
     }
 
-    /// Validates and records an M-originated guatiao frame, then fans it out.
+    /// Validates and records a Station-originated guatiao frame, then fans it out.
     pub async fn ingest(
         &self,
-        m_token: &str,
+        station_token: &str,
         session_id: &SessionId,
         sequence: u64,
         frame: Vec<u8>,
     ) -> Result<(), GatewayError> {
-        self.authenticate_m(m_token)?;
+        self.authenticate_station(station_token)?;
         if frame.len() > self.config.limits.max_frame_bytes {
             return Err(GatewayError::TooLarge);
         }
@@ -834,7 +836,7 @@ impl Gateway {
         Ok(())
     }
 
-    /// Queues one browser frame for M after confirming an active write lease.
+    /// Queues one browser frame for the Station after confirming an active write lease.
     pub async fn submit_input(
         &self,
         session_id: &SessionId,
@@ -920,7 +922,7 @@ impl Gateway {
         }
     }
 
-    /// Waits for the next terminal input from an authenticated M connection.
+    /// Waits for the next terminal input from an authenticated Station connection.
     pub async fn receive_agent_input(&self) -> Option<AgentInput> {
         self.input_rx.lock().await.recv().await
     }
@@ -930,7 +932,7 @@ impl Gateway {
         self.config.public_origin()
     }
 
-    /// Returns the Axum service for M ingress, browser attach and terminal sockets.
+    /// Returns the Axum service for the Station channel, browser attach and terminal sockets.
     pub fn router(self) -> Router {
         let max_frame_bytes = self.config.limits.max_frame_bytes;
         Router::new()
@@ -976,26 +978,26 @@ impl Gateway {
             .route("/v1/auth/session", get(access_session))
             .route("/v1/user/profile", get(user_profile))
             .route("/v1/user/audit", get(user_audit))
-            .route("/v1/m/sessions", post(register_session))
+            .route("/v1/station/sessions", post(register_session))
             .route(
-                "/v1/m/sessions/{session_id}/lifecycle/{sequence}",
+                "/v1/station/sessions/{session_id}/lifecycle/{sequence}",
                 post(publish_lifecycle),
             )
             .route(
-                "/v1/m/sessions/{session_id}/terminal/{sequence}",
+                "/v1/station/sessions/{session_id}/terminal/{sequence}",
                 post(publish_terminal_output),
             )
             .route(
-                "/v1/m/sessions/{session_id}/events/{sequence}",
+                "/v1/station/sessions/{session_id}/events/{sequence}",
                 post(ingest_event),
             )
-            .route("/v1/m/attach-grants", post(issue_attach_token))
-            .route("/v1/m/access-tokens", post(issue_access_token))
+            .route("/v1/station/attach-grants", post(issue_attach_token))
+            .route("/v1/station/access-tokens", post(issue_access_token))
             .route(
-                "/v1/m/access-tokens/{token_id}",
+                "/v1/station/access-tokens/{token_id}",
                 axum::routing::delete(revoke_access_token),
             )
-            .route("/v1/m/inputs/next", get(next_agent_input))
+            .route("/v1/station/inputs/next", get(next_agent_input))
             .route("/v1/attach", post(exchange_attach_token))
             .route("/v1/socket/{session_id}", get(websocket_attach))
             .layer(axum::extract::DefaultBodyLimit::max(max_frame_bytes))
@@ -1245,7 +1247,7 @@ async fn create_user_mission(
     };
     let mission_id = MissionId::new(brief.key()).map_err(|_| ApiError::internal())?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let audit = AuditEntry {
+    let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
         actor: actor_id,
         action: "mission.create.requested".to_owned(),
@@ -1395,7 +1397,7 @@ async fn record_proposal_audit(
     action: &'static str,
 ) -> Result<(), ApiError> {
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let entry = AuditEntry {
+    let entry = AuditRecord {
         id: Uuid::new_v4().to_string(),
         actor: person.id,
         action: action.to_owned(),
@@ -1557,7 +1559,7 @@ async fn issue_access_token(
     Json(request): Json<IssueAccessTokenRequest>,
 ) -> Result<(StatusCode, Json<IssuedAccessToken>), ApiError> {
     gateway
-        .authenticate_m(bearer(&headers)?)
+        .authenticate_station(bearer(&headers)?)
         .map_err(ApiError::from)?;
     if !(60..=86_400).contains(&request.ttl_seconds) {
         return Err(ApiError::bad_request());
@@ -1642,7 +1644,7 @@ async fn authenticate_password(
 }
 
 async fn issue_access_token_record(
-    registry: IntakeRegistry,
+    registry: FileRegistry,
     person_id: String,
     ttl_seconds: u64,
 ) -> Result<IssuedAccessToken, ApiError> {
@@ -1921,7 +1923,7 @@ async fn authorize_resource_action(
 }
 
 async fn ensure_station_registered(
-    registry: &IntakeRegistry,
+    registry: &FileRegistry,
     station_id: &str,
 ) -> Result<ai6::StationRecord, ApiError> {
     let registry = registry.clone();
@@ -2017,7 +2019,7 @@ async fn put_user_station_settings(
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::bad_request())?;
-    let audit = AuditEntry {
+    let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
         actor: person.id,
         action: "station.settings.update".to_owned(),
@@ -2034,7 +2036,7 @@ async fn put_user_station_settings(
 }
 
 async fn ensure_operation_registered(
-    registry: &IntakeRegistry,
+    registry: &FileRegistry,
     operation_id: &OperationId,
 ) -> Result<(), ApiError> {
     let registry = registry.clone();
@@ -2137,7 +2139,7 @@ async fn put_user_agent_role(
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     ensure_operation_registered(&registry, &operation_id).await?;
     let operation = operation_id.to_string();
-    let audit = AuditEntry {
+    let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
         actor: person.id,
         action: "agent.role.update".to_owned(),
@@ -2186,7 +2188,7 @@ async fn delete_user_agent_role(
     if !removed {
         return Err(ApiError::from(GatewayError::NotFound));
     }
-    let audit = AuditEntry {
+    let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
         actor: person.id,
         action: "agent.role.remove".to_owned(),
@@ -2207,7 +2209,7 @@ async fn user_audit(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
     Query(query): Query<UserAuditQuery>,
-) -> Result<Json<Vec<AuditEntry>>, ApiError> {
+) -> Result<Json<Vec<AuditRecord>>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation_filter = query
         .operation_id
@@ -2347,7 +2349,7 @@ async fn revoke_access_token(
     Path(token_id): Path<String>,
 ) -> Result<Json<RevokedAccessToken>, ApiError> {
     gateway
-        .authenticate_m(bearer(&headers)?)
+        .authenticate_station(bearer(&headers)?)
         .map_err(ApiError::from)?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::internal)?;
     let revoked = tokio::task::spawn_blocking(move || registry.revoke_access_token(&token_id))
@@ -2410,7 +2412,7 @@ struct RegisterSessionRequest {
     operation_id: String,
     mission_id: String,
     session_id: String,
-    mission: Option<MissionBrief>,
+    mission: Option<LaunchManifest>,
 }
 
 #[derive(Deserialize)]
@@ -2481,7 +2483,7 @@ pub struct BoardMission {
     /// Provider Sessions registered for this Mission.
     pub sessions: Vec<BoardSession>,
     /// Exact Mission brief and sanitized launch manifest published by AI6, when known.
-    pub brief: Option<MissionBrief>,
+    pub brief: Option<LaunchManifest>,
 }
 
 /// AI6 Station overview derived from the shared check-in Registry.
@@ -2519,7 +2521,7 @@ pub struct BoardStation {
 /// Mission instructions and non-secret launch metadata published by AI6.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct MissionBrief {
+pub struct LaunchManifest {
     /// Exact task instructions provided to the configured Agent.
     pub prompt: String,
     /// Configured AI6 Agent identity, if assigned.
@@ -2713,7 +2715,7 @@ async fn next_agent_input(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    gateway.authenticate_m(bearer(&headers)?)?;
+    gateway.authenticate_station(bearer(&headers)?)?;
     let input = gateway
         .receive_agent_input()
         .await
@@ -3229,7 +3231,7 @@ mod tests {
     async fn m_authentication_and_station_scoping_are_enforced() {
         let gateway = gateway();
         assert_eq!(
-            gateway.authenticate_m("wrong").unwrap_err(),
+            gateway.authenticate_station("wrong").unwrap_err(),
             GatewayError::Unauthorized
         );
         let (_, _, session) = register(&gateway).await;
@@ -3597,7 +3599,7 @@ mod tests {
         let token = "m-token-that-is-long-enough-for-testing";
 
         let registered = client
-            .post(format!("{base}/v1/m/sessions"))
+            .post(format!("{base}/v1/station/sessions"))
             .bearer_auth(token)
             .json(&serde_json::json!({
                 "operation_id": "station-a",
@@ -3629,7 +3631,7 @@ mod tests {
 
         let lifecycle = client
             .post(format!(
-                "{base}/v1/m/sessions/provider-session-a/lifecycle/1"
+                "{base}/v1/station/sessions/provider-session-a/lifecycle/1"
             ))
             .bearer_auth(token)
             .json(&serde_json::json!({
@@ -3647,7 +3649,7 @@ mod tests {
 
         let terminal = client
             .post(format!(
-                "{base}/v1/m/sessions/provider-session-a/terminal/2"
+                "{base}/v1/station/sessions/provider-session-a/terminal/2"
             ))
             .bearer_auth(token)
             .body(vec![0xff, 0x00, 0x80])
@@ -3657,7 +3659,7 @@ mod tests {
         assert_eq!(terminal.status(), StatusCode::ACCEPTED);
 
         let resumed = client
-            .post(format!("{base}/v1/m/sessions"))
+            .post(format!("{base}/v1/station/sessions"))
             .bearer_auth(token)
             .json(&serde_json::json!({
                 "operation_id": "station-a",
@@ -3675,7 +3677,7 @@ mod tests {
 
         let denied = client
             .post(format!(
-                "{base}/v1/m/sessions/provider-session-a/lifecycle/3"
+                "{base}/v1/station/sessions/provider-session-a/lifecycle/3"
             ))
             .json(&serde_json::json!({
                 "operation_id": "station-a",
@@ -3763,7 +3765,7 @@ mod tests {
         )
         .unwrap();
         let directory = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(directory.path());
+        let registry = FileRegistry::open(directory.path());
         let mut hq_info = BTreeMap::new();
         hq_info.insert("operations".to_owned(), serde_json::json!([]));
         hq_info.insert(
@@ -3858,7 +3860,7 @@ mod tests {
                 "m-token-that-is-long-enough-for-testing",
                 OperationId::new("G").unwrap(),
                 MissionId::new("mission-g").unwrap(),
-                MissionBrief {
+                LaunchManifest {
                     prompt: "Review the requested change".to_owned(),
                     agent_id: Some("technical-officer".to_owned()),
                     role_id: Some("case-officer".to_owned()),
@@ -4089,7 +4091,7 @@ mod tests {
         let created: serde_json::Value = created_mission.json().await.unwrap();
         assert_eq!(created["operation_id"], "G");
         assert_eq!(created["state"], "queued");
-        let queued = IntakeRegistry::open(directory.path()).list_new().unwrap();
+        let queued = FileRegistry::open(directory.path()).list_new().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].title, "Inspect the board");
         assert_eq!(
@@ -4176,7 +4178,7 @@ mod tests {
         assert_eq!(approved["proposal_id"], approval_proposal_id);
         assert_eq!(approved["state"], "queued");
         assert_eq!(
-            IntakeRegistry::open(directory.path())
+            FileRegistry::open(directory.path())
                 .list_new()
                 .unwrap()
                 .len(),
@@ -4194,7 +4196,7 @@ mod tests {
         let rejected: serde_json::Value = rejected.json().await.unwrap();
         assert_eq!(rejected["state"], "rejected");
         assert!(
-            IntakeRegistry::open(directory.path())
+            FileRegistry::open(directory.path())
                 .list_mission_proposals("G", 10)
                 .unwrap()
                 .is_empty()
@@ -4537,7 +4539,7 @@ mod tests {
     #[tokio::test]
     async fn issued_access_token_is_shared_across_gateways_and_revocation_propagates() {
         let directory = tempfile::tempdir().unwrap();
-        let registry = IntakeRegistry::open(directory.path());
+        let registry = FileRegistry::open(directory.path());
         let first = Gateway::with_registry(
             GatewayConfig::new(
                 "https://localhost",
@@ -4567,11 +4569,11 @@ mod tests {
         let server_a = tokio::spawn(async move { axum::serve(listener_a, first.router()).await });
         let server_b = tokio::spawn(async move { axum::serve(listener_b, second.router()).await });
         let client = reqwest::Client::new();
-        let m_token = "m-token-that-is-long-enough-for-testing";
+        let station_token = "m-token-that-is-long-enough-for-testing";
 
         let issued = client
-            .post(format!("{base_a}/v1/m/access-tokens"))
-            .bearer_auth(m_token)
+            .post(format!("{base_a}/v1/station/access-tokens"))
+            .bearer_auth(station_token)
             .json(&serde_json::json!({"person_id":"person-007","ttl_seconds":600}))
             .send()
             .await
@@ -4593,8 +4595,8 @@ mod tests {
         assert_eq!(session["person_id"], "person-007");
 
         let revoked = client
-            .delete(format!("{base_a}/v1/m/access-tokens/{token_id}"))
-            .bearer_auth(m_token)
+            .delete(format!("{base_a}/v1/station/access-tokens/{token_id}"))
+            .bearer_auth(station_token)
             .send()
             .await
             .unwrap();
@@ -4626,7 +4628,7 @@ mod tests {
         let client = reqwest::Client::new();
 
         let unauthorized = client
-            .post(format!("{base}/v1/m/sessions"))
+            .post(format!("{base}/v1/station/sessions"))
             .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","session_id":"provider-session-a"}))
             .send()
             .await
@@ -4634,7 +4636,7 @@ mod tests {
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
         let authorized = client
-            .post(format!("{base}/v1/m/sessions"))
+            .post(format!("{base}/v1/station/sessions"))
             .bearer_auth("m-token-that-is-long-enough-for-testing")
             .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","session_id":"provider-session-a"}))
             .send()
@@ -4643,7 +4645,7 @@ mod tests {
         assert_eq!(authorized.status(), StatusCode::CREATED);
 
         let grant = client
-            .post(format!("{base}/v1/m/attach-grants"))
+            .post(format!("{base}/v1/station/attach-grants"))
             .bearer_auth("m-token-that-is-long-enough-for-testing")
             .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","session_id":"provider-session-a","mode":"read"}))
             .send()
@@ -4707,7 +4709,9 @@ mod tests {
             (2, terminal_value.clone()),
         ] {
             let ingested = client
-                .post(format!("{base}/v1/m/sessions/{session}/events/{sequence}"))
+                .post(format!(
+                    "{base}/v1/station/sessions/{session}/events/{sequence}"
+                ))
                 .bearer_auth("m-token-that-is-long-enough-for-testing")
                 .body(frame)
                 .send()

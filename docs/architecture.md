@@ -12,7 +12,7 @@ Infrastructure  Station ──────────────────�
 ```
 
 - An **Operation** is a global project and its policy: checkout, roster, clearance,
-  cover, budget and a `selector` of Station labels. Stations serve Operations; no
+  cover, budget and a `station_labels` of Station labels. Stations serve Operations; no
   Station owns one.
 - A **Mission** is one brief under an Operation. Its **Mission ID** may group several
   **Sessions**; a Session ID comes from the provider and survives a resume.
@@ -34,8 +34,8 @@ AI6 names.
 
 ```text
  operators ── Moneypenny app / ai6ctl ── HTTPS/WSS ──► Universal Exports (public API)
-                                                         │ M bearer, DipTel frames
- people, trackers ── briefs ──► Registry (I Branch)      ▼
+                                                         │ Station bearer, DipTel frames
+ people, trackers ── briefs ──► Registry                ▼
                                    ▲         ┌──────────────────────────────┐
                                    └─leases──┤ Station: ai6 serve           │
                                              │  directorates: M I Q 00 Med. │
@@ -73,7 +73,7 @@ geometry, used natively and from WebAssembly.
    validated loadouts, Mission-scoped secret leases, Claude MCP configuration and
    bubblewrap argument translation. The loadout catalog is not yet applied at provider
    startup. Secrets never enter a worktree, event log or terminal stream.
-3. **I Branch owns intelligence and records.** The file-backed Registry holds briefs,
+3. **The Registry owns the shared record.** The file-backed Registry holds briefs,
    leases, Station check-ins, the Headquarters lease, audit, role overrides and
    access-token digests; the Cable relay delivers agent-to-agent messages.
 4. **M owns decisions.** The roster, Agent selection, clearance, cover and the Mission
@@ -102,7 +102,7 @@ same-origin and TLS-only, and operator input counts as watchdog activity.
 ## Agent Cables
 
 Agent-to-agent messages are **Cables**; terminal output, guatiao wire frames and live
-stream events remain **DipTels**. The `ai6::directorates::i::cables` relay stores durable Cable envelopes,
+stream events remain **DipTels**. The `ai6::directorates::registry::cables` relay stores durable Cable envelopes,
 resolves audiences and enforces explicit grants. The Rust AI6 daemon starts per-Session
 MCP endpoints for managed Claude and Codex handlers when `cables-mcp` is enabled.
 

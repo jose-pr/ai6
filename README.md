@@ -94,14 +94,14 @@ ai6ctl session SESSION_ID
 
 `ai6ctl` reads `AI6_EXPORTS_URL` for the Universal Exports origin and a user bearer from
 `AI6_ACCESS_TOKEN`. A Station publishes to Universal Exports when `AI6_EXPORTS_URL` and
-`AI6_EXPORTS_TOKEN` are both set.
+`AI6_EXPORTS_STATION_TOKEN` are both set.
 
 ## API overview
 
 | Crate or module | Purpose |
 | --- | --- |
 | `ai6::directorates::m` | Roster (Operations, Agents, roles), Missions, identities, cover, access kinds |
-| `ai6::directorates::i` | The Registry (briefs, leases, check-ins, audit) and the Cable relay |
+| `ai6::directorates::registry` | The Registry (briefs, leases, check-ins, audit) and the Cable relay |
 | `ai6::directorates::q` | Terminals, loadouts, secret leases, MCP config, sandbox arguments |
 | `ai6::directorates::section_00` | The AgentHandler contract |
 | `ai6::directorates::medical` | The Session watchdog |
@@ -124,7 +124,7 @@ Infrastructure  Station ──────────────────�
 An **Operation** is a global project and its policy; Stations serve it, none owns it. A
 **Mission** is one brief; a **Session** is one resumable provider run. A **Station** is a
 node running `ai6 serve`; a **Theater** is the host a Session runs on, today always its
-Station's own. The directorates (M, I Branch, Q Branch, 00 Section, Medical) decide; the
+Station's own. The directorates (M, the Registry, Q Branch, 00 Section, Medical) decide; the
 Station runs their decisions; Universal Exports is the only public door. See
 [Architecture](https://jose-pr.github.io/ai6/architecture/) and
 [Organization](https://jose-pr.github.io/ai6/organization/). Remote Theaters and a SQL

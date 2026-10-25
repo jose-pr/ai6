@@ -82,8 +82,8 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::identity` | Validated `MissionId`, provider-issued `SessionId` and access-token records |
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
 | `ai6::directorates::m::access` | Authenticator, Directory and Authorizer kinds and the built-in `RoleAuthorizer` |
-| `ai6::directorates::i::intake` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
-| `ai6::directorates::i::cables` | Permission-scoped Agent-to-Agent Cable relay |
+| `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
+| `ai6::directorates::registry::cables` | Permission-scoped Agent-to-Agent Cable relay |
 | `ai6::directorates::q` | Loadouts, Mission-scoped secret leases, MCP config and sandbox arguments |
 | `ai6::directorates::q::terminal` | Terminal and terminal-session kinds and the Session bridge |
 | `ai6::directorates::section_00::agent` | AgentHandler, AgentSession and provider-neutral events |
@@ -115,7 +115,7 @@ audits commit authors and messages and attaches a `cover` report. A violation ma
 Mission `blown` when the Operation sets `on_blown = "fail"`. With `cables-mcp`, Claude and
 Codex Sessions receive a per-Session MCP endpoint with a random bearer token that is never
 persisted or passed as an argument. With `publisher` and both `AI6_EXPORTS_URL` and
-`AI6_EXPORTS_TOKEN` set, the Station registers Sessions with Universal Exports, publishes
+`AI6_EXPORTS_STATION_TOKEN` set, the Station registers Sessions with Universal Exports, publishes
 lifecycle and terminal output through a bounded queue, and dispatches authorized terminal
 input back to the live Session; its state is at `GET /internal/publisher`.
 

@@ -540,7 +540,9 @@ class MissionBoard extends ChangeNotifier {
         ),
       ]);
       if (responses.any((response) => response.statusCode != 200)) {
-        throw StateError('Moneypenny API returned an unsuccessful response.');
+        throw StateError(
+          'Universal Exports returned an unsuccessful response.',
+        );
       }
       final body = jsonDecode(responses[0].body) as List<dynamic>;
       sessions = body
@@ -563,7 +565,7 @@ class MissionBoard extends ChangeNotifier {
       );
       error = null;
     } on Object {
-      error = 'Could not load Stations from the Moneypenny gateway.';
+      error = 'Could not load Stations from Universal Exports.';
     } finally {
       loading = false;
       notifyListeners();
@@ -635,7 +637,7 @@ class MissionBoard extends ChangeNotifier {
       await refresh();
     } on Object {
       accessToken = null;
-      loginError = 'Could not connect to the Moneypenny gateway.';
+      loginError = 'Could not connect to Universal Exports.';
       loading = false;
       notifyListeners();
     }
@@ -2444,7 +2446,7 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                             const SizedBox(height: 10),
                             const Text('Effective actions by Operation'),
                             if (account.operations.isEmpty)
-                              const Text('No Moneypenny actions are granted.')
+                              const Text('No AI6 actions are granted.')
                             else
                               for (final operation in account.operations)
                                 Padding(
@@ -3208,7 +3210,7 @@ class _SessionDetailContent extends StatelessWidget {
                     )
                   : board.accessToken == null
                   ? const _SessionPreviewPanel(
-                      message: 'Sign in to the Moneypenny gateway to attach to this Session.',
+                      message: 'Sign in to Universal Exports to attach to this Session.',
                     )
                   : _LiveSessionTerminal(session: current, board: board),
             ),
@@ -3397,7 +3399,7 @@ class _GatewayUnavailable extends StatelessWidget {
         children: [
           Icon(Icons.cloud_off, size: 42, color: Color(0xff84999b)),
           SizedBox(height: 12),
-          Text('Moneypenny gateway is offline'),
+          Text('Universal Exports is offline'),
           SizedBox(height: 4),
           Text(
             'Start the gateway, or launch with MONEYPENNY_DEMO=true to preview.',

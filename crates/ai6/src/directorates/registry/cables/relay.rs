@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::directorates::i::intake::IntakeRegistry;
+use crate::directorates::registry::store::FileRegistry;
 
 use super::{
     Cable, CableDraft, CableError, CableRecipient, CableScope, CableState, CableTarget,
@@ -598,7 +598,7 @@ type EndpointKey = (String, String, Option<String>, Option<String>);
 
 /// Authorizes sends and receives, snapshots broadcast audiences and stores accepted Cables.
 pub struct CableRelay {
-    registry: Arc<IntakeRegistry>,
+    registry: Arc<FileRegistry>,
     policy: RwLock<CablePolicy>,
     endpoints: Arc<EndpointSource>,
     channels: BTreeMap<String, BTreeSet<String>>,
@@ -613,9 +613,9 @@ pub struct CableRelay {
 }
 
 impl CableRelay {
-    /// Creates a relay over the I Branch file Registry and an authoritative Agent directory.
+    /// Creates a relay over the file Registry and an authoritative Agent directory.
     pub fn new(
-        registry: Arc<IntakeRegistry>,
+        registry: Arc<FileRegistry>,
         policy: CablePolicy,
         endpoints: impl Fn() -> Vec<CableEndpoint> + Send + Sync + 'static,
         channels: BTreeMap<String, BTreeSet<String>>,
@@ -1473,7 +1473,7 @@ mod tests {
     }
 
     fn relay(
-        registry: Arc<IntakeRegistry>,
+        registry: Arc<FileRegistry>,
         policy: CablePolicy,
         endpoints: Vec<CableEndpoint>,
     ) -> CableRelay {
@@ -1505,7 +1505,7 @@ mod tests {
         )
         .unwrap();
         let service = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![endpoint("008", "operation-a", Some("session-008"))],
         );
@@ -1540,7 +1540,7 @@ mod tests {
             target(CableScope::Agent, Some("007")),
         );
         let denied = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             CablePolicy::try_new(vec![receiver_grant.clone()], BTreeMap::new()).unwrap(),
             vec![endpoint_at(
                 "008",
@@ -1560,7 +1560,7 @@ mod tests {
         );
 
         let allowed = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             CablePolicy::try_new(
                 vec![
                     grant("007", CableAction::Send, cross_agent.clone()),
@@ -1602,7 +1602,7 @@ mod tests {
         let records = Arc::new(Mutex::new(Vec::new()));
         let audit_records = records.clone();
         let service = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![
                 endpoint("007", "operation-a", Some("session-007")),
@@ -1644,7 +1644,7 @@ mod tests {
         )
         .unwrap();
         let service = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![endpoint("008", "operation-a", Some("session-008"))],
         );
@@ -1679,7 +1679,7 @@ mod tests {
         let receiver_grant = grant("008", CableAction::Receive, operation.clone());
         let release_grant = grant("009", CableAction::Release, operation.clone());
         let service = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             CablePolicy::try_new(
                 vec![
                     sender_grant.clone(),
@@ -1714,7 +1714,7 @@ mod tests {
             .unwrap();
         assert_eq!(released.delivered, 0);
         assert_eq!(released.refused, 1);
-        let stored = IntakeRegistry::open(root.path())
+        let stored = FileRegistry::open(root.path())
             .get_cable(cable.id())
             .unwrap()
             .unwrap();
@@ -1741,7 +1741,7 @@ mod tests {
         )
         .unwrap();
         let service = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![
                 endpoint("008", "operation-a", Some("session-008")),
@@ -1787,7 +1787,7 @@ mod tests {
         )
         .unwrap();
         let service = CableRelay::new(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             policy,
             || {
                 vec![
@@ -1873,7 +1873,7 @@ mod tests {
         )
         .unwrap();
         let service = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![
                 endpoint("007", "operation-a", Some("session-007")),
@@ -1923,7 +1923,7 @@ mod tests {
         let sender_grant = grant("007", CableAction::Send, operation.clone());
         let receiver_grant = grant("008", CableAction::Receive, operation.clone());
         let service = relay(
-            Arc::new(IntakeRegistry::open(root.path())),
+            Arc::new(FileRegistry::open(root.path())),
             CablePolicy::try_new(vec![sender_grant.clone(), receiver_grant], BTreeMap::new())
                 .unwrap(),
             vec![endpoint("008", "operation-a", Some("session-008"))],
@@ -1944,7 +1944,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        let stored = IntakeRegistry::open(root.path())
+        let stored = FileRegistry::open(root.path())
             .get_cable(sent.id())
             .unwrap()
             .unwrap();

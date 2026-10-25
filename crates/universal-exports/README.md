@@ -15,7 +15,7 @@ over Operation access; the gateway enforces the scoped grants M issues.** See th
 
 | Feature | Adds | Default |
 | --- | --- | --- |
-| (none) | Authenticated M ingress, Operation/Mission/Session binding, bounded replay/fanout, write leases, HTTPS origin checks and loopback serving. | Yes |
+| (none) | Authenticated Station channel, Operation/Mission/Session binding, bounded replay/fanout, write leases, HTTPS origin checks and loopback serving. | Yes |
 | `cli` | The `universal-exports` service command. | No |
 
 Terminal bytes remain binary and are redacted from debug output.
@@ -37,7 +37,7 @@ service command.
 ```rust
 use std::time::Duration;
 use universal_exports::{Gateway, GatewayConfig, GatewayLimits};
-use ai6::IntakeRegistry;
+use ai6::FileRegistry;
 
 let config = GatewayConfig::new(
     "https://localhost",
@@ -46,7 +46,7 @@ let config = GatewayConfig::new(
     Duration::from_secs(60),
     Duration::from_secs(30),
 )?;
-let registry = IntakeRegistry::from_environment()?;
+let registry = FileRegistry::from_environment()?;
 let _app = Gateway::with_registry(config, registry).router();
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
@@ -54,7 +54,7 @@ let _app = Gateway::with_registry(config, registry).router();
 For a deployed listener, run `universal-exports` behind an HTTPS reverse proxy. It binds
 to loopback, and the proxy must remove client-supplied `X-Forwarded-Proto` and set
 it to `https`; browser endpoints require that marker and an exact `Origin` match.
-The M credential is accepted only through its environment variable, never as an
+The Station credential is accepted only through its environment variable, never as an
 argument.
 
 ## Command line
@@ -102,17 +102,17 @@ configured access policy.
 
 | Item | Purpose |
 | --- | --- |
-| `GatewayConfig`, `GatewayLimits` | HTTPS origin, M credential, TTLs and bounded resource policy. |
+| `GatewayConfig`, `GatewayLimits` | HTTPS origin, Station credential, TTLs and bounded resource policy. |
 | `Gateway` | M registration, typed lifecycle/terminal publication, board snapshots, shared access-token issue/verify/revoke, raw guatiao ingress, browser attach and input queue. |
 | `AttachGrant`, `AttachMode` | Station/Mission/Session-scoped read or write authorization. |
 | `Attachment`, `AgentInput` | Bounded viewer replay/live stream and queued terminal input or resize. |
 | `GatewayError` | Refusals for auth, scope, bounds, malformed frames and backpressure. |
-| `Gateway::router` | Axum routes for M ingress, attach token exchange and WebSocket sessions. |
+| `Gateway::router` | Axum routes for the Station channel, attach token exchange and WebSocket sessions. |
 | `Gateway::serve_loopback(port, shutdown)` | Loopback listener with caller-owned graceful shutdown. |
 
 ### HTTP routes
 
-All `/v1/m/` paths require M's bearer credential.
+All `/v1/station/` paths require the Station bearer credential.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -122,13 +122,13 @@ All `/v1/m/` paths require M's bearer credential.
 | `GET` | `/v1/missions` | Group registered provider Sessions by Mission and apply `mission.read` to each Operation. |
 | `GET` | `/v1/operations/{operation_id}/missions/{mission_id}` | Return one authorized Mission and its AI6-published brief and sanitized launch manifest. |
 | `GET` | `/v1/auth/session` | Validate the bearer access token against the shared I Registry and return its person and expiry. |
-| `POST` | `/v1/m/access-tokens` | Issue a person-bound access token after M authenticates the user; the raw token is returned once. Body: `{"person_id":"…","ttl_seconds":600}`. |
-| `DELETE` | `/v1/m/access-tokens/{token_id}` | Revoke a token across gateway replicas sharing the I Registry. |
-| `POST` | `/v1/m/sessions` | Register an Operation, Mission ID and provider Session ID, optionally with the authoritative Mission brief and sanitized launch manifest; returns `{"next_sequence": N}`. |
-| `POST` | `/v1/m/sessions/{session_id}/lifecycle/{sequence}` | Publish JSON lifecycle state; the gateway encodes the guatiao event. |
-| `POST` | `/v1/m/sessions/{session_id}/terminal/{sequence}` | Publish raw terminal bytes; the gateway encodes the guatiao event. |
-| `POST` | `/v1/m/sessions/{session_id}/events/{sequence}` | Ingest one guatiao frame. Schema/close frames use cursor `0`; values use a positive event sequence. |
-| `POST` | `/v1/m/attach-grants` | Issue a read or write token within M's Station grant. |
+| `POST` | `/v1/station/access-tokens` | Issue a person-bound access token after M authenticates the user; the raw token is returned once. Body: `{"person_id":"…","ttl_seconds":600}`. |
+| `DELETE` | `/v1/station/access-tokens/{token_id}` | Revoke a token across gateway replicas sharing the I Registry. |
+| `POST` | `/v1/station/sessions` | Register an Operation, Mission ID and provider Session ID, optionally with the authoritative Mission brief and sanitized launch manifest; returns `{"next_sequence": N}`. |
+| `POST` | `/v1/station/sessions/{session_id}/lifecycle/{sequence}` | Publish JSON lifecycle state; the gateway encodes the guatiao event. |
+| `POST` | `/v1/station/sessions/{session_id}/terminal/{sequence}` | Publish raw terminal bytes; the gateway encodes the guatiao event. |
+| `POST` | `/v1/station/sessions/{session_id}/events/{sequence}` | Ingest one guatiao frame. Schema/close frames use cursor `0`; values use a positive event sequence. |
+| `POST` | `/v1/station/attach-grants` | Issue a read or write token within M's Station grant. |
 | `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token. |
 | `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the I Registry. |
 | `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `session.read`, `session.input`, `audit.read`, `agent.read` and `agent.configure` actions by authorized Operation. |
@@ -142,7 +142,7 @@ All `/v1/m/` paths require M's bearer credential.
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve` | Require `mission.create`; record the approving operator and promote the proposal into scheduler-visible intake. |
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/reject` | Require `mission.create`; record the rejecting operator and file the proposal outside runnable intake. |
 | `GET` | `/v1/auth/session` | Validate a user bearer token and return its token ID, person ID and expiry. |
-| `GET` | `/v1/m/inputs/next` | Wait for one bounded binary terminal input or resize frame for M. |
+| `GET` | `/v1/station/inputs/next` | Wait for one bounded binary terminal input or resize frame for M. |
 | `POST` | `/v1/attach` | Exchange a token in the request body for a one-connection cookie. |
 | `GET` | `/v1/socket/{session_id}?after={sequence}` | Replay and stream events for one provider Session. |
 
@@ -194,7 +194,7 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 | --- | --- | --- |
 | `AI6_EXPORTS_PUBLIC_ORIGIN` | Required public HTTPS origin; overridden by `--public-origin`. | None |
 | `AI6_EXPORTS_PORT` | Loopback listener port; overridden by `--port`. | `7082` |
-| `AI6_EXPORTS_M_TOKEN` | Required M bearer credential supplied by Q; environment only. | None |
+| `AI6_EXPORTS_STATION_TOKEN` | Required Station channel bearer credential supplied by Q; environment only. | None |
 | `AI6_EXPORTS_AUTHENTICATOR` | Guatiao Authenticator provider ID. | None |
 | `AI6_EXPORTS_AUTHENTICATOR_CONFIG` | Path to the Authenticator's JSON config object. | None |
 | `AI6_EXPORTS_PROXY_USER_HEADER` | Sanitized authenticated-user header supplied by the trusted reverse proxy. | None |

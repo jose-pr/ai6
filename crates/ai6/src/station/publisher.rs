@@ -472,7 +472,7 @@ fn receive_inputs(
     running: Arc<AtomicBool>,
     targets: Arc<Mutex<BTreeMap<SessionId, InputTargetRegistration>>>,
 ) {
-    let Ok(endpoint) = origin.join("v1/m/inputs/next") else {
+    let Ok(endpoint) = origin.join("v1/station/inputs/next") else {
         return;
     };
     while running.load(Ordering::Acquire) {
@@ -693,7 +693,7 @@ fn register(
 ) -> Result<u64, &'static str> {
     let url = config
         .origin
-        .join("v1/m/sessions")
+        .join("v1/station/sessions")
         .map_err(|_| "invalid registration endpoint")?;
     let mut response = agent
         .post(url.as_str())
@@ -794,7 +794,7 @@ fn session_endpoint(
     sequence: u64,
 ) -> Result<Url, &'static str> {
     let mut url = origin
-        .join("v1/m/sessions/")
+        .join("v1/station/sessions/")
         .map_err(|_| "invalid Session endpoint")?;
     let mut segments = url
         .path_segments_mut()
@@ -968,12 +968,12 @@ mod tests {
                     .nth(1)
                     .unwrap_or_default()
                     .to_owned();
-                let response = if path == "/v1/m/inputs/next" {
+                let response = if path == "/v1/station/inputs/next" {
                     received_input_poll = true;
                     "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 } else {
                     outbound_count += 1;
-                    let response = if path == "/v1/m/sessions" {
+                    let response = if path == "/v1/station/sessions" {
                         "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{\"next_sequence\":41}"
                     } else {
                         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -1037,7 +1037,7 @@ mod tests {
         let terminal = TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
             Box::new(RawOutputTerminal),
             telemetry.clone(),
-            crate::directorates::medical::watchdog::InactivityMonitor::default(),
+            crate::directorates::medical::watchdog::Watchdog::default(),
         );
         let spec = Spec {
             argv: vec!["mock".to_owned()],
@@ -1060,7 +1060,7 @@ mod tests {
         let lifecycle = requests.recv_timeout(Duration::from_secs(3)).unwrap();
         gateway.join().unwrap();
 
-        assert_eq!(registration.path, "/v1/m/sessions");
+        assert_eq!(registration.path, "/v1/station/sessions");
         assert!(registration.headers.contains("Bearer test-token"));
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&registration.body).unwrap(),
@@ -1081,9 +1081,15 @@ mod tests {
                 }
             })
         );
-        assert_eq!(terminal.path, "/v1/m/sessions/session%2Fa/terminal/41");
+        assert_eq!(
+            terminal.path,
+            "/v1/station/sessions/session%2Fa/terminal/41"
+        );
         assert_eq!(terminal.body, [0, 255, 10]);
-        assert_eq!(lifecycle.path, "/v1/m/sessions/session%2Fa/lifecycle/42");
+        assert_eq!(
+            lifecycle.path,
+            "/v1/station/sessions/session%2Fa/lifecycle/42"
+        );
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&lifecycle.body).unwrap(),
             serde_json::json!({
@@ -1139,7 +1145,7 @@ mod tests {
                     headers.push_str(&line);
                 }
                 let path = request_line.split_whitespace().nth(1).unwrap_or_default();
-                if path == "/v1/m/sessions" {
+                if path == "/v1/station/sessions" {
                     let body_length = headers
                         .lines()
                         .find_map(|line| {
@@ -1155,7 +1161,8 @@ mod tests {
                         .write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{\"next_sequence\":41}")
                         .unwrap();
                     gateway_ready.store(true, Ordering::Release);
-                } else if path == "/v1/m/inputs/next" && gateway_ready.load(Ordering::Acquire) {
+                } else if path == "/v1/station/inputs/next" && gateway_ready.load(Ordering::Acquire)
+                {
                     assert!(headers.contains("Bearer test-token"));
                     let (frame, operation_id) = &frames[input_index];
                     let response = format!(
@@ -1183,7 +1190,7 @@ mod tests {
         let terminal = TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
             Box::new(RecordingTerminal(sender)),
             telemetry.clone(),
-            crate::directorates::medical::watchdog::InactivityMonitor::default(),
+            crate::directorates::medical::watchdog::Watchdog::default(),
         );
         let spec = Spec {
             argv: vec!["mock".to_owned()],

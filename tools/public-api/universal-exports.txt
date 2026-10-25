@@ -41,7 +41,7 @@ pub universal_exports::Attachment::replay: alloc::vec::Vec<alloc::vec::Vec<u8>>
 impl core::fmt::Debug for universal_exports::Attachment
 pub fn universal_exports::Attachment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct universal_exports::BoardMission
-pub universal_exports::BoardMission::brief: core::option::Option<universal_exports::MissionBrief>
+pub universal_exports::BoardMission::brief: core::option::Option<universal_exports::LaunchManifest>
 pub universal_exports::BoardMission::mission_id: alloc::string::String
 pub universal_exports::BoardMission::operation_id: alloc::string::String
 pub universal_exports::BoardMission::sessions: alloc::vec::Vec<universal_exports::BoardSession>
@@ -63,7 +63,7 @@ pub universal_exports::BoardStation::station_id: alloc::string::String
 pub struct universal_exports::Gateway
 impl universal_exports::Gateway
 pub async fn universal_exports::Gateway::attach(&self, &ai6_diptel::SessionId, &str, u64) -> core::result::Result<universal_exports::Attachment, universal_exports::GatewayError>
-pub fn universal_exports::Gateway::authenticate_m(&self, &str) -> core::result::Result<(), universal_exports::GatewayError>
+pub fn universal_exports::Gateway::authenticate_station(&self, &str) -> core::result::Result<(), universal_exports::GatewayError>
 pub async fn universal_exports::Gateway::board_missions(&self) -> alloc::vec::Vec<universal_exports::BoardMission>
 pub async fn universal_exports::Gateway::board_sessions(&self) -> alloc::vec::Vec<universal_exports::BoardSession>
 pub async fn universal_exports::Gateway::disconnect(&self, universal_exports::Attachment)
@@ -81,8 +81,8 @@ pub async fn universal_exports::Gateway::register_session(&self, &str, ai6_dipte
 pub fn universal_exports::Gateway::router(self) -> axum::routing::Router
 pub async fn universal_exports::Gateway::serve_loopback<F>(self, u16, F) -> core::result::Result<(), core::io::error::Error> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn universal_exports::Gateway::submit_input(&self, &ai6_diptel::SessionId, &str, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
-pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, ai6::directorates::i::intake::IntakeRegistry, universal_exports::AccessProviders) -> Self
-pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, ai6::directorates::i::intake::IntakeRegistry) -> Self
+pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, ai6::directorates::registry::store::FileRegistry, universal_exports::AccessProviders) -> Self
+pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, ai6::directorates::registry::store::FileRegistry) -> Self
 impl core::fmt::Debug for universal_exports::Gateway
 pub fn universal_exports::Gateway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::GatewayConfig
@@ -101,16 +101,16 @@ pub universal_exports::GatewayLimits::max_sessions: usize
 pub universal_exports::GatewayLimits::scrollback_events: usize
 impl core::default::Default for universal_exports::GatewayLimits
 pub fn universal_exports::GatewayLimits::default() -> Self
-#[non_exhaustive] pub struct universal_exports::MissionBrief
-pub universal_exports::MissionBrief::agent_id: core::option::Option<alloc::string::String>
-pub universal_exports::MissionBrief::effort: core::option::Option<alloc::string::String>
-pub universal_exports::MissionBrief::environment_keys: alloc::vec::Vec<alloc::string::String>
-pub universal_exports::MissionBrief::handler_provider: alloc::string::String
-pub universal_exports::MissionBrief::model: core::option::Option<alloc::string::String>
-pub universal_exports::MissionBrief::prompt: alloc::string::String
-pub universal_exports::MissionBrief::role_id: core::option::Option<alloc::string::String>
-pub universal_exports::MissionBrief::terminal_provider: alloc::string::String
-pub universal_exports::MissionBrief::working_directory: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::LaunchManifest
+pub universal_exports::LaunchManifest::agent_id: core::option::Option<alloc::string::String>
+pub universal_exports::LaunchManifest::effort: core::option::Option<alloc::string::String>
+pub universal_exports::LaunchManifest::environment_keys: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::LaunchManifest::handler_provider: alloc::string::String
+pub universal_exports::LaunchManifest::model: core::option::Option<alloc::string::String>
+pub universal_exports::LaunchManifest::prompt: alloc::string::String
+pub universal_exports::LaunchManifest::role_id: core::option::Option<alloc::string::String>
+pub universal_exports::LaunchManifest::terminal_provider: alloc::string::String
+pub universal_exports::LaunchManifest::working_directory: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::StationBoard
 pub universal_exports::StationBoard::headquarters_station: core::option::Option<alloc::string::String>
 pub universal_exports::StationBoard::stations: alloc::vec::Vec<universal_exports::BoardStation>

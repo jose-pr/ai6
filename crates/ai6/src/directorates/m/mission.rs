@@ -62,14 +62,14 @@ pub struct Mission {
 
 /// Mission records held in memory and persisted as one atomic snapshot.
 #[derive(Debug, Default)]
-pub struct MissionBook {
+pub struct MissionStore {
     missions: BTreeMap<String, Mission>,
-    operations: BTreeMap<String, MissionOperation>,
+    operations: BTreeMap<String, LaunchManifest>,
     path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct MissionOperation {
+pub(crate) struct LaunchManifest {
     pub(crate) handler_provider: String,
     pub(crate) terminal_provider: String,
     pub(crate) working_directory: String,
@@ -82,10 +82,10 @@ pub(crate) struct MissionOperation {
 struct MissionSnapshot {
     version: u32,
     missions: BTreeMap<String, Mission>,
-    operations: BTreeMap<String, MissionOperation>,
+    operations: BTreeMap<String, LaunchManifest>,
 }
 
-impl MissionBook {
+impl MissionStore {
     /// Opens a durable Mission book, creating an empty store when needed.
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
@@ -130,7 +130,7 @@ impl MissionBook {
         Ok(book)
     }
 
-    /// Creates a queued Mission. The caller supplies the durable identity from I Branch.
+    /// Creates a queued Mission. The caller supplies the durable identity from the Registry.
     pub fn create(
         &mut self,
         mission_id: MissionId,
@@ -175,7 +175,7 @@ impl MissionBook {
     }
 
     #[cfg(feature = "daemon")]
-    pub(crate) fn operation(&self, mission_id: &str) -> Option<MissionOperation> {
+    pub(crate) fn operation(&self, mission_id: &str) -> Option<LaunchManifest> {
         self.operations.get(mission_id).cloned()
     }
 
@@ -183,7 +183,7 @@ impl MissionBook {
     pub(crate) fn set_operation(
         &mut self,
         mission_id: &str,
-        operation: MissionOperation,
+        operation: LaunchManifest,
     ) -> Result<(), MissionError> {
         if !self.missions.contains_key(mission_id) {
             return Err(MissionError::NotFound);
@@ -305,7 +305,7 @@ impl MissionBook {
     fn commit_with(
         &mut self,
         missions: BTreeMap<String, Mission>,
-        operations: BTreeMap<String, MissionOperation>,
+        operations: BTreeMap<String, LaunchManifest>,
     ) -> Result<(), MissionError> {
         self.persist(&missions, &operations)
             .map_err(|_| MissionError::Persistence)?;
@@ -317,7 +317,7 @@ impl MissionBook {
     fn persist(
         &self,
         missions: &BTreeMap<String, Mission>,
-        operations: &BTreeMap<String, MissionOperation>,
+        operations: &BTreeMap<String, LaunchManifest>,
     ) -> io::Result<()> {
         let Some(path) = &self.path else {
             return Ok(());
@@ -379,8 +379,8 @@ fn valid_transition(from: MissionState, to: MissionState) -> bool {
 mod tests {
     use super::*;
 
-    fn book() -> MissionBook {
-        MissionBook::default()
+    fn book() -> MissionStore {
+        MissionStore::default()
     }
 
     #[test]
@@ -515,7 +515,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("missions.json");
         {
-            let mut book = MissionBook::open(&path).unwrap();
+            let mut book = MissionStore::open(&path).unwrap();
             book.create(
                 MissionId::try_new("mission-1").unwrap(),
                 Some("operation-a".to_owned()),
@@ -532,7 +532,7 @@ mod tests {
             .unwrap();
             book.set_operation(
                 "mission-1",
-                MissionOperation {
+                LaunchManifest {
                     handler_provider: "claude".to_owned(),
                     terminal_provider: "pty".to_owned(),
                     working_directory: directory.path().to_string_lossy().into_owned(),
@@ -544,7 +544,7 @@ mod tests {
             .unwrap();
         }
 
-        let mut reopened = MissionBook::open(path).unwrap();
+        let mut reopened = MissionStore::open(path).unwrap();
         let mission = reopened.get("mission-1").unwrap();
         assert_eq!(mission.state, MissionState::Working);
         assert_eq!(mission.role_id.as_deref(), Some("case-officer"));

@@ -9,7 +9,7 @@ fn help_documents_the_credential_environment_variable() {
 
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
-    assert!(help.contains("AI6_EXPORTS_M_TOKEN"));
+    assert!(help.contains("AI6_EXPORTS_STATION_TOKEN"));
     assert!(help.contains("AI6_EXPORTS_PUBLIC_ORIGIN"));
     assert!(help.contains("AI6_EXPORTS_PORT"));
     assert!(help.contains("AI6_EXPORTS_AUTHENTICATOR"));
@@ -24,11 +24,11 @@ fn help_documents_the_credential_environment_variable() {
 fn missing_credential_fails_without_prompting_or_echoing_a_value() {
     let output = Command::new(env!("CARGO_BIN_EXE_universal-exports"))
         .args(["--public-origin", "https://localhost"])
-        .env_remove("AI6_EXPORTS_M_TOKEN")
+        .env_remove("AI6_EXPORTS_STATION_TOKEN")
         .output()
         .unwrap();
 
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8(output.stderr).unwrap();
-    assert!(error.contains("AI6_EXPORTS_M_TOKEN must be set"));
+    assert!(error.contains("AI6_EXPORTS_STATION_TOKEN must be set"));
 }

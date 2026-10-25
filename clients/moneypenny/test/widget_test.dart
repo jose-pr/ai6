@@ -765,7 +765,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.text('Sign in to the Moneypenny gateway to attach to this Session.'),
+      find.text('Sign in to Universal Exports to attach to this Session.'),
       findsNothing,
     );
 

@@ -42,7 +42,7 @@ pub struct GatewayConfig { /* fields are private */ }
 impl GatewayConfig {
     pub fn new(
         public_origin: impl Into<String>,
-        m_token: impl Into<String>,
+        station_token: impl Into<String>,
         limits: GatewayLimits,
         attach_token_ttl: Duration,
         write_lease_ttl: Duration,
@@ -54,10 +54,10 @@ impl GatewayConfig {
 `GatewayLimits::default()` allows 16 Sessions, 12 clients per Session, 64
 scrollback events, 256 KiB per frame, 40 input frames per second, 64 queued
 inputs and 8 fanout events. Config validation requires an HTTPS origin, a
-32-byte minimum M credential, finite non-zero bounds, TTLs no longer than 300
+32-byte minimum Station credential, finite non-zero bounds, TTLs no longer than 300
 seconds, at most 100,000 client slots, and a maximum aggregate 512 MiB budget
 for history, fanout, input and socket write buffers. `GatewayConfig` formats its
-M credential as `[REDACTED]`.
+Station credential as `[REDACTED]`.
 
 ## Authorization types
 
@@ -114,7 +114,7 @@ pub struct BoardMission {
     pub operation_id: String,
     pub mission_id: String,
     pub sessions: Vec<BoardSession>,
-    pub brief: Option<MissionBrief>,
+    pub brief: Option<LaunchManifest>,
 }
 
 #[non_exhaustive]
@@ -139,7 +139,7 @@ pub struct BoardStation {
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct MissionBrief {
+pub struct LaunchManifest {
     pub prompt: String,
     pub agent_id: Option<String>,
     pub role_id: Option<String>,
@@ -177,16 +177,16 @@ pub struct Gateway { /* shared, bounded state */ }
 
 impl Gateway {
     pub fn new(config: GatewayConfig) -> Self;
-    pub fn with_registry(config: GatewayConfig, registry: ai6::IntakeRegistry) -> Self;
+    pub fn with_registry(config: GatewayConfig, registry: ai6::FileRegistry) -> Self;
     pub fn with_access(
         config: GatewayConfig,
-        registry: ai6::IntakeRegistry,
+        registry: ai6::FileRegistry,
         access: AccessProviders,
     ) -> Self;
-    pub fn authenticate_m(&self, presented: &str) -> Result<(), GatewayError>;
+    pub fn authenticate_station(&self, presented: &str) -> Result<(), GatewayError>;
     pub async fn register_session(
         &self,
-        m_token: &str,
+        station_token: &str,
         operation_id: OperationId,
         mission_id: MissionId,
         session_id: SessionId,
@@ -195,19 +195,19 @@ impl Gateway {
     pub async fn board_missions(&self) -> Vec<BoardMission>;
     pub async fn publish_lifecycle(
         &self,
-        m_token: &str,
+        station_token: &str,
         event: LifecycleEvent,
     ) -> Result<(), GatewayError>;
     pub async fn publish_terminal_output(
         &self,
-        m_token: &str,
+        station_token: &str,
         session_id: SessionId,
         sequence: u64,
         bytes: Vec<u8>,
     ) -> Result<(), GatewayError>;
     pub async fn issue_attach_token(
         &self,
-        m_token: &str,
+        station_token: &str,
         grant: AttachGrant,
     ) -> Result<String, GatewayError>;
     pub async fn exchange_attach_token(&self, token: &str)
@@ -220,7 +220,7 @@ impl Gateway {
     ) -> Result<Attachment, GatewayError>;
     pub async fn ingest(
         &self,
-        m_token: &str,
+        station_token: &str,
         session_id: &SessionId,
         sequence: u64,
         frame: Vec<u8>,
@@ -254,8 +254,8 @@ impl Gateway {
 It reflects Sessions known to this gateway; a queued Mission with no registered
 provider Session is not included.
 
-`new` creates bounded in-memory state and one bounded M input queue. `authenticate_m`
-compares the presented bearer credential with the configured M credential. Session
+`new` creates bounded in-memory state and one bounded M input queue. `authenticate_station`
+compares the presented bearer credential with the configured Station credential. Session
 registration is idempotent only for the same Station/Mission/Session tuple. Session
 and credential tables have configured capacity limits.
 
@@ -339,16 +339,16 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/user/attach-grants` | Requires a user bearer; checks `session.read` or `session.input` at the registered Operation before issuing an attach token. |
 | `POST /v1/user/operations/{operation_id}/missions` | Requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared I Registry; returns the queued Mission ID. |
 | `GET /v1/auth/session` | Validates a user bearer and reports its token ID, person ID and expiry. |
-| `POST /v1/m/sessions` | Bearer-authenticated registration request with `operation_id`, `mission_id`, `session_id`, and optional sanitized Mission brief metadata. |
-| `POST /v1/m/sessions/{session_id}/lifecycle/{sequence}` | Bearer-authenticated JSON lifecycle update with Station, Mission ID and state. |
-| `POST /v1/m/sessions/{session_id}/terminal/{sequence}` | Bearer-authenticated raw terminal output bytes. |
-| `POST /v1/m/sessions/{session_id}/events/{sequence}` | Bearer-authenticated binary guatiao frame. |
-| `POST /v1/m/attach-grants` | Bearer-authenticated grant request; returns token in JSON response body. |
-| `GET /v1/m/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with Station and Mission identity headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
+| `POST /v1/station/sessions` | Bearer-authenticated registration request with `operation_id`, `mission_id`, `session_id`, and optional sanitized Mission brief metadata. |
+| `POST /v1/station/sessions/{session_id}/lifecycle/{sequence}` | Bearer-authenticated JSON lifecycle update with Station, Mission ID and state. |
+| `POST /v1/station/sessions/{session_id}/terminal/{sequence}` | Bearer-authenticated raw terminal output bytes. |
+| `POST /v1/station/sessions/{session_id}/events/{sequence}` | Bearer-authenticated binary guatiao frame. |
+| `POST /v1/station/attach-grants` | Bearer-authenticated grant request; returns token in JSON response body. |
+| `GET /v1/station/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with Station and Mission identity headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
 | `POST /v1/attach` | Requires exact `Origin` and trusted HTTPS proxy marker; exchanges token from JSON body for a scoped cookie. |
 | `GET /v1/socket/{session_id}?after={sequence}` | Requires the cookie, exact `Origin` and trusted HTTPS marker. Streams binary guatiao messages. |
 
-Only the `/v1/m/` routes accept M's bearer credential. The configured M token
+Only the `/v1/station/` routes accept the Station bearer credential. The configured Station token
 must be loaded from Q's scoped credential lease and must never be logged. Browser
 users authenticate at `/v1/auth/login`; Authenticator and Directory calls execute
 on the blocking pool. Reverse-proxy identity is accepted only from the configured
@@ -371,7 +371,7 @@ map these to 400, 401, 403, 404, 409 or 413 responses.
 The optional `cli` feature builds the service command:
 
 - `universal-exports --public-origin <HTTPS_ORIGIN> [--port <PORT>] [--plugin-path <PATH>]`
-  starts the loopback gateway. `AI6_EXPORTS_M_TOKEN` is required from the environment;
+  starts the loopback gateway. `AI6_EXPORTS_STATION_TOKEN` is required from the environment;
   it is never accepted as an argument. Set `AI6_EXPORTS_DIRECTORY` and either
   `AI6_EXPORTS_AUTHENTICATOR` or `AI6_EXPORTS_PROXY_USER_HEADER` to enable user access.
   `AI6_EXPORTS_PROXY_LOOKUP_BY` selects the Directory attribute for proxy identity
@@ -396,7 +396,7 @@ The library reads no environment variables. The commands read:
 | --- | --- | --- |
 | `AI6_EXPORTS_PUBLIC_ORIGIN` | Required browser HTTPS origin; overridden by `--public-origin`. | None |
 | `AI6_EXPORTS_PORT` | Loopback listener port; overridden by `--port`. | `7082` |
-| `AI6_EXPORTS_M_TOKEN` | Required M bearer credential from Q; accepted only from the environment, never a command-line argument. | None |
+| `AI6_EXPORTS_STATION_TOKEN` | Required Station channel bearer credential from Q; accepted only from the environment, never a command-line argument. | None |
 | `AI6_EXPORTS_AUTHENTICATOR` | Guatiao Authenticator provider ID; paired with the Directory setting. | None |
 | `AI6_EXPORTS_AUTHENTICATOR_CONFIG` | Path to a JSON object containing the Authenticator's Guatiao config. | None |
 | `AI6_EXPORTS_PROXY_USER_HEADER` | Sanitized authenticated-user header supplied by the trusted reverse proxy. | None |
@@ -409,7 +409,7 @@ The library reads no environment variables. The commands read:
 | `AI6_EXPORTS_URL` | API origin for `ai6ctl`; overridden by `--server`. | `http://127.0.0.1:7082` |
 | `AI6_ACCESS_TOKEN` | User bearer required by `ai6ctl missions`, `mission`, `sessions` and `session`. | None |
 
-`--help` lists the flag-backed variables and names `AI6_EXPORTS_M_TOKEN` in its help text.
+`--help` lists the flag-backed variables and names `AI6_EXPORTS_STATION_TOKEN` in its help text.
 The command does not log the credential.
 
 ## Gotchas

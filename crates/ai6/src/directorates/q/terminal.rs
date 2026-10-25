@@ -62,7 +62,7 @@ pub trait AgentTerminal: Send + Sync {
 /// Wraps an AI6-discovered terminal provider in the object handle passed to AgentHandlers.
 pub struct TerminalBridge {
     provider: Box<dyn Terminal>,
-    watchdog: Option<crate::directorates::medical::watchdog::InactivityMonitor>,
+    watchdog: Option<crate::directorates::medical::watchdog::Watchdog>,
     #[cfg(feature = "publisher")]
     telemetry: Option<std::sync::Arc<crate::station::publisher::SessionTelemetry>>,
 }
@@ -91,7 +91,7 @@ impl TerminalBridge {
     )]
     pub(crate) fn agent_terminal_with_watchdog(
         provider: Box<dyn Terminal>,
-        watchdog: crate::directorates::medical::watchdog::InactivityMonitor,
+        watchdog: crate::directorates::medical::watchdog::Watchdog,
     ) -> Object<dyn AgentTerminal> {
         Self {
             provider,
@@ -106,7 +106,7 @@ impl TerminalBridge {
     pub(crate) fn agent_terminal_with_watchdog_and_telemetry(
         provider: Box<dyn Terminal>,
         telemetry: std::sync::Arc<crate::station::publisher::SessionTelemetry>,
-        watchdog: crate::directorates::medical::watchdog::InactivityMonitor,
+        watchdog: crate::directorates::medical::watchdog::Watchdog,
     ) -> Object<dyn AgentTerminal> {
         Self {
             provider,
@@ -167,7 +167,7 @@ impl TerminalInputTarget for TerminalInputBridge {
 
 struct TerminalSessionBridge {
     session: Arc<Object<dyn TerminalSession>>,
-    watchdog: Option<crate::directorates::medical::watchdog::InactivityMonitor>,
+    watchdog: Option<crate::directorates::medical::watchdog::Watchdog>,
     #[cfg(feature = "publisher")]
     telemetry: Option<std::sync::Arc<crate::station::publisher::SessionTelemetry>>,
 }
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn terminal_bridge_feeds_raw_output_to_the_shared_watchdog() {
-        let watchdog = crate::directorates::medical::watchdog::InactivityMonitor::with_limits(
+        let watchdog = crate::directorates::medical::watchdog::Watchdog::with_limits(
             std::time::Duration::from_secs(1),
             std::time::Duration::ZERO,
             std::time::Duration::from_secs(1),

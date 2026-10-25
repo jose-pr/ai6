@@ -9,14 +9,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ai6::guatiao::{ToValue, Value};
-use ai6::{Authenticator, Authorizer, Directory, IntakeRegistry, RoleAuthorizer};
+use ai6::{Authenticator, Authorizer, Directory, FileRegistry, RoleAuthorizer};
 use clap::Parser;
 use guatiao::value::Number;
 use serde_json::Value as JsonValue;
 use universal_exports::{AccessProviders, Gateway, GatewayConfig, GatewayLimits};
 
 const DEFAULT_PORT: u16 = 7082;
-const M_TOKEN_ENV: &str = "AI6_EXPORTS_M_TOKEN";
+const STATION_TOKEN_ENV: &str = "AI6_EXPORTS_STATION_TOKEN";
 const MAX_PROVIDER_CONFIG_BYTES: usize = 1024 * 1024;
 const MAX_PROVIDER_CONFIG_DEPTH: usize = 64;
 
@@ -24,7 +24,7 @@ const MAX_PROVIDER_CONFIG_DEPTH: usize = 64;
 #[command(
     name = "universal-exports",
     about = "Serve the authenticated AI6 Universal Exports gateway",
-    after_help = "M's bearer credential is read only from AI6_EXPORTS_M_TOKEN. User access requires a Directory plus an Authenticator or a trusted reverse-proxy identity header."
+    after_help = "The Station channel credential is read only from AI6_EXPORTS_STATION_TOKEN. User access requires a Directory plus an Authenticator or a trusted reverse-proxy identity header."
 )]
 struct Cli {
     /// The public HTTPS origin used to validate browser requests.
@@ -72,16 +72,18 @@ struct Cli {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    let m_token = match std::env::var(M_TOKEN_ENV) {
+    let station_token = match std::env::var(STATION_TOKEN_ENV) {
         Ok(token) => token,
         Err(_) => {
-            eprintln!("universal-exports: {M_TOKEN_ENV} must be set by the credential provider");
+            eprintln!(
+                "universal-exports: {STATION_TOKEN_ENV} must be set by the credential provider"
+            );
             return ExitCode::FAILURE;
         }
     };
     let config = match GatewayConfig::new(
         cli.public_origin.clone(),
-        m_token,
+        station_token,
         GatewayLimits::default(),
         Duration::from_secs(300),
         Duration::from_secs(30),
@@ -92,7 +94,7 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let registry = match IntakeRegistry::from_environment() {
+    let registry = match FileRegistry::from_environment() {
         Ok(registry) => registry,
         Err(error) => {
             eprintln!("universal-exports: shared access-token Registry is unavailable: {error}");
