@@ -53,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   kind it names, once per approval and no longer than it lasts. Leases are revoked when the
   Mission ends or its Session stops; each issue is a `credential` timeline event naming the
   secrets, never a value. `SecretBroker::lease_names` leases part of a loadout.
+- Ephemeral Theaters. `access = { ephemeral = { provider, config, keep_failed,
+  keep_failed_hours } }` makes a Theater a template: each Mission bound to it gets a fresh
+  Theater from a Theater provider (the new kind `ai6_theater_provider`,
+  `ai6::directorates::q::ephemeral`), fitted out as the template's `requires` and
+  `provision` say, and destroyed once the Mission is done or abandoned; a failed Mission's
+  Theater is kept for inspection within the template's bounds, and a restarted Station
+  adopts what is left. The new `ai6-theater-container` crate is the `ephemeral-container`
+  provider: one Docker or Podman container per Mission, reached by the `container`
+  transport. Check-ins publish a Theater's `made_for` Mission, and placement never chooses
+  it for another.
 - Green ink: a person's recorded approval of one irreversible step. An Agent calls the
   `request_approval` tool on its Session's AI6 endpoint with the step's kind (`push`,
   `merge`, `release`, `delete`, `clearance` or one its Operation adds) and target. The

@@ -26,7 +26,7 @@ workdir = "/srv/work"
 
 | Key | Meaning |
 | --- | --- |
-| `access` | The transport: `"local"`, `{ ssh = { … } }`, or `{ transport = { provider = "…", config = { … } } }` for any other transport provider. |
+| `access` | The transport: `"local"`, `{ ssh = { … } }`, or `{ transport = { provider = "…", config = { … } } }` for any other transport provider; `{ ephemeral = { … } }` makes the Theater a template (see [Ephemeral Theaters](#ephemeral-theaters)). |
 | `labels` | Labels an Operation's `station_labels` may match, overlaid on the Station's own. |
 | `agents` | Where the harness may run: `"auto"` (default), `"local"` or `"remote-hands"`. See [Two ways to work on a Theater](#two-ways-to-work-on-a-theater). |
 | `egress` | How the Theater reaches the provider's API: `"direct"` (default), `{ proxy = "http://…" }`, `"station"` (a proxy the Station provides over the transport's `forward`) or `"none"` (no internet). |
@@ -196,6 +196,46 @@ the Theater's `workdir`. An Operation with a `path` that is not bound to a Theat
 on a remote-hands Theater only if that Theater has a `workdir`. A file tool on a transport
 without `files` answers that it is unavailable and points at `theater_run`.
 
+## Ephemeral Theaters
+
+A Theater can be a **template** instead of a host: each Mission bound to it gets a fresh
+Theater made from it, so no Mission sees what another left behind.
+
+```toml
+[theater.scratch]
+access = { ephemeral = { provider = "ephemeral-container", config = { image = "registry.fedoraproject.org/fedora:44", engine = "podman", run_args = ["--network", "none"] }, keep_failed = 3, keep_failed_hours = 24 } }
+agents = "remote-hands"
+workdir = "/work"
+
+[theater.scratch.requires]
+tools = ["git"]
+
+[theater.scratch.provision]
+install = { git = "dnf install -y git" }
+```
+
+- `provider` is a Theater provider (kind `ai6_theater_provider`); `ephemeral-container`
+  (`ai6-theater-container`) makes a Docker or Podman container from `image` and needs the
+  `container` transport loaded beside it. `config` is the provider's own settings.
+- An Operation binds to the template by its ID (`theater = "scratch"`). When the Mission first
+  starts, the Station has the provider make `scratch-<mission>`, reaches it through the
+  transport the provider names, fits it out as `requires` and `provision` say (the same
+  steps as `ai6 theater provision`; a failed step fails the start), and runs the Session
+  there. The new Theater inherits the template's other keys; without a `workdir` of its own
+  it works in the Operation's `path`. A Mission that is blocked, parked or started again
+  comes back to the same Theater.
+- After each check-in the Station sweeps: a Theater whose Mission is done or abandoned is
+  destroyed. One whose Mission failed or was blown, or which no Mission on this Station
+  knows, is kept for inspection: at most `keep_failed` (default 3) per template, each for at
+  most `keep_failed_hours` (default 24), the oldest going first. A Station that restarts
+  adopts the Theaters the provider still lists.
+- Placement chooses the template like any Theater (its requirements count as met, since they
+  are fitted when a Theater is made) and never chooses a Theater made for another Mission;
+  check-ins publish those with `made_for`.
+- A container has no terminal and no `forward`, and a harness on another host reaches the
+  Station's Cable endpoint through a forward, so a container Theater works in remote-hands
+  mode: set `agents = "remote-hands"`.
+
 ## The field runner
 
 A harness the Station supervises itself is the Station's child: if the Station stops or
@@ -303,3 +343,8 @@ to ask why.
   but no proxy is started yet.
 - A terminal over the `adb`, `container` and `qemu` transports, and a QEMU guest agent that
   can end a process it started (a timeout leaves it running in the guest).
+- Ephemeral virtual machines: only containers have a Theater provider. Destroying a kept
+  Theater early is not yet a step an operator approves in green ink; the sweep's bounds
+  remove it.
+- The Station does not refit a Theater on its own rounds: `ai6 theater provision` is run by
+  command, and an ephemeral Theater is fitted out when it is made.

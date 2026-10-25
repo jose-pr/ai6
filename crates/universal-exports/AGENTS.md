@@ -179,7 +179,7 @@ pub struct BoardStation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BoardTheater {
     pub id: String,
-    pub access: String,              // "local", "ssh" or "transport"
+    pub access: String,              // "local", "ssh", "transport" or "ephemeral" (a template)
     pub host: Option<String>,        // ssh host only; user, port and key path are never published
     pub provider: Option<String>,    // transport provider of a "transport" Theater
     pub labels: BTreeMap<String, String>,
@@ -192,6 +192,7 @@ pub struct BoardTheater {
     pub weakened: Vec<String>,       // loose settings and ambient credentials found there
     pub requires: Option<ai6::Requirements>, // what Sessions need there
     pub report: Option<ai6::ProbeReport>,    // the Station's last probe: unmet, found, free space
+    pub made_for: Option<String>,    // the Mission an ephemeral Theater was made for
 }
 
 #[non_exhaustive]

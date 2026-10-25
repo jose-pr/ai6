@@ -327,10 +327,22 @@ adds labels, facts or a runner.
 ```rust
 pub const LOCAL_THEATER: &str; // "local"
 #[non_exhaustive]
-pub enum TheaterAccess { Local, Ssh(SshAccess), Transport(TransportAccess) }
+pub enum TheaterAccess { Local, Ssh(SshAccess), Transport(TransportAccess), Ephemeral(EphemeralAccess) }
 impl TheaterAccess {
-    /// The transport provider ID and its settings as TOML text (a `TransportConfig`).
+    /// The transport provider ID and its settings as TOML text (a `TransportConfig`);
+    /// an error for an ephemeral template, which has none of its own.
     pub fn transport(&self) -> Result<(String, String), TheaterError>;
+}
+pub const DEFAULT_KEEP_FAILED: usize = 3;
+pub const DEFAULT_KEEP_FAILED_HOURS: u64 = 24;
+#[non_exhaustive]                            // TOML: access = { ephemeral = { … } }; not on `local`
+pub struct EphemeralAccess { pub provider: String, pub config: serde_json::Map<String, serde_json::Value>,
+    pub keep_failed: Option<usize>, pub keep_failed_hours: Option<u64> }
+impl EphemeralAccess {
+    pub fn new(provider: impl Into<String>) -> Self;
+    pub fn with_setting(self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Self;
+    pub fn keeping_failed(self, count: usize, hours: u64) -> Self;
+    pub fn settings_toml(&self) -> Result<String, TheaterError>;   // a TheaterProviderConfig
 }
 #[non_exhaustive]
 pub struct SshAccess {
@@ -397,7 +409,7 @@ impl Theater {
     pub fn summary(&self) -> TheaterSummary;     // no capabilities: the Station adds them
 }
 #[non_exhaustive]
-pub enum TheaterKind { Local, Ssh, Transport }   // as_str() -> "local" | "ssh" | "transport"
+pub enum TheaterKind { Local, Ssh, Transport, Ephemeral }   // as_str() -> "local" | "ssh" | "transport" | "ephemeral"
 #[non_exhaustive]
 pub struct TheaterSummary {                  // what a Station publishes; no user, port, key path or proxy URL
     pub id: String, pub access: TheaterKind, pub host: Option<String>, pub provider: Option<String>,
@@ -409,6 +421,7 @@ pub struct TheaterSummary {                  // what a Station publishes; no use
     pub weakened: Vec<String>,               // loose settings + "ambient credential on the Theater: …"
     pub requires: Option<Requirements>,
     pub report: Option<ProbeReport>,         // the Station's last probe; absent until one finishes
+    pub made_for: Option<String>,            // the Mission an ephemeral Theater was made for
 }
 impl TheaterSummary { pub fn local() -> Self; }
 pub fn is_sha256_pin(pin: &str) -> bool;    // "sha256:" and 64 hex digits
@@ -442,6 +455,40 @@ Every five minutes it also runs `q::provision::probe` on each Theater whose tran
 `run` (not on a Windows host that declares no `requires`) and publishes the report: unmet
 requirements, programs found, free space, and each ambient credential as a `weakened` line.
 A harness the probe found and accepted is added to `harnesses`.
+
+### Ephemeral Theaters (`ai6::directorates::q::ephemeral`)
+
+A Guatiao kind (`ai6_theater_provider`; floor hash pinned in a test) for providers that make
+a Theater per Mission. Calls block.
+
+```rust
+pub trait TheaterProvider: Send + Sync {
+    fn capabilities(&self) -> Result<Value, ProviderError>;     // Capabilities of what it makes
+    fn create(&self, request: &Value) -> Result<Value, ProviderError>; // TheaterRequest -> MadeTheater; same name = same Theater
+    fn destroy(&self, name: &str) -> Result<(), ProviderError>; // one already gone is Ok
+    fn list(&self, template: &str) -> Result<Value, ProviderError>; // MadeTheaters, oldest first
+}
+pub struct TheaterProviderConfig { pub settings_toml: String }    // the template's `config`
+pub struct TheaterRequest { pub name: String, pub template: String, pub mission: String }
+pub struct MadeTheater { pub name: String, pub template: String, pub mission: String,
+    pub created_at: u64 /* default 0 */, pub transport: String, pub settings_toml: String }
+pub struct MadeTheaters { pub theaters: Vec<MadeTheater> }
+pub struct TheaterMaker;   // typed wrapper: new(Box<dyn TheaterProvider>), capabilities, create, destroy, list
+```
+
+`Plugins::theater_providers()` and `Plugins::theater_provider(id, config)` find and build
+them; `ai6-theater-container` (ID `ephemeral-container`) is the container one. A Station
+builds the provider of each `ephemeral` template at start. Starting a Mission whose
+Operation is bound to a template has the provider make `<template>-<mission>` (characters
+outside `[A-Za-z0-9._-]` become `-`; cut to 100 bytes with a digest), reached by the
+transport `MadeTheater` names and inheriting the template's keys (`workdir` defaults to the
+Operation's `path`); the Station runs `q::provision::provision` on it when the template has
+`requires`, `provision` or `runner` (a failed step fails the start) and records a probe
+report. The launch record names the made Theater. After every check-in the Station adopts
+listed Theaters it does not know, destroys those whose Mission is `done` or `abandoned`, and
+keeps those whose Mission `failed`, was `blown` or is unknown here, at most `keep_failed`
+per template and for at most `keep_failed_hours`, newest first. A Theater with a Session
+starting or running is never touched.
 
 ### Provisioning (`ai6::directorates::q::provision`)
 
@@ -620,7 +667,8 @@ pub struct PlacementChoice { pub station: String, pub theater: String, pub agent
 pub enum ExecutionMode { Field, RemoteHands }   // default Field; as_str() -> "field" | "remote-hands"
 /// How a Session would run on `theater`, or the capability that is missing.
 pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String>;
-/// Why the Theater's `requires` rule it out: unchecked, or an unmet os/tool/disk. Ok without `requires`.
+/// Why the Theater's `requires` rule it out: unchecked, or an unmet os/tool/disk. Ok without
+/// `requires`, and for an ephemeral template (fitted out when a Theater is made from it).
 pub fn fitness(theater: &TheaterSummary) -> Result<(), String>;
 /// In field mode only: the handler must be one of `requires.harnesses` (when any) and installed.
 pub fn harness_verdict(theater: &TheaterSummary, mode: ExecutionMode, handler: &str) -> Result<(), String>;
@@ -635,8 +683,9 @@ pub fn place(policy: &OperationPolicy, request: &PlacementRequest, stations: &[S
 `place` returns every eligible (Station, Theater, Agent) choice, best first, and one
 rejection for everything ruled out; the `reason` is a sentence an operator can act on.
 Checks, in order: the Operation's `stations` list, the Mission's `stations`, the `execution`
-role, health (a check-in no older than `DEFAULT_LEASE`), capacity, then per Theater: the
-Operation's `theater` binding, reachability and capabilities (`execution_mode`), `fitness`,
+role, health (a check-in no older than `DEFAULT_LEASE`), capacity, then per Theater: not
+`made_for` a Mission, the Operation's `theater` binding, reachability and capabilities
+(`execution_mode`), `fitness`,
 `station_labels` (matched as globs against the Station's labels overlaid by the Theater's)
 and the Operation's checkout (on the Station's own host in field mode; on any other Theater,
 or in remote-hands mode, the Operation must be bound to the Theater or the Theater must set a
