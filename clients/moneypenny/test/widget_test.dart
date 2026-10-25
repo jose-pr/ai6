@@ -681,6 +681,30 @@ void main() {
                   'theater_id': 'local',
                   'mode': 'field',
                 },
+                'attempts': [
+                  {
+                    'attempt': 1,
+                    'session_id': 'attempt-1',
+                    'provider_session_id': 'claude-session-000',
+                    'predecessor': null,
+                    'station': 'station-beta',
+                    'theater': 'local',
+                    'status': 'lost',
+                    'lost': 'Station "station-beta" went dark',
+                    'checkpoint_branch': 'mission-007-review',
+                  },
+                  {
+                    'attempt': 2,
+                    'session_id': 'attempt-2',
+                    'provider_session_id': 'claude-session-123',
+                    'predecessor': 'attempt-1',
+                    'station': 'station-alpha',
+                    'theater': 'local',
+                    'status': 'active',
+                    'lost': null,
+                    'checkpoint_branch': null,
+                  },
+                ],
               },
             ]),
             200,
@@ -777,6 +801,19 @@ void main() {
     expect(find.text('Operations'), findsNWidgets(2));
     expect(find.text('operation-alpha'), findsOneWidget);
     expect(find.text('Mission mission-007'), findsOneWidget);
+    expect(
+      find.text('Attempt 1 · lost · Station station-beta · Theater local'),
+      findsOneWidget,
+    );
+    expect(find.text('Station "station-beta" went dark'), findsOneWidget);
+    expect(
+      find.text('Checkpointed to branch mission-007-review'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Attempt 2 · active · Station station-alpha · Theater local'),
+      findsOneWidget,
+    );
     expect(find.text('claude-session-123'), findsOneWidget);
     expect(find.text('codex-session-456'), findsOneWidget);
     expect(find.text('WORKING'), findsOneWidget);

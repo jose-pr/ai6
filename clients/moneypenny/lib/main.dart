@@ -132,6 +132,26 @@ class MissionBoard extends ChangeNotifier {
           theaterId: 'local',
         ),
       ];
+      missionAttempts = const {
+        ('G', 'mission-007'): [
+          MissionAttemptSummary(
+            attempt: 1,
+            station: 'station-remote-02',
+            theater: 'local',
+            status: 'lost',
+            lost:
+                'Station "station-remote-02" went dark with Theater "local"; '
+                'its harness ran on that Station\'s own host',
+            checkpointBranch: 'mission-007-review',
+          ),
+          MissionAttemptSummary(
+            attempt: 2,
+            station: 'station-control-01',
+            theater: 'local',
+            status: 'active',
+          ),
+        ],
+      };
       auditEntries = const [
         AuditEntrySummary(
           id: 'preview-audit-001',
@@ -218,6 +238,9 @@ class MissionBoard extends ChangeNotifier {
   Timer? _poll;
   List<SessionSummary> sessions = const [];
   List<MissionBriefSummary> missionBriefs = const [];
+
+  /// Every attempt at each Mission, by (Operation, Mission), first first.
+  Map<(String, String), List<MissionAttemptSummary>> missionAttempts = const {};
   List<AuditEntrySummary> auditEntries = const [];
   UserSessionSummary? userSession;
   StationBoardSummary stationBoard = const StationBoardSummary(
@@ -941,6 +964,14 @@ class MissionBoard extends ChangeNotifier {
           )
           .whereType<MissionBriefSummary>()
           .toList(growable: false);
+      missionAttempts = {
+        for (final item in missions.cast<Map<String, dynamic>>())
+          (item['operation_id'] as String, item['mission_id'] as String): [
+            for (final attempt
+                in (item['attempts'] as List<dynamic>? ?? const []))
+              MissionAttemptSummary.fromJson(attempt as Map<String, dynamic>),
+          ],
+      };
       stationBoard = StationBoardSummary.fromJson(
         jsonDecode(responses[2].body) as Map<String, dynamic>,
       );
@@ -955,6 +986,9 @@ class MissionBoard extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  List<MissionAttemptSummary> attempts(String operationId, String missionId) =>
+      missionAttempts[(operationId, missionId)] ?? const [];
 
   MissionBriefSummary? missionBrief(String operationId, String missionId) =>
       missionBriefs
@@ -1722,6 +1756,48 @@ class MissionBriefSummary {
       mode: brief['mode'] as String?,
     );
   }
+}
+
+/// One attempt at a Mission: where it ran and how it stands.
+class MissionAttemptSummary {
+  const MissionAttemptSummary({
+    required this.attempt,
+    required this.station,
+    required this.status,
+    this.theater,
+    this.lost,
+    this.checkpointBranch,
+  });
+
+  final int attempt;
+  final String station;
+  final String? theater;
+
+  /// `active`, `parked`, `ended` or `lost`.
+  final String status;
+
+  /// Why the attempt was lost, when it was.
+  final String? lost;
+
+  /// The branch its work was last checkpointed to, when it was.
+  final String? checkpointBranch;
+
+  factory MissionAttemptSummary.fromJson(Map<String, dynamic> json) =>
+      MissionAttemptSummary(
+        attempt: json['attempt'] as int,
+        station: json['station'] as String,
+        status: json['status'] as String,
+        theater: json['theater'] as String?,
+        lost: json['lost'] as String?,
+        checkpointBranch: json['checkpoint_branch'] as String?,
+      );
+
+  String describe() => [
+    'Attempt $attempt',
+    status,
+    'Station $station',
+    if (theater case final theater?) 'Theater $theater',
+  ].join(' · ');
 }
 
 class MoneypennyApp extends StatelessWidget {
@@ -3754,6 +3830,11 @@ class _MissionCard extends StatelessWidget {
                   ?.copyWith(color: const Color(0xff9aafb0)),
             ),
           ),
+          if (board.attempts(mission.operationId, mission.missionId)
+              case final attempts
+              when attempts.length > 1 ||
+                  attempts.any((attempt) => attempt.status == 'lost'))
+            _AttemptHistory(attempts: attempts),
           if (board.controls[(mission.operationId, mission.missionId)]
               case final control?)
             Padding(
@@ -3774,6 +3855,36 @@ class _MissionCard extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Every attempt at a Mission, first first, with why a lost one was lost.
+class _AttemptHistory extends StatelessWidget {
+  const _AttemptHistory({required this.attempts});
+
+  final List<MissionAttemptSummary> attempts;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).textTheme.bodySmall
+        ?.copyWith(color: const Color(0xff9aafb0));
+    return Padding(
+      padding: const EdgeInsets.only(left: 27, bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final attempt in attempts) ...[
+            Text(
+              attempt.describe(),
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+            if (attempt.lost case final lost?) Text(lost, style: muted),
+            if (attempt.checkpointBranch case final branch?)
+              Text('Checkpointed to branch $branch', style: muted),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _MissionBriefPage extends StatelessWidget {
