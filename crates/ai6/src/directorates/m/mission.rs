@@ -76,6 +76,12 @@ pub(crate) struct LaunchManifest {
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<String>,
     pub(crate) cover: Option<CoverAudit>,
+    /// The Station that supervises the Session; absent in records written before placement.
+    #[serde(default)]
+    pub(crate) station_id: Option<String>,
+    /// The Theater the harness runs in; absent in records written before placement.
+    #[serde(default)]
+    pub(crate) theater_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -540,12 +546,17 @@ mod tests {
                     model: Some("sonnet".to_owned()),
                     effort: Some("high".to_owned()),
                     cover: None,
+                    station_id: Some("hq".to_owned()),
+                    theater_id: Some("local".to_owned()),
                 },
             )
             .unwrap();
         }
 
         let mut reopened = MissionStore::open(path).unwrap();
+        let manifest = reopened.operation("mission-1").unwrap();
+        assert_eq!(manifest.station_id.as_deref(), Some("hq"));
+        assert_eq!(manifest.theater_id.as_deref(), Some("local"));
         let mission = reopened.get("mission-1").unwrap();
         assert_eq!(mission.state, MissionState::Working);
         assert_eq!(mission.role_id.as_deref(), Some("case-officer"));
@@ -562,5 +573,47 @@ mod tests {
         );
         assert_eq!(reopened.get("mission-1").unwrap().revision, 4);
         assert_eq!(reopened.recover_working().unwrap(), 0);
+    }
+
+    #[test]
+    fn launch_records_written_before_placement_still_load() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missions.json");
+        {
+            let mut book = MissionStore::open(&path).unwrap();
+            book.create(
+                MissionId::try_new("old-1").unwrap(),
+                None,
+                "inspect".to_owned(),
+                None,
+                None,
+            )
+            .unwrap();
+            book.set_operation(
+                "old-1",
+                LaunchManifest {
+                    handler_provider: "claude".to_owned(),
+                    terminal_provider: "pty".to_owned(),
+                    working_directory: directory.path().to_string_lossy().into_owned(),
+                    model: None,
+                    effort: None,
+                    cover: None,
+                    station_id: Some("hq".to_owned()),
+                    theater_id: Some("local".to_owned()),
+                },
+            )
+            .unwrap();
+        }
+        let mut snapshot: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let manifest = snapshot["operations"]["old-1"].as_object_mut().unwrap();
+        manifest.remove("station_id").unwrap();
+        manifest.remove("theater_id").unwrap();
+        fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+
+        let reopened = MissionStore::open(&path).unwrap();
+        let manifest = reopened.operation("old-1").unwrap();
+        assert_eq!(manifest.station_id, None);
+        assert_eq!(manifest.theater_id, None);
     }
 }

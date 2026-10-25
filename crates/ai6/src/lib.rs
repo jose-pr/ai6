@@ -21,6 +21,10 @@ pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionI
 pub use directorates::m::roster::{
     AgentRole, CoverIdentity, Operation, Roster, RosterError, Workspace,
 };
+pub use directorates::m::theaters::{
+    LOCAL_THEATER, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind, TheaterSummary,
+    Theaters,
+};
 pub use directorates::medical::watchdog::{
     DEFAULT_BLOCKED_AFTER, DEFAULT_LINE_HISTORY, DEFAULT_LOOP_MIN_LINES, DEFAULT_STALL_TIMEOUT,
     Watchdog, WatchdogConfig, WatchdogOverrides,

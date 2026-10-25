@@ -5,3 +5,4 @@ pub mod cover;
 pub mod identity;
 pub mod mission;
 pub mod roster;
+pub mod theaters;

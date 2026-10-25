@@ -124,6 +124,8 @@ class MissionBoard extends ChangeNotifier {
           model: 'claude-sonnet',
           effort: 'high',
           environmentKeys: ['AI6_MISSION_ID'],
+          stationId: 'station-control-01',
+          theaterId: 'local',
         ),
       ];
       auditEntries = const [
@@ -172,6 +174,15 @@ class MissionBoard extends ChangeNotifier {
             running: 2,
             capacity: 4,
             operations: ['G'],
+            theaters: [
+              TheaterSummary(id: 'local', access: 'local'),
+              TheaterSummary(
+                id: 'build-box',
+                access: 'ssh',
+                host: 'build.example.net',
+                labels: {'os': 'linux'},
+              ),
+            ],
           ),
           StationSummary(
             stationId: 'station-remote-02',
@@ -763,6 +774,7 @@ class StationSummary {
     required this.running,
     required this.capacity,
     required this.operations,
+    this.theaters = const [],
   });
 
   final String stationId;
@@ -773,6 +785,7 @@ class StationSummary {
   final int running;
   final int capacity;
   final List<String> operations;
+  final List<TheaterSummary> theaters;
 
   factory StationSummary.fromJson(Map<String, dynamic> json) => StationSummary(
     stationId: json['station_id'] as String,
@@ -783,7 +796,43 @@ class StationSummary {
     running: json['running'] as int,
     capacity: json['capacity'] as int,
     operations: (json['operations'] as List<dynamic>).cast<String>(),
+    theaters: ((json['theaters'] as List<dynamic>?) ?? const [])
+        .map(
+          (theater) => TheaterSummary.fromJson(theater as Map<String, dynamic>),
+        )
+        .toList(growable: false),
   );
+}
+
+/// A host or sandbox a Station reaches; `ssh` Theaters are listed but not yet
+/// chosen for Sessions.
+class TheaterSummary {
+  const TheaterSummary({
+    required this.id,
+    required this.access,
+    this.host,
+    this.labels = const {},
+  });
+
+  final String id;
+  final String access;
+  final String? host;
+  final Map<String, String> labels;
+
+  factory TheaterSummary.fromJson(Map<String, dynamic> json) => TheaterSummary(
+    id: json['id'] as String,
+    access: json['access'] as String,
+    host: json['host'] as String?,
+    labels: ((json['labels'] as Map<String, dynamic>?) ?? const {}).map(
+      (key, value) => MapEntry(key, value as String),
+    ),
+  );
+
+  String get description {
+    final where = host == null ? access : '$access $host';
+    final tags = labels.entries.map((e) => '${e.key}=${e.value}').join(', ');
+    return tags.isEmpty ? where : '$where · $tags';
+  }
 }
 
 class UserSessionSummary {
@@ -1043,6 +1092,8 @@ class MissionBriefSummary {
     required this.model,
     required this.effort,
     required this.environmentKeys,
+    this.stationId,
+    this.theaterId,
   });
 
   final String operationId;
@@ -1056,6 +1107,8 @@ class MissionBriefSummary {
   final String? model;
   final String? effort;
   final List<String> environmentKeys;
+  final String? stationId;
+  final String? theaterId;
 
   static MissionBriefSummary? fromMissionJson(Map<String, dynamic> json) {
     final brief = json['brief'];
@@ -1073,6 +1126,8 @@ class MissionBriefSummary {
       effort: brief['effort'] as String?,
       environmentKeys: (brief['environment_keys'] as List<dynamic>)
           .cast<String>(),
+      stationId: brief['station_id'] as String?,
+      theaterId: brief['theater_id'] as String?,
     );
   }
 }
@@ -2703,6 +2758,29 @@ class _StationCard extends StatelessWidget {
             '${station.running}/${station.capacity} sessions',
             style: Theme.of(context).textTheme.bodySmall,
           ),
+          if (station.theaters.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                for (final theater in station.theaters)
+                  Tooltip(
+                    message: theater.description,
+                    child: Chip(
+                      avatar: Icon(
+                        theater.access == 'local'
+                            ? Icons.computer
+                            : Icons.cloud_outlined,
+                        size: 15,
+                      ),
+                      label: Text('Theater ${theater.id}'),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+              ],
+            ),
+          ],
           if (station.operations.isNotEmpty) ...[
             const SizedBox(height: 10),
             Wrap(
@@ -2959,6 +3037,8 @@ class _MissionBriefPage extends StatelessWidget {
         const SizedBox(height: 8),
         _manifestRow('Agent', brief.agentId ?? 'Unassigned'),
         _manifestRow('Role', brief.roleId ?? 'Unspecified'),
+        _manifestRow('Station', brief.stationId ?? 'Not recorded'),
+        _manifestRow('Theater', brief.theaterId ?? 'Not recorded'),
         _manifestRow('Handler', brief.handlerProvider),
         _manifestRow('Terminal', brief.terminalProvider),
         _manifestRow('Working directory', brief.workingDirectory),

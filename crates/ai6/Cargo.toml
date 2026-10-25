@@ -12,11 +12,11 @@ exclude = [".*", "*.local.*"]
 
 [features]
 default = []
-daemon = ["dep:axum", "dep:tokio", "dep:globset", "guatiao/load"]
+daemon = ["dep:axum", "dep:tokio", "guatiao/load"]
 # Adds bounded background event publication to the Universal Exports gateway.
 publisher = ["daemon", "dep:ai6-diptel", "dep:ureq", "dep:url"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars", "dep:subtle"]
-station-tls = ["dep:rustls", "dep:tokio-rustls", "dep:rcgen", "dep:rustls-pemfile", "dep:x509-parser", "dep:globset", "dep:data-encoding"]
+station-tls = ["dep:rustls", "dep:tokio-rustls", "dep:rcgen", "dep:rustls-pemfile", "dep:x509-parser", "dep:data-encoding"]
 cli = ["daemon", "publisher", "cables-mcp", "station-tls", "dep:clap", "tokio/signal"]
 
 [[bin]]
@@ -44,7 +44,7 @@ tokio-rustls = { workspace = true, optional = true }
 rcgen = { workspace = true, optional = true }
 rustls-pemfile = { workspace = true, optional = true }
 x509-parser = { workspace = true, optional = true }
-globset = { workspace = true, optional = true }
+globset.workspace = true
 data-encoding = { workspace = true, optional = true }
 lru.workspace = true
 regex.workspace = true

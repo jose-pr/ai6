@@ -113,7 +113,7 @@ enum Command {
         operation_id: String,
         mission_id: String,
         session_id: SessionId,
-        mission: Option<MissionPublication>,
+        mission: Option<Box<MissionPublication>>,
     },
     Lifecycle {
         operation_id: String,
@@ -340,6 +340,8 @@ pub(crate) struct MissionPublication {
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<String>,
     pub(crate) environment_keys: Vec<String>,
+    pub(crate) station_id: Option<String>,
+    pub(crate) theater_id: Option<String>,
 }
 
 impl SessionTelemetry {
@@ -359,7 +361,7 @@ impl SessionTelemetry {
             operation_id: self.operation_id.clone(),
             mission_id: self.mission_id.to_string(),
             session_id: session_id.clone(),
-            mission: state.mission.clone(),
+            mission: state.mission.clone().map(Box::new),
         }) {
             state.session_id = Some(session_id.clone());
             if let Some(target) = &state.terminal_target {
@@ -627,7 +629,7 @@ fn publish_loop(
                 &operation_id,
                 &mission_id,
                 &session_id,
-                mission.as_ref(),
+                mission.as_deref(),
             )
             .map(|sequence| {
                 sequences.insert(session_id, sequence);
@@ -1033,6 +1035,8 @@ mod tests {
             model: Some("sonnet".to_owned()),
             effort: Some("high".to_owned()),
             environment_keys: vec!["API_TOKEN".to_owned()],
+            station_id: Some("hq".to_owned()),
+            theater_id: Some("local".to_owned()),
         });
         let terminal = TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
             Box::new(RawOutputTerminal),
@@ -1077,7 +1081,9 @@ mod tests {
                     "working_directory": "C:/operations/a",
                     "model": "sonnet",
                     "effort": "high",
-                    "environment_keys": ["API_TOKEN"]
+                    "environment_keys": ["API_TOKEN"],
+                    "station_id": "hq",
+                    "theater_id": "local"
                 }
             })
         );

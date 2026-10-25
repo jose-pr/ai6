@@ -1142,7 +1142,25 @@ fn board_station(
         running: usize_value("running"),
         capacity: usize_value("capacity"),
         operations: operations.to_vec(),
+        theaters: station_theaters(info),
     }
+}
+
+/// The Theaters a Station published; one without the key reaches only its own host.
+fn station_theaters(info: &BTreeMap<String, serde_json::Value>) -> Vec<BoardTheater> {
+    let published = info
+        .get("theaters")
+        .and_then(|value| serde_json::from_value::<Vec<ai6::TheaterSummary>>(value.clone()).ok())
+        .unwrap_or_else(|| vec![ai6::TheaterSummary::local()]);
+    published
+        .into_iter()
+        .map(|theater| BoardTheater {
+            id: theater.id,
+            access: theater.access.as_str().to_owned(),
+            host: theater.host,
+            labels: theater.labels,
+        })
+        .collect()
 }
 
 async fn missions(
@@ -2516,6 +2534,23 @@ pub struct BoardStation {
     pub capacity: usize,
     /// Operations visible to this user that the Station can host.
     pub operations: Vec<String>,
+    /// Theaters the Station reaches; its own host is always the `local` Theater.
+    pub theaters: Vec<BoardTheater>,
+}
+
+/// One Theater a Station reaches, as the Station published it at check-in.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BoardTheater {
+    /// Theater identifier.
+    pub id: String,
+    /// How the Station reaches it: `local` or `ssh`.
+    pub access: String,
+    /// SSH host, for an `ssh` Theater.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Theater labels.
+    pub labels: BTreeMap<String, String>,
 }
 
 /// Mission instructions and non-secret launch metadata published by AI6.
@@ -2540,6 +2575,12 @@ pub struct LaunchManifest {
     pub effort: Option<String>,
     /// Environment variable names only; values are never published.
     pub environment_keys: Vec<String>,
+    /// The Station that supervises the Session, when the publishing Station reported it.
+    #[serde(default)]
+    pub station_id: Option<String>,
+    /// The Theater the harness runs in, when the publishing Station reported it.
+    #[serde(default)]
+    pub theater_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -3628,6 +3669,10 @@ mod tests {
         let brief = mission.brief.unwrap();
         assert_eq!(brief.prompt, "Inspect this change");
         assert_eq!(brief.environment_keys, ["API_TOKEN"]);
+        assert_eq!(
+            brief.station_id, None,
+            "a registration without placement still loads"
+        );
 
         let lifecycle = client
             .post(format!(
@@ -3788,6 +3833,13 @@ mod tests {
         worker_info.insert("roles".to_owned(), serde_json::json!(["execution"]));
         worker_info.insert("capacity".to_owned(), serde_json::json!(4));
         worker_info.insert("running".to_owned(), serde_json::json!(2));
+        worker_info.insert(
+            "theaters".to_owned(),
+            serde_json::json!([
+                {"id": "local", "access": "local", "labels": {}},
+                {"id": "build-box", "access": "ssh", "host": "build.example.net", "labels": {"os": "linux"}}
+            ]),
+        );
         registry.check_in("worker", worker_info).unwrap();
         let make_proposal = |retry_key: &str, title: &str| {
             MissionProposal::try_new(
@@ -3870,6 +3922,8 @@ mod tests {
                     model: Some("claude-sonnet".to_owned()),
                     effort: Some("high".to_owned()),
                     environment_keys: vec!["API_TOKEN".to_owned()],
+                    station_id: Some("worker".to_owned()),
+                    theater_id: Some("local".to_owned()),
                 },
             )
             .await
@@ -4347,6 +4401,13 @@ mod tests {
         assert_eq!(station_board["stations"][0]["healthy"], true);
         assert_eq!(station_board["stations"][0]["headquarters"], false);
         assert_eq!(station_board["stations"][0]["operations"][0], "G");
+        assert_eq!(
+            station_board["stations"][0]["theaters"],
+            serde_json::json!([
+                {"id": "local", "access": "local", "labels": {}},
+                {"id": "build-box", "access": "ssh", "host": "build.example.net", "labels": {"os": "linux"}}
+            ])
+        );
         assert!(
             !serde_json::to_string(&station_board)
                 .unwrap()
@@ -4372,6 +4433,8 @@ mod tests {
         );
         assert_eq!(mission_detail["brief"]["role_id"], "case-officer");
         assert_eq!(mission_detail["brief"]["environment_keys"][0], "API_TOKEN");
+        assert_eq!(mission_detail["brief"]["station_id"], "worker");
+        assert_eq!(mission_detail["brief"]["theater_id"], "local");
         assert!(
             !serde_json::to_string(&mission_detail)
                 .unwrap()

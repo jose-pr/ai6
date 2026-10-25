@@ -28,6 +28,7 @@ use crate::directorates::m::mission::{
 use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
+use crate::directorates::m::theaters::{LOCAL_THEATER, Theater, TheaterAccess, Theaters};
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
 use crate::directorates::q::safehouse::{SafeHouseReport, SafeHouseSpec};
 use crate::directorates::q::terminal::TerminalBridge;
@@ -88,6 +89,9 @@ pub struct StationConfig {
     roles: BTreeSet<StationRole>,
     labels: BTreeMap<String, String>,
     terminal: Option<String>,
+    /// Theaters declared in code; `serve` merges them over `theaters.toml` into `theaters`.
+    extra_theaters: Vec<Theater>,
+    theaters: Theaters,
 }
 
 impl StationConfig {
@@ -114,6 +118,14 @@ impl StationConfig {
         self.terminal = Some(provider.into());
         self
     }
+
+    /// Declares a Theater this Station reaches, over any in `theaters.toml` with the same ID.
+    /// The Station's own host is always reachable as the `local` Theater.
+    #[must_use]
+    pub fn with_theater(mut self, theater: Theater) -> Self {
+        self.extra_theaters.push(theater);
+        self
+    }
 }
 
 impl Default for StationConfig {
@@ -124,6 +136,8 @@ impl Default for StationConfig {
                 .collect(),
             labels: BTreeMap::new(),
             terminal: None,
+            extra_theaters: Vec::new(),
+            theaters: Theaters::default(),
         }
     }
 }
@@ -346,6 +360,18 @@ where
     let roster = Roster::load(&config_dir).map_err(|error| {
         io::Error::new(io::ErrorKind::InvalidData, format!("AI6 roster: {error}"))
     })?;
+    let mut theaters = Theaters::load(&config_dir).map_err(|error| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("AI6 Theaters: {error}"))
+    })?;
+    for theater in std::mem::take(&mut config.station.extra_theaters) {
+        theaters.insert(theater).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("AI6 Theaters: {error}"),
+            )
+        })?;
+    }
+    config.station.theaters = theaters;
     let station_id = config
         .station_id
         .take()
@@ -1145,7 +1171,8 @@ fn publish_station_check_in(state: &DaemonState) {
         .roster
         .operations()
         .filter(|operation| {
-            operation.theater.is_none() && operation.path.as_ref().is_some_and(|path| path.is_dir())
+            local_theater_of(&state.station.theaters, operation).is_some()
+                && operation.path.as_ref().is_some_and(|path| path.is_dir())
         })
         .map(|operation| operation.id.clone())
         .collect::<Vec<_>>();
@@ -1188,9 +1215,38 @@ fn publish_station_check_in(state: &DaemonState) {
     );
     info.insert("running".to_owned(), serde_json::json!(active_sessions));
     info.insert("operations".to_owned(), serde_json::json!(operations));
+    info.insert(
+        "theaters".to_owned(),
+        serde_json::json!(state.station.theaters.summaries()),
+    );
     if let Err(error) = state.intake.check_in(&state.station_id, info) {
         eprintln!("ai6: Station check-in failed: {error}");
     }
+}
+
+/// The Theater an Operation's Sessions run in when that Theater is this Station's own host:
+/// the Operation's `theater`, or `local` when it names none. `None` when the named Theater
+/// is not reached with local access, so this Station cannot run the Operation itself.
+fn local_theater_of(theaters: &Theaters, operation: &roster::Operation) -> Option<String> {
+    let id = operation.theater.as_deref().unwrap_or(LOCAL_THEATER);
+    theaters
+        .find(id)
+        .filter(|theater| theater.access == TheaterAccess::Local)
+        .map(|theater| theater.id)
+}
+
+/// The Theater a Session for `operation_id` runs in on this Station, or why it cannot.
+fn session_theater(state: &DaemonState, operation_id: Option<&str>) -> Result<String, String> {
+    let Some(operation) = operation_id.and_then(|id| state.roster.operation(id).ok()) else {
+        return Ok(LOCAL_THEATER.to_owned());
+    };
+    local_theater_of(&state.station.theaters, operation).ok_or_else(|| {
+        format!(
+            "Operation {:?} is bound to Theater {:?}, which this Station does not reach with local access; Sessions do not run on remote Theaters yet",
+            operation.id,
+            operation.theater.as_deref().unwrap_or_default()
+        )
+    })
 }
 
 fn unix_now() -> f64 {
@@ -1919,13 +1975,6 @@ fn resolve_working_area(
     let operation = roster
         .operation(operation_id)
         .map_err(|error| error.to_string())?;
-    if operation.theater.is_some() {
-        return Err(format!(
-            "Operation {:?} is on remote Theater {:?}; a Theater work directory is required",
-            operation.id,
-            operation.theater.as_deref().unwrap_or_default()
-        ));
-    }
     let checkout = operation
         .path
         .as_ref()
@@ -2155,6 +2204,8 @@ async fn start_mission(
             role.id
         )));
     }
+    let theater_id =
+        session_theater(&state, mission.operation_id.as_deref()).map_err(configuration_error)?;
     let _reservation = reserve_mission_start(&state, &mission, &agent)?;
     let handler_provider = agent
         .handler
@@ -2262,6 +2313,8 @@ async fn start_mission(
         model: model.clone(),
         effort: effort.clone(),
         cover: cover_audit.clone(),
+        station_id: Some(state.station_id.clone()),
+        theater_id: Some(theater_id.clone()),
     };
     let persisted = state
         .missions
@@ -2289,6 +2342,8 @@ async fn start_mission(
             model: model.clone(),
             effort: effort.clone(),
             environment_keys: environment.keys().cloned().collect(),
+            station_id: Some(state.station_id.clone()),
+            theater_id: Some(theater_id.clone()),
         });
     }
     let start_request = AgentStart {
@@ -2611,6 +2666,8 @@ async fn resume_mission(
                 model: model.clone(),
                 effort: effort.clone(),
                 environment_keys: environment.keys().cloned().collect(),
+                station_id: Some(state.station_id.clone()),
+                theater_id: session_theater(&state, Some(operation_id)).ok(),
             });
             telemetry.bind(session_id.clone());
             telemetry
@@ -4448,6 +4505,11 @@ mod tests {
         );
         assert_eq!(stations[0].info()["running"], 0);
         assert_eq!(stations[0].info()["operations"], serde_json::json!(["G"]));
+        assert_eq!(
+            stations[0].info()["theaters"],
+            serde_json::json!([{"id": "local", "access": "local", "labels": {}}]),
+            "a Station always reaches its own host as the local Theater"
+        );
 
         schedule_intake_once(&state);
         let mission_id = "manual--brief-1";

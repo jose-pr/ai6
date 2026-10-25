@@ -20,6 +20,15 @@ String stationBoardResponse() => jsonEncode({
       'running': 2,
       'capacity': 4,
       'operations': ['operation-alpha'],
+      'theaters': [
+        {'id': 'local', 'access': 'local', 'labels': {}},
+        {
+          'id': 'build-box',
+          'access': 'ssh',
+          'host': 'build.example.net',
+          'labels': {'os': 'linux'},
+        },
+      ],
     },
   ],
 });
@@ -658,6 +667,8 @@ void main() {
                   'model': 'claude-sonnet',
                   'effort': 'high',
                   'environment_keys': ['AI6_MISSION_ID'],
+                  'station_id': 'station-alpha',
+                  'theater_id': 'local',
                 },
               },
             ]),
@@ -710,6 +721,8 @@ void main() {
     expect(find.text('HQS'), findsOneWidget);
     expect(find.text('station-alpha'), findsOneWidget);
     expect(find.textContaining('2/4 sessions'), findsOneWidget);
+    expect(find.text('Theater local'), findsOneWidget);
+    expect(find.text('Theater build-box'), findsOneWidget);
     expect(find.text('operation-alpha'), findsOneWidget);
     expect(find.text('claude-session-123'), findsNothing);
     await tester.tap(navLabel('Operations'));
@@ -719,6 +732,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Review the requested change.'), findsOneWidget);
     expect(find.text('case-officer'), findsOneWidget);
+    expect(find.text('station-alpha'), findsOneWidget);
+    expect(find.text('local'), findsOneWidget);
     expect(find.text('AI6_MISSION_ID'), findsOneWidget);
     expect(find.text('Environment values are withheld.'), findsOneWidget);
     await tester.pageBack();
