@@ -164,11 +164,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai6-transport-adb"
+version = "0.1.0"
+dependencies = [
+ "ai6",
+ "serde",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "ai6-transport-container"
+version = "0.1.0"
+dependencies = [
+ "ai6",
+ "serde",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "ai6-transport-local"
 version = "0.1.0"
 dependencies = [
  "ai6",
  "tempfile",
+]
+
+[[package]]
+name = "ai6-transport-qemu"
+version = "0.1.0"
+dependencies = [
+ "ai6",
+ "data-encoding",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]
