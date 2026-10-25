@@ -8,6 +8,7 @@ members = [
     "crates/providers/access/*",
     "crates/providers/agents/*",
     "crates/providers/safehouses/*",
+    "crates/providers/sources/*",
     "crates/providers/terminals/*",
 ]
 

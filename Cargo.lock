@@ -140,6 +140,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai6-source-github"
+version = "0.1.0"
+dependencies = [
+ "ai6",
+ "serde",
+ "serde_json",
+ "toml",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "ai6-terminal-pty"
 version = "0.1.0"
 dependencies = [
