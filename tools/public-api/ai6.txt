@@ -269,6 +269,7 @@ pub ai6::directorates::m::roster::Operation::path: core::option::Option<std::pat
 pub ai6::directorates::m::roster::Operation::repos: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::safe_houses: bool
+pub ai6::directorates::m::roster::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
 pub ai6::directorates::m::roster::Operation::sources: toml::table::Table
 pub ai6::directorates::m::roster::Operation::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::m::roster::Operation::theater: core::option::Option<alloc::string::String>
@@ -714,6 +715,37 @@ pub const ai6::directorates::registry::cables::DEFAULT_CABLE_TTL: f64
 pub const ai6::directorates::registry::cables::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::directorates::registry::cables::MAX_CABLE_FANOUT: usize
 pub const ai6::directorates::registry::cables::MAX_CABLE_TTL: f64
+pub mod ai6::directorates::registry::sleepers
+pub enum ai6::directorates::registry::sleepers::Fire
+pub ai6::directorates::registry::sleepers::Fire::AlreadyFired
+pub ai6::directorates::registry::sleepers::Fire::Queued
+pub struct ai6::directorates::registry::sleepers::Cron
+impl ai6::directorates::registry::sleepers::Cron
+pub fn ai6::directorates::registry::sleepers::Cron::latest_at_or_before(&self, i64) -> core::option::Option<i64>
+pub fn ai6::directorates::registry::sleepers::Cron::parse(&str) -> core::result::Result<Self, ai6::directorates::registry::sleepers::CronError>
+pub struct ai6::directorates::registry::sleepers::CronError(_)
+impl core::error::Error for ai6::directorates::registry::sleepers::CronError
+impl core::fmt::Display for ai6::directorates::registry::sleepers::CronError
+pub fn ai6::directorates::registry::sleepers::CronError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::registry::sleepers::Sleeper
+pub ai6::directorates::registry::sleepers::Sleeper::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sleepers::Sleeper::priority: i64
+pub ai6::directorates::registry::sleepers::Sleeper::prompt: alloc::string::String
+pub ai6::directorates::registry::sleepers::Sleeper::role: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sleepers::Sleeper::schedule: alloc::string::String
+pub ai6::directorates::registry::sleepers::Sleeper::title: alloc::string::String
+impl ai6::directorates::registry::sleepers::Sleeper
+pub fn ai6::directorates::registry::sleepers::Sleeper::due_window(&self, i64, i64) -> core::option::Option<i64>
+pub fn ai6::directorates::registry::sleepers::Sleeper::fingerprint(&self) -> alloc::string::String
+pub fn ai6::directorates::registry::sleepers::Sleeper::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub struct ai6::directorates::registry::sleepers::SleeperAuthorization
+pub ai6::directorates::registry::sleepers::SleeperAuthorization::at: i64
+pub ai6::directorates::registry::sleepers::SleeperAuthorization::authorized_by: alloc::string::String
+pub ai6::directorates::registry::sleepers::SleeperAuthorization::fingerprint: alloc::string::String
+pub const ai6::directorates::registry::sleepers::MAX_WINDOW_AGE_SECS: i64
+pub const ai6::directorates::registry::sleepers::SLEEPER_BRIEF_SOURCE: &str
+pub fn ai6::directorates::registry::sleepers::sleeper_brief(&str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> ai6::directorates::registry::store::Brief
+pub fn ai6::directorates::registry::sleepers::window_label(i64) -> alloc::string::String
 pub mod ai6::directorates::registry::sources
 pub enum ai6::directorates::registry::sources::Ingest
 pub ai6::directorates::registry::sources::Ingest::Finished
@@ -829,6 +861,11 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_cable(&self, &ai
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<std::path::PathBuf>
 pub fn ai6::directorates::registry::store::FileRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
@@ -1125,6 +1162,9 @@ pub ai6::CableState::Failed
 pub ai6::CableState::Held
 pub ai6::CableState::Queued
 pub ai6::CableState::Refused
+pub enum ai6::Fire
+pub ai6::Fire::AlreadyFired
+pub ai6::Fire::Queued
 pub enum ai6::Ingest
 pub ai6::Ingest::Finished
 pub ai6::Ingest::InFlight
@@ -1440,6 +1480,14 @@ pub fn ai6::directorates::registry::cables::CableTarget::try_new(ai6::directorat
 pub struct ai6::CoverIdentity
 pub ai6::CoverIdentity::email: alloc::string::String
 pub ai6::CoverIdentity::name: alloc::string::String
+pub struct ai6::Cron
+impl ai6::directorates::registry::sleepers::Cron
+pub fn ai6::directorates::registry::sleepers::Cron::latest_at_or_before(&self, i64) -> core::option::Option<i64>
+pub fn ai6::directorates::registry::sleepers::Cron::parse(&str) -> core::result::Result<Self, ai6::directorates::registry::sleepers::CronError>
+pub struct ai6::CronError(_)
+impl core::error::Error for ai6::directorates::registry::sleepers::CronError
+impl core::fmt::Display for ai6::directorates::registry::sleepers::CronError
+pub fn ai6::directorates::registry::sleepers::CronError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::CxReport
 pub ai6::CxReport::body: alloc::string::String
 pub ai6::CxReport::branch: core::option::Option<alloc::string::String>
@@ -1492,6 +1540,11 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_cable(&self, &ai
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<std::path::PathBuf>
 pub fn ai6::directorates::registry::store::FileRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
@@ -1596,6 +1649,7 @@ pub ai6::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::Operation::repos: alloc::vec::Vec<alloc::string::String>
 pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::Operation::safe_houses: bool
+pub ai6::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
 pub ai6::Operation::sources: toml::table::Table
 pub ai6::Operation::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::Operation::theater: core::option::Option<alloc::string::String>
@@ -1761,6 +1815,21 @@ pub const ai6::directorates::m::identity::SessionId::KINDS: guatiao::value::conv
 pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
 impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
 pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+pub struct ai6::Sleeper
+pub ai6::Sleeper::agent: core::option::Option<alloc::string::String>
+pub ai6::Sleeper::priority: i64
+pub ai6::Sleeper::prompt: alloc::string::String
+pub ai6::Sleeper::role: core::option::Option<alloc::string::String>
+pub ai6::Sleeper::schedule: alloc::string::String
+pub ai6::Sleeper::title: alloc::string::String
+impl ai6::directorates::registry::sleepers::Sleeper
+pub fn ai6::directorates::registry::sleepers::Sleeper::due_window(&self, i64, i64) -> core::option::Option<i64>
+pub fn ai6::directorates::registry::sleepers::Sleeper::fingerprint(&self) -> alloc::string::String
+pub fn ai6::directorates::registry::sleepers::Sleeper::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub struct ai6::SleeperAuthorization
+pub ai6::SleeperAuthorization::at: i64
+pub ai6::SleeperAuthorization::authorized_by: alloc::string::String
+pub ai6::SleeperAuthorization::fingerprint: alloc::string::String
 pub struct ai6::SourceBatch
 pub ai6::SourceBatch::cursor: core::option::Option<alloc::string::String>
 pub ai6::SourceBatch::items: alloc::vec::Vec<ai6::directorates::registry::sources::SourceItem>
@@ -1888,6 +1957,7 @@ pub const ai6::MAX_LOADOUT_BYTES: usize
 pub const ai6::MAX_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::MAX_STATION_MISSION_CAPACITY: usize
 pub const ai6::READ_TIMED_OUT: i64
+pub const ai6::SLEEPER_BRIEF_SOURCE: &str
 pub const ai6::SOURCE_BRIEF_PREFIX: &str
 pub trait ai6::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>

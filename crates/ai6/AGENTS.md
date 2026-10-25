@@ -192,7 +192,8 @@ pub struct Operation {
     pub cover: String,
     pub cover_identity: Option<CoverIdentity>,
     pub on_blown: String,
-    pub sources: toml::Table,
+    pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
+    pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
 }
 impl Operation {
     /// `workspace.provider`, else `"git"` when the source or `path` holds a `.git`, else `None`.
@@ -446,6 +447,53 @@ cursor; every 15 s it posts a `CxReport` for each unreported finished source bri
 finished outcome carries `state`, `mission_id`, `session_ids`, `agent` and `branch`. Report
 wording follows `Cover::disclosure()`: `Hidden` (covert), `Assisted` (partial) or `Full`
 (overt).
+
+## Sleepers (`ai6::directorates::registry::sleepers`)
+
+An Operation's `sleepers.<name>` tables are standing orders. Names use letters, digits,
+`-` and `_`; the roster refuses an invalid definition when it loads.
+
+```rust
+pub struct Sleeper {
+    pub schedule: String,        // five-field cron in UTC
+    pub title: String,
+    pub prompt: String,          // operator-written; not fenced
+    pub agent: Option<String>,
+    pub role: Option<String>,
+    pub priority: i64,
+}
+impl Sleeper {
+    pub fn validate(&self) -> Result<(), String>;
+    pub fn fingerprint(&self) -> String;   // SHA-256 over every field
+    pub fn due_window(&self, now: i64, authorized_at: i64) -> Option<i64>;
+}
+pub struct SleeperAuthorization { pub fingerprint: String, pub authorized_by: String, pub at: i64 }
+pub enum Fire { Queued, AlreadyFired }
+pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
+pub const MAX_WINDOW_AGE_SECS: i64; // 86_400
+
+pub struct Cron;
+impl Cron {
+    pub fn parse(expression: &str) -> Result<Cron, CronError>;
+    pub fn latest_at_or_before(&self, now: i64) -> Option<i64>; // Unix seconds, looks back 366 days
+}
+pub fn window_label(window: i64) -> String; // "20261025T0300Z"
+
+FileRegistry::authorize_sleeper(operation: &str, name: &str, sleeper: &Sleeper, authorized_by: &str, at: i64) -> io::Result<()>
+FileRegistry::sleeper_authorization(operation: &str, name: &str) -> io::Result<Option<SleeperAuthorization>>
+FileRegistry::revoke_sleeper(operation: &str, name: &str) -> io::Result<bool>
+FileRegistry::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, window: i64) -> io::Result<Fire>
+```
+
+Cron fields take `*`, numbers, `a-b`, `,` lists and `/step`; day-of-week is 0-7 (0 and 7 are
+Sunday); when both day fields are restricted a day matches if either does. A schedule that
+never matches within a year (`0 0 30 2 *`) parses but never fires.
+
+`fire_sleeper` submits a brief keyed `sleeper--<operation>.<name>.<window>` and reports
+`AlreadyFired` when that key exists in `new`, `claimed`, `done` or `failed`, which is what
+makes a window fire once across Stations. Authorizations are stored under `sleepers/`. The
+Headquarters holder fires only sleepers whose stored fingerprint equals the current
+definition, using windows after the approval time and no more than a day old.
 
 ## Identity and handler API
 
@@ -944,4 +992,7 @@ against the provider's schema. Pass `None` only for a provider with a default in
   config directory.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.
+- `ai6 sleeper [--config-dir PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:
+  show and approve an Operation's standing orders. It reads the Registry from
+  `AI6_REGISTRY` or the platform state directory, like the Station.
 - User-facing management goes through Universal Exports and the separate `ai6ctl` command.

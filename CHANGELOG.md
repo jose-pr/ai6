@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   keyed `source_<provider>--<item>`: a changed item updates its queued brief, and a claimed
   or finished one is never queued again. Tracker text is fenced in the brief as untrusted
   data. Reports are worded by the Operation's cover policy.
+- Sleepers: standing orders under `operation.<id>.sleepers.<name>` (a five-field UTC cron
+  `schedule`, a `title` and a `prompt`) that queue a brief per scheduled window. A sleeper
+  fires only after `ai6 sleeper authorize <operation> <name>` approves its exact definition
+  (editing it withdraws the approval), and the brief's key is derived from the window, so
+  a Headquarters failover cannot queue it twice. `ai6 sleeper list|authorize|revoke`.
 - Source providers `ai6-source-github` (labeled issues and pull requests, comment and
   label back) and `ai6-source-jira` (JQL on Cloud or Server/Data Center, comment and
   workflow transition back).

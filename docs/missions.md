@@ -88,6 +88,38 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Source.repo
 - **Limits.** Review comments on a pull request are not forwarded to the Mission's
   Session. Jira issues are not transitioned when a Mission starts, only when it ends.
 
+## Sleepers
+
+A **Sleeper** is a standing order: a brief that queues itself on a schedule, such as a
+nightly dependency update. It is configured on the Operation and does nothing until an
+operator approves it.
+
+```toml
+[operation.G.sleepers.nightly-deps]
+schedule = "0 3 * * *"   # minute hour day-of-month month day-of-week, in UTC
+title = "Update dependencies"
+prompt = "Update the lockfile, run the tests and keep the work on a branch."
+role = "maintenance"      # optional: agent, role, priority
+```
+
+```bash
+ai6 sleeper list
+ai6 sleeper authorize G nightly-deps
+ai6 sleeper revoke G nightly-deps
+```
+
+- **Authorization.** `authorize` approves the sleeper exactly as written. Editing its
+  schedule, title, prompt or assignment withdraws the approval until it is authorized
+  again. Windows at or before the approval never fire.
+- **One brief per window.** The Station holding the Headquarters lease checks the clock
+  every 20 seconds and queues the brief for the latest scheduled minute. The brief's key
+  comes from the Operation, the sleeper and that minute, so a Station that takes over the
+  lease after a failover finds the key already used (queued, running or finished) and
+  queues nothing. A window more than 24 hours old is skipped rather than run late.
+- **Prompt.** The prompt is the operator's own text, not fenced as untrusted data.
+- **Events.** There is no event trigger; a CI failure or a new issue arrives through a
+  [Source](#sources).
+
 ## Restart recovery and publication
 
 AI6 persists the selected Agent, handler, terminal, working directory, model, effort,

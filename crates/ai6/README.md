@@ -60,6 +60,9 @@ ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
 ai6 identity
 ai6 peer waiting
 ai6 peer accept FINGERPRINT
+ai6 sleeper [--config-dir PATH] list
+ai6 sleeper [--config-dir PATH] authorize OPERATION NAME
+ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
 ```
 
 - `ai6 serve` runs the Station. Harnesses run in an available terminal provider,
@@ -70,6 +73,8 @@ ai6 peer accept FINGERPRINT
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists certificates a peer-trust listener rejected; `ai6 peer accept`
   pins one of them.
+- `ai6 sleeper` lists an Operation's standing orders and authorizes or revokes them; a
+  sleeper queues briefs on its schedule only while its current definition is authorized.
 
 Exit status is `0` on success and `1` on a configuration, listener or identity failure.
 
@@ -83,6 +88,7 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
 | `ai6::directorates::m::access` | Authenticator, Directory and Authorizer kinds and the built-in `RoleAuthorizer` |
 | `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
+| `ai6::directorates::registry::sleepers` | Sleepers: cron standing orders, their authorization and per-window briefs |
 | `ai6::directorates::registry::sources` | The Source kind (trackers and CI), brief ingestion, cursors and CX reports |
 | `ai6::directorates::registry::cables` | Permission-scoped Agent-to-Agent Cable relay |
 | `ai6::directorates::q` | Loadouts, Mission-scoped secret leases, MCP config and sandbox arguments |

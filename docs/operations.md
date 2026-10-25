@@ -85,6 +85,18 @@ Credentials are never configured: a source names the environment variable that h
 token (`token_env`), and the Station reads it when it polls. A bare string is shorthand for
 the provider's main target, as in `sources = { jira = "GUA" }`.
 
+## Sleepers
+
+`sleepers` holds standing orders that queue a brief on a cron schedule, once an operator
+authorizes them with `ai6 sleeper authorize`. See [Sleepers](missions.md#sleepers).
+
+```toml
+[operation.G.sleepers.nightly-deps]
+schedule = "0 3 * * *"
+title = "Update dependencies"
+prompt = "Update the lockfile and run the tests."
+```
+
 Missions and provider Sessions are visible in the Moneypenny app and through `ai6ctl`. The Mission ID identifies
 the work; the provider-issued Session ID identifies one resumable agent run. See
 [Missions and intake](missions.md) and [Agents and clearance](agents.md).
