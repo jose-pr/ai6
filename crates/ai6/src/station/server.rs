@@ -6511,6 +6511,17 @@ mod tests {
         .await
         .expect("quiet Session should reach the Watchdog deadline");
 
+        let events = state
+            .events
+            .lock()
+            .unwrap()
+            .get(mission_id.as_str())
+            .map(|queue| {
+                queue
+                    .iter()
+                    .map(|event| event.kind.clone())
+                    .collect::<Vec<_>>()
+            });
         assert_eq!(
             state
                 .missions
@@ -6519,7 +6530,13 @@ mod tests {
                 .get(mission_id.as_str())
                 .unwrap()
                 .state,
-            MissionState::Stalled
+            MissionState::Stalled,
+            "events seen: {events:?}; Session still registered: {}",
+            state
+                .sessions
+                .lock()
+                .unwrap()
+                .contains_key(mission_id.as_str())
         );
         assert!(
             state
