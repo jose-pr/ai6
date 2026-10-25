@@ -243,10 +243,25 @@ impl McpServer {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretSource {
-    /// An environment variable of the Station's process.
+    /// An environment variable of the Station's process. Weaker than a file: every process
+    /// the Station starts on its own host, a harness among them, inherits it.
     Env(String),
-    /// A file on the Station; one trailing newline is dropped.
+    /// A file on the Station, relative to its configuration directory unless absolute; one
+    /// trailing newline is dropped.
     File(PathBuf),
+}
+
+impl SecretSource {
+    /// Why this source is weaker than the default, if it is.
+    pub fn weakening(&self) -> Option<String> {
+        match self {
+            Self::Env(variable) => Some(format!(
+                "read from the Station's environment variable {variable}, which harnesses on the \
+                 Station's own host inherit"
+            )),
+            Self::File(_) => None,
+        }
+    }
 }
 
 /// How a loadout secret reaches a Session: `[secret.<name>]`.
@@ -263,7 +278,8 @@ pub struct SecretDefinition {
 
 impl SecretDefinition {
     /// The definition every key at its default: the Session variable is the name in upper
-    /// case with `-` and `.` as `_`, read on the Station from `AI6_SECRET_<that variable>`.
+    /// case with `-` and `.` as `_`, read on the Station from the file `secrets/<name>` in its
+    /// configuration directory.
     pub fn new(name: impl Into<String>) -> Self {
         let name = name.into();
         let env: String = name
@@ -274,7 +290,7 @@ impl SecretDefinition {
             })
             .collect();
         Self {
-            source: SecretSource::Env(format!("AI6_SECRET_{env}")),
+            source: SecretSource::File(PathBuf::from("secrets").join(&name)),
             name,
             env,
             green_ink: false,
@@ -589,7 +605,7 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
                 SecretSource::File(PathBuf::from(file))
             }
             Some(_) => return Err(QError::new(QErrorKind::Schema, path)),
-            None => SecretSource::Env(format!("AI6_SECRET_{}", definition.env)),
+            None => definition.source,
         };
         validate_names(&raw.kinds, QErrorKind::Schema, path.clone())?;
         if !raw.kinds.is_empty() && !raw.green_ink {
@@ -775,7 +791,14 @@ from = { file = "/etc/ai6/secrets/release" }
         assert_eq!(forge.env(), "FORGE_TOKEN");
         assert_eq!(
             forge.source(),
-            &super::SecretSource::Env("AI6_SECRET_FORGE_TOKEN".to_owned())
+            &super::SecretSource::File(std::path::PathBuf::from("secrets").join("forge-token"))
+        );
+        assert!(forge.source().weakening().is_none());
+        assert!(
+            super::SecretSource::Env("X".to_owned())
+                .weakening()
+                .unwrap()
+                .contains("inherit")
         );
         assert!(!forge.green_ink() && forge.kinds().is_empty());
         let release = catalog.secret("release");

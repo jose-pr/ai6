@@ -431,6 +431,8 @@ where
         config.station.credentials =
             std::mem::take(&mut config.station.credentials).with_catalog(catalog);
     }
+    config.station.credentials =
+        std::mem::take(&mut config.station.credentials).in_config_dir(&config_dir);
     let station_id = config
         .station_id
         .take()
@@ -1363,6 +1365,7 @@ fn fence_out(state: &DaemonState, mission_id: &str) {
         .ok()
         .and_then(|mut sessions| sessions.remove(mission_id))
         .inspect(|operation| operation.gate.close());
+    credentials::release(state, mission_id);
     // The Station that took the lease re-attaches to a runner's harness, so it keeps running.
     if let Some(runner) = operation
         .as_ref()
@@ -3151,8 +3154,6 @@ async fn start_mission(
         initial_context.push(briefing);
     }
     let exposure = medical::open_gate(&state, &mission);
-    credentials::issue(&state, &mission, &agent.id, &exposure, &mut environment)
-        .map_err(configuration_error)?;
     #[cfg(feature = "cables-mcp")]
     let mut cables_mcp = if let Some(operation_id) = mission.operation_id.as_deref() {
         let theater = state
@@ -3216,6 +3217,11 @@ async fn start_mission(
         ));
     }
     let working_directory = area.path.clone();
+    // Leased last, so every failure after it goes through `start_failure`, which revokes.
+    if let Err(error) = credentials::issue(&state, &mission, &agent.id, &exposure, &mut environment)
+    {
+        return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
+    }
     // A Mission started again (a later attempt) keeps the lease of the attempt it replaces
     // until the new Session is recorded.
     let previous_hold = session_hold(&state, &mission_id);
@@ -3737,14 +3743,6 @@ async fn resume_mission(
         .ok_or_else(|| conflict("Provider has not issued a Session ID yet"))?;
     acquire_session_hold(&state, &mission, &session_id)?;
     let exposure = medical::open_gate(&state, &mission);
-    credentials::issue(
-        &state,
-        &mission,
-        &resume_agent.id,
-        &exposure,
-        &mut environment,
-    )
-    .map_err(configuration_error)?;
     #[cfg(feature = "publisher")]
     let telemetry = state.publisher.as_ref().and_then(|publisher| {
         mission.operation_id.as_ref().map(|operation_id| {
@@ -3855,6 +3853,17 @@ async fn resume_mission(
     } else {
         None
     };
+    // A harness a runner still supervises keeps the environment it started with.
+    if reattach.is_none() {
+        credentials::issue(
+            &state,
+            &mission,
+            &resume_agent.id,
+            &exposure,
+            &mut environment,
+        )
+        .map_err(configuration_error)?;
+    }
     let message = request.message;
     let resume_request = AgentResume {
         mission_id: mission.mission_id.clone(),
@@ -3965,9 +3974,17 @@ async fn resume_mission(
         // A Session runs in this process or on a runner; nothing else builds a launch.
         _ => return Err(internal_error()),
     };
-    let resumed = resumed
-        .map_err(|error| runtime_error(format!("AgentHandler resume worker failed: {error}")))?
-        .map_err(provider_error)?;
+    let resumed = match resumed {
+        Ok(Ok(resumed)) => resumed,
+        failed => {
+            credentials::release(&state, &mission_id);
+            return Err(match failed {
+                Err(error) => runtime_error(format!("AgentHandler resume worker failed: {error}")),
+                Ok(Err(error)) => provider_error(error),
+                Ok(Ok(_)) => internal_error(),
+            });
+        }
+    };
     let resumed = Arc::new(Mutex::new(resumed));
     state.sessions.lock().map_err(|_| internal_error())?.insert(
         mission_id.clone(),
@@ -8844,7 +8861,8 @@ mod tests {
             .decide_approval(
                 "G",
                 &release.id,
-                &crate::Ruling::approve("operator", now, now + 600.0),
+                // An approval that lasts for ages still leases for at most an hour.
+                &crate::Ruling::approve("operator", now, 1.0e300),
             )
             .unwrap();
         resume(state.clone()).await;

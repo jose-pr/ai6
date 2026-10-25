@@ -13,8 +13,8 @@ use std::time::Duration;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
 use crate::directorates::q::{
-    LoadoutCatalog, MAX_SECRET_LEASE_TTL, SecretBackend, SecretBroker, SecretLease,
-    SecretLeaseRequest, StationSecrets,
+    LoadoutCatalog, MAX_SECRET_LEASE_TTL, SecretBackend, SecretBroker, SecretDefinition,
+    SecretLease, SecretLeaseRequest, StationSecrets,
 };
 use crate::directorates::registry::approvals::{Approval, ApprovalStatus};
 use crate::directorates::registry::timeline::TimelineEvent;
@@ -31,6 +31,8 @@ const MAX_NAMES_DETAIL: usize = 240;
 pub(crate) struct CredentialDesk {
     catalog: Option<Arc<LoadoutCatalog>>,
     backend: Option<Arc<dyn SecretBackend>>,
+    /// Where the Station's own backend finds relative secret files.
+    config_dir: Option<std::path::PathBuf>,
     issued: Arc<Mutex<BTreeMap<String, Vec<SecretLease>>>>,
     spent: Arc<Mutex<BTreeSet<String>>>,
 }
@@ -46,6 +48,7 @@ impl std::fmt::Debug for CredentialDesk {
 impl PartialEq for CredentialDesk {
     fn eq(&self, other: &Self) -> bool {
         self.catalog == other.catalog
+            && self.config_dir == other.config_dir
             && Arc::ptr_eq(&self.issued, &other.issued)
             && match (&self.backend, &other.backend) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -72,6 +75,25 @@ impl CredentialDesk {
         self.catalog.is_some()
     }
 
+    /// Resolves relative secret files against the Station's configuration directory, and
+    /// logs each secret read from a weaker source.
+    pub(crate) fn in_config_dir(mut self, dir: &std::path::Path) -> Self {
+        self.config_dir = Some(dir.to_path_buf());
+        if self.backend.is_none()
+            && let Some(catalog) = &self.catalog
+        {
+            for definition in catalog.secrets() {
+                if let Some(weakening) = definition.source().weakening() {
+                    eprintln!(
+                        "ai6: secret {:?} is weakened: {weakening}",
+                        definition.name()
+                    );
+                }
+            }
+        }
+        self
+    }
+
     /// The names of the secrets leased to `mission_id`'s Session now.
     #[cfg(test)]
     pub(crate) fn issued_for(&self, mission_id: &str) -> Vec<String> {
@@ -87,9 +109,10 @@ impl CredentialDesk {
 
     /// The backend leases come from: the one set in code, else the Station's own.
     fn broker(&self, catalog: &LoadoutCatalog) -> SecretBroker {
-        let backend: Arc<dyn SecretBackend> = match &self.backend {
-            Some(backend) => backend.clone(),
-            None => Arc::new(StationSecrets::new(catalog.secrets())),
+        let backend: Arc<dyn SecretBackend> = match (&self.backend, &self.config_dir) {
+            (Some(backend), _) => backend.clone(),
+            (None, Some(dir)) => Arc::new(StationSecrets::new(catalog.secrets()).relative_to(dir)),
+            (None, None) => Arc::new(StationSecrets::new(catalog.secrets())),
         };
         SecretBroker::new(Shared(backend))
     }
@@ -158,7 +181,8 @@ pub(super) fn issue(
         .iter()
         .map(|name| catalog.secret(name))
         .partition(|definition| !definition.green_ink());
-    let mut leases = Vec::new();
+    // Whatever was acquired is revoked if this issue fails part way.
+    let mut leases = Leases::default();
     let mut leased = Vec::new();
 
     if !ordinary.is_empty() {
@@ -174,15 +198,8 @@ pub(super) fn issue(
             .map_err(|error| {
                 format!("Agent {agent:?}'s credentials could not be leased: {error}")
             })?;
-        for definition in &ordinary {
-            lease
-                .with_secret(definition.name(), |value| {
-                    environment.insert(definition.env().to_owned(), value.to_owned())
-                })
-                .map_err(|error| error.to_string())?;
-        }
+        leases.hand_over(lease, &ordinary, environment)?;
         leased.extend(names);
-        leases.push(lease);
     }
 
     let mut approvals = Vec::new();
@@ -202,7 +219,9 @@ pub(super) fn issue(
             };
             let now = state.clock.now() as f64;
             let remaining = approval.expires_at.unwrap_or(now) - now;
-            let ttl = Duration::from_secs_f64(remaining.max(1.0)).min(MAX_SECRET_LEASE_TTL);
+            // Clamped before converting: an approval may expire centuries from now.
+            let ttl =
+                Duration::from_secs_f64(remaining.clamp(1.0, MAX_SECRET_LEASE_TTL.as_secs_f64()));
             let names = vec![definition.name().to_owned()];
             let lease =
                 SecretLeaseRequest::with_ttl(state.station_id.clone(), mission_id.clone(), ttl)
@@ -217,26 +236,60 @@ pub(super) fn issue(
                     continue;
                 }
             };
+            leases.hand_over(lease, std::slice::from_ref(definition), environment)?;
+            spent.insert(approval.request.id.clone());
+            approvals.push(approval.request.id.clone());
+            leased.push(definition.name().to_owned());
+        }
+    }
+
+    if !leases.0.is_empty() {
+        record(state, mission, agent, &leased, &approvals);
+        let replaced = desk
+            .issued
+            .lock()
+            .map_err(|_| "credential lock was poisoned")?
+            .insert(mission_id, std::mem::take(&mut leases.0));
+        // A concurrent issue for the same Mission lost the race; its leases go too.
+        drop(Leases(replaced.unwrap_or_default()));
+    }
+    Ok(())
+}
+
+/// Leases revoked when dropped.
+#[derive(Default)]
+struct Leases(Vec<SecretLease>);
+
+impl Leases {
+    /// Keeps `lease` and puts each of `definitions`' values in `environment` under its
+    /// variable.
+    fn hand_over(
+        &mut self,
+        lease: SecretLease,
+        definitions: &[SecretDefinition],
+        environment: &mut BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        self.0.push(lease);
+        let lease = self.0.last().ok_or("no lease to hand over")?;
+        for definition in definitions {
             lease
                 .with_secret(definition.name(), |value| {
                     environment.insert(definition.env().to_owned(), value.to_owned())
                 })
                 .map_err(|error| error.to_string())?;
-            spent.insert(approval.request.id.clone());
-            approvals.push(approval.request.id.clone());
-            leased.push(definition.name().to_owned());
-            leases.push(lease);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Leases {
+    fn drop(&mut self) {
+        for lease in self.0.drain(..) {
+            if let Err(error) = lease.revoke() {
+                eprintln!("ai6: a credential lease was not revoked: {error}");
+            }
         }
     }
-
-    if !leases.is_empty() {
-        record(state, mission, agent, &leased, &approvals);
-        desk.issued
-            .lock()
-            .map_err(|_| "credential lock was poisoned")?
-            .insert(mission_id, leases);
-    }
-    Ok(())
 }
 
 /// Revokes every lease issued for `mission_id`, once its Session stops on this Station or the

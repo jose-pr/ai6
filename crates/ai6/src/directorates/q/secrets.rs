@@ -303,7 +303,8 @@ pub struct StationSecrets {
 }
 
 impl StationSecrets {
-    /// Reads each definition's secret from its source.
+    /// Reads each definition's secret from its source; a relative file is relative to the
+    /// process's working directory until [`StationSecrets::relative_to`] says otherwise.
     pub fn new(definitions: impl IntoIterator<Item = super::SecretDefinition>) -> Self {
         Self {
             sources: definitions
@@ -311,6 +312,19 @@ impl StationSecrets {
                 .map(|definition| (definition.name().to_owned(), definition.source().clone()))
                 .collect(),
         }
+    }
+
+    /// Resolves relative files against `dir`, the Station's configuration directory.
+    #[must_use]
+    pub fn relative_to(mut self, dir: &std::path::Path) -> Self {
+        for source in self.sources.values_mut() {
+            if let super::SecretSource::File(path) = source
+                && path.is_relative()
+            {
+                *path = dir.join(&*path);
+            }
+        }
+        self
     }
 }
 

@@ -45,12 +45,12 @@ mkfifo env
 mkfifo in
 : > out
 cat > run.sh <<'WRAPPER'
-ai6_cwd=$1
-shift
 echo $$ > pid
-ai6_dir=$(pwd -P)
 . ./env
 rm -f ./env
+ai6_dir=$(pwd -P)
+ai6_cwd=$1
+shift
 cd "$ai6_cwd" || { echo 127 > "$ai6_dir/exit"; exit 127; }
 exec 3<>"$ai6_dir/in"
 "$@" <&3 >>"$ai6_dir/out" 2>&1
