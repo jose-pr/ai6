@@ -46,13 +46,14 @@ uuid = { version = "1", default-features = false, features = ["v4"] }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 # Blocking HTTP for the bounded AI6-to-Moneypenny publisher thread.
 ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
-# Station-to-station TLS with the ring provider; rustls is shared with ureq.
-rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-# Self-signed station identities and strict certificate name matching.
+# Station-to-station mutual TLS: identity, fingerprints, a trust store with per-source caps
+# and policy profiles. Each is pinned to a revision of its repository's main.
+coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "ed5a5c401bc2da942c5c1f0de42c38e90927a8a9" }
+coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = "fa409d770baf5086619480d68fadfc9dc7cfa6dd", features = ["generate", "ca", "tokio", "tls12"] }
+# The configuration types coqui-peer-tls returns; shared with ureq, on the ring provider.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+# Self-signed and CA-issued certificates for the Station TLS tests.
 rcgen = "0.14"
-rustls-pemfile = "2"
-x509-parser = "0.18"
 globset = "0.4"
 data-encoding = { version = "2", default-features = false }
 # Validates gateway origins and encodes Session IDs as URL path segments.

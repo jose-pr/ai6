@@ -24,6 +24,8 @@ dependencies = [
  "coqui-access-local-plugin",
  "coqui-access-peer-plugin",
  "coqui-access-proxy-plugin",
+ "coqui-peer",
+ "coqui-peer-tls",
  "coqui-roles",
  "coqui-roles-plugin",
  "data-encoding",
@@ -35,7 +37,6 @@ dependencies = [
  "regex",
  "rmcp",
  "rustls",
- "rustls-pemfile",
  "schemars",
  "serde",
  "serde_json",
@@ -43,12 +44,10 @@ dependencies = [
  "subtle",
  "tempfile",
  "tokio",
- "tokio-rustls",
  "toml",
  "ureq",
  "url",
  "uuid",
- "x509-parser",
  "zeroize",
 ]
 
@@ -655,6 +654,7 @@ dependencies = [
  "sha1 0.11.0",
  "sha2",
  "subtle",
+ "tokio",
 ]
 
 [[package]]
@@ -664,7 +664,12 @@ source = "git+https://github.com/Boriken-Dev/coqui-peer-tls?rev=fa409d770baf5086
 dependencies = [
  "coqui-peer",
  "data-encoding",
+ "globset",
+ "rcgen",
  "rustls",
+ "tokio",
+ "tokio-rustls",
+ "x509-parser",
 ]
 
 [[package]]
@@ -2203,15 +2208,6 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]

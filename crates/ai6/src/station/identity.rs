@@ -1,81 +1,165 @@
 //! Station certificate identities and mutual TLS trust.
+//!
+//! A Station's identity, the peers it trusts and the TLS configurations that use them come
+//! from `coqui-peer-tls` and `coqui-peer`; this module fixes where AI6 keeps them and the
+//! protocol it speaks. A peer is named by its [`Fingerprint`], printed `sha256:<hex>` and
+//! read in any spelling `coqui-peer` knows, including the grouped base32 earlier Stations
+//! printed. Every setting that decides what a handshake accepts is a [`Policy`]: callers
+//! pass [`Policy::strict`] (TLS 1.3, SHA-2 pins) unless an operator chose otherwise.
 
-use std::borrow::Borrow;
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, Write};
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
-use rcgen::{CertifiedKey, generate_simple_self_signed};
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
-use rustls::pki_types::pem::PemObject;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
-use rustls::{ClientConfig, DigitallySignedStruct, DistinguishedName, RootCertStore, ServerConfig};
-use sha2::{Digest, Sha256};
+pub use coqui_peer::{Digest, WaitingEntry, WaitingLimits};
+pub use coqui_peer_tls::{
+    Built, CaPolicy, Fingerprint, Identity, PeerIdentity, Pins, Policy, Trust, TrustStore,
+    TrustStoreExt, Weakening,
+};
+use coqui_peer_tls::{PeerError, client_config_with, server_config_with};
+use rustls::{ClientConfig, ServerConfig};
 
-const IDENTITY_FILE: &str = "identity.pem";
-const STATION_ALPN: &[u8] = b"ai6-station/1";
-const MAX_CERTIFICATE_BYTES: usize = 64 * 1024;
-const MAX_WAITING_PEERS: usize = 1_000;
-const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+/// The ALPN protocol Stations speak to each other.
+pub const STATION_ALPN: &[u8] = b"ai6-station/1";
 
-/// A SHA-256 certificate fingerprint, printed as grouped base32.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StationFingerprint(String);
+/// The identity file in a state directory: one certificate followed by its private key.
+pub const IDENTITY_FILE: &str = "identity.pem";
 
-impl FromStr for StationFingerprint {
-    type Err = StationIdentityError;
+/// Why a Station identity, trust store or TLS configuration could not be made.
+///
+/// The messages never hold key material or paths.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum StationIdentityError {
+    /// The identity or a TLS configuration was refused.
+    Tls(PeerError),
+    /// The trust store or a fingerprint was refused.
+    Peers(coqui_peer::Error),
+}
 
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let letters: String = value
-            .chars()
-            .filter(|character| !matches!(character, '-' | ' ' | '\t' | '\n' | '\r'))
-            .map(|character| character.to_ascii_uppercase())
-            .collect();
-        if letters.len() != 52 || !letters.bytes().all(|byte| BASE32.contains(&byte)) {
-            return Err(StationIdentityError::InvalidId);
+impl fmt::Display for StationIdentityError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tls(error) => error.fmt(formatter),
+            Self::Peers(error) => error.fmt(formatter),
         }
-        // SHA-256 has 256 bits; the final base32 symbol contains four zero padding bits.
-        if !letters.ends_with('A') && !letters.ends_with('Q') {
-            return Err(StationIdentityError::InvalidId);
+    }
+}
+
+impl std::error::Error for StationIdentityError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Tls(error) => Some(error),
+            Self::Peers(error) => Some(error),
         }
-        Ok(Self(grouped(&letters)))
     }
 }
 
-impl TryFrom<String> for StationFingerprint {
-    type Error = StationIdentityError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
+impl From<PeerError> for StationIdentityError {
+    fn from(error: PeerError) -> Self {
+        Self::Tls(error)
     }
 }
 
-impl AsRef<str> for StationFingerprint {
-    fn as_ref(&self) -> &str {
-        self.as_str()
+impl From<coqui_peer::Error> for StationIdentityError {
+    fn from(error: coqui_peer::Error) -> Self {
+        Self::Peers(error)
     }
 }
 
-impl Borrow<str> for StationFingerprint {
-    fn borrow(&self) -> &str {
-        self.as_str()
-    }
+/// Opens this Station's identity in `state_dir`, creating a self-signed one on first use.
+///
+/// An `identity.pem` written by an earlier version is read as it is: the fingerprint of the
+/// certificate does not change.
+///
+/// # Errors
+///
+/// Returns an error when the file is unreadable, holds more than one certificate or no
+/// matching key, or cannot be created.
+pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError> {
+    Ok(Identity::open_or_create(&state_dir.join(IDENTITY_FILE))?)
 }
 
-impl StationFingerprint {
-    fn of_certificate(certificate: &[u8]) -> Self {
-        let hash = Sha256::digest(certificate);
-        let mut letters = String::with_capacity(52);
-        let (mut held, mut bits) = (0u32, 0u32);
-        for byte in hash {
-            held = (held << 8) | u32::from(byte);
+/// Opens the peers this Station has accepted or is asked to accept, under
+/// `<state_dir>/peers`, bounded by `policy`'s waiting limits (per source address, in total,
+/// and how often one peer from one address is written down again).
+///
+/// A store written by an earlier version, with files named by the grouped base32 fingerprint
+/// and holding only the certificate, is read as it is.
+///
+/// # Errors
+///
+/// Returns an error when the directories cannot be created.
+pub fn open_peers(state_dir: &Path, policy: &Policy) -> Result<TrustStore, StationIdentityError> {
+    Ok(TrustStore::open(state_dir)?.with_limits(policy.waiting_limits()))
+}
+
+/// Trust exactly the peers in `store`: a peer that is not accepted is refused, and recorded as
+/// waiting (with the address it came from) once it has proved it holds its key.
+pub fn trust_peers(store: TrustStore) -> Trust {
+    Trust::Pinned(Pins::store(store))
+}
+
+/// The client side of a Station connection: presents `identity` and accepts only the Station
+/// whose certificate has the fingerprint `server`.
+///
+/// # Errors
+///
+/// Returns an error when `policy` asks for something the TLS library cannot do, or lists no
+/// digest that `server` uses.
+pub fn client_config(
+    identity: &Identity,
+    server: &Fingerprint,
+    policy: &Policy,
+) -> Result<Built<ClientConfig>, StationIdentityError> {
+    let trust = Trust::Pinned(Pins::fixed([*server]));
+    Ok(client_config_with(
+        identity,
+        &trust,
+        &[STATION_ALPN],
+        policy,
+    )?)
+}
+
+/// The server side of a Station connection: requires a client certificate that `trust`
+/// accepts, and proof that the client holds its key.
+///
+/// # Errors
+///
+/// Returns an error when `policy` asks for something the TLS library cannot do, or `trust`
+/// cannot be used by a server.
+pub fn server_config(
+    identity: &Identity,
+    trust: &Trust,
+    policy: &Policy,
+) -> Result<Built<ServerConfig>, StationIdentityError> {
+    Ok(server_config_with(
+        identity,
+        trust,
+        &[STATION_ALPN],
+        policy,
+    )?)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    use coqui_peer_tls::asynch::{accept, dial};
+    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
+    use tokio::net::{TcpListener, TcpStream};
+
+    use super::*;
+
+    /// A peer-store file as the previous version wrote it: named by the grouped base32
+    /// fingerprint, holding one certificate block and nothing else.
+    fn legacy_file(der: &[u8]) -> (String, String) {
+        const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        let hash = coqui_peer::Digest::Sha256.of(der);
+        let (mut held, mut bits, mut letters) = (0u32, 0u32, String::new());
+        for byte in hash.as_bytes() {
+            held = (held << 8) | u32::from(*byte);
             bits += 8;
             while bits >= 5 {
                 bits -= 5;
@@ -85,693 +169,47 @@ impl StationFingerprint {
         if bits > 0 {
             letters.push(char::from(BASE32[((held << (5 - bits)) & 31) as usize]));
         }
-        Self(grouped(&letters))
-    }
-
-    /// Returns the stable certificate fingerprint.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for StationFingerprint {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-fn grouped(letters: &str) -> String {
-    letters
-        .as_bytes()
-        .chunks(4)
-        .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-/// An station's self-issued TLS certificate and its private key.
-pub struct StationIdentity {
-    id: StationFingerprint,
-    certificate: CertificateDer<'static>,
-    key: PrivateKeyDer<'static>,
-}
-
-impl fmt::Debug for StationIdentity {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_tuple("StationIdentity")
-            .field(&self.id)
-            .finish()
-    }
-}
-
-impl Clone for StationIdentity {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id.clone(),
-            certificate: self.certificate.clone(),
-            key: self.key.clone_key(),
+        let name = letters
+            .as_bytes()
+            .chunks(4)
+            .map(|chunk| std::str::from_utf8(chunk).unwrap())
+            .collect::<Vec<_>>()
+            .join("-");
+        let encoded = data_encoding::BASE64.encode(der);
+        let mut pem = String::from("-----BEGIN CERTIFICATE-----\n");
+        for chunk in encoded.as_bytes().chunks(64) {
+            pem.push_str(std::str::from_utf8(chunk).unwrap());
+            pem.push('\n');
         }
+        pem.push_str("-----END CERTIFICATE-----\n");
+        (format!("{name}.pem"), pem)
     }
-}
-
-impl StationIdentity {
-    /// Creates an station identity without writing it to disk.
-    pub fn generate() -> Result<Self, StationIdentityError> {
-        let CertifiedKey { cert, signing_key } =
-            generate_simple_self_signed(vec!["localhost".to_owned()])
-                .map_err(|_| StationIdentityError::Certificate)?;
-        let text = format!("{}{}", cert.pem(), signing_key.serialize_pem());
-        Self::from_pem(&text)
-    }
-
-    /// Reads an identity PEM containing one certificate and its matching private key.
-    pub fn from_pem(text: &str) -> Result<Self, StationIdentityError> {
-        let certificate = CertificateDer::from_pem_slice(text.as_bytes())
-            .map_err(|_| StationIdentityError::Certificate)?;
-        let key = PrivateKeyDer::from_pem_slice(text.as_bytes())
-            .map_err(|_| StationIdentityError::Certificate)?;
-        validate_key_pair(&certificate, &key)?;
-        Ok(Self {
-            id: StationFingerprint::of_certificate(&certificate),
-            certificate,
-            key,
-        })
-    }
-
-    /// Loads the identity PEM at path, returning None when it is absent.
-    pub fn read(path: &Path) -> Result<Option<Self>, StationIdentityError> {
-        match fs::read_to_string(path) {
-            Ok(text) => Self::from_pem(&text).map(Some),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(StationIdentityError::Io(error)),
-        }
-    }
-
-    /// Opens or creates identity.pem in an AI6 state directory.
-    pub fn open_or_create(state_dir: &Path) -> Result<Self, StationIdentityError> {
-        let path = state_dir.join(IDENTITY_FILE);
-        if let Some(identity) = Self::read(&path)? {
-            return Ok(identity);
-        }
-        let identity = Self::generate()?;
-        match identity.write_new(&path) {
-            Ok(()) => {}
-            Err(StationIdentityError::Io(error))
-                if error.kind() == io::ErrorKind::AlreadyExists =>
-            {
-                return Self::read(&path)?.ok_or(StationIdentityError::Certificate);
-            }
-            Err(error) => return Err(error),
-        }
-        Self::read(&path)?.ok_or(StationIdentityError::Certificate)
-    }
-
-    /// Writes the combined certificate and key without replacing an existing identity.
-    pub fn write_new(&self, path: &Path) -> Result<(), StationIdentityError> {
-        let parent = path.parent().ok_or(StationIdentityError::Path)?;
-        fs::create_dir_all(parent).map_err(StationIdentityError::Io)?;
-        let pem = format!(
-            "{}{}",
-            encode_pem("CERTIFICATE", self.certificate.as_ref()),
-            private_key_pem(&self.key)?
-        );
-        let temporary = temporary_path(path);
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temporary).map_err(StationIdentityError::Io)?;
-        let result = (|| {
-            file.write_all(pem.as_bytes())
-                .map_err(StationIdentityError::Io)?;
-            file.sync_all().map_err(StationIdentityError::Io)?;
-            fs::hard_link(&temporary, path).map_err(StationIdentityError::Io)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-                    .map_err(StationIdentityError::Io)?;
-            }
-            Ok(())
-        })();
-        drop(file);
-        let _ = fs::remove_file(&temporary);
-        result
-    }
-
-    /// Returns this station's certificate fingerprint.
-    pub fn id(&self) -> &StationFingerprint {
-        &self.id
-    }
-
-    fn certificate(&self) -> CertificateDer<'static> {
-        self.certificate.clone()
-    }
-
-    fn key(&self) -> PrivateKeyDer<'static> {
-        self.key.clone_key()
-    }
-}
-
-fn validate_key_pair(
-    certificate: &CertificateDer<'static>,
-    key: &PrivateKeyDer<'static>,
-) -> Result<(), StationIdentityError> {
-    let provider = crypto_provider();
-    ServerConfig::builder_with_provider(Arc::clone(&provider))
-        .with_safe_default_protocol_versions()
-        .map_err(|_| StationIdentityError::Tls)?
-        .with_no_client_auth()
-        .with_single_cert(vec![certificate.clone()], key.clone_key())
-        .map_err(|_| StationIdentityError::Certificate)?;
-    Ok(())
-}
-
-fn private_key_pem(key: &PrivateKeyDer<'static>) -> Result<String, StationIdentityError> {
-    match key {
-        PrivateKeyDer::Pkcs8(key) => Ok(encode_pem("PRIVATE KEY", key.secret_pkcs8_der())),
-        PrivateKeyDer::Pkcs1(key) => Ok(encode_pem("RSA PRIVATE KEY", key.secret_pkcs1_der())),
-        PrivateKeyDer::Sec1(key) => Ok(encode_pem("EC PRIVATE KEY", key.secret_sec1_der())),
-        _ => Err(StationIdentityError::Certificate),
-    }
-}
-
-fn encode_pem(label: &str, der: &[u8]) -> String {
-    let encoded = data_encoding::BASE64.encode(der);
-    let mut pem = format!("-----BEGIN {label}-----\n");
-    for chunk in encoded.as_bytes().chunks(64) {
-        pem.push_str(std::str::from_utf8(chunk).unwrap_or_default());
-        pem.push('\n');
-    }
-    pem.push_str(&format!("-----END {label}-----\n"));
-    pem
-}
-
-fn temporary_path(path: &Path) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{}.{}.tmp", std::process::id(), nonce));
-    path.with_file_name(name)
-}
-
-/// Persistent certificate pins learned from rejected incoming handshakes.
-#[derive(Debug, Clone)]
-pub struct PeerTrustStore {
-    root: PathBuf,
-}
-
-impl PeerTrustStore {
-    /// Opens the peer store under an AI6 state directory.
-    pub fn open(state_dir: &Path) -> Result<Self, StationIdentityError> {
-        let root = state_dir.join("peers");
-        fs::create_dir_all(root.join("accepted")).map_err(StationIdentityError::Io)?;
-        fs::create_dir_all(root.join("waiting")).map_err(StationIdentityError::Io)?;
-        Ok(Self { root })
-    }
-
-    /// Lists the certificate IDs awaiting operator acceptance.
-    pub fn waiting(&self) -> Result<Vec<StationFingerprint>, StationIdentityError> {
-        self.list("waiting")
-    }
-
-    /// Lists accepted certificate IDs.
-    pub fn accepted(&self) -> Result<Vec<StationFingerprint>, StationIdentityError> {
-        self.list("accepted")
-    }
-
-    /// Accepts one previously observed peer certificate by its full fingerprint.
-    pub fn accept(&self, id: &StationFingerprint) -> Result<(), StationIdentityError> {
-        let source = self.peer_path("waiting", id);
-        let target = self.peer_path("accepted", id);
-        if target.exists() {
-            return if self.is_accepted(id) {
-                Err(StationIdentityError::AlreadyAccepted)
-            } else {
-                Err(StationIdentityError::Certificate)
-            };
-        }
-        let text = fs::read_to_string(&source).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                StationIdentityError::NotWaiting
-            } else {
-                StationIdentityError::Io(error)
-            }
-        })?;
-        let certificate = CertificateDer::from_pem_slice(text.as_bytes())
-            .map_err(|_| StationIdentityError::Certificate)?;
-        if StationFingerprint::of_certificate(&certificate) != *id {
-            return Err(StationIdentityError::Certificate);
-        }
-        fs::rename(source, target).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                StationIdentityError::NotWaiting
-            } else {
-                StationIdentityError::Io(error)
-            }
-        })
-    }
-
-    fn list(&self, section: &str) -> Result<Vec<StationFingerprint>, StationIdentityError> {
-        let mut ids = Vec::new();
-        for entry in fs::read_dir(self.root.join(section)).map_err(StationIdentityError::Io)? {
-            let entry = entry.map_err(StationIdentityError::Io)?;
-            if entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "pem")
-            {
-                let path = entry.path();
-                let stem = path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .ok_or(StationIdentityError::Certificate)?;
-                ids.push(stem.parse()?);
-            }
-        }
-        ids.sort();
-        Ok(ids)
-    }
-
-    fn peer_path(&self, section: &str, id: &StationFingerprint) -> PathBuf {
-        self.root.join(section).join(format!("{}.pem", id.as_str()))
-    }
-
-    fn is_accepted(&self, id: &StationFingerprint) -> bool {
-        let Ok(text) = fs::read_to_string(self.peer_path("accepted", id)) else {
-            return false;
-        };
-        let Ok(certificate) = CertificateDer::from_pem_slice(text.as_bytes()) else {
-            return false;
-        };
-        StationFingerprint::of_certificate(&certificate) == *id
-    }
-
-    fn record_waiting(&self, certificate: &CertificateDer<'_>, id: &StationFingerprint) {
-        if certificate.len() > MAX_CERTIFICATE_BYTES {
-            return;
-        }
-        let waiting = self.root.join("waiting");
-        let path = self.peer_path("waiting", id);
-        if path.exists() {
-            return;
-        }
-        let Ok(entries) = fs::read_dir(&waiting) else {
-            return;
-        };
-        if entries.take(MAX_WAITING_PEERS).count() >= MAX_WAITING_PEERS {
-            return;
-        }
-        let pem = encode_pem("CERTIFICATE", certificate.as_ref());
-        let temp = temporary_path(&path);
-        let Ok(mut file) = OpenOptions::new().write(true).create_new(true).open(&temp) else {
-            return;
-        };
-        if file.write_all(pem.as_bytes()).is_ok() && file.sync_all().is_ok() {
-            let _ = fs::hard_link(&temp, path);
-        }
-        drop(file);
-        let _ = fs::remove_file(temp);
-    }
-}
-
-/// Trust policy for an station listener.
-#[derive(Debug, Clone)]
-pub enum TlsTrust {
-    /// Trust only certificates explicitly accepted through ai6 peer accept.
-    Peers(PeerTrustStore),
-    /// Trust certificates signed by the listed CAs and matching optional name globs.
-    Ca {
-        ca_file: PathBuf,
-        subject: Vec<String>,
-        san: Vec<String>,
-    },
-    /// Accept an explicitly pinned peer or a certificate matching the CA policy.
-    PeersOrCa {
-        peers: PeerTrustStore,
-        ca_file: PathBuf,
-        subject: Vec<String>,
-        san: Vec<String>,
-    },
-}
-
-/// Builds the client TLS configuration for one certificate-pinned station.
-pub fn client_config(
-    identity: &StationIdentity,
-    expected: &StationFingerprint,
-) -> Result<ClientConfig, StationIdentityError> {
-    let provider = crypto_provider();
-    let verifier = PinnedServerVerifier {
-        expected: expected.clone(),
-        provider: Arc::clone(&provider),
-    };
-    let mut config = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|_| StationIdentityError::Tls)?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(verifier))
-        .with_client_auth_cert(vec![identity.certificate()], identity.key())
-        .map_err(|_| StationIdentityError::Certificate)?;
-    config.alpn_protocols = vec![STATION_ALPN.to_vec()];
-    Ok(config)
-}
-
-/// Builds a server configuration that requires a trusted client certificate.
-pub fn server_config(
-    identity: &StationIdentity,
-    trust: TlsTrust,
-) -> Result<ServerConfig, StationIdentityError> {
-    let provider = crypto_provider();
-    let verifier = OfficeClientVerifier::new(trust, Arc::clone(&provider))?;
-    let mut config = ServerConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|_| StationIdentityError::Tls)?
-        .with_client_cert_verifier(Arc::new(verifier))
-        .with_single_cert(vec![identity.certificate()], identity.key())
-        .map_err(|_| StationIdentityError::Certificate)?;
-    config.alpn_protocols = vec![STATION_ALPN.to_vec()];
-    Ok(config)
-}
-
-fn crypto_provider() -> Arc<CryptoProvider> {
-    Arc::new(rustls::crypto::ring::default_provider())
-}
-
-#[derive(Debug)]
-struct PinnedServerVerifier {
-    expected: StationFingerprint,
-    provider: Arc<CryptoProvider>,
-}
-
-impl ServerCertVerifier for PinnedServerVerifier {
-    fn verify_server_cert(
-        &self,
-        certificate: &CertificateDer<'_>,
-        _: &[CertificateDer<'_>],
-        _: &ServerName<'_>,
-        _: &[u8],
-        _: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        if StationFingerprint::of_certificate(certificate) == self.expected {
-            Ok(ServerCertVerified::assertion())
-        } else {
-            Err(rustls::Error::General(
-                "station certificate does not match the pinned identity".to_owned(),
-            ))
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signed: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(
-            message,
-            certificate,
-            signed,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signed: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(
-            message,
-            certificate,
-            signed,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
-
-#[derive(Debug)]
-struct OfficeClientVerifier {
-    peers: Option<PeerTrustStore>,
-    ca: Option<Arc<dyn ClientCertVerifier>>,
-    subjects: Option<GlobSet>,
-    sans: Option<GlobSet>,
-    provider: Arc<CryptoProvider>,
-}
-
-impl OfficeClientVerifier {
-    fn new(trust: TlsTrust, provider: Arc<CryptoProvider>) -> Result<Self, StationIdentityError> {
-        let (peers, ca_file, subject, san) = match trust {
-            TlsTrust::Peers(peers) => (Some(peers), None, Vec::new(), Vec::new()),
-            TlsTrust::Ca {
-                ca_file,
-                subject,
-                san,
-            } => (None, Some(ca_file), subject, san),
-            TlsTrust::PeersOrCa {
-                peers,
-                ca_file,
-                subject,
-                san,
-            } => (Some(peers), Some(ca_file), subject, san),
-        };
-        let ca = ca_file
-            .as_deref()
-            .map(|path| load_ca_verifier(path, Arc::clone(&provider)))
-            .transpose()?;
-        Ok(Self {
-            peers,
-            ca,
-            subjects: compile_globs(&subject)?,
-            sans: compile_globs(&san)?,
-            provider,
-        })
-    }
-
-    fn names_match(&self, certificate: &CertificateDer<'_>) -> Result<bool, rustls::Error> {
-        if self.subjects.is_none() && self.sans.is_none() {
-            return Ok(true);
-        }
-        let (_, certificate) =
-            x509_parser::parse_x509_certificate(certificate.as_ref()).map_err(|_| {
-                rustls::Error::InvalidCertificate(rustls::CertificateError::BadEncoding)
-            })?;
-        if let Some(subjects) = &self.subjects
-            && !subjects.is_match(certificate.subject().to_string())
-        {
-            return Ok(false);
-        }
-        if let Some(sans) = &self.sans {
-            let extension = certificate.subject_alternative_name().map_err(|_| {
-                rustls::Error::InvalidCertificate(rustls::CertificateError::BadEncoding)
-            })?;
-            let names = extension
-                .as_ref()
-                .into_iter()
-                .flat_map(|extension| extension.value.general_names.iter())
-                .filter_map(|name| match name {
-                    x509_parser::extensions::GeneralName::DNSName(name) => Some((*name).to_owned()),
-                    x509_parser::extensions::GeneralName::RFC822Name(name) => {
-                        Some((*name).to_owned())
-                    }
-                    x509_parser::extensions::GeneralName::URI(name) => Some((*name).to_owned()),
-                    x509_parser::extensions::GeneralName::IPAddress(address) => {
-                        Some(format!("{address:?}"))
-                    }
-                    _ => None,
-                });
-            if !names.into_iter().any(|name| sans.is_match(name)) {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-}
-
-impl ClientCertVerifier for OfficeClientVerifier {
-    fn root_hint_subjects(&self) -> &[DistinguishedName] {
-        self.ca
-            .as_ref()
-            .map_or(&[], |verifier| verifier.root_hint_subjects())
-    }
-
-    fn verify_client_cert(
-        &self,
-        certificate: &CertificateDer<'_>,
-        intermediates: &[CertificateDer<'_>],
-        now: UnixTime,
-    ) -> Result<ClientCertVerified, rustls::Error> {
-        let id = StationFingerprint::of_certificate(certificate);
-        let accepted = self
-            .peers
-            .as_ref()
-            .is_some_and(|peers| peers.is_accepted(&id));
-        if accepted {
-            return Ok(ClientCertVerified::assertion());
-        }
-        if let Some(ca) = &self.ca
-            && ca
-                .verify_client_cert(certificate, intermediates, now)
-                .is_ok()
-            && self.names_match(certificate)?
-        {
-            return Ok(ClientCertVerified::assertion());
-        }
-        if let Some(peers) = &self.peers {
-            peers.record_waiting(certificate, &id);
-        }
-        Err(rustls::Error::General(
-            "client certificate is not trusted by this station".to_owned(),
-        ))
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signed: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(
-            message,
-            certificate,
-            signed,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signed: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(
-            message,
-            certificate,
-            signed,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
-
-fn load_ca_verifier(
-    path: &Path,
-    provider: Arc<CryptoProvider>,
-) -> Result<Arc<dyn ClientCertVerifier>, StationIdentityError> {
-    let file = File::open(path).map_err(StationIdentityError::Io)?;
-    let certs = rustls_pemfile::certs(&mut BufReader::new(file))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| StationIdentityError::Certificate)?;
-    if certs.is_empty() {
-        return Err(StationIdentityError::Certificate);
-    }
-    let mut roots = RootCertStore::empty();
-    for cert in certs {
-        roots
-            .add(cert)
-            .map_err(|_| StationIdentityError::Certificate)?;
-    }
-    rustls::server::WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider)
-        .build()
-        .map_err(|_| StationIdentityError::Certificate)
-}
-
-fn compile_globs(patterns: &[String]) -> Result<Option<GlobSet>, StationIdentityError> {
-    if patterns.is_empty() {
-        return Ok(None);
-    }
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        builder.add(Glob::new(pattern).map_err(|_| StationIdentityError::TrustPattern)?);
-    }
-    builder
-        .build()
-        .map(Some)
-        .map_err(|_| StationIdentityError::TrustPattern)
-}
-
-/// Sanitized failures while loading, storing or building station TLS identities.
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum StationIdentityError {
-    /// The station fingerprint is malformed.
-    InvalidId,
-    /// The certificate or its private key is missing or invalid.
-    Certificate,
-    /// The certificate did not satisfy this TLS configuration.
-    Tls,
-    /// The certificate trust glob is malformed.
-    TrustPattern,
-    /// The requested peer has not made a rejected connection.
-    NotWaiting,
-    /// The peer was already accepted.
-    AlreadyAccepted,
-    /// The path does not name a file inside a directory.
-    Path,
-    /// Filesystem operation failed.
-    Io(io::Error),
-}
-
-impl fmt::Display for StationIdentityError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::InvalidId => "station certificate id is invalid",
-            Self::Certificate => "station certificate or private key is invalid",
-            Self::Tls => "station TLS configuration is invalid",
-            Self::TrustPattern => "station certificate trust pattern is invalid",
-            Self::NotWaiting => "station certificate is not waiting for acceptance",
-            Self::AlreadyAccepted => "station certificate is already accepted",
-            Self::Path => "identity path must have a parent directory",
-            Self::Io(_) => "station identity storage failed",
-        })
-    }
-}
-
-impl std::error::Error for StationIdentityError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(error) => Some(error),
-            _ => None,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio_rustls::{TlsAcceptor, TlsConnector};
 
     #[test]
-    fn identity_is_created_once_has_a_private_file_mode_and_requires_its_key() {
+    fn identity_is_created_once_and_a_file_of_the_previous_version_keeps_its_fingerprint() {
         let directory = tempfile::tempdir().unwrap();
-        let identity = StationIdentity::open_or_create(directory.path()).unwrap();
+        let identity = open_identity(directory.path()).unwrap();
         let path = directory.path().join(IDENTITY_FILE);
         assert_eq!(
-            StationIdentity::read(&path).unwrap().unwrap().id(),
-            identity.id()
+            Identity::read(&path).unwrap().unwrap().fingerprint(),
+            identity.fingerprint()
         );
-        let certificate_only = encode_pem("CERTIFICATE", identity.certificate().as_ref());
-        assert!(StationIdentity::from_pem(&certificate_only).is_err());
+        assert_eq!(
+            open_identity(directory.path()).unwrap().fingerprint(),
+            identity.fingerprint()
+        );
         assert!(!format!("{identity:?}").contains("PRIVATE KEY"));
+        assert!(identity.fingerprint().to_string().starts_with("sha256:"));
+
+        // The previous version wrote the certificate block, then the PKCS#8 key block, with
+        // 64-character lines: exactly what `to_pem` writes.
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("-----BEGIN CERTIFICATE-----\n"));
+        assert!(text.contains("-----BEGIN PRIVATE KEY-----\n"));
+        assert!(
+            text.lines()
+                .all(|line| line.len() <= 64 || line.starts_with("-----"))
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -783,114 +221,191 @@ mod tests {
     }
 
     #[test]
-    fn office_ids_parse_grouped_and_ungrouped_base32() {
-        let identity = StationIdentity::generate().unwrap();
-        let grouped = identity.id().to_string();
-        let mut noncanonical = grouped.replace('-', "");
+    fn fingerprints_read_every_spelling_a_station_has_printed() {
+        let identity = Identity::generate().unwrap();
+        let fingerprint = identity.fingerprint();
+        let (name, _) = legacy_file(identity.certificate_der());
+        let grouped = name.trim_end_matches(".pem");
+        assert_eq!(grouped, fingerprint.to_base32_grouped());
+        assert_eq!(grouped.parse::<Fingerprint>().unwrap(), fingerprint);
         assert_eq!(
-            grouped
-                .replace('-', "")
-                .parse::<StationFingerprint>()
-                .unwrap(),
-            *identity.id()
+            grouped.replace('-', "").parse::<Fingerprint>().unwrap(),
+            fingerprint
         );
-        assert!("not-an-station-id".parse::<StationFingerprint>().is_err());
-        let last = noncanonical.pop().unwrap();
-        noncanonical.push(if last == 'A' { 'B' } else { 'R' });
-        assert!(noncanonical.parse::<StationFingerprint>().is_err());
+        assert_eq!(
+            fingerprint.hex().parse::<Fingerprint>().unwrap(),
+            fingerprint
+        );
+        assert_eq!(
+            fingerprint.to_string().parse::<Fingerprint>().unwrap(),
+            fingerprint
+        );
+        assert!("not-a-station-id".parse::<Fingerprint>().is_err());
     }
 
     #[test]
-    fn peer_store_accepts_only_waiting_certificate_ids() {
+    fn a_peer_store_of_the_previous_version_is_read_without_migration() {
         let directory = tempfile::tempdir().unwrap();
-        let peers = PeerTrustStore::open(directory.path()).unwrap();
-        let identity = StationIdentity::generate().unwrap();
-        let id = identity.id().clone();
-        peers.record_waiting(&identity.certificate(), &id);
-        assert_eq!(peers.waiting().unwrap(), vec![id.clone()]);
-        peers.accept(&id).unwrap();
+        let accepted = Identity::generate().unwrap();
+        let waiting = Identity::generate().unwrap();
+        for (section, identity) in [("accepted", &accepted), ("waiting", &waiting)] {
+            let (name, pem) = legacy_file(identity.certificate_der());
+            let folder = directory.path().join("peers").join(section);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join(name), pem).unwrap();
+        }
+
+        let peers = open_peers(directory.path(), &Policy::strict()).unwrap();
+        assert_eq!(peers.accepted().unwrap(), vec![accepted.fingerprint()]);
+        assert!(peers.is_accepted(&accepted.fingerprint()));
+        let entries = peers.waiting().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, waiting.fingerprint());
+        assert_eq!(entries[0].source, None);
+
+        peers.accept(&waiting.fingerprint()).unwrap();
         assert!(peers.waiting().unwrap().is_empty());
-        assert_eq!(peers.accepted().unwrap(), vec![id.clone()]);
-        assert!(matches!(
-            peers.accept(&id),
-            Err(StationIdentityError::AlreadyAccepted)
-        ));
+        let mut both = peers.accepted().unwrap();
+        both.sort();
+        let mut expected = vec![accepted.fingerprint(), waiting.fingerprint()];
+        expected.sort();
+        assert_eq!(both, expected);
+        // The accepted peers authenticate a handshake as before.
+        assert!(
+            server_config(
+                &Identity::generate().unwrap(),
+                &trust_peers(peers),
+                &Policy::strict()
+            )
+            .is_ok()
+        );
     }
 
     #[test]
-    fn peer_accept_checks_the_certificate_fingerprint_not_only_the_filename() {
+    fn the_policy_bounds_the_waiting_list_per_source_address() {
         let directory = tempfile::tempdir().unwrap();
-        let peers = PeerTrustStore::open(directory.path()).unwrap();
-        let identity = StationIdentity::generate().unwrap();
-        let id = identity.id().clone();
-        let path = peers.peer_path("waiting", &id);
-        peers.record_waiting(&identity.certificate(), &id);
-
-        let unrelated = StationIdentity::generate().unwrap();
-        fs::write(
-            path,
-            encode_pem("CERTIFICATE", unrelated.certificate().as_ref()),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            peers.accept(&id),
-            Err(StationIdentityError::Certificate)
-        ));
-        assert!(!peers.is_accepted(&id));
+        let mut policy = Policy::strict();
+        policy.waiting_per_source = 1;
+        let peers = open_peers(directory.path(), &policy).unwrap();
+        let source: SocketAddr = "192.0.2.7:4000".parse().unwrap();
+        let first = Identity::generate().unwrap();
+        let second = Identity::generate().unwrap();
+        peers.record_waiting_certificate(first.certificate_der(), Some(source));
+        peers.record_waiting_certificate(second.certificate_der(), Some(source));
+        let waiting = peers.waiting().unwrap();
+        assert_eq!(waiting.len(), 1, "one source holds one place");
+        assert_eq!(waiting[0].id, second.fingerprint());
+        assert_eq!(waiting[0].source, Some(source));
     }
 
     #[tokio::test]
-    async fn mtls_refuses_unknown_peer_lists_it_and_accepts_it_after_operator_action() {
+    async fn mtls_refuses_an_unknown_peer_lists_it_with_its_address_and_accepts_it_after_the_operator()
+     {
         let directory = tempfile::tempdir().unwrap();
-        let peers = PeerTrustStore::open(directory.path()).unwrap();
-        let server_identity = StationIdentity::generate().unwrap();
-        let client_identity = StationIdentity::generate().unwrap();
-        let server = server_config(&server_identity, TlsTrust::Peers(peers.clone())).unwrap();
-        let client = client_config(&client_identity, server_identity.id()).unwrap();
-        assert!(!handshake(server, client).await);
-        assert_eq!(peers.waiting().unwrap(), vec![client_identity.id().clone()]);
+        let policy = Policy::strict();
+        let peers = open_peers(directory.path(), &policy).unwrap();
+        let server_identity = Identity::generate().unwrap();
+        let client_identity = Identity::generate().unwrap();
+        let server = server_config(&server_identity, &trust_peers(peers.clone()), &policy).unwrap();
+        assert!(server.weakened.is_empty());
+        let client =
+            client_config(&client_identity, &server_identity.fingerprint(), &policy).unwrap();
+        let refused = handshake(server.config, client.config).await;
+        assert!(refused.is_err());
+        let waiting = peers.waiting().unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].id, client_identity.fingerprint());
+        assert!(
+            waiting[0]
+                .source
+                .is_some_and(|source| source.ip().is_loopback())
+        );
 
-        peers.accept(client_identity.id()).unwrap();
-        let server = server_config(&server_identity, TlsTrust::Peers(peers.clone())).unwrap();
-        let client = client_config(&client_identity, server_identity.id()).unwrap();
-        assert!(handshake(server, client).await);
+        peers.accept(&client_identity.fingerprint()).unwrap();
+        let server = server_config(&server_identity, &trust_peers(peers), &policy).unwrap();
+        let client =
+            client_config(&client_identity, &server_identity.fingerprint(), &policy).unwrap();
+        let (server_sees, client_sees, protocol) =
+            handshake(server.config, client.config).await.unwrap();
+        assert_eq!(server_sees, client_identity.fingerprint());
+        assert_eq!(client_sees, server_identity.fingerprint());
+        assert_eq!(protocol.as_deref(), Some(STATION_ALPN));
+    }
+
+    #[tokio::test]
+    async fn a_client_refuses_a_server_that_is_not_the_pinned_station() {
+        let policy = Policy::strict();
+        let server_identity = Identity::generate().unwrap();
+        let client_identity = Identity::generate().unwrap();
+        let other = Identity::generate().unwrap();
+        let server = server_config(&server_identity, &Trust::AnyWithKeyProof, &policy).unwrap();
+        let client = client_config(&client_identity, &other.fingerprint(), &policy).unwrap();
+        assert!(handshake(server.config, client.config).await.is_err());
     }
 
     #[tokio::test]
     async fn ca_signed_peer_connects_when_subject_and_san_match_listener_globs() {
         let directory = tempfile::tempdir().unwrap();
+        let policy = Policy::strict();
         let (ca_pem, issuer) = ca();
         let ca_path = directory.path().join("ca.pem");
         fs::write(&ca_path, ca_pem).unwrap();
         let server_identity = signed_identity(&issuer, "AI6 Server");
         let client_identity = signed_identity(&issuer, "AI6 Client");
-        let server = server_config(
-            &server_identity,
-            TlsTrust::Ca {
-                ca_file: ca_path,
-                subject: vec!["*AI6 Client*".to_owned()],
+        let trust = |subject: &str| {
+            Trust::Ca(CaPolicy {
+                ca_file: ca_path.clone(),
+                subject: vec![subject.to_owned()],
                 san: vec!["localhost".to_owned()],
-            },
-        )
-        .unwrap();
-        let client = client_config(&client_identity, server_identity.id()).unwrap();
-        assert!(handshake(server, client).await);
+            })
+        };
+        let server = server_config(&server_identity, &trust("*AI6 Client*"), &policy).unwrap();
+        let client =
+            client_config(&client_identity, &server_identity.fingerprint(), &policy).unwrap();
+        assert!(handshake(server.config, client.config).await.is_ok());
+
+        let server = server_config(&server_identity, &trust("*Somebody Else*"), &policy).unwrap();
+        let client =
+            client_config(&client_identity, &server_identity.fingerprint(), &policy).unwrap();
+        assert!(handshake(server.config, client.config).await.is_err());
     }
 
-    async fn handshake(server: ServerConfig, client: ClientConfig) -> bool {
+    #[test]
+    fn a_looser_policy_is_reported() {
+        let identity = Identity::generate().unwrap();
+        let mut policy = Policy::strict();
+        policy.check_validity = false;
+        let built = server_config(&identity, &Trust::AnyWithKeyProof, &policy).unwrap();
+        assert_eq!(built.weakened.len(), 1);
+    }
+
+    /// Runs one handshake over loopback. On success: the fingerprint each side saw of the
+    /// other, and the protocol the server negotiated.
+    async fn handshake(
+        server: ServerConfig,
+        client: ClientConfig,
+    ) -> Result<(Fingerprint, Fingerprint, Option<Vec<u8>>), PeerError> {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let acceptor = TlsAcceptor::from(Arc::new(server));
+        let server = Arc::new(server);
         let accepted = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            acceptor.accept(stream).await.is_ok()
+            accept(server, stream).await.map(|(stream, peer)| {
+                (
+                    peer.fingerprint,
+                    stream.get_ref().1.alpn_protocol().map(<[u8]>::to_vec),
+                )
+            })
         });
-        let connector = TlsConnector::from(Arc::new(client));
         let stream = TcpStream::connect(address).await.unwrap();
-        let name = ServerName::try_from("localhost".to_owned()).unwrap();
-        let connected = connector.connect(name, stream).await.is_ok();
-        connected && accepted.await.unwrap()
+        let dialed = dial(Arc::new(client), stream).await;
+        let accepted = accepted.await.unwrap();
+        match (dialed, accepted) {
+            (Ok((_, server_peer)), Ok((client_fingerprint, protocol))) => {
+                Ok((client_fingerprint, server_peer.fingerprint, protocol))
+            }
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        }
     }
 
     fn ca() -> (String, Issuer<'static, KeyPair>) {
@@ -905,13 +420,13 @@ mod tests {
         (pem, Issuer::new(parameters, key))
     }
 
-    fn signed_identity(issuer: &Issuer<'_, KeyPair>, common_name: &str) -> StationIdentity {
+    fn signed_identity(issuer: &Issuer<'_, KeyPair>, common_name: &str) -> Identity {
         let key = KeyPair::generate().unwrap();
         let mut parameters = CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
         parameters
             .distinguished_name
             .push(DnType::CommonName, common_name);
         let certificate = parameters.signed_by(&key, issuer).unwrap();
-        StationIdentity::from_pem(&format!("{}{}", certificate.pem(), key.serialize_pem())).unwrap()
+        Identity::from_pem(&format!("{}{}", certificate.pem(), key.serialize_pem())).unwrap()
     }
 }

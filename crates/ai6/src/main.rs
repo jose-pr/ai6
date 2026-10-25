@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use ai6::station::identity;
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -111,7 +112,8 @@ struct ServeArgs {
 enum PeerCommand {
     /// Accept a certificate shown in the waiting peer list.
     Accept {
-        /// Full certificate fingerprint printed by the connecting station.
+        /// Full certificate fingerprint (sha256:HEX, bare hex or grouped base32) printed by the
+        /// connecting station.
         id: String,
     },
     /// List certificates waiting for acceptance.
@@ -123,7 +125,7 @@ async fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Identity => match station_identity() {
             Ok(identity) => {
-                println!("{}", identity.id());
+                println!("{}", identity.fingerprint());
                 ExitCode::SUCCESS
             }
             Err(error) => {
@@ -246,10 +248,9 @@ fn parse_station_label(value: &str) -> Result<(String, String), String> {
     Ok((key.to_owned(), value.to_owned()))
 }
 
-fn station_identity() -> Result<ai6::StationIdentity, ai6::StationIdentityError> {
-    let state_dir =
-        ai6::station::safehouse::state_dir().map_err(|_| ai6::StationIdentityError::Path)?;
-    ai6::StationIdentity::open_or_create(&state_dir)
+fn station_identity() -> Result<identity::Identity, String> {
+    let state_dir = ai6::station::safehouse::state_dir().map_err(|error| error.to_string())?;
+    identity::open_identity(&state_dir).map_err(|error| error.to_string())
 }
 
 fn sleeper_command(config_dir: Option<PathBuf>, command: SleeperCommand) -> Result<String, String> {
@@ -323,25 +324,31 @@ fn sleeper_command(config_dir: Option<PathBuf>, command: SleeperCommand) -> Resu
     }
 }
 
-fn peer_command(command: PeerCommand) -> Result<String, ai6::StationIdentityError> {
-    let state_dir =
-        ai6::station::safehouse::state_dir().map_err(|_| ai6::StationIdentityError::Path)?;
-    let peers = ai6::PeerTrustStore::open(&state_dir)?;
+fn peer_command(command: PeerCommand) -> Result<String, String> {
+    let state_dir = ai6::station::safehouse::state_dir().map_err(|error| error.to_string())?;
+    let peers = identity::open_peers(&state_dir, &identity::Policy::strict())
+        .map_err(|error| error.to_string())?;
     match command {
         PeerCommand::Accept { id } => {
-            let id = id.parse::<ai6::StationFingerprint>()?;
-            peers.accept(&id)?;
+            let id = id
+                .parse::<identity::Fingerprint>()
+                .map_err(|error| error.to_string())?;
+            peers.accept(&id).map_err(|error| error.to_string())?;
             Ok(format!("Accepted station {id}\n"))
         }
         PeerCommand::Waiting => {
-            let ids = peers.waiting()?;
-            if ids.is_empty() {
+            let waiting = peers.waiting().map_err(|error| error.to_string())?;
+            if waiting.is_empty() {
                 Ok("No Stations are waiting for acceptance.\n".to_owned())
             } else {
                 Ok(format!(
                     "Stations waiting for acceptance:\n{}\n",
-                    ids.iter()
-                        .map(|id| format!("  {id}"))
+                    waiting
+                        .iter()
+                        .map(|entry| match entry.source {
+                            Some(source) => format!("  {}  from {source}", entry.id),
+                            None => format!("  {}", entry.id),
+                        })
                         .collect::<Vec<_>>()
                         .join("\n")
                 ))

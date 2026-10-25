@@ -16,7 +16,7 @@ daemon = ["dep:axum", "dep:tokio", "guatiao/load"]
 # Adds bounded background event publication to the Universal Exports gateway.
 publisher = ["daemon", "dep:ai6-diptel", "dep:ureq", "dep:url"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars", "dep:subtle"]
-station-tls = ["dep:rustls", "dep:tokio-rustls", "dep:rcgen", "dep:rustls-pemfile", "dep:x509-parser", "dep:data-encoding"]
+station-tls = ["dep:coqui-peer", "dep:coqui-peer-tls", "dep:rustls"]
 cli = ["daemon", "publisher", "cables-mcp", "station-tls", "dep:clap", "tokio/signal"]
 
 [[bin]]
@@ -41,13 +41,10 @@ serde_json.workspace = true
 rmcp = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 sha2.workspace = true
+coqui-peer = { workspace = true, optional = true }
+coqui-peer-tls = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
-tokio-rustls = { workspace = true, optional = true }
-rcgen = { workspace = true, optional = true }
-rustls-pemfile = { workspace = true, optional = true }
-x509-parser = { workspace = true, optional = true }
 globset.workspace = true
-data-encoding = { workspace = true, optional = true }
 lru.workspace = true
 regex.workspace = true
 subtle = { workspace = true, optional = true }
@@ -63,6 +60,8 @@ zeroize.workspace = true
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 tokio.workspace = true
+rcgen.workspace = true
+data-encoding = { workspace = true, features = ["alloc"] }
 # The access plugins are libraries to load, never to link: depending on them has Cargo build
 # each one beside the test binaries, where the plugin tests scan for them.
 coqui-access-key-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "668cd761a92ba8259aab8a027e482da70fe39369" }

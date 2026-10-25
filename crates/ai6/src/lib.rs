@@ -74,10 +74,6 @@ pub use directorates::section_00::agent::{
     UsageLimit,
 };
 pub use guatiao;
-#[cfg(feature = "station-tls")]
-pub use station::identity::{
-    PeerTrustStore, StationFingerprint, StationIdentity, StationIdentityError, TlsTrust,
-};
 #[cfg(feature = "daemon")]
 pub use station::server::{
     DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_TERMINAL, ServeConfig, StationConfig,
