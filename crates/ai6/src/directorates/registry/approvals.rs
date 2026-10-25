@@ -406,10 +406,8 @@ impl ClassAuthorization {
         clearance: &str,
         scope: &ActionScope,
     ) -> bool {
-        let who = self
-            .agents
-            .iter()
-            .any(|listed| listed == "*" || listed == agent)
+        let named = |listed: &String| listed == "*" || listed == agent;
+        let who = self.agents.iter().any(named)
             || role.is_some_and(|role| self.roles.iter().any(|listed| listed == role));
         who && clearance_at_least(clearance, &self.clearance_min)
             && self.kinds.contains(&scope.kind)
