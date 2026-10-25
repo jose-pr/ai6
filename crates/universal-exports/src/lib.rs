@@ -953,6 +953,10 @@ impl Gateway {
                 get(list_user_mission_proposals),
             )
             .route(
+                "/v1/user/operations/{operation_id}/placement-preview",
+                get(placement_preview),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve",
                 post(approve_user_mission_proposal),
             )
@@ -1227,6 +1231,7 @@ async fn create_user_mission(
             .tags
             .iter()
             .any(|tag| tag.trim().is_empty() || tag.len() > 64)
+        || !valid_station_list(&request.stations)
     {
         return Err(ApiError::bad_request());
     }
@@ -1257,6 +1262,7 @@ async fn create_user_mission(
         agent: request.agent_id,
         role: request.role,
         tags: request.tags,
+        stations: request.stations,
         priority: 0,
         url: None,
         data: BTreeMap::new(),
@@ -1291,6 +1297,121 @@ async fn create_user_mission(
             state: "queued",
         }),
     ))
+}
+
+fn valid_station_list(stations: &[String]) -> bool {
+    stations.len() <= 64
+        && stations.iter().all(|station| {
+            !station.is_empty() && station.len() <= 256 && !station.chars().any(char::is_control)
+        })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlacementPreviewQuery {
+    agent: Option<String>,
+    role: Option<String>,
+    /// Comma-separated Station IDs the Mission would narrow placement to.
+    stations: Option<String>,
+    /// Comma-separated tags the Agent must carry.
+    tags: Option<String>,
+}
+
+/// Where a Mission for the Operation would run, and why each other place would not.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlacementPreview {
+    /// The Operation previewed.
+    pub operation_id: String,
+    /// The Station whose copy of the Operation's policy was used: the Headquarters Station
+    /// when it publishes one, otherwise the first Station that does.
+    pub policy_station: String,
+    /// Eligible (Station, Theater, Agent) choices, best first.
+    pub choices: Vec<ai6::PlacementChoice>,
+    /// Everything ruled out, each with its reason.
+    pub rejections: Vec<ai6::PlacementRejection>,
+}
+
+fn comma_list(value: Option<String>) -> Vec<String> {
+    value
+        .iter()
+        .flat_map(|list| list.split(','))
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+async fn placement_preview(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(operation_id): Path<String>,
+    Query(query): Query<PlacementPreviewQuery>,
+) -> Result<Json<PlacementPreview>, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    authorize_operation_action(&gateway, person, &operation_id, "mission.read").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let mut request = ai6::PlacementRequest::default();
+    request.stations = comma_list(query.stations);
+    request.agent = query.agent.filter(|agent| !agent.trim().is_empty());
+    request.role = query.role.filter(|role| !role.trim().is_empty());
+    request.tags = comma_list(query.tags);
+    if !valid_station_list(&request.stations) || request.tags.len() > 32 {
+        return Err(ApiError::bad_request());
+    }
+    let operation = operation_id.to_string();
+    let preview = tokio::task::spawn_blocking(move || {
+        let records = registry
+            .stations(Duration::MAX)
+            .map_err(|_| ApiError::internal())?;
+        let headquarters = registry.headquarters().map_err(|_| ApiError::internal())?;
+        let leases = registry.leases().map_err(|_| ApiError::internal())?;
+        let published = |record: &ai6::StationRecord| {
+            record
+                .info()
+                .get("operation_policies")
+                .and_then(|policies| policies.get(&operation))
+                .and_then(|policy| {
+                    serde_json::from_value::<ai6::OperationPolicy>(policy.clone()).ok()
+                })
+        };
+        let preferred = headquarters
+            .as_ref()
+            .and_then(|lease| records.iter().find(|r| r.station() == lease.station()))
+            .and_then(|record| published(record).map(|policy| (record, policy)));
+        let (source, policy) = preferred
+            .or_else(|| {
+                records
+                    .iter()
+                    .find_map(|record| published(record).map(|policy| (record, policy)))
+            })
+            .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| ApiError::internal())?
+            .as_secs_f64();
+        let stations = records
+            .iter()
+            .map(|record| {
+                let load = leases
+                    .iter()
+                    .filter(|lease| lease.station() == record.station())
+                    .count();
+                ai6::StationFacts::from_record(record, now, ai6::DEFAULT_LEASE, load)
+            })
+            .collect::<Vec<_>>();
+        let placement = ai6::place(&policy, &request, &stations);
+        Ok::<_, ApiError>(PlacementPreview {
+            operation_id: operation,
+            policy_station: source.station().to_owned(),
+            choices: placement.choices,
+            rejections: placement.rejections,
+        })
+    })
+    .await
+    .map_err(|_| ApiError::internal())??;
+    Ok(Json(preview))
 }
 
 async fn list_user_mission_proposals(
@@ -2442,6 +2563,8 @@ struct CreateUserMissionRequest {
     role: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    stations: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -3840,6 +3963,18 @@ mod tests {
                 {"id": "build-box", "access": "ssh", "host": "build.example.net", "labels": {"os": "linux"}}
             ]),
         );
+        worker_info.insert("handlers".to_owned(), serde_json::json!(["claude"]));
+        worker_info.insert(
+            "operation_policies".to_owned(),
+            serde_json::json!({"G": {
+                "operation": "G",
+                "checkout": true,
+                "agents": [
+                    {"id": "007", "handler": "claude", "priority": 10, "roles": ["case-officer"]},
+                    {"id": "008", "handler": "codex", "priority": 5, "roles": ["case-officer"]}
+                ]
+            }}),
+        );
         registry.check_in("worker", worker_info).unwrap();
         let make_proposal = |retry_key: &str, title: &str| {
             MissionProposal::try_new(
@@ -3857,6 +3992,7 @@ mod tests {
                     agent: None,
                     role: Some("case-officer".to_owned()),
                     tags: vec!["review".to_owned()],
+                    stations: Vec::new(),
                     priority: 1,
                     url: None,
                     data: BTreeMap::new(),
@@ -4401,6 +4537,68 @@ mod tests {
         assert_eq!(station_board["stations"][0]["healthy"], true);
         assert_eq!(station_board["stations"][0]["headquarters"], false);
         assert_eq!(station_board["stations"][0]["operations"][0], "G");
+
+        let anonymous_preview = client
+            .get(format!("{base}/v1/user/operations/G/placement-preview"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(anonymous_preview.status(), StatusCode::UNAUTHORIZED);
+        let unauthorized_preview = client
+            .get(format!("{base}/v1/user/operations/L/placement-preview"))
+            .bearer_auth(&viewer_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauthorized_preview.status(), StatusCode::FORBIDDEN);
+        let preview = client
+            .get(format!("{base}/v1/user/operations/G/placement-preview"))
+            .bearer_auth(&viewer_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(preview.status(), StatusCode::OK);
+        let preview: serde_json::Value = preview.json().await.unwrap();
+        assert_eq!(preview["operation_id"], "G");
+        assert_eq!(preview["policy_station"], "worker");
+        assert_eq!(
+            preview["choices"],
+            serde_json::json!([{
+                "station": "worker", "theater": "local", "agent": "007", "handler": "claude"
+            }])
+        );
+        let rejections = preview["rejections"].as_array().unwrap();
+        assert!(
+            rejections
+                .iter()
+                .any(|r| r["station"] == "hq" && r["reason"] == "it has no execution role")
+        );
+        assert!(rejections.iter().any(|r| r["station"] == "worker"
+            && r["agent"] == "008"
+            && r["reason"] == "handler \"codex\" is not available on this Station"));
+        let narrowed = client
+            .get(format!(
+                "{base}/v1/user/operations/G/placement-preview?stations=hq&agent=007"
+            ))
+            .bearer_auth(&viewer_token)
+            .send()
+            .await
+            .unwrap();
+        let narrowed: serde_json::Value = narrowed.json().await.unwrap();
+        assert!(narrowed["choices"].as_array().unwrap().is_empty());
+        assert!(narrowed["rejections"].as_array().unwrap().iter().any(|r| {
+            r["station"] == "worker"
+                && r["reason"] == "the Mission narrows placement to Stations [hq]"
+        }));
+        let bad_query = client
+            .get(format!(
+                "{base}/v1/user/operations/G/placement-preview?unknown=1"
+            ))
+            .bearer_auth(&viewer_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bad_query.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
             station_board["stations"][0]["theaters"],
             serde_json::json!([

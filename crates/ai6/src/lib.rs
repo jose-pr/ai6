@@ -18,6 +18,10 @@ pub use directorates::m::access::{
     Verdict,
 };
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
+pub use directorates::m::placement::{
+    AgentFacts, OperationPolicy, Placement, PlacementChoice, PlacementRejection, PlacementRequest,
+    StationFacts, place,
+};
 pub use directorates::m::roster::{
     AgentRole, CoverIdentity, Operation, Roster, RosterError, Workspace,
 };

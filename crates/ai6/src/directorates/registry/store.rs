@@ -64,6 +64,10 @@ pub struct Brief {
     /// Requested Agent capabilities.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Stations the Mission is limited to. It can only narrow the Operation's `stations`
+    /// list, never widen it; empty adds no limit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stations: Vec<String>,
     /// Higher values sort first.
     #[serde(default)]
     pub priority: i64,
@@ -2634,6 +2638,7 @@ mod tests {
                 agent: None,
                 role: Some("analyst".to_owned()),
                 tags: Vec::new(),
+                stations: Vec::new(),
                 priority: 0,
                 url: None,
                 data: BTreeMap::new(),
@@ -2678,6 +2683,7 @@ mod tests {
                     agent: None,
                     role: None,
                     tags: Vec::new(),
+                    stations: Vec::new(),
                     priority: 0,
                     url: None,
                     data: BTreeMap::new(),
@@ -2720,6 +2726,7 @@ mod tests {
                     agent: None,
                     role: Some("analyst".to_owned()),
                     tags: Vec::new(),
+                    stations: Vec::new(),
                     priority: 0,
                     url: None,
                     data: BTreeMap::new(),
@@ -2790,6 +2797,7 @@ mod tests {
             agent: None,
             role: Some("implement".to_owned()),
             tags: vec!["ui".to_owned()],
+            stations: Vec::new(),
             priority: 0,
             url: None,
             data: BTreeMap::new(),

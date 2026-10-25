@@ -672,6 +672,7 @@ impl CableTools {
             agent: None,
             role: args.role,
             tags: args.tags,
+            stations: Vec::new(),
             priority: args.priority,
             url: None,
             data: Default::default(),

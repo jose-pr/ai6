@@ -285,6 +285,7 @@ pub fn sleeper_brief(operation: &str, name: &str, sleeper: &Sleeper, window: i64
         agent: sleeper.agent.clone(),
         role: sleeper.role.clone(),
         tags: Vec::new(),
+        stations: Vec::new(),
         priority: sleeper.priority,
         url: None,
         data,

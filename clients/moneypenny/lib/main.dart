@@ -259,6 +259,60 @@ class MissionBoard extends ChangeNotifier {
     return profile;
   }
 
+  bool canReadMissions(String operationId) =>
+      userSession?.operations.any(
+        (operation) =>
+            operation.operationId == operationId &&
+            operation.actions.contains('mission.read'),
+      ) ??
+      false;
+
+  /// Operations of the Station board whose Missions this account may read, so a
+  /// placement preview can be asked for them.
+  List<String> get previewOperations =>
+      (stationBoard.stations.expand((station) => station.operations).toSet()
+            ..removeWhere((operation) => !canReadMissions(operation)))
+          .toList()
+        ..sort();
+
+  Future<PlacementPreview> loadPlacementPreview(String operationId) async {
+    if (demo) {
+      return const PlacementPreview(
+        operationId: 'G',
+        policyStation: 'station-control-01',
+        choices: [
+          PlacementChoice(
+            station: 'station-control-01',
+            theater: 'local',
+            agent: '007',
+          ),
+        ],
+        rejections: [
+          PlacementRejection(
+            station: 'station-remote-02',
+            reason: 'it has not checked in for 120 seconds (gone dark)',
+          ),
+        ],
+      );
+    }
+    final token = accessToken;
+    if (token == null) {
+      throw StateError('Sign in before previewing placement.');
+    }
+    final response = await _client.get(
+      apiOrigin.resolve(
+        '/v1/user/operations/${Uri.encodeComponent(operationId)}/placement-preview',
+      ),
+      headers: {'authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the placement preview.');
+    }
+    return PlacementPreview.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   bool canCreateMission(String operationId) =>
       userSession?.operations.any(
         (operation) =>
@@ -835,6 +889,81 @@ class TheaterSummary {
   }
 }
 
+class PlacementChoice {
+  const PlacementChoice({
+    required this.station,
+    required this.theater,
+    required this.agent,
+  });
+
+  final String station;
+  final String theater;
+  final String agent;
+
+  factory PlacementChoice.fromJson(Map<String, dynamic> json) =>
+      PlacementChoice(
+        station: json['station'] as String,
+        theater: json['theater'] as String,
+        agent: json['agent'] as String,
+      );
+}
+
+class PlacementRejection {
+  const PlacementRejection({
+    required this.reason,
+    this.station,
+    this.theater,
+    this.agent,
+  });
+
+  final String? station;
+  final String? theater;
+  final String? agent;
+  final String reason;
+
+  factory PlacementRejection.fromJson(Map<String, dynamic> json) =>
+      PlacementRejection(
+        station: json['station'] as String?,
+        theater: json['theater'] as String?,
+        agent: json['agent'] as String?,
+        reason: json['reason'] as String,
+      );
+
+  /// What was ruled out: the Station and Theater it names, then the Agent.
+  String get subject => [
+    station,
+    theater,
+    if (agent != null) 'Agent $agent',
+  ].whereType<String>().join(' / ');
+}
+
+/// Where a Mission for an Operation would run and why each other place would not.
+class PlacementPreview {
+  const PlacementPreview({
+    required this.operationId,
+    required this.policyStation,
+    required this.choices,
+    required this.rejections,
+  });
+
+  final String operationId;
+  final String policyStation;
+  final List<PlacementChoice> choices;
+  final List<PlacementRejection> rejections;
+
+  factory PlacementPreview.fromJson(Map<String, dynamic> json) =>
+      PlacementPreview(
+        operationId: json['operation_id'] as String,
+        policyStation: json['policy_station'] as String,
+        choices: (json['choices'] as List<dynamic>)
+            .map((c) => PlacementChoice.fromJson(c as Map<String, dynamic>))
+            .toList(growable: false),
+        rejections: (json['rejections'] as List<dynamic>)
+            .map((r) => PlacementRejection.fromJson(r as Map<String, dynamic>))
+            .toList(growable: false),
+      );
+}
+
 class UserSessionSummary {
   const UserSessionSummary({
     required this.personId,
@@ -1384,6 +1513,8 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                   !widget.board.demo &&
                   widget.board.canCreateMission(operationId),
             ),
+            if (widget.board.previewOperations.isNotEmpty)
+              _PlacementPanel(board: widget.board),
             if (widget.board.demo) const _DemoBanner(),
             if (widget.board.error != null)
               _ErrorBanner(
@@ -2592,6 +2723,140 @@ class _StationOverview extends StatelessWidget {
                 ),
             ],
           ),
+      ],
+    ),
+  );
+}
+
+/// Asks the gateway where a Mission for an Operation would run and shows the
+/// reason for every Station, Theater or Agent it would not.
+class _PlacementPanel extends StatefulWidget {
+  const _PlacementPanel({required this.board});
+
+  final MissionBoard board;
+
+  @override
+  State<_PlacementPanel> createState() => _PlacementPanelState();
+}
+
+class _PlacementPanelState extends State<_PlacementPanel> {
+  String? _operationId;
+  Future<PlacementPreview>? _preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final operations = widget.board.previewOperations;
+    final selected = operations.contains(_operationId)
+        ? _operationId
+        : operations.first;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'PLACEMENT PREVIEW',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  letterSpacing: 2.4,
+                  color: const Color(0xff86a39d),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  DropdownButton<String>(
+                    value: selected,
+                    items: [
+                      for (final operation in operations)
+                        DropdownMenuItem(
+                          value: operation,
+                          child: Text(operation),
+                        ),
+                    ],
+                    onChanged: (value) => setState(() {
+                      _operationId = value;
+                      _preview = null;
+                    }),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: selected == null
+                        ? null
+                        : () => setState(() {
+                            _operationId = selected;
+                            _preview = widget.board.loadPlacementPreview(
+                              selected,
+                            );
+                          }),
+                    icon: const Icon(Icons.alt_route),
+                    label: const Text('Preview placement'),
+                  ),
+                ],
+              ),
+              if (_preview != null)
+                FutureBuilder<PlacementPreview>(
+                  future: _preview,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const Padding(
+                        padding: EdgeInsets.only(top: 10),
+                        child: Text('The gateway could not preview placement.'),
+                      );
+                    }
+                    final preview = snapshot.data;
+                    if (preview == null) {
+                      return const Padding(
+                        padding: EdgeInsets.only(top: 10),
+                        child: LinearProgressIndicator(),
+                      );
+                    }
+                    return _PlacementResult(preview: preview);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlacementResult extends StatelessWidget {
+  const _PlacementResult({required this.preview});
+
+  final PlacementPreview preview;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          preview.choices.isEmpty
+              ? 'No place can run this Operation now.'
+              : 'Would run on, best first',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        for (final choice in preview.choices)
+          Text(
+            '${choice.station} \u00b7 ${choice.theater} \u00b7 ${choice.agent}',
+          ),
+        if (preview.rejections.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text('Ruled out', style: Theme.of(context).textTheme.titleSmall),
+          for (final rejection in preview.rejections)
+            Text('${rejection.subject}: ${rejection.reason}'),
+        ],
+        const SizedBox(height: 6),
+        Text(
+          'Policy from ${preview.policyStation}',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
       ],
     ),
   );

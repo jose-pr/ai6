@@ -14,7 +14,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
-use globset::Glob;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
@@ -25,6 +24,7 @@ use crate::directorates::m::identity::MAX_ID_BYTES;
 use crate::directorates::m::mission::{
     LaunchManifest, Mission, MissionError, MissionState, MissionStore,
 };
+use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
@@ -1057,7 +1057,8 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         if !has_assignment_capacity(state, &operation_id, &agent_id) {
             continue;
         }
-        let Some(execution_station) = place_brief(state, &operation_id, &leases) else {
+        let Some(execution_station) = place_brief(state, &brief, &operation_id, &agent_id, &leases)
+        else {
             continue;
         };
         let mut meta = BTreeMap::new();
@@ -1215,6 +1216,29 @@ fn publish_station_check_in(state: &DaemonState) {
     );
     info.insert("running".to_owned(), serde_json::json!(active_sessions));
     info.insert("operations".to_owned(), serde_json::json!(operations));
+    let policies: BTreeMap<String, OperationPolicy> = state
+        .roster
+        .operations()
+        .filter_map(|operation| {
+            OperationPolicy::from_roster(&state.roster, &operation.id)
+                .ok()
+                .map(|policy| (operation.id.clone(), policy))
+        })
+        .collect();
+    match serde_json::to_vec(&policies) {
+        Ok(encoded) if encoded.len() <= MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES => {
+            info.insert("operation_policies".to_owned(), serde_json::json!(policies));
+        }
+        Ok(_) => eprintln!(
+            "ai6: Station placement policies exceed the {} KiB check-in budget; placement previews will be unavailable",
+            MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES / 1024
+        ),
+        Err(error) => eprintln!("ai6: could not encode Station placement policies: {error}"),
+    }
+    info.insert(
+        "handlers".to_owned(),
+        serde_json::json!(available_handlers(state)),
+    );
     info.insert(
         "theaters".to_owned(),
         serde_json::json!(state.station.theaters.summaries()),
@@ -1353,75 +1377,36 @@ fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &s
     })
 }
 
-fn place_brief(state: &DaemonState, operation_id: &str, leases: &[Lease]) -> Option<String> {
-    let operation = state.roster.operation(operation_id).ok()?;
-    let stations = state.intake.stations(DEFAULT_LEASE).ok()?;
-    let mut load = BTreeMap::<&str, usize>::new();
-    for lease in leases {
-        *load.entry(lease.station()).or_default() += 1;
-    }
-    let needs_local_checkout = operation.theater.is_none() && operation.path.is_some();
-    let mut selected: Option<(usize, bool, String)> = None;
-    for station in stations {
-        let info = station.info();
-        let execution = info
-            .get("roles")
-            .and_then(serde_json::Value::as_array)
-            .is_none_or(|roles| roles.iter().any(|role| role.as_str() == Some("execution")));
-        if !execution {
-            continue;
-        }
-        let capacity = info
-            .get("capacity")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|capacity| usize::try_from(capacity).ok())
-            .unwrap_or(1);
-        let station_load = *load.get(station.station()).unwrap_or(&0);
-        if capacity == 0 || station_load >= capacity {
-            continue;
-        }
-        if !station_matches_labels(info.get("labels"), &operation.station_labels) {
-            continue;
-        }
-        if needs_local_checkout
-            && !info
-                .get("operations")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|operations| {
-                    operations
-                        .iter()
-                        .any(|candidate| candidate.as_str() == Some(operation_id))
-                })
-        {
-            continue;
-        }
-        let candidate = (
-            station_load,
-            station.station() != state.station_id,
-            station.station().to_owned(),
-        );
-        if selected.as_ref().is_none_or(|current| candidate < *current) {
-            selected = Some(candidate);
-        }
-    }
-    selected.map(|(_, _, station)| station)
-}
-
-fn station_matches_labels(
-    labels: Option<&serde_json::Value>,
-    selector: &BTreeMap<String, String>,
-) -> bool {
-    let Some(labels) = labels.and_then(serde_json::Value::as_object) else {
-        return selector.is_empty();
+/// Chooses the execution Station for a brief with M's placement; the Agent is already fixed.
+fn place_brief(
+    state: &DaemonState,
+    brief: &Brief,
+    operation_id: &str,
+    agent_id: &str,
+    leases: &[Lease],
+) -> Option<String> {
+    let policy = OperationPolicy::from_roster(&state.roster, operation_id).ok()?;
+    let records = state.intake.stations(Duration::MAX).ok()?;
+    let now = unix_now();
+    let stations: Vec<StationFacts> = records
+        .iter()
+        .map(|record| {
+            let load = leases
+                .iter()
+                .filter(|lease| lease.station() == record.station())
+                .count();
+            StationFacts::from_record(record, now, DEFAULT_LEASE, load)
+        })
+        .collect();
+    let request = PlacementRequest {
+        stations: brief.stations.clone(),
+        agent: Some(agent_id.to_owned()),
+        deciding_station: Some(state.station_id.clone()),
+        ..PlacementRequest::default()
     };
-    selector.iter().all(|(key, pattern)| {
-        labels
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|value| {
-                Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(value))
-            })
-    })
+    placement::place(&policy, &request, &stations)
+        .best()
+        .map(|choice| choice.station.clone())
 }
 
 fn mission_id_for_brief(brief: &Brief) -> Result<MissionId, String> {
@@ -4510,6 +4495,15 @@ mod tests {
             serde_json::json!([{"id": "local", "access": "local", "labels": {}}]),
             "a Station always reaches its own host as the local Theater"
         );
+        assert_eq!(
+            stations[0].info()["operation_policies"]["G"]["checkout"],
+            true,
+            "the check-in carries each Operation's placement policy for previews"
+        );
+        assert_eq!(
+            stations[0].info()["handlers"],
+            serde_json::json!(["mock-agent"])
+        );
 
         schedule_intake_once(&state);
         let mission_id = "manual--brief-1";
@@ -4601,8 +4595,7 @@ mod tests {
         fs::create_dir_all(&queued).unwrap();
         fs::write(
             dir.path().join("operations.toml"),
-            "[operation.G]\ntheater = \"remote\"
-station_labels = { gpu = \"yes\" }\n",
+            "[operation.G]\nstation_labels = { gpu = \"yes\" }\n",
         )
         .unwrap();
         fs::write(
@@ -4622,7 +4615,7 @@ station_labels = { gpu = \"yes\" }\n",
         .unwrap();
         fs::write(
             queued.join("manual--target-2.json"),
-            r#"{"title":"Second target work","id":"target-2","source":"manual","operation":"G","agent":"007"}"#,
+            r#"{"title":"Second target work","id":"target-2","source":"manual","operation":"G","agent":"007","stations":["worker-b"]}"#,
         )
         .unwrap();
         let intake = Arc::new(FileRegistry::open(&registry_dir));
@@ -4695,7 +4688,11 @@ station_labels = { gpu = \"yes\" }\n",
         assert_eq!(target.meta()["operation"], "G");
         assert_eq!(target.meta()["agent"], "007");
         let second_target = state.intake.lease("manual--target-2").unwrap().unwrap();
-        assert_eq!(second_target.station(), "worker-a");
+        assert_eq!(
+            second_target.station(),
+            "worker-b",
+            "the Mission narrows the tie between equally loaded Stations to worker-b"
+        );
         assert!(state.intake.list_new().unwrap().is_empty());
         assert!(state.missions.lock().unwrap().list().is_empty());
     }

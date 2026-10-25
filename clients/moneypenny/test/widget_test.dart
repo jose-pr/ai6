@@ -681,6 +681,38 @@ void main() {
         if (request.url.path == '/v1/user/profile') {
           return http.Response(userProfileResponse(), 200);
         }
+        if (request.url.path ==
+            '/v1/user/operations/operation-alpha/placement-preview') {
+          return http.Response(
+            jsonEncode({
+              'operation_id': 'operation-alpha',
+              'policy_station': 'station-alpha',
+              'choices': [
+                {
+                  'station': 'station-alpha',
+                  'theater': 'local',
+                  'agent': '007',
+                  'handler': 'claude',
+                },
+              ],
+              'rejections': [
+                {
+                  'station': 'station-beta',
+                  'theater': null,
+                  'agent': null,
+                  'reason': 'it is at capacity (2 of 2 Missions)',
+                },
+                {
+                  'station': null,
+                  'theater': null,
+                  'agent': '008',
+                  'reason': 'it has no handler configured',
+                },
+              ],
+            }),
+            200,
+          );
+        }
         expect(request.url.path, '/v1/board');
         return http.Response(
           jsonEncode([
@@ -723,7 +755,18 @@ void main() {
     expect(find.textContaining('2/4 sessions'), findsOneWidget);
     expect(find.text('Theater local'), findsOneWidget);
     expect(find.text('Theater build-box'), findsOneWidget);
-    expect(find.text('operation-alpha'), findsOneWidget);
+    await tester.tap(find.text('Preview placement'));
+    await tester.pumpAndSettle();
+    expect(find.text('station-alpha \u00b7 local \u00b7 007'), findsOneWidget);
+    expect(
+      find.text('station-beta: it is at capacity (2 of 2 Missions)'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Agent 008: it has no handler configured'),
+      findsOneWidget,
+    );
+    expect(find.text('operation-alpha'), findsNWidgets(2));
     expect(find.text('claude-session-123'), findsNothing);
     await tester.tap(navLabel('Operations'));
     await tester.pumpAndSettle();

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
 use crate::directorates::registry::sleepers::Sleeper;
+use crate::directorates::registry::store::validate_station_id;
 
 const AGENTS_FILE: &str = "agents.toml";
 const OPERATIONS_FILE: &str = "operations.toml";
@@ -111,6 +112,9 @@ pub struct Operation {
     pub workspace: Workspace,
     /// Station labels required before a Station may run this Operation's Missions.
     pub station_labels: BTreeMap<String, String>,
+    /// Stations allowed to run this Operation's Missions; empty allows every Station. A
+    /// Mission may narrow this list but never widen it.
+    pub stations: Vec<String>,
     /// Cover policy used when work is committed.
     pub cover: String,
     /// Optional Git author the Operation's Agents commit under (their cover).
@@ -454,6 +458,7 @@ struct OperationDefinition {
     branch: Option<toml::Value>,
     base: Option<toml::Value>,
     station_labels: BTreeMap<String, String>,
+    stations: Vec<String>,
     cover: String,
     cover_identity: Option<CoverIdentity>,
     on_blown: String,
@@ -543,6 +548,7 @@ impl OperationDefinition {
                 isolate: self.workspace.isolate,
             },
             station_labels: self.station_labels,
+            stations: self.stations,
             cover: if self.cover.is_empty() {
                 "covert".to_owned()
             } else {
@@ -576,6 +582,17 @@ impl OperationDefinition {
                     operation.id
                 ))
             })?;
+        }
+        if let Some(station) = operation
+            .stations
+            .iter()
+            .find(|station| validate_station_id(station).is_err())
+        {
+            return Err(error(format!(
+                "{}: Operation {:?}: stations entry {station:?} is not a valid Station ID",
+                source.display(),
+                operation.id
+            )));
         }
         validate_clearance(&operation.clearance).map_err(|e| {
             error(format!(
@@ -855,6 +872,21 @@ mod tests {
 
     static TEST_DIRECTORY_ID: std::sync::atomic::AtomicUsize =
         std::sync::atomic::AtomicUsize::new(0);
+
+    #[test]
+    fn an_operation_may_list_the_stations_allowed_to_run_it() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "operations.toml",
+            "[operation.G]\nstations = [\"hq-1\", \"lab-gpu\"]\n[operation.H]\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        assert_eq!(roster.operation("G").unwrap().stations, ["hq-1", "lab-gpu"]);
+        assert!(roster.operation("H").unwrap().stations.is_empty());
+
+        directory.write("operations.toml", "[operation.G]\nstations = [\"\"]\n");
+        assert!(Roster::load(&directory.0).is_err());
+    }
 
     #[test]
     fn resolves_agent_alias_inheritance_and_registered_operation_override() {
