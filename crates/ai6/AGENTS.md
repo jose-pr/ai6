@@ -243,6 +243,7 @@ pub struct Operation {
     pub on_blown: String,
     pub on_limit: OnLimit,                        // Wait (default) or Backup; see Provider limits
     pub limit_fallback_secs: u64,                 // park time when a limit has no reset time; default 1800
+    pub on_lost: OnLost,                          // Retry (default) or Fail; see Recovery
     pub budget: Budget,                           // no limit unless configured
     pub exposure: ExposurePolicy,                 // strict unless configured
     pub quarantine: QuarantinePolicy,             // 3 stalls/loops, 2 budget stops, 1 blown cover per 24 h
@@ -261,7 +262,11 @@ pub struct Workspace {
     pub base: String,              // default "HEAD"
     pub branch: String,            // template, default "{id}-{slug}"
     pub isolate: bool,             // default true
+    pub checkpoint_remote: Option<String>, // Git remote checkpoints are pushed to; None (default) pushes nothing
+    pub checkpoint_secs: u64,      // between checkpoints; default DEFAULT_CHECKPOINT_SECS (300); above 0
 }
+#[non_exhaustive] pub enum OnLost { Retry, Fail }   // serde "retry" | "fail"
+pub const DEFAULT_CHECKPOINT_SECS: u64 = 300;
 pub struct CoverIdentity { pub name: String, pub email: String }
 #[non_exhaustive]
 pub struct RosterError(String);
@@ -662,6 +667,7 @@ leases() -> io::Result<Vec<Lease>>
 expired() -> io::Result<Vec<Lease>>
 renew(key: &str, station: &str, duration: Duration) -> io::Result<bool>
 recover(lease: &Lease, max_attempts: u32, by: &str) -> io::Result<Option<LeaseRecovery>>
+hand_over(lease: &Lease, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>  // same claim and attempt; None if the lease changed or is live
 finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<&[u8]>, station: Option<&str>) -> io::Result<Option<PathBuf>>
 ```
 
@@ -786,7 +792,19 @@ The shared record of every Agent Session, under `sessions/<id>.json` in the Regi
 Station's `missions.json` dies with it; this record does not.
 
 ```rust
-#[non_exhaustive] pub enum SessionStatus { Active, Parked, Ended }
+#[non_exhaustive] pub enum SessionStatus { Active, Parked, Ended, Lost }
+impl SessionStatus { pub fn is_closed(self) -> bool }   // Ended or Lost
+#[non_exhaustive] pub struct SessionLaunch {         // what another Station needs to re-attach
+    pub handler: String, pub terminal: String, pub working_directory: String,
+    pub model: Option<String>, pub effort: Option<String>,
+    pub mode: ExecutionMode,                 // default Field
+    pub runner: Option<String>,              // the runner's Session key; only these are adopted
+}
+impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
+    pub fn with_model(self, Option<String>, Option<String>) -> Self;
+    pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self; }
+pub const MAX_RECENT_EVENTS: usize = 20;
+pub const MAX_RECENT_EVENT_CHARS: usize = 300;
 #[non_exhaustive] pub struct SessionRecord {
     pub session_id: String,                  // AI6's ID (not the provider's)
     pub mission_id: String,
@@ -800,13 +818,18 @@ Station's `missions.json` dies with it; this record does not.
     pub lease_expires: f64,
     pub fence: u64,                          // fencing token of the current lease
     pub exposure: Vec<Exposure>,             // untrusted input read; only grows; default empty
+    pub launch: Option<SessionLaunch>,       // absent in older records
+    pub recent: Vec<String>,                 // last events seen, oldest first, bounded as above
+    pub checkpoint: Option<SafeHouseCheckpoint>, pub checkpointed_at: Option<f64>,
+    pub lost: Option<String>,                // why, with SessionStatus::Lost
 }
-impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }
+impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }   // false once closed
 pub struct NewSession   // NewSession::new(session_id, mission_id, station)
                         //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
-                        //   .with_exposure(Vec<Exposure>)
+                        //   .with_exposure(Vec<Exposure>) .with_launch(SessionLaunch)
 pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStatus) .parked_until(f64)
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
+                          //   .launch(SessionLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
 #[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, HeldBy(String), Stale, Io(io::Error) }
 
 impl FileRegistry {
@@ -817,8 +840,16 @@ impl FileRegistry {
     pub fn take_session(&self, id: &str, station: &str, ttl: Duration) -> Result<SessionRecord, SessionError>
     pub fn renew_session(&self, id: &str, station: &str, fence: u64, ttl: Duration) -> Result<SessionRecord, SessionError>
     pub fn update_session(&self, id: &str, station: &str, fence: u64, update: SessionUpdate) -> Result<SessionRecord, SessionError>
+    pub fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError>
+    pub fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>  // highest attempt
 }
 ```
+
+`lose_session` marks a Session whose lease has lapsed `Lost` with the reason (cut to 300
+characters) and moves its fencing token on, so the old holder's next write is `Stale`;
+`HeldBy` while the lease is live, `Ended` once closed. A `Lost` Session is closed like an
+`Ended` one: it cannot be taken or written. `recent` keeps the last 20 lines, each cut to
+300 characters.
 
 A Station acts on a Session only while it holds the lease. `open_session` creates the
 record held by `new`'s Station; `take_session` renews the lease for the current holder, takes
@@ -831,7 +862,24 @@ wall-clock Unix seconds, so Stations need synchronized clocks. The daemon record
 when it starts, takes the lease again to resume it, mirrors Mission state into the record,
 renews its leases with the Station check-in, and closes and abandons a Mission whose token
 is refused. The daemon's launch record keeps the lease and fence in `missions.json`
-(`session`); records without one still load.
+(`session`); records without one still load. It also writes the Session's launch, its recent
+events (at most every 15 seconds) and, when the Operation sets
+`workspace.checkpoint_remote`, a safe-house checkpoint every `checkpoint_secs`.
+
+Recovery (`ai6::directorates::m::recovery`): when a Station's brief lease and its Session's
+lease have both lapsed, the Headquarters Station either hands the brief's lease to a Station
+that adopts the Session or marks the Session lost and queues the brief again (or files it,
+`on_lost = "fail"`). A new attempt links to the lost Session, starts its safe house from the
+lost one's checkpoint and is told what it was doing.
+
+```rust
+/// The live Station that should re-attach to `session`'s runner harness, placed like a new
+/// Session but only on that Theater, in field mode, never on `session.station`. Errs, with
+/// the reason, for a `local` Theater, a Session without a runner or recorded launch, or no
+/// eligible Station.
+pub fn adopter(policy: &OperationPolicy, request: &PlacementRequest,
+               stations: &[StationFacts], session: &SessionRecord) -> Result<PlacementChoice, String>
+```
 
 ## Usage ledger and quarantine records (`ai6::directorates::registry::{usage, quarantine}`)
 
@@ -1695,6 +1743,9 @@ pub trait SafeHouseSession: Send + Sync {
     fn info(&self) -> Result<Value, ProviderError>;    // SafeHouseInfo
     fn changes(&self) -> Result<Value, ProviderError>; // ChangeLog, newest first; empty without history
     fn finish(&self) -> Result<Value, ProviderError>;  // SafeHouseReport; idempotent
+    /// Optional (default GUATIAO_ERR_UNSUPPORTED): CheckpointSpec in, SafeHouseCheckpoint out.
+    /// Saves the work so far where another Station can fetch it, leaving the worktree alone.
+    fn checkpoint(&self, spec: &Value) -> Result<Value, ProviderError>;
 }
 pub struct SafeHouseSpec {
     pub operation_id: String, pub mission_id: String, pub title: String,
@@ -1704,7 +1755,14 @@ pub struct SafeHouseSpec {
     pub isolate: bool,     // false: work in `source` itself
     pub state_root: String,
     pub reopen: Option<SafeHouseReport>, // re-attach to a safe house kept by an earlier run
+    pub checkpoint: Option<SafeHouseCheckpoint>, // start a new one from a lost attempt's work
 }
+pub struct CheckpointSpec {
+    pub remote: String,    // Git remote name or URL
+    pub message: String,   // already under the Operation's cover
+    pub author_name: Option<String>, pub author_email: Option<String>, // the cover identity
+}
+pub struct SafeHouseCheckpoint { pub remote: String, pub branch: String, pub commit: String, pub base: Option<String> }
 pub struct SafeHouseInfo {
     pub path: String, pub branch: Option<String>, pub base: Option<String>,
     pub supports_history: bool, // false: cover is "not checkable"
@@ -1721,7 +1779,8 @@ grows by optional fields only. Providers: `git` (`ai6-safehouse-git`) and `copy`
 
 `station::safehouse::SafeHouse::open(&dyn SafeHouseProvider, &SafeHouseSpec)` wraps a
 session: `path()`, `branch()`, `base()`, `supports_history()`, `is_isolated()`,
-`changes()`, `finish()` and `active_report()`. Only isolated safe houses are recorded on
+`changes()`, `finish()`, `checkpoint(&CheckpointSpec)` and `active_report()`. The Station
+offers a lost attempt's checkpoint only when it opens a new isolated safe house. Only isolated safe houses are recorded on
 the Mission and finished by the daemon. `state_dir()` resolves `AI6_STATE`, then
 `AI6_HOME/state`, then `%LOCALAPPDATA%/AI6` on Windows, then `XDG_STATE_HOME/AI6` or
 `~/.local/state/AI6`.

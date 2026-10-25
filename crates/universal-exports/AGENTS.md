@@ -138,6 +138,20 @@ pub struct BoardMission {
     pub sessions: Vec<BoardSession>,
     pub brief: Option<LaunchManifest>,
     pub usage: Option<MissionUsage>,   // tokens and cost from the Registry ledger
+    pub attempts: Vec<MissionAttempt>, // every attempt, first first, from the Session records
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MissionAttempt {
+    pub attempt: u32,
+    pub session_id: String,                  // AI6's Session ID
+    pub provider_session_id: Option<String>,
+    pub predecessor: Option<String>,         // AI6 ID of the attempt it replaced
+    pub station: String, pub theater: Option<String>,
+    pub status: String,                      // "active" | "parked" | "ended" | "lost"
+    pub lost: Option<String>,                // why, when lost
+    pub checkpoint_branch: Option<String>,   // where its work was last checkpointed
 }
 
 #[non_exhaustive]
@@ -483,7 +497,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/stations` | Requires a user bearer; returns visible Station health, hosted Operations and current Headquarters Station. |
 | `GET /v1/user/operations/{operation_id}/placement-preview` | Requires `mission.read` at the Operation; returns the eligible (Station, Theater, Agent) choices, best first, and a reason for each rejection. Optional `agent`, `role`, `stations`, `tags` query parameters narrow it. |
 | `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. |
-| `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available and its `usage` (tokens and cost per Session and UTC day) once a provider has reported any. |
+| `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Session and UTC day) once a provider has reported any, and its `attempts` from the shared Session records. `GET /v1/missions` carries `attempts` too. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret. |
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. |
 | `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role and `approval.decide`/`approval.class` actions; Station grants include `station.read`, `station.configure` and `audit.read`. Every action is computed by the Authorizer, not inferred from directory groups. |

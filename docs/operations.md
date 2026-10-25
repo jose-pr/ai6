@@ -45,6 +45,8 @@ recorded in the Mission report.
 | `base` | `HEAD` | Revision a safe house starts from |
 | `branch` | `{id}-{slug}` | Branch name template; `{id}`, `{slug}` and `{operation}` are filled in |
 | `isolate` | `true` | `false` works in `source` itself instead of a separate copy |
+| `checkpoint_remote` | none | A Git remote (name or URL) each running Mission's safe house is checkpointed to, on its own branch, so a later attempt on another Station starts from its work. Unset pushes nothing |
+| `checkpoint_secs` | `300` | Seconds between checkpoints while a Session runs. Must be above zero |
 
 Two providers ship: `git` (a worktree on its own branch; commits are audited) and `copy`
 (a plain copy of the directory, always kept, no history).
@@ -86,6 +88,22 @@ limit_fallback_secs = 1800 # how long to park when the provider gives no reset t
 
 Both are overridable per Operation and an unknown `on_limit` value fails the load. See
 [Recovery](missions.md#recovery).
+
+## Lost Sessions
+
+When a Station goes dark with a Session that no other Station can re-attach to (its harness
+ran on that Station's own host), the Session is lost:
+
+```toml
+[operation.G]
+on_lost = "retry" # or "fail"
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `on_lost` | `retry` | `retry` queues the brief again as a new attempt on another eligible Station, starting from the last checkpoint (see `workspace.checkpoint_remote`) with a hand-off about the lost attempt, up to three attempts in all. `fail` files the brief as lost |
+
+An unknown value fails the load. See [Station loss](missions.md#station-loss-adoption).
 
 ## Budgets, exposure and quarantine
 

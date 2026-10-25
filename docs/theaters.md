@@ -163,8 +163,10 @@ Station that is shut down, killed or fenced out leaves the harness running, and 
 stays Working. When the Station starts again it re-attaches to the same runner Session and
 receives every event it missed, in order, from the last one it acknowledged (the last
 event it took may come twice). A Station that loses the Session's lease lets go the same
-way; another Station adopting a running Session is not implemented yet. A Mission parked at
-a provider limit resumes in a new harness instead, as before.
+way. When a Station goes dark for good, another Station that reaches the same runner (a
+Theater with the same ID and a `runner`) adopts the Session and re-attaches in the same way
+([Station loss](missions.md#station-loss-adoption)). A Mission parked at a provider limit
+resumes in a new harness instead, as before.
 
 The runner listens on a loopback port only, behind a bearer token kept in its state
 directory (`token`, readable only by its user). On the Station's own host the Station talks

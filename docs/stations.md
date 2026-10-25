@@ -82,7 +82,9 @@ an available provider, preferring `pty`; `ai6 serve --terminal ID` pins one. See
 Stations sharing a file Registry (`AI6_REGISTRY`) coordinate check-ins, leases and
 Headquarters election. Lease expiry uses wall-clock time, so Stations need synchronized
 clocks. Check-ins expire after 45 seconds; a Station whose check-ins lapse has *gone dark*
-and its leased briefs are recovered by another Station. The Registry is file-backed; a SQL
+and its leased briefs are recovered by the Headquarters Station: a Session a runner still
+supervises is adopted by another Station, any other is lost and tried again
+([Recovery](missions.md#recovery)). The Registry is file-backed; a SQL
 backend is not supported.
 
 ## Capacity and visibility

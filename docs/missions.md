@@ -161,16 +161,19 @@ transport, on the Station in remote-hands mode (see [Theaters](theaters.md)).
 
 ## Recovery
 
-Work should survive a refused quota and a lost lease. Two mechanisms exist today.
+Work should survive a refused quota, a lost lease and a Station that goes dark (the
+tradecraft word is *extraction*).
 
 ### Session records and fencing
 
 Besides the Station's own `missions.json`, every Session has a record in the shared
 Registry (`sessions/`). It holds AI6's Session ID (distinct from the provider's), the
 provider Session ID, the Station that supervises it, its Theater, the attempt number and the
-ID of the Session it replaced, its exposure to untrusted input, and its status (`active`,
-`parked` or `ended`). Another
-Station that opens the same Registry sees the same records.
+ID of the Session it replaced, its exposure to untrusted input, its status (`active`,
+`parked`, `ended` or `lost`), how its harness was launched (handler, terminal, working
+directory, model, effort, mode and the runner's key), the last 20 things it was seen doing
+and its last safe-house checkpoint. Another Station that opens the same Registry sees the
+same records.
 
 A Station acts on a Session only while it holds the record's **lease**, and every write
 presents the **fencing token** the lease was granted with. The token comes from the
@@ -181,9 +184,62 @@ Station also refuses a resume. The daemon renews its leases with each Station ch
 (15 seconds; a lease lasts 60). A Mission started before records were shared gets a record
 the next time it resumes.
 
-Moving a running Session to another Station, or to another Theater when its own is lost,
-is not implemented: a Session's records and lease are the groundwork for it, and
-provider transcripts stay with the Theater that holds them.
+### Station loss: adoption
+
+When a Station goes dark its brief leases stop being renewed. Once a brief's lease and its
+Session's lease have both run out, the Headquarters Station decides what happens to the
+Mission (a brief whose Mission never started is simply queued again):
+
+- **Adopted.** The harness ran on a Theater's [field runner](theaters.md#the-field-runner),
+  so it is still running. The Headquarters hands the brief's lease (same claim, same
+  attempt) to a live Station that reaches that runner, placed as a new Session would be
+  but only on that Theater and never on the dark Station. That Station takes the Session's
+  lease with a larger fencing token, records the Mission as the dark Station launched it
+  and re-attaches to the runner Session, receiving every event the dark Station did not
+  take. Nothing is launched twice, and a parked Session resumes when its quota resets.
+- **Lost.** The harness ran on the dark Station's own host (Theater `local`), or with no
+  runner, so it ended with the Station. Its record is marked `lost` with the reason, its
+  fencing token moves on so the Station is refused if it comes back, and the brief is
+  queued again for a [new attempt](#lost-sessions-a-new-attempt-with-a-hand-off). An
+  Operation with `on_lost = "fail"` files the brief as lost instead. A brief that has
+  already been tried three times is filed as lost either way.
+
+Only Missions that came from a brief are recovered this way: a Mission created on one
+Station through its private API lives only in that Station's book. A Theater with a
+runner that dies while its Station lives is not handled yet: the Station keeps waiting for
+the runner.
+
+### Lost Sessions: a new attempt with a hand-off
+
+The Station that takes the brief starts the Mission as attempt N+1, linked to the lost
+Session as its predecessor, with new AI6 and provider Session IDs (provider transcripts stay
+on the Theater that held them, so the provider Session cannot be resumed). The Agent is told
+about the attempt it continues:
+
+```text
+This Mission continues attempt 1, which was lost: Station "alpha" went dark with Theater
+"local"; its harness ran on that Station's own host.
+Its work was last saved as commit 3f2a9c01d4e7 on branch mission-7-fix of origin; your
+working directory starts from it. Inspect it before you continue: changes made after that
+save are gone.
+What it was last seen doing, oldest first:
+- text: running the parser tests
+- tool: Edit
+```
+
+The work survives only if it was **checkpointed**. With `workspace.checkpoint_remote` set
+(see [Operations](operations.md#workspace)), the Station saves each running Session's safe
+house every `checkpoint_secs`: one commit on top of the branch's own commits that also
+holds the uncommitted changes, pushed to the Mission's branch on that remote, without
+touching the Agent's worktree, staging area or `HEAD`. The commit follows the Operation's
+cover (no Agent or model named, the cover's footer, the `cover_identity` as author). The
+next attempt's safe house is then a new worktree on that branch at that commit, so the
+`git` provider fetches it from the remote; a provider without history starts from the base.
+Without a checkpoint the hand-off says the work could not be recovered.
+
+The attempts are on the Mission: `GET /v1/missions` and the Mission detail list each one's
+Station, Theater, status, why it was lost and the branch it was checkpointed to, and
+Moneypenny shows them on the Mission card.
 
 ### Provider limits: park and resume
 

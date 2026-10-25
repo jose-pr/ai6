@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Recovery when a Station goes dark. Once its brief lease and its Session's lease lapse, the
+  Headquarters Station hands the brief to a live Station that reaches the same Theater's
+  field runner, which takes the Session lease (fenced) and re-attaches, replaying the events
+  the dark Station never took: nothing is launched twice. A Session that ran on the dark
+  Station's own host, or without a runner, is marked `lost` (`ai6::SessionStatus::Lost`,
+  `FileRegistry::lose_session`) and its brief is queued again: the next attempt, on another
+  eligible Station, links to it as its predecessor and is briefed on why it was lost and
+  what it was last seen doing. `on_lost = "fail"` files the brief instead. Session records
+  carry the harness's launch (`SessionLaunch`), its recent events and its last checkpoint;
+  `FileRegistry::hand_over` gives a lapsed brief lease to another Station, and
+  `directorates::m::recovery::adopter` chooses it.
+- Safe-house checkpoints. With `workspace.checkpoint_remote` set, a Station saves each
+  running Mission's safe house every `checkpoint_secs` (default 300) as a commit holding
+  its uncommitted work, under the Operation's cover, pushed to the Mission's branch without
+  touching the Agent's worktree; a later attempt's safe house starts from it. The safe-house
+  kind gains the optional `checkpoint` slot and `SafeHouseSpec.checkpoint`
+  (`CheckpointSpec`, `SafeHouseCheckpoint`), which the `git` provider implements.
+- Attempt history: `GET /v1/missions` and the Mission detail list each attempt
+  (`universal_exports::MissionAttempt`: Station, Theater, status, why it was lost and its
+  checkpoint branch), and Moneypenny shows them on the Mission card.
+
 - Green ink: a person's recorded approval of one irreversible step. An Agent calls the
   `request_approval` tool on its Session's AI6 endpoint with the step's kind (`push`,
   `merge`, `release`, `delete`, `clearance` or one its Operation adds) and target. The
