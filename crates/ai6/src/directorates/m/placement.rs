@@ -344,6 +344,16 @@ pub fn place(
                 }
             };
             for agent in &usable {
+                let handler = agent.handler.as_deref().unwrap_or_default();
+                if let Err(reason) = harness_verdict(theater, mode, handler) {
+                    placement.rejections.push(PlacementRejection {
+                        station: Some(station.station.clone()),
+                        theater: Some(theater.id.clone()),
+                        agent: Some(agent.id.clone()),
+                        reason,
+                    });
+                    continue;
+                }
                 placement.choices.push(PlacementChoice {
                     station: station.station.clone(),
                     theater: theater.id.clone(),
@@ -456,6 +466,7 @@ fn theater_verdict(
         return Err(format!("the Operation runs only in Theater {bound:?}"));
     }
     let mode = execution_mode(theater)?;
+    fitness(theater)?;
     // The Theater's own labels win over the Station's, so a Theater can refine them.
     let mut labels = station.labels.clone();
     labels.extend(theater.labels.clone());
@@ -503,6 +514,68 @@ fn theater_verdict(
         }
     }
     Ok(mode)
+}
+
+/// Why the Theater's declared requirements rule it out, if they do: they have not been
+/// checked, or a requirement other than a harness is unmet. A Theater that declares none is
+/// not checked; harnesses are judged per Agent by [`harness_verdict`].
+pub fn fitness(theater: &TheaterSummary) -> Result<(), String> {
+    let Some(requires) = &theater.requires else {
+        return Ok(());
+    };
+    let report = theater.report.as_ref().ok_or_else(|| {
+        "its requirements have not been checked yet: the Station's probe has not finished"
+            .to_owned()
+    })?;
+    if let Some(error) = &report.error {
+        return Err(format!("its requirements could not be checked: {error}"));
+    }
+    let unmet: Vec<String> = report
+        .unmet
+        .iter()
+        .filter(|unmet| !requires.harnesses.iter().any(|h| h.name() == unmet.name))
+        .map(ToString::to_string)
+        .collect();
+    if unmet.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "it does not meet its requirements: {}",
+            unmet.join("; ")
+        ))
+    }
+}
+
+/// Why an Agent whose handler is `handler` cannot run on the Theater in `mode`, if it cannot:
+/// in field mode its harness runs there, so a Theater that lists its harnesses must list this
+/// one and have it installed. Remote-hands mode runs the harness on the Station.
+pub fn harness_verdict(
+    theater: &TheaterSummary,
+    mode: ExecutionMode,
+    handler: &str,
+) -> Result<(), String> {
+    let Some(requires) = theater
+        .requires
+        .as_ref()
+        .filter(|_| mode == ExecutionMode::Field)
+    else {
+        return Ok(());
+    };
+    if !requires.allows_harness(handler) {
+        return Err(format!(
+            "harness {handler:?} is not one of the Theater's requires.harnesses"
+        ));
+    }
+    let unmet = theater
+        .report
+        .as_ref()
+        .and_then(|report| report.unmet.iter().find(|unmet| unmet.name == handler));
+    match unmet {
+        Some(unmet) => Err(format!(
+            "harness {handler:?} is missing on this Theater: {unmet}"
+        )),
+        None => Ok(()),
+    }
 }
 
 /// What the Station's own host can do when it has not said: everything but forwarding.
@@ -1172,6 +1245,105 @@ mod tests {
             (best.theater.as_str(), best.mode),
             ("box", ExecutionMode::Field)
         );
+    }
+
+    #[test]
+    fn a_theater_missing_a_harness_is_not_eligible_for_its_agents_and_says_why() {
+        use crate::directorates::q::provision::{ProbeReport, Requirements};
+        let requires = Requirements::default()
+            .with_harness("claude>=2.1".parse().unwrap())
+            .with_tool("git".parse().unwrap());
+        let mut lab = Theater::new("lab", TheaterAccess::Local)
+            .with_requirements(requires.clone())
+            .summary();
+        let probed = |found: &[(&str, &str)]| {
+            let mut report = ProbeReport {
+                found: found
+                    .iter()
+                    .map(|(name, version)| ((*name).to_owned(), (*version).to_owned()))
+                    .collect(),
+                ..ProbeReport::default()
+            };
+            report.unmet = requires.check(&report);
+            report
+        };
+        let mut station = station("a", 0);
+        station.theaters = vec![lab.clone()];
+        let rejected = |placement: &Placement| {
+            placement
+                .rejections
+                .iter()
+                .map(|r| (r.theater.clone(), r.agent.clone(), r.reason.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        // Not probed yet: the whole Theater waits for its report.
+        let placement = place(&policy(), &PlacementRequest::default(), &[station.clone()]);
+        assert!(placement.choices.is_empty());
+        assert_eq!(
+            rejected(&placement),
+            [(
+                Some("lab".to_owned()),
+                None,
+                "its requirements have not been checked yet: the Station's probe has not finished"
+                    .to_owned()
+            )]
+        );
+
+        // The harness is missing: 007 (claude) is ruled out there with the reason, and 008's
+        // codex is not a harness the Theater provides.
+        lab.report = Some(probed(&[("git", "git version 2.47.0")]));
+        station.theaters = vec![lab.clone()];
+        let placement = place(&policy(), &PlacementRequest::default(), &[station.clone()]);
+        assert!(placement.choices.is_empty());
+        assert_eq!(
+            rejected(&placement),
+            [
+                (
+                    Some("lab".to_owned()),
+                    Some("007".to_owned()),
+                    "harness \"claude\" is missing on this Theater: claude>=2.1: not installed"
+                        .to_owned()
+                ),
+                (
+                    Some("lab".to_owned()),
+                    Some("008".to_owned()),
+                    "harness \"codex\" is not one of the Theater's requires.harnesses".to_owned()
+                ),
+            ]
+        );
+
+        // A missing tool rules out the Theater for everyone.
+        lab.report = Some(probed(&[("claude", "2.1.310 (Claude Code)")]));
+        station.theaters = vec![lab.clone()];
+        let placement = place(&policy(), &PlacementRequest::default(), &[station.clone()]);
+        assert_eq!(
+            rejected(&placement)[0].2,
+            "it does not meet its requirements: git: not installed"
+        );
+
+        // Fit: 007 runs there.
+        lab.report = Some(probed(&[
+            ("claude", "2.1.310"),
+            ("git", "git version 2.47.0"),
+        ]));
+        station.theaters = vec![lab.clone()];
+        let placement = place(&policy(), &PlacementRequest::default(), &[station.clone()]);
+        assert_eq!(placement.choices.len(), 1);
+        assert_eq!(placement.choices[0].agent, "007");
+
+        // In remote-hands mode the harness runs on the Station, so the Theater's does not
+        // matter.
+        lab.agents = AgentMode::RemoteHands;
+        lab.workdir = Some("/srv/work".to_owned());
+        lab.capabilities = Some(Capabilities {
+            run: true,
+            ..Capabilities::default()
+        });
+        lab.report = Some(probed(&[("git", "git version 2.47.0")]));
+        station.theaters = vec![lab];
+        let placement = place(&policy(), &PlacementRequest::default(), &[station]);
+        assert_eq!(placement.choices.len(), 2);
     }
 
     #[test]

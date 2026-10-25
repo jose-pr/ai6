@@ -27,7 +27,7 @@ pub use directorates::m::approvals::{
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
 pub use directorates::m::placement::{
     AgentFacts, ExecutionMode, OperationPolicy, Placement, PlacementChoice, PlacementRejection,
-    PlacementRequest, StationFacts, execution_mode, place,
+    PlacementRequest, StationFacts, execution_mode, fitness, harness_verdict, place,
 };
 pub use directorates::m::roster::{
     AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS, OnLost, Operation, Roster, RosterError,
@@ -53,6 +53,10 @@ pub use directorates::medical::usage::{
 pub use directorates::medical::watchdog::{
     DEFAULT_BLOCKED_AFTER, DEFAULT_LINE_HISTORY, DEFAULT_LOOP_MIN_LINES, DEFAULT_STALL_TIMEOUT,
     Watchdog, WatchdogConfig, WatchdogOverrides,
+};
+pub use directorates::q::provision::{
+    DEFAULT_INSTALL_TIMEOUT_SECS, ProbeReport, ProvisionSpec, ProvisionStep, RequiredProgram,
+    Requirements, StepStatus, Unmet,
 };
 pub use directorates::q::safehouse::{
     Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseInfo, SafeHouseProvider,

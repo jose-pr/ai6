@@ -1533,6 +1533,26 @@ struct LaunchPlan {
     /// The Mission's working directory on a Theater other than the Station's own host, or
     /// in remote-hands mode.
     root: Option<String>,
+    /// The Theater as this Station publishes it.
+    summary: crate::directorates::m::theaters::TheaterSummary,
+}
+
+impl LaunchPlan {
+    /// Why an Agent with `handler` cannot start here: the Theater's requirements are unmet
+    /// or, in field mode, its harness is missing there.
+    fn refuses(&self, handler: Option<&str>) -> Option<String> {
+        placement::fitness(&self.summary)
+            .and_then(|()| {
+                placement::harness_verdict(&self.summary, self.mode, handler.unwrap_or_default())
+            })
+            .err()
+            .map(|reason| {
+                format!(
+                    "Theater {:?} cannot host this Session: {reason}",
+                    self.theater_id
+                )
+            })
+    }
 }
 
 /// The Theater a Session for `operation_id` runs in on this Station and the mode it runs in,
@@ -1562,6 +1582,7 @@ fn launch_plan(state: &DaemonState, operation_id: Option<&str>) -> Result<Launch
         mode,
         own_host,
         root,
+        summary,
     })
 }
 
@@ -2945,6 +2966,9 @@ async fn start_mission(
         )));
     }
     let plan = launch_plan(&state, mission.operation_id.as_deref()).map_err(configuration_error)?;
+    if let Some(reason) = plan.refuses(agent.handler.as_deref()) {
+        return Err(configuration_error(reason));
+    }
     let theater_id = plan.theater_id.clone();
     let runner = match plan.mode {
         ExecutionMode::Field => runner_link(&state, &theater_id).map_err(configuration_error)?,

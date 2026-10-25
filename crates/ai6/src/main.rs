@@ -47,6 +47,32 @@ enum Command {
         #[command(subcommand)]
         command: RunnerCommand,
     },
+    /// Fit out the Theaters declared in theaters.toml.
+    Theater {
+        #[command(subcommand)]
+        command: TheaterCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TheaterCommand {
+    /// Install what a Theater lacks over its transport: the programs its `requires` names and
+    /// its runner. Each step prints ok, changed or failed; a second run on a fit Theater
+    /// changes nothing. Exits non-zero when a step failed, or with --check when one would
+    /// change.
+    Provision {
+        /// The Theater ID in theaters.toml.
+        theater: String,
+        /// Look only: report what would change and write nothing on the Theater.
+        #[arg(long)]
+        check: bool,
+        /// AI6 configuration directory containing theaters.toml.
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+        /// A directory or library path to scan for the Theater's transport provider.
+        #[arg(long = "plugin-path")]
+        plugin_paths: Vec<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -246,6 +272,15 @@ async fn main() -> ExitCode {
             }
         },
         Command::Runner { command } => runner_command(command).await,
+        Command::Theater { command } => {
+            match tokio::task::spawn_blocking(move || theater_command(command)).await {
+                Ok(code) => code,
+                Err(error) => {
+                    eprintln!("ai6: theater command failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::Serve(args) => {
             let ServeArgs {
                 listen,
@@ -417,6 +452,72 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                 }
             }
         }
+    }
+}
+
+/// Runs `ai6 theater …`. Blocks on the Theater's transport.
+fn theater_command(command: TheaterCommand) -> ExitCode {
+    let TheaterCommand::Provision {
+        theater,
+        check,
+        config_dir,
+        plugin_paths,
+    } = command;
+    let config_dir = match config_dir {
+        Some(path) => path,
+        None => match ai6::directorates::m::roster::config_dir() {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!("ai6: AI6 configuration: {error}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+    let found = ai6::Theaters::load(&config_dir)
+        .map_err(|error| error.to_string())
+        .and_then(|theaters| {
+            theaters
+                .find(&theater)
+                .ok_or_else(|| format!("theaters.toml declares no Theater {theater:?}"))
+        });
+    let declared = match found {
+        Ok(declared) => declared,
+        Err(error) => {
+            eprintln!("ai6: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let plugins = ai6::station::plugins::Plugins::scan(&plugin_paths);
+    let client = match plugins.theater_transport(&declared.access) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("ai6: Theater {theater:?}: {error}");
+            let scan = plugins.scan_summary();
+            for problem in scan.failed.iter().chain(&scan.unreadable) {
+                eprintln!("ai6: plugin path: {problem}");
+            }
+            return ExitCode::FAILURE;
+        }
+    };
+    let steps = ai6::directorates::q::provision::provision(&client, &declared, check);
+    let mut unfit = false;
+    for step in &steps {
+        println!(
+            "{:<12} {:<18} {}",
+            step.status.as_str(),
+            step.name,
+            step.detail
+        );
+        unfit |= match step.status {
+            ai6::StepStatus::Failed => true,
+            ai6::StepStatus::WouldChange => check,
+            _ => false,
+        };
+    }
+    if unfit {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 

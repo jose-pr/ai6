@@ -4,14 +4,16 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use guatiao::ToValue;
-
 use crate::directorates::m::theaters::{Theater, TheaterAccess, TheaterSummary, Theaters};
-use crate::directorates::q::transport::{Capabilities, TransportClient, TransportConfig, describe};
+use crate::directorates::q::provision::{self, ProbeReport};
+use crate::directorates::q::transport::{Capabilities, TransportClient, describe};
 use crate::station::plugins::Plugins;
 
 /// How long after a failed contact the Station tries a Theater again.
 const REPROBE_AFTER: Duration = Duration::from_secs(60);
+/// How often the Station looks over a Theater again for its requirements and for ambient
+/// credentials.
+const REPORT_EVERY: Duration = Duration::from_secs(300);
 
 /// The transport for each Theater a Station reaches.
 ///
@@ -33,6 +35,9 @@ struct Probe {
     error: Option<String>,
     last: Option<Instant>,
     running: bool,
+    report: Option<ProbeReport>,
+    reported: Option<Instant>,
+    reporting: bool,
 }
 
 impl Transports {
@@ -115,19 +120,7 @@ impl Transports {
 }
 
 fn build_client(access: &TheaterAccess, plugins: &Plugins) -> Result<Arc<TransportClient>, String> {
-    let (provider, settings_toml) = access.transport().map_err(|error| error.to_string())?;
-    let config = match access {
-        TheaterAccess::Local => None,
-        _ => Some(
-            TransportConfig { settings_toml }
-                .to_value()
-                .map_err(|error| error.to_string())?,
-        ),
-    };
-    plugins
-        .transport(&provider, config.as_ref())
-        .map(|transport| Arc::new(TransportClient::new(transport)))
-        .map_err(|error| error.to_string())
+    plugins.theater_transport(access).map(Arc::new)
 }
 
 impl Entry {
@@ -162,8 +155,76 @@ impl Entry {
                 .arch
                 .get_or_insert_with(|| std::env::consts::ARCH.to_owned());
         }
+        summary.report = match (&self.client, &capabilities) {
+            (Ok(client), Some(capabilities)) if summary.unavailable.is_none() => {
+                self.known_report(client, capabilities)
+            }
+            (Err(reason), _) if self.theater.requires.is_some() => Some(ProbeReport::failed(
+                format!("this Station cannot reach it to probe it: {reason}"),
+            )),
+            _ => None,
+        };
+        if let Some(report) = &summary.report {
+            for ambient in &report.ambient {
+                summary
+                    .weakened
+                    .push(format!("ambient credential on the Theater: {ambient}"));
+            }
+            // A harness the probe found and accepted is installed there, declared or not.
+            for harness in self.theater.requires.iter().flat_map(|r| &r.harnesses) {
+                let name = harness.name();
+                let accepted = report.found.contains_key(name)
+                    && !report.unmet.iter().any(|unmet| unmet.name == name);
+                if accepted && !summary.harnesses.iter().any(|known| known == name) {
+                    summary.harnesses.push(name.to_owned());
+                }
+            }
+        }
         summary.capabilities = capabilities;
         summary
+    }
+
+    /// The last report on the Theater's requirements and ambient credentials, looking again in
+    /// the background when it is due. `None` until a first look finishes, and for a Windows
+    /// host that declares no requirements.
+    fn known_report(
+        &self,
+        client: &Arc<TransportClient>,
+        capabilities: &Capabilities,
+    ) -> Option<ProbeReport> {
+        let requires = self.theater.requires.clone();
+        if requires.is_none() && capabilities.os.as_deref() == Some("windows") {
+            return None;
+        }
+        let mut probe = self.probe.lock().ok()?;
+        let due = probe
+            .reported
+            .is_none_or(|reported| reported.elapsed() >= REPORT_EVERY);
+        if due && !probe.reporting {
+            probe.reporting = true;
+            let (client, state, capabilities) =
+                (client.clone(), self.probe.clone(), capabilities.clone());
+            let workdir = self.theater.workdir.clone();
+            let spawned = std::thread::Builder::new()
+                .name("ai6-theater-report".to_owned())
+                .spawn(move || {
+                    let report = provision::probe(
+                        &client,
+                        &capabilities,
+                        requires.as_ref(),
+                        workdir.as_deref(),
+                    );
+                    if let Ok(mut probe) = state.lock() {
+                        probe.reporting = false;
+                        probe.reported = Some(Instant::now());
+                        probe.report = Some(report);
+                    }
+                });
+            if spawned.is_err() {
+                probe.reporting = false;
+            }
+        }
+        probe.report.clone()
     }
 
     /// What the transport reported, contacting a remote host in the background until it
@@ -216,7 +277,7 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use guatiao::library::ProviderError;
-    use guatiao::{Status, Value};
+    use guatiao::{Status, ToValue, Value};
 
     use super::*;
     use crate::directorates::m::theaters::SshAccess;
@@ -299,6 +360,185 @@ mod tests {
         assert!(local.unavailable.is_none());
         let without = transports.summary("local", false).unwrap();
         assert!(!without.capabilities.unwrap().terminal);
+    }
+
+    /// A host whose every command prints `stdout`, as the probe script would.
+    struct Answers(&'static str);
+
+    impl Transport for Answers {
+        fn capabilities(&self) -> Result<Value, ProviderError> {
+            Capabilities {
+                run: true,
+                ..Capabilities::default()
+            }
+            .to_value()
+            .map_err(|e| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &e.to_string()))
+        }
+
+        fn run(&self, _spec: &Value) -> Result<Value, ProviderError> {
+            crate::directorates::q::transport::Output {
+                code: Some(0),
+                stdout: guatiao::Bytes(self.0.as_bytes().to_vec()),
+                ..Default::default()
+            }
+            .to_value()
+            .map_err(|e| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &e.to_string()))
+        }
+    }
+
+    #[test]
+    fn a_probe_reports_unmet_requirements_and_ambient_credentials_without_values() {
+        use crate::directorates::q::provision::Requirements;
+        let theater = ssh_theater().with_requirements(
+            Requirements::default()
+                .with_os("linux")
+                .with_harness("claude>=2.1".parse().unwrap())
+                .with_tool("git".parse().unwrap()),
+        );
+        let transports = Transports::none().with_transport(
+            theater,
+            Box::new(Answers(
+                "os\tLinux\nfound\tgit\tgit version 2.47.0\nmissing\tclaude\nfree_kb\t2048\n\
+                 ambient\ta git credential store (~/.git-credentials)\n",
+            )),
+        );
+        let summary = wait_for(&transports, |s| s.report.is_some());
+        let report = summary.report.unwrap();
+        assert_eq!(report.os.as_deref(), Some("linux"));
+        assert_eq!(report.found["git"], "git version 2.47.0");
+        assert_eq!(report.free_mb, Some(2));
+        assert_eq!(
+            report
+                .unmet
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["claude>=2.1: not installed"]
+        );
+        assert_eq!(
+            summary.weakened,
+            ["ambient credential on the Theater: a git credential store (~/.git-credentials)"]
+        );
+        assert!(
+            summary.harnesses.is_empty(),
+            "a missing harness is not published"
+        );
+    }
+
+    /// Every file under `root` with its contents and permissions, to show a run wrote nothing.
+    #[cfg(unix)]
+    fn snapshot(root: &std::path::Path) -> Vec<(std::path::PathBuf, Vec<u8>, u32)> {
+        use std::os::unix::fs::PermissionsExt;
+        let mut files = Vec::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+                    files.push((path.clone(), std::fs::read(&path).unwrap(), mode));
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provisioning_twice_changes_then_finds_everything_ok_and_a_check_writes_nothing() {
+        use crate::directorates::m::theaters::RunnerSettings;
+        use crate::directorates::q::provision::{
+            ProvisionSpec, ProvisionStep, Requirements, StepStatus, provision,
+        };
+        use crate::station::transports::testing::ShellTransport;
+
+        let station = tempfile::tempdir().unwrap();
+        let build = station.path().join("ai6-build");
+        std::fs::write(&build, b"#!/bin/sh\necho ai6 test build\n").unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let theater = Theater::new("box", TheaterAccess::Ssh(SshAccess::new("b.example")))
+            .with_runner(RunnerSettings::default().with_command("~/opt/ai6/bin/ai6"))
+            .with_requirements(
+                Requirements::default()
+                    .with_tool("ai6-stand-in>=1.2".parse().unwrap())
+                    .with_disk_mb(1),
+            )
+            .with_provision(
+                ProvisionSpec::default()
+                    .with_runner(build.to_string_lossy())
+                    .with_install(
+                        "ai6-stand-in",
+                        "mkdir -p bin && printf '#!/bin/sh\\necho ai6-stand-in 1.2.0\\n' \
+                         > bin/ai6-stand-in && chmod 755 bin/ai6-stand-in",
+                    ),
+            );
+        let client = TransportClient::new(Box::new(ShellTransport::new(home.path(), None)));
+        let statuses = |steps: &[ProvisionStep]| {
+            steps
+                .iter()
+                .map(|step| (step.name.clone(), step.status))
+                .collect::<Vec<_>>()
+        };
+
+        // Checking an unfit Theater says what would change and writes nothing.
+        let before = snapshot(home.path());
+        let checked = provision(&client, &theater, true);
+        assert_eq!(
+            statuses(&checked),
+            [
+                ("disk".to_owned(), StepStatus::Ok),
+                ("ai6-stand-in".to_owned(), StepStatus::WouldChange),
+                ("runner".to_owned(), StepStatus::WouldChange),
+            ],
+            "{checked:#?}"
+        );
+        assert_eq!(snapshot(home.path()), before);
+
+        let first = provision(&client, &theater, false);
+        assert_eq!(
+            statuses(&first),
+            [
+                ("disk".to_owned(), StepStatus::Ok),
+                ("ai6-stand-in".to_owned(), StepStatus::Changed),
+                ("runner".to_owned(), StepStatus::Changed),
+            ],
+            "{first:#?}"
+        );
+        let installed = home.path().join("opt/ai6/bin/ai6");
+        assert_eq!(
+            std::fs::read(&installed).unwrap(),
+            std::fs::read(&build).unwrap()
+        );
+        assert!(!home.path().join("opt/ai6/bin/ai6.ai6-partial").exists());
+
+        let second = provision(&client, &theater, false);
+        assert!(
+            second.iter().all(|step| step.status == StepStatus::Ok),
+            "{second:#?}"
+        );
+
+        // A fit Theater checks all ok, and the check writes nothing.
+        let before = snapshot(home.path());
+        let checked = provision(&client, &theater, true);
+        assert!(checked.iter().all(|step| step.status == StepStatus::Ok));
+        assert_eq!(snapshot(home.path()), before);
+
+        // A changed build is copied again; a program with no install command fails.
+        std::fs::write(&build, b"#!/bin/sh\necho ai6 newer build\n").unwrap();
+        let mut stricter = theater.clone();
+        stricter.requires = Some(Requirements::default().with_tool("ai6-absent".parse().unwrap()));
+        let steps = provision(&client, &stricter, false);
+        assert_eq!(
+            statuses(&steps),
+            [
+                ("ai6-absent".to_owned(), StepStatus::Failed),
+                ("runner".to_owned(), StepStatus::Changed),
+            ]
+        );
+        assert!(steps[0].detail.contains("provision.install.ai6-absent"));
     }
 
     #[test]
@@ -573,7 +813,15 @@ pub(crate) mod testing {
             )
             .map_err(internal)?;
             let mut command = std::process::Command::new("sh");
-            command.arg("-c").arg(line).current_dir(&self.home);
+            // The host's own home, with its `bin` first on the PATH as a login shell has it.
+            let path = std::env::var("PATH").unwrap_or_default();
+            command
+                .arg("-c")
+                .arg(line)
+                .current_dir(&self.home)
+                .env("HOME", &self.home)
+                .env("PATH", format!("{}/bin:{path}", self.home.display()))
+                .env_remove("SSH_AUTH_SOCK");
             crate::directorates::q::transport::kit::run_process(
                 &mut command,
                 &crate::directorates::q::transport::kit::ProcessInput {
@@ -602,6 +850,19 @@ pub(crate) mod testing {
             }
             .to_value()
             .map_err(internal)
+        }
+
+        fn write_file(&self, spec: &Value) -> Result<(), ProviderError> {
+            self.check()?;
+            let spec =
+                crate::directorates::q::transport::WriteSpec::from_value(spec).map_err(internal)?;
+            let path = self.path(&spec.path);
+            if spec.create_dirs
+                && let Some(parent) = path.parent()
+            {
+                std::fs::create_dir_all(parent).map_err(|e| io(&e))?;
+            }
+            std::fs::write(path, &spec.data.0).map_err(|e| io(&e))
         }
 
         fn forward(

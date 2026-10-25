@@ -245,6 +245,28 @@ impl Plugins {
         build::<dyn Transport>(&self.registry, provider, config)
     }
 
+    /// Builds the transport a Theater's access settings name. Building never contacts the host.
+    pub fn theater_transport(
+        &self,
+        access: &crate::directorates::m::theaters::TheaterAccess,
+    ) -> Result<crate::directorates::q::transport::TransportClient, String> {
+        use crate::directorates::m::theaters::TheaterAccess;
+        use crate::directorates::q::transport::{TransportClient, TransportConfig};
+        use guatiao::ToValue;
+        let (provider, settings_toml) = access.transport().map_err(|error| error.to_string())?;
+        let config = match access {
+            TheaterAccess::Local => None,
+            _ => Some(
+                TransportConfig { settings_toml }
+                    .to_value()
+                    .map_err(|error| error.to_string())?,
+            ),
+        };
+        self.transport(&provider, config.as_ref())
+            .map(TransportClient::new)
+            .map_err(|error| error.to_string())
+    }
+
     /// Constructs a Source from its provider ID and Guatiao config.
     pub fn source(
         &self,

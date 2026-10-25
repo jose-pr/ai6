@@ -39,6 +39,34 @@ fn negative_watchdog_timeout_is_an_invalid_invocation() {
 }
 
 #[test]
+fn theater_provision_names_what_is_missing_before_contacting_anything() {
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("theaters.toml"),
+        "[theater.box]\naccess = { ssh = { host = \"b.example\" } }\n",
+    )
+    .unwrap();
+    let run = |theater: &str| {
+        let output = ai6()
+            .args(["theater", "provision", theater, "--check", "--config-dir"])
+            .arg(config.path())
+            .output()
+            .expect("the AI6 command should start");
+        (
+            output.status.success(),
+            String::from_utf8(output.stderr).unwrap(),
+        )
+    };
+    let (ok, error) = run("absent");
+    assert!(!ok && error.contains("theaters.toml declares no Theater \"absent\""));
+    let (ok, error) = run("box");
+    assert!(
+        !ok && error.contains("no provider `ssh` is loaded"),
+        "{error}"
+    );
+}
+
+#[test]
 fn sleepers_are_listed_authorized_and_revoked() {
     let config = tempfile::tempdir().unwrap();
     let registry = tempfile::tempdir().unwrap();

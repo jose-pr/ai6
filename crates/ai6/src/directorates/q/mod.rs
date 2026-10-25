@@ -4,6 +4,7 @@ mod mcp;
 mod sandbox;
 mod secrets;
 
+pub mod provision;
 pub mod safehouse;
 pub mod terminal;
 pub mod transport;

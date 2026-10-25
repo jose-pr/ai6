@@ -24,6 +24,10 @@
 //! `workdir` where a Mission works when its Operation does not name a path on that Theater,
 //! and `runner` how to reach the `ai6 runner` that supervises harnesses there (see
 //! [`RunnerSettings`]).
+//!
+//! `requires` says what the Theater must have before Sessions run there and `provision` how
+//! to install it (see [`Requirements`] and [`ProvisionSpec`]); the Station probes the
+//! Theater and publishes what it found, and `ai6 theater provision` fits it out.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -31,6 +35,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::directorates::q::provision::{ProbeReport, ProvisionSpec, Requirements};
 use crate::directorates::q::transport::Capabilities;
 
 /// The Theater every Station reaches without configuration: its own host.
@@ -354,6 +359,12 @@ pub struct Theater {
     /// supervises them itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<RunnerSettings>,
+    /// What the Theater must have before Sessions run there; nothing is checked when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires: Option<Requirements>,
+    /// How `ai6 theater provision` installs what the Theater lacks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provision: Option<ProvisionSpec>,
 }
 
 impl Theater {
@@ -368,7 +379,23 @@ impl Theater {
             harnesses: Vec::new(),
             workdir: None,
             runner: None,
+            requires: None,
+            provision: None,
         }
+    }
+
+    /// Declares what the Theater must have before Sessions run there.
+    #[must_use]
+    pub fn with_requirements(mut self, requires: Requirements) -> Self {
+        self.requires = Some(requires);
+        self
+    }
+
+    /// Declares how to install what the Theater lacks.
+    #[must_use]
+    pub fn with_provision(mut self, provision: ProvisionSpec) -> Self {
+        self.provision = Some(provision);
+        self
     }
 
     /// Has a runner supervise the harnesses on the Theater.
@@ -454,6 +481,8 @@ impl Theater {
             runner: self.runner.is_some(),
             unavailable: None,
             weakened: self.weakenings(),
+            requires: self.requires.clone(),
+            report: None,
         }
     }
 
@@ -565,6 +594,16 @@ impl Theater {
                 )));
             }
         }
+        if let Some(requires) = &self.requires {
+            requires
+                .validate()
+                .map_err(|error| TheaterError(format!("Theater {id:?}: {error}")))?;
+        }
+        if let Some(provision) = &self.provision {
+            provision
+                .validate()
+                .map_err(|error| TheaterError(format!("Theater {id:?}: {error}")))?;
+        }
         Ok(())
     }
 }
@@ -639,9 +678,16 @@ pub struct TheaterSummary {
     /// contact failed. Absent when it can.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unavailable: Option<String>,
-    /// Settings looser than their defaults.
+    /// Settings looser than their defaults, and credentials found on the Theater outside
+    /// AI6's leases.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub weakened: Vec<String>,
+    /// What the Theater must have before Sessions run there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires: Option<Requirements>,
+    /// What the Station's last probe of the Theater found; absent until one finishes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<ProbeReport>,
 }
 
 impl TheaterSummary {
@@ -708,6 +754,10 @@ impl Theaters {
             workdir: Option<String>,
             #[serde(default)]
             runner: Option<RunnerSettings>,
+            #[serde(default)]
+            requires: Option<Requirements>,
+            #[serde(default)]
+            provision: Option<ProvisionSpec>,
         }
         let document: Document = toml::from_str(text).map_err(|e| TheaterError(e.to_string()))?;
         let mut theaters = Self::default();
@@ -721,6 +771,8 @@ impl Theaters {
                 harnesses: definition.harnesses,
                 workdir: definition.workdir,
                 runner: definition.runner,
+                requires: definition.requires,
+                provision: definition.provision,
             })?;
         }
         Ok(theaters)
@@ -868,6 +920,47 @@ runner = { command = "/opt/ai6/bin/ai6", state_dir = "/var/lib/ai6/runner", plug
             Theaters::parse("[theater.box]\naccess = \"local\"\nrunner = { command = \"\" }\n")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn requirements_are_published_and_the_provision_spec_is_not() {
+        let theaters = Theaters::parse(
+            r#"
+[theater.box]
+access = { ssh = { host = "b.example" } }
+
+[theater.box.requires]
+os = "linux"
+harnesses = ["claude>=2.1"]
+tools = ["git"]
+disk_mb = 512
+
+[theater.box.provision]
+runner = "/srv/builds/ai6"
+install = { git = "sudo dnf install -y git" }
+"#,
+        )
+        .unwrap();
+        let theater = theaters.find("box").unwrap();
+        let requires = theater.requires.clone().unwrap();
+        assert_eq!(requires.harnesses[0].to_string(), "claude>=2.1");
+        assert_eq!(requires.disk_mb, Some(512));
+        let provision = theater.provision.clone().unwrap();
+        assert_eq!(provision.install["git"], "sudo dnf install -y git");
+        let published = serde_json::to_value(theater.summary()).unwrap();
+        assert_eq!(
+            published["requires"],
+            serde_json::json!({"os": "linux", "harnesses": ["claude>=2.1"], "tools": ["git"], "disk_mb": 512})
+        );
+        assert!(!published.to_string().contains("dnf"));
+        for bad in [
+            "[theater.x]\naccess = \"local\"\nrequires = { tools = [\"git\", \"git\"] }\n",
+            "[theater.x]\naccess = \"local\"\nrequires = { tools = [\"git>=x\"] }\n",
+            "[theater.x]\naccess = \"local\"\nrequires = { cpu = 4 }\n",
+            "[theater.x]\naccess = \"local\"\nprovision = { install = { git = \"\" } }\n",
+        ] {
+            assert!(Theaters::parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
