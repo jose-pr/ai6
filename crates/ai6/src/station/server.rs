@@ -12,8 +12,8 @@ use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, LockResult, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
@@ -1298,7 +1298,8 @@ fn fence_out(state: &DaemonState, mission_id: &str) {
         .sessions
         .lock()
         .ok()
-        .and_then(|mut sessions| sessions.remove(mission_id));
+        .and_then(|mut sessions| sessions.remove(mission_id))
+        .inspect(|operation| operation.gate.close());
     if let Some(operation) = operation
         && let Ok(session) = operation.session.lock()
     {
@@ -2088,6 +2089,7 @@ struct AgentOperation {
     session: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
     watchdog: Watchdog,
     exposure: ExposureGate,
+    gate: SessionGate,
     session_id: Option<SessionId>,
     #[cfg(feature = "cables-mcp")]
     _cables_mcp: Option<cables_mcp::Endpoint>,
@@ -2095,6 +2097,43 @@ struct AgentOperation {
     _theater_mcp: Option<theater_mcp::Endpoint>,
     #[cfg(feature = "publisher")]
     telemetry: Option<Arc<SessionTelemetry>>,
+}
+
+/// Coordinates operator requests with a Session's event pump.
+///
+/// The pump holds the Session lock for up to a second per poll and takes it again at once,
+/// and `std::sync::Mutex` is not fair: without a turn, an operator message can wait for as
+/// long as the Session stays quiet.
+#[derive(Clone, Default)]
+struct SessionGate {
+    waiting: Arc<AtomicUsize>,
+    closing: Arc<AtomicBool>,
+}
+
+impl SessionGate {
+    /// Takes the Session lock for an operator request, ahead of the pump's next poll.
+    fn lock<'a, T: ?Sized>(&self, session: &'a Mutex<T>) -> LockResult<MutexGuard<'a, T>> {
+        self.waiting.fetch_add(1, Ordering::AcqRel);
+        let guard = session.lock();
+        self.waiting.fetch_sub(1, Ordering::AcqRel);
+        guard
+    }
+
+    /// Waits until no operator request is queued for the Session lock.
+    fn yield_to_operator(&self) {
+        while self.waiting.load(Ordering::Acquire) > 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Marks the Session as ending, before its Mission's final transition.
+    fn close(&self) {
+        self.closing.store(true, Ordering::Release);
+    }
+
+    fn is_closing(&self) -> bool {
+        self.closing.load(Ordering::Acquire)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -2904,6 +2943,7 @@ async fn start_mission(
             session: session.clone(),
             watchdog,
             exposure,
+            gate: SessionGate::default(),
             session_id: session_id.clone(),
             #[cfg(feature = "cables-mcp")]
             _cables_mcp: cables_mcp,
@@ -3247,6 +3287,7 @@ async fn resume_mission(
             session: resumed.clone(),
             watchdog,
             exposure,
+            gate: SessionGate::default(),
             session_id: Some(session_id.clone()),
             #[cfg(feature = "cables-mcp")]
             _cables_mcp: cables_mcp,
@@ -3284,16 +3325,23 @@ async fn send_message(
     axum::extract::Path(mission_id): axum::extract::Path<String>,
     Json(request): Json<SendMessage>,
 ) -> Result<StatusCode, ApiErrorResponse> {
-    let (session, watchdog) = state
+    let (session, watchdog, gate) = state
         .sessions
         .lock()
         .map_err(|_| internal_error())?
         .get(&mission_id)
-        .map(|operation| (operation.session.clone(), operation.watchdog.clone()))
+        .map(|operation| {
+            (
+                operation.session.clone(),
+                operation.watchdog.clone(),
+                operation.gate.clone(),
+            )
+        })
         .ok_or_else(|| mission_error(MissionError::NotFound))?;
+    let worker_gate = gate.clone();
     tokio::task::spawn_blocking(move || {
-        session
-            .lock()
+        worker_gate
+            .lock(&session)
             .map_err(|_| "provider Session lock was poisoned".to_owned())?
             .send_message(AgentMessage { text: request.text })
             .map_err(|error| error.to_string())
@@ -3302,20 +3350,24 @@ async fn send_message(
     .map_err(|error| runtime_error(format!("message worker failed: {error}")))?
     .map_err(provider_error)?;
     watchdog.record_operator_input();
-    let current = state
-        .missions
-        .lock()
-        .map_err(|_| internal_error())?
-        .get(&mission_id)
-        .map(|mission| mission.state)
-        .ok_or_else(|| mission_error(MissionError::NotFound))?;
-    if matches!(current, MissionState::Blocked | MissionState::Stalled) {
-        state
-            .missions
-            .lock()
-            .map_err(|_| internal_error())?
-            .transition(&mission_id, MissionState::Working)
-            .map_err(mission_error)?;
+    let revived = {
+        let mut missions = state.missions.lock().map_err(|_| internal_error())?;
+        let current = missions
+            .get(&mission_id)
+            .map(|mission| mission.state)
+            .ok_or_else(|| mission_error(MissionError::NotFound))?;
+        // Checked under the Mission book lock: a closing Session sets its gate before its
+        // final transition, so this cannot undo a stall or leave a Mission without a Session.
+        let revive =
+            matches!(current, MissionState::Blocked | MissionState::Stalled) && !gate.is_closing();
+        if revive {
+            missions
+                .transition(&mission_id, MissionState::Working)
+                .map_err(mission_error)?;
+        }
+        revive
+    };
+    if revived {
         publish_lifecycle(&state, &mission_id, MissionState::Working);
     }
     Ok(StatusCode::ACCEPTED)
@@ -3325,16 +3377,15 @@ async fn interrupt_mission(
     State(state): State<DaemonState>,
     axum::extract::Path(mission_id): axum::extract::Path<String>,
 ) -> Result<Json<Mission>, ApiErrorResponse> {
-    let session = state
+    let (session, gate) = state
         .sessions
         .lock()
         .map_err(|_| internal_error())?
         .get(&mission_id)
-        .map(|operation| operation.session.clone())
+        .map(|operation| (operation.session.clone(), operation.gate.clone()))
         .ok_or_else(|| mission_error(MissionError::NotFound))?;
     tokio::task::spawn_blocking(move || {
-        session
-            .lock()
+        gate.lock(&session)
             .map_err(|_| "provider Session lock was poisoned".to_owned())?
             .interrupt()
             .map_err(|error| error.to_string())
@@ -3429,14 +3480,14 @@ fn spawn_event_pump_with_monitor(
         let mut output_revision = monitor.output_revision();
         let mut usage_tracker = UsageTracker::default();
         let mut budget_notices = BTreeSet::new();
-        let exposure = state
+        let (exposure, gate) = state
             .sessions
             .lock()
             .ok()
             .and_then(|sessions| {
                 sessions
                     .get(&mission_id)
-                    .map(|operation| operation.exposure.clone())
+                    .map(|operation| (operation.exposure.clone(), operation.gate.clone()))
             })
             .unwrap_or_default();
         let mut announced = exposure.exposures().len();
@@ -3450,6 +3501,7 @@ fn spawn_event_pump_with_monitor(
             if !is_current_session(&state, &mission_id, &session) {
                 break;
             }
+            gate.yield_to_operator();
             let result = (|| {
                 let session = session
                     .lock()
@@ -3595,6 +3647,7 @@ fn spawn_event_pump_with_monitor(
                     usage: None,
                     tools: Vec::new(),
                 };
+                gate.close();
                 apply_event_state(&state, &mission_id, &event);
                 queue_event(&state, &mission_id, event);
                 if let Ok(session) = session.lock() {
@@ -3791,7 +3844,9 @@ fn handle_limit(
             .get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
         {
-            sessions.remove(mission_id)
+            sessions
+                .remove(mission_id)
+                .inspect(|operation| operation.gate.close())
         } else {
             None
         }
@@ -3956,7 +4011,9 @@ fn finish_operation(
             .get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
         {
-            sessions.remove(mission_id)
+            sessions
+                .remove(mission_id)
+                .inspect(|operation| operation.gate.close())
         } else {
             None
         }
@@ -4096,7 +4153,9 @@ fn stop_operation(
             .get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
         {
-            sessions.remove(mission_id)
+            sessions
+                .remove(mission_id)
+                .inspect(|operation| operation.gate.close())
         } else {
             None
         }
@@ -4136,7 +4195,8 @@ async fn finalize_mission_resources(
         .sessions
         .lock()
         .map_err(|_| internal_error())?
-        .remove(mission_id);
+        .remove(mission_id)
+        .inspect(|operation| operation.gate.close());
     let Some(operation) = operation else {
         return Ok(());
     };
@@ -4551,6 +4611,7 @@ mod tests {
                     )),
                     watchdog: Watchdog::default(),
                     exposure: ExposureGate::default(),
+                    gate: SessionGate::default(),
                     session_id: Some(session),
                     #[cfg(feature = "cables-mcp")]
                     _cables_mcp: None,
@@ -6380,6 +6441,7 @@ mod tests {
                 session: session.clone(),
                 watchdog: Watchdog::default(),
                 exposure: ExposureGate::default(),
+                gate: SessionGate::default(),
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
@@ -6484,6 +6546,7 @@ mod tests {
                 session: session.clone(),
                 watchdog: monitor.clone(),
                 exposure: ExposureGate::default(),
+                gate: SessionGate::default(),
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
@@ -6598,9 +6661,15 @@ mod tests {
         .expect("event worker should stop promptly");
     }
 
-    #[tokio::test]
-    async fn operator_message_resets_the_watchdog_before_the_session_stalls() {
-        let mission_id = MissionId::try_new("mission-quiet").unwrap();
+    /// A Working Mission with a quiet mock Session registered under `gate`.
+    fn quiet_session_state(
+        mission_id: &str,
+        gate: SessionGate,
+    ) -> (
+        DaemonState,
+        Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    ) {
+        let mission_id = MissionId::try_new(mission_id).unwrap();
         let session_id = SessionId::try_new("provider-session-quiet").unwrap();
         let mut missions = MissionStore::default();
         missions
@@ -6662,6 +6731,7 @@ mod tests {
                 session: session.clone(),
                 watchdog: Watchdog::default(),
                 exposure: ExposureGate::default(),
+                gate,
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
@@ -6671,6 +6741,76 @@ mod tests {
                 telemetry: None,
             },
         );
+
+        (state, session)
+    }
+
+    #[test]
+    fn session_gate_gives_an_operator_the_lock_before_the_next_poll() {
+        let session = Arc::new(Mutex::new(()));
+        let gate = SessionGate::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let poller = {
+            let (session, gate, stop) = (session.clone(), gate.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Acquire) {
+                    gate.yield_to_operator();
+                    let _poll = session.lock().unwrap();
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            })
+        };
+        std::thread::sleep(Duration::from_millis(20));
+        let started = std::time::Instant::now();
+        drop(gate.lock(&session).unwrap());
+        let waited = started.elapsed();
+        stop.store(true, Ordering::Release);
+        poller.join().unwrap();
+        assert!(
+            waited < Duration::from_secs(2),
+            "operator waited {waited:?} for a poller that holds the lock for 50 ms"
+        );
+    }
+
+    #[tokio::test]
+    async fn operator_message_does_not_revive_a_closing_session() {
+        let gate = SessionGate::default();
+        let (state, _session) = quiet_session_state("mission-closing", gate.clone());
+        gate.close();
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .transition("mission-closing", MissionState::Stalled)
+            .unwrap();
+        assert_eq!(
+            send_message(
+                State(state.clone()),
+                axum::extract::Path("mission-closing".to_owned()),
+                Json(SendMessage {
+                    text: "continue".to_owned(),
+                }),
+            )
+            .await
+            .unwrap(),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-closing")
+                .unwrap()
+                .state,
+            MissionState::Stalled
+        );
+    }
+
+    #[tokio::test]
+    async fn operator_message_resets_the_watchdog_before_the_session_stalls() {
+        let mission_id = MissionId::try_new("mission-quiet").unwrap();
+        let (state, session) = quiet_session_state(mission_id.as_str(), SessionGate::default());
 
         spawn_event_pump_with_monitor(
             state.clone(),
@@ -6962,6 +7102,7 @@ mod tests {
                 session: session.clone(),
                 watchdog: Watchdog::default(),
                 exposure: ExposureGate::default(),
+                gate: SessionGate::default(),
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,

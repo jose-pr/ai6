@@ -327,7 +327,9 @@ pub(super) fn stop_for_budget(
             .get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
         {
-            sessions.remove(mission_id)
+            sessions
+                .remove(mission_id)
+                .inspect(|operation| operation.gate.close())
         } else {
             None
         }
@@ -511,7 +513,8 @@ fn stop_for_quarantine(state: &DaemonState, mission: &Mission, records: &[Quaran
         .sessions
         .lock()
         .ok()
-        .and_then(|mut sessions| sessions.remove(mission_id));
+        .and_then(|mut sessions| sessions.remove(mission_id))
+        .inspect(|operation| operation.gate.close());
     if let Some(operation) = &operation
         && let Ok(session) = operation.session.lock()
     {
