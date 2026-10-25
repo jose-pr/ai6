@@ -1,0 +1,63 @@
+[package]
+name = "ai6"
+description = "The AI6 Mission daemon and command"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+exclude = [".*", "*.local.*"]
+
+[features]
+default = []
+daemon = ["dep:axum", "dep:tokio", "dep:globset", "guatiao/load"]
+# Adds bounded background event publication to the Universal Exports gateway.
+publisher = ["daemon", "dep:ai6-diptel", "dep:ureq", "dep:url"]
+cables-mcp = ["daemon", "dep:rmcp", "dep:schemars", "dep:subtle"]
+station-tls = ["dep:rustls", "dep:tokio-rustls", "dep:rcgen", "dep:rustls-pemfile", "dep:x509-parser", "dep:globset", "dep:data-encoding"]
+cli = ["daemon", "publisher", "cables-mcp", "station-tls", "dep:clap", "tokio/signal"]
+
+[[bin]]
+name = "ai6"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[[test]]
+name = "cli"
+path = "tests/cli.rs"
+required-features = ["cli"]
+
+[dependencies]
+axum = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+guatiao = { workspace = true, features = ["provider"] }
+fs2 = "0.4"
+serde = { workspace = true, features = ["alloc"] }
+serde_json.workspace = true
+rmcp = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+sha2.workspace = true
+rustls = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+rcgen = { workspace = true, optional = true }
+rustls-pemfile = { workspace = true, optional = true }
+x509-parser = { workspace = true, optional = true }
+globset = { workspace = true, optional = true }
+data-encoding = { workspace = true, optional = true }
+lru.workspace = true
+regex.workspace = true
+subtle = { workspace = true, optional = true }
+tempfile.workspace = true
+toml.workspace = true
+tokio = { workspace = true, optional = true }
+ureq = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+ai6-diptel = { path = "../ai6-diptel", optional = true }
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
+tokio.workspace = true

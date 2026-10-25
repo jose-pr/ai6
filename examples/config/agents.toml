@@ -1,0 +1,53 @@
+# Agents are codenames; the harness, model and effort are the codename's current
+# occupant. Roles describe the job. A Mission asks for a role, and M posts the
+# highest-priority qualified Agent whose handler is available; the next one is its
+# backup (008 covers for 007).
+
+[agent.007]
+aliases = ["JamesBond"]
+handler = "claude"
+model = "sonnet"
+effort = "high"
+clearance = "field"
+roles = ["case-officer", "targeter", "analyst", "senior-analyst", "technical-officer"]
+priority = 20
+
+[agent.008]
+handler = "codex"
+model = "gpt-5.6"
+effort = "high"
+clearance = "field"
+roles = ["case-officer", "targeter", "analyst", "senior-analyst", "technical-officer"]
+priority = 10
+
+[agent.Tanner]
+handler = "claude"
+model = "sonnet"
+effort = "medium"
+clearance = "desk"
+roles = ["reports-officer"]
+priority = 10
+
+[role.case-officer]
+purpose = "Own a bounded Mission and coordinate its delivery within the Operation."
+policy = "Follow the Mission brief and Operation rules; request authorization for restricted actions."
+
+[role.targeter]
+purpose = "Find relevant material in approved sources and explain the evidence behind each priority."
+policy = "Stay within the brief and its approved sources; label gaps and never treat a priority as a conclusion."
+
+[role.analyst]
+purpose = "Synthesize supplied evidence and explain what it supports, contradicts, or leaves unknown."
+policy = "Separate sourced facts from inference, preserve provenance, and include plausible alternatives."
+
+[role.senior-analyst]
+purpose = "Independently review an analysis and test its assumptions and confidence."
+policy = "Seek disconfirming evidence and alternative explanations; report findings without claiming approval authority."
+
+[role.reports-officer]
+purpose = "Prepare concise, decision-ready reports from validated findings."
+policy = "Preserve source provenance, confidence and unresolved questions; do not overstate conclusions."
+
+[role.technical-officer]
+purpose = "Diagnose Agent handler and tool issues and propose bounded technical changes."
+policy = "Follow the explicit technical brief; request authorization before changing credentials, policy or deployment."

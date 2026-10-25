@@ -1,0 +1,833 @@
+# `ai6` — API header
+
+Header-file-style reference for the `ai6` crate: the public library and daemon command,
+with signatures, contracts and gotchas. It ships inside the package and is self-contained.
+Development documentation lives with the source at <https://github.com/jose-pr/ai6>.
+
+| Feature | Adds | Default |
+| --- | --- | --- |
+| (none) | Public AI6 contracts without daemon dependencies. | Yes |
+| `daemon` | The Station's HTTP service, scheduler and Guatiao provider host. | No |
+| `publisher` | Bounded lifecycle and raw terminal-byte publication to Universal Exports. | No |
+| `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
+| `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS. | No |
+| `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
+
+MSRV: Rust 1.89. The crate depends on Guatiao, serde, fs2, sha2, lru and zeroize.
+`daemon` adds Axum, Tokio and Guatiao provider loading, `publisher` adds `ureq` and
+`url`, and `station-tls` adds rustls, tokio-rustls, rcgen, PEM/X.509 parsing and
+certificate-name globs. `cli` adds clap and Tokio signal support. The crate builds as a
+Rust library and contains no `unsafe` code. `cables-mcp` adds RMCP's Streamable HTTP
+server, JSON Schema support, constant-time bearer checks and per-Session tokens; the
+default feature set remains dependency-light.
+
+The library root re-exports common contracts. Two public modules group the rest.
+`directorates` holds the decisions: `directorates::m` owns access, identity, Missions, the
+roster and cover; `directorates::i` owns the Registry (intake) and Cables; `directorates::q`
+owns loadouts, secret leases and terminal contracts; `directorates::section_00` owns the
+AgentHandler contract; `directorates::medical` owns Session monitoring. `station` holds the
+node that runs them: `station::server` (daemon service and `serve*`), `station::plugins`
+(provider host), `station::safehouse` (Mission worktrees), `station::publisher`
+(`publisher` feature) and `station::identity` (`station-tls` feature). The command
+exposes `ai6 serve`, `ai6 identity` and `ai6 peer waiting|accept`.
+
+## Access contracts (`ai6::directorates::m::access`)
+
+```rust
+pub struct Attempt {
+    pub name: Option<String>,
+    pub secret: Option<String>,
+    pub headers: BTreeMap<String, String>,
+    pub peer: Option<String>,
+    pub secure: Option<bool>,
+    pub certificate: Option<String>,
+}
+pub struct Lookup { pub by: String, pub value: String }
+pub enum Verdict { Unknown, Invalid, Valid(Lookup) }
+pub struct Person {
+    pub id: String,
+    pub name: String,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+    pub groups: Vec<String>,
+    pub attributes: BTreeMap<String, guatiao::Value>,
+}
+pub trait Authenticator {
+    fn authenticate(&self, attempt: Attempt) -> Result<Verdict, guatiao::library::ProviderError>;
+}
+pub trait Directory {
+    fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, guatiao::library::ProviderError>;
+}
+pub struct AuthorizationRequest { pub person: Person, pub action: String, pub resource: String }
+pub struct AuthorizationDecision {
+    pub allowed: bool,
+    pub limits: BTreeMap<String, guatiao::Value>,
+}
+pub trait Authorizer {
+    fn authorize(&self, request: AuthorizationRequest)
+        -> Result<AuthorizationDecision, guatiao::library::ProviderError>;
+}
+pub struct RoleAuthorizer;
+#[non_exhaustive]
+pub struct RolePolicyError;
+impl core::error::Error for RolePolicyError;
+impl RoleAuthorizer {
+    pub fn from_toml(source: &str) -> Result<Self, RolePolicyError>;
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, RolePolicyError>;
+}
+#[non_exhaustive]
+pub struct RoleAuthorizerConfig { pub policy_toml: String }
+pub struct RoleAuthorizerProvider;
+```
+
+These types are re-exported from `ai6`. The Guatiao kinds are
+`lineupmux_authenticator`, `lineupmux_directory` and `lineupmux_authorizer`.
+`Verdict::Valid` carries only a `Lookup`; the authoritative Directory supplies the full
+`Person`. `Attempt` debug output redacts its name, credentials, request headers, peer and
+certificate identity. `Plugins` discovers, lists and constructs these kinds; the caller
+composes authentication, directory lookup and authorization. Daemon plugin scans also
+register the `ai6_roles` provider, configured with `RoleAuthorizerConfig`. The built-in `RoleAuthorizer`
+loads a first-match `[role.*]` and `[[rule]]` policy from TOML; rules match `account:<name>`,
+`person:<id>` or `group:<name>` at an exact `station:<id>`, `operation:<id>`, `theater:<id>`
+or `*` scope.
+No matching rule is deny, and the first matching role is decisive even when its action list
+does not include the requested action. The Universal Exports gateway loads and enforces
+this policy for user requests.
+
+## Watchdog (`ai6::directorates::medical::watchdog`)
+
+```rust
+pub struct WatchdogConfig;
+impl WatchdogConfig {
+    pub fn with_stall_timeout(self, timeout: Duration) -> Self;
+    pub fn with_loop_timeout(self, timeout: Duration) -> Self;
+    pub fn with_loop_min_lines(self, count: usize) -> Self;
+    pub fn with_blocked_after(self, timeout: Duration) -> Self;
+    pub fn with_max_runtime(self, timeout: Option<Duration>) -> Self;
+    pub fn with_history(self, count: usize) -> Self;
+    pub fn with_normalize_digits(self, normalize: bool) -> Self;
+}
+pub struct WatchdogOverrides {
+    pub stall_timeout: Option<Duration>,
+    pub loop_timeout: Option<Duration>,
+    pub loop_min_lines: Option<usize>,
+    pub blocked_after: Option<Duration>,
+    pub max_runtime: Option<Duration>,
+    pub history: Option<usize>,
+    pub normalize_digits: Option<bool>,
+}
+impl WatchdogOverrides {
+    pub fn apply_to(&self, base: &WatchdogConfig) -> WatchdogConfig;
+}
+impl InactivityMonitor {
+    pub fn with_config(config: WatchdogConfig) -> Self;
+    pub fn max_runtime(&self) -> Option<Duration>;
+    pub fn is_max_runtime_exceeded(&self) -> bool;
+}
+impl ServeConfig {
+    pub fn with_watchdog(self, watchdog: WatchdogConfig) -> Self;
+}
+```
+
+`WatchdogConfig::default()` uses a 300-second stall timeout and loop timeout, 50 repeated
+lines, a 10-second prompt timeout, no maximum runtime, 4,096 least-recently-used line
+digests and no digit normalization. Its `with_stall_timeout`, `with_loop_timeout`, `with_loop_min_lines`,
+`with_blocked_after`, `with_max_runtime`, `with_history` and `with_normalize_digits` builders
+set those limits. `InactivityMonitor::with_config` starts a monitor from the configuration;
+`ServeConfig::with_watchdog` applies it to daemon Sessions. Provider events and terminal
+output reset the inactivity deadline; accepted operator messages also reset prompt and
+repeated-line tracking. Terminal output is split on carriage returns and newlines, ANSI
+sequences are removed before comparison, and digit runs can be normalized to `#`. Repeated
+lines with no novel output for the configured loop timeout interrupt and close the handler
+operation as stalled. A quiet prompt-shaped tail marks the Mission blocked after the
+configured prompt timeout; later terminal output or an accepted operator message returns it
+to Working. The optional maximum runtime is measured from Session start and is not reset by
+activity; `is_max_runtime_exceeded()` and `max_runtime()` expose that deadline. The daemon
+publishes lifecycle updates through Universal Exports when configured. Each `[agent.<id>.limits]`
+table can override selected daemon defaults; numeric duration values are finite, non-negative
+seconds, may be fractional and merge field by field through `extends` inheritance.
+
+## Operations and Agent roster (`ai6::directorates::m::roster`)
+
+```rust
+#[non_exhaustive]
+pub struct Agent {
+    pub id: String,
+    pub description: String,
+    pub aliases: Vec<String>,
+    pub handler: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub roles: Vec<String>,
+    pub tags: Vec<String>,
+    pub clearance: String,
+    pub priority: i64,
+    pub context: String,
+    pub env: BTreeMap<String, String>,
+    pub limits: WatchdogOverrides,
+    pub max_concurrent: Option<usize>,
+}
+#[non_exhaustive]
+pub struct AgentRole {
+    pub id: String,
+    pub purpose: String,
+    pub policy: String,
+}
+impl AgentRole {
+    pub fn validate(&self) -> Result<(), RosterError>;
+}
+#[non_exhaustive]
+pub struct Operation {
+    pub id: String,
+    pub name: Option<String>,
+    pub description: String,
+    pub path: Option<PathBuf>,
+    pub theater: Option<String>,
+    pub config: Option<PathBuf>,
+    pub roster: Vec<String>,
+    pub repos: Vec<String>,
+    pub clearance: String,
+    pub max_concurrent: Option<usize>,
+    pub safe_houses: bool,
+    pub branch: String,
+    pub base: String,
+    pub selector: BTreeMap<String, String>,
+    pub cover: String,
+    pub identity: Option<OperationIdentity>,
+    pub on_blown: String,
+    pub intake: toml::Table,
+}
+pub struct OperationIdentity { pub name: String, pub email: String }
+#[non_exhaustive]
+pub struct RosterError(String);
+impl core::fmt::Display for RosterError;
+impl core::error::Error for RosterError;
+impl Roster {
+    pub fn load(root: impl Into<PathBuf>) -> Result<Self, RosterError>;
+    pub fn operation(&self, key: &str) -> Result<&Operation, RosterError>;
+    pub fn operations(&self) -> impl Iterator<Item = &Operation>;
+    pub fn role(&self, key: &str) -> Result<&AgentRole, RosterError>;
+    pub fn roles(&self) -> impl Iterator<Item = &AgentRole>;
+    pub fn agent(&self, operation_key: Option<&str>, agent_key: &str)
+        -> Result<Agent, RosterError>;
+    pub fn select_agent(
+        &self,
+        operation_key: Option<&str>,
+        role: Option<&str>,
+        tags: &[String],
+        available_handlers: Option<&[String]>,
+    ) -> Result<Agent, RosterError>;
+    pub fn agents_for_operation(&self, operation_key: &str) -> Result<Vec<Agent>, RosterError>;
+}
+pub fn config_dir() -> Result<PathBuf, RosterError>;
+```
+
+`load` reads `operations.toml` and `agents.toml`; missing files produce an empty roster and
+invalid files fail closed. Operations are global: an Operation is not owned by a Station,
+and its `selector` lists the Station labels a Station must carry to run its Missions.
+
+An Agent is a codename; its `handler`, `model` and `effort` are the codename's current
+occupant. An `AgentRole` (`[role.<id>]`) is a job description only: a `purpose` and a
+`policy`, passed to the Session as initial context. Neither grants authorization. An
+Agent's `roles` lists the roles it is qualified for; a qualified role name may carry a
+suffix (`case-officer/implementation` resolves to `case-officer`).
+
+`agent` accepts a codename or unambiguous alias and an optional Operation key. It reads
+`.ai6/agents.toml` only for a registered Operation, merges inherited `env` and `limits` by
+key, and rejects Agents outside the Operation's roster or above its clearance.
+`select_agent` returns the highest-priority eligible Agent qualified for the role prefix
+and carrying every tag. With `available_handlers`, Agents whose handler is not listed are
+skipped, so the next qualified Agent serves as the backup; the error says no available
+Agent matched. `operations` yields stable codename order. `config_dir` resolves
+`AI6_CONFIG_DIR`, then `XDG_CONFIG_HOME/ai6`, then the platform configuration directory.
+`Agent.limits` is layered over the daemon-wide watchdog settings when a Mission starts or
+resumes.
+
+## I Branch intake (`ai6::directorates::i::intake`)
+
+```rust
+pub struct AuditEntry {
+    pub id: String,
+    pub actor: String,
+    pub action: String,
+    pub operation: String,
+    pub resource: Option<String>,
+    pub target: String,
+    pub at: f64,
+}
+
+pub struct StationSettings { /* validated settings for one Station */ }
+impl StationSettings {
+    pub fn try_new(station: impl Into<String>, max_concurrent_missions: usize) -> io::Result<Self>;
+    pub fn station(&self) -> &str;
+    pub fn max_concurrent_missions(&self) -> usize;
+}
+pub const MAX_STATION_MISSION_CAPACITY: usize; // 1024
+pub struct MissionProposal {
+    pub id: String,
+    pub operation_id: String,
+    pub parent_mission_id: MissionId,
+    pub proposer_agent_id: String,
+    pub proposer_session_id: SessionId,
+    pub brief: Brief,
+    pub created_at: f64,
+}
+IntakeRegistry::submit_mission_proposal(&MissionProposal) -> io::Result<PathBuf>
+IntakeRegistry::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
+IntakeRegistry::promote_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<Brief>
+IntakeRegistry::reject_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<MissionProposal>
+```
+
+`IntakeRegistry::open(root)` reads the file-backed Registry's `new/` queue without
+creating or changing files; `from_environment()` resolves `AI6_REGISTRY`, then
+`AI6_HOME/registry`, then the platform state directory. `list_new()` returns valid
+version-1 `Brief` values ordered by priority descending, creation time ascending, then
+key. It skips malformed briefs, rejects unknown fields and
+newer versions, and bounds scans to 1,000 files and individual briefs to 1 MiB. Listing
+is read-only. `claim_new(key)` moves one queued brief to `claimed/` under the shared
+`.ai6-registry.lock` but does not create a Station lease. Lease-aware operations are:
+
+```rust
+pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
+record_audit(entry: &AuditEntry) -> io::Result<PathBuf>
+list_audit(limit: usize) -> io::Result<Vec<AuditEntry>>
+station_settings(station: &str) -> io::Result<Option<StationSettings>>
+set_station_settings(station: &str, settings: &StationSettings) -> io::Result<()>
+submit_brief(brief: &Brief) -> io::Result<PathBuf>
+claim_with_lease(key: Option<&str>, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>
+lease(key: &str) -> io::Result<Option<Lease>>
+read_claimed(key: &str) -> io::Result<Option<Brief>>
+leases() -> io::Result<Vec<Lease>>
+expired() -> io::Result<Vec<Lease>>
+renew(key: &str, station: &str, duration: Duration) -> io::Result<bool>
+recover(lease: &Lease, max_attempts: u32, by: &str) -> io::Result<Option<LeaseRecovery>>
+finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<&[u8]>, station: Option<&str>) -> io::Result<Option<PathBuf>>
+```
+
+`submit_brief` validates and atomically writes a unique Mission brief to `new/`; it
+refuses a key already present in `new/`, `claimed/`, `done/` or `failed/`.
+Agent-authored Mission proposals are separately stored under `proposals/pending/<operation>/`
+and never appear in `list_new()`. `promote_mission_proposal` moves an authorized proposal into
+`new/` and is safe to retry; `reject_mission_proposal` files it under `proposals/rejected/`.
+Only Universal Exports's authenticated, Operation-authorized review endpoints call these decision
+methods. Provider Session identity is bound by AI6, never supplied in the proposed brief.
+
+`record_audit` stores a validated metadata-only `AuditEntry` under `audit/` and rejects
+duplicate IDs. Each entry is bounded to 16 KiB and the listing scans at most 10,000
+records. `list_audit` returns newest entries first and requires a result limit from 1 to
+500. Operation events contain actor, action, Operation, target and Unix timestamp;
+Station events use the explicit `resource = "station:<id>"` scope. Request prompts,
+terminal data and credential values are not audit fields.
+
+`StationSettings::try_new(station, capacity)` accepts a Station ID and a maximum
+concurrent Mission count from 1 through 1,024. `IntakeRegistry::station_settings(station)`
+reads the validated current value; `set_station_settings(station, settings)` persists it
+under a collision-resistant Station-specific file and the shared Registry lock. A daemon
+uses the live value for new Mission admission and scheduling; absent settings retain its
+startup default, and unreadable settings fail closed. Existing provider Sessions are not
+stopped when the limit is lowered.
+
+`put_agent_role(operation, role)`, `list_agent_roles(operation)`, `agent_role(operation,
+key)` and `remove_agent_role(operation, role_id)` manage validated, bounded role
+overrides in `agent-roles/<operation>/`. These use the shared Registry lock for writes,
+isolate every Operation, reject path-like identifiers and cap each Operation at 256 roles.
+AI6 resolves the Operation override before the global role. Station check-ins publish the
+global role catalog for authorized Universal Exports readers.
+
+`read_claimed` reads a leased Brief without changing it. `claim_with_lease` returns
+`None` when no brief matches. Renew returns `false` if the Station no longer owns the
+claimed brief. `recover` returns `Requeued`, `Failed`, or `None` when another Station
+changed the lease. `finish` returns the destination path or `None` when the caller's lease
+was lost. Lease expiration uses wall-clock Unix seconds; shared Stations need synchronized
+clocks. SQL Registry URLs remain unsupported. Station liveness and Headquarters election
+use the same versioned file layout and `.ai6-registry.lock`; the scheduler does not yet
+use election for distributed placement.
+
+```rust
+pub fn check_in(&self, station: &str, info: BTreeMap<String, serde_json::Value>) -> io::Result<()>
+pub fn stations(&self, within: Duration) -> io::Result<Vec<StationRecord>>
+pub fn elect(&self, station: &str, ttl: Duration) -> io::Result<bool>
+pub fn headquarters(&self) -> io::Result<Option<HeadquartersLease>>
+pub fn station(&self) -> &str
+pub fn seen(&self) -> f64
+pub fn info(&self) -> &BTreeMap<String, serde_json::Value>
+pub fn expires(&self) -> f64
+```
+
+`check_in` atomically replaces the Station's JSON record under `stations/`; caller values
+for the reserved `station` and `seen` keys are ignored. Station IDs are non-empty, at most
+256 UTF-8 bytes and contain no control characters. `stations(within)` returns fresh,
+valid records in stable filename order and skips malformed, stale or oversized files.
+Records are bounded to 1 MiB and scans to 1,000 Stations. `elect` returns `true` when it
+acquires or renews the lease and `false` when another Station still holds it. An expired
+record moves to `headquarters/lease.lapsed.<station>` before the new lease is written.
+`headquarters` returns the current record even when its lease has expired. Headquarters
+leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating Stations
+need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`
+and local Operation paths with each Station check-in every 15 seconds, alongside host and
+platform metadata. `StationConfig` defaults to both `Control` and `Execution` and no
+pinned terminal; `with_roles` replaces the role set, `with_label` adds a selector label and
+`with_terminal` pins the terminal provider. Without a pin the Station uses an available
+terminal provider, preferring `DEFAULT_TERMINAL`. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
+distributed placement. Station and Agent limits count assignments in the shared Registry.
+The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID` set an
+explicit identity.
+`Brief::key()` and `Brief::prompt()` expose the key and prompt fields used by I Branch intake.
+
+## Identity and handler API
+
+`MissionId::try_new(impl Into<String>)` and `SessionId::try_new(impl Into<String>)`
+validate non-empty values up to 256 UTF-8 bytes with no control characters. Both also
+implement `FromStr` and `Display`. A Mission can group several provider Sessions; a
+Session ID is issued by the provider and stays stable when that Session resumes.
+
+With `station-tls` (`ai6::station::identity`, re-exported at the root), `StationFingerprint` is the SHA-256 fingerprint of the Station certificate, rendered
+as uppercase base32 in groups of four. `StationIdentity::open_or_create(state_dir)` stores
+the combined certificate and private key in `identity.pem`; Unix writes use mode `0600`.
+`client_config` pins the expected certificate fingerprint and verifies the handshake's
+signature proof. `server_config` requires a client certificate and accepts either a peer
+explicitly placed in the `PeerTrustStore` or a certificate signed by the configured CA
+and matching the optional subject/SAN globs in `TlsTrust`. Unknown peer certificates are
+bounded and placed in `peers/waiting`; an operator lists and accepts them with the CLI.
+The default AI6 state location can be overridden with `AI6_STATE` or `AI6_HOME`.
+`AccessTokenRecord` is the versioned device-token metadata value. It holds the
+canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
+expiry and optional revocation times; its debug output redacts the digest. `IntakeRegistry`
+stores and validates records in the `access-tokens/` and `access-token-digests/`
+directories, returns only active records, and serializes revocation under the shared
+Registry lock.
+
+## Q Branch loadouts (`ai6::directorates::q`)
+
+```rust
+pub const MAX_LOADOUT_BYTES: usize;
+#[non_exhaustive]
+pub enum QErrorKind { Io, TooLarge, InvalidUtf8, Parse, Schema }
+pub struct QError;
+impl QError {
+    pub const fn kind(&self) -> QErrorKind;
+    pub fn path(&self) -> Option<&Path>;
+    pub const fn line(&self) -> Option<usize>;
+    pub const fn column(&self) -> Option<usize>;
+    pub const fn offset(&self) -> Option<usize>;
+}
+pub struct Loadout;
+impl Loadout {
+    pub fn agent(&self) -> &str;
+    pub fn sandbox_name(&self) -> Option<&str>;
+    pub fn mcp_names(&self) -> &[String];
+    pub fn secret_names(&self) -> &[String];
+}
+pub struct SandboxProfile;
+impl SandboxProfile {
+    pub fn name(&self) -> &str;
+    pub fn backend(&self) -> &str;
+    pub fn read_write(&self) -> &[String];
+    pub fn read_only(&self) -> &[String];
+    pub fn network(&self) -> &[String];
+}
+pub struct McpServer;
+impl McpServer {
+    pub fn name(&self) -> &str;
+    pub fn command(&self) -> &[String];
+    pub fn deny(&self) -> &[String];
+}
+pub struct LoadoutCatalog;
+impl LoadoutCatalog {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, QError>;
+    pub fn for_agent(&self, agent: &str) -> Result<&Loadout, QError>;
+    pub fn sandbox_for(&self, loadout: &Loadout) -> Option<&SandboxProfile>;
+    pub fn servers_for(&self, loadout: &Loadout) -> Result<Vec<&McpServer>, QError>;
+    pub fn loadouts(&self) -> impl Iterator<Item = &Loadout>;
+    pub fn sandboxes(&self) -> impl Iterator<Item = &SandboxProfile>;
+    pub fn mcp_servers(&self) -> impl Iterator<Item = &McpServer>;
+}
+impl FromStr for LoadoutCatalog { type Err = QError; }
+```
+
+Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]` and `[mcp.<name>]` TOML
+tables. Parsing is bounded to one MiB, denies unknown fields and invalid or duplicate
+names, and validates references before returning a catalog. Errors distinguish I/O,
+size, encoding, TOML syntax and schema failures; diagnostics expose source positions but
+never document contents. The catalog is inert: it does not expand environment variables,
+resolve paths, launch MCP servers or create sandboxes. Loading the catalog is a caller
+responsibility, and the daemon does not yet apply its declarations during provider startup.
+
+Secret references can be leased through `SecretBroker`:
+
+```rust
+pub const DEFAULT_SECRET_LEASE_TTL: Duration;
+pub const MAX_SECRET_LEASE_TTL: Duration;
+pub struct SecretLeaseRequest;
+impl SecretLeaseRequest {
+    pub fn try_new(station: impl Into<String>, mission_id: impl Into<String>)
+        -> Result<Self, SecretError>;
+    pub fn with_ttl(station: impl Into<String>, mission_id: impl Into<String>, ttl: Duration)
+        -> Result<Self, SecretError>;
+    pub fn station(&self) -> &str;
+    pub fn mission_id(&self) -> &str;
+    pub const fn ttl(&self) -> Duration;
+}
+pub struct SecretRequest;
+impl SecretRequest {
+    pub fn lease_id(&self) -> &str;
+    pub fn station(&self) -> &str;
+    pub fn mission_id(&self) -> &str;
+    pub const fn ttl(&self) -> Duration;
+}
+pub struct SecretBackendFailure;
+impl Default for SecretBackendFailure;
+impl SecretBackendFailure { pub const fn new() -> Self; }
+pub trait SecretBackend: Send + Sync {
+    fn acquire(&self, request: &SecretRequest, names: &[String])
+        -> Result<BTreeMap<String, SecretValue>, SecretBackendFailure>;
+    fn revoke(&self, lease_id: &str) -> Result<(), SecretBackendFailure>;
+}
+pub struct SecretBroker;
+impl SecretBroker {
+    pub fn new(backend: impl SecretBackend + 'static) -> Self;
+    pub fn with_max_ttl(self, max_ttl: Duration) -> Result<Self, SecretError>;
+    pub fn lease(&self, loadout: &Loadout, request: SecretLeaseRequest)
+        -> Result<SecretLease, SecretError>;
+}
+pub struct SecretValue;
+impl SecretValue {
+    pub fn new(value: impl Into<String>) -> Self;
+    pub fn with_exposed<T>(&self, use_value: impl FnOnce(&str) -> T) -> T;
+}
+pub struct SecretLease;
+impl SecretLease {
+    pub fn station(&self) -> &str;
+    pub fn mission_id(&self) -> &str;
+    pub fn expires_at(&self) -> Instant;
+    pub fn is_active(&self) -> bool;
+    pub fn names(&self) -> Vec<String>;
+    pub fn with_secret<T>(&self, name: &str, use_value: impl FnOnce(&str) -> T)
+        -> Result<T, SecretError>;
+    pub fn revoke(&self) -> Result<(), SecretError>;
+}
+#[non_exhaustive]
+pub enum SecretError { InvalidIdentity, InvalidTtl, Backend, InvalidResponse, AccessDenied, Expired }
+pub fn claude_mcp_config(catalog: &LoadoutCatalog, loadout: &Loadout)
+    -> Result<serde_json::Value, QError>;
+```
+
+Backends receive only the configured loadout's secret names, Station, Mission ID, an
+opaque lease ID and a bounded TTL. They return exactly those names as `SecretValue`s;
+unexpected keys fail closed. Both `SecretValue` and lease debug output redact values.
+Values are zeroized when dropped. `with_secret` holds the lease lock during the callback
+so revocation cannot race an active read; the callback must be short and must not re-enter
+that lease. Explicit `revoke` clears local values first and retries backend revocation
+after failures. Lease expiry is monotonic and backend implementations must enforce their
+own TTL and bounded revocation timeout. Secret values must stay out of argv, logs,
+transcripts, Cables and reports.
+
+`claude_mcp_config` emits only the exact loadout's stdio servers as `mcpServers` entries
+with a `command` and `args` array. It rejects server names Claude cannot represent and
+per-server deny lists because this host config cannot enforce them. It does not include
+secrets, environment variables or identity metadata and does not start the servers.
+
+Sandbox launch policy can be translated into an inert bubblewrap vector:
+
+```rust
+pub struct SandboxRequest;
+impl SandboxRequest {
+    pub fn new(worktree: impl Into<PathBuf>, command: impl IntoIterator<Item = String>) -> Self;
+    pub fn with_allowed_root(self, root: impl Into<PathBuf>) -> Self;
+    pub fn with_executable(self, executable: impl Into<String>) -> Self;
+}
+#[non_exhaustive]
+pub enum SandboxError {
+    UnsupportedBackend, UnsupportedPlatform, UnsupportedNetworkPolicy,
+    InvalidCommand, InvalidPath, InvalidWorktree, MissingWorktreeMount, DuplicateMount,
+}
+impl SandboxProfile {
+    pub fn bubblewrap_argv(&self, request: &SandboxRequest) -> Result<Vec<String>, SandboxError>;
+}
+```
+
+This translator is Linux-only and never invokes a process. The worktree must mount at
+`/workspace`; canonicalized additional mounts must remain inside a caller-supplied allowed
+root. Parent mounts precede child mounts, network access is isolated, and requested host
+allowlists fail closed because this profile cannot enforce them. Invalid UTF-8 paths,
+missing paths, escapes and duplicate destinations are rejected. The daemon does not yet
+apply this vector to AgentHandler startup.
+
+## Cables (`ai6::directorates::i::cables`)
+
+`CableScope` defines Agent unicast and Station, Theater, global or named-channel
+broadcast. `CableTarget::try_new(scope, name)` requires a name except for global.
+`CableRecipient::try_new(agent, session_id, state)` validates the relay-resolved
+recipient. `CableDraft::new(sender_agent, sender_operation, sender_station, target, body,
+recipients, idempotency_key, id, created_at, expires_at)` creates the required fields;
+builder methods add the optional Theater, Mission, Session, conversation and reply
+identities. `Cable::try_new(draft)` validates a complete envelope. Bodies are limited to
+16 KiB UTF-8, expiry must be later than creation and no more than 24 hours later, and
+recipient `(agent, session_id)` pairs must be unique. Serde uses the version-1 I Branch
+field names and rejects missing, unknown or invalid fields. `Debug` redacts Cable bodies.
+`with_recipient_state(agent, session_id, state)` returns a new Cable for a permitted
+delivery transition, `None` for a recipient not in the audience, or `CableError` for an
+invalid transition. The relay must derive sender identity from the authenticated Agent
+Session; these value types do not authorize sends or resolve broadcast audiences.
+
+`CablePrincipal::try_new(agent, operation, theater, station, session_id, mission_id)` is for
+trusted session adapters only; request objects have no sender identity. `CablePolicy`
+holds deny-by-default `CableGrant`s and per-Agent `CableInboundMode` values. A grant
+names an Agent (or `*`), a `CableAction` (`Send`, `Receive`, `Discover`, `Release`) and one exact
+`CableTarget`. `CableRelay::new(Arc<IntakeRegistry>, policy, endpoint_source, channels)`
+uses the shared Registry, an authoritative Agent/Session directory and named channel
+members. `with_limits` configures bounded fan-out (1–1,000) and persistent sender/scope
+token buckets. `send(principal, CableSendRequest)` checks sender and every receiver,
+deduplicates the audience, snapshots recipient Sessions, applies deliver/hold/refuse and
+stores an idempotent Cable. Same-Station unicast uses Station grants; cross-Station
+unicast uses explicit Agent grants. Theater, global and channel broadcasts require exact
+scope grants. `discover` exposes only same-Station peers allowed by both sides' grants.
+`inbox` rechecks current receive permissions on queued deliveries, marks delivered records,
+and returns a `CableDelivery` without the audience list or idempotency key.
+`held(principal, limit)` lists held Cable metadata only under matching Release grants and
+omits bodies. `release(principal, cable_id)` requires the same exact scope grant, rechecks
+each recipient's current Receive grant, delivers still-authorized recipients and refuses
+ones whose grant was revoked. `CableHeldDelivery` identifies held recipients; `CableRelease`
+reports delivered/refused counts.
+`acknowledge` is idempotent for delivered messages. `reply` checks that the original was
+delivered to the caller and derives its destination and reply threading from the stored
+record. `update_policy` applies revocations to queued messages on their next inbox read.
+The default lifetime is 15 minutes, maximum 24 hours and default fan-out limit is 100.
+`CableRelayError` keeps unavailable and unauthorized targets indistinguishable.
+`with_audit_sink` emits sender/target/decision/time metadata only; bodies are omitted.
+Inbound bodies are untrusted data and do not grant authority.
+
+The daemon reads strict `cables.toml` from its config directory. Missing configuration
+denies every action. `[[grants]]` entries name `agent`, `action`, `scope`, and optional
+`name`; `[inbound]` selects `deliver`, `hold`, or `refuse` by Agent; `[channels]` maps
+channel names to Agent lists. `max_fanout`, `sender_rate`, `sender_burst`, `scope_rate`,
+and `scope_burst` bound routing. `ServeConfig::with_station_id` or `AI6_STATION_ID` supplies
+the Station identity; the default is the host and process ID.
+
+`IntakeRegistry::submit_cable(&cable)` stores the envelope under `cables/` with atomic
+replacement and the same `.ai6-registry.lock` used by I Branch claims. A retry with the
+same sender and idempotency key returns the stored record when immutable request content
+matches; conflicting content returns `AlreadyExists`. `find_cable(sender, key)` and
+`get_cable(id)` read accepted records. `cable_inbox(agent, session_id, limit, now)` lists
+unexpired queued/delivered records for an Agent Session, sorted by creation time and ID;
+`limit` is 1–1,000 and `now` is optional Unix time for deterministic callers.
+`update_cable_delivery(id, agent, session_id, state, now)` serializes recipient state
+changes under the Registry lock and automatically expires overdue deliveries.
+`held_cables(limit, now)` lists unexpired envelopes containing at least one held recipient
+for the scoped relay to authorize.
+`take_cable_quotas(buckets, now)` atomically consumes sender and scope token buckets from
+`cable-quotas.json`; each bucket is `(key, rate_per_second, burst_capacity)`, and its key
+is SHA-256 hashed before it is stored. The file backend bounds scans to 10,000 Cable files
+and records to 2 MiB. SQL Registry storage is not implemented.
+
+`ai6::directorates::section_00::agent` defines `AgentStart`, `AgentResume`, `AgentMessage`, `AgentEvent`, the
+`AgentHandler` Guatiao kind `ai6_agent_handler`, and the `AgentSession` object kind
+`ai6_agent_session`. Handlers own harness launch, initial-context delivery, resume,
+message submission and event decoding. AI6 supplies an `AgentTerminal` object bridge
+over its selected `Terminal` provider.
+
+## Terminal API (`ai6::directorates::q::terminal`)
+
+`Spec`, `ExitInfo`, `Terminal`, `AgentTerminal` and `TerminalSession` define the
+Guatiao terminal contracts. `Terminal` is a provider kind discovered by AI6;
+`AgentTerminal` is the object bridge AI6 wraps around that provider for a handler.
+The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in tests.
+
+## Mission lifecycle (`ai6::directorates::m::mission`)
+
+`MissionBook` validates lifecycle transitions, associates provider `SessionId` values
+with an AI6-owned `MissionId`, records safe-house disposition and optional `CoverReport`,
+and increments a revision for changes. Repeating the current state is a no-op and does not
+increment the revision. `MissionState` serializes as `queued`, `working`, `blocked`,
+`stalled`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy violation
+when the Operation uses `on_blown = "fail"`.
+`MissionBook::set_cover_report(mission_id, report)` persists the cover audit. A Mission
+returns this value as its optional `cover` field beside `safe_house`. `Mission.role_id`
+stores the canonical configured Agent role independently of `agent_id` and provider
+`session_ids`; selected handler/model/effort settings persist for reattachment.
+`MissionBook::open(path)` persists a versioned JSON snapshot atomically after
+each mutation. The daemon opens `missions.json` under `safehouse::state_dir()`; this is
+runtime Mission state, separate from I Branch's durable intake registry. The snapshot
+stores non-secret handler, terminal, work-directory, model and effort settings for each
+started Mission (the terminal is the one the Station chose at start), including the cover policy, starting commit and identity; environment values
+are never persisted. The snapshot format is version 3. On startup, `Working` Missions
+become `Blocked` and the scheduler retries reattachment through the same provider Session ID.
+The daemon's loopback
+`/internal/missions` routes expose Mission state to local control components; Universal Exports
+remains the authenticated public API.
+
+## Operation cover (`ai6::directorates::m::cover`)
+
+`Covers::default()` supplies `covert`, `partial` and `overt`. `Covers::load(config_dir)`
+loads `covers.toml`, with custom entries replacing built-ins of the same name;
+`parse_toml(source)` validates the same schema in memory. `get(name)` returns a policy or
+`CoverError`; `names()` returns sorted names.
+`Cover::briefing(identity, agent, model)` creates the initial Agent instructions and
+`check_commits(commits, identity, model)` returns ordered `CoverViolation` values for
+identity, attribution trailer, model mention, announcement, forbidden-pattern and footer
+rules. Forbidden patterns match case-insensitively. `CoverReport` records the policy,
+number of commits, `blown` flag and violations; the daemon persists it to the Mission after
+checking commits since the Mission's starting revision.
+
+```rust
+pub struct CoverCommit { pub sha: String, pub author: String, pub committer: String, pub message: String }
+pub struct CoverViolation { pub commit: String, pub rule: String, pub detail: String }
+pub struct CoverReport { pub policy: String, pub commits: usize, pub blown: bool, pub violations: Vec<CoverViolation> }
+pub struct Covers;
+impl Covers {
+    pub fn load(config_dir: impl AsRef<Path>) -> Result<Self, CoverError>;
+    pub fn parse_toml(source: &str) -> Result<Self, CoverError>;
+    pub fn get(&self, name: &str) -> Result<&Cover, CoverError>;
+    pub fn names(&self) -> Vec<&str>;
+}
+impl Cover {
+    pub fn name(&self) -> &str;
+    pub fn briefing(&self, identity: Option<&OperationIdentity>, agent: &str, model: &str) -> String;
+    pub fn check_commits(&self, commits: &[CoverCommit], identity: Option<&OperationIdentity>, model: &str) -> Vec<CoverViolation>;
+}
+```
+
+## Station daemon (`ai6::station::server`)
+
+`DEFAULT_MAX_CONCURRENT_MISSIONS` is `4`. `DEFAULT_TERMINAL` (`"pty"`) is the preferred
+terminal provider when several are available and none is pinned. `serve` and
+`serve_with_plugins` use these defaults. The capacity-aware variants accept an explicit limit and reject zero:
+
+```rust
+serve_with_capacity(address: SocketAddr, max_concurrent_missions: usize, shutdown: F)
+serve_with_plugins_and_capacity(address: SocketAddr, plugin_paths: &[PathBuf], max_concurrent_missions: usize, shutdown: F)
+serve_with_config_dir_and_capacity(address: SocketAddr, plugin_paths: &[PathBuf], config_dir: &Path, max_concurrent_missions: usize, shutdown: F)
+```
+
+`ServeConfig::new(address)` defaults to the configured roster path, built-in Mission
+capacity, `StationConfig::default()` and no Universal Exports publisher.
+`with_plugin_paths`, `with_config_dir`, `with_station_id`, `with_station_config`,
+`with_max_concurrent_missions`, `with_watchdog` and, with feature `publisher`,
+`with_publisher` set those options before calling `serve_with_options`.
+
+Each returns `std::io::Result<()>`; `F: Future<Output = ()> + Send + 'static`. The
+background scheduler starts assigned queued Missions and leases file-backed I Branch
+briefs, resolving their Operation and Agent before creating durable Mission records.
+Global, Station and Agent concurrency limits apply to Session starts; transient failures
+retry after five seconds. Active leases renew every 30 seconds. Expired leases from other
+Stations are recovered after three attempts, and invalid assignments or terminal Missions
+are filed under `failed/` or `done/` with an outcome record. SQL Registry URLs are not
+supported by this Rust intake implementation.
+
+`pub async fn serve<F: Future<Output = ()> + Send + 'static>(address: SocketAddr,
+shutdown: F) -> std::io::Result<()>` binds the local service without agent plugins.
+`serve_with_plugins(address, plugin_paths, shutdown)` also scans configured Guatiao
+library paths for `ai6_agent_handler` and `ai6_terminal` providers. The caller owns signal
+handling; the binary passes Ctrl-C as the graceful-shutdown future. The service offers
+`GET /healthz`, `GET /internal/agent-handlers`, `GET /internal/agent-roles`,
+`GET /internal/terminals`,
+`GET /internal/plugins`, `GET /internal/intake/briefs`, and local Mission lifecycle
+routes under `/internal/missions`. The intake endpoint lists valid queued file briefs
+without claiming them; the background scheduler owns leasing and execution. Each brief
+gets a deterministic Mission ID in lease metadata, and renewal allows the same scheduler
+to recover its mapping after restart. Unsupported or invalid assignments are filed as
+failures.
+`POST /internal/missions/{mission_id}/start` resolves the Mission's Agent from the roster
+and starts the Agent's handler in the Station's terminal provider. Mission creation may
+name an Agent directly or request a role and tags; AI6 selects the highest-priority
+qualified Agent whose handler is available, respecting the Operation's roster and
+clearance. AI6 drains provider events
+in a background worker and updates Mission state independently of Universal Exports polling;
+`GET .../events/next?timeout_ms=` reads from a bounded daemon event queue. The
+`POST .../messages`, `POST .../interrupt` and `POST .../resume` routes operate the
+provider Session. Resume passes the same provider-issued Session ID back to its handler
+and rejects a handler that returns a different ID. After a process restart, resume rebuilds
+handler settings from the persisted operation and current Agent roster. The optional
+`environment` map in a resume request supplies fresh, non-persisted values such as new
+short-lived credentials. Active safe houses are reopened only after their Git worktree,
+Operation repository, branch and base commit are verified.
+`GET /internal/missions/{mission_id}/cables` discovers grant-visible active peers;
+`GET .../cables/inbox?limit=` reads authorized deliveries; `POST .../cables` sends a
+Cable without caller-selected sender identity; `GET .../cables/held?limit=` lists body-free
+held metadata under Release grants; `POST .../cables/{cable_id}/release` releases eligible
+recipients; `POST .../cables/{cable_id}/ack` and
+`POST .../cables/{cable_id}/reply` acknowledge or reply to a delivered Cable. The relay
+snapshots only currently managed Sessions as recipients, and the internal API is loopback
+only.
+With `cables-mcp`, each managed Session receives its own loopback-only, random-token
+authenticated Streamable HTTP MCP endpoint. Claude and Codex handlers receive the endpoint
+URL and token through their launch environment; the bearer token is not placed in process
+arguments or persisted. Tools expose peer discovery, scoped Cable send, inbox read,
+scoped held-Cable listing/release, acknowledgement and linked replies. Held metadata omits
+the body; an explicit Release grant is required and current Receive grants are checked
+again before release. The endpoint and live Cable identity are removed when
+the Agent operation closes. Missing Cable grants continue to deny every action.
+On graceful shutdown, event workers interrupt and close active Sessions and move Working
+Missions to Blocked while preserving their safe houses. Mission records persist across
+daemon restarts, and a blocked Mission can reattach to its provider Session through its
+handler. `ai6::directorates::m::roster`
+loads global `operations.toml` and `agents.toml`; local `.ai6/agents.toml` is read only for
+a registered Operation. Agent watchdog `limits` inherit and merge by field, then override the
+daemon's `WatchdogConfig`. A local Operation with `safe_houses = true` gets a Git worktree under
+AI6's state directory. Untouched worktrees and branches are removed when the Mission
+ends; worktrees containing commits or changes are kept and included in the Mission report.
+Remote Theaters are not implemented: Missions run on the Station's own host.
+This private listener is for
+daemon health, provider discovery and Universal Exports-to-daemon operations; user-facing
+Station and Mission operations belong to Universal Exports's authenticated API.
+
+## Universal Exports publication (`ai6::station::publisher`)
+
+`Config::try_new(origin, token)` accepts a bare HTTPS origin or an HTTP loopback origin;
+its `Debug` output redacts the token. `ServeConfig::with_publisher(config)` enables
+publication through `serve_with_options`. The `ai6` command reads
+`AI6_EXPORTS_URL` and `AI6_EXPORTS_TOKEN` together; leaving both unset disables
+publication, and setting only one is a startup error. Redirects are disabled. A bounded
+background thread orders Session registration, lifecycle updates and raw terminal chunks
+on one event cursor. A separate authenticated long-poll receives validated Guatiao input
+and resize frames from `/v1/m/inputs/next`; AI6 dispatches them only to the live terminal
+bound to the matching Station, Mission and provider Session. The gateway's user-scoped
+write grant and lease checks remain the authorization boundary. Requests time out after
+two seconds; outbound writes are not retried, while input polling retries after errors.
+A queue overflow or outbound gateway error disables publication and is reported by
+`GET /internal/publisher`; it does not block Mission execution. Terminal chunks and the
+pre-registration output buffer are each bounded to 1 MiB. Output read before the provider
+Session ID is observed is queued until registration; overflowing that buffer disables
+publication.
+
+## Safe houses (`ai6::station::safehouse`)
+
+`SafeHouse::create(repository, root, station_id, mission_id, title, branch_template, base)`
+creates a Git worktree under `root/safe-houses/<station>/<mission>` and returns its path,
+branch and base commit. The canonical state root must be outside the repository, and the
+Mission path must not already exist. Branch templates expand `{id}`, `{slug}` and
+`{station}`; Git validates the final ref and base commit. `finish()` removes an untouched
+worktree and branch; it retains changed or committed work and returns a `SafeHouseReport`
+with the path, branch, base and commit summaries. `SafeHouse::reopen(repository, report)`
+validates the Mission report against the registered Git worktree, branch and base commit
+before restoring cleanup ownership after a daemon restart. `state_dir()` resolves `AI6_STATE`, then
+`AI6_HOME/state`, then `%LOCALAPPDATA%/AI6` on Windows, then `XDG_STATE_HOME/AI6` or
+`~/.local/state/AI6`.
+
+## Plugin discovery (`ai6::station::plugins`)
+
+`Plugins::scan(paths: &[PathBuf]) -> Plugins` filters Guatiao libraries for
+`ai6_agent_handler`, `ai6_terminal` and the three access kinds before mapping them and
+retains the registry for the daemon process lifetime. `handlers()`, `terminals()`,
+`authenticators()`, `directories()` and `authorizers()` list providers and their
+availability. `handler(provider, config)`, `terminal(provider, config)`,
+`authenticator(provider, config)`, `directory(provider, config)` and
+`authorizer(provider, config)` construct typed providers, validating a supplied `Value`
+against the provider's schema. Pass `None` only for a provider with a default instance.
+`scan_summary()` reports loaded, skipped, failed and unreadable paths.
+
+## Command line
+
+- `ai6 serve [--listen 127.0.0.1:7081] [--station ID] [--role control|execution]... [--label KEY=VALUE]... [--terminal ID] [--config-dir PATH] [--plugin-path PATH]...`
+  (feature `cli`): run the Station and load Operation and Agent configuration.
+  `--terminal` pins the terminal provider; without it an available one is used,
+  preferring `pty`. It accepts
+  `--max-concurrent-missions 4`, `--stall-timeout 300`, `--loop-timeout 300`,
+  `--loop-min-lines 50`, `--blocked-after 10`, optional `--max-runtime`, `--history 4096`
+  and `--normalize-digits`. Station roles default to control and execution; repeated `--role`
+  values replace that default. `--label` adds a placement label. Timeout values are
+  non-negative seconds and may be fractional. `AI6_CONFIG_DIR` overrides the default
+  config directory.
+- `ai6 identity` creates or prints this Station's certificate fingerprint.
+- `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.
+- User-facing management goes through Universal Exports and the separate `ai6ctl` command.
