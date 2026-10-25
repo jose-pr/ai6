@@ -517,12 +517,12 @@ fn assumed_own_host() -> Capabilities {
 
 /// How a Session would run on `theater`, or the capability that is missing.
 ///
-/// Field mode runs the harness on the Theater and needs a route to the provider's API. On
-/// the Station's own host it needs `terminal` and `files`. On a remote host it needs either
-/// a runner (reached with `run`), or, for the detached wrapper the Station supervises over
-/// the transport, `run`, `files`, a POSIX host and a declared harness. Remote-hands mode
-/// runs the harness on the Station and needs only the transport's `run`. `agents` can force
-/// either.
+/// Field mode runs the harness on the Theater and needs a route to the provider's API. A
+/// runner there supervises it with its own providers; on another host the Station reaches
+/// the runner with `run`. Without a runner, the Station's own host needs `terminal` and
+/// `files`, and another host needs, for the detached wrapper the Station supervises over the
+/// transport, `run`, `files`, a POSIX host and a declared harness. Remote-hands mode runs the
+/// harness on the Station and needs only the transport's `run`. `agents` can force either.
 pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String> {
     if let Some(reason) = &theater.unavailable {
         return Err(format!("the Station cannot reach it: {reason}"));
@@ -539,16 +539,16 @@ pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String>
     };
 
     let mut field_missing = Vec::new();
-    if own_host {
+    if theater.runner {
+        if !own_host && !capabilities.run {
+            field_missing.push("the `run` capability to reach its runner".to_owned());
+        }
+    } else if own_host {
         if !capabilities.terminal {
             field_missing.push("the `terminal` capability".to_owned());
         }
         if !capabilities.files {
             field_missing.push("the `files` capability".to_owned());
-        }
-    } else if theater.runner {
-        if !capabilities.run {
-            field_missing.push("the `run` capability to reach its runner".to_owned());
         }
     } else {
         let mut wrapper = Vec::new();
@@ -1076,6 +1076,12 @@ mod tests {
             summary.agents = AgentMode::Local;
             summary
         };
+        // A runner on the Station's own host brings its own terminal provider.
+        let mut own_runner = TheaterSummary::local();
+        own_runner.runner = true;
+        own_runner.capabilities = Some(Capabilities::default());
+        assert_eq!(mode_of(&own_runner), Ok(ExecutionMode::Field));
+
         // With a runner, `run` (to reach it) is all field mode needs from the transport.
         let mut with_runner = remote(
             "box",
