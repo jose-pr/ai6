@@ -83,6 +83,8 @@ struct BoardSession {
     session_id: String,
     state: Option<String>,
     sequence: u64,
+    #[serde(default)]
+    exposure: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -456,26 +458,27 @@ fn print_mission(mission: &BoardMission) {
         plain(&mission.mission_id),
         mission.sessions.len()
     );
-    println!("SESSION\tSTATE\tSEQUENCE");
+    println!("SESSION\tSTATE\tSEQUENCE\tEXPOSURE");
     for session in &mission.sessions {
         println!(
-            "{}\t{}\t{}",
+            "{}\t{}\t{}\t{}",
             plain(&session.session_id),
             session
                 .state
                 .as_deref()
                 .map(plain)
                 .unwrap_or_else(|| "awaiting lifecycle".to_owned()),
-            session.sequence
+            session.sequence,
+            exposure_column(&session.exposure)
         );
     }
 }
 
 fn print_sessions(sessions: impl IntoIterator<Item = BoardSession>) {
-    println!("STATION\tMISSION\tSESSION\tSTATE\tSEQUENCE");
+    println!("STATION\tMISSION\tSESSION\tSTATE\tSEQUENCE\tEXPOSURE");
     for session in sessions {
         println!(
-            "{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}",
             plain(&session.operation_id),
             plain(&session.mission_id),
             plain(&session.session_id),
@@ -484,8 +487,22 @@ fn print_sessions(sessions: impl IntoIterator<Item = BoardSession>) {
                 .as_deref()
                 .map(plain)
                 .unwrap_or_else(|| "awaiting lifecycle".to_owned()),
-            session.sequence
+            session.sequence,
+            exposure_column(&session.exposure)
         );
+    }
+}
+
+/// The untrusted input a Session read, comma separated; `-` when it read none.
+fn exposure_column(exposure: &[String]) -> String {
+    if exposure.is_empty() {
+        "-".to_owned()
+    } else {
+        exposure
+            .iter()
+            .map(|source| plain(source))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 

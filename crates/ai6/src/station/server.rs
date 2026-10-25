@@ -32,6 +32,7 @@ use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
 use crate::directorates::m::theaters::{LOCAL_THEATER, Theater, TheaterAccess, Theaters};
 use crate::directorates::medical::exposure::ExposureGate;
+use crate::directorates::medical::quarantine::IncidentKind;
 use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
 use crate::directorates::q::safehouse::{SafeHouseReport, SafeHouseSpec};
@@ -974,6 +975,7 @@ async fn scheduler_loop(state: DaemonState) {
             next_station_check_in = Instant::now() + STATION_CHECK_IN_INTERVAL;
             renew_session_leases(&state);
         }
+        medical::enforce_quarantines(&state);
         schedule_recovered_once(&state).await;
         schedule_parked_once(&state).await;
         schedule_queued_once(&state).await;
@@ -1670,18 +1672,23 @@ fn resolve_brief_assignment(
         .map(|key| configured_agent_role(state, Some(&operation.id), key))
         .transpose()?;
     let agent = if let Some(agent_key) = brief.agent.as_deref() {
-        state
+        let agent = state
             .roster
             .agent(Some(&operation.id), agent_key)
-            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+        if medical::is_quarantined(state, &agent.id, Some(&operation.id)) {
+            return Err(format!("Agent {:?} is quarantined", agent.id));
+        }
+        agent
     } else {
         state
             .roster
-            .select_agent(
+            .select_agent_excluding(
                 Some(&operation.id),
                 brief.role.as_deref(),
                 &brief.tags,
                 Some(&available_handlers(state)),
+                &medical::quarantined_agents(state, Some(&operation.id)),
             )
             .map_err(|error| error.to_string())?
     };
@@ -1925,6 +1932,9 @@ async fn schedule_queued_once(state: &DaemonState) {
             break;
         }
         let mission_id = mission.mission_id.to_string();
+        if !medical::reassign_if_quarantined(state, &mission) {
+            continue;
+        }
         let now = Instant::now();
         let should_wait = state
             .retry_after
@@ -2140,11 +2150,12 @@ async fn create_mission(
         Some(
             state
                 .roster
-                .select_agent(
+                .select_agent_excluding(
                     operation_id.as_deref(),
                     request.role.as_deref(),
                     &request.tags,
                     Some(&available_handlers(&state)),
+                    &medical::quarantined_agents(&state, operation_id.as_deref()),
                 )
                 .map_err(configuration_error)?,
         )
@@ -2417,6 +2428,9 @@ async fn start_mission(
         .roster
         .agent(mission.operation_id.as_deref(), agent_id)
         .map_err(configuration_error)?;
+    if medical::is_quarantined(&state, &agent.id, mission.operation_id.as_deref()) {
+        return Err(conflict(&format!("Agent {:?} is quarantined", agent.id)));
+    }
     let role = mission
         .role_id
         .as_deref()
@@ -3419,6 +3433,14 @@ fn spawn_event_pump_with_monitor(
                     let _ = session.interrupt();
                 }
                 finish_operation(&state, &mission_id, &session);
+                if !max_runtime {
+                    let kind = if looping {
+                        IncidentKind::Loop
+                    } else {
+                        IncidentKind::Stall
+                    };
+                    medical::report_incident(&state, &mission_id, kind);
+                }
                 break;
             }
         }
@@ -3577,6 +3599,7 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
         MissionState::Failed => Some("failed"),
         MissionState::Blown => Some("failed"),
         MissionState::Parked => Some("parked"),
+        MissionState::Quarantined => Some("quarantined"),
         MissionState::Queued | MissionState::Abandoned => None,
     }
 }
@@ -3681,11 +3704,12 @@ fn backup_agent(
         .collect::<Vec<_>>();
     state
         .roster
-        .select_agent(
+        .select_agent_excluding(
             mission.operation_id.as_deref(),
             mission.role_id.as_deref(),
             &[],
             Some(&handlers),
+            &medical::quarantined_agents(state, mission.operation_id.as_deref()),
         )
         .ok()
 }
@@ -3855,6 +3879,9 @@ fn publish_finished_event(
     event: AgentEvent,
     finished: Option<FinishOutcome>,
 ) {
+    let cover_blown = finished
+        .as_ref()
+        .is_some_and(|finished| finished.cover_blown);
     let event = if let Some(finished) = &finished {
         apply_finish_outcome(event, finished)
     } else {
@@ -3875,6 +3902,9 @@ fn publish_finished_event(
     }
     apply_event_state(state, mission_id, &event);
     queue_event(state, mission_id, event);
+    if cover_blown {
+        medical::report_incident(state, mission_id, IncidentKind::Blown);
+    }
 }
 
 fn apply_finish_outcome(mut event: AgentEvent, finished: &FinishOutcome) -> AgentEvent {
@@ -6911,6 +6941,158 @@ mod tests {
         assert_eq!(
             medical::brief_exposure(&brief),
             ["brief:source", "cable:008"]
+        );
+    }
+
+    const QUARANTINE_AGENTS: &str = "[role.case-officer]\npurpose = \"Review changes\"\npolicy = \"Report findings\"\n[agent.007]\nhandler = \"mock-spend\"\npriority = 5\nroles = [\"case-officer\"]\n[agent.008]\nhandler = \"mock-agent\"\nroles = [\"case-officer\"]\n";
+
+    fn case_officer_brief() -> crate::Brief {
+        crate::Brief {
+            title: "Review".to_owned(),
+            body: String::new(),
+            id: "brief-q".to_owned(),
+            source: "manual".to_owned(),
+            operation: Some("G".to_owned()),
+            agent: None,
+            role: Some("case-officer".to_owned()),
+            tags: Vec::new(),
+            stations: Vec::new(),
+            priority: 0,
+            url: None,
+            data: BTreeMap::new(),
+            created: String::new(),
+            version: 1,
+        }
+    }
+
+    fn mission_state(state: &DaemonState, mission_id: &str) -> Mission {
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .get(mission_id)
+            .unwrap()
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn three_stalls_quarantine_the_agent_stop_its_other_mission_and_send_new_work_to_the_backup()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", QUARANTINE_AGENTS);
+        start_mission_one(&state).await;
+        start_mission_by_id(&state, "mission-2").await;
+        assert_eq!(
+            resolve_brief_assignment(&state, &case_officer_brief())
+                .unwrap()
+                .1,
+            "007"
+        );
+
+        for _ in 0..2 {
+            medical::report_incident(&state, "mission-1", IncidentKind::Stall);
+        }
+        assert!(!state.intake.is_quarantined("007", Some("G")).unwrap());
+        medical::report_incident(&state, "mission-1", IncidentKind::Loop);
+
+        assert!(state.intake.is_quarantined("007", Some("G")).unwrap());
+        let record = &state.intake.quarantines().unwrap()[0];
+        assert!(
+            record.reason.contains("3 stalls or loops"),
+            "{}",
+            record.reason
+        );
+        assert_eq!(record.by, "station:test");
+        for id in ["mission-1", "mission-2"] {
+            assert_eq!(
+                mission_state(&state, id).state,
+                MissionState::Quarantined,
+                "{id}"
+            );
+        }
+        assert!(
+            state.sessions.lock().unwrap().is_empty(),
+            "the Agent's running Sessions are stopped"
+        );
+        let mut kinds = Vec::new();
+        while let Some(event) = pop_event(&state, "mission-2") {
+            kinds.push(event.kind);
+        }
+        assert!(kinds.contains(&"quarantined".to_owned()), "{kinds:?}");
+        let actions: Vec<_> = state
+            .intake
+            .list_audit(10)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.action)
+            .collect();
+        assert!(
+            actions.contains(&"agent.quarantine".to_owned()),
+            "{actions:?}"
+        );
+
+        // New work for the role goes to the backup, and a started Mission is refused.
+        assert_eq!(
+            resolve_brief_assignment(&state, &case_officer_brief())
+                .unwrap()
+                .1,
+            "008"
+        );
+        let refused = start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await;
+        assert!(matches!(
+            refused,
+            Err(ApiErrorResponse(StatusCode::CONFLICT, _))
+        ));
+
+        // Releasing clears the record; the stopped Missions go back to the queue with the
+        // backup Agent.
+        assert_eq!(record.operation.as_deref(), Some("G"));
+        assert!(state.intake.release_quarantine("007", Some("G")).unwrap());
+        medical::enforce_quarantines(&state);
+        for id in ["mission-1", "mission-2"] {
+            let mission = mission_state(&state, id);
+            assert_eq!(mission.state, MissionState::Queued, "{id}");
+            assert_eq!(mission.agent_id.as_deref(), Some("008"), "{id}");
+        }
+        assert_eq!(
+            resolve_brief_assignment(&state, &case_officer_brief())
+                .unwrap()
+                .1,
+            "007"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_queued_mission_whose_agent_is_quarantined_moves_to_the_backup() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", QUARANTINE_AGENTS);
+        medical::quarantine_agent(&state, "007", Some("G"), "turned", "operator");
+        let mission = mission_state(&state, "mission-1");
+        assert_eq!(mission.state, MissionState::Queued);
+        assert!(medical::reassign_if_quarantined(&state, &mission));
+        assert_eq!(
+            mission_state(&state, "mission-1").agent_id.as_deref(),
+            Some("008")
+        );
+
+        // With no other qualified Agent the Mission waits.
+        let alone = tempfile::tempdir().unwrap();
+        let state = test_state(alone.path(), "", "[agent.007]\nhandler = \"mock-agent\"\n");
+        medical::quarantine_agent(&state, "007", None, "turned", "operator");
+        let mission = mission_state(&state, "mission-1");
+        assert!(!medical::reassign_if_quarantined(&state, &mission));
+        assert_eq!(
+            mission_state(&state, "mission-1").agent_id.as_deref(),
+            Some("007")
         );
     }
 

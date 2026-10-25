@@ -34,6 +34,9 @@ pub enum MissionState {
     Abandoned,
     /// A provider usage limit paused the work; it resumes when `parked_until` passes.
     Parked,
+    /// Medical or an operator stopped the work because its Agent is quarantined; only an
+    /// operator releases it.
+    Quarantined,
 }
 
 /// A Mission as stored and returned by the daemon.
@@ -362,6 +365,51 @@ impl MissionStore {
         Ok(updated)
     }
 
+    /// Quarantines an active Mission: its work stops and only an operator moves it on.
+    ///
+    /// Quarantining again is harmless. Finished Missions are left alone.
+    pub fn quarantine(&mut self, mission_id: &str) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.state == MissionState::Quarantined {
+            return Ok(mission.clone());
+        }
+        if !valid_transition(mission.state, MissionState::Quarantined) {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Quarantined,
+            });
+        }
+        mission.state = MissionState::Quarantined;
+        mission.parked_until = None;
+        mission.blocked_reason = None;
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
+    /// Gives a queued Mission to another Agent, as when its assigned Agent is quarantined.
+    pub fn reassign(
+        &mut self,
+        mission_id: &str,
+        agent_id: String,
+    ) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.state != MissionState::Queued {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Queued,
+            });
+        }
+        mission.agent_id = Some(agent_id);
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
     /// Lists parked Missions whose resume time is `now` or earlier, in identity order.
     pub fn due_parked(&self, now: i64) -> Vec<Mission> {
         self.missions
@@ -389,6 +437,7 @@ impl MissionStore {
                 | MissionState::Blocked
                 | MissionState::Stalled
                 | MissionState::Parked
+                | MissionState::Quarantined
         ) {
             return Err(MissionError::InvalidTransition {
                 from: mission.state,
@@ -527,7 +576,9 @@ pub enum MissionError {
 }
 
 fn valid_transition(from: MissionState, to: MissionState) -> bool {
-    use MissionState::{Abandoned, Blocked, Blown, Done, Failed, Parked, Queued, Stalled, Working};
+    use MissionState::{
+        Abandoned, Blocked, Blown, Done, Failed, Parked, Quarantined, Queued, Stalled, Working,
+    };
     matches!(
         (from, to),
         (Queued, Working | Failed | Abandoned)
@@ -537,6 +588,8 @@ fn valid_transition(from: MissionState, to: MissionState) -> bool {
             | (Blocked, Blown)
             | (Stalled, Working | Failed | Blown | Abandoned)
             | (Parked, Working | Failed | Abandoned)
+            | (Working | Blocked | Stalled | Parked, Quarantined)
+            | (Quarantined, Abandoned)
     )
 }
 

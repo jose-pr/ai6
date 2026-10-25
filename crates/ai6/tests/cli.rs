@@ -131,3 +131,44 @@ fn identity_and_peers_work_on_a_state_directory_with_the_source_address_shown() 
     );
     assert!(!run(&["peer", "accept", &stranger.fingerprint().to_string()]).0);
 }
+
+#[test]
+fn agents_are_quarantined_listed_and_released() {
+    let registry = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = ai6()
+            .arg("quarantine")
+            .args(args)
+            .env("AI6_REGISTRY", registry.path())
+            .output()
+            .expect("the AI6 command should start");
+        (
+            output.status.success(),
+            String::from_utf8(output.stdout).unwrap(),
+        )
+    };
+
+    assert!(run(&["list"]).1.contains("No Agents are quarantined"));
+    let (ok, text) = run(&["add", "007", "looping", "--operation", "G"]);
+    assert!(ok && text.contains("Quarantined 007 in G"), "{text}");
+    let listed = run(&["list"]).1;
+    assert!(
+        listed.contains("007\tG\t") && listed.contains("looping"),
+        "{listed}"
+    );
+    assert!(
+        !run(&["release", "007"]).0,
+        "a release names an Operation or --all"
+    );
+    assert!(
+        run(&["release", "007", "--all"])
+            .1
+            .contains("not quarantined")
+    );
+    assert!(
+        run(&["release", "007", "--operation", "G"])
+            .1
+            .contains("Released 007")
+    );
+    assert!(run(&["list"]).1.contains("No Agents are quarantined"));
+}

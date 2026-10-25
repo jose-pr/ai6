@@ -1,0 +1,276 @@
+//! Quarantine records: Agents stopped everywhere until an operator releases them.
+//!
+//! A record names an Agent and the Operation it applies to (or every Operation). Every
+//! Station reads the same records, so a quarantine raised on one Station stops the Agent on
+//! the others. The incidents that justify a quarantine are kept per Agent for a few days.
+
+use std::fs;
+use std::io;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use super::store::{FileRegistry, invalid_data, registry_lock, safe_component, write_atomic};
+use crate::directorates::medical::quarantine::Incident;
+
+const ALL_OPERATIONS: &str = "_all";
+const MAX_RECORD_BYTES: u64 = 16 * 1024;
+const MAX_QUARANTINES: usize = 10_000;
+const MAX_INCIDENTS: usize = 256;
+/// Incidents older than this are dropped; no policy window is longer in practice.
+const KEEP_INCIDENTS_SECS: f64 = 7.0 * 24.0 * 3600.0;
+
+/// An Agent stopped by Medical or an operator.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Quarantine {
+    /// The Agent codename.
+    pub agent: String,
+    /// The Operation it applies to; `None` is every Operation.
+    pub operation: Option<String>,
+    /// Why it was quarantined.
+    pub reason: String,
+    /// Who quarantined it: an operator, or `station:ID` for an automatic trigger.
+    pub by: String,
+    /// When, as Unix seconds.
+    pub at: f64,
+}
+
+impl Quarantine {
+    /// A quarantine of `agent` in `operation` (every Operation when `None`).
+    pub fn new(
+        agent: impl Into<String>,
+        operation: Option<String>,
+        reason: impl Into<String>,
+        by: impl Into<String>,
+        at: f64,
+    ) -> Self {
+        Self {
+            agent: agent.into(),
+            operation,
+            reason: reason.into(),
+            by: by.into(),
+            at,
+        }
+    }
+
+    /// Whether this record stops `agent` working in `operation`.
+    pub fn covers(&self, agent: &str, operation: Option<&str>) -> bool {
+        self.agent == agent
+            && match (&self.operation, operation) {
+                (None, _) => true,
+                (Some(own), Some(asked)) => own == asked,
+                (Some(_), None) => false,
+            }
+    }
+}
+
+impl FileRegistry {
+    fn quarantine_dir(&self) -> PathBuf {
+        self.root.join("quarantine")
+    }
+
+    fn quarantine_path(&self, agent: &str, operation: Option<&str>) -> PathBuf {
+        self.quarantine_dir().join(format!(
+            "{}--{}.json",
+            safe_component(agent),
+            safe_component(operation.unwrap_or(ALL_OPERATIONS))
+        ))
+    }
+
+    /// Quarantines an Agent. Quarantining again replaces the reason; the first record's
+    /// time is kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an empty Agent or reason, or when the Registry cannot be written.
+    pub fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine> {
+        if record.agent.trim().is_empty() || record.reason.trim().is_empty() {
+            return Err(invalid_data("a quarantine needs an Agent and a reason"));
+        }
+        let _lock = registry_lock(&self.root)?;
+        let path = self.quarantine_path(&record.agent, record.operation.as_deref());
+        if let Some(existing) = read_record(&path)? {
+            return Ok(existing);
+        }
+        if fs::read_dir(self.quarantine_dir())
+            .is_ok_and(|entries| entries.count() >= MAX_QUARANTINES)
+        {
+            return Err(io::Error::other("too many quarantine records"));
+        }
+        let bytes = serde_json::to_vec(record).map_err(io::Error::other)?;
+        write_atomic(&path, &bytes)?;
+        Ok(record.clone())
+    }
+
+    /// Lifts a quarantine; `false` when there was none.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be written.
+    pub fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool> {
+        let _lock = registry_lock(&self.root)?;
+        match fs::remove_file(self.quarantine_path(agent, operation)) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Lists every quarantine, Agent first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a record cannot be read.
+    pub fn quarantines(&self) -> io::Result<Vec<Quarantine>> {
+        let entries = match fs::read_dir(self.quarantine_dir()) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut records = Vec::new();
+        for entry in entries {
+            let path = entry?.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+                && let Some(record) = read_record(&path)?
+            {
+                records.push(record);
+            }
+        }
+        records.sort_by(|left, right| {
+            (&left.agent, &left.operation).cmp(&(&right.agent, &right.operation))
+        });
+        Ok(records)
+    }
+
+    /// Whether `agent` is quarantined for `operation`, by a record for that Operation or one
+    /// for every Operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the records cannot be read; callers that gate work on this treat
+    /// that as quarantined.
+    pub fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool> {
+        Ok(self
+            .quarantines()?
+            .iter()
+            .any(|record| record.covers(agent, operation)))
+    }
+
+    /// Adds an incident to an Agent's history and returns the history, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the history cannot be read or written.
+    pub fn record_incident(&self, agent: &str, incident: Incident) -> io::Result<Vec<Incident>> {
+        let _lock = registry_lock(&self.root)?;
+        let path = self
+            .quarantine_dir()
+            .join("incidents")
+            .join(format!("{}.json", safe_component(agent)));
+        let mut history: Vec<Incident> = match fs::read(&path) {
+            Ok(bytes) if bytes.len() as u64 <= MAX_RECORD_BYTES * 16 => {
+                serde_json::from_slice(&bytes)
+                    .map_err(|error| invalid_data(format!("invalid incident history: {error}")))?
+            }
+            Ok(_) => return Err(invalid_data("incident history exceeds the size limit")),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(error),
+        };
+        let cutoff = incident.at - KEEP_INCIDENTS_SECS;
+        history.retain(|known| known.at >= cutoff);
+        history.push(incident);
+        if history.len() > MAX_INCIDENTS {
+            history.drain(..history.len() - MAX_INCIDENTS);
+        }
+        let bytes = serde_json::to_vec(&history).map_err(io::Error::other)?;
+        write_atomic(&path, &bytes)?;
+        Ok(history)
+    }
+}
+
+fn read_record(path: &std::path::Path) -> io::Result<Option<Quarantine>> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if bytes.len() as u64 > MAX_RECORD_BYTES {
+        return Err(invalid_data("quarantine record exceeds the size limit"));
+    }
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| invalid_data(format!("invalid quarantine record: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::directorates::medical::quarantine::IncidentKind;
+
+    fn registry() -> (tempfile::TempDir, FileRegistry) {
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
+        (root, registry)
+    }
+
+    #[test]
+    fn a_quarantine_covers_its_operation_or_all_and_release_lifts_it() {
+        let (_root, registry) = registry();
+        assert!(!registry.is_quarantined("007", Some("G")).unwrap());
+        registry
+            .quarantine_agent(&Quarantine::new(
+                "007",
+                Some("G".into()),
+                "looping",
+                "ops",
+                10.0,
+            ))
+            .unwrap();
+        assert!(registry.is_quarantined("007", Some("G")).unwrap());
+        assert!(!registry.is_quarantined("007", Some("L")).unwrap());
+        assert!(!registry.is_quarantined("008", Some("G")).unwrap());
+        registry
+            .quarantine_agent(&Quarantine::new("009", None, "turned", "ops", 11.0))
+            .unwrap();
+        assert!(registry.is_quarantined("009", Some("anything")).unwrap());
+        assert!(registry.is_quarantined("009", None).unwrap());
+
+        let again = registry
+            .quarantine_agent(&Quarantine::new(
+                "007",
+                Some("G".into()),
+                "other",
+                "x",
+                99.0,
+            ))
+            .unwrap();
+        assert_eq!((again.reason.as_str(), again.at), ("looping", 10.0));
+        assert_eq!(registry.quarantines().unwrap().len(), 2);
+        assert!(registry.release_quarantine("007", Some("G")).unwrap());
+        assert!(!registry.release_quarantine("007", Some("G")).unwrap());
+        assert!(!registry.is_quarantined("007", Some("G")).unwrap());
+    }
+
+    #[test]
+    fn incidents_accumulate_per_agent_and_old_ones_are_dropped() {
+        let (_root, registry) = registry();
+        let incident = |at| Incident {
+            kind: IncidentKind::Stall,
+            at,
+            operation: None,
+            mission: "m".to_owned(),
+        };
+        registry.record_incident("007", incident(1_000.0)).unwrap();
+        registry.record_incident("008", incident(1_001.0)).unwrap();
+        let history = registry.record_incident("007", incident(2_000.0)).unwrap();
+        assert_eq!(history.len(), 2);
+        let history = registry
+            .record_incident("007", incident(2_000.0 + KEEP_INCIDENTS_SECS + 1.0))
+            .unwrap();
+        assert_eq!(history.len(), 1, "incidents past the retention are dropped");
+    }
+}

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
     Authorizer, Brief, Directory, FileRegistry, Lookup, MissionProposal, MissionUsage, Person,
-    StationSettings, Verdict,
+    Quarantine, StationSettings, Verdict,
 };
 use ai6_diptel::{
     FrameReceiver, IncomingFrame, LifecycleEvent, MissionId, OperationId, SessionId, SessionState,
@@ -1004,6 +1004,18 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/agent-roles/{role_id}",
                 axum::routing::put(put_user_agent_role).delete(delete_user_agent_role),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/quarantine",
+                get(list_user_quarantines),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/quarantine/{agent_id}",
+                post(quarantine_user_agent),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/quarantine/{agent_id}/release",
+                post(release_user_quarantine),
             )
             .route(
                 "/v1/operations/{operation_id}/missions/{mission_id}",
@@ -2416,6 +2428,134 @@ async fn delete_user_agent_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuarantineRequest {
+    reason: String,
+}
+
+fn valid_agent_id(agent_id: &str) -> bool {
+    !agent_id.is_empty()
+        && agent_id.len() <= 128
+        && agent_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+}
+
+async fn list_user_quarantines(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(operation_id): Path<String>,
+) -> Result<Json<Vec<Quarantine>>, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    authorize_operation_action(&gateway, person, &operation_id, "agent.read").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let operation = operation_id.to_string();
+    let records = tokio::task::spawn_blocking(move || registry.quarantines())
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+    Ok(Json(
+        records
+            .into_iter()
+            .filter(|record| {
+                record
+                    .operation
+                    .as_deref()
+                    .is_none_or(|own| own == operation)
+            })
+            .collect(),
+    ))
+}
+
+async fn quarantine_user_agent(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, agent_id)): Path<(String, String)>,
+    Json(request): Json<QuarantineRequest>,
+) -> Result<StatusCode, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    let reason = request.reason.trim().to_owned();
+    if !valid_agent_id(&agent_id)
+        || reason.is_empty()
+        || reason.chars().count() > 512
+        || reason.chars().any(char::is_control)
+    {
+        return Err(ApiError::bad_request());
+    }
+    authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.configure").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    ensure_operation_registered(&registry, &operation_id).await?;
+    let at = unix_timestamp()?;
+    let record = Quarantine::new(
+        agent_id.clone(),
+        Some(operation_id.to_string()),
+        reason,
+        person.id.clone(),
+        at,
+    );
+    let audit = AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor: person.id,
+        action: "agent.quarantine".to_owned(),
+        operation: operation_id.to_string(),
+        resource: None,
+        target: agent_id,
+        at,
+    };
+    tokio::task::spawn_blocking(move || {
+        registry.quarantine_agent(&record)?;
+        registry.record_audit(&audit)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    Ok(StatusCode::CREATED)
+}
+
+async fn release_user_quarantine(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, agent_id)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    if !valid_agent_id(&agent_id) {
+        return Err(ApiError::bad_request());
+    }
+    authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.configure").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let operation = operation_id.to_string();
+    let target = agent_id.clone();
+    // Only this Operation's own record is lifted here; a quarantine of every Operation is
+    // released by an operator on a Station (`ai6 quarantine release --all`).
+    let released =
+        tokio::task::spawn_blocking(move || registry.release_quarantine(&target, Some(&operation)))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(|_| ApiError::internal())?;
+    if !released {
+        return Err(ApiError::from(GatewayError::NotFound));
+    }
+    let audit = AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor: person.id,
+        action: "agent.quarantine.release".to_owned(),
+        operation: operation_id.to_string(),
+        resource: None,
+        target: agent_id,
+        at: unix_timestamp()?,
+    };
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    tokio::task::spawn_blocking(move || registry.record_audit(&audit))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn user_audit(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -2853,6 +2993,7 @@ async fn publish_lifecycle(
         "blocked" => SessionState::Blocked,
         "stalled" => SessionState::Stalled,
         "parked" => SessionState::Parked,
+        "quarantined" => SessionState::Quarantined,
         "done" => SessionState::Done,
         "failed" => SessionState::Failed,
         _ => return Err(ApiError::bad_request()),
@@ -3321,7 +3462,7 @@ fn validate_lifecycle_value(
         || session != session_id.as_str()
         || !matches!(
             state,
-            "working" | "blocked" | "stalled" | "parked" | "done" | "failed"
+            "working" | "blocked" | "stalled" | "parked" | "quarantined" | "done" | "failed"
         )
         || sequence != expected_sequence
     {
@@ -4776,6 +4917,67 @@ mod tests {
         let roles_after_delete: serde_json::Value = roles_after_delete.json().await.unwrap();
         assert_eq!(roles_after_delete.as_array().unwrap().len(), 1);
         assert_eq!(roles_after_delete[0]["id"], "case-officer");
+
+        let quarantine = format!("{base}/v1/user/operations/G/quarantine");
+        let forbidden = client
+            .post(format!("{quarantine}/007"))
+            .bearer_auth(&viewer_token)
+            .json(&serde_json::json!({ "reason": "looping" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+        let quarantined = client
+            .post(format!("{quarantine}/007"))
+            .bearer_auth(&operator_token)
+            .json(&serde_json::json!({ "reason": "looping" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(quarantined.status(), StatusCode::CREATED);
+        let listed: serde_json::Value = client
+            .get(&quarantine)
+            .bearer_auth(&operator_token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(listed[0]["agent"], "007");
+        assert_eq!(listed[0]["operation"], "G");
+        assert_eq!(listed[0]["by"], "operator-007");
+        let viewer_release = client
+            .post(format!("{quarantine}/007/release"))
+            .bearer_auth(&viewer_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(viewer_release.status(), StatusCode::FORBIDDEN);
+        let released = client
+            .post(format!("{quarantine}/007/release"))
+            .bearer_auth(&operator_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(released.status(), StatusCode::NO_CONTENT);
+        let again = client
+            .post(format!("{quarantine}/007/release"))
+            .bearer_auth(&operator_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(again.status(), StatusCode::NOT_FOUND);
+        let empty: serde_json::Value = client
+            .get(&quarantine)
+            .bearer_auth(&operator_token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(empty.as_array().unwrap().is_empty());
 
         let anonymous_board = client.get(format!("{base}/v1/board")).send().await.unwrap();
         assert_eq!(anonymous_board.status(), StatusCode::UNAUTHORIZED);

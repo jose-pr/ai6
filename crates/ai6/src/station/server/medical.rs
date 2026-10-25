@@ -4,13 +4,15 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use super::{DaemonState, queue_event, session_hold, sync_session_record};
-use crate::directorates::m::mission::Mission;
+use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, Exposure, ExposureGate, tool_source,
 };
+use crate::directorates::medical::quarantine::{Incident, IncidentKind};
 use crate::directorates::medical::usage::{
     Budget, BudgetBreach, BudgetLevel, BudgetScope, MissionUsage, UsageTotals, UsageTracker,
 };
+use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::sessions::SessionUpdate;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
 use crate::directorates::registry::store::{AuditRecord, Brief};
@@ -21,6 +23,9 @@ pub(super) const BUDGET_REASON: &str = "budget";
 
 /// The event kind that reports a budget warning or stop.
 pub(super) const BUDGET_EVENT: &str = "budget";
+
+/// The event kind that reports a Mission stopped because its Agent is quarantined.
+pub(super) const QUARANTINED_EVENT: &str = "quarantined";
 
 /// The event kind that reports a new way a Session was exposed; its text is the source.
 pub(super) const EXPOSED_EVENT: &str = "exposed";
@@ -347,4 +352,260 @@ pub(super) fn stop_for_budget(
         telemetry.publish_lifecycle("blocked");
     }
     sync_session_record(state, mission_id);
+    report_incident(state, mission_id, IncidentKind::Budget);
+}
+
+/// Whether `agent` may not work in `operation` because it is quarantined.
+///
+/// An unreadable quarantine list counts as quarantined: work that cannot be shown to be
+/// allowed does not start.
+pub(super) fn is_quarantined(state: &DaemonState, agent: &str, operation: Option<&str>) -> bool {
+    state
+        .intake
+        .is_quarantined(agent, operation)
+        .unwrap_or_else(|error| {
+            eprintln!(
+                "ai6: quarantine list unreadable, treating {agent:?} as quarantined: {error}"
+            );
+            true
+        })
+}
+
+/// The Agents quarantined for `operation`, for the roster to skip.
+pub(super) fn quarantined_agents(state: &DaemonState, operation: Option<&str>) -> Vec<String> {
+    state
+        .intake
+        .quarantines()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|record| record.covers(&record.agent, operation))
+        .map(|record| record.agent)
+        .collect()
+}
+
+/// Records an incident against the Mission's Agent and quarantines the Agent when its
+/// Operation's policy says its recent history warrants it.
+pub(super) fn report_incident(state: &DaemonState, mission_id: &str, kind: IncidentKind) {
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+    else {
+        return;
+    };
+    let Some(agent) = mission.agent_id.clone() else {
+        return;
+    };
+    let policy = mission
+        .operation_id
+        .as_deref()
+        .and_then(|id| state.roster.operation(id).ok())
+        .map(|operation| operation.quarantine)
+        .unwrap_or_default();
+    let now = state.clock.now() as f64;
+    let incident = Incident {
+        kind,
+        at: now,
+        operation: mission.operation_id.clone(),
+        mission: mission_id.to_owned(),
+    };
+    let mut history = match state.intake.record_incident(&agent, incident) {
+        Ok(history) => history,
+        Err(error) => {
+            eprintln!("ai6: incident of Agent {agent:?} was not recorded: {error}");
+            return;
+        }
+    };
+    // An Operation's policy judges what happened in that Operation.
+    history.retain(|known| known.operation == mission.operation_id);
+    if let Some(reason) = policy.reason(&history, now) {
+        quarantine_agent(
+            state,
+            &agent,
+            mission.operation_id.as_deref(),
+            &reason,
+            &format!("station:{}", state.station_id),
+        );
+    }
+}
+
+/// Quarantines an Agent in the Registry and stops its work on this Station.
+pub(super) fn quarantine_agent(
+    state: &DaemonState,
+    agent: &str,
+    operation: Option<&str>,
+    reason: &str,
+    by: &str,
+) {
+    let record = Quarantine::new(
+        agent,
+        operation.map(str::to_owned),
+        reason,
+        by,
+        state.clock.now() as f64,
+    );
+    match state.intake.quarantine_agent(&record) {
+        Ok(_) => {
+            eprintln!("ai6: Agent {agent:?} is quarantined: {reason}");
+            let audit = AuditRecord {
+                id: format!("agent.quarantine-{}", uuid::Uuid::new_v4().simple()),
+                actor: by.to_owned(),
+                action: "agent.quarantine".to_owned(),
+                operation: operation.unwrap_or_default().to_owned(),
+                resource: operation
+                    .is_none()
+                    .then(|| format!("station:{}", state.station_id)),
+                target: agent.to_owned(),
+                at: record.at,
+            };
+            if let Err(error) = state.intake.record_audit(&audit) {
+                eprintln!("ai6: quarantine audit record was not written: {error}");
+            }
+        }
+        Err(error) => eprintln!("ai6: Agent {agent:?} was not quarantined: {error}"),
+    }
+    enforce_quarantines(state);
+}
+
+/// Brings this Station's Missions in line with the Registry's quarantine list: the work of
+/// a quarantined Agent stops, and a Mission whose Agent was released goes back to the queue,
+/// with the next qualified Agent when there is one.
+pub(super) fn enforce_quarantines(state: &DaemonState) {
+    let records = match state.intake.quarantines() {
+        Ok(records) => records,
+        Err(error) => {
+            eprintln!("ai6: quarantine list unreadable: {error}");
+            return;
+        }
+    };
+    let missions = state
+        .missions
+        .lock()
+        .map(|missions| missions.list())
+        .unwrap_or_default();
+    for mission in missions {
+        let Some(agent) = mission.agent_id.as_deref() else {
+            continue;
+        };
+        let covered = records
+            .iter()
+            .any(|record| record.covers(agent, mission.operation_id.as_deref()));
+        match (covered, mission.state) {
+            (
+                true,
+                MissionState::Working
+                | MissionState::Blocked
+                | MissionState::Stalled
+                | MissionState::Parked,
+            ) => stop_for_quarantine(state, &mission, &records),
+            (false, MissionState::Quarantined) => release_mission(state, &mission),
+            _ => {}
+        }
+    }
+}
+
+fn stop_for_quarantine(state: &DaemonState, mission: &Mission, records: &[Quarantine]) {
+    let mission_id = mission.mission_id.as_str();
+    let operation = state
+        .sessions
+        .lock()
+        .ok()
+        .and_then(|mut sessions| sessions.remove(mission_id));
+    if let Some(operation) = &operation
+        && let Ok(session) = operation.session.lock()
+    {
+        let _ = session.interrupt();
+        let _ = session.close();
+    }
+    let quarantined = state
+        .missions
+        .lock()
+        .ok()
+        .is_some_and(|mut missions| missions.quarantine(mission_id).is_ok());
+    if !quarantined {
+        return;
+    }
+    #[cfg(feature = "publisher")]
+    if let Some(telemetry) = operation
+        .as_ref()
+        .and_then(|operation| operation.telemetry.as_ref())
+    {
+        telemetry.publish_lifecycle("quarantined");
+    }
+    sync_session_record(state, mission_id);
+    let reason = records
+        .iter()
+        .find(|record| {
+            mission
+                .agent_id
+                .as_deref()
+                .is_some_and(|agent| record.covers(agent, mission.operation_id.as_deref()))
+        })
+        .map_or("quarantined", |record| record.reason.as_str());
+    queue_event(
+        state,
+        mission_id,
+        AgentEvent {
+            kind: QUARANTINED_EVENT.to_owned(),
+            text: Some(format!("Agent quarantined: {reason}")),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+        },
+    );
+}
+
+fn release_mission(state: &DaemonState, mission: &Mission) {
+    let Some(agent) = mission.agent_id.clone() else {
+        return;
+    };
+    let handlers = super::available_handlers(state);
+    let backup = state
+        .roster
+        .select_agent_excluding(
+            mission.operation_id.as_deref(),
+            mission.role_id.as_deref(),
+            &[],
+            Some(&handlers),
+            std::slice::from_ref(&agent),
+        )
+        .map_or(agent, |backup| backup.id);
+    let requeued = state.missions.lock().ok().is_some_and(|mut missions| {
+        missions
+            .requeue_for(mission.mission_id.as_str(), backup)
+            .is_ok()
+    });
+    if requeued {
+        sync_session_record(state, mission.mission_id.as_str());
+    }
+}
+
+/// Gives a queued Mission whose Agent is quarantined to the next qualified Agent.
+///
+/// Returns `false` when it must wait: its Agent is quarantined and no other can take it.
+pub(super) fn reassign_if_quarantined(state: &DaemonState, mission: &Mission) -> bool {
+    let Some(agent) = mission.agent_id.as_deref() else {
+        return true;
+    };
+    if !is_quarantined(state, agent, mission.operation_id.as_deref()) {
+        return true;
+    }
+    let handlers = super::available_handlers(state);
+    let excluded = quarantined_agents(state, mission.operation_id.as_deref());
+    let Ok(backup) = state.roster.select_agent_excluding(
+        mission.operation_id.as_deref(),
+        mission.role_id.as_deref(),
+        &[],
+        Some(&handlers),
+        &excluded,
+    ) else {
+        return false;
+    };
+    state.missions.lock().ok().is_some_and(|mut missions| {
+        missions
+            .reassign(mission.mission_id.as_str(), backup.id)
+            .is_ok()
+    })
 }

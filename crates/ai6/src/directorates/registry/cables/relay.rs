@@ -1260,6 +1260,11 @@ impl CableRelay {
         {
             return Err(CableRelayError::Unavailable);
         }
+        // A quarantined sender's Cables are held for an authorized release, never delivered.
+        let sender_quarantined = self
+            .registry
+            .is_quarantined(&sender.agent, Some(&sender.operation))
+            .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let mut selected = Vec::new();
         let mut seen = BTreeSet::new();
         for endpoint in candidates {
@@ -1290,6 +1295,7 @@ impl CableRelay {
                 continue;
             }
             let state = match policy.inbound_mode(&endpoint.agent) {
+                CableInboundMode::Deliver if sender_quarantined => CableState::Held,
                 CableInboundMode::Deliver => CableState::Queued,
                 CableInboundMode::Hold => CableState::Held,
                 CableInboundMode::Refuse => CableState::Refused,
@@ -1628,6 +1634,52 @@ mod tests {
         assert_eq!(audit[0].decision, "accepted");
         assert_eq!(audit[0].target_scope, CableScope::Station);
         assert!(!format!("{:?}", sent).contains("Review this change"));
+    }
+
+    #[test]
+    fn a_quarantined_senders_cables_are_held_until_released() {
+        use crate::directorates::registry::quarantine::Quarantine;
+
+        let root = tempfile::tempdir().unwrap();
+        let registry = Arc::new(FileRegistry::open(root.path()));
+        let operation = target(CableScope::Station, Some("station-a"));
+        let policy = CablePolicy::try_new(
+            vec![
+                grant("007", CableAction::Send, operation.clone()),
+                grant("008", CableAction::Receive, operation.clone()),
+                grant("009", CableAction::Release, operation.clone()),
+            ],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let service = relay(
+            registry.clone(),
+            policy,
+            vec![endpoint("008", "operation-a", Some("session-008"))],
+        );
+        let sender = principal("007", "operation-a");
+        let before = service
+            .send(&sender, request(operation.clone(), "before"))
+            .unwrap();
+        assert_eq!(before.recipients()[0].state(), CableState::Queued);
+
+        registry
+            .quarantine_agent(&Quarantine::new("007", None, "looping", "ops", 1.0))
+            .unwrap();
+        let held = service.send(&sender, request(operation, "after")).unwrap();
+        assert_eq!(held.recipients()[0].state(), CableState::Held);
+        assert!(
+            service
+                .inbox(&principal("008", "operation-a"), 10)
+                .unwrap()
+                .iter()
+                .all(|delivery| delivery.cable_id != held.id()),
+            "the receiver is not given a quarantined sender's Cable"
+        );
+        let released = service
+            .release(&principal("009", "operation-a"), held.id())
+            .unwrap();
+        assert_eq!(released.delivered, 1);
     }
 
     #[test]

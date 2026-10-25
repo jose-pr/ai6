@@ -37,6 +37,41 @@ enum Command {
         #[command(subcommand)]
         command: SleeperCommand,
     },
+    /// List, add or release Agent quarantines in the shared Registry.
+    Quarantine {
+        #[command(subcommand)]
+        command: QuarantineCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum QuarantineCommand {
+    /// List every quarantined Agent, with who raised it and why.
+    List,
+    /// Quarantine an Agent: its work stops and no new work goes to it.
+    Add {
+        /// Agent codename.
+        agent: String,
+        /// Why; recorded with the quarantine.
+        reason: String,
+        /// Quarantine it in this Operation only (default: every Operation).
+        #[arg(long, conflicts_with = "all")]
+        operation: Option<String>,
+        /// Quarantine it in every Operation.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Release an Agent; its stopped Missions return to the queue.
+    Release {
+        /// Agent codename.
+        agent: String,
+        /// Release the quarantine of this Operation.
+        #[arg(long, conflicts_with = "all")]
+        operation: Option<String>,
+        /// Release the quarantine that covers every Operation.
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -153,6 +188,16 @@ async fn main() -> ExitCode {
             }
             Err(error) => {
                 eprintln!("ai6: sleeper operation failed: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Quarantine { command } => match quarantine_command(command) {
+            Ok(output) => {
+                print!("{output}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("ai6: quarantine operation failed: {error}");
                 ExitCode::FAILURE
             }
         },
@@ -319,6 +364,77 @@ fn sleeper_command(config_dir: Option<PathBuf>, command: SleeperCommand) -> Resu
                 format!("Revoked sleeper {name} of Operation {operation}\n")
             } else {
                 format!("Sleeper {name} of Operation {operation} was not authorized\n")
+            })
+        }
+    }
+}
+
+fn quarantine_command(command: QuarantineCommand) -> Result<String, String> {
+    let registry = ai6::FileRegistry::from_environment().map_err(|e| e.to_string())?;
+    let scope = |operation: Option<String>, all: bool| -> Result<Option<String>, String> {
+        match (operation, all) {
+            (Some(operation), false) => Ok(Some(operation)),
+            (None, true) => Ok(None),
+            _ => Err("name an Operation with --operation, or pass --all".to_owned()),
+        }
+    };
+    match command {
+        QuarantineCommand::List => {
+            let records = registry.quarantines().map_err(|e| e.to_string())?;
+            if records.is_empty() {
+                return Ok("No Agents are quarantined.\n".to_owned());
+            }
+            let mut output = String::from("AGENT\tOPERATION\tBY\tREASON\n");
+            for record in records {
+                output.push_str(&format!(
+                    "{}\t{}\t{}\t{}\n",
+                    record.agent,
+                    record.operation.as_deref().unwrap_or("(all)"),
+                    record.by,
+                    record.reason
+                ));
+            }
+            Ok(output)
+        }
+        QuarantineCommand::Add {
+            agent,
+            reason,
+            operation,
+            all,
+        } => {
+            let scope = if operation.is_none() && !all {
+                None
+            } else {
+                scope(operation, all)?
+            };
+            let by = std::env::var("USER")
+                .or_else(|_| std::env::var("USERNAME"))
+                .unwrap_or_else(|_| "operator".to_owned());
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+            let record = ai6::Quarantine::new(&agent, scope.clone(), reason, by, now);
+            registry
+                .quarantine_agent(&record)
+                .map_err(|e| e.to_string())?;
+            Ok(format!(
+                "Quarantined {agent} in {}\n",
+                scope.as_deref().unwrap_or("every Operation")
+            ))
+        }
+        QuarantineCommand::Release {
+            agent,
+            operation,
+            all,
+        } => {
+            let scope = scope(operation, all)?;
+            let had = registry
+                .release_quarantine(&agent, scope.as_deref())
+                .map_err(|e| e.to_string())?;
+            Ok(if had {
+                format!("Released {agent}\n")
+            } else {
+                format!("{agent} was not quarantined there\n")
             })
         }
     }

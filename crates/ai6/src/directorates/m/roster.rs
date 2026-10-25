@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
+use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
 use crate::directorates::registry::sleepers::Sleeper;
@@ -134,6 +135,8 @@ pub struct Operation {
     pub budget: Budget,
     /// What a Session may do once it has read untrusted input; strict unless configured.
     pub exposure: ExposurePolicy,
+    /// When an Agent working here is quarantined.
+    pub quarantine: QuarantinePolicy,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
@@ -340,6 +343,19 @@ impl Roster {
         tags: &[String],
         available_handlers: Option<&[String]>,
     ) -> Result<Agent, RosterError> {
+        self.select_agent_excluding(operation_key, role, tags, available_handlers, &[])
+    }
+
+    /// Like [`Roster::select_agent`], skipping the Agents named in `excluded` (quarantined
+    /// ones), so the next qualified Agent is chosen instead.
+    pub fn select_agent_excluding(
+        &self,
+        operation_key: Option<&str>,
+        role: Option<&str>,
+        tags: &[String],
+        available_handlers: Option<&[String]>,
+        excluded: &[String],
+    ) -> Result<Agent, RosterError> {
         let mut keys: BTreeSet<String> = self.agents.keys().cloned().collect();
         if let Some(operation) = operation_key.map(|key| self.operation(key)).transpose()?
             && let Some(path) = self.operation_agent_file(operation)
@@ -367,7 +383,7 @@ impl Roster {
                     .as_ref()
                     .is_some_and(|handler| handlers.contains(handler))
             });
-            if role_matches && tags_match && available {
+            if role_matches && tags_match && available && !excluded.contains(&agent.id) {
                 candidates.insert(agent.id.clone(), agent);
             }
         }
@@ -487,6 +503,7 @@ struct OperationDefinition {
     limit_fallback_secs: Option<u64>,
     budget: BudgetDefinition,
     exposure: ExposureDefinition,
+    quarantine: QuarantineDefinition,
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
 }
@@ -549,6 +566,9 @@ impl OperationDefinition {
         let exposure = self.exposure.resolve().map_err(|message| {
             error(format!("{}: Operation {id:?}: {message}", source.display()))
         })?;
+        let quarantine = self.quarantine.resolve().map_err(|message| {
+            error(format!("{}: Operation {id:?}: {message}", source.display()))
+        })?;
         let operation = Operation {
             id,
             name: self.name,
@@ -597,6 +617,7 @@ impl OperationDefinition {
                 .unwrap_or(DEFAULT_LIMIT_FALLBACK_SECS),
             budget,
             exposure,
+            quarantine,
             sources: self.sources,
             sleepers: self.sleepers,
         };

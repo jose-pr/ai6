@@ -258,8 +258,8 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
     .await;
     assert!(mission.status.success());
     let mission = String::from_utf8(mission.stdout).unwrap();
-    assert!(mission.contains("SESSION\tSTATE\tSEQUENCE"));
-    assert!(mission.contains("provider-session-007\tworking\t1"));
+    assert!(mission.contains("SESSION\tSTATE\tSEQUENCE\tEXPOSURE"));
+    assert!(mission.contains("provider-session-007\tworking\t1\t-"));
 
     let sessions = ai6ctl(
         server.clone(),
@@ -273,8 +273,8 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
         String::from_utf8_lossy(&sessions.stderr)
     );
     let sessions = String::from_utf8(sessions.stdout).unwrap();
-    assert!(sessions.contains("STATION\tMISSION\tSESSION\tSTATE\tSEQUENCE"));
-    assert!(sessions.contains("station-01\tmission-007\tprovider-session-007\tworking\t1"));
+    assert!(sessions.contains("STATION\tMISSION\tSESSION\tSTATE\tSEQUENCE\tEXPOSURE"));
+    assert!(sessions.contains("station-01\tmission-007\tprovider-session-007\tworking\t1\t-"));
 
     let session = ai6ctl(
         server.clone(),

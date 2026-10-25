@@ -738,6 +738,13 @@ void main() {
               'sequence': 3,
               'exposure': ['brief:source', 'tool:WebFetch'],
             },
+            {
+              'operation_id': 'operation-alpha',
+              'mission_id': 'mission-007',
+              'session_id': 'claude-session-901',
+              'state': 'quarantined',
+              'sequence': 2,
+            },
           ]),
           200,
         );
@@ -756,6 +763,7 @@ void main() {
     expect(find.text('WORKING'), findsOneWidget);
     expect(find.text('BLOCKED'), findsOneWidget);
     expect(find.text('PARKED'), findsOneWidget);
+    expect(find.text('QUARANTINED'), findsOneWidget);
     expect(find.text('EXPOSED'), findsOneWidget);
     expect(
       find.byTooltip('Read untrusted input: brief:source, tool:WebFetch'),
@@ -805,6 +813,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('claude-session-789'), findsOneWidget);
     expect(find.text('codex-session-456'), findsNothing);
+
+    await tester.tap(find.byTooltip('Filter by quarantined'));
+    await tester.pumpAndSettle();
+    expect(find.text('claude-session-901'), findsOneWidget);
+    expect(find.text('claude-session-789'), findsNothing);
 
     await tester.tap(find.byTooltip('Show all Sessions'));
     await tester.pumpAndSettle();

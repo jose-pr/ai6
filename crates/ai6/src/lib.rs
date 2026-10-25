@@ -35,6 +35,10 @@ pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure, ExposureDefinition,
     ExposureGate, ExposurePolicy, ExposurePreset, REVIEW, Restriction, cable_source, tool_source,
 };
+pub use directorates::medical::quarantine::{
+    DEFAULT_BUDGET_STOPS, DEFAULT_STALLS, DEFAULT_WINDOW_SECS, Incident, IncidentKind,
+    QuarantineDefinition, QuarantinePolicy,
+};
 pub use directorates::medical::usage::{
     Budget, BudgetBreach, BudgetDefinition, BudgetLevel, BudgetPreset, BudgetScope,
     DEFAULT_WARN_AT_PERMILLE, MissionUsage, UsageTotals, UsageTracker, micro_usd, utc_day,
@@ -63,6 +67,7 @@ pub use directorates::registry::cables::{
     CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_BODY_BYTES,
     MAX_CABLE_FANOUT, MAX_CABLE_TTL,
 };
+pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
     NewSession, SessionError, SessionRecord, SessionStatus, SessionUpdate,
 };

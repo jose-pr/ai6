@@ -87,6 +87,9 @@ pub enum SessionState {
     Stalled,
     /// A provider usage limit paused the operation until its quota resets.
     Parked,
+    /// Medical stopped the operation because its Agent is quarantined; only an operator
+    /// releases it.
+    Quarantined,
     /// The operation finished.
     Done,
     /// The agent operation exited unsuccessfully.
@@ -395,6 +398,7 @@ fn parse_state(state: &str) -> Option<SessionState> {
         "blocked" => Some(SessionState::Blocked),
         "stalled" => Some(SessionState::Stalled),
         "parked" => Some(SessionState::Parked),
+        "quarantined" => Some(SessionState::Quarantined),
         "done" => Some(SessionState::Done),
         "failed" => Some(SessionState::Failed),
         _ => None,
@@ -418,6 +422,7 @@ fn state_name(state: SessionState) -> &'static str {
         SessionState::Blocked => "blocked",
         SessionState::Stalled => "stalled",
         SessionState::Parked => "parked",
+        SessionState::Quarantined => "quarantined",
         SessionState::Done => "done",
         SessionState::Failed => "failed",
     }
@@ -677,6 +682,33 @@ mod tests {
     }
 
     #[test]
+    fn a_quarantined_session_round_trips_and_matches_its_wire_vector() {
+        let event = LifecycleEvent {
+            operation_id: OperationId::new("station-a").unwrap(),
+            mission_id: MissionId::new("mission-17").unwrap(),
+            session_id: SessionId::new("provider-run-3").unwrap(),
+            state: SessionState::Quarantined,
+            sequence: 4,
+        };
+        let (schema, value) = lifecycle_frames(&event).unwrap();
+        let mut receiver = FrameReceiver::new();
+        assert_eq!(receiver.accept(&schema).unwrap(), None);
+        assert_eq!(
+            receiver.accept(&value).unwrap(),
+            Some(IncomingFrame::Lifecycle(event))
+        );
+        let hex = value
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let expected = include_str!("../tests/vectors/frames.txt")
+            .lines()
+            .find_map(|line| line.strip_prefix("lifecycle_value_quarantined="))
+            .unwrap();
+        assert_eq!(hex, expected);
+    }
+
+    #[test]
     fn committed_wire_vectors_match_the_rust_encoder() {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
@@ -707,6 +739,7 @@ mod tests {
                 "terminal_value" => &terminal_frames.1,
                 "resize_schema" => &resize_frames.0,
                 "resize_value" => &resize_frames.1,
+                "lifecycle_value_quarantined" => continue,
                 _ => panic!("unknown vector name"),
             };
             let actual = actual

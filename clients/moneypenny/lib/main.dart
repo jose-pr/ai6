@@ -3134,6 +3134,7 @@ class _BoardHeader extends StatelessWidget {
                 'blocked',
                 'stalled',
                 'parked',
+                'quarantined',
                 'done',
                 'failed',
               ])
@@ -3800,6 +3801,7 @@ Color _stateColor(String state) => switch (state) {
   'blocked' => const Color(0xffffc16b),
   'stalled' => const Color(0xffff7777),
   'parked' => const Color(0xff8fb7ff),
+  'quarantined' => const Color(0xffd98cff),
   'done' => const Color(0xff9da8b5),
   'failed' => const Color(0xffff4e66),
   _ => const Color(0xff9da8b5),
