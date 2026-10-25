@@ -1,0 +1,21 @@
+[package]
+name = "ai6-access-proxy"
+description = "Trust identity headers from configured AI6 reverse proxies"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+exclude = [".*", "*.local.*"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+ai6 = { path = "../../../ai6", default-features = false }
+serde.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

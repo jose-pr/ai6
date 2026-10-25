@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/ai6",
     "crates/ai6-diptel",
+    "crates/providers/access/*",
     "crates/providers/agents/*",
     "crates/providers/terminals/*",
 ]

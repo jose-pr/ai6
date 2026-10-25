@@ -1,0 +1,25 @@
+[package]
+name = "ai6-access-key"
+description = "Hashed AI6 bearer keys with identity and group lookup"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+exclude = [".*", "*.local.*"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+ai6 = { path = "../../../ai6", default-features = false }
+serde.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+toml.workspace = true
+getrandom = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
