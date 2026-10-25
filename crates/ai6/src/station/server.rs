@@ -1493,6 +1493,10 @@ struct LaunchPlan {
     theater_id: String,
     mode: ExecutionMode,
     /// The Mission's working directory on the Theater, in remote-hands mode.
+    #[cfg_attr(
+        not(feature = "cables-mcp"),
+        allow(dead_code, reason = "only the Theater tools use it")
+    )]
     root: Option<String>,
 }
 

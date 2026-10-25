@@ -83,6 +83,10 @@ impl Transports {
     }
 
     /// The transport that reaches the Theater `id`, or why there is none.
+    #[cfg_attr(
+        not(feature = "cables-mcp"),
+        allow(dead_code, reason = "only the Theater tools use it")
+    )]
     pub(crate) fn client(&self, id: &str) -> Result<Arc<TransportClient>, String> {
         match self.entries.get(id) {
             Some(entry) => entry.client.clone(),

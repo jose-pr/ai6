@@ -6,7 +6,7 @@ use ai6::guatiao::Bytes;
 use ai6::guatiao::library::ProviderError;
 use ai6::{DirEntry, DirListing, FileData, ReadSpec, WriteSpec};
 
-use crate::io_error;
+use ai6::directorates::q::transport::kit::io_error;
 
 pub(crate) fn read(spec: &ReadSpec) -> Result<FileData, ProviderError> {
     let fail = |error: std::io::Error| io_error(&error, &spec.path);

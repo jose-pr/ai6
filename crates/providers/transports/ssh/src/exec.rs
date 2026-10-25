@@ -12,7 +12,9 @@ use russh::client::Msg;
 use russh::{ChannelMsg, ChannelReadHalf, ChannelWriteHalf, Sig};
 use tokio::runtime::Handle;
 
-use crate::command::{command_line, signal_number};
+use ai6::directorates::q::transport::kit::command_line;
+
+use crate::command::signal_number;
 use crate::refuse;
 use crate::session::Link;
 

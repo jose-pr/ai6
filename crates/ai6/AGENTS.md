@@ -445,9 +445,35 @@ missing file or directory is `GUATIAO_ERR_NOT_FOUND`. `contract::check` runs a t
 against its own `Capabilities`: what it claims works, what it does not claim answers
 `GUATIAO_ERR_UNSUPPORTED`.
 
-Providers: `ai6-transport-local` (`run`, `files`) and `ai6-transport-ssh` (`terminal`, `run`,
-`files`, `forward`), each with its own API header. `Plugins::transports()` and
-`Plugins::transport(provider, config)` find and build them.
+Providers, each with its own API header: `ai6-transport-local` (`run`, `files`),
+`ai6-transport-ssh` (`terminal`, `run`, `files`, `forward`), `ai6-transport-adb` (`run`,
+`files`, `forward`), `ai6-transport-container` (`run`, `files`) and `ai6-transport-qemu`
+(`run`, `files`). `Plugins::transports()` and `Plugins::transport(provider, config)` find and
+build them.
+
+### Kit (`ai6::directorates::q::transport::kit`)
+
+What the providers share, for a host reached through a command:
+
+```rust
+pub fn quote(word: &str) -> String;                      // one POSIX-shell word
+pub fn command_line(argv: &[String], cwd: Option<&str>, env: Option<&BTreeMap<String, String>>)
+    -> Result<String, String>;                           // cd 'cwd' && exec env 'K=V' 'argv0' 'arg'…
+pub fn is_variable_name(name: &str) -> bool;
+pub struct ProcessInput<'a> { pub stdin: Option<&'a [u8]>, pub timeout_ms: u64, pub max_output: u64 }
+pub fn run_process(command: &mut Command, input: &ProcessInput<'_>) -> Result<Output, ProviderError>;
+pub fn io_error(error: &io::Error, what: &str) -> ProviderError;   // NotFound -> GUATIAO_ERR_NOT_FOUND
+pub trait Shell { fn sh(&self, script: &str, stdin: Option<&[u8]>, max_output: u64) -> Result<Output, ProviderError>; }
+pub fn read_file(shell: &dyn Shell, spec: &ReadSpec) -> Result<FileData, ProviderError>;
+pub fn write_file(shell: &dyn Shell, spec: &WriteSpec) -> Result<(), ProviderError>;
+pub fn list_dir(shell: &dyn Shell, path: &str) -> Result<DirListing, ProviderError>;
+pub const EXIT_NOT_FOUND: i64 = 44;
+```
+
+`run_process` kills a process at its timeout (not its descendants) and keeps at most
+`max_output` bytes of each stream. The file functions are POSIX `sh` scripts over `Shell`
+(`wc`, `tail`, `head`, `cat`, `mkdir`, `printf`): a script that exits `EXIT_NOT_FOUND` is
+`GUATIAO_ERR_NOT_FOUND`, and a name holding a tab or a newline is not listed correctly.
 
 ### Remote-hands tools
 

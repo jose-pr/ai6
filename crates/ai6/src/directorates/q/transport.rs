@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::directorates::q::terminal::TerminalSession;
 
+pub mod kit;
+
 /// Output a [`Transport::run`] keeps per stream unless the spec asks for another limit.
 pub const DEFAULT_MAX_OUTPUT: u64 = 1024 * 1024;
 

@@ -71,15 +71,6 @@ fn value(model: &impl ToValue) -> Result<Value, ProviderError> {
         .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))
 }
 
-/// A failed filesystem or process call, with the status a caller can act on.
-fn io_error(error: &std::io::Error, path: &str) -> ProviderError {
-    let status = match error.kind() {
-        std::io::ErrorKind::NotFound => Status::GUATIAO_ERR_NOT_FOUND,
-        _ => Status::GUATIAO_ERR_INTERNAL,
-    };
-    refuse(status, format!("{path}: {error}"))
-}
-
 fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
     ProviderError::new(status, &error.to_string())
 }
