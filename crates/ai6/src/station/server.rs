@@ -6531,12 +6531,13 @@ mod tests {
                 .unwrap()
                 .state,
             MissionState::Stalled,
-            "events seen: {events:?}; Session still registered: {}",
+            "events seen: {events:?}; Session still registered: {}; Mission: {:?}",
             state
                 .sessions
                 .lock()
                 .unwrap()
-                .contains_key(mission_id.as_str())
+                .contains_key(mission_id.as_str()),
+            state.missions.lock().unwrap().get(mission_id.as_str())
         );
         assert!(
             state
