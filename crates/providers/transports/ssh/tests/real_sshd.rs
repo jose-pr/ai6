@@ -19,8 +19,9 @@ use ai6_transport_ssh::Ssh;
 use russh::keys::ssh_key::LineEnding;
 use russh::keys::{Algorithm, PrivateKey};
 
-const SSHD: &str = "/usr/sbin/sshd";
-const SFTP_SERVER: &str = "/usr/libexec/openssh/sftp-server";
+/// Where distributions put the server and its SFTP subsystem (Fedora and macOS, Debian).
+const SSHD_PATHS: &str = "/usr/sbin/sshd /usr/local/sbin/sshd";
+const SFTP_PATHS: &str = "/usr/libexec/openssh/sftp-server /usr/lib/openssh/sftp-server";
 
 /// A command that reads a bash script from its standard input where the `sshd` lives.
 fn on_host() -> Command {
@@ -79,10 +80,18 @@ struct Sshd {
 impl Sshd {
     /// Starts a private `sshd`, or says why it cannot.
     fn start() -> Result<Self, String> {
-        output_of(&format!(
-            "test -x {SSHD} && test -x {SFTP_SERVER} && command -v ssh-keygen"
+        let found = output_of(&format!(
+            "for f in {SSHD_PATHS}; do [ -x $f ] && echo $f && break; done; \
+             for f in {SFTP_PATHS}; do [ -x $f ] && echo $f && break; done; \
+             command -v ssh-keygen"
         ))
         .map_err(|why| format!("no OpenSSH server to start ({why})"))?;
+        let [sshd, sftp_server, _] = found.lines().collect::<Vec<_>>()[..] else {
+            return Err(format!(
+                "no OpenSSH server to start (found only: {found:?})"
+            ));
+        };
+        let (sshd, sftp_server) = (sshd.to_owned(), sftp_server.to_owned());
 
         let key_dir = tempfile::tempdir().unwrap();
         let client = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
@@ -130,10 +139,10 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 StrictModes no
 AllowTcpForwarding yes
-Subsystem sftp {SFTP_SERVER}
+Subsystem sftp {sftp_server}
 LogLevel ERROR
 CONFIG
-setsid nohup {SSHD} -D -f {dir}/sshd_config -E {dir}/log > /dev/null 2>&1 < /dev/null &
+setsid nohup {sshd} -D -f {dir}/sshd_config -E {dir}/log > /dev/null 2>&1 < /dev/null &
 sleep 1
 test -s {dir}/pid
 echo started
