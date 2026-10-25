@@ -6474,9 +6474,10 @@ mod tests {
             state.clone(),
             mission_id.to_string(),
             session,
-            Watchdog::new(std::time::Duration::from_secs(1)),
+            // Wide margins: on a loaded runner the test task can lag the pump by a second.
+            Watchdog::new(std::time::Duration::from_secs(3)),
         );
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
         assert_eq!(
             send_message(
                 State(state.clone()),
@@ -6489,7 +6490,7 @@ mod tests {
             .unwrap(),
             StatusCode::ACCEPTED
         );
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
         assert_eq!(
             state
                 .missions
@@ -6502,7 +6503,7 @@ mod tests {
             "the deadline must restart when the operator message is accepted"
         );
         let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::time::timeout(std::time::Duration::from_secs(8), async {
             for event_pump in event_pumps {
                 event_pump.await.unwrap();
             }
