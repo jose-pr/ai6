@@ -1,0 +1,21 @@
+pub mod ai6_transport_ssh
+pub struct ai6_transport_ssh::Ssh
+impl ai6::directorates::q::transport::Transport for ai6_transport_ssh::Ssh
+pub fn ai6_transport_ssh::Ssh::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_ssh::Ssh::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_ssh::Ssh::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_ssh::Ssh::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_ssh::Ssh::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_ssh::Ssh::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_ssh::Ssh::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_ssh::Ssh::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6::directorates::q::transport::TransportConfig> for ai6_transport_ssh::Ssh
+pub type ai6_transport_ssh::Ssh::Error = guatiao::library::kind::ProviderError
+pub fn ai6_transport_ssh::Ssh::try_from(ai6::directorates::q::transport::TransportConfig) -> core::result::Result<Self, Self::Error>
+impl core::ops::drop::Drop for ai6_transport_ssh::Ssh
+pub fn ai6_transport_ssh::Ssh::drop(&mut self)
+impl guatiao::library::kind::parts::ProviderDecl for ai6_transport_ssh::Ssh
+pub const ai6_transport_ssh::Ssh::KINDS: &'static [&'static str]
+pub fn ai6_transport_ssh::Ssh::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[no_mangle] pub static ai6_transport_ssh::guatiao_declares: [u8; 20]
+#[no_mangle] pub unsafe c fn ai6_transport_ssh::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>
