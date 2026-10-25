@@ -45,8 +45,7 @@ use crate::directorates::medical::quarantine::IncidentKind;
 use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
 use crate::directorates::q::safehouse::{SafeHouseReport, SafeHouseSpec};
-use crate::directorates::q::terminal::TerminalBridge;
-#[cfg(feature = "cables-mcp")]
+use crate::directorates::q::terminal::{Terminal, TerminalBridge};
 use crate::directorates::q::transport::TransportClient;
 use crate::directorates::registry::cables::{
     CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
@@ -1592,6 +1591,11 @@ fn theater_area(
              there is no directory to work in there"
         )
     })?;
+    if !crate::directorates::m::mission::is_absolute_anywhere(path) {
+        return Err(format!(
+            "the directory a Mission works in on Theater {theater_id:?} must be absolute, not {path:?}"
+        ));
+    }
     Ok(WorkingArea {
         path: path.to_owned(),
         safe_house: None,
@@ -1774,6 +1778,70 @@ fn runner_session(
             .into_object();
     }
     session.into_object()
+}
+
+/// The terminal a harness the Station supervises itself starts in.
+enum HarnessTerminal {
+    /// The Station's Terminal provider, on its own host.
+    Provider(Box<dyn Terminal>),
+    /// The detached wrapper on another POSIX host, over its transport.
+    Detached(Arc<TransportClient>),
+}
+
+fn harness_terminal(
+    state: &DaemonState,
+    theater_id: &str,
+    wrapped: bool,
+    terminal_provider: &str,
+) -> Result<HarnessTerminal, ApiErrorResponse> {
+    if wrapped {
+        return state
+            .transports
+            .client(theater_id)
+            .map(HarnessTerminal::Detached)
+            .map_err(configuration_error);
+    }
+    state
+        .plugins
+        .terminal(terminal_provider, None)
+        .map(HarnessTerminal::Provider)
+        .map_err(provider_error)
+}
+
+impl HarnessTerminal {
+    /// The provider to hand the handler. A wrapped harness re-opens its Cable forward, on the
+    /// port its harness was given, when the link comes back.
+    fn build(
+        self,
+        mission_id: &str,
+        forward: &Arc<Mutex<Option<crate::directorates::q::transport::Forward>>>,
+        #[cfg(feature = "cables-mcp")] route: Option<&CableRoute>,
+    ) -> Box<dyn Terminal> {
+        let client = match self {
+            Self::Provider(terminal) => return terminal,
+            Self::Detached(client) => client,
+        };
+        let wrapper = crate::station::detached::DetachedTerminal::new(client, mission_id);
+        #[cfg(feature = "cables-mcp")]
+        if let Some(CableRoute {
+            transport: Some((client, target)),
+            ..
+        }) = route
+        {
+            let (client, target, forward) = (client.clone(), target.clone(), forward.clone());
+            return Box::new(wrapper.on_relink(move || {
+                let port = forward
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.as_ref().map(|open| open.info().remote_port));
+                if let Err(error) = reopen_forward(&client, &target, &forward, port) {
+                    eprintln!("ai6: {error}");
+                }
+            }));
+        }
+        let _ = forward;
+        Box::new(wrapper)
+    }
 }
 
 /// Records which runner Session a Mission's harness is, and the terminal the runner chose.
@@ -2868,11 +2936,7 @@ async fn start_mission(
         ExecutionMode::RemoteHands => None,
     };
     let remote_field = plan.mode == ExecutionMode::Field && !plan.own_host;
-    if remote_field && runner.is_none() {
-        return Err(configuration_error(format!(
-            "Theater {theater_id:?} is another host and declares no runner to supervise the harness there"
-        )));
-    }
+    let wrapped = remote_field && runner.is_none();
     let _reservation = reserve_mission_start(&state, &mission, &agent)?;
     let handler_provider = agent
         .handler
@@ -2883,6 +2947,7 @@ async fn start_mission(
     // A runner reports the terminal it chose once the harness starts.
     let terminal_provider = match &runner {
         Some(link) => link.terminal().unwrap_or(DEFAULT_TERMINAL).to_owned(),
+        None if wrapped => crate::station::detached::TERMINAL.to_owned(),
         None => station_terminal(&state).map_err(configuration_error)?,
     };
     #[cfg(feature = "publisher")]
@@ -2897,10 +2962,7 @@ async fn start_mission(
     let in_process = match &runner {
         Some(_) => None,
         None => Some((
-            state
-                .plugins
-                .terminal(&terminal_provider, None)
-                .map_err(provider_error)?,
+            harness_terminal(&state, &theater_id, wrapped, &terminal_provider)?,
             state
                 .plugins
                 .handler(&handler_provider, None)
@@ -3006,18 +3068,17 @@ async fn start_mission(
     };
     let forward = Arc::new(Mutex::new(None));
     #[cfg(feature = "cables-mcp")]
-    let cable = match &runner {
-        Some(_) => {
-            route_cables(
-                &state,
-                (plan.own_host, &theater_id),
-                cables_mcp.as_ref(),
-                &forward,
-                &mut environment,
-            )
-            .await?
-        }
-        None => None,
+    let cable = if runner.is_some() || wrapped {
+        route_cables(
+            &state,
+            (plan.own_host, &theater_id),
+            cables_mcp.as_ref(),
+            &forward,
+            &mut environment,
+        )
+        .await?
+    } else {
+        None
     };
     #[cfg(feature = "cables-mcp")]
     let theater_mcp = if remote_hands {
@@ -3107,6 +3168,12 @@ async fn start_mission(
     });
     let started = match (in_process, &runner, &attachment) {
         (Some((terminal, handler)), _, _) => {
+            let terminal = terminal.build(
+                &mission_id,
+                &forward,
+                #[cfg(feature = "cables-mcp")]
+                cable.as_ref(),
+            );
             #[cfg(feature = "publisher")]
             let terminal_handle = match &telemetry {
                 Some(telemetry) => TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
@@ -3558,13 +3625,12 @@ async fn resume_mission(
         })
     });
     let watchdog = Watchdog::with_config(resume_agent.limits.apply_to(&state.watchdog));
+    let resume_wrapped =
+        resume_mode == ExecutionMode::Field && !resume_own_host && runner.is_none();
     let in_process = match &runner {
         Some(_) => None,
         None => Some((
-            state
-                .plugins
-                .terminal(&terminal_provider, None)
-                .map_err(provider_error)?,
+            harness_terminal(&state, &resume_theater, resume_wrapped, &terminal_provider)?,
             state
                 .plugins
                 .handler(&handler_provider, None)
@@ -3634,21 +3700,18 @@ async fn resume_mission(
     }
     let forward = Arc::new(Mutex::new(None));
     #[cfg(feature = "cables-mcp")]
-    let cable = match &runner {
-        Some(_) => {
-            route_cables(
-                &state,
-                (resume_own_host, &resume_theater),
-                cables_mcp.as_ref(),
-                &forward,
-                &mut environment,
-            )
-            .await?
-        }
-        None => None,
+    let cable = if runner.is_some() || resume_wrapped {
+        route_cables(
+            &state,
+            (resume_own_host, &resume_theater),
+            cables_mcp.as_ref(),
+            &forward,
+            &mut environment,
+        )
+        .await?
+    } else {
+        None
     };
-    #[cfg(not(feature = "cables-mcp"))]
-    let _ = resume_own_host;
     let message = request.message;
     let resume_request = AgentResume {
         mission_id: mission.mission_id.clone(),
@@ -3670,6 +3733,12 @@ async fn resume_mission(
     });
     let resumed = match (in_process, &runner, &attachment) {
         (Some((terminal, handler)), _, _) => {
+            let terminal = terminal.build(
+                &mission_id,
+                &forward,
+                #[cfg(feature = "cables-mcp")]
+                cable.as_ref(),
+            );
             #[cfg(feature = "publisher")]
             let terminal_handle = match &telemetry {
                 Some(telemetry) => TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
@@ -5634,6 +5703,7 @@ mod tests {
             MockSpendHandler,
             MockRecordingHandler,
             MockDripHandler,
+            MockLinesHandler,
             MockTerminalProvider,
             MockSafeHouseProvider,
             MockPlainProvider
@@ -8725,5 +8795,289 @@ mod tests {
         let link = RunnerLink::local(runner_dir, PathBuf::from("unused"));
         let report = link.status(&key).unwrap().unwrap();
         assert!(!report.ended, "the runner's harness is not stopped");
+    }
+
+    /// Lines a [`MockLinesHandler`] harness prints, one every 50 ms.
+    #[cfg(unix)]
+    const LINES: u32 = 40;
+
+    /// A harness that is a real process: `sh` printing `tick N` lines, read through the
+    /// terminal the Station hands the handler. End of output completes the Session.
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "mock-lines", name = "Mock Lines", crate = crate::guatiao)]
+    struct MockLinesHandler;
+
+    impl AgentHandler for MockLinesHandler {
+        fn start(
+            &self,
+            request: AgentStart,
+            terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            let script =
+                "i=1; while [ $i -le 40 ]; do echo \"tick $i\"; i=$((i + 1)); sleep 0.05; done";
+            let spec = crate::directorates::q::terminal::Spec {
+                argv: vec!["sh".to_owned(), "-c".to_owned(), script.to_owned()],
+                cwd: Some(request.working_directory),
+                env: Some(request.environment),
+                rows: 24,
+                cols: 80,
+            };
+            let terminal = terminal.spawn(
+                &spec
+                    .to_value()
+                    .map_err(|error| test_provider_error(&error.to_string()))?,
+            )?;
+            Ok(LineSession {
+                terminal,
+                pending: Mutex::new(Vec::new()),
+                done: AtomicBool::new(false),
+            }
+            .into_object())
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(MockSession::new(request.session_id, "completed").into_object())
+        }
+    }
+
+    struct LineSession {
+        terminal: Object<dyn TerminalSession>,
+        pending: Mutex<Vec<u8>>,
+        done: AtomicBool,
+    }
+
+    impl AgentSession for LineSession {
+        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
+            Ok(SessionId::try_new("provider-session-lines").ok())
+        }
+
+        fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
+            let event = |kind: &str, text: String| AgentEvent {
+                kind: kind.to_owned(),
+                text: Some(text),
+                data: None,
+                limit: None,
+                usage: None,
+                tools: Vec::new(),
+            };
+            loop {
+                let mut pending = self.pending.lock().unwrap();
+                if let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                    let line: Vec<u8> = pending.drain(..=end).collect();
+                    let text = String::from_utf8_lossy(&line).trim().to_owned();
+                    return Ok(Some(event("text", text)));
+                }
+                drop(pending);
+                if self.done.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(10));
+                    return Ok(None);
+                }
+                let mut buffer = [0u8; 4096];
+                match self.terminal.read(&mut buffer, timeout_ms)? {
+                    crate::directorates::q::terminal::READ_TIMED_OUT => return Ok(None),
+                    0 => {
+                        self.done.store(true, Ordering::Release);
+                        return Ok(Some(event("completed", "output ended".to_owned())));
+                    }
+                    count => self
+                        .pending
+                        .lock()
+                        .unwrap()
+                        .extend_from_slice(&buffer[..count as usize]),
+                }
+            }
+        }
+
+        fn interrupt(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn close(&self) -> Result<(), ProviderError> {
+            self.terminal.kill()
+        }
+    }
+
+    /// A Station whose Operation `G` is bound to the Theater `box`, a POSIX host reached
+    /// through a link the test can drop, with Mission `mission-1` queued for `handler`.
+    #[cfg(unix)]
+    fn shell_station(
+        root: &Path,
+        theater: Theater,
+        handler: &str,
+        runner_dir: Option<&Path>,
+    ) -> (DaemonState, Arc<AtomicBool>, Arc<AtomicUsize>) {
+        let mut state = test_state(root, "", &format!("[agent.007]\nhandler = \"{handler}\"\n"));
+        fs::write(
+            root.join("operations.toml"),
+            "[operation.G]\ntheater = \"box\"\n",
+        )
+        .unwrap();
+        state.roster = Arc::new(Roster::load(root).unwrap());
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        let shell = crate::station::transports::testing::ShellTransport::new(&home, runner_dir);
+        let (link, forwards) = (shell.link(), shell.forwards());
+        let mut theaters = Theaters::default();
+        theaters.insert(theater.clone()).unwrap();
+        state.transports = Arc::new(
+            Transports::build(&theaters, &plugins::Plugins::scan(&[]))
+                .with_transport(theater, Box::new(shell)),
+        );
+        (state, link, forwards)
+    }
+
+    /// Collects the Mission's events until it completes, dropping the link for a while once
+    /// `drop_after` ticks have arrived.
+    #[cfg(unix)]
+    async fn ticks_across_a_dropped_link(
+        state: &DaemonState,
+        link: &AtomicBool,
+        drop_after: usize,
+        outage: Duration,
+    ) -> (Vec<u32>, bool) {
+        let mut events = Vec::new();
+        let mut dropped = false;
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !ticks(&events).1 {
+                if !dropped && ticks(&events).0.len() >= drop_after {
+                    dropped = true;
+                    link.store(true, Ordering::Release);
+                    tokio::time::sleep(outage).await;
+                    link.store(false, Ordering::Release);
+                }
+                if let Some(event) = pop_event(state, "mission-1") {
+                    events.push(event);
+                } else {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the Session did not complete: {:?}", ticks(&events).0));
+        ticks(&events)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_wrapped_harness_on_a_remote_host_survives_a_dropped_link_and_is_read_again() {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let theater = Theater::new(
+            "box",
+            TheaterAccess::Transport(crate::TransportAccess::new("shell")),
+        )
+        .with_harness("mock-lines")
+        .with_workdir(work.to_string_lossy().into_owned());
+        let (state, link, forwards) = shell_station(root.path(), theater, "mock-lines", None);
+
+        let plan = launch_plan(&state, Some("G")).unwrap();
+        assert_eq!((plan.mode, plan.own_host), (ExecutionMode::Field, false));
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        let manifest = state
+            .missions
+            .lock()
+            .unwrap()
+            .operation("mission-1")
+            .unwrap();
+        assert_eq!(manifest.terminal_provider, "detached");
+        assert_eq!(manifest.working_directory, work.to_string_lossy());
+
+        let (ticks, completed) =
+            ticks_across_a_dropped_link(&state, &link, 5, Duration::from_millis(800)).await;
+        assert!(completed);
+        assert_eq!(
+            ticks,
+            (1..=LINES).collect::<Vec<_>>(),
+            "every line the harness printed while the link was down is read after it"
+        );
+        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        // The harness ran detached, in its own directory under the login user's home.
+        let wrapped: Vec<_> = fs::read_dir(root.path().join("home/.ai6/detached"))
+            .unwrap()
+            .collect();
+        assert_eq!(wrapped.len(), 1);
+        #[cfg(feature = "cables-mcp")]
+        assert!(
+            forwards.load(Ordering::Acquire) >= 2,
+            "the Cable forward was opened again after the link came back"
+        );
+        #[cfg(not(feature = "cables-mcp"))]
+        let _ = forwards;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_runner_reached_through_a_transport_keeps_its_session_across_a_dropped_link() {
+        let root = tempfile::tempdir().unwrap();
+        let runner_dir = root.path().join("runner");
+        let _runner = start_test_runner(&runner_dir).await;
+        let work = root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let theater = Theater::new(
+            "box",
+            TheaterAccess::Transport(crate::TransportAccess::new("shell")),
+        )
+        .with_workdir(work.to_string_lossy().into_owned())
+        .with_runner(crate::RunnerSettings::default());
+        let (state, link, forwards) =
+            shell_station(root.path(), theater, "mock-drip", Some(&runner_dir));
+
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        assert!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .operation("mission-1")
+                .unwrap()
+                .runner
+                .is_some()
+        );
+
+        let (ticks, completed) =
+            ticks_across_a_dropped_link(&state, &link, 5, DRIP_INTERVAL * 12).await;
+        assert!(completed);
+        assert_eq!(
+            ticks,
+            (1..=DRIP_TICKS).collect::<Vec<_>>(),
+            "the runner kept the events spooled while the link was down"
+        );
+        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        #[cfg(feature = "cables-mcp")]
+        assert!(
+            forwards.load(Ordering::Acquire) >= 2,
+            "the Cable forward was opened again after the link came back"
+        );
+        #[cfg(not(feature = "cables-mcp"))]
+        let _ = forwards;
     }
 }

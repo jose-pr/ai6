@@ -332,6 +332,8 @@ pub(crate) mod testing {
         Capabilities, DirEntry, DirListing, FileData, Output, ReadSpec, RunSpec, Transport,
         WriteSpec,
     };
+    #[cfg(unix)]
+    use crate::directorates::q::transport::{ForwardInfo, ForwardSpec, TransportForward};
 
     pub(crate) struct DirTransport {
         root: PathBuf,
@@ -454,6 +456,225 @@ pub(crate) mod testing {
             }
             entries.sort_by(|a, b| a.name.cmp(&b.name));
             DirListing { entries }.to_value().map_err(internal)
+        }
+    }
+
+    /// A POSIX host reached through a link that a test can drop: commands run in `sh` with a
+    /// home directory, files are local, a forward is a local TCP relay, and
+    /// `ai6 runner call` reaches the runner serving `runner_dir` as the command would.
+    #[cfg(unix)]
+    pub(crate) struct ShellTransport {
+        home: PathBuf,
+        runner_dir: Option<PathBuf>,
+        down: Arc<std::sync::atomic::AtomicBool>,
+        forwards: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[cfg(unix)]
+    impl ShellTransport {
+        pub(crate) fn new(home: &Path, runner_dir: Option<&Path>) -> Self {
+            Self {
+                home: home.to_path_buf(),
+                runner_dir: runner_dir.map(Path::to_path_buf),
+                down: Arc::default(),
+                forwards: Arc::default(),
+            }
+        }
+
+        /// While set, every operation fails as a dropped link does.
+        pub(crate) fn link(&self) -> Arc<std::sync::atomic::AtomicBool> {
+            self.down.clone()
+        }
+
+        /// How many forwards have been opened.
+        pub(crate) fn forwards(&self) -> Arc<std::sync::atomic::AtomicUsize> {
+            self.forwards.clone()
+        }
+
+        fn check(&self) -> Result<(), ProviderError> {
+            if self.down.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(internal("the link is down"));
+            }
+            Ok(())
+        }
+
+        fn path(&self, path: &str) -> PathBuf {
+            let path = Path::new(path);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                self.home.join(path)
+            }
+        }
+
+        fn runner_call(&self, spec: &RunSpec) -> Output {
+            let mut words = spec.argv[3..].iter();
+            let mut state_dir = self.runner_dir.clone().unwrap_or_default();
+            let mut rest = Vec::new();
+            while let Some(word) = words.next() {
+                if word == "--state-dir" {
+                    state_dir = PathBuf::from(words.next().cloned().unwrap_or_default());
+                } else {
+                    rest.push(word.clone());
+                }
+            }
+            let body = spec
+                .stdin
+                .as_ref()
+                .filter(|stdin| !stdin.0.is_empty())
+                .map(|stdin| serde_json::from_slice::<serde_json::Value>(&stdin.0).unwrap());
+            match crate::station::runner::call(&state_dir, &rest[0], &rest[1], body.as_ref()) {
+                Ok((status, body)) => Output {
+                    code: Some(0),
+                    stdout: Bytes(
+                        serde_json::json!({ "status": status, "body": body })
+                            .to_string()
+                            .into_bytes(),
+                    ),
+                    ..Output::default()
+                },
+                Err(error) => Output {
+                    code: Some(i64::from(crate::station::runner::CALL_NOT_RUNNING)),
+                    stderr: Bytes(error.into_bytes()),
+                    ..Output::default()
+                },
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Transport for ShellTransport {
+        fn capabilities(&self) -> Result<Value, ProviderError> {
+            Capabilities {
+                run: true,
+                files: true,
+                forward: true,
+                os: Some(std::env::consts::OS.to_owned()),
+                ..Capabilities::default()
+            }
+            .to_value()
+            .map_err(internal)
+        }
+
+        fn run(&self, spec: &Value) -> Result<Value, ProviderError> {
+            self.check()?;
+            let spec = RunSpec::from_value(spec).map_err(internal)?;
+            if spec
+                .argv
+                .get(..3)
+                .is_some_and(|words| words == ["ai6", "runner", "call"])
+            {
+                return self.runner_call(&spec).to_value().map_err(internal);
+            }
+            let line = crate::directorates::q::transport::kit::command_line(
+                &spec.argv,
+                spec.cwd.as_deref(),
+                spec.env.as_ref(),
+            )
+            .map_err(internal)?;
+            let mut command = std::process::Command::new("sh");
+            command.arg("-c").arg(line).current_dir(&self.home);
+            crate::directorates::q::transport::kit::run_process(
+                &mut command,
+                &crate::directorates::q::transport::kit::ProcessInput {
+                    stdin: spec.stdin.as_ref().map(|stdin| stdin.0.as_slice()),
+                    timeout_ms: spec.timeout_ms,
+                    max_output: spec.max_output,
+                },
+            )?
+            .to_value()
+            .map_err(internal)
+        }
+
+        fn read_file(&self, spec: &Value) -> Result<Value, ProviderError> {
+            self.check()?;
+            let spec = ReadSpec::from_value(spec).map_err(internal)?;
+            let bytes = std::fs::read(self.path(&spec.path)).map_err(|e| io(&e))?;
+            let start = usize::try_from(spec.offset)
+                .unwrap_or(usize::MAX)
+                .min(bytes.len());
+            let end = start
+                .saturating_add(usize::try_from(spec.limit).unwrap_or(usize::MAX))
+                .min(bytes.len());
+            FileData {
+                data: Bytes(bytes[start..end].to_vec()),
+                size: bytes.len() as u64,
+            }
+            .to_value()
+            .map_err(internal)
+        }
+
+        fn forward(
+            &self,
+            spec: &Value,
+        ) -> Result<guatiao::library::Object<dyn TransportForward>, ProviderError> {
+            self.check()?;
+            let spec = ForwardSpec::from_value(spec).map_err(internal)?;
+            let listener =
+                std::net::TcpListener::bind(("127.0.0.1", spec.remote_port)).map_err(|e| io(&e))?;
+            listener.set_nonblocking(true).map_err(|e| io(&e))?;
+            let port = listener.local_addr().map_err(|e| io(&e))?.port();
+            let open = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let running = open.clone();
+            let target = spec.target.clone();
+            let listening = std::thread::spawn(move || {
+                while running.load(std::sync::atomic::Ordering::Acquire) {
+                    let Ok((inbound, _)) = listener.accept() else {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    };
+                    let _ = inbound.set_nonblocking(false);
+                    let Ok(outbound) = std::net::TcpStream::connect(&target) else {
+                        continue;
+                    };
+                    let (mut in_read, mut out_write) =
+                        (inbound.try_clone().unwrap(), outbound.try_clone().unwrap());
+                    std::thread::spawn(move || std::io::copy(&mut in_read, &mut out_write));
+                    let (mut out_read, mut in_write) = (outbound, inbound);
+                    std::thread::spawn(move || std::io::copy(&mut out_read, &mut in_write));
+                }
+            });
+            self.forwards
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            Ok(LocalForward {
+                info: ForwardInfo {
+                    remote_host: "127.0.0.1".to_owned(),
+                    remote_port: port,
+                },
+                open,
+                listening: Mutex::new(Some(listening)),
+            }
+            .into_object())
+        }
+    }
+
+    #[cfg(unix)]
+    struct LocalForward {
+        info: ForwardInfo,
+        open: Arc<std::sync::atomic::AtomicBool>,
+        listening: Mutex<Option<std::thread::JoinHandle<()>>>,
+    }
+
+    #[cfg(unix)]
+    impl TransportForward for LocalForward {
+        fn info(&self) -> Result<Value, ProviderError> {
+            self.info.to_value().map_err(internal)
+        }
+
+        /// Returns once the port is free again, as a host's forward does.
+        fn close(&self) -> Result<(), ProviderError> {
+            self.open.store(false, std::sync::atomic::Ordering::Release);
+            if let Some(listening) = self.listening.lock().unwrap().take() {
+                let _ = listening.join();
+            }
+            Ok(())
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for LocalForward {
+        fn drop(&mut self) {
+            self.open.store(false, std::sync::atomic::Ordering::Release);
         }
     }
 }

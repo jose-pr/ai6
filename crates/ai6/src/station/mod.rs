@@ -2,6 +2,8 @@
 //! where their decisions run — its identity, HTTP server, provider host, safe houses and
 //! publication to Universal Exports.
 
+#[cfg(feature = "daemon")]
+pub(crate) mod detached;
 #[cfg(feature = "station-tls")]
 pub mod identity;
 #[cfg(feature = "daemon")]
