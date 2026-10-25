@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
+use crate::directorates::m::placement::ExecutionMode;
 use crate::directorates::q::safehouse::SafeHouseReport;
 use crate::{MissionId, SessionId};
 
@@ -98,6 +99,10 @@ pub(crate) struct LaunchManifest {
     /// The Theater the harness runs in; absent in records written before placement.
     #[serde(default)]
     pub(crate) theater_id: Option<String>,
+    /// Whether the harness runs on the Theater or acts on it from the Station; records
+    /// written before remote-hands mode ran on the Theater.
+    #[serde(default)]
+    pub(crate) mode: ExecutionMode,
     /// The Registry Session record this Station holds for the Mission; absent in records
     /// written before Session records were shared.
     #[serde(default)]
@@ -760,6 +765,7 @@ mod tests {
                     cover: None,
                     station_id: Some("hq".to_owned()),
                     theater_id: Some("local".to_owned()),
+                    mode: ExecutionMode::Field,
                     session: None,
                 },
             )
@@ -813,6 +819,7 @@ mod tests {
                     cover: None,
                     station_id: Some("hq".to_owned()),
                     theater_id: Some("local".to_owned()),
+                    mode: ExecutionMode::Field,
                     session: None,
                 },
             )
@@ -939,6 +946,7 @@ mod tests {
                     cover: None,
                     station_id: Some("hq".to_owned()),
                     theater_id: Some("local".to_owned()),
+                    mode: ExecutionMode::Field,
                     session: None,
                 },
             )

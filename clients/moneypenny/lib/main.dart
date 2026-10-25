@@ -868,6 +868,7 @@ class TheaterCapabilities {
     this.forward = false,
     this.os,
     this.arch,
+    this.notes = const [],
   });
 
   final bool terminal;
@@ -877,6 +878,9 @@ class TheaterCapabilities {
   final String? os;
   final String? arch;
 
+  /// Facts the transport wants an operator to see, such as a host key to pin.
+  final List<String> notes;
+
   factory TheaterCapabilities.fromJson(Map<String, dynamic> json) =>
       TheaterCapabilities(
         terminal: json['terminal'] as bool? ?? false,
@@ -885,6 +889,7 @@ class TheaterCapabilities {
         forward: json['forward'] as bool? ?? false,
         os: json['os'] as String?,
         arch: json['arch'] as String?,
+        notes: ((json['notes'] as List<dynamic>?) ?? const []).cast<String>(),
       );
 
   /// The abilities that are present, then the host's platform.
@@ -969,6 +974,7 @@ class TheaterSummary {
       tags.isEmpty ? where : '$where · $tags',
       if (unavailable != null) 'unreachable: $unavailable',
       if (capabilities != null) capabilities!.description,
+      ...?capabilities?.notes,
       'agents $agents · egress $egress',
       if (harnesses.isNotEmpty) 'harnesses ${harnesses.join(', ')}',
       ...weakened.map((setting) => 'weakened: $setting'),
@@ -1329,6 +1335,7 @@ class MissionBriefSummary {
     required this.environmentKeys,
     this.stationId,
     this.theaterId,
+    this.mode,
   });
 
   final String operationId;
@@ -1344,6 +1351,10 @@ class MissionBriefSummary {
   final List<String> environmentKeys;
   final String? stationId;
   final String? theaterId;
+
+  /// `field` when the harness runs on the Theater, `remote-hands` when it runs on the
+  /// Station and acts on the Theater through its transport.
+  final String? mode;
 
   static MissionBriefSummary? fromMissionJson(Map<String, dynamic> json) {
     final brief = json['brief'];
@@ -1363,6 +1374,7 @@ class MissionBriefSummary {
           .cast<String>(),
       stationId: brief['station_id'] as String?,
       theaterId: brief['theater_id'] as String?,
+      mode: brief['mode'] as String?,
     );
   }
 }
@@ -3411,6 +3423,7 @@ class _MissionBriefPage extends StatelessWidget {
         _manifestRow('Role', brief.roleId ?? 'Unspecified'),
         _manifestRow('Station', brief.stationId ?? 'Not recorded'),
         _manifestRow('Theater', brief.theaterId ?? 'Not recorded'),
+        if (brief.mode != null) _manifestRow('Mode', brief.mode!),
         _manifestRow('Handler', brief.handlerProvider),
         _manifestRow('Terminal', brief.terminalProvider),
         _manifestRow('Working directory', brief.workingDirectory),

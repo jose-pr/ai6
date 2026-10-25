@@ -79,6 +79,9 @@ impl AgentHandler for CodexHandler {
         )?;
         session.notify("initialized", json!({}))?;
         let mut params = json!({ "cwd": request.working_directory });
+        if is_remote_hands(&request.environment) {
+            restrict_to_remote_hands(&mut params);
+        }
         if let Some(model) = request.model {
             params["model"] = json!(model);
         }
@@ -127,6 +130,9 @@ impl AgentHandler for CodexHandler {
             params["model"] = json!(model);
         }
         params["cwd"] = json!(request.working_directory);
+        if is_remote_hands(&request.environment) {
+            restrict_to_remote_hands(&mut params);
+        }
         let response = match session.request("thread/resume", params, Duration::from_secs(30)) {
             Ok(response) => response,
             Err(error) => {
@@ -506,17 +512,36 @@ fn app_server_argv(
     environment: &std::collections::BTreeMap<String, String>,
 ) -> Vec<String> {
     let mut argv = vec![executable.to_string(), "app-server".to_string()];
-    if let Some(url) = environment.get("AI6_CABLE_MCP_URL")
-        && environment.contains_key("AI6_CABLE_MCP_TOKEN")
-    {
-        argv.extend([
-            "-c".to_owned(),
-            format!("mcp_servers.ai6-cables.url=\"{url}\""),
-            "-c".to_owned(),
-            "mcp_servers.ai6-cables.bearer_token_env_var=\"AI6_CABLE_MCP_TOKEN\"".to_owned(),
-        ]);
+    for (server, prefix) in [
+        ("ai6-cables", "AI6_CABLE_MCP"),
+        ("ai6-theater", "AI6_THEATER_MCP"),
+    ] {
+        if let Some(url) = environment.get(&format!("{prefix}_URL"))
+            && environment.contains_key(&format!("{prefix}_TOKEN"))
+        {
+            argv.extend([
+                "-c".to_owned(),
+                format!("mcp_servers.{server}.url=\"{url}\""),
+                "-c".to_owned(),
+                format!("mcp_servers.{server}.bearer_token_env_var=\"{prefix}_TOKEN\""),
+            ]);
+        }
     }
     argv
+}
+
+/// Whether the Station serves a Theater's tools, which is remote-hands mode.
+fn is_remote_hands(environment: &std::collections::BTreeMap<String, String>) -> bool {
+    environment.contains_key("AI6_THEATER_MCP_URL")
+        && environment.contains_key("AI6_THEATER_MCP_TOKEN")
+}
+
+/// Codex cannot switch its shell tool off, so in remote-hands mode it runs in a read-only
+/// sandbox that asks nothing: work cannot land on the Station, and the Theater tools are
+/// how it changes anything.
+fn restrict_to_remote_hands(params: &mut Value) {
+    params["sandbox"] = json!("read-only");
+    params["approvalPolicy"] = json!("never");
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderError> {
@@ -1105,6 +1130,39 @@ mod tests {
             .to_string();
 
         assert!(error.contains("closed its terminal"));
+    }
+
+    #[test]
+    fn remote_hands_adds_the_theater_server_and_a_read_only_sandbox() {
+        let environment = std::collections::BTreeMap::from([
+            (
+                "AI6_THEATER_MCP_URL".to_owned(),
+                "http://127.0.0.1:43211/mcp".to_owned(),
+            ),
+            (
+                "AI6_THEATER_MCP_TOKEN".to_owned(),
+                "theater-secret-token".to_owned(),
+            ),
+        ]);
+        assert!(is_remote_hands(&environment));
+        assert!(!is_remote_hands(&std::collections::BTreeMap::new()));
+
+        let argv = app_server_argv("codex", &environment);
+        assert!(argv.iter().any(|argument| {
+            argument == "mcp_servers.ai6-theater.url=\"http://127.0.0.1:43211/mcp\""
+        }));
+        assert!(argv.iter().any(|argument| {
+            argument == "mcp_servers.ai6-theater.bearer_token_env_var=\"AI6_THEATER_MCP_TOKEN\""
+        }));
+        assert!(
+            argv.iter()
+                .all(|argument| !argument.contains("theater-secret-token"))
+        );
+
+        let mut params = json!({ "cwd": "/scratch" });
+        restrict_to_remote_hands(&mut params);
+        assert_eq!(params["sandbox"], "read-only");
+        assert_eq!(params["approvalPolicy"], "never");
     }
 
     #[test]

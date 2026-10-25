@@ -86,7 +86,7 @@ impl AgentHandler for ClaudeHandler {
             argv.extend(["--effort".to_string(), effort.clone()]);
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
-        add_cables_mcp(&mut argv, &request.environment);
+        add_mcp(&mut argv, &request.environment);
         let session = spawn(
             terminal,
             argv,
@@ -123,7 +123,7 @@ impl AgentHandler for ClaudeHandler {
             argv.extend(["--effort".to_string(), effort]);
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
-        add_cables_mcp(&mut argv, &request.environment);
+        add_mcp(&mut argv, &request.environment);
         let session = spawn(
             terminal,
             argv,
@@ -142,24 +142,46 @@ impl AgentHandler for ClaudeHandler {
     }
 }
 
-fn add_cables_mcp(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
-    if !environment.contains_key("AI6_CABLE_MCP_URL")
-        || !environment.contains_key("AI6_CABLE_MCP_TOKEN")
-    {
-        return;
+/// Claude's own shell and file tools, turned off in remote-hands mode so that nothing the
+/// harness does lands on the Station.
+const OWN_TOOLS: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,Grep,LS";
+
+/// Whether `environment` carries an MCP endpoint's URL and token under `prefix`.
+fn has_endpoint(environment: &BTreeMap<String, String>, prefix: &str) -> bool {
+    environment.contains_key(&format!("{prefix}_URL"))
+        && environment.contains_key(&format!("{prefix}_TOKEN"))
+}
+
+/// One HTTP MCP server entry whose URL and bearer token come from the environment, so the
+/// token never appears in the command line.
+fn http_server(prefix: &str) -> Value {
+    json!({
+        "type": "http",
+        "url": format!("${{{prefix}_URL}}"),
+        "headers": { "Authorization": format!("Bearer ${{{prefix}_TOKEN}}") }
+    })
+}
+
+/// Adds the Station's MCP servers: Cable tools, and, when the Station serves a Theater's
+/// tools (remote-hands mode), those in place of Claude's own shell and file tools.
+fn add_mcp(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
+    let mut servers = serde_json::Map::new();
+    if has_endpoint(environment, "AI6_CABLE_MCP") {
+        servers.insert("ai6-cables".to_owned(), http_server("AI6_CABLE_MCP"));
     }
-    let config = json!({
-        "mcpServers": {
-            "ai6-cables": {
-                "type": "http",
-                "url": "${AI6_CABLE_MCP_URL}",
-                "headers": {
-                    "Authorization": "Bearer ${AI6_CABLE_MCP_TOKEN}"
-                }
-            }
-        }
-    });
-    argv.extend(["--mcp-config".to_owned(), config.to_string()]);
+    if has_endpoint(environment, "AI6_THEATER_MCP") {
+        servers.insert("ai6-theater".to_owned(), http_server("AI6_THEATER_MCP"));
+        argv.extend([
+            "--disallowedTools".to_owned(),
+            OWN_TOOLS.to_owned(),
+            "--allowedTools".to_owned(),
+            "mcp__ai6-theater".to_owned(),
+        ]);
+    }
+    if !servers.is_empty() {
+        let config = json!({ "mcpServers": servers });
+        argv.extend(["--mcp-config".to_owned(), config.to_string()]);
+    }
 }
 
 /// Gives Claude Code its own spend ceiling for this process (print mode only).
@@ -1164,12 +1186,55 @@ mod tests {
         ]);
         let mut argv = vec!["claude".to_owned()];
 
-        add_cables_mcp(&mut argv, &environment);
+        add_mcp(&mut argv, &environment);
 
         assert_eq!(argv[1], "--mcp-config");
         assert!(argv[2].contains("${AI6_CABLE_MCP_URL}"));
         assert!(argv[2].contains("${AI6_CABLE_MCP_TOKEN}"));
         assert!(!argv[2].contains("session-secret-token"));
+        assert!(!argv.iter().any(|argument| argument == "--disallowedTools"));
+    }
+
+    #[test]
+    fn remote_hands_turns_off_claudes_own_tools_and_adds_the_theater_server() {
+        let environment = BTreeMap::from([
+            (
+                "AI6_THEATER_MCP_URL".to_owned(),
+                "http://127.0.0.1:43211/mcp".to_owned(),
+            ),
+            (
+                "AI6_THEATER_MCP_TOKEN".to_owned(),
+                "theater-secret-token".to_owned(),
+            ),
+        ]);
+        let mut argv = vec!["claude".to_owned()];
+
+        add_mcp(&mut argv, &environment);
+
+        let position = |flag: &str| argv.iter().position(|argument| argument == flag).unwrap();
+        let disallowed = &argv[position("--disallowedTools") + 1];
+        for tool in ["Bash", "Edit", "Write", "Read", "Grep"] {
+            assert!(disallowed.split(',').any(|name| name == tool), "{tool}");
+        }
+        assert_eq!(argv[position("--allowedTools") + 1], "mcp__ai6-theater");
+        let config = &argv[position("--mcp-config") + 1];
+        assert!(config.contains("ai6-theater") && !config.contains("ai6-cables"));
+        assert!(config.contains("${AI6_THEATER_MCP_TOKEN}"));
+        assert!(
+            !argv
+                .iter()
+                .any(|argument| argument.contains("theater-secret-token"))
+        );
+        // A variadic flag is closed by the next flag, so no value runs on into another.
+        assert!(position("--disallowedTools") < position("--allowedTools"));
+        assert!(position("--allowedTools") < position("--mcp-config"));
+    }
+
+    #[test]
+    fn without_a_theater_server_claude_keeps_its_own_tools() {
+        let mut argv = vec!["claude".to_owned()];
+        add_mcp(&mut argv, &BTreeMap::new());
+        assert_eq!(argv, ["claude"]);
     }
 
     /// The shape Claude Code 2.1 prints for a finished turn. The field names follow its

@@ -757,7 +757,7 @@ mod tests {
     }
 }
 
-async fn authorize(
+pub(super) async fn authorize(
     State(token): State<String>,
     request: Request<axum::body::Body>,
     next: Next,

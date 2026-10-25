@@ -342,6 +342,7 @@ pub(crate) struct MissionPublication {
     pub(crate) environment_keys: Vec<String>,
     pub(crate) station_id: Option<String>,
     pub(crate) theater_id: Option<String>,
+    pub(crate) mode: crate::directorates::m::placement::ExecutionMode,
 }
 
 impl SessionTelemetry {
@@ -1037,6 +1038,7 @@ mod tests {
             environment_keys: vec!["API_TOKEN".to_owned()],
             station_id: Some("hq".to_owned()),
             theater_id: Some("local".to_owned()),
+            mode: crate::directorates::m::placement::ExecutionMode::Field,
         });
         let terminal = TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
             Box::new(RawOutputTerminal),
@@ -1083,7 +1085,8 @@ mod tests {
                     "effort": "high",
                     "environment_keys": ["API_TOKEN"],
                     "station_id": "hq",
-                    "theater_id": "local"
+                    "theater_id": "local",
+                    "mode": "field"
                 }
             })
         );

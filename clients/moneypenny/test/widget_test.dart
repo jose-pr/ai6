@@ -679,6 +679,7 @@ void main() {
                   'environment_keys': ['AI6_MISSION_ID'],
                   'station_id': 'station-alpha',
                   'theater_id': 'local',
+                  'mode': 'field',
                 },
               },
             ]),
@@ -829,6 +830,7 @@ void main() {
     expect(find.text('case-officer'), findsOneWidget);
     expect(find.text('station-alpha'), findsOneWidget);
     expect(find.text('local'), findsOneWidget);
+    expect(find.text('field'), findsOneWidget);
     expect(find.text('AI6_MISSION_ID'), findsOneWidget);
     expect(find.text('Environment values are withheld.'), findsOneWidget);
     await tester.pageBack();

@@ -2954,6 +2954,10 @@ pub struct LaunchManifest {
     /// The Theater the harness runs in, when the publishing Station reported it.
     #[serde(default)]
     pub theater_id: Option<String>,
+    /// Whether the harness runs on the Theater (`field`) or on the Station, acting on the
+    /// Theater through its transport (`remote-hands`); absent from older Stations.
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -4522,6 +4526,7 @@ mod tests {
                     environment_keys: vec!["API_TOKEN".to_owned()],
                     station_id: Some("worker".to_owned()),
                     theater_id: Some("local".to_owned()),
+                    mode: Some("remote-hands".to_owned()),
                 },
             )
             .await
@@ -5191,6 +5196,7 @@ mod tests {
         assert_eq!(mission_detail["brief"]["environment_keys"][0], "API_TOKEN");
         assert_eq!(mission_detail["brief"]["station_id"], "worker");
         assert_eq!(mission_detail["brief"]["theater_id"], "local");
+        assert_eq!(mission_detail["brief"]["mode"], "remote-hands");
         assert!(
             !serde_json::to_string(&mission_detail)
                 .unwrap()

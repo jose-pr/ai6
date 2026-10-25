@@ -312,3 +312,144 @@ mod tests {
         assert_eq!(transports.summaries(true).len(), 2);
     }
 }
+
+/// A transport over a directory, standing in for a host that only a transport reaches: a
+/// path such as `/work/a.txt` is `<root>/work/a.txt` on the Station's disk, and a command is
+/// recorded rather than run.
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+
+    use guatiao::library::ProviderError;
+    use guatiao::{Bytes, FromValue, Status, ToValue, Value};
+
+    use crate::directorates::q::transport::{
+        Capabilities, DirEntry, DirListing, FileData, Output, ReadSpec, RunSpec, Transport,
+        WriteSpec,
+    };
+
+    pub(crate) struct DirTransport {
+        root: PathBuf,
+        files: bool,
+        runs: Arc<Mutex<Vec<RunSpec>>>,
+    }
+
+    impl DirTransport {
+        pub(crate) fn new(root: &Path) -> Self {
+            Self {
+                root: root.to_path_buf(),
+                files: true,
+                runs: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        pub(crate) fn without_files(mut self) -> Self {
+            self.files = false;
+            self
+        }
+
+        /// The commands run so far.
+        pub(crate) fn runs(&self) -> Arc<Mutex<Vec<RunSpec>>> {
+            self.runs.clone()
+        }
+
+        pub(crate) fn capabilities_model(&self) -> Capabilities {
+            Capabilities {
+                run: true,
+                files: self.files,
+                os: Some("linux".to_owned()),
+                ..Capabilities::default()
+            }
+        }
+
+        fn path(&self, path: &str) -> PathBuf {
+            self.root.join(path.trim_start_matches('/'))
+        }
+    }
+
+    fn internal(error: impl std::fmt::Display) -> ProviderError {
+        ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
+    }
+
+    fn io(error: &std::io::Error) -> ProviderError {
+        let status = if error.kind() == std::io::ErrorKind::NotFound {
+            Status::GUATIAO_ERR_NOT_FOUND
+        } else {
+            Status::GUATIAO_ERR_INTERNAL
+        };
+        ProviderError::new(status, &error.to_string())
+    }
+
+    impl Transport for DirTransport {
+        fn capabilities(&self) -> Result<Value, ProviderError> {
+            self.capabilities_model().to_value().map_err(internal)
+        }
+
+        fn run(&self, spec: &Value) -> Result<Value, ProviderError> {
+            let spec = RunSpec::from_value(spec).map_err(internal)?;
+            let stdout = format!("ran {}", spec.argv.join(" "));
+            self.runs.lock().unwrap().push(spec);
+            Output {
+                code: Some(0),
+                stdout: Bytes(stdout.into_bytes()),
+                ..Output::default()
+            }
+            .to_value()
+            .map_err(internal)
+        }
+
+        fn read_file(&self, spec: &Value) -> Result<Value, ProviderError> {
+            let spec = ReadSpec::from_value(spec).map_err(internal)?;
+            let bytes = std::fs::read(self.path(&spec.path)).map_err(|e| io(&e))?;
+            let start = usize::try_from(spec.offset)
+                .unwrap_or(usize::MAX)
+                .min(bytes.len());
+            let end = start
+                .saturating_add(usize::try_from(spec.limit).unwrap_or(usize::MAX))
+                .min(bytes.len());
+            FileData {
+                data: Bytes(bytes[start..end].to_vec()),
+                size: bytes.len() as u64,
+            }
+            .to_value()
+            .map_err(internal)
+        }
+
+        fn write_file(&self, spec: &Value) -> Result<(), ProviderError> {
+            let spec = WriteSpec::from_value(spec).map_err(internal)?;
+            let path = self.path(&spec.path);
+            if spec.create_dirs
+                && let Some(parent) = path.parent()
+            {
+                std::fs::create_dir_all(parent).map_err(|e| io(&e))?;
+            }
+            if spec.append {
+                use std::io::Write;
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(path)
+                    .and_then(|mut file| file.write_all(&spec.data.0))
+                    .map_err(|e| io(&e))
+            } else {
+                std::fs::write(path, &spec.data.0).map_err(|e| io(&e))
+            }
+        }
+
+        fn list_dir(&self, path: &str) -> Result<Value, ProviderError> {
+            let mut entries = Vec::new();
+            for entry in std::fs::read_dir(self.path(path)).map_err(|e| io(&e))? {
+                let entry = entry.map_err(|e| io(&e))?;
+                let metadata = entry.metadata().map_err(|e| io(&e))?;
+                entries.push(DirEntry {
+                    name: entry.file_name().to_string_lossy().into_owned(),
+                    kind: if metadata.is_dir() { "dir" } else { "file" }.to_owned(),
+                    size: if metadata.is_dir() { 0 } else { metadata.len() },
+                });
+            }
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
+            DirListing { entries }.to_value().map_err(internal)
+        }
+    }
+}

@@ -3,6 +3,8 @@
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
 mod medical;
+#[cfg(feature = "cables-mcp")]
+mod theater_mcp;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -26,7 +28,9 @@ use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, parke
 use crate::directorates::m::mission::{
     LaunchManifest, Mission, MissionError, MissionState, MissionStore, SessionHold,
 };
-use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
+use crate::directorates::m::placement::{
+    self, ExecutionMode, OperationPolicy, PlacementRequest, StationFacts,
+};
 use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
@@ -1484,17 +1488,103 @@ fn local_theater_of(theaters: &Theaters, operation: &roster::Operation) -> Optio
         .map(|theater| theater.id)
 }
 
+/// Where a Session runs and how, decided from the Theater's capabilities.
+struct LaunchPlan {
+    theater_id: String,
+    mode: ExecutionMode,
+    /// The Mission's working directory on the Theater, in remote-hands mode.
+    root: Option<String>,
+}
+
+/// The Theater a Session for `operation_id` runs in on this Station and the mode it runs in,
+/// or why it cannot run.
+fn launch_plan(state: &DaemonState, operation_id: Option<&str>) -> Result<LaunchPlan, String> {
+    let operation = operation_id.and_then(|id| state.roster.operation(id).ok());
+    let theater_id = operation
+        .and_then(|operation| operation.theater.clone())
+        .unwrap_or_else(|| LOCAL_THEATER.to_owned());
+    let terminal_available = station_terminal(state).is_ok();
+    let summary = state
+        .transports
+        .summary(&theater_id, terminal_available)
+        .ok_or_else(|| format!("this Station does not reach a Theater {theater_id:?}"))?;
+    let mode = placement::execution_mode(&summary)
+        .map_err(|reason| format!("Theater {theater_id:?} cannot host this Session: {reason}"))?;
+    let root = match mode {
+        ExecutionMode::Field => None,
+        ExecutionMode::RemoteHands => remote_root(state, operation, &theater_id),
+    };
+    Ok(LaunchPlan {
+        theater_id,
+        mode,
+        root,
+    })
+}
+
+/// The Mission's working directory on a Theater it works on through its transport: the
+/// Operation's path when the Operation is bound to the Theater (that is where its checkout
+/// is), else the Theater's `workdir`.
+fn remote_root(
+    state: &DaemonState,
+    operation: Option<&roster::Operation>,
+    theater_id: &str,
+) -> Option<String> {
+    operation
+        .filter(|operation| operation.theater.as_deref() == Some(theater_id))
+        .and_then(|operation| operation.path.as_ref())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .or_else(|| {
+            state
+                .transports
+                .theater(theater_id)
+                .and_then(|theater| theater.workdir.clone())
+        })
+}
+
+/// Starts the MCP endpoint that serves a Theater's tools to the harness and puts its URL
+/// and token in `environment`; answers the instructions the harness is given.
+#[cfg(feature = "cables-mcp")]
+async fn start_theater_tools(
+    state: &DaemonState,
+    theater_id: &str,
+    root: Option<&str>,
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(theater_mcp::Endpoint, String), String> {
+    let client = state.transports.client(theater_id)?;
+    let capabilities = client
+        .capabilities()
+        .map_err(|error| crate::directorates::q::transport::describe(&error))?;
+    let endpoint =
+        theater_mcp::Endpoint::start(client, capabilities.clone(), root.map(str::to_owned))
+            .await
+            .map_err(|error| format!("Theater MCP listener failed: {error}"))?;
+    endpoint.add_environment(environment);
+    Ok((endpoint, theater_mcp::instructions(root, &capabilities)))
+}
+
 /// The Theater a Session for `operation_id` runs in on this Station, or why it cannot.
 fn session_theater(state: &DaemonState, operation_id: Option<&str>) -> Result<String, String> {
-    let Some(operation) = operation_id.and_then(|id| state.roster.operation(id).ok()) else {
-        return Ok(LOCAL_THEATER.to_owned());
-    };
-    local_theater_of(&state.station.theaters, operation).ok_or_else(|| {
-        format!(
-            "Operation {:?} is bound to Theater {:?}, which this Station does not reach with local access; Sessions do not run on remote Theaters yet",
-            operation.id,
-            operation.theater.as_deref().unwrap_or_default()
-        )
+    launch_plan(state, operation_id).map(|plan| plan.theater_id)
+}
+
+/// The Station-side scratch directory of a remote-hands Mission. The harness runs here, but
+/// its shell and file tools are off and the Theater's work never touches it.
+fn remote_hands_area(requested: Option<&str>, mission: &Mission) -> Result<WorkingArea, String> {
+    if requested.is_some_and(|path| !path.trim().is_empty()) {
+        return Err(
+            "a Mission on a remote-hands Theater works in the Theater's directory, not in a \
+             working_directory on the Station"
+                .to_owned(),
+        );
+    }
+    let path = crate::station::safehouse::state_dir()
+        .map_err(|error| error.to_string())?
+        .join("remote-hands")
+        .join(mission.mission_id.as_str());
+    fs::create_dir_all(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(WorkingArea {
+        path: path.to_string_lossy().into_owned(),
+        safe_house: None,
     })
 }
 
@@ -1997,6 +2087,8 @@ struct AgentOperation {
     session_id: Option<SessionId>,
     #[cfg(feature = "cables-mcp")]
     _cables_mcp: Option<cables_mcp::Endpoint>,
+    #[cfg(feature = "cables-mcp")]
+    _theater_mcp: Option<theater_mcp::Endpoint>,
     #[cfg(feature = "publisher")]
     telemetry: Option<Arc<SessionTelemetry>>,
 }
@@ -2460,8 +2552,8 @@ async fn start_mission(
             role.id
         )));
     }
-    let theater_id =
-        session_theater(&state, mission.operation_id.as_deref()).map_err(configuration_error)?;
+    let plan = launch_plan(&state, mission.operation_id.as_deref()).map_err(configuration_error)?;
+    let theater_id = plan.theater_id.clone();
     let _reservation = reserve_mission_start(&state, &mission, &agent)?;
     let handler_provider = agent
         .handler
@@ -2491,15 +2583,20 @@ async fn start_mission(
     let operation_id = mission.operation_id.clone();
     let requested_directory = request.working_directory.clone();
     let area_mission = mission.clone();
+    let remote_hands = plan.mode == ExecutionMode::RemoteHands;
     let area = tokio::task::spawn_blocking(move || {
-        resolve_working_area(
-            &roster,
-            &plugins,
-            operation_id.as_deref(),
-            requested_directory.as_deref(),
-            None,
-            &area_mission,
-        )
+        if remote_hands {
+            remote_hands_area(requested_directory.as_deref(), &area_mission)
+        } else {
+            resolve_working_area(
+                &roster,
+                &plugins,
+                operation_id.as_deref(),
+                requested_directory.as_deref(),
+                None,
+                &area_mission,
+            )
+        }
     })
     .await
     .map_err(|error| runtime_error(format!("working-area worker failed: {error}")))?
@@ -2570,6 +2667,23 @@ async fn start_mission(
     } else {
         None
     };
+    #[cfg(feature = "cables-mcp")]
+    let theater_mcp = if remote_hands {
+        let (endpoint, instructions) =
+            start_theater_tools(&state, &theater_id, plan.root.as_deref(), &mut environment)
+                .await
+                .map_err(configuration_error)?;
+        initial_context.push(instructions);
+        Some(endpoint)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "cables-mcp"))]
+    if remote_hands {
+        return Err(configuration_error(
+            "this build has no Theater tools, which remote-hands mode needs",
+        ));
+    }
     let working_directory = area.path.clone();
     // A Mission started again (a later attempt) keeps the lease of the attempt it replaces
     // until the new Session is recorded.
@@ -2583,6 +2697,7 @@ async fn start_mission(
         cover: cover_audit.clone(),
         station_id: Some(state.station_id.clone()),
         theater_id: Some(theater_id.clone()),
+        mode: plan.mode,
         session: previous_hold.clone(),
     };
     let persisted = state
@@ -2613,6 +2728,7 @@ async fn start_mission(
             environment_keys: environment.keys().cloned().collect(),
             station_id: Some(state.station_id.clone()),
             theater_id: Some(theater_id.clone()),
+            mode: plan.mode,
         });
     }
     let start_request = AgentStart {
@@ -2787,6 +2903,8 @@ async fn start_mission(
             session_id: session_id.clone(),
             #[cfg(feature = "cables-mcp")]
             _cables_mcp: cables_mcp,
+            #[cfg(feature = "cables-mcp")]
+            _theater_mcp: theater_mcp,
             #[cfg(feature = "publisher")]
             telemetry: telemetry.clone(),
         },
@@ -2968,6 +3086,14 @@ async fn resume_mission(
         .ok_or_else(|| conflict("Provider has not issued a Session ID yet"))?;
     acquire_session_hold(&state, &mission, &session_id)?;
     let exposure = medical::open_gate(&state, &mission);
+    let resume_manifest = state
+        .missions
+        .lock()
+        .map_err(|_| internal_error())?
+        .operation(&mission_id);
+    let resume_mode = resume_manifest
+        .as_ref()
+        .map_or_else(ExecutionMode::default, |manifest| manifest.mode);
     #[cfg(feature = "publisher")]
     let telemetry = state.publisher.as_ref().and_then(|publisher| {
         mission.operation_id.as_ref().map(|operation_id| {
@@ -2984,6 +3110,7 @@ async fn resume_mission(
                 environment_keys: environment.keys().cloned().collect(),
                 station_id: Some(state.station_id.clone()),
                 theater_id: session_theater(&state, Some(operation_id)).ok(),
+                mode: resume_mode,
             });
             telemetry.bind(session_id.clone());
             telemetry
@@ -3033,6 +3160,31 @@ async fn resume_mission(
     } else {
         None
     };
+    #[cfg(feature = "cables-mcp")]
+    let theater_mcp = if resume_mode == ExecutionMode::RemoteHands {
+        let theater_id = resume_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.theater_id.clone())
+            .unwrap_or_else(|| LOCAL_THEATER.to_owned());
+        let operation = mission
+            .operation_id
+            .as_deref()
+            .and_then(|id| state.roster.operation(id).ok());
+        let root = remote_root(&state, operation, &theater_id);
+        let (endpoint, _) =
+            start_theater_tools(&state, &theater_id, root.as_deref(), &mut environment)
+                .await
+                .map_err(configuration_error)?;
+        Some(endpoint)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "cables-mcp"))]
+    if resume_mode == ExecutionMode::RemoteHands {
+        return Err(configuration_error(
+            "this build has no Theater tools, which remote-hands mode needs",
+        ));
+    }
     #[cfg(feature = "publisher")]
     let terminal_handle = match &telemetry {
         Some(telemetry) => TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
@@ -3094,6 +3246,8 @@ async fn resume_mission(
             session_id: Some(session_id.clone()),
             #[cfg(feature = "cables-mcp")]
             _cables_mcp: cables_mcp,
+            #[cfg(feature = "cables-mcp")]
+            _theater_mcp: theater_mcp,
             #[cfg(feature = "publisher")]
             telemetry: telemetry.clone(),
         },
@@ -4396,6 +4550,8 @@ mod tests {
                     session_id: Some(session),
                     #[cfg(feature = "cables-mcp")]
                     _cables_mcp: None,
+                    #[cfg(feature = "cables-mcp")]
+                    _theater_mcp: None,
                     #[cfg(feature = "publisher")]
                     telemetry: None,
                 },
@@ -4866,6 +5022,7 @@ mod tests {
             MockHandler,
             MockLimitedHandler,
             MockSpendHandler,
+            MockRecordingHandler,
             MockTerminalProvider,
             MockSafeHouseProvider,
             MockPlainProvider
@@ -5632,7 +5789,7 @@ mod tests {
         );
         assert_eq!(
             stations[0].info()["handlers"],
-            serde_json::json!(["mock-agent", "mock-limit", "mock-spend"])
+            serde_json::json!(["mock-agent", "mock-limit", "mock-recorder", "mock-spend"])
         );
 
         schedule_intake_once(&state);
@@ -6222,6 +6379,8 @@ mod tests {
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
+                #[cfg(feature = "cables-mcp")]
+                _theater_mcp: None,
                 #[cfg(feature = "publisher")]
                 telemetry: None,
             },
@@ -6324,6 +6483,8 @@ mod tests {
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
+                #[cfg(feature = "cables-mcp")]
+                _theater_mcp: None,
                 #[cfg(feature = "publisher")]
                 telemetry: None,
             },
@@ -6500,6 +6661,8 @@ mod tests {
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
+                #[cfg(feature = "cables-mcp")]
+                _theater_mcp: None,
                 #[cfg(feature = "publisher")]
                 telemetry: None,
             },
@@ -6798,6 +6961,8 @@ mod tests {
                 session_id: Some(session_id),
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
+                #[cfg(feature = "cables-mcp")]
+                _theater_mcp: None,
                 #[cfg(feature = "publisher")]
                 telemetry: None,
             },
@@ -7269,5 +7434,264 @@ mod tests {
             "the cost counts toward one UTC day"
         );
         state.stopping.store(true, Ordering::Release);
+    }
+
+    /// What the Station handed the recording handler, one entry per start or resume.
+    static RECORDED_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new());
+    static RECORDED_RESUMES: Mutex<Vec<AgentResume>> = Mutex::new(Vec::new());
+
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "mock-recorder", name = "Mock Recorder", crate = crate::guatiao)]
+    struct MockRecordingHandler;
+
+    impl AgentHandler for MockRecordingHandler {
+        fn start(
+            &self,
+            request: AgentStart,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            RECORDED_STARTS.lock().unwrap().push(request);
+            Ok(MockSession::new(
+                SessionId::try_new("provider-session-remote")
+                    .map_err(|error| test_provider_error(&error.to_string()))?,
+                "blocked",
+            )
+            .into_object())
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            let session_id = request.session_id.clone();
+            RECORDED_RESUMES.lock().unwrap().push(request);
+            Ok(MockSession::new(session_id, "blocked").into_object())
+        }
+    }
+
+    /// A Station whose Operation `G` is bound to the Theater `phone`, which only a fake
+    /// transport reaches, plus one queued Mission with a unique ID.
+    fn remote_hands_state(
+        root: &Path,
+        theater_root: &Path,
+        theater: Theater,
+    ) -> (DaemonState, String) {
+        let state = test_state(root, "", "[agent.007]\nhandler = \"mock-recorder\"\n");
+        fs::write(
+            root.join("operations.toml"),
+            "[operation.G]\ntheater = \"phone\"\n",
+        )
+        .unwrap();
+        let mission_id = format!("remote-hands-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "edit the file on the phone".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let mut theaters = Theaters::default();
+        theaters.insert(theater.clone()).unwrap();
+        let transports = Transports::build(&theaters, &plugins::Plugins::scan(&[])).with_transport(
+            theater,
+            Box::new(crate::station::transports::testing::DirTransport::new(
+                theater_root,
+            )),
+        );
+        let mut state = state;
+        state.roster = Arc::new(Roster::load(root).unwrap());
+        state.transports = Arc::new(transports);
+        (state, mission_id)
+    }
+
+    fn phone() -> Theater {
+        Theater::new(
+            "phone",
+            TheaterAccess::Transport(crate::TransportAccess::new("dir")),
+        )
+        .with_workdir("/work")
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    async fn call_theater_tool(
+        environment: &BTreeMap<String, String>,
+        tool: &'static str,
+        arguments: serde_json::Value,
+    ) -> serde_json::Value {
+        use rmcp::ServiceExt;
+        use rmcp::model::{CallToolRequestParams, ContentBlock};
+        use rmcp::transport::{
+            StreamableHttpClientTransport,
+            streamable_http_client::StreamableHttpClientTransportConfig,
+        };
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(
+                environment["AI6_THEATER_MCP_URL"].clone(),
+            )
+            .auth_header(environment["AI6_THEATER_MCP_TOKEN"].clone()),
+        );
+        let client = ().serve(transport).await.unwrap();
+        let response = client
+            .call_tool(
+                CallToolRequestParams::new(tool)
+                    .with_arguments(serde_json::from_value(arguments).unwrap()),
+            )
+            .await
+            .unwrap();
+        client.cancel().await.unwrap();
+        let [ContentBlock::Text(text)] = response.content.as_slice() else {
+            panic!("a tool answers one text block");
+        };
+        serde_json::from_str(&text.text).unwrap()
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_remote_hands_mission_edits_a_file_on_the_theater_and_the_stations_disk_is_untouched()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let theater_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(theater_root.path().join("work")).unwrap();
+        let (state, mission_id) = remote_hands_state(root.path(), theater_root.path(), phone());
+
+        // The Theater cannot run a harness (a transport only), so `auto` chooses remote hands.
+        let plan = launch_plan(&state, Some("G")).unwrap();
+        assert_eq!(plan.mode, ExecutionMode::RemoteHands);
+        assert_eq!(plan.root.as_deref(), Some("/work"));
+
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+
+        let started = RECORDED_STARTS
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|request| request.mission_id.as_str() == mission_id)
+            .cloned()
+            .expect("the handler was started");
+        let scratch = PathBuf::from(&started.working_directory);
+        assert!(scratch.ends_with(Path::new("remote-hands").join(&mission_id)));
+        assert!(
+            started
+                .initial_context
+                .iter()
+                .any(|text| text.contains("remote Theater") && text.contains("/work"))
+        );
+        assert!(!started.environment.contains_key("AI6_CABLE_MCP_URL_UNSET"));
+        let manifest = state
+            .missions
+            .lock()
+            .unwrap()
+            .operation(&mission_id)
+            .expect("the launch is recorded");
+        assert_eq!(manifest.mode, ExecutionMode::RemoteHands);
+        assert_eq!(manifest.theater_id.as_deref(), Some("phone"));
+
+        // The harness's only way to act on the Theater is the tool endpoint it was handed.
+        let written = call_theater_tool(
+            &started.environment,
+            "theater_write",
+            serde_json::json!({"path": "hello.txt", "content": "edited on the theater\n"}),
+        )
+        .await;
+        assert_eq!(written["path"], "/work/hello.txt", "{written}");
+        assert_eq!(
+            fs::read_to_string(theater_root.path().join("work/hello.txt")).unwrap(),
+            "edited on the theater\n"
+        );
+        assert_eq!(
+            fs::read_dir(&scratch).unwrap().count(),
+            0,
+            "nothing landed in the Station's scratch directory"
+        );
+        assert!(!root.path().join("checkout").join("hello.txt").exists());
+
+        // A resumed Session gets the same tools again.
+        let _ = resume_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(ResumeMission {
+                message: Some("carry on".to_owned()),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+        let resumed = RECORDED_RESUMES
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|request| request.mission_id.as_str() == mission_id)
+            .cloned()
+            .expect("the handler was resumed");
+        let listing =
+            call_theater_tool(&resumed.environment, "theater_list", serde_json::json!({})).await;
+        assert_eq!(listing["entries"][0]["name"], "hello.txt");
+
+        // Ending the Mission closes the Session, which stops its event pump.
+        finalize_mission_resources(&state, &mission_id, true)
+            .await
+            .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn the_launch_plan_follows_the_theaters_declared_facts() {
+        let root = tempfile::tempdir().unwrap();
+        let theater_root = tempfile::tempdir().unwrap();
+
+        // `agents = "local"` is never silently downgraded.
+        let (state, _) = remote_hands_state(
+            root.path(),
+            theater_root.path(),
+            phone().with_agents(crate::AgentMode::Local),
+        );
+        let reason = launch_plan(&state, Some("G")).err().unwrap();
+        assert!(
+            reason.contains("Theater \"phone\" cannot host this Session"),
+            "{reason}"
+        );
+        assert!(
+            reason.contains("agents = \"local\" needs a runner on the Theater"),
+            "{reason}"
+        );
+
+        // An Operation that names a Theater the Station does not reach cannot start.
+        fs::write(
+            root.path().join("operations.toml"),
+            "[operation.G]\ntheater = \"elsewhere\"\n",
+        )
+        .unwrap();
+        let mut state = state;
+        state.roster = Arc::new(Roster::load(root.path()).unwrap());
+        let reason = launch_plan(&state, Some("G")).err().unwrap();
+        assert!(
+            reason.contains("does not reach a Theater \"elsewhere\""),
+            "{reason}"
+        );
+
+        // No Operation, or one with no Theater, runs on the Station's own host in field mode.
+        let plan = launch_plan(&state, None).unwrap();
+        assert_eq!(
+            (plan.theater_id.as_str(), plan.mode),
+            ("local", ExecutionMode::Field)
+        );
+        assert!(plan.root.is_none());
     }
 }
