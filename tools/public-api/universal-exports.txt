@@ -53,6 +53,7 @@ pub universal_exports::BoardSession::operation_id: alloc::string::String
 pub universal_exports::BoardSession::sequence: u64
 pub universal_exports::BoardSession::session_id: alloc::string::String
 pub universal_exports::BoardSession::state: core::option::Option<alloc::string::String>
+pub universal_exports::BoardSession::updated_at: core::option::Option<f64>
 #[non_exhaustive] pub struct universal_exports::BoardStation
 pub universal_exports::BoardStation::capacity: usize
 pub universal_exports::BoardStation::headquarters: bool
@@ -76,6 +77,20 @@ pub universal_exports::BoardTheater::provider: core::option::Option<alloc::strin
 pub universal_exports::BoardTheater::unavailable: core::option::Option<alloc::string::String>
 pub universal_exports::BoardTheater::weakened: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardTheater::workdir: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::ControlStatus
+pub universal_exports::ControlStatus::action: alloc::string::String
+pub universal_exports::ControlStatus::agent: core::option::Option<alloc::string::String>
+pub universal_exports::ControlStatus::control_id: alloc::string::String
+pub universal_exports::ControlStatus::finished_at: core::option::Option<f64>
+pub universal_exports::ControlStatus::mission_id: alloc::string::String
+pub universal_exports::ControlStatus::operation_id: alloc::string::String
+pub universal_exports::ControlStatus::reason: core::option::Option<alloc::string::String>
+pub universal_exports::ControlStatus::requested_at: f64
+pub universal_exports::ControlStatus::requested_by: alloc::string::String
+pub universal_exports::ControlStatus::session_id: core::option::Option<alloc::string::String>
+pub universal_exports::ControlStatus::state: core::option::Option<alloc::string::String>
+pub universal_exports::ControlStatus::station_id: alloc::string::String
+pub universal_exports::ControlStatus::status: alloc::string::String
 pub struct universal_exports::Gateway
 impl universal_exports::Gateway
 pub async fn universal_exports::Gateway::attach(&self, &ai6_diptel::SessionId, &str, u64) -> core::result::Result<universal_exports::Attachment, universal_exports::GatewayError>
@@ -145,3 +160,21 @@ pub universal_exports::PlacementPreview::rejections: alloc::vec::Vec<ai6::direct
 #[non_exhaustive] pub struct universal_exports::StationBoard
 pub universal_exports::StationBoard::headquarters_station: core::option::Option<alloc::string::String>
 pub universal_exports::StationBoard::stations: alloc::vec::Vec<universal_exports::BoardStation>
+#[non_exhaustive] pub struct universal_exports::TimelineItem
+pub universal_exports::TimelineItem::action: alloc::string::String
+pub universal_exports::TimelineItem::actor: core::option::Option<alloc::string::String>
+pub universal_exports::TimelineItem::at: f64
+pub universal_exports::TimelineItem::detail: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub universal_exports::TimelineItem::id: alloc::string::String
+pub universal_exports::TimelineItem::kind: alloc::string::String
+pub universal_exports::TimelineItem::mission_id: core::option::Option<alloc::string::String>
+pub universal_exports::TimelineItem::operation_id: alloc::string::String
+pub universal_exports::TimelineItem::session_id: core::option::Option<alloc::string::String>
+pub universal_exports::TimelineItem::station_id: core::option::Option<alloc::string::String>
+pub universal_exports::TimelineItem::target: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::TimelinePage
+pub universal_exports::TimelinePage::items: alloc::vec::Vec<universal_exports::TimelineItem>
+pub universal_exports::TimelinePage::next_cursor: core::option::Option<alloc::string::String>
+pub universal_exports::TimelinePage::operation_id: alloc::string::String
+pub const universal_exports::DEFAULT_TIMELINE_PAGE: usize
+pub const universal_exports::MAX_TIMELINE_PAGE: usize

@@ -1,20 +1,41 @@
 pub mod ai6_diptel
+#[non_exhaustive] pub enum ai6_diptel::ControlAction
+pub ai6_diptel::ControlAction::Cancel
+pub ai6_diptel::ControlAction::Interrupt
+pub ai6_diptel::ControlAction::Resume
+pub ai6_diptel::ControlAction::Retry
+impl ai6_diptel::ControlAction
+pub const ai6_diptel::ControlAction::ALL: [Self; 4]
+pub const fn ai6_diptel::ControlAction::as_str(self) -> &'static str
+pub fn ai6_diptel::ControlAction::parse(&str) -> core::option::Option<Self>
 pub enum ai6_diptel::IncomingFrame
 pub ai6_diptel::IncomingFrame::Closed(u64)
+pub ai6_diptel::IncomingFrame::Control(ai6_diptel::MissionControl)
 pub ai6_diptel::IncomingFrame::Lifecycle(ai6_diptel::LifecycleEvent)
 pub ai6_diptel::IncomingFrame::Resize(ai6_diptel::TerminalResize)
 pub ai6_diptel::IncomingFrame::Terminal(ai6_diptel::TerminalData)
 #[non_exhaustive] pub enum ai6_diptel::SessionState
+pub ai6_diptel::SessionState::Abandoned
 pub ai6_diptel::SessionState::Blocked
 pub ai6_diptel::SessionState::Done
 pub ai6_diptel::SessionState::Failed
 pub ai6_diptel::SessionState::Parked
 pub ai6_diptel::SessionState::Quarantined
+pub ai6_diptel::SessionState::Queued
 pub ai6_diptel::SessionState::Stalled
 pub ai6_diptel::SessionState::Working
+impl ai6_diptel::SessionState
+pub const fn ai6_diptel::SessionState::as_str(self) -> &'static str
+pub fn ai6_diptel::SessionState::parse(&str) -> core::option::Option<Self>
 #[non_exhaustive] pub enum ai6_diptel::TerminalDirection
 pub ai6_diptel::TerminalDirection::Input
 pub ai6_diptel::TerminalDirection::Output
+pub struct ai6_diptel::ControlId(_)
+impl ai6_diptel::ControlId
+pub fn ai6_diptel::ControlId::as_str(&self) -> &str
+pub fn ai6_diptel::ControlId::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6_diptel::InvalidIdentity>
+impl core::fmt::Display for ai6_diptel::ControlId
+pub fn ai6_diptel::ControlId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6_diptel::FrameDecodeError(_)
 impl core::error::Error for ai6_diptel::FrameDecodeError
 impl core::fmt::Display for ai6_diptel::FrameDecodeError
@@ -27,6 +48,10 @@ pub fn ai6_diptel::FrameReceiver::new() -> Self
 impl core::error::Error for ai6_diptel::FrameTooLarge
 impl core::fmt::Display for ai6_diptel::FrameTooLarge
 pub fn ai6_diptel::FrameTooLarge::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6_diptel::InvalidControl
+impl core::error::Error for ai6_diptel::InvalidControl
+impl core::fmt::Display for ai6_diptel::InvalidControl
+pub fn ai6_diptel::InvalidControl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6_diptel::InvalidIdentity
 impl core::error::Error for ai6_diptel::InvalidIdentity
 impl core::fmt::Display for ai6_diptel::InvalidIdentity
@@ -41,6 +66,21 @@ pub ai6_diptel::LifecycleEvent::operation_id: ai6_diptel::OperationId
 pub ai6_diptel::LifecycleEvent::sequence: u64
 pub ai6_diptel::LifecycleEvent::session_id: ai6_diptel::SessionId
 pub ai6_diptel::LifecycleEvent::state: ai6_diptel::SessionState
+pub struct ai6_diptel::MissionControl
+impl ai6_diptel::MissionControl
+pub const fn ai6_diptel::MissionControl::action(&self) -> ai6_diptel::ControlAction
+pub fn ai6_diptel::MissionControl::agent(&self) -> core::option::Option<&str>
+pub fn ai6_diptel::MissionControl::control_id(&self) -> &ai6_diptel::ControlId
+pub fn ai6_diptel::MissionControl::message(&self) -> core::option::Option<&str>
+pub fn ai6_diptel::MissionControl::mission_id(&self) -> &ai6_diptel::MissionId
+pub fn ai6_diptel::MissionControl::new(ai6_diptel::ControlId, ai6_diptel::OperationId, ai6_diptel::MissionId, ai6_diptel::ControlAction) -> Self
+pub fn ai6_diptel::MissionControl::operation_id(&self) -> &ai6_diptel::OperationId
+pub fn ai6_diptel::MissionControl::session_id(&self) -> core::option::Option<&ai6_diptel::SessionId>
+pub fn ai6_diptel::MissionControl::with_agent(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6_diptel::InvalidControl>
+pub fn ai6_diptel::MissionControl::with_message(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6_diptel::InvalidControl>
+pub fn ai6_diptel::MissionControl::with_session(self, ai6_diptel::SessionId) -> Self
+impl core::fmt::Debug for ai6_diptel::MissionControl
+pub fn ai6_diptel::MissionControl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6_diptel::MissionId(_)
 impl ai6_diptel::MissionId
 pub fn ai6_diptel::MissionId::as_str(&self) -> &str
@@ -81,8 +121,10 @@ pub fn ai6_diptel::TerminalResize::new(ai6_diptel::SessionId, u64, u16, u16) -> 
 pub const fn ai6_diptel::TerminalResize::rows(&self) -> u16
 pub const fn ai6_diptel::TerminalResize::sequence(&self) -> u64
 pub fn ai6_diptel::TerminalResize::session_id(&self) -> &ai6_diptel::SessionId
+pub const ai6_diptel::MAX_CONTROL_MESSAGE_BYTES: usize
 pub const ai6_diptel::MAX_ID_BYTES: usize
 pub const ai6_diptel::MAX_TERMINAL_BYTES: usize
+pub fn ai6_diptel::control_frames(&ai6_diptel::MissionControl) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::lifecycle_frames(&ai6_diptel::LifecycleEvent) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::resize_frames(&ai6_diptel::TerminalResize) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::terminal_frames(&ai6_diptel::TerminalData) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>

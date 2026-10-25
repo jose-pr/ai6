@@ -214,6 +214,7 @@ pub fn ai6::directorates::m::mission::MissionStore::park(&mut self, &str, i64) -
 pub fn ai6::directorates::m::mission::MissionStore::quarantine(&mut self, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::reassign(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::requeue_for(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::retry(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::directorates::q::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::transition(&mut self, &str, ai6::directorates::m::mission::MissionState) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -1371,6 +1372,7 @@ pub fn ai6::directorates::registry::store::Brief::prompt(&self) -> alloc::string
 pub struct ai6::directorates::registry::store::FileRegistry
 impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
@@ -1439,6 +1441,9 @@ impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::store::FileRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::directorates::registry::store::FileRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
+impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
 #[non_exhaustive] pub struct ai6::directorates::registry::store::HeadquartersLease
 impl ai6::directorates::registry::store::HeadquartersLease
 pub fn ai6::directorates::registry::store::HeadquartersLease::expires(&self) -> f64
@@ -1477,6 +1482,26 @@ pub const ai6::directorates::registry::store::DEFAULT_LEASE: core::time::Duratio
 pub const ai6::directorates::registry::store::GONE_DARK_AFTER: core::time::Duration
 pub const ai6::directorates::registry::store::MAX_STATION_MISSION_CAPACITY: usize
 pub fn ai6::directorates::registry::store::default_registry_dir() -> core::io::error::Result<std::path::PathBuf>
+pub mod ai6::directorates::registry::timeline
+#[non_exhaustive] pub struct ai6::directorates::registry::timeline::TimelineEvent
+pub ai6::directorates::registry::timeline::TimelineEvent::action: alloc::string::String
+pub ai6::directorates::registry::timeline::TimelineEvent::actor: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::timeline::TimelineEvent::at: f64
+pub ai6::directorates::registry::timeline::TimelineEvent::detail: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::registry::timeline::TimelineEvent::id: alloc::string::String
+pub ai6::directorates::registry::timeline::TimelineEvent::kind: alloc::string::String
+pub ai6::directorates::registry::timeline::TimelineEvent::mission: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::timeline::TimelineEvent::operation: alloc::string::String
+pub ai6::directorates::registry::timeline::TimelineEvent::session: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::timeline::TimelineEvent::station: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::timeline::TimelineEvent
+pub fn ai6::directorates::registry::timeline::TimelineEvent::actor(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::detail(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::mission(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::session(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::station(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub const ai6::directorates::registry::timeline::MAX_TIMELINE_EVENTS: usize
 pub mod ai6::directorates::registry::usage
 pub mod ai6::directorates::section_00
 pub mod ai6::directorates::section_00::agent
@@ -2187,6 +2212,7 @@ pub ai6::FileData::size: u64
 pub struct ai6::FileRegistry
 impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
@@ -2255,6 +2281,9 @@ impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::store::FileRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::directorates::registry::store::FileRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
+impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
 pub struct ai6::FinishedSourceBrief
 pub ai6::FinishedSourceBrief::brief: ai6::directorates::registry::store::Brief
 pub ai6::FinishedSourceBrief::ok: bool
@@ -2757,6 +2786,24 @@ pub fn ai6::directorates::m::theaters::Theaters::merge(&mut self, ai6::directora
 pub fn ai6::directorates::m::theaters::Theaters::parse(&str) -> core::result::Result<Self, ai6::directorates::m::theaters::TheaterError>
 pub fn ai6::directorates::m::theaters::Theaters::reachable(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::Theater>
 pub fn ai6::directorates::m::theaters::Theaters::summaries(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
+#[non_exhaustive] pub struct ai6::TimelineEvent
+pub ai6::TimelineEvent::action: alloc::string::String
+pub ai6::TimelineEvent::actor: core::option::Option<alloc::string::String>
+pub ai6::TimelineEvent::at: f64
+pub ai6::TimelineEvent::detail: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::TimelineEvent::id: alloc::string::String
+pub ai6::TimelineEvent::kind: alloc::string::String
+pub ai6::TimelineEvent::mission: core::option::Option<alloc::string::String>
+pub ai6::TimelineEvent::operation: alloc::string::String
+pub ai6::TimelineEvent::session: core::option::Option<alloc::string::String>
+pub ai6::TimelineEvent::station: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::timeline::TimelineEvent
+pub fn ai6::directorates::registry::timeline::TimelineEvent::actor(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::detail(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::mission(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::session(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::timeline::TimelineEvent::station(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::TokenUsage
 pub ai6::TokenUsage::cache_read: u64
 pub ai6::TokenUsage::cache_write: u64
@@ -2878,6 +2925,7 @@ pub const ai6::MAX_CABLE_TTL: f64
 pub const ai6::MAX_LOADOUT_BYTES: usize
 pub const ai6::MAX_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::MAX_STATION_MISSION_CAPACITY: usize
+pub const ai6::MAX_TIMELINE_EVENTS: usize
 pub const ai6::READ_TIMED_OUT: i64
 pub const ai6::REVIEW: &str
 pub const ai6::SCOPE_KINDS: [&str; 3]
