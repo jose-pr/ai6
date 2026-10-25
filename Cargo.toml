@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/ai6",
+    "crates/universal-exports",
     "crates/ai6-diptel",
     "crates/providers/access/*",
     "crates/providers/agents/*",
