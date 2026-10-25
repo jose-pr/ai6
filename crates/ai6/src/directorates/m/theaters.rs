@@ -17,6 +17,9 @@
 //!
 //! `access` names a transport, the way in: `"local"`, `{ ssh = { … } }`, or
 //! `{ transport = { provider = "…", config = { … } } }` for any other transport provider.
+//! `{ ephemeral = { provider = "…", config = { … } } }` makes the Theater a template: each
+//! Mission bound to it gets a fresh Theater from a Theater provider (see
+//! [`EphemeralAccess`]).
 //! The transport reports what it can do (see
 //! [`Capabilities`]). The other keys state
 //! facts a transport cannot probe: `agents` says where the harness may run, `egress` how the
@@ -54,20 +57,94 @@ pub enum TheaterAccess {
     Ssh(SshAccess),
     /// A host reached by another transport provider.
     Transport(TransportAccess),
+    /// A template: each Mission gets a fresh Theater made from it, destroyed afterwards.
+    Ephemeral(EphemeralAccess),
+}
+
+fn toml_text(value: &impl Serialize, what: &str) -> Result<String, TheaterError> {
+    toml::to_string(value).map_err(|error| TheaterError(format!("{what} settings: {error}")))
 }
 
 impl TheaterAccess {
-    /// The transport provider that reaches the Theater and its settings as TOML text.
+    /// The transport provider that reaches the Theater and its settings as TOML text. An
+    /// ephemeral template has none: the Theaters made from it do.
     pub fn transport(&self) -> Result<(String, String), TheaterError> {
-        fn text(value: &impl Serialize) -> Result<String, TheaterError> {
-            toml::to_string(value)
-                .map_err(|error| TheaterError(format!("transport settings: {error}")))
-        }
         match self {
             Self::Local => Ok(("local".to_owned(), String::new())),
-            Self::Ssh(ssh) => Ok(("ssh".to_owned(), text(ssh)?)),
-            Self::Transport(access) => Ok((access.provider.clone(), text(&access.config)?)),
+            Self::Ssh(ssh) => Ok(("ssh".to_owned(), toml_text(ssh, "transport")?)),
+            Self::Transport(access) => Ok((
+                access.provider.clone(),
+                toml_text(&access.config, "transport")?,
+            )),
+            Self::Ephemeral(_) => Err(TheaterError(
+                "an ephemeral Theater is made per Mission; reach the Theater made from it"
+                    .to_owned(),
+            )),
         }
+    }
+}
+
+/// Theaters an ephemeral template keeps after their Mission failed, unless it says otherwise.
+pub const DEFAULT_KEEP_FAILED: usize = 3;
+/// Hours a kept Theater stays, unless its template says otherwise.
+pub const DEFAULT_KEEP_FAILED_HOURS: u64 = 24;
+
+/// A template for Theaters made fresh for each Mission by a Theater provider:
+/// `access = { ephemeral = { provider = "container", config = { … } } }`.
+///
+/// A Theater made from it is destroyed once its Mission is done or abandoned. One whose
+/// Mission failed is kept for inspection, at most `keep_failed` of them and for at most
+/// `keep_failed_hours`, the oldest going first.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EphemeralAccess {
+    /// The Theater provider ID.
+    pub provider: String,
+    /// The provider's settings; the provider validates them and refuses unknown keys.
+    #[serde(default)]
+    pub config: serde_json::Map<String, serde_json::Value>,
+    /// How many failed Missions' Theaters to keep; [`DEFAULT_KEEP_FAILED`] when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_failed: Option<usize>,
+    /// How long a kept Theater stays, in hours; [`DEFAULT_KEEP_FAILED_HOURS`] when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_failed_hours: Option<u64>,
+}
+
+impl EphemeralAccess {
+    /// A template for `provider` with no settings and the default bounds.
+    pub fn new(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            config: serde_json::Map::new(),
+            keep_failed: None,
+            keep_failed_hours: None,
+        }
+    }
+
+    /// Sets one provider setting.
+    #[must_use]
+    pub fn with_setting(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<serde_json::Value>,
+    ) -> Self {
+        self.config.insert(key.into(), value.into());
+        self
+    }
+
+    /// Keeps at most `count` failed Missions' Theaters, each for at most `hours`.
+    #[must_use]
+    pub fn keeping_failed(mut self, count: usize, hours: u64) -> Self {
+        self.keep_failed = Some(count);
+        self.keep_failed_hours = Some(hours);
+        self
+    }
+
+    /// The provider's settings as TOML text (a `TheaterProviderConfig`).
+    pub fn settings_toml(&self) -> Result<String, TheaterError> {
+        toml_text(&self.config, "Theater provider")
     }
 }
 
@@ -466,6 +543,11 @@ impl Theater {
                 None,
                 Some(transport.provider.clone()),
             ),
+            TheaterAccess::Ephemeral(template) => (
+                TheaterKind::Ephemeral,
+                None,
+                Some(template.provider.clone()),
+            ),
         };
         TheaterSummary {
             id: self.id.clone(),
@@ -483,6 +565,7 @@ impl Theater {
             weakened: self.weakenings(),
             requires: self.requires.clone(),
             report: None,
+            made_for: None,
         }
     }
 
@@ -545,6 +628,19 @@ impl Theater {
                     return Err(TheaterError(format!(
                         "Theater {id:?}: transport provider must be a non-empty word not starting with '-'"
                     )));
+                }
+            }
+            TheaterAccess::Ephemeral(template) => {
+                if !word(&template.provider) {
+                    return Err(TheaterError(format!(
+                        "Theater {id:?}: ephemeral provider must be a non-empty word not starting with '-'"
+                    )));
+                }
+                if id == LOCAL_THEATER {
+                    return Err(TheaterError(
+                        "the Theater `local` is the Station's own host and cannot be ephemeral"
+                            .to_owned(),
+                    ));
                 }
             }
         }
@@ -625,6 +721,9 @@ pub enum TheaterKind {
     Ssh,
     /// A host reached by another transport provider; see [`TheaterSummary::provider`].
     Transport,
+    /// A template whose Theaters a Theater provider makes per Mission; see
+    /// [`TheaterSummary::provider`].
+    Ephemeral,
 }
 
 impl TheaterKind {
@@ -634,6 +733,7 @@ impl TheaterKind {
             Self::Local => "local",
             Self::Ssh => "ssh",
             Self::Transport => "transport",
+            Self::Ephemeral => "ephemeral",
         }
     }
 }
@@ -688,6 +788,9 @@ pub struct TheaterSummary {
     /// What the Station's last probe of the Theater found; absent until one finishes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report: Option<ProbeReport>,
+    /// The Mission an ephemeral Theater was made for; placement never chooses it for another.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub made_for: Option<String>,
 }
 
 impl TheaterSummary {
@@ -958,6 +1061,42 @@ install = { git = "sudo dnf install -y git" }
             "[theater.x]\naccess = \"local\"\nrequires = { tools = [\"git>=x\"] }\n",
             "[theater.x]\naccess = \"local\"\nrequires = { cpu = 4 }\n",
             "[theater.x]\naccess = \"local\"\nprovision = { install = { git = \"\" } }\n",
+        ] {
+            assert!(Theaters::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_ephemeral_template_names_its_provider_and_bounds_what_it_keeps() {
+        let theaters = Theaters::parse(
+            r#"
+[theater.scratch]
+access = { ephemeral = { provider = "container", config = { image = "fedora:44", engine = "podman" }, keep_failed = 1 } }
+agents = "remote-hands"
+"#,
+        )
+        .unwrap();
+        let scratch = theaters.find("scratch").unwrap();
+        let TheaterAccess::Ephemeral(template) = &scratch.access else {
+            panic!("expected an ephemeral template");
+        };
+        assert_eq!(
+            (template.keep_failed, template.keep_failed_hours),
+            (Some(1), None)
+        );
+        assert_eq!(
+            template.settings_toml().unwrap(),
+            "engine = \"podman\"\nimage = \"fedora:44\"\n"
+        );
+        assert!(scratch.access.transport().is_err());
+        let published = serde_json::to_value(scratch.summary()).unwrap();
+        assert_eq!(published["access"], "ephemeral");
+        assert_eq!(published["provider"], "container");
+        assert!(!published.to_string().contains("fedora"));
+        for bad in [
+            "[theater.x]\naccess = { ephemeral = { provider = \"\" } }\n",
+            "[theater.x]\naccess = { ephemeral = { provider = \"c\", keep = 1 } }\n",
+            "[theater.local]\naccess = { ephemeral = { provider = \"c\" } }\n",
         ] {
             assert!(Theaters::parse(bad).is_err(), "{bad}");
         }

@@ -460,6 +460,9 @@ fn theater_verdict(
     station: &StationFacts,
     theater: &TheaterSummary,
 ) -> Result<ExecutionMode, String> {
+    if let Some(mission) = &theater.made_for {
+        return Err(format!("it was made for Mission {mission:?} alone"));
+    }
     if let Some(bound) = &policy.theater
         && bound != &theater.id
     {
@@ -518,9 +521,14 @@ fn theater_verdict(
 
 /// Why the Theater's declared requirements rule it out, if they do: they have not been
 /// checked, or a requirement other than a harness is unmet. A Theater that declares none is
-/// not checked; harnesses are judged per Agent by [`harness_verdict`].
+/// not checked, nor is an ephemeral template, whose Theaters are fitted out when they are
+/// made; harnesses are judged per Agent by [`harness_verdict`].
 pub fn fitness(theater: &TheaterSummary) -> Result<(), String> {
-    let Some(requires) = &theater.requires else {
+    let Some(requires) = theater
+        .requires
+        .as_ref()
+        .filter(|_| theater.access != TheaterKind::Ephemeral)
+    else {
         return Ok(());
     };
     let report = theater.report.as_ref().ok_or_else(|| {
@@ -1344,6 +1352,41 @@ mod tests {
         station.theaters = vec![lab];
         let placement = place(&policy(), &PlacementRequest::default(), &[station]);
         assert_eq!(placement.choices.len(), 2);
+    }
+
+    #[test]
+    fn an_ephemeral_template_is_placed_and_a_theater_made_from_it_is_not() {
+        use crate::directorates::m::theaters::EphemeralAccess;
+        use crate::directorates::q::provision::Requirements;
+        let mut template = Theater::new(
+            "scratch",
+            TheaterAccess::Ephemeral(EphemeralAccess::new("container")),
+        )
+        .with_requirements(Requirements::default().with_tool("git".parse().unwrap()))
+        .summary();
+        template.capabilities = Some(Capabilities {
+            run: true,
+            files: true,
+            ..Capabilities::default()
+        });
+        let mut made = remote("scratch-m1", template.capabilities.clone());
+        made.made_for = Some("m1".to_owned());
+        let mut station = station("a", 0);
+        station.theaters = vec![template, made];
+        let mut bound = policy();
+        bound.theater = Some("scratch".to_owned());
+        let placement = place(&bound, &PlacementRequest::default(), &[station.clone()]);
+        let best = placement.best().unwrap();
+        assert_eq!(
+            (best.theater.as_str(), best.mode),
+            ("scratch", ExecutionMode::RemoteHands),
+            "a template's requirements are met when a Theater is made from it"
+        );
+        let placement = place(&policy(), &PlacementRequest::default(), &[station]);
+        assert!(placement.rejections.iter().any(|r| {
+            r.theater.as_deref() == Some("scratch-m1")
+                && r.reason == "it was made for Mission \"m1\" alone"
+        }));
     }
 
     #[test]

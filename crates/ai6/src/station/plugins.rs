@@ -9,6 +9,7 @@ use guatiao::{Status, Value};
 use serde::Serialize;
 
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
+use crate::directorates::q::ephemeral::TheaterProvider;
 use crate::directorates::q::safehouse::SafeHouseProvider;
 use crate::directorates::q::terminal::Terminal;
 use crate::directorates::q::transport::Transport;
@@ -111,6 +112,7 @@ impl Plugins {
                             | "ai6_terminal"
                             | "ai6_safehouse"
                             | "ai6_transport"
+                            | "ai6_theater_provider"
                             | "ai6_source"
                     )
             }) {
@@ -173,6 +175,20 @@ impl Plugins {
     /// Returns the transport providers and their reported availability.
     pub fn transports(&self) -> Vec<ProviderInfo> {
         providers(&self.registry, <dyn Transport>::NAME)
+    }
+
+    /// Returns the Theater providers (ephemeral Theaters) and their reported availability.
+    pub fn theater_providers(&self) -> Vec<ProviderInfo> {
+        providers(&self.registry, <dyn TheaterProvider>::NAME)
+    }
+
+    /// Constructs a Theater provider from its ID and optional Guatiao config.
+    pub fn theater_provider(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+    ) -> Result<Box<dyn TheaterProvider>, PluginBuildError> {
+        build::<dyn TheaterProvider>(&self.registry, provider, config)
     }
 
     /// Returns the Source providers and their reported availability.

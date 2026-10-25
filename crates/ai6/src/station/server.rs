@@ -5,6 +5,7 @@ mod cables_mcp;
 #[cfg(feature = "publisher")]
 mod controls;
 mod credentials;
+mod ephemeral;
 #[cfg(feature = "cables-mcp")]
 mod green_ink;
 mod medical;
@@ -1040,6 +1041,8 @@ async fn scheduler_loop(state: DaemonState) {
             next_station_check_in = Instant::now() + STATION_CHECK_IN_INTERVAL;
             renew_session_leases(&state);
             recovery::checkpoint_due(&state);
+            let sweeping = state.clone();
+            let _ = tokio::task::spawn_blocking(move || ephemeral::sweep(&sweeping)).await;
         }
         medical::enforce_quarantines(&state);
         #[cfg(feature = "cables-mcp")]
@@ -1590,9 +1593,20 @@ impl LaunchPlan {
 /// The Theater a Session for `operation_id` runs in on this Station and the mode it runs in,
 /// or why it cannot run.
 fn launch_plan(state: &DaemonState, operation_id: Option<&str>) -> Result<LaunchPlan, String> {
+    launch_plan_in(state, operation_id, None)
+}
+
+/// [`launch_plan`] in `theater`, such as the Theater made for the Mission from the ephemeral
+/// template its Operation is bound to, instead of the Operation's own.
+fn launch_plan_in(
+    state: &DaemonState,
+    operation_id: Option<&str>,
+    theater: Option<&str>,
+) -> Result<LaunchPlan, String> {
     let operation = operation_id.and_then(|id| state.roster.operation(id).ok());
-    let theater_id = operation
-        .and_then(|operation| operation.theater.clone())
+    let theater_id = theater
+        .map(str::to_owned)
+        .or_else(|| operation.and_then(|operation| operation.theater.clone()))
         .unwrap_or_else(|| LOCAL_THEATER.to_owned());
     let terminal_available = station_terminal(state).is_ok();
     let summary = state
@@ -1630,7 +1644,7 @@ fn runner_link(state: &DaemonState, theater_id: &str) -> Result<Option<Arc<Runne
         TheaterAccess::Local => None,
         _ => Some(state.transports.client(theater_id)?),
     };
-    Ok(RunnerLink::for_theater(theater, transport)?.map(Arc::new))
+    Ok(RunnerLink::for_theater(&theater, transport)?.map(Arc::new))
 }
 
 /// The working directory of a Mission whose harness runs on a Theater other than the
@@ -2997,7 +3011,15 @@ async fn start_mission(
             role.id
         )));
     }
-    let plan = launch_plan(&state, mission.operation_id.as_deref()).map_err(configuration_error)?;
+    let made = {
+        let (worker, worker_mission) = (state.clone(), mission.clone());
+        tokio::task::spawn_blocking(move || ephemeral::prepare(&worker, &worker_mission))
+            .await
+            .map_err(|error| runtime_error(format!("Theater maker worker failed: {error}")))?
+            .map_err(configuration_error)?
+    };
+    let plan = launch_plan_in(&state, mission.operation_id.as_deref(), made.as_deref())
+        .map_err(configuration_error)?;
     if let Some(reason) = plan.refuses(agent.handler.as_deref()) {
         return Err(configuration_error(reason));
     }
@@ -5858,7 +5880,9 @@ mod tests {
             MockLinesHandler,
             MockTerminalProvider,
             MockSafeHouseProvider,
-            MockPlainProvider
+            MockPlainProvider,
+            super::ephemeral::testing::MockMaker,
+            super::ephemeral::testing::MockDir
         ]
     );
 
@@ -8848,6 +8872,145 @@ mod tests {
         for place in [root.path(), theater_root.path()] {
             assert!(files_holding(place, "fake-release-token").is_empty());
         }
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_mission_runs_in_a_theater_made_for_it_which_is_gone_once_the_mission_is_done() {
+        use crate::directorates::m::theaters::{AgentMode, EphemeralAccess};
+        let root = tempfile::tempdir().unwrap();
+        let made_root = tempfile::tempdir().unwrap();
+        let mut state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-recorder\"\n",
+        );
+        fs::write(
+            root.path().join("operations.toml"),
+            "[operation.G]\ntheater = \"scratch\"\n",
+        )
+        .unwrap();
+        state.roster = Arc::new(Roster::load(root.path()).unwrap());
+        let template = Theater::new(
+            "scratch",
+            TheaterAccess::Ephemeral(
+                EphemeralAccess::new("mock-maker")
+                    .with_setting("root", made_root.path().to_string_lossy().into_owned())
+                    .keeping_failed(1, 24),
+            ),
+        )
+        .with_agents(AgentMode::RemoteHands)
+        .with_workdir("/work");
+        let mut theaters = Theaters::default();
+        theaters.insert(template).unwrap();
+        state.transports = Arc::new(Transports::build(&theaters, &state.plugins));
+        let missions: Vec<String> = ["done", "failed-1", "failed-2"]
+            .iter()
+            .map(|name| format!("ephemeral-{name}-{}", std::process::id()))
+            .collect();
+        for mission in &missions {
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .create(
+                    MissionId::try_new(mission).unwrap(),
+                    Some("G".to_owned()),
+                    "work in a clean Theater".to_owned(),
+                    Some("007".to_owned()),
+                    None,
+                )
+                .unwrap();
+        }
+        let run = |state: DaemonState, mission: String, end: MissionState| async move {
+            let _ = start_mission(
+                State(state.clone()),
+                axum::extract::Path(mission.clone()),
+                Json(StartMission {
+                    working_directory: None,
+                    initial_context: Vec::new(),
+                    environment: BTreeMap::new(),
+                }),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+            wait_for_state(&state, &mission, MissionState::Blocked).await;
+            let theater = state
+                .missions
+                .lock()
+                .unwrap()
+                .operation(&mission)
+                .and_then(|manifest| manifest.theater_id)
+                .unwrap();
+            let environment = RECORDED_STARTS
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|request| request.mission_id.as_str() == mission)
+                .map(|request| request.environment.clone())
+                .unwrap();
+            let written = call_theater_tool(
+                &environment,
+                "theater_write",
+                serde_json::json!({"path": "hello.txt", "content": "made for one Mission\n"}),
+            )
+            .await;
+            assert_eq!(written["path"], "/work/hello.txt", "{written}");
+            finalize_mission_resources(&state, &mission, true)
+                .await
+                .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
+            let mut book = state.missions.lock().unwrap();
+            if end == MissionState::Done {
+                book.transition(&mission, MissionState::Working).unwrap();
+            }
+            book.transition(&mission, end).unwrap();
+            theater
+        };
+
+        // The first Mission gets a Theater of its own, and its work lands there.
+        let first = run(state.clone(), missions[0].clone(), MissionState::Done).await;
+        assert_eq!(first, format!("scratch-{}", missions[0]));
+        assert_eq!(
+            fs::read_to_string(made_root.path().join(&first).join("work/hello.txt")).unwrap(),
+            "made for one Mission\n"
+        );
+        let made = state.transports.summary(&first, true).unwrap();
+        assert_eq!(made.made_for.as_deref(), Some(missions[0].as_str()));
+        assert!(!root.path().join("checkout/hello.txt").exists());
+
+        // Done: the next sweep destroys it.
+        ephemeral::sweep(&state);
+        assert!(
+            !made_root.path().join(&first).exists(),
+            "the Theater is gone"
+        );
+        assert!(state.transports.theater(&first).is_none());
+
+        // Failed Missions' Theaters are kept for inspection, at most one here: the newest.
+        let older = run(state.clone(), missions[1].clone(), MissionState::Failed).await;
+        let newer = run(state.clone(), missions[2].clone(), MissionState::Failed).await;
+        ephemeral::sweep(&state);
+        assert!(!made_root.path().join(&older).exists());
+        assert!(
+            made_root
+                .path()
+                .join(&newer)
+                .join("work/hello.txt")
+                .exists()
+        );
+
+        // A Station that restarts adopts what the provider still lists.
+        state.transports = Arc::new(Transports::build(&theaters, &state.plugins));
+        assert!(state.transports.theater(&newer).is_none());
+        ephemeral::sweep(&state);
+        let adopted = state.transports.summary(&newer, true).unwrap();
+        assert_eq!(adopted.made_for.as_deref(), Some(missions[2].as_str()));
+        assert!(
+            made_root.path().join(&newer).exists(),
+            "a kept Theater stays"
+        );
         state.stopping.store(true, Ordering::Release);
     }
 

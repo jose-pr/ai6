@@ -34,9 +34,9 @@ pub use directorates::m::roster::{
     Workspace,
 };
 pub use directorates::m::theaters::{
-    AgentMode, Egress, EgressKind, LOCAL_THEATER, RunnerSettings, SshAccess, Theater,
-    TheaterAccess, TheaterError, TheaterKind, TheaterSummary, Theaters, TransportAccess,
-    is_sha256_pin,
+    AgentMode, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind, EphemeralAccess,
+    LOCAL_THEATER, RunnerSettings, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind,
+    TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
 };
 pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure, ExposureDefinition,
@@ -53,6 +53,9 @@ pub use directorates::medical::usage::{
 pub use directorates::medical::watchdog::{
     DEFAULT_BLOCKED_AFTER, DEFAULT_LINE_HISTORY, DEFAULT_LOOP_MIN_LINES, DEFAULT_STALL_TIMEOUT,
     Watchdog, WatchdogConfig, WatchdogOverrides,
+};
+pub use directorates::q::ephemeral::{
+    MadeTheater, MadeTheaters, TheaterMaker, TheaterProvider, TheaterProviderConfig, TheaterRequest,
 };
 pub use directorates::q::provision::{
     DEFAULT_INSTALL_TIMEOUT_SECS, ProbeReport, ProvisionSpec, ProvisionStep, RequiredProgram,

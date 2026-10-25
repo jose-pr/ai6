@@ -1,10 +1,13 @@
 //! The transports a Station built for its Theaters, and what they report.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use guatiao::ToValue;
+
 use crate::directorates::m::theaters::{Theater, TheaterAccess, TheaterSummary, Theaters};
+use crate::directorates::q::ephemeral::{TheaterMaker, TheaterProviderConfig};
 use crate::directorates::q::provision::{self, ProbeReport};
 use crate::directorates::q::transport::{Capabilities, TransportClient, describe};
 use crate::station::plugins::Plugins;
@@ -19,14 +22,31 @@ const REPORT_EVERY: Duration = Duration::from_secs(300);
 ///
 /// Building one never contacts a host. A Theater whose transport cannot be built is kept
 /// with the reason, so placement and the operator see it instead of the Theater vanishing.
+/// An ephemeral template has a Theater provider instead of a transport; the Theaters made
+/// from it come and go while the Station runs.
 pub(crate) struct Transports {
-    entries: BTreeMap<String, Entry>,
+    entries: RwLock<BTreeMap<String, Arc<Entry>>>,
 }
 
 struct Entry {
     theater: Theater,
     client: Result<Arc<TransportClient>, String>,
+    /// The provider of an ephemeral template.
+    maker: Option<Result<Arc<TheaterMaker>, String>>,
+    /// What an ephemeral Theater was made for.
+    made: Option<Made>,
     probe: Arc<Mutex<Probe>>,
+}
+
+/// Where an ephemeral Theater came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Made {
+    /// The template's Theater ID.
+    pub(crate) template: String,
+    /// The Mission it was made for.
+    pub(crate) mission: String,
+    /// When, as Unix seconds.
+    pub(crate) created_at: u64,
 }
 
 #[derive(Default)]
@@ -45,16 +65,40 @@ impl Transports {
     /// [`Transports::summaries`].
     pub(crate) fn none() -> Self {
         Self {
-            entries: BTreeMap::new(),
+            entries: RwLock::new(BTreeMap::new()),
         }
     }
 
-    /// Builds the transport for every reachable Theater from the loaded providers.
+    /// Builds the transport for every reachable Theater, and the Theater provider for every
+    /// ephemeral template, from the loaded providers.
     pub(crate) fn build(theaters: &Theaters, plugins: &Plugins) -> Self {
-        let mut transports = Self::none();
+        let transports = Self::none();
         for theater in theaters.reachable() {
-            let client = build_client(&theater.access, plugins);
-            transports.insert(theater, client);
+            if let TheaterAccess::Ephemeral(template) = &theater.access {
+                let maker = template
+                    .settings_toml()
+                    .map_err(|error| error.to_string())
+                    .and_then(|settings_toml| {
+                        TheaterProviderConfig { settings_toml }
+                            .to_value()
+                            .map_err(|error| error.to_string())
+                    })
+                    .and_then(|config| {
+                        plugins
+                            .theater_provider(&template.provider, Some(&config))
+                            .map_err(|error| error.to_string())
+                    })
+                    .map(|provider| Arc::new(TheaterMaker::new(provider)));
+                transports.insert(Entry::new(
+                    theater,
+                    Err("an ephemeral template has no transport of its own".to_owned()),
+                    Some(maker),
+                    None,
+                ));
+            } else {
+                let client = plugins.theater_transport(&theater.access).map(Arc::new);
+                transports.insert(Entry::new(theater, client, None, None));
+            }
         }
         transports
     }
@@ -62,29 +106,77 @@ impl Transports {
     /// Adds a Theater with an already built transport, replacing one with the same ID.
     #[cfg(test)]
     pub(crate) fn with_transport(
-        mut self,
+        self,
         theater: Theater,
         transport: Box<dyn crate::directorates::q::transport::Transport>,
     ) -> Self {
         let client = Ok(Arc::new(TransportClient::new(transport)));
-        self.insert(theater, client);
+        self.insert(Entry::new(theater, client, None, None));
         self
     }
 
-    fn insert(&mut self, theater: Theater, client: Result<Arc<TransportClient>, String>) {
-        self.entries.insert(
-            theater.id.clone(),
-            Entry {
-                theater,
-                client,
-                probe: Arc::new(Mutex::new(Probe::default())),
-            },
-        );
+    fn insert(&self, entry: Entry) {
+        if let Ok(mut entries) = self.entries.write() {
+            entries.insert(entry.theater.id.clone(), Arc::new(entry));
+        }
+    }
+
+    fn entry(&self, id: &str) -> Option<Arc<Entry>> {
+        self.entries.read().ok()?.get(id).cloned()
+    }
+
+    /// Adds a Theater made from an ephemeral template, reached through `client`.
+    pub(crate) fn add_made(&self, theater: Theater, client: TransportClient, made: Made) {
+        self.insert(Entry::new(theater, Ok(Arc::new(client)), None, Some(made)));
+    }
+
+    /// Forgets the Theater `id`.
+    pub(crate) fn remove(&self, id: &str) {
+        if let Ok(mut entries) = self.entries.write() {
+            entries.remove(id);
+        }
+    }
+
+    /// Every Theater made from an ephemeral template, by ID.
+    pub(crate) fn made(&self) -> Vec<(String, Made)> {
+        self.entries
+            .read()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|(id, entry)| Some((id.clone(), entry.made.clone()?)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every ephemeral template, with its Theater provider or why there is none.
+    pub(crate) fn templates(&self) -> Vec<(Theater, Result<Arc<TheaterMaker>, String>)> {
+        self.entries
+            .read()
+            .map(|entries| {
+                entries
+                    .values()
+                    .filter_map(|entry| Some((entry.theater.clone(), entry.maker.clone()?)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Records a probe report taken outside the background probe, such as right after
+    /// provisioning.
+    pub(crate) fn set_report(&self, id: &str, report: ProbeReport) {
+        if let Some(entry) = self.entry(id)
+            && let Ok(mut probe) = entry.probe.lock()
+        {
+            probe.report = Some(report);
+            probe.reported = Some(Instant::now());
+        }
     }
 
     /// The Theater declared under `id`.
-    pub(crate) fn theater(&self, id: &str) -> Option<&Theater> {
-        self.entries.get(id).map(|entry| &entry.theater)
+    pub(crate) fn theater(&self, id: &str) -> Option<Theater> {
+        self.entry(id).map(|entry| entry.theater.clone())
     }
 
     /// The transport that reaches the Theater `id`, or why there is none.
@@ -93,7 +185,7 @@ impl Transports {
         allow(dead_code, reason = "only the Theater tools use it")
     )]
     pub(crate) fn client(&self, id: &str) -> Result<Arc<TransportClient>, String> {
-        match self.entries.get(id) {
+        match self.entry(id) {
             Some(entry) => entry.client.clone(),
             None => Err(format!("this Station does not reach a Theater {id:?}")),
         }
@@ -105,27 +197,66 @@ impl Transports {
     /// slow or dead host never delays a check-in; its summary says it is unreachable until
     /// the contact succeeds.
     pub(crate) fn summaries(&self, terminal_available: bool) -> Vec<TheaterSummary> {
-        self.entries
-            .values()
+        let entries: Vec<Arc<Entry>> = self
+            .entries
+            .read()
+            .map(|entries| entries.values().cloned().collect())
+            .unwrap_or_default();
+        entries
+            .iter()
             .map(|entry| entry.summary(terminal_available))
             .collect()
     }
 
     /// One Theater as published at check-in.
     pub(crate) fn summary(&self, id: &str, terminal_available: bool) -> Option<TheaterSummary> {
-        self.entries
-            .get(id)
+        self.entry(id)
             .map(|entry| entry.summary(terminal_available))
     }
 }
 
-fn build_client(access: &TheaterAccess, plugins: &Plugins) -> Result<Arc<TransportClient>, String> {
-    plugins.theater_transport(access).map(Arc::new)
-}
-
 impl Entry {
-    fn summary(&self, terminal_available: bool) -> TheaterSummary {
+    fn new(
+        theater: Theater,
+        client: Result<Arc<TransportClient>, String>,
+        maker: Option<Result<Arc<TheaterMaker>, String>>,
+        made: Option<Made>,
+    ) -> Self {
+        Self {
+            theater,
+            client,
+            maker,
+            made,
+            probe: Arc::new(Mutex::new(Probe::default())),
+        }
+    }
+
+    /// An ephemeral template as published: what the Theaters made from it can do, and the
+    /// operating system it requires when its provider does not say.
+    fn template_summary(&self, maker: &Result<Arc<TheaterMaker>, String>) -> TheaterSummary {
         let mut summary = self.theater.summary();
+        match maker
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|maker| maker.capabilities().map_err(|error| describe(&error)))
+        {
+            Ok(mut capabilities) => {
+                if capabilities.os.is_none() {
+                    capabilities.os = self.theater.requires.as_ref().and_then(|r| r.os.clone());
+                }
+                summary.capabilities = Some(capabilities);
+            }
+            Err(reason) => summary.unavailable = Some(reason),
+        }
+        summary
+    }
+
+    fn summary(&self, terminal_available: bool) -> TheaterSummary {
+        if let Some(maker) = &self.maker {
+            return self.template_summary(maker);
+        }
+        let mut summary = self.theater.summary();
+        summary.made_for = self.made.as_ref().map(|made| made.mission.clone());
         let own_host = self.theater.access == TheaterAccess::Local;
         let mut capabilities = None;
         match &self.client {
