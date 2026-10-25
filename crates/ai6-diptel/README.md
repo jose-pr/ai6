@@ -45,6 +45,7 @@ let event = LifecycleEvent {
     mission_id: MissionId::new("mission-17")?,
     session_id: SessionId::new("provider-run-3")?,
     state: SessionState::Working,
+    reason: None,
     sequence: 4,
 };
 let (schema_frame, value_frame) = lifecycle_frames(&event)?;

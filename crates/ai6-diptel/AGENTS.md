@@ -63,14 +63,19 @@ pub struct LifecycleEvent {
     pub mission_id: MissionId,
     pub session_id: SessionId,
     pub state: SessionState,
+    pub reason: Option<String>,   // why AI6 holds this state: "green-ink", "budget"
     pub sequence: u64,
 }
+pub const MAX_REASON_BYTES: usize = 64;
+pub fn valid_reason(reason: &str) -> bool;   // 1..=64 bytes of a-z 0-9 - _ .
 ```
 
 All fields above are public. `SessionState` is non-exhaustive and carries the state
 of the Mission the Session serves: `Queued` means the Mission waits for another
 attempt (this Session will not run again) and `Abandoned` that an operator or AI6
-withdrew it. `sequence` is a monotonic cursor for events in one provider Session. A
+withdrew it. `reason` is an optional field of the lifecycle frame: `green-ink` on a
+`Blocked` Session whose Agent waits for a person's approval of an irreversible step.
+The receiver refuses a reason that `valid_reason` rejects. `sequence` is a monotonic cursor for events in one provider Session. A
 Mission may have multiple Sessions; these types do not derive one identity from
 another.
 

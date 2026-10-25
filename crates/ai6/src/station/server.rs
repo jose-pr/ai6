@@ -4,6 +4,8 @@
 mod cables_mcp;
 #[cfg(feature = "publisher")]
 mod controls;
+#[cfg(feature = "cables-mcp")]
+mod green_ink;
 mod medical;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
@@ -24,6 +26,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
+use crate::directorates::m::approvals::GREEN_INK_REASON;
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::identity::MAX_ID_BYTES;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, parked_until};
@@ -455,6 +458,8 @@ where
             eprintln!("ai6: Theater {:?} is weakened: {weakened}", theater.id);
         }
     }
+    #[cfg(feature = "cables-mcp")]
+    green_ink::log_weakenings(&roster);
     let state = DaemonState {
         plugins,
         roster,
@@ -998,6 +1003,8 @@ async fn scheduler_loop(state: DaemonState) {
             renew_session_leases(&state);
         }
         medical::enforce_quarantines(&state);
+        #[cfg(feature = "cables-mcp")]
+        green_ink::deliver_decisions(&state).await;
         schedule_recovered_once(&state).await;
         schedule_parked_once(&state).await;
         schedule_queued_once(&state).await;
@@ -2712,6 +2719,7 @@ async fn start_mission(
         )
         .await
         .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
+        endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
         endpoint.add_environment(&mut environment);
         initial_context.push(cables_mcp::INSTRUCTIONS.to_owned());
         Some(endpoint)
@@ -3204,6 +3212,7 @@ async fn resume_mission(
         )
         .await
         .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
+        endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
         endpoint.add_environment(&mut environment);
         endpoint
             .bind_session(Some(&session_id))
@@ -3360,14 +3369,21 @@ async fn send_message(
     watchdog.record_operator_input();
     let revived = {
         let mut missions = state.missions.lock().map_err(|_| internal_error())?;
-        let current = missions
+        let (current, waits_for_green_ink) = missions
             .get(&mission_id)
-            .map(|mission| mission.state)
+            .map(|mission| {
+                (
+                    mission.state,
+                    mission.blocked_reason.as_deref() == Some(GREEN_INK_REASON),
+                )
+            })
             .ok_or_else(|| mission_error(MissionError::NotFound))?;
         // Checked under the Mission book lock: a closing Session sets its gate before its
         // final transition, so this cannot undo a stall or leave a Mission without a Session.
-        let revive =
-            matches!(current, MissionState::Blocked | MissionState::Stalled) && !gate.is_closing();
+        // A message does not end a wait for green ink; only the decision does.
+        let revive = matches!(current, MissionState::Blocked | MissionState::Stalled)
+            && !waits_for_green_ink
+            && !gate.is_closing();
         if revive {
             missions
                 .transition(&mission_id, MissionState::Working)
@@ -3549,6 +3565,13 @@ fn spawn_event_pump_with_monitor(
                         handle_limit(&state, &mission_id, &session, event);
                         break;
                     }
+                    #[cfg(feature = "cables-mcp")]
+                    if event.kind == "completed"
+                        && green_ink::end_turn_waiting(&state, &mission_id, &session)
+                    {
+                        queue_event(&state, &mission_id, event);
+                        break;
+                    }
                     if matches!(event.kind.as_str(), "completed" | "failed") {
                         let finished = finish_operation(&state, &mission_id, &session);
                         publish_finished_event(&state, &mission_id, event, finished);
@@ -3581,10 +3604,13 @@ fn spawn_event_pump_with_monitor(
             let current_output_revision = monitor.output_revision();
             if current_output_revision != output_revision {
                 output_revision = current_output_revision;
+                // Output does not end a wait for green ink; only the decision does.
                 let resumed = state.missions.lock().ok().and_then(|mut missions| {
-                    (missions.get(&mission_id)?.state == MissionState::Blocked)
-                        .then(|| missions.transition(&mission_id, MissionState::Working).ok())
-                        .flatten()
+                    let mission = missions.get(&mission_id)?;
+                    (mission.state == MissionState::Blocked
+                        && mission.blocked_reason.as_deref() != Some(GREEN_INK_REASON))
+                    .then(|| missions.transition(&mission_id, MissionState::Working).ok())
+                    .flatten()
                 });
                 if resumed.is_some() {
                     publish_lifecycle(&state, &mission_id, MissionState::Working);
@@ -3811,11 +3837,24 @@ fn publish_lifecycle(state: &DaemonState, mission_id: &str, mission_state: Missi
             .ok()
             .and_then(|sessions| sessions.get(mission_id)?.telemetry.clone());
         if let Some(telemetry) = telemetry {
-            telemetry.publish_lifecycle(state_name);
+            telemetry.publish_lifecycle_for(state_name, held_reason(state, mission_id));
         }
     }
     #[cfg(not(feature = "publisher"))]
     let _ = (state, mission_id, mission_state);
+}
+
+/// Why AI6 itself holds a blocked Mission, as the lifecycle reports it.
+#[cfg(feature = "publisher")]
+fn held_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
+    let missions = state.missions.lock().ok()?;
+    let mission = missions.get(mission_id)?;
+    if mission.state != MissionState::Blocked {
+        return None;
+    }
+    [GREEN_INK_REASON, medical::BUDGET_REASON]
+        .into_iter()
+        .find(|reason| mission.blocked_reason.as_deref() == Some(*reason))
 }
 
 #[cfg(feature = "publisher")]
@@ -4940,7 +4979,11 @@ mod tests {
             Ok(Some(self.session_id.clone()))
         }
 
-        fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
+        fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
+            RECORDED_MESSAGES
+                .lock()
+                .unwrap()
+                .push((self.session_id.to_string(), message.text));
             Ok(())
         }
 
@@ -7596,7 +7639,9 @@ mod tests {
 
     /// What the Station handed the recording handler, one entry per start or resume.
     static RECORDED_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new());
-    static RECORDED_RESUMES: Mutex<Vec<AgentResume>> = Mutex::new(Vec::new());
+    pub(super) static RECORDED_RESUMES: Mutex<Vec<AgentResume>> = Mutex::new(Vec::new());
+    /// Every message a mock Session was sent, with its provider Session ID.
+    pub(super) static RECORDED_MESSAGES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
     #[derive(Default, Provider)]
     #[provider(AgentHandler, id = "mock-recorder", name = "Mock Recorder", crate = crate::guatiao)]

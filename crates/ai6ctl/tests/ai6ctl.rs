@@ -120,6 +120,7 @@ async fn start_gateway() -> (String, oneshot::Sender<()>, String, tempfile::Temp
                 mission_id: mission,
                 session_id: session,
                 state: SessionState::Working,
+                reason: None,
                 sequence: 1,
             },
         )

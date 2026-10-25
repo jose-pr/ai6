@@ -218,6 +218,7 @@ struct ActivityState {
     partial_line: Vec<u8>,
     seen_lines: LruCache<[u8; 32], ()>,
     output_revision: u64,
+    paused_since: Option<Instant>,
 }
 
 impl Default for Watchdog {
@@ -251,6 +252,7 @@ impl Watchdog {
                 partial_line: Vec::new(),
                 seen_lines: LruCache::new(history),
                 output_revision: 0,
+                paused_since: None,
             })),
         }
     }
@@ -269,6 +271,34 @@ impl Watchdog {
                 .with_blocked_after(blocked_after)
                 .with_loop_min_lines(loop_min_lines),
         )
+    }
+
+    /// Stops judging the Session while it waits on a person, such as for green ink: a paused
+    /// Session is never stalled, looping, blocked at a prompt or past its maximum runtime.
+    /// Pausing again is harmless.
+    pub fn pause(&self) {
+        let mut state = self.lock_state();
+        if state.paused_since.is_none() {
+            state.paused_since = Some(Instant::now());
+        }
+    }
+
+    /// Judges the Session again as if it had just been active; the time spent paused does
+    /// not count toward the maximum runtime.
+    pub fn resume(&self) {
+        let now = Instant::now();
+        let mut state = self.lock_state();
+        if let Some(since) = state.paused_since.take() {
+            state.started += now.saturating_duration_since(since);
+        }
+        state.last_activity = now;
+        state.last_novel = now;
+        state.lines_since_novel = 0;
+    }
+
+    /// Whether the Session is paused.
+    pub fn is_paused(&self) -> bool {
+        self.lock_state().paused_since.is_some()
     }
 
     /// Records provider output or operator input as Session activity.
@@ -336,14 +366,16 @@ impl Watchdog {
 
     /// Returns whether the Session exceeded its optional maximum runtime.
     pub fn is_max_runtime_exceeded(&self) -> bool {
-        self.config
-            .max_runtime
-            .is_some_and(|timeout| self.lock_state().started.elapsed() >= timeout)
+        self.config.max_runtime.is_some_and(|timeout| {
+            let state = self.lock_state();
+            state.paused_since.is_none() && state.started.elapsed() >= timeout
+        })
     }
 
     /// Returns whether the Session has exceeded its quiet period.
     pub fn is_stalled(&self) -> bool {
-        self.lock_state().last_activity.elapsed() >= self.config.stall_timeout
+        let state = self.lock_state();
+        state.paused_since.is_none() && state.last_activity.elapsed() >= self.config.stall_timeout
     }
 
     #[cfg_attr(
@@ -352,7 +384,8 @@ impl Watchdog {
     )]
     pub(crate) fn is_looping(&self) -> bool {
         let state = self.lock_state();
-        state.lines_since_novel >= self.config.loop_min_lines
+        state.paused_since.is_none()
+            && state.lines_since_novel >= self.config.loop_min_lines
             && state.last_novel.elapsed() >= self.config.loop_timeout
     }
 
@@ -362,7 +395,8 @@ impl Watchdog {
     )]
     pub(crate) fn is_waiting_at_prompt(&self) -> bool {
         let state = self.lock_state();
-        looks_like_prompt(&state.partial_line)
+        state.paused_since.is_none()
+            && looks_like_prompt(&state.partial_line)
             && state.last_activity.elapsed() >= self.config.blocked_after
     }
 
@@ -539,6 +573,31 @@ mod tests {
 
         monitor.record_activity();
         assert!(!monitor.is_stalled());
+    }
+
+    #[test]
+    fn a_paused_session_is_not_judged_and_resumes_with_a_fresh_deadline() {
+        let monitor = Watchdog::with_config(
+            WatchdogConfig::default()
+                .with_stall_timeout(Duration::from_millis(10))
+                .with_max_runtime(Some(Duration::from_millis(40))),
+        );
+        monitor.pause();
+        monitor.pause();
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(monitor.is_paused());
+        assert!(!monitor.is_stalled());
+        assert!(!monitor.is_max_runtime_exceeded());
+
+        monitor.resume();
+        assert!(!monitor.is_paused());
+        assert!(!monitor.is_stalled());
+        assert!(
+            !monitor.is_max_runtime_exceeded(),
+            "the time spent paused does not count"
+        );
+        std::thread::sleep(Duration::from_millis(15));
+        assert!(monitor.is_stalled());
     }
 
     #[test]

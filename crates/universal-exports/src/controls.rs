@@ -633,7 +633,40 @@ pub(crate) mod tests {
         }
     }
 
+    /// Operator 007 may read, control and audit Operation G, and audit Station `worker`;
+    /// viewer 007 may read and audit G.
+    pub(crate) const ROLES: &str = r#"
+        [role.viewer]
+        actions = ["mission.read", "audit.read"]
+
+        [role.operator]
+        actions = ["mission.read", "mission.control", "audit.read"]
+
+        [[rule]]
+        subject = "person:viewer-007"
+        scope = "operation:G"
+        role = "viewer"
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "operation:G"
+        role = "operator"
+
+        [role.station-auditor]
+        actions = ["audit.read"]
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "station:worker"
+        role = "station-auditor"
+    "#;
+
     pub(crate) async fn served() -> Served {
+        served_with(ROLES).await
+    }
+
+    /// As [`served`], with another role policy for `operator-007` and `viewer-007`.
+    pub(crate) async fn served_with(roles: &str) -> Served {
         let directory = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(directory.path());
         for (station, operations) in [("hq", vec![]), ("worker", vec!["G", "L"])] {
@@ -652,34 +685,7 @@ pub(crate) mod tests {
                 Duration::from_secs(60),
             )
             .unwrap();
-        let authorizer = role_authorizer_from_toml(
-            r#"
-                [role.viewer]
-                actions = ["mission.read", "audit.read"]
-
-                [role.operator]
-                actions = ["mission.read", "mission.control", "audit.read"]
-
-                [[rule]]
-                subject = "person:viewer-007"
-                scope = "operation:G"
-                role = "viewer"
-
-                [[rule]]
-                subject = "person:operator-007"
-                scope = "operation:G"
-                role = "operator"
-
-                [role.station-auditor]
-                actions = ["audit.read"]
-
-                [[rule]]
-                subject = "person:operator-007"
-                scope = "station:worker"
-                role = "station-auditor"
-            "#,
-        )
-        .unwrap();
+        let authorizer = role_authorizer_from_toml(roles).unwrap();
         let gateway = Gateway::with_access(
             GatewayConfig::new(
                 "https://localhost",

@@ -1,0 +1,850 @@
+//! The Station's side of green ink: an Agent's request reaches the Registry, its Mission
+//! waits with the Watchdog paused, and the decision goes back to the Agent.
+//!
+//! Decisions are made elsewhere (Universal Exports writes them to the Registry), so the
+//! scheduler looks for them: a decision reaches a live Session as a message, or resumes a
+//! Session that ended its turn while it waited. A request nobody decides expires as refused.
+
+use std::sync::Arc;
+
+use axum::Json;
+use axum::extract::{Path, State};
+use serde::Serialize;
+use tokio::time::Instant;
+
+use super::{
+    DaemonState, ResumeMission, SCHEDULER_RETRY_DELAY, publish_lifecycle, queue_event,
+    resume_mission, sync_session_record,
+};
+use crate::directorates::m::approvals::{ActionScope, GREEN_INK_REASON, Requirement};
+use crate::directorates::m::mission::{Mission, MissionState};
+use crate::directorates::m::roster::Roster;
+use crate::directorates::registry::approvals::{
+    Approval, ApprovalRequest, ApprovalStatus, Decision,
+};
+use crate::directorates::registry::store::AuditRecord;
+use crate::directorates::registry::timeline::TimelineEvent;
+use crate::directorates::section_00::agent::{AgentEvent, AgentMessage, AgentSession};
+use crate::{MissionId, SessionId};
+
+/// The event kind that reports a request waiting for green ink, and its decision.
+pub(super) const GREEN_INK_EVENT: &str = "green_ink";
+
+/// The timeline and event kind for green ink.
+const TIMELINE_KIND: &str = "green_ink";
+
+/// What an Agent asks for through `request_approval`.
+pub(super) struct Asked {
+    pub(super) operation: String,
+    pub(super) mission: String,
+    pub(super) session: String,
+    pub(super) agent: String,
+    pub(super) kind: String,
+    pub(super) target: String,
+    pub(super) reason: String,
+    pub(super) idempotency_key: String,
+    /// Whether the Session's exposure keeps it from class authorisations.
+    pub(super) exposed: bool,
+}
+
+/// What `request_approval` answers.
+#[derive(Debug, Serialize)]
+pub(super) struct Answer {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<String>,
+    /// `approved`, `pending`, `rejected`, `expired` or `not_required`.
+    pub(super) status: &'static str,
+    /// When an approval stops covering the step, or when a pending request expires.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+/// A Session's way to ask its Station for green ink.
+#[derive(Clone)]
+pub(super) struct Desk {
+    state: DaemonState,
+}
+
+impl Desk {
+    pub(super) fn new(state: DaemonState) -> Self {
+        Self { state }
+    }
+
+    /// Records a request and answers at once: approved by a class authorisation, not
+    /// required by the Operation's policy, or pending while the Mission waits for a person.
+    ///
+    /// # Errors
+    ///
+    /// A message the Agent may read: the step is out of bounds, the Agent may not ask, or the
+    /// Registry could not be written.
+    pub(super) fn request(&self, asked: Asked) -> Result<Answer, String> {
+        let state = &self.state;
+        let now = state.clock.now() as f64;
+        let operation = state
+            .roster
+            .operation(&asked.operation)
+            .map_err(|_| "the Operation is not configured on this Station".to_owned())?;
+        let mission = state
+            .missions
+            .lock()
+            .ok()
+            .and_then(|missions| missions.get(&asked.mission).cloned())
+            .ok_or("this Station has no such Mission")?;
+        let clearance = state
+            .roster
+            .agent(Some(&asked.operation), &asked.agent)
+            .map_err(|_| "the Agent is not configured for this Operation".to_owned())?
+            .clearance;
+        let scope = ActionScope::try_new(&asked.kind, &asked.target).map_err(|e| e.to_string())?;
+        let policy = &operation.green_ink;
+        match policy.requirement(&clearance, &scope) {
+            Requirement::NotRequired => {
+                return Ok(Answer {
+                    request_id: None,
+                    status: "not_required",
+                    expires_at: None,
+                    message: Some("the Operation's policy lets this Agent take the step".into()),
+                });
+            }
+            Requirement::GreenInk => {}
+            _ if !policy.requesters().any(|known| known == clearance) => {
+                return Err(format!("a {clearance} Agent may not ask for green ink"));
+            }
+            _ => {
+                return Err(format!(
+                    "the Operation does not govern {:?}; ask for one of: {}",
+                    scope.kind,
+                    policy.kinds().collect::<Vec<_>>().join(", ")
+                ));
+            }
+        }
+        let request = ApprovalRequest::try_new(
+            &asked.operation,
+            MissionId::try_new(&asked.mission).map_err(|e| e.to_string())?,
+            SessionId::try_new(&asked.session).map_err(|e| e.to_string())?,
+            &asked.agent,
+            scope,
+            asked.reason,
+            &asked.idempotency_key,
+        )
+        .map_err(|e| e.to_string())?
+        .expiring(now, policy.request_ttl());
+        let registry = &state.intake;
+        let unavailable = |error: std::io::Error| format!("the request was not recorded: {error}");
+        if let Some(status) = registry
+            .approval(&asked.operation, &request.id, now)
+            .map_err(unavailable)?
+        {
+            if matches!(status, ApprovalStatus::Pending(_)) {
+                hold(state, &asked.mission);
+            }
+            return Ok(answer(&status));
+        }
+        if !asked.exposed
+            && let Some(approval) = registry
+                .approve_by_class(&request, mission.role_id.as_deref(), &clearance, now)
+                .map_err(unavailable)?
+        {
+            record_class_use(state, &approval);
+            return Ok(answer(&ApprovalStatus::Decided(approval)));
+        }
+        let status = registry.request_approval(&request).map_err(unavailable)?;
+        record_event(state, &request, "requested", &request.agent);
+        queue_event(
+            state,
+            &asked.mission,
+            AgentEvent {
+                kind: GREEN_INK_EVENT.to_owned(),
+                text: Some(format!(
+                    "waiting for green ink to {} {} ({})",
+                    request.scope.kind, request.scope.target, request.id
+                )),
+                data: None,
+                limit: None,
+                usage: None,
+                tools: Vec::new(),
+            },
+        );
+        hold(state, &asked.mission);
+        Ok(answer(&status))
+    }
+}
+
+fn answer(status: &ApprovalStatus) -> Answer {
+    let request = status.request();
+    match status {
+        ApprovalStatus::Pending(_) => Answer {
+            request_id: Some(request.id.clone()),
+            status: "pending",
+            expires_at: Some(request.expires_at),
+            message: Some(
+                "an operator decides; the decision arrives as a message. Do not take the step \
+                 before it is approved"
+                    .to_owned(),
+            ),
+        },
+        ApprovalStatus::Decided(approval) => Answer {
+            request_id: Some(request.id.clone()),
+            status: approval.decision.as_str(),
+            expires_at: approval.expires_at,
+            message: approval.note.clone(),
+        },
+    }
+}
+
+/// Blocks the Mission for green ink and pauses its Watchdog: waiting for a person is not a
+/// stall.
+fn hold(state: &DaemonState, mission_id: &str) {
+    let blocked = state
+        .missions
+        .lock()
+        .ok()
+        .is_some_and(|mut missions| missions.block_for(mission_id, GREEN_INK_REASON).is_ok());
+    if let Ok(sessions) = state.sessions.lock()
+        && let Some(operation) = sessions.get(mission_id)
+    {
+        operation.watchdog.pause();
+    }
+    if blocked {
+        sync_session_record(state, mission_id);
+        publish_lifecycle(state, mission_id, MissionState::Blocked);
+    }
+}
+
+/// Whether a Mission waits for green ink.
+fn waits(mission: &Mission) -> bool {
+    mission.state == MissionState::Blocked
+        && mission.blocked_reason.as_deref() == Some(GREEN_INK_REASON)
+}
+
+/// Ends a Session whose turn completed while its Mission waits for green ink, keeping the
+/// Mission blocked so the decision resumes it. `false` when the Mission does not wait.
+pub(super) fn end_turn_waiting(
+    state: &DaemonState,
+    mission_id: &str,
+    session: &Arc<std::sync::Mutex<guatiao::library::Object<dyn AgentSession>>>,
+) -> bool {
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+    else {
+        return false;
+    };
+    let Some(operation_id) = mission.operation_id.as_deref() else {
+        return false;
+    };
+    let pending = state
+        .intake
+        .mission_approvals(operation_id, mission_id, state.clock.now() as f64)
+        .is_ok_and(|statuses| {
+            statuses
+                .iter()
+                .any(|status| matches!(status, ApprovalStatus::Pending(_)))
+        });
+    if !waits(&mission) || !pending {
+        return false;
+    }
+    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
+        sessions
+            .get(mission_id)
+            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
+            .then(|| sessions.remove(mission_id))
+            .flatten()
+            .inspect(|operation| operation.gate.close())
+    });
+    if let Some(operation) = operation
+        && let Ok(session) = operation.session.lock()
+    {
+        let _ = session.close();
+    }
+    sync_session_record(state, mission_id);
+    true
+}
+
+/// Tells Agents the decisions on their requests and lets their Missions go on once nothing
+/// they asked for is pending.
+pub(super) async fn deliver_decisions(state: &DaemonState) {
+    let missions = state
+        .missions
+        .lock()
+        .map(|missions| missions.list())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|mission| matches!(mission.state, MissionState::Working | MissionState::Blocked))
+        .collect::<Vec<_>>();
+    let now = state.clock.now() as f64;
+    for mission in missions {
+        let Some(operation_id) = mission.operation_id.as_deref() else {
+            continue;
+        };
+        let mission_id = mission.mission_id.as_str();
+        let Ok(statuses) = state
+            .intake
+            .mission_approvals(operation_id, mission_id, now)
+        else {
+            continue;
+        };
+        let pending = statuses
+            .iter()
+            .any(|status| matches!(status, ApprovalStatus::Pending(_)));
+        let untold = statuses
+            .into_iter()
+            .filter_map(|status| match status {
+                ApprovalStatus::Decided(approval) if approval.notified_at.is_none() => {
+                    Some(approval)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let live = state.sessions.lock().ok().and_then(|sessions| {
+            sessions
+                .get(mission_id)
+                .map(|operation| (operation.session.clone(), operation.gate.clone()))
+        });
+        match live {
+            Some((session, gate)) => {
+                for approval in &untold {
+                    let message = AgentMessage {
+                        text: decision_text(approval, now),
+                    };
+                    let session = session.clone();
+                    let gate = gate.clone();
+                    let sent = tokio::task::spawn_blocking(move || {
+                        gate.lock(&session)
+                            .ok()
+                            .is_some_and(|session| session.send_message(message).is_ok())
+                    })
+                    .await
+                    .unwrap_or(false);
+                    if sent {
+                        told(state, approval, now);
+                    }
+                }
+                if !pending && waits(&mission) {
+                    release(state, mission_id);
+                }
+            }
+            None if !pending && waits(&mission) && !untold.is_empty() => {
+                resume_with(state, mission_id, &untold, now).await;
+            }
+            None => {}
+        }
+    }
+}
+
+/// Moves a Mission whose live Session no longer waits back to work.
+fn release(state: &DaemonState, mission_id: &str) {
+    let working = state.missions.lock().ok().is_some_and(|mut missions| {
+        missions
+            .transition(mission_id, MissionState::Working)
+            .is_ok()
+    });
+    if let Ok(sessions) = state.sessions.lock()
+        && let Some(operation) = sessions.get(mission_id)
+    {
+        operation.watchdog.resume();
+    }
+    if working {
+        sync_session_record(state, mission_id);
+        publish_lifecycle(state, mission_id, MissionState::Working);
+    }
+}
+
+/// Resumes a Session that ended its turn while it waited, with the decisions as its message.
+async fn resume_with(state: &DaemonState, mission_id: &str, untold: &[Approval], now: f64) {
+    let waiting = state
+        .retry_after
+        .lock()
+        .ok()
+        .and_then(|retries| retries.get(mission_id).copied())
+        .is_some_and(|retry_at| retry_at > Instant::now());
+    if waiting {
+        return;
+    }
+    let text = untold
+        .iter()
+        .map(|approval| decision_text(approval, now))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let resumed = resume_mission(
+        State(state.clone()),
+        Path(mission_id.to_owned()),
+        Json(ResumeMission {
+            message: Some(text),
+            environment: Default::default(),
+        }),
+    )
+    .await;
+    match resumed {
+        Ok(_) => {
+            for approval in untold {
+                told(state, approval, now);
+            }
+            if let Ok(mut retries) = state.retry_after.lock() {
+                retries.remove(mission_id);
+            }
+        }
+        Err(error) => {
+            eprintln!(
+                "ai6: Mission {mission_id:?} was not resumed with its green ink decision: {}",
+                error.1.0.error
+            );
+            if let Ok(mut retries) = state.retry_after.lock() {
+                retries.insert(
+                    mission_id.to_owned(),
+                    Instant::now() + SCHEDULER_RETRY_DELAY,
+                );
+            }
+        }
+    }
+}
+
+/// Records that the Agent was told, on the Registry record and the timeline.
+fn told(state: &DaemonState, approval: &Approval, now: f64) {
+    let request = &approval.request;
+    if let Err(error) = state
+        .intake
+        .mark_approval_notified(&request.operation, &request.id, now)
+    {
+        eprintln!(
+            "ai6: green ink request {:?} was told but not marked: {error}",
+            request.id
+        );
+    }
+    record_event(state, request, approval.decision.as_str(), &approval.signer);
+    queue_event(
+        state,
+        request.mission.as_str(),
+        AgentEvent {
+            kind: GREEN_INK_EVENT.to_owned(),
+            text: Some(format!(
+                "green ink {} for {} {} ({})",
+                approval.decision.as_str(),
+                request.scope.kind,
+                request.scope.target,
+                request.id
+            )),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+        },
+    );
+}
+
+/// What the Agent is told about a decision.
+fn decision_text(approval: &Approval, now: f64) -> String {
+    let request = &approval.request;
+    let step = format!(
+        "Green ink: request {} to {} {}",
+        request.id, request.scope.kind, request.scope.target
+    );
+    match approval.decision {
+        Decision::Approved => {
+            let minutes = approval
+                .expires_at
+                .map_or(0.0, |expires| ((expires - now) / 60.0).ceil().max(0.0));
+            format!(
+                "{step} was approved by {}. Take exactly that step within {minutes:.0} minutes; \
+                 the approval does not cover anything else.",
+                approval.signer
+            )
+        }
+        Decision::Rejected => format!(
+            "{step} was rejected by {}{}. Do not take that step.",
+            approval.signer,
+            approval
+                .note
+                .as_deref()
+                .map(|note| format!(": {note}"))
+                .unwrap_or_default()
+        ),
+        _ => format!("{step} expired without a decision. Treat it as rejected."),
+    }
+}
+
+/// Audits a class authorisation's use; the actor is the class authorisation itself.
+fn record_class_use(state: &DaemonState, approval: &Approval) {
+    let request = &approval.request;
+    let audit = AuditRecord {
+        id: format!("class_authorization.used-{}", uuid::Uuid::new_v4().simple()),
+        actor: approval.signer.clone(),
+        action: "class_authorization.used".to_owned(),
+        operation: request.operation.clone(),
+        resource: None,
+        target: request.id.clone(),
+        at: approval.at,
+    };
+    if let Err(error) = state.intake.record_audit(&audit) {
+        eprintln!("ai6: class authorisation audit record was not written: {error}");
+    }
+    record_event(state, request, "approved", &approval.signer);
+}
+
+fn record_event(state: &DaemonState, request: &ApprovalRequest, action: &str, actor: &str) {
+    let event = TimelineEvent::new(
+        TIMELINE_KIND,
+        action,
+        request.operation.clone(),
+        state.clock.now() as f64,
+    )
+    .station(state.station_id.clone())
+    .mission(request.mission.to_string())
+    .session(request.session.to_string())
+    .actor(actor)
+    .detail("request", request.id.clone())
+    .detail("step", request.scope.kind.clone())
+    .detail("target", request.scope.target.clone());
+    if let Err(error) = state.intake.record_event(&event) {
+        eprintln!("ai6: green ink timeline event was not recorded: {error}");
+    }
+}
+
+/// Lists, for the operator, the green ink settings each Operation loosens.
+pub(super) fn log_weakenings(roster: &Roster) {
+    for operation in roster.operations() {
+        for weakened in operation.green_ink.weakenings() {
+            eprintln!(
+                "ai6: Operation {:?} green ink is weakened: {weakened}",
+                operation.id
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path as FsPath;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use super::super::tests::{
+        RECORDED_MESSAGES, RECORDED_RESUMES, start_mission_by_id, test_state, wait_for_state,
+    };
+    use super::*;
+    use crate::directorates::registry::approvals::{ClassAuthorization, Ruling};
+
+    /// 007 runs on the recording mock, which reports its Session blocked at once and then stays
+    /// quiet; its Watchdog stalls a quiet Session after 0.3 seconds.
+    const AGENTS: &str = "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
+                          [agent.007.limits]\nstall_timeout = 0.3\n\
+                          [agent.desk]\nhandler = \"mock-recorder\"\nclearance = \"desk\"\n";
+
+    /// A Station with one queued Mission of a unique ID for Agent 007 of Operation G.
+    fn station(root: &FsPath, name: &str) -> (DaemonState, String) {
+        let state = test_state(root, "", AGENTS);
+        let mission_id = format!("green-ink-{name}-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "release the work".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        (state, mission_id)
+    }
+
+    async fn call_tool(
+        state: &DaemonState,
+        mission_id: &str,
+        arguments: serde_json::Value,
+    ) -> String {
+        use rmcp::ServiceExt;
+        use rmcp::model::{CallToolRequestParams, ContentBlock};
+        use rmcp::transport::{
+            StreamableHttpClientTransport,
+            streamable_http_client::StreamableHttpClientTransportConfig,
+        };
+        let environment = state.sessions.lock().unwrap()[mission_id]
+            .environment
+            .clone();
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(environment["AI6_CABLE_MCP_URL"].clone())
+                .auth_header(environment["AI6_CABLE_MCP_TOKEN"].clone()),
+        );
+        let client = ().serve(transport).await.unwrap();
+        let response = client
+            .call_tool(
+                CallToolRequestParams::new("request_approval")
+                    .with_arguments(serde_json::from_value(arguments).unwrap()),
+            )
+            .await
+            .unwrap();
+        client.cancel().await.unwrap();
+        let [ContentBlock::Text(text)] = response.content.as_slice() else {
+            panic!("the tool answers one text block");
+        };
+        text.text.clone()
+    }
+
+    fn push_main(key: &str) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "push",
+            "target": "origin:refs/heads/main",
+            "reason": "the release branch is green",
+            "idempotency_key": key,
+        })
+    }
+
+    fn mission(state: &DaemonState, mission_id: &str) -> Mission {
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .get(mission_id)
+            .cloned()
+            .unwrap()
+    }
+
+    fn now(state: &DaemonState) -> f64 {
+        state.clock.now() as f64
+    }
+
+    fn told_about(request_id: &str) -> Vec<(String, String)> {
+        RECORDED_MESSAGES
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, text)| text.contains(request_id))
+            .cloned()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_session_asks_waits_past_the_watchdog_and_resumes_working_once_approved() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "approve");
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+
+        let answer: serde_json::Value =
+            serde_json::from_str(&call_tool(&state, &mission_id, push_main("push-1")).await)
+                .unwrap();
+        assert_eq!(answer["status"], "pending", "{answer}");
+        let request_id = answer["request_id"].as_str().unwrap().to_owned();
+        let waiting = mission(&state, &mission_id);
+        assert_eq!(waiting.state, MissionState::Blocked);
+        assert_eq!(waiting.blocked_reason.as_deref(), Some(GREEN_INK_REASON));
+        let watchdog = state.sessions.lock().unwrap()[&mission_id].watchdog.clone();
+        assert!(watchdog.is_paused());
+
+        // Twice the stall timeout passes: waiting for a person is not a stall.
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert_eq!(mission(&state, &mission_id).state, MissionState::Blocked);
+        let pending = state.intake.pending_approvals("G", now(&state)).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].agent, "007");
+        assert_eq!(pending[0].session.as_str(), "provider-session-remote");
+
+        // What Universal Exports writes when an operator signs.
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request_id,
+                &Ruling::approve("operator-m", now(&state), now(&state) + 600.0),
+            )
+            .unwrap();
+        deliver_decisions(&state).await;
+
+        let told = told_about(&request_id);
+        assert_eq!(told.len(), 1, "{told:?}");
+        assert_eq!(told[0].0, "provider-session-remote");
+        assert!(
+            told[0].1.contains("approved by operator-m"),
+            "{}",
+            told[0].1
+        );
+        let working = mission(&state, &mission_id);
+        assert_eq!(working.state, MissionState::Working);
+        assert_eq!(working.blocked_reason, None);
+        assert!(!watchdog.is_paused());
+        let Some(ApprovalStatus::Decided(approval)) = state
+            .intake
+            .approval("G", &request_id, now(&state))
+            .unwrap()
+        else {
+            panic!("the request is decided");
+        };
+        assert!(approval.notified_at.is_some());
+        deliver_decisions(&state).await;
+        assert_eq!(told_about(&request_id).len(), 1, "a decision is told once");
+        let actions = state
+            .intake
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| {
+                event.kind == TIMELINE_KIND && event.mission.as_deref() == Some(&mission_id)
+            })
+            .map(|event| (event.action, event.actor.unwrap_or_default()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actions,
+            [
+                ("requested".to_owned(), "007".to_owned()),
+                ("approved".to_owned(), "operator-m".to_owned())
+            ]
+        );
+
+        // Asking again with the same key returns the decision.
+        let again: serde_json::Value =
+            serde_json::from_str(&call_tool(&state, &mission_id, push_main("push-1")).await)
+                .unwrap();
+        assert_eq!(again["status"], "approved");
+        assert_eq!(again["request_id"], request_id.as_str());
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_ends_while_waiting_is_resumed_with_the_refusal() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "reject");
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let answer: serde_json::Value =
+            serde_json::from_str(&call_tool(&state, &mission_id, push_main("push-2")).await)
+                .unwrap();
+        let request_id = answer["request_id"].as_str().unwrap().to_owned();
+        let session = state.sessions.lock().unwrap()[&mission_id].session.clone();
+
+        assert!(end_turn_waiting(&state, &mission_id, &session));
+        assert!(!state.sessions.lock().unwrap().contains_key(&mission_id));
+        assert_eq!(mission(&state, &mission_id).state, MissionState::Blocked);
+        deliver_decisions(&state).await;
+        let resumed_for = |mission_id: &str| {
+            RECORDED_RESUMES
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|resume| resume.mission_id.as_str() == mission_id)
+                .cloned()
+        };
+        assert!(
+            resumed_for(&mission_id).is_none(),
+            "nothing resumes before the decision"
+        );
+
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request_id,
+                &Ruling::reject(
+                    "operator-q",
+                    now(&state),
+                    Some("not before the audit".into()),
+                ),
+            )
+            .unwrap();
+        deliver_decisions(&state).await;
+        let message = resumed_for(&mission_id)
+            .expect("the decision resumes the Session")
+            .message
+            .unwrap_or_default();
+        assert!(
+            message.contains(&request_id)
+                && message.contains("rejected by operator-q: not before the audit"),
+            "{message}"
+        );
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    fn asked(mission_id: &str, agent: &str, kind: &str, target: &str) -> Asked {
+        Asked {
+            operation: "G".to_owned(),
+            mission: mission_id.to_owned(),
+            session: "provider-session-direct".to_owned(),
+            agent: agent.to_owned(),
+            kind: kind.to_owned(),
+            target: target.to_owned(),
+            reason: "routine".to_owned(),
+            idempotency_key: format!("{kind}-{target}"),
+            exposed: false,
+        }
+    }
+
+    #[test]
+    fn a_class_authorisation_approves_at_once_unless_the_session_is_exposed() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "class");
+        let class = ClassAuthorization::new(
+            "G",
+            vec!["push".to_owned()],
+            "origin:refs/heads/release/*",
+            "operator-m",
+            now(&state),
+            now(&state) + 3600.0,
+        )
+        .for_agents(vec!["007".to_owned()]);
+        state.intake.put_class_authorization(&class).unwrap();
+        let desk = Desk::new(state.clone());
+
+        let covered = desk
+            .request(asked(
+                &mission_id,
+                "007",
+                "push",
+                "origin:refs/heads/release/2",
+            ))
+            .unwrap();
+        assert_eq!(covered.status, "approved");
+        assert_eq!(
+            mission(&state, &mission_id).state,
+            MissionState::Queued,
+            "an approved request does not hold the Mission"
+        );
+        assert_eq!(state.intake.class_authorizations("G").unwrap()[0].uses, 1);
+        let audit = state.intake.audit_records().unwrap();
+        assert!(
+            audit
+                .iter()
+                .any(|record| record.action == "class_authorization.used"
+                    && record.actor == format!("class:{}", class.id)),
+            "{audit:?}"
+        );
+
+        let mut exposed = asked(&mission_id, "007", "push", "origin:refs/heads/release/3");
+        exposed.exposed = true;
+        assert_eq!(desk.request(exposed).unwrap().status, "pending");
+        assert_eq!(state.intake.class_authorizations("G").unwrap()[0].uses, 1);
+    }
+
+    #[test]
+    fn the_policy_answers_before_anything_is_stored() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "policy");
+        let desk = Desk::new(state.clone());
+        let own_branch = desk
+            .request(asked(&mission_id, "007", "push", "origin:ai6/work"))
+            .unwrap();
+        assert_eq!(own_branch.status, "not_required");
+        let desk_agent = desk
+            .request(asked(&mission_id, "desk", "push", "origin:main"))
+            .unwrap_err();
+        assert!(
+            desk_agent.contains("desk Agent may not ask"),
+            "{desk_agent}"
+        );
+        let unknown = desk
+            .request(asked(&mission_id, "007", "deploy", "production"))
+            .unwrap_err();
+        assert!(unknown.contains("push"), "{unknown}");
+        assert!(
+            state
+                .intake
+                .pending_approvals("G", now(&state))
+                .unwrap()
+                .is_empty()
+        );
+    }
+}

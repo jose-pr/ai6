@@ -27,6 +27,8 @@ pub const SCOPE_KINDS: [&str; 3] = ["station", "operation", "theater"];
 pub const ACTIONS: &[&str] = &[
     "agent.configure",
     "agent.read",
+    "approval.class",
+    "approval.decide",
     "audit.read",
     "mission.control",
     "mission.create",

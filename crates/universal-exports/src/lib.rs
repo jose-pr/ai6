@@ -4,6 +4,7 @@
 #![warn(missing_docs)]
 
 mod controls;
+mod green_ink;
 mod login_limit;
 mod timeline;
 
@@ -425,6 +426,7 @@ struct SessionRecord {
     operation_id: OperationId,
     mission_id: MissionId,
     lifecycle_state: Option<String>,
+    lifecycle_reason: Option<String>,
     lifecycle_sequence: u64,
     lifecycle_at: Option<f64>,
     history: VecDeque<(u64, Vec<u8>)>,
@@ -511,6 +513,7 @@ impl Gateway {
                 operation_id,
                 mission_id,
                 lifecycle_state: None,
+                lifecycle_reason: None,
                 lifecycle_sequence: 0,
                 lifecycle_at: None,
                 history: VecDeque::new(),
@@ -553,6 +556,7 @@ impl Gateway {
                 mission_id: session.mission_id.to_string(),
                 session_id: session_id.to_string(),
                 state: session.lifecycle_state.clone(),
+                reason: session.lifecycle_reason.clone(),
                 sequence: session.lifecycle_sequence,
                 updated_at: session.lifecycle_at,
                 exposure: Vec::new(),
@@ -869,7 +873,17 @@ impl Gateway {
         let lifecycle_state = match &received {
             guatiao::value::wire::channel::Received::Value { channel: 1, value } => {
                 let map: &Map = value.try_as_ref().ok_or(GatewayError::InvalidFrame)?;
-                Some(read_text(map, "state")?.to_owned())
+                let reason = match map.get("reason") {
+                    Some(reason) => Some(
+                        <&str>::try_from(reason)
+                            .ok()
+                            .filter(|reason| ai6_diptel::valid_reason(reason))
+                            .ok_or(GatewayError::InvalidFrame)?
+                            .to_owned(),
+                    ),
+                    None => None,
+                };
+                Some((read_text(map, "state")?.to_owned(), reason))
             }
             _ => None,
         };
@@ -885,7 +899,7 @@ impl Gateway {
         let mut transition = None;
         if is_value {
             session.last_sequence = sequence;
-            if let Some(state) = lifecycle_state {
+            if let Some((state, reason)) = lifecycle_state {
                 let at = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map_or(0.0, |elapsed| elapsed.as_secs_f64());
@@ -901,6 +915,7 @@ impl Gateway {
                     });
                 }
                 session.lifecycle_state = Some(state);
+                session.lifecycle_reason = reason;
                 session.lifecycle_sequence = sequence;
                 session.lifecycle_at = Some(at);
             }
@@ -1086,6 +1101,26 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/timeline",
                 get(timeline::operation_timeline),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/green-ink",
+                get(green_ink::pending),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/green-ink/{request_id}/approve",
+                post(green_ink::approve),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/green-ink/{request_id}/reject",
+                post(green_ink::reject),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/class-authorizations",
+                get(green_ink::list_classes).post(green_ink::create_class),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/class-authorizations/{id}",
+                axum::routing::delete(green_ink::revoke_class),
             )
             .route("/v1/user/attach-grants", post(issue_user_attach_token))
             .route("/v1/auth/login", post(login))
@@ -2149,6 +2184,8 @@ async fn user_profile(
                 "mission.read",
                 "mission.create",
                 "mission.control",
+                "approval.decide",
+                "approval.class",
                 "session.read",
                 "session.input",
                 "audit.read",
@@ -2890,6 +2927,8 @@ struct LifecycleRequest {
     operation_id: String,
     mission_id: String,
     state: String,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 /// One provider Session entry returned by the public board API.
@@ -2904,6 +2943,9 @@ pub struct BoardSession {
     pub session_id: String,
     /// Latest Mission state, absent until the first lifecycle event.
     pub state: Option<String>,
+    /// Why AI6 holds the Session in that state, when it says: `green-ink` while a step
+    /// waits for a person's approval, `budget` after a spending limit.
+    pub reason: Option<String>,
     /// Sequence of the latest lifecycle event, or zero before one arrives.
     pub sequence: u64,
     /// When the latest lifecycle event arrived, as Unix seconds; the most recently updated
@@ -3103,6 +3145,13 @@ async fn publish_lifecycle(
     Json(request): Json<LifecycleRequest>,
 ) -> Result<StatusCode, ApiError> {
     let state = SessionState::parse(&request.state).ok_or_else(ApiError::bad_request)?;
+    if request
+        .reason
+        .as_deref()
+        .is_some_and(|reason| !ai6_diptel::valid_reason(reason))
+    {
+        return Err(ApiError::bad_request());
+    }
     gateway
         .publish_lifecycle(
             bearer(&headers)?,
@@ -3113,6 +3162,7 @@ async fn publish_lifecycle(
                     .map_err(|_| ApiError::bad_request())?,
                 session_id: SessionId::new(session).map_err(|_| ApiError::bad_request())?,
                 state,
+                reason: request.reason,
                 sequence,
             },
         )
@@ -3763,6 +3813,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_board_shows_why_a_session_is_held_until_its_next_state() {
+        let gateway = gateway();
+        let (operation, mission, session) = register(&gateway).await;
+        let event = |state, reason: Option<&str>, sequence| LifecycleEvent {
+            operation_id: operation.clone(),
+            mission_id: mission.clone(),
+            session_id: session.clone(),
+            state,
+            reason: reason.map(str::to_owned),
+            sequence,
+        };
+        let token = "m-token-that-is-long-enough-for-testing";
+        gateway
+            .publish_lifecycle(token, event(SessionState::Blocked, Some("green-ink"), 1))
+            .await
+            .unwrap();
+        let board = gateway.board_sessions().await;
+        assert_eq!(
+            (board[0].state.as_deref(), board[0].reason.as_deref()),
+            (Some("blocked"), Some("green-ink"))
+        );
+        gateway
+            .publish_lifecycle(token, event(SessionState::Working, None, 2))
+            .await
+            .unwrap();
+        assert_eq!(gateway.board_sessions().await[0].reason, None);
+        assert!(
+            gateway
+                .publish_lifecycle(token, event(SessionState::Blocked, Some("Green Ink"), 3))
+                .await
+                .is_err(),
+            "a reason is a name"
+        );
+    }
+
+    #[tokio::test]
     async fn typed_m_publisher_encodes_failed_state_and_binary_terminal_output() {
         let gateway = gateway();
         let (station, mission, session) = register(&gateway).await;
@@ -3775,6 +3861,7 @@ mod tests {
                     mission_id: mission,
                     session_id: session.clone(),
                     state: SessionState::Failed,
+                    reason: None,
                     sequence: 1,
                 },
             )
@@ -5604,6 +5691,7 @@ mod tests {
             mission_id: MissionId::new("mission-a").unwrap(),
             session_id: session.clone(),
             state: SessionState::Working,
+            reason: None,
             sequence: 1,
         };
         let (schema, value) = lifecycle_frames(&event).unwrap();

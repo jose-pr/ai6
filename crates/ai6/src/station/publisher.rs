@@ -125,6 +125,7 @@ enum Command {
         mission_id: String,
         session_id: SessionId,
         state: &'static str,
+        reason: Option<&'static str>,
     },
     Terminal {
         session_id: SessionId,
@@ -635,6 +636,11 @@ impl SessionTelemetry {
     }
 
     pub(crate) fn publish_lifecycle(&self, state: &'static str) {
+        self.publish_lifecycle_for(state, None);
+    }
+
+    /// Publishes a state with the reason AI6 holds the Session in it, such as `green-ink`.
+    pub(crate) fn publish_lifecycle_for(&self, state: &'static str, reason: Option<&'static str>) {
         let Ok(telemetry) = self.state.lock() else {
             self.publisher.fail("Session telemetry lock failed");
             return;
@@ -645,6 +651,7 @@ impl SessionTelemetry {
                 mission_id: self.mission_id.to_string(),
                 session_id: session_id.clone(),
                 state,
+                reason,
             });
         }
     }
@@ -865,13 +872,17 @@ fn publish_loop(
                 mission_id,
                 session_id,
                 state,
+                reason,
             } => publish_lifecycle(
                 &agent,
                 &config,
-                &operation_id,
-                &mission_id,
                 &session_id,
-                state,
+                Lifecycle {
+                    operation_id: &operation_id,
+                    mission_id: &mission_id,
+                    state,
+                    reason,
+                },
                 &mut sequences,
             ),
             Command::Terminal { session_id, bytes } => {
@@ -909,6 +920,8 @@ struct Lifecycle<'a> {
     operation_id: &'a str,
     mission_id: &'a str,
     state: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a str>,
 }
 
 fn register(
@@ -949,10 +962,8 @@ fn register(
 fn publish_lifecycle(
     agent: &ureq::Agent,
     config: &Config,
-    operation_id: &str,
-    mission_id: &str,
     session_id: &SessionId,
-    state: &str,
+    lifecycle: Lifecycle<'_>,
     sequences: &mut BTreeMap<SessionId, u64>,
 ) -> Result<(), &'static str> {
     let sequence = take_sequence(sequences, session_id)?;
@@ -960,11 +971,7 @@ fn publish_lifecycle(
     let mut response = agent
         .post(url.as_str())
         .header("Authorization", &format!("Bearer {}", config.token))
-        .send_json(Lifecycle {
-            operation_id,
-            mission_id,
-            state,
-        })
+        .send_json(lifecycle)
         .map_err(|_| "lifecycle request failed")?;
     if response.status() != 202 {
         return Err("gateway rejected a lifecycle event");

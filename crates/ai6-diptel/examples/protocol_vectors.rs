@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mission_id: MissionId::new("mission-17")?,
         session_id: SessionId::new("provider-run-3")?,
         state: SessionState::Working,
+        reason: None,
         sequence: 4,
     };
     let terminal = TerminalData::new(
@@ -28,9 +29,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_session(SessionId::new("provider-run-3")?)
     .with_agent("008")?;
 
+    let quarantined = LifecycleEvent {
+        state: SessionState::Quarantined,
+        ..lifecycle.clone()
+    };
+    let green_ink = LifecycleEvent {
+        state: SessionState::Blocked,
+        reason: Some("green-ink".to_owned()),
+        ..lifecycle.clone()
+    };
+
     for (name, frame) in [
         ("lifecycle_schema", lifecycle_frames(&lifecycle)?.0),
         ("lifecycle_value", lifecycle_frames(&lifecycle)?.1),
+        (
+            "lifecycle_value_quarantined",
+            lifecycle_frames(&quarantined)?.1,
+        ),
+        ("lifecycle_value_green_ink", lifecycle_frames(&green_ink)?.1),
         ("terminal_schema", terminal_frames(&terminal)?.0),
         ("terminal_value", terminal_frames(&terminal)?.1),
         ("resize_schema", resize_frames(&resize)?.0),

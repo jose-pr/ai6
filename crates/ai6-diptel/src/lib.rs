@@ -15,6 +15,8 @@ pub const MAX_ID_BYTES: usize = 256;
 pub const MAX_TERMINAL_BYTES: usize = 1024 * 1024;
 /// The largest operator message a control carries, in UTF-8 bytes.
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 16 * 1024;
+/// The longest lifecycle reason, in bytes.
+pub const MAX_REASON_BYTES: usize = 64;
 const LIFECYCLE_CHANNEL: u64 = 1;
 const TERMINAL_CHANNEL: u64 = 2;
 const RESIZE_CHANNEL: u64 = 3;
@@ -345,6 +347,10 @@ pub struct LifecycleEvent {
     pub session_id: SessionId,
     /// Updated board state.
     pub state: SessionState,
+    /// Why AI6 holds the Session in this state, when it says: `green-ink` while a step waits
+    /// for a person's approval, `budget` after a spending limit. A lowercase name of at most
+    /// [`MAX_REASON_BYTES`].
+    pub reason: Option<String>,
     /// Monotonically increasing event cursor for this Session.
     pub sequence: u64,
 }
@@ -444,6 +450,7 @@ pub fn lifecycle_frames(
         .field(FieldBuilder::new("mission_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("session_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("state", KindBuilder::string()).required())
+        .field(FieldBuilder::new("reason", KindBuilder::string()))
         .field(FieldBuilder::new("sequence", KindBuilder::int()).required())
         .finish()?;
     let mut value = Map::new();
@@ -451,6 +458,9 @@ pub fn lifecycle_frames(
     value.set("mission_id", event.mission_id.as_str());
     value.set("session_id", event.session_id.as_str());
     value.set("state", event.state.as_str());
+    if let Some(reason) = &event.reason {
+        value.set("reason", reason.as_str());
+    }
     value.set("sequence", event.sequence);
     frames(LIFECYCLE_CHANNEL, &schema, &value.into())
 }
@@ -586,6 +596,13 @@ impl FrameReceiver {
                     session_id: SessionId::new(text(&map, "session_id")?)
                         .map_err(|error| FrameDecodeError(error.to_string()))?,
                     state,
+                    reason: optional_text(&map, "reason")?
+                        .map(|reason| {
+                            valid_reason(&reason)
+                                .then_some(reason)
+                                .ok_or_else(|| FrameDecodeError("invalid lifecycle reason".into()))
+                        })
+                        .transpose()?,
                     sequence: number(&map, "sequence")?,
                 };
                 Ok(Some(IncomingFrame::Lifecycle(event)))
@@ -636,6 +653,16 @@ impl FrameReceiver {
             ))),
         }
     }
+}
+
+/// Whether `reason` is a lifecycle reason: 1 to [`MAX_REASON_BYTES`] of `a-z`, `0-9`, `-`, `_`
+/// and `.`.
+pub fn valid_reason(reason: &str) -> bool {
+    !reason.is_empty()
+        && reason.len() <= MAX_REASON_BYTES
+        && reason.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_.".contains(&byte)
+        })
 }
 
 fn text(map: &Map, key: &str) -> Result<String, FrameDecodeError> {
@@ -837,6 +864,7 @@ mod tests {
             mission_id: MissionId::new("mission-17").unwrap(),
             session_id: SessionId::new("provider-run-3").unwrap(),
             state: SessionState::Working,
+            reason: None,
             sequence: 4,
         };
         let (schema, value) = lifecycle_frames(&event).unwrap();
@@ -897,6 +925,7 @@ mod tests {
             mission_id: MissionId::new("mission-17").unwrap(),
             session_id: SessionId::new("provider-run-3").unwrap(),
             state: SessionState::Blocked,
+            reason: None,
             sequence: 9,
         };
         let terminal = TerminalData::new(
@@ -936,6 +965,7 @@ mod tests {
             mission_id: MissionId::new("mission-17").unwrap(),
             session_id: SessionId::new("provider-run-3").unwrap(),
             state: SessionState::Parked,
+            reason: None,
             sequence: 4,
         };
         let (schema, value) = lifecycle_frames(&event).unwrap();
@@ -954,6 +984,7 @@ mod tests {
             mission_id: MissionId::new("mission-17").unwrap(),
             session_id: SessionId::new("provider-run-3").unwrap(),
             state: SessionState::Quarantined,
+            reason: None,
             sequence: 4,
         };
         let (schema, value) = lifecycle_frames(&event).unwrap();
@@ -972,6 +1003,42 @@ mod tests {
             .find_map(|line| line.strip_prefix("lifecycle_value_quarantined="))
             .unwrap();
         assert_eq!(hex, expected);
+    }
+
+    #[test]
+    fn a_session_waiting_for_green_ink_carries_its_reason_and_matches_its_wire_vector() {
+        let event = LifecycleEvent {
+            operation_id: OperationId::new("station-a").unwrap(),
+            mission_id: MissionId::new("mission-17").unwrap(),
+            session_id: SessionId::new("provider-run-3").unwrap(),
+            state: SessionState::Blocked,
+            reason: Some("green-ink".to_owned()),
+            sequence: 4,
+        };
+        let (schema, value) = lifecycle_frames(&event).unwrap();
+        let mut receiver = FrameReceiver::new();
+        assert_eq!(receiver.accept(&schema).unwrap(), None);
+        assert_eq!(
+            receiver.accept(&value).unwrap(),
+            Some(IncomingFrame::Lifecycle(event.clone()))
+        );
+        let hex = value
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let expected = include_str!("../tests/vectors/frames.txt")
+            .lines()
+            .find_map(|line| line.strip_prefix("lifecycle_value_green_ink="))
+            .unwrap();
+        assert_eq!(hex, expected);
+
+        let forged = LifecycleEvent {
+            reason: Some("Green Ink\n".to_owned()),
+            ..event
+        };
+        let (_, value) = lifecycle_frames(&forged).unwrap();
+        assert!(receiver.accept(&value).is_err(), "a reason must be a name");
+        assert!(!valid_reason(&"x".repeat(MAX_REASON_BYTES + 1)));
     }
 
     fn sample_control() -> MissionControl {
@@ -1053,6 +1120,7 @@ mod tests {
             mission_id: MissionId::new("mission-17").unwrap(),
             session_id: SessionId::new("provider-run-3").unwrap(),
             state: SessionState::Working,
+            reason: None,
             sequence: 4,
         };
         let terminal = TerminalData::new(
@@ -1080,7 +1148,7 @@ mod tests {
                 "resize_value" => &resize_frames.1,
                 "control_schema" => &control_frames.0,
                 "control_value" => &control_frames.1,
-                "lifecycle_value_quarantined" => continue,
+                "lifecycle_value_quarantined" | "lifecycle_value_green_ink" => continue,
                 _ => panic!("unknown vector name"),
             };
             let actual = actual

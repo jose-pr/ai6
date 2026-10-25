@@ -351,7 +351,7 @@ pub(super) fn stop_for_budget(
     }
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = &operation.telemetry {
-        telemetry.publish_lifecycle("blocked");
+        telemetry.publish_lifecycle_for("blocked", Some(BUDGET_REASON));
     }
     sync_session_record(state, mission_id);
     report_incident(state, mission_id, IncidentKind::Budget);
