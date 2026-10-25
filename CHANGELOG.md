@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `ai6_safehouse` Guatiao kind (`ai6::directorates::q::safehouse`); `ai6-safehouse-git`
   is the `git` provider (a worktree on its own branch). An Operation chooses one with
   `workspace = { provider, source, base, branch, isolate }`; the provider defaults to `git`
-  for a Git checkout. The daemon runs no Git commands itself.
+  for a Git checkout. The daemon runs no Git commands itself. `ai6-safehouse-copy` is the
+  `copy` provider: a plain directory copy with no history.
 - Cover checks read the safe house's changes through the provider. A provider that keeps
   no history makes the cover report say `checkable = false` instead of passing.
 - Cover policies (`covert`, `partial`, `overt`, or `covers.toml`) with an Operation

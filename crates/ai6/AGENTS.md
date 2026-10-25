@@ -843,7 +843,7 @@ pub struct SafeHouseReport { pub path: String, pub branch: Option<String>, pub b
 
 `finish` removes an untouched isolated safe house and keeps one that holds work; it leaves
 a safe house in place alone. Floor hashes are pinned by tests in `safehouse.rs`; a model
-grows by optional fields only. Providers: `git` (`ai6-safehouse-git`).
+grows by optional fields only. Providers: `git` (`ai6-safehouse-git`) and `copy` (`ai6-safehouse-copy`, no history).
 
 `station::safehouse::SafeHouse::open(&dyn SafeHouseProvider, &SafeHouseSpec)` wraps a
 session: `path()`, `branch()`, `base()`, `supports_history()`, `is_isolated()`,

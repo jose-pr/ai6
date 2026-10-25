@@ -52,6 +52,7 @@ nav:
           - ai6-agent-codex: https://jose-pr.github.io/ai6/rust/ai6_agent_codex/index.html
           - ai6-terminal-pty: https://jose-pr.github.io/ai6/rust/ai6_terminal_pty/index.html
           - ai6-safehouse-git: https://jose-pr.github.io/ai6/rust/ai6_safehouse_git/index.html
+          - ai6-safehouse-copy: https://jose-pr.github.io/ai6/rust/ai6_safehouse_copy/index.html
   - Changelog: changelog.md
 
 plugins:

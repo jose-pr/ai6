@@ -196,6 +196,7 @@ stream so an attached viewer's emulator does not answer a second time.
 | `crates/ai6ctl/` | Rust | The read-only operator command |
 | `crates/providers/agents/` | Rust | Claude and Codex AgentHandler providers |
 | `crates/providers/terminals/pty/` | Rust | The `pty` terminal provider (openpty / ConPTY) |
+| `crates/providers/safehouses/` | Rust | The `git` (worktree) and `copy` (plain directory) safe-house providers |
 | `crates/providers/access/` | Rust | Key, LDAP, local, peer-certificate and reverse-proxy access providers |
 | `clients/moneypenny/` | Dart/Flutter | The Moneypenny operator app for desktop and web |
 | `examples/config/` | TOML | A runnable Operation and Agent roster |

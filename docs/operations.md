@@ -41,6 +41,9 @@ recorded in the Mission report.
 | `branch` | `{id}-{slug}` | Branch name template; `{id}`, `{slug}` and `{operation}` are filled in |
 | `isolate` | `true` | `false` works in `source` itself instead of a separate copy |
 
+Two providers ship: `git` (a worktree on its own branch; commits are audited) and `copy`
+(a plain copy of the directory, always kept, no history).
+
 Providers are loaded by the Station that runs the Session (`ai6 serve --plugin-path`). A
 provider that keeps no history makes the Mission's cover report say it was **not
 checkable** instead of passing. The earlier keys `repos`, `safe_houses`, `branch` and
