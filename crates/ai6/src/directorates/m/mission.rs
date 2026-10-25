@@ -153,7 +153,7 @@ impl MissionStore {
                     !snapshot.missions.contains_key(key)
                         || operation.handler_provider.trim().is_empty()
                         || operation.terminal_provider.trim().is_empty()
-                        || !Path::new(&operation.working_directory).is_absolute()
+                        || !is_absolute_anywhere(&operation.working_directory)
                 })
             {
                 return Err(io::Error::new(
@@ -239,7 +239,7 @@ impl MissionStore {
         }
         if operation.handler_provider.trim().is_empty()
             || operation.terminal_provider.trim().is_empty()
-            || !Path::new(&operation.working_directory).is_absolute()
+            || !is_absolute_anywhere(&operation.working_directory)
         {
             return Err(MissionError::InvalidOperation);
         }
@@ -594,6 +594,18 @@ impl MissionStore {
     }
 }
 
+/// Whether `path` is absolute on the Station or on a Theater, which may run another OS: a
+/// POSIX `/…` path or a Windows drive path.
+pub(crate) fn is_absolute_anywhere(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    Path::new(path).is_absolute()
+        || path.starts_with('/')
+        || (bytes.len() > 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\'))
+}
+
 /// A rejected Mission operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissionError {
@@ -642,6 +654,54 @@ mod tests {
 
     fn book() -> MissionStore {
         MissionStore::default()
+    }
+
+    #[test]
+    fn a_working_directory_on_a_theater_of_another_os_is_absolute() {
+        for path in ["/srv/work", "C:\\work", "c:/work"] {
+            assert!(is_absolute_anywhere(path), "{path}");
+        }
+        for path in ["work", "./work", "C:work", ""] {
+            assert!(!is_absolute_anywhere(path), "{path}");
+        }
+    }
+
+    #[cfg(feature = "daemon")]
+    #[test]
+    fn a_launch_on_a_posix_theater_reopens_on_any_station() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missions.json");
+        let mut book = MissionStore::open(&path).unwrap();
+        book.create(
+            MissionId::try_new("mission-1").unwrap(),
+            None,
+            "work over there".to_owned(),
+            None,
+            None,
+        )
+        .unwrap();
+        book.set_operation(
+            "mission-1",
+            LaunchManifest {
+                handler_provider: "claude".to_owned(),
+                terminal_provider: "detached".to_owned(),
+                working_directory: "/srv/work".to_owned(),
+                model: None,
+                effort: None,
+                cover: None,
+                station_id: None,
+                theater_id: Some("box".to_owned()),
+                mode: ExecutionMode::Field,
+                session: None,
+                runner: Some("key-1".to_owned()),
+            },
+        )
+        .unwrap();
+        drop(book);
+        let book = MissionStore::open(&path).unwrap();
+        let manifest = book.operation("mission-1").unwrap();
+        assert_eq!(manifest.working_directory, "/srv/work");
+        assert_eq!(manifest.runner.as_deref(), Some("key-1"));
     }
 
     #[test]
