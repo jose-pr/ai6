@@ -1332,12 +1332,13 @@ impl LoadoutCatalog {
 impl FromStr for LoadoutCatalog { type Err = QError; }
 pub struct SecretDefinition;
 impl SecretDefinition {
-    pub fn new(name: impl Into<String>) -> Self;  // env = NAME upper, -/. as _; source Env("AI6_SECRET_<env>")
+    pub fn new(name: impl Into<String>) -> Self;  // env = NAME upper, -/. as _; source File("secrets/<name>")
     pub fn name(&self) -> &str; pub fn env(&self) -> &str;
     pub fn green_ink(&self) -> bool; pub fn kinds(&self) -> &[String];   // empty: any approval kind
     pub fn source(&self) -> &SecretSource;
 }
-#[non_exhaustive] pub enum SecretSource { Env(String), File(PathBuf) }
+#[non_exhaustive] pub enum SecretSource { Env(String), File(PathBuf) }   // a relative file: relative to the config dir
+impl SecretSource { pub fn weakening(&self) -> Option<String>; }          // Some for Env: local harnesses inherit it
 ```
 
 Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]` and
@@ -1393,7 +1394,10 @@ impl SecretBroker {
 /// The Station's own backend: reads each value at lease time from its SecretSource (a file
 /// loses one trailing newline); missing or empty fails; revoke is a no-op.
 pub struct StationSecrets;
-impl StationSecrets { pub fn new(definitions: impl IntoIterator<Item = SecretDefinition>) -> Self; }
+impl StationSecrets {
+    pub fn new(definitions: impl IntoIterator<Item = SecretDefinition>) -> Self;
+    pub fn relative_to(self, dir: &Path) -> Self;   // resolve relative files against dir (the Station's config dir)
+}
 impl SecretBackend for StationSecrets;
 pub struct SecretValue;
 impl SecretValue {
@@ -1727,14 +1731,18 @@ pending. Requests and deliveries are `green_ink` timeline events; the lifecycle 
 reason (`green-ink`, `budget`) to Universal Exports.
 Credentials: a Station with a loadout catalog (`loadouts.toml` in the configuration
 directory, or `StationConfig::with_loadouts`) leases the Agent's loadout secrets at every
-Session start and resume (one-hour lease, from `with_secret_backend` or `StationSecrets`)
-and puts each value in the start or resume request's `environment` under its `env`, after
-removing the loadout's variables an earlier Session held. A backend refusal of an ordinary
-secret fails the start. A `green_ink` secret is leased only while the Mission holds a live
+Session start and resume, last before the launch (one-hour lease, from
+`with_secret_backend` or `StationSecrets` relative to the configuration directory, which
+logs each env-sourced secret as a weakening at start) and puts each value in the start or
+resume request's `environment` under its `env`, after removing the loadout's variables an
+earlier Session held. A resume that re-attaches to a runner's live harness issues nothing.
+A backend refusal of an ordinary secret fails the start, and leases acquired by a failed
+issue are revoked. A `green_ink` secret is leased only while the Mission holds a live
 approval (`FileRegistry::mission_approvals`) of one of its `kinds`, once per approval (kept
-in memory), with the approval's remaining time as the TTL; otherwise its variable is absent.
-An exposed Session under the `secrets` restriction gets none. Leases are revoked when the
-Session's operation is finished, stopped or finalized, and on a failed start. Each issue is a
+in memory), with the approval's remaining time, at most an hour, as the TTL; otherwise its
+variable is absent. An exposed Session under the `secrets` restriction gets none. Leases are
+revoked when the Session's operation is finished, stopped, finalized or fenced out, on a
+failed start or resume, and when a later issue for the Mission replaces them. Each issue is a
 `credential`/`leased` timeline event (`secrets` = names, `approval` = request ID). Values are
 never written: the launch record and publication carry variable names only, the detached
 wrapper passes the environment through a FIFO, and a runner keeps it in memory.

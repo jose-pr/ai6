@@ -131,11 +131,11 @@ secrets = ["anthropic", "forge", "release"]
 
 [secret.anthropic]
 env = "ANTHROPIC_API_KEY"                    # default: the name in upper case, - and . as _
-from = { env = "AI6_SECRET_ANTHROPIC_API_KEY" } # default: AI6_SECRET_<env>; or { file = "…" }
+                                             # read from secrets/anthropic in this directory
 
 [secret.forge]
 env = "GH_TOKEN"
-from = { file = "/etc/ai6/secrets/forge" }
+from = { file = "/etc/ai6/secrets/forge" }   # or { env = "VAR" }: weaker, see below
 
 [secret.release]                             # a credential for protected targets
 env = "RELEASE_TOKEN"
@@ -150,11 +150,19 @@ kinds = ["release", "push"]                  # approvals that unlock it; default
   wrapper](theaters.md#the-detached-wrapper) hands the environment over through a FIFO; a
   runner keeps it in memory. A Session refuses to start when its backend refuses an
   ordinary secret.
-- The Station's own backend reads each value when it is leased from the Station's
-  environment or a file there (`from`); `StationConfig::with_secret_backend` puts another in
-  its place, such as a vault client whose leases expire on their own. Leases last at most
-  an hour and are revoked when the Mission ends or its Session stops on that Station; a
-  value already in a harness's environment stays there until the harness ends.
+- The Station's own backend reads each value when it is leased, from a file on the Station
+  (`secrets/<name>` in its configuration directory by default; a relative `from = { file }`
+  is relative to that directory) or, with `from = { env = "VAR" }`, from the Station's own
+  environment. The environment is the weaker choice, logged as a weakening at start: every
+  process the Station starts on its own host inherits it, a harness among them, green ink
+  or not. `StationConfig::with_secret_backend` puts another backend in its place, such as a
+  vault client whose leases expire on their own. Leases last at most an hour and are
+  revoked when the Mission ends or its Session stops on that Station; a value already in a
+  harness's environment stays there until the harness ends.
+- A harness on the Station's own host runs as the Station's user, so it can read what that
+  user can, the secret files among them. Keep green ink credentials out of reach of local
+  harnesses: give them to Missions on other Theaters, or use a backend the harness cannot
+  query.
 - A `green_ink` secret is leased only while the Mission holds a live [green
   ink](missions.md#green-ink) approval of one of its `kinds`: once per approval, for no
   longer than the approval lasts. The Agent asks with `request_approval`, and the

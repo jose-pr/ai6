@@ -46,9 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   writes nothing (`ai6::directorates::q::provision`).
 - Credentials as Q leases. A Station reads `loadouts.toml` and, at every Session start and
   resume, leases the Agent's loadout secrets from its secret backend and hands each value to
-  the harness in its environment only (`[secret.NAME]`: `env`, `from = { env | file }` on
-  the Station, `green_ink`, `kinds`). The Station's own backend (`StationSecrets`) reads the
-  Station's environment or a file; `StationConfig::with_secret_backend` replaces it. A
+  the harness in its environment only (`[secret.NAME]`: `env`, `from = { file | env }` on
+  the Station, `green_ink`, `kinds`). The Station's own backend (`StationSecrets`) reads a
+  file (`secrets/NAME` in the configuration directory by default) or, logged as a weakening,
+  the Station's environment; `StationConfig::with_secret_backend` replaces it. A
   `green_ink` secret is leased only while the Mission holds a live green ink approval of a
   kind it names, once per approval and no longer than it lasts. Leases are revoked when the
   Mission ends or its Session stops; each issue is a `credential` timeline event naming the
