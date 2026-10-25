@@ -60,6 +60,10 @@ pub struct Capabilities {
     /// The host's CPU architecture, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arch: Option<String>,
+    /// Facts an operator should see, such as the host key trusted on first use.
+    #[map(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// Settings a Theater passes to the transport that reaches it. Crosses as a value.

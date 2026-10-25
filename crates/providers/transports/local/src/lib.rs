@@ -38,6 +38,7 @@ impl Transport for Local {
             forward: false,
             os: Some(std::env::consts::OS.to_owned()),
             arch: Some(std::env::consts::ARCH.to_owned()),
+            notes: Vec::new(),
         })
     }
 

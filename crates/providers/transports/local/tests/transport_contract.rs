@@ -42,7 +42,7 @@ fn it_claims_exactly_what_it_does() {
     assert!(!capabilities.terminal && !capabilities.forward);
     assert_eq!(capabilities.os.as_deref(), Some(std::env::consts::OS));
     assert_eq!(capabilities.arch.as_deref(), Some(std::env::consts::ARCH));
-    assert_eq!(Local.probe().is_ok(), true);
+    assert!(Local.probe().is_ok());
 }
 
 #[test]

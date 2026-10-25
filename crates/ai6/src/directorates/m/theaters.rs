@@ -124,6 +124,9 @@ pub struct SshAccess {
     /// it is reported; the key seen is published so it can be pinned afterwards.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub trust_on_first_use: bool,
+    /// Seconds to wait for the connection and login; 15 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_timeout_secs: Option<u64>,
 }
 
 impl SshAccess {
@@ -136,6 +139,7 @@ impl SshAccess {
             identity: None,
             host_key: None,
             trust_on_first_use: false,
+            connect_timeout_secs: None,
         }
     }
 
@@ -171,6 +175,13 @@ impl SshAccess {
     #[must_use]
     pub fn trusting_on_first_use(mut self) -> Self {
         self.trust_on_first_use = true;
+        self
+    }
+
+    /// Sets how long to wait for the connection and login.
+    #[must_use]
+    pub fn with_connect_timeout_secs(mut self, secs: u64) -> Self {
+        self.connect_timeout_secs = Some(secs);
         self
     }
 }
@@ -415,6 +426,11 @@ impl Theater {
                 if ssh.identity.as_deref().is_some_and(str::is_empty) {
                     return Err(TheaterError(format!(
                         "Theater {id:?}: ssh identity must not be empty"
+                    )));
+                }
+                if ssh.connect_timeout_secs == Some(0) {
+                    return Err(TheaterError(format!(
+                        "Theater {id:?}: ssh connect_timeout_secs must be at least 1"
                     )));
                 }
                 if let Some(pin) = &ssh.host_key

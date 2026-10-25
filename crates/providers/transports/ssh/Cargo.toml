@@ -1,0 +1,28 @@
+[package]
+name = "ai6-transport-ssh"
+description = "An AI6 transport provider that reaches a host over SSH: commands, terminals, SFTP files and reverse forwards"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+exclude = [".*", "*.local.*"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+ai6 = { path = "../../../ai6", default-features = false }
+russh.workspace = true
+russh-sftp.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync", "time"] }
+toml.workspace = true
+
+[dev-dependencies]
+ai6 = { path = "../../../ai6", features = ["daemon"] }
+rand = { version = "0.10", features = ["thread_rng"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "sync", "time"] }

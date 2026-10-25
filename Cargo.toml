@@ -63,3 +63,6 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = "0.29"
 tempfile = "3"
+# SSH transport: one pure-Rust client on every OS, with the ring crypto provider.
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "3"
