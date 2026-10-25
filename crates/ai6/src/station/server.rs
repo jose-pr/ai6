@@ -8667,11 +8667,24 @@ mod tests {
         while ticks(&seen).0.len() < 5 {
             seen.push(wait_for_event(&first, "mission-1").await);
         }
-        let (before, _) = ticks(&seen);
 
         // Station A dies: it lets go of nothing and tells the runner nothing.
         let crashed = first.sessions.lock().unwrap().remove("mission-1").unwrap();
         drop(crashed);
+        // A's pump may have taken a tick past the fifth before it stopped; A received that
+        // one, so the replay starts after it.
+        let event_pumps = std::mem::take(&mut *first.event_pumps.lock().unwrap());
+        tokio::time::timeout(Duration::from_secs(10), async {
+            for event_pump in event_pumps {
+                event_pump.await.unwrap();
+            }
+        })
+        .await
+        .expect("Station A's event pump stops once its Session is gone");
+        while let Some(event) = pop_event(&first, "mission-1") {
+            seen.push(event);
+        }
+        let (before, _) = ticks(&seen);
         assert_eq!(
             first
                 .missions
