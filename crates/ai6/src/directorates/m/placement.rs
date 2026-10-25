@@ -479,8 +479,9 @@ fn theater_verdict(
         ));
     }
     if policy.checkout {
+        let own_host = theater.access == TheaterKind::Local;
         match mode {
-            ExecutionMode::Field if !station.checkouts.contains(&policy.operation) => {
+            ExecutionMode::Field if own_host && !station.checkouts.contains(&policy.operation) => {
                 return Err(format!(
                     "this Station has no checkout of Operation {:?}",
                     policy.operation
@@ -489,9 +490,9 @@ fn theater_verdict(
             // The checkout is on the Theater, which the Station cannot inspect: the
             // Operation must say where it is by binding to the Theater, or the Theater
             // must say where its Missions work.
-            ExecutionMode::RemoteHands
-                if policy.theater.as_deref() != Some(theater.id.as_str())
-                    && theater.workdir.is_none() =>
+            _ if (mode == ExecutionMode::RemoteHands || !own_host)
+                && policy.theater.as_deref() != Some(theater.id.as_str())
+                && theater.workdir.is_none() =>
             {
                 return Err(format!(
                     "Operation {:?} has a checkout and this Theater has no `workdir`: bind the Operation to the Theater or set the Theater's `workdir`",
@@ -516,10 +517,12 @@ fn assumed_own_host() -> Capabilities {
 
 /// How a Session would run on `theater`, or the capability that is missing.
 ///
-/// Field mode runs the harness on the Theater and needs `terminal` and `files`, a harness
-/// and a route to the provider's API. Until a runner can supervise a harness on a remote
-/// host, only the Station's own host qualifies. Remote-hands mode runs the harness on the
-/// Station and needs only the transport's `run`. `agents` can force either.
+/// Field mode runs the harness on the Theater and needs a route to the provider's API. On
+/// the Station's own host it needs `terminal` and `files`. On a remote host it needs either
+/// a runner (reached with `run`), or, for the detached wrapper the Station supervises over
+/// the transport, `run`, `files`, a POSIX host and a declared harness. Remote-hands mode
+/// runs the harness on the Station and needs only the transport's `run`. `agents` can force
+/// either.
 pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String> {
     if let Some(reason) = &theater.unavailable {
         return Err(format!("the Station cannot reach it: {reason}"));
@@ -536,17 +539,39 @@ pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String>
     };
 
     let mut field_missing = Vec::new();
-    if !own_host {
-        field_missing.push(
-            "a runner on the Theater to supervise the harness (only the Station's own host runs one)"
-                .to_owned(),
-        );
-    }
-    if !capabilities.terminal {
-        field_missing.push("the `terminal` capability".to_owned());
-    }
-    if !capabilities.files {
-        field_missing.push("the `files` capability".to_owned());
+    if own_host {
+        if !capabilities.terminal {
+            field_missing.push("the `terminal` capability".to_owned());
+        }
+        if !capabilities.files {
+            field_missing.push("the `files` capability".to_owned());
+        }
+    } else if theater.runner {
+        if !capabilities.run {
+            field_missing.push("the `run` capability to reach its runner".to_owned());
+        }
+    } else {
+        let mut wrapper = Vec::new();
+        if theater.harnesses.is_empty() {
+            wrapper.push("a declared harness (`harnesses`)");
+        }
+        if !capabilities.run {
+            wrapper.push("the `run` capability");
+        }
+        if !capabilities.files {
+            wrapper.push("the `files` capability");
+        }
+        match capabilities.os.as_deref() {
+            Some("windows") => wrapper.push("a POSIX host"),
+            None => wrapper.push("a known POSIX host (the transport has not reported its os)"),
+            Some(_) => {}
+        }
+        if !wrapper.is_empty() {
+            field_missing.push(format!(
+                "a runner on the Theater (`runner`), or for the detached wrapper {}",
+                wrapper.join(", ")
+            ));
+        }
     }
     match theater.egress {
         EgressKind::Isolated => {
@@ -919,7 +944,7 @@ mod tests {
         assert_eq!(
             mode_of(&remote("box", Some(runs()))),
             Ok(ExecutionMode::RemoteHands),
-            "no runner supervises a harness on a remote host yet"
+            "a remote host with neither a runner nor a declared harness gets remote hands"
         );
         let run_only = Capabilities {
             run: true,
@@ -1043,6 +1068,104 @@ mod tests {
         station.checkouts.clear();
         let placement = place(&bound, &PlacementRequest::default(), &[station]);
         assert_eq!(placement.best().unwrap().theater, "box");
+    }
+
+    #[test]
+    fn a_remote_host_hosts_the_harness_with_a_runner_or_the_detached_wrapper() {
+        let local_only = |mut summary: TheaterSummary| {
+            summary.agents = AgentMode::Local;
+            summary
+        };
+        // With a runner, `run` (to reach it) is all field mode needs from the transport.
+        let mut with_runner = remote(
+            "box",
+            Some(Capabilities {
+                run: true,
+                ..Capabilities::default()
+            }),
+        );
+        with_runner.runner = true;
+        assert_eq!(mode_of(&with_runner), Ok(ExecutionMode::Field));
+        let mut unreachable_runner = remote(
+            "box",
+            Some(Capabilities {
+                files: true,
+                ..Capabilities::default()
+            }),
+        );
+        unreachable_runner.runner = true;
+        assert_eq!(
+            mode_of(&local_only(unreachable_runner)).unwrap_err(),
+            "agents = \"local\" needs the `run` capability to reach its runner"
+        );
+
+        // Without one, a POSIX host with `run`, `files` and a declared harness gets the
+        // detached wrapper.
+        let posix = Capabilities {
+            os: Some("linux".to_owned()),
+            ..runs()
+        };
+        let mut wrapper = remote("box", Some(posix.clone()));
+        wrapper.harnesses = vec!["claude".to_owned()];
+        assert_eq!(mode_of(&wrapper), Ok(ExecutionMode::Field));
+
+        let mut windows = wrapper.clone();
+        windows.capabilities = Some(Capabilities {
+            os: Some("windows".to_owned()),
+            ..posix.clone()
+        });
+        assert_eq!(mode_of(&windows), Ok(ExecutionMode::RemoteHands));
+        let reason = mode_of(&local_only(windows)).unwrap_err();
+        assert!(
+            reason.contains("for the detached wrapper a POSIX host"),
+            "{reason}"
+        );
+
+        let mut unknown = wrapper.clone();
+        unknown.capabilities = Some(runs());
+        let reason = mode_of(&local_only(unknown)).unwrap_err();
+        assert!(reason.contains("has not reported its os"), "{reason}");
+
+        let mut undeclared = wrapper;
+        undeclared.harnesses.clear();
+        let reason = mode_of(&local_only(undeclared)).unwrap_err();
+        assert_eq!(
+            reason,
+            "agents = \"local\" needs a runner on the Theater (`runner`), or for the detached \
+             wrapper a declared harness (`harnesses`)"
+        );
+    }
+
+    #[test]
+    fn field_mode_on_a_remote_host_works_where_the_theater_says() {
+        let mut runner_box = remote(
+            "box",
+            Some(Capabilities {
+                run: true,
+                ..Capabilities::default()
+            }),
+        );
+        runner_box.runner = true;
+        let mut station = station("a", 0);
+        station.theaters.push(runner_box);
+
+        // The Station's checkout is not on the Theater: an unbound Operation needs `workdir`.
+        let placement = place(&policy(), &PlacementRequest::default(), &[station.clone()]);
+        assert!(placement.choices.iter().all(|c| c.theater == "local"));
+        assert!(placement.rejections.iter().any(|r| {
+            r.theater.as_deref() == Some("box") && r.reason.contains("has no `workdir`")
+        }));
+
+        // Bound to the Theater, it runs there in field mode with no checkout on the Station.
+        let mut bound = policy();
+        bound.theater = Some("box".to_owned());
+        station.checkouts.clear();
+        let placement = place(&bound, &PlacementRequest::default(), &[station]);
+        let best = placement.best().unwrap();
+        assert_eq!(
+            (best.theater.as_str(), best.mode),
+            ("box", ExecutionMode::Field)
+        );
     }
 
     #[test]

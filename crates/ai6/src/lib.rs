@@ -33,8 +33,9 @@ pub use directorates::m::roster::{
     AgentRole, CoverIdentity, Operation, Roster, RosterError, Workspace,
 };
 pub use directorates::m::theaters::{
-    AgentMode, Egress, EgressKind, LOCAL_THEATER, SshAccess, Theater, TheaterAccess, TheaterError,
-    TheaterKind, TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
+    AgentMode, Egress, EgressKind, LOCAL_THEATER, RunnerSettings, SshAccess, Theater,
+    TheaterAccess, TheaterError, TheaterKind, TheaterSummary, Theaters, TransportAccess,
+    is_sha256_pin,
 };
 pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure, ExposureDefinition,

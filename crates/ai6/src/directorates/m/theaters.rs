@@ -9,18 +9,21 @@
 //! agents = "auto"
 //! egress = "direct"
 //! harnesses = ["claude"]
+//! runner = { command = "/opt/ai6/bin/ai6", plugin_paths = ["/opt/ai6/lib"] }
 //! ```
 //!
 //! A Station's own host is always reachable as the implicit `local` Theater; declaring
-//! `[theater.local]` only adds labels to it.
+//! `[theater.local]` adds labels or a runner to it.
 //!
 //! `access` names a transport, the way in: `"local"`, `{ ssh = { … } }`, or
 //! `{ transport = { provider = "…", config = { … } } }` for any other transport provider.
 //! The transport reports what it can do (see
 //! [`Capabilities`]). The other keys state
 //! facts a transport cannot probe: `agents` says where the harness may run, `egress` how the
-//! Theater reaches the provider's API, `harnesses` which harnesses are installed there, and
-//! `workdir` where a Mission works when its Operation does not name a path on that Theater.
+//! Theater reaches the provider's API, `harnesses` which harnesses are installed there,
+//! `workdir` where a Mission works when its Operation does not name a path on that Theater,
+//! and `runner` how to reach the `ai6 runner` that supervises harnesses there (see
+//! [`RunnerSettings`]).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -269,6 +272,60 @@ impl EgressKind {
     }
 }
 
+/// A runner on a Theater: the `ai6` binary in its runner mode supervises the harness there and
+/// spools its events, so a Session outlives the Station that started it and a Station that
+/// comes back (or another one) re-attaches and replays what it missed.
+///
+/// `runner = {}` uses every default.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerSettings {
+    /// The `ai6` command on the Theater: `ai6` on its `PATH`, or the Station's own binary on
+    /// the Station's own host, when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// The runner's state directory on the Theater; the runner's own default when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_dir: Option<String>,
+    /// Directories or library files on the Theater that the runner loads providers from.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_paths: Vec<String>,
+    /// The terminal provider the runner uses; an available one, preferring `pty`, when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
+}
+
+impl RunnerSettings {
+    /// Sets the `ai6` command on the Theater.
+    #[must_use]
+    pub fn with_command(mut self, command: impl Into<String>) -> Self {
+        self.command = Some(command.into());
+        self
+    }
+
+    /// Sets the runner's state directory.
+    #[must_use]
+    pub fn with_state_dir(mut self, state_dir: impl Into<String>) -> Self {
+        self.state_dir = Some(state_dir.into());
+        self
+    }
+
+    /// Adds a directory or library file the runner loads providers from.
+    #[must_use]
+    pub fn with_plugin_path(mut self, path: impl Into<String>) -> Self {
+        self.plugin_paths.push(path.into());
+        self
+    }
+
+    /// Pins the terminal provider the runner uses.
+    #[must_use]
+    pub fn with_terminal(mut self, terminal: impl Into<String>) -> Self {
+        self.terminal = Some(terminal.into());
+        self
+    }
+}
+
 /// A host or sandbox where a Session's harness can run.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,6 +350,10 @@ pub struct Theater {
     /// this Theater; the transport's own default when absent.
     #[serde(default)]
     pub workdir: Option<String>,
+    /// The runner that supervises harnesses on the Theater; without one, the Station
+    /// supervises them itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<RunnerSettings>,
 }
 
 impl Theater {
@@ -306,7 +367,15 @@ impl Theater {
             egress: Egress::default(),
             harnesses: Vec::new(),
             workdir: None,
+            runner: None,
         }
+    }
+
+    /// Has a runner supervise the harnesses on the Theater.
+    #[must_use]
+    pub fn with_runner(mut self, runner: RunnerSettings) -> Self {
+        self.runner = Some(runner);
+        self
     }
 
     /// Adds or replaces a label.
@@ -382,6 +451,7 @@ impl Theater {
             egress: self.egress.kind(),
             harnesses: self.harnesses.clone(),
             workdir: self.workdir.clone(),
+            runner: self.runner.is_some(),
             unavailable: None,
             weakened: self.weakenings(),
         }
@@ -467,6 +537,34 @@ impl Theater {
                 "Theater {id:?}: workdir must not be empty"
             )));
         }
+        if let Some(runner) = &self.runner {
+            let text = |value: &str| !value.is_empty() && !value.chars().any(char::is_control);
+            if runner
+                .command
+                .as_deref()
+                .is_some_and(|command| !text(command))
+            {
+                return Err(TheaterError(format!(
+                    "Theater {id:?}: runner command must be non-empty text"
+                )));
+            }
+            if runner.state_dir.as_deref().is_some_and(|dir| !text(dir))
+                || runner.plugin_paths.iter().any(|path| !text(path))
+            {
+                return Err(TheaterError(format!(
+                    "Theater {id:?}: runner paths must be non-empty text"
+                )));
+            }
+            if runner
+                .terminal
+                .as_deref()
+                .is_some_and(|terminal| !word(terminal))
+            {
+                return Err(TheaterError(format!(
+                    "Theater {id:?}: runner terminal must be a provider ID"
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -534,6 +632,9 @@ pub struct TheaterSummary {
     /// The directory a remote-hands Mission works in when its Operation names no path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workdir: Option<String>,
+    /// A runner supervises harnesses on the Theater, so its Sessions outlive the Station.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub runner: bool,
     /// Why the Station cannot reach the Theater now: no transport provider, or the last
     /// contact failed. Absent when it can.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -605,6 +706,8 @@ impl Theaters {
             harnesses: Vec<String>,
             #[serde(default)]
             workdir: Option<String>,
+            #[serde(default)]
+            runner: Option<RunnerSettings>,
         }
         let document: Document = toml::from_str(text).map_err(|e| TheaterError(e.to_string()))?;
         let mut theaters = Self::default();
@@ -617,6 +720,7 @@ impl Theaters {
                 egress: definition.egress,
                 harnesses: definition.harnesses,
                 workdir: definition.workdir,
+                runner: definition.runner,
             })?;
         }
         Ok(theaters)
@@ -729,6 +833,40 @@ harnesses = ["claude", "codex"]
             serde_json::to_string(&phone.summary())
                 .unwrap()
                 .contains(r#""provider":"adb""#)
+        );
+    }
+
+    #[test]
+    fn a_runner_is_declared_with_defaults_and_published_as_a_fact() {
+        let theaters = Theaters::parse(
+            r#"
+[theater.local]
+access = "local"
+runner = {}
+
+[theater.box]
+access = { ssh = { host = "b.example" } }
+runner = { command = "/opt/ai6/bin/ai6", state_dir = "/var/lib/ai6/runner", plugin_paths = ["/opt/ai6/lib"], terminal = "pty" }
+"#,
+        )
+        .unwrap();
+        let local = theaters.find("local").unwrap();
+        assert_eq!(local.runner, Some(RunnerSettings::default()));
+        let remote = theaters.find("box").unwrap();
+        let runner = remote.runner.clone().unwrap();
+        assert_eq!(runner.command.as_deref(), Some("/opt/ai6/bin/ai6"));
+        assert_eq!(runner.plugin_paths, ["/opt/ai6/lib"]);
+        let published = serde_json::to_value(remote.summary()).unwrap();
+        assert_eq!(published["runner"], true);
+        assert!(!published.to_string().contains("/opt/ai6"));
+        assert!(
+            Theaters::parse("[theater.box]\naccess = \"local\"\nrunner = { tmux = true }\n")
+                .is_err(),
+            "unknown runner settings are refused"
+        );
+        assert!(
+            Theaters::parse("[theater.box]\naccess = \"local\"\nrunner = { command = \"\" }\n")
+                .is_err()
         );
     }
 
