@@ -85,6 +85,8 @@ pub enum SessionState {
     Blocked,
     /// The operation stopped reporting progress.
     Stalled,
+    /// A provider usage limit paused the operation until its quota resets.
+    Parked,
     /// The operation finished.
     Done,
     /// The agent operation exited unsuccessfully.
@@ -392,6 +394,7 @@ fn parse_state(state: &str) -> Option<SessionState> {
         "working" => Some(SessionState::Working),
         "blocked" => Some(SessionState::Blocked),
         "stalled" => Some(SessionState::Stalled),
+        "parked" => Some(SessionState::Parked),
         "done" => Some(SessionState::Done),
         "failed" => Some(SessionState::Failed),
         _ => None,
@@ -414,6 +417,7 @@ fn state_name(state: SessionState) -> &'static str {
         SessionState::Working => "working",
         SessionState::Blocked => "blocked",
         SessionState::Stalled => "stalled",
+        SessionState::Parked => "parked",
         SessionState::Done => "done",
         SessionState::Failed => "failed",
     }
@@ -651,6 +655,24 @@ mod tests {
         assert_eq!(
             receiver.accept(&resize_value).unwrap(),
             Some(IncomingFrame::Resize(resize))
+        );
+    }
+
+    #[test]
+    fn a_parked_session_round_trips_through_the_receiver() {
+        let event = LifecycleEvent {
+            operation_id: OperationId::new("station-a").unwrap(),
+            mission_id: MissionId::new("mission-17").unwrap(),
+            session_id: SessionId::new("provider-run-3").unwrap(),
+            state: SessionState::Parked,
+            sequence: 4,
+        };
+        let (schema, value) = lifecycle_frames(&event).unwrap();
+        let mut receiver = FrameReceiver::new();
+        assert_eq!(receiver.accept(&schema).unwrap(), None);
+        assert_eq!(
+            receiver.accept(&value).unwrap(),
+            Some(IncomingFrame::Lifecycle(event))
         );
     }
 

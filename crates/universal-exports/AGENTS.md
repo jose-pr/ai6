@@ -311,7 +311,7 @@ too, and their configured capacity counts toward the aggregate budget.
 `publish_lifecycle` and `publish_terminal_output` are the higher-level M path:
 they construct guatiao values with the shared protocol crate, announce each
 channel schema on first use, then submit the value through the same validation
-and fanout path. Lifecycle state accepts `working`, `blocked`, `stalled`,
+and fanout path. Lifecycle state accepts `working`, `blocked`, `stalled`, `parked` (a provider usage limit),
 `done` and `failed`. The HTTP routes use JSON for lifecycle metadata and raw
 bytes for terminal output; both remain bearer-authenticated as M.
 

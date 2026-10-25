@@ -2773,6 +2773,7 @@ async fn publish_lifecycle(
         "working" => SessionState::Working,
         "blocked" => SessionState::Blocked,
         "stalled" => SessionState::Stalled,
+        "parked" => SessionState::Parked,
         "done" => SessionState::Done,
         "failed" => SessionState::Failed,
         _ => return Err(ApiError::bad_request()),
@@ -3217,7 +3218,10 @@ fn validate_lifecycle_value(
     if station != operation_id.as_str()
         || mission != mission_id.as_str()
         || session != session_id.as_str()
-        || !matches!(state, "working" | "blocked" | "stalled" | "done" | "failed")
+        || !matches!(
+            state,
+            "working" | "blocked" | "stalled" | "parked" | "done" | "failed"
+        )
         || sequence != expected_sequence
     {
         return Err(GatewayError::Forbidden);
@@ -3842,9 +3846,41 @@ mod tests {
             3
         );
 
-        let denied = client
+        // A Session a provider limit paused is a board state of its own.
+        let parked = client
             .post(format!(
                 "{base}/v1/station/sessions/provider-session-a/lifecycle/3"
+            ))
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "operation_id": "station-a",
+                "mission_id": "mission-a",
+                "state": "parked"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(parked.status(), StatusCode::ACCEPTED);
+        let session = observer.board_missions().await.remove(0).sessions.remove(0);
+        assert_eq!(session.state.as_deref(), Some("parked"));
+        let unknown = client
+            .post(format!(
+                "{base}/v1/station/sessions/provider-session-a/lifecycle/4"
+            ))
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "operation_id": "station-a",
+                "mission_id": "mission-a",
+                "state": "paused"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+
+        let denied = client
+            .post(format!(
+                "{base}/v1/station/sessions/provider-session-a/lifecycle/4"
             ))
             .json(&serde_json::json!({
                 "operation_id": "station-a",

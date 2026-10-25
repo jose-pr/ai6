@@ -42,7 +42,7 @@ work; a provider Session ID identifies one resumable agent operation.
 ## Board events
 
 ```rust
-pub enum SessionState { Working, Blocked, Stalled, Done, Failed }
+pub enum SessionState { Working, Blocked, Stalled, Parked, Done, Failed }
 pub struct SessionSnapshot {
     pub operation_id: OperationId,
     pub mission_id: MissionId,

@@ -730,6 +730,13 @@ void main() {
               'state': 'blocked',
               'sequence': 9,
             },
+            {
+              'operation_id': 'operation-alpha',
+              'mission_id': 'mission-007',
+              'session_id': 'claude-session-789',
+              'state': 'parked',
+              'sequence': 3,
+            },
           ]),
           200,
         );
@@ -747,6 +754,7 @@ void main() {
     expect(find.text('codex-session-456'), findsOneWidget);
     expect(find.text('WORKING'), findsOneWidget);
     expect(find.text('BLOCKED'), findsOneWidget);
+    expect(find.text('PARKED'), findsOneWidget);
 
     await tester.tap(navLabel('Stations'));
     await tester.pumpAndSettle();
@@ -787,10 +795,16 @@ void main() {
     expect(find.text('claude-session-123'), findsNothing);
     expect(find.text('codex-session-456'), findsOneWidget);
 
+    await tester.tap(find.byTooltip('Filter by parked'));
+    await tester.pumpAndSettle();
+    expect(find.text('claude-session-789'), findsOneWidget);
+    expect(find.text('codex-session-456'), findsNothing);
+
     await tester.tap(find.byTooltip('Show all Sessions'));
     await tester.pumpAndSettle();
     expect(find.text('claude-session-123'), findsOneWidget);
     expect(find.text('codex-session-456'), findsOneWidget);
+    expect(find.text('claude-session-789'), findsOneWidget);
 
     await tester.tap(find.text('claude-session-123'));
     await tester.pumpAndSettle();
