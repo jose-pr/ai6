@@ -87,15 +87,20 @@ and Cable bodies and briefs are untrusted text.
 recorded human approvals of irreversible steps (a push to a protected branch, a release,
 a deletion).
 
+## Built from the same lore
+
+| Name | Canon | Owns |
+| --- | --- | --- |
+| **Sleepers** | real tradecraft | Standing orders: a schedule wakes an Agent with a set brief, once each authorized by M (`operation.<id>.sleepers`) |
+| **CX report** | real (SIS reporting) | The outcome report a Source receives when its Mission ends: an issue comment, a Jira transition |
+
 ## Planned posts
 
 | Name | Canon | Would own |
 | --- | --- | --- |
 | **Chief of Staff** | novel, film (Bill Tanner) | Vetting briefs and budgets before M accepts them |
 | **Head of Station** | novel (*The Man with the Golden Gun*: "Heads of Station"), real (SIS) | A long-lived agent per Station: local logistics, Theater setup, safe houses |
-| **Sleepers** | real tradecraft | Standing orders: a trigger (CI failed, a label added, a schedule) wakes an Agent with a set brief |
 | **Bona fides** | real (proof something is genuine) | Provenance and signatures for briefs, providers and hooks |
-| **CX report** | real (SIS reporting) | The outcome report sent back to whoever asked: an issue comment, a PR summary |
 | **Liaison** | real | A2A federation with agent systems outside AI6 |
 
 ## Field dictionary

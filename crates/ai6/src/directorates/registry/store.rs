@@ -239,7 +239,7 @@ impl MissionProposal {
     }
 }
 
-/// Metadata-only audit event stored in the shared file-backed I Registry.
+/// Metadata-only audit event stored in the shared file-backed Registry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditRecord {
@@ -976,7 +976,7 @@ impl FileRegistry {
             .join(format!("{digest}.json"))
     }
 
-    /// Stores revocable access-token metadata under the cross-language I Registry.
+    /// Stores revocable access-token metadata under the shared Registry.
     ///
     /// Only the SHA-256 digest is retained; the bearer secret is returned to its issuer
     /// once and is never written to the Registry. Token IDs and digests are unique.

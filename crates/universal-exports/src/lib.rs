@@ -448,7 +448,7 @@ impl Gateway {
         }
     }
 
-    /// Creates a gateway backed by the shared I Registry for user access tokens.
+    /// Creates a gateway backed by the shared Registry for user access tokens.
     pub fn with_registry(config: GatewayConfig, registry: FileRegistry) -> Self {
         let mut gateway = Self::new(config);
         gateway.registry = Some(registry);

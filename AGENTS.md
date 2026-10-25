@@ -9,7 +9,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 
 | Path | What |
 | --- | --- |
-| `crates/ai6/` | The Station daemon and AI6 contracts: `ai6::directorates::{m,i,q,section_00,medical}` decide, `ai6::station` runs; `ai6` command |
+| `crates/ai6/` | The Station daemon and AI6 contracts: `ai6::directorates::{m,registry,q,section_00,medical}` decide, `ai6::station` runs; `ai6` command |
 | `crates/universal-exports/` | Universal Exports: the authenticated public API gateway and `universal-exports` command |
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The read-only operator command |

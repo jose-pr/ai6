@@ -123,23 +123,23 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/user/operations/{operation_id}/placement-preview` | Require `mission.read`; return where a Mission for the Operation would run (Station, Theater, Agent, best first) and a reason for every place ruled out. Optional `agent`, `role`, `stations` and `tags` narrow it. |
 | `GET` | `/v1/missions` | Group registered provider Sessions by Mission and apply `mission.read` to each Operation. |
 | `GET` | `/v1/operations/{operation_id}/missions/{mission_id}` | Return one authorized Mission and its AI6-published brief and sanitized launch manifest. |
-| `GET` | `/v1/auth/session` | Validate the bearer access token against the shared I Registry and return its person and expiry. |
+| `GET` | `/v1/auth/session` | Validate the bearer access token against the shared Registry and return its person and expiry. |
 | `POST` | `/v1/station/access-tokens` | Issue a person-bound access token after M authenticates the user; the raw token is returned once. Body: `{"person_id":"…","ttl_seconds":600}`. |
-| `DELETE` | `/v1/station/access-tokens/{token_id}` | Revoke a token across gateway replicas sharing the I Registry. |
+| `DELETE` | `/v1/station/access-tokens/{token_id}` | Revoke a token across gateway replicas sharing the Registry. |
 | `POST` | `/v1/station/sessions` | Register an Operation, Mission ID and provider Session ID, optionally with the authoritative Mission brief and sanitized launch manifest; returns `{"next_sequence": N}`. |
 | `POST` | `/v1/station/sessions/{session_id}/lifecycle/{sequence}` | Publish JSON lifecycle state; the gateway encodes the guatiao event. |
 | `POST` | `/v1/station/sessions/{session_id}/terminal/{sequence}` | Publish raw terminal bytes; the gateway encodes the guatiao event. |
 | `POST` | `/v1/station/sessions/{session_id}/events/{sequence}` | Ingest one guatiao frame. Schema/close frames use cursor `0`; values use a positive event sequence. |
 | `POST` | `/v1/station/attach-grants` | Issue a read or write token within M's Station grant. |
 | `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token. |
-| `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the I Registry. |
+| `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the Registry. |
 | `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `session.read`, `session.input`, `audit.read`, `agent.read` and `agent.configure` actions by authorized Operation. |
 | `GET` | `/v1/user/audit?operation_id=<id>&limit=<n>` | Return up to 500 newest metadata-only audit records authorized by `audit.read` for each Operation. |
 | `GET` | `/v1/user/operations/{operation_id}/agent-roles` | Require `agent.read`; return the Headquarters Station role catalog merged with this Operation's validated overrides. Each role has `operation_override` to identify whether it replaces the Station definition. |
-| `PUT` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; validate and store a purpose, policy and ordered handler/model/effort candidate list in the shared I Registry. |
+| `PUT` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; validate and store a role purpose and policy in the shared Registry. |
 | `DELETE` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; remove the Operation override, fall back to the Station definition and record a metadata-only audit event. |
 | `POST` | `/v1/user/attach-grants` | Issue a Session attach token only when `session.read` or `session.input` is allowed at that Station. |
-| `POST` | `/v1/user/operations/{operation_id}/missions` | Require `mission.create` for the Operation and atomically enqueue the bounded title and explicit brief in the shared I Registry. |
+| `POST` | `/v1/user/operations/{operation_id}/missions` | Require `mission.create` for the Operation and atomically enqueue the bounded title and explicit brief in the shared Registry. |
 | `GET` | `/v1/user/operations/{operation_id}/mission-proposals` | Require `mission.create`; list bounded pending Agent proposals for review in that Operation. |
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve` | Require `mission.create`; record the approving operator and promote the proposal into scheduler-visible intake. |
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/reject` | Require `mission.create`; record the rejecting operator and file the proposal outside runnable intake. |
@@ -168,7 +168,7 @@ every connection comes from the proxy, so name the header it fills with the clie
 (`x-forwarded-for` or `x-real-ip`) or every client shares one count.
 Successful login returns a short-lived user bearer token. Password secrets are
 never logged or persisted. `/v1/auth/logout`
-revokes that token in the shared Registry. The I Registry stores only a domain-separated
+revokes that token in the shared Registry. The Registry stores only a domain-separated
 SHA-256 digest, person ID, issue/expiry times, and revocation time. Token secrets are
 returned only once. `/v1/board` and `/v1/missions` apply `mission.read` per Operation;
 user attach grants apply `session.read` or `session.input` to the exact registered Operation and

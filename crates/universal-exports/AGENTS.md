@@ -203,7 +203,7 @@ Both models are non-exhaustive; downstream Rust code should deserialize them or
 read their public fields instead of constructing struct literals.
 
 `GET /v1/stations` returns this user's visible Station check-ins and hosted Operations
-from the shared I Registry. A Station is healthy when its check-in is no older than 45
+from the shared Registry. A Station is healthy when its check-in is no older than 45
 seconds; stale check-ins remain visible as offline. `headquarters_station` and each
 Station's `headquarters` marker are populated only for an unexpired elected Headquarters
 lease. The route filters Operations using `mission.read` and omits host and process
@@ -381,13 +381,13 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. |
 | `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role actions; Station grants include `station.read`, `station.configure` and `audit.read`. Every action is computed by the Authorizer, not inferred from directory groups. |
 | `GET /v1/user/audit?operation_id=<id>&station_id=<id>&limit=<n>` | Requires a user bearer and `audit.read`; the optional Operation and Station filters are mutually exclusive. Returns at most 500 newest metadata-only records, filtered by the Authorizer for each resource. Records contain actor, action, resource scope, target and time; prompts, terminal output and secrets are excluded. |
-| `GET /v1/user/operations/{operation_id}/agent-roles` | Requires `agent.read`; returns the Headquarters Station catalog merged with validated Operation-scoped I Registry overrides. Each role includes `operation_override` provenance. |
+| `GET /v1/user/operations/{operation_id}/agent-roles` | Requires `agent.read`; returns the Headquarters Station catalog merged with validated Operation-scoped Registry overrides. Each role includes `operation_override` provenance. |
 | `PUT /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; validates and stores the role override and records only actor/action/Operation/role ID/time in audit. |
 | `DELETE /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; removes the override, falls back to the Station definition and records a metadata-only audit event. |
 | `GET /v1/user/stations/{station_id}/settings` | Requires `station.read`; returns the live concurrent Mission limit, whether it has an explicit Registry override, and whether the Station has the execution role. |
-| `PUT /v1/user/stations/{station_id}/settings` | Requires `station.configure`; execution Stations only; validates a 1–1,024 concurrent Mission limit, persists it in the shared I Registry, and records a Station-scoped metadata-only audit event. |
+| `PUT /v1/user/stations/{station_id}/settings` | Requires `station.configure`; execution Stations only; validates a 1–1,024 concurrent Mission limit, persists it in the shared Registry, and records a Station-scoped metadata-only audit event. |
 | `POST /v1/user/attach-grants` | Requires a user bearer; checks `session.read` or `session.input` at the registered Operation before issuing an attach token. |
-| `POST /v1/user/operations/{operation_id}/missions` | Requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared I Registry; returns the queued Mission ID. The body may carry `stations` to limit the Mission to those Stations (it can only narrow the Operation's list). |
+| `POST /v1/user/operations/{operation_id}/missions` | Requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared Registry; returns the queued Mission ID. The body may carry `stations` to limit the Mission to those Stations (it can only narrow the Operation's list). |
 | `GET /v1/auth/session` | Validates a user bearer and reports its token ID, person ID and expiry. |
 | `POST /v1/station/sessions` | Bearer-authenticated registration request with `operation_id`, `mission_id`, `session_id`, and optional sanitized Mission brief metadata. |
 | `POST /v1/station/sessions/{session_id}/lifecycle/{sequence}` | Bearer-authenticated JSON lifecycle update with Station, Mission ID and state. |
