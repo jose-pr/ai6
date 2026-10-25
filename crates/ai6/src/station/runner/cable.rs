@@ -114,8 +114,14 @@ fn refuse(status: StatusCode, message: &str) -> Response {
 }
 
 async fn relay(State(shared): State<Shared>, request: Request) -> Response {
-    let presented = request
-        .headers()
+    // The body is read before any refusal: answering an unread request and closing makes
+    // Windows abort the client's send instead of delivering the status.
+    let (parts, body) = request.into_parts();
+    let Ok(body) = axum::body::to_bytes(body, MAX_REQUEST).await else {
+        return refuse(StatusCode::PAYLOAD_TOO_LARGE, "the request is too large");
+    };
+    let presented = parts
+        .headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
@@ -128,10 +134,6 @@ async fn relay(State(shared): State<Shared>, request: Request) -> Response {
             StatusCode::SERVICE_UNAVAILABLE,
             "no Station is attached to this Session now; try again later",
         );
-    };
-    let (parts, body) = request.into_parts();
-    let Ok(body) = axum::body::to_bytes(body, MAX_REQUEST).await else {
-        return refuse(StatusCode::PAYLOAD_TOO_LARGE, "the request is too large");
     };
     let mut forward = ureq::http::Request::builder()
         .method(parts.method.as_str())
