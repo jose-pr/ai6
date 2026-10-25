@@ -22,7 +22,7 @@ publish = false
 
 [workspace.dependencies]
 # guatiao main, pinned until a release carries what these crates use.
-guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "c68361008a0e58c644fb0a3c4cfe107114cf22e9" }
+guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "1738fa73a2871df2f355c631026a8c6dbb94fa92" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
