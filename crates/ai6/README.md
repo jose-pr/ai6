@@ -38,7 +38,7 @@ cargo add ai6 --git https://github.com/jose-pr/ai6
 | `daemon` | The Station's private HTTP service, scheduler, Guatiao provider host and watchdogs. | No |
 | `publisher` | Bounded publication of lifecycle events and raw terminal bytes to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
-| `station-tls` | Persistent Station certificate identities and pinned-peer or CA mutual TLS. | No |
+| `station-tls` | Persistent Station certificate identities and pinned-peer or CA mutual TLS, on `coqui-peer-tls`. | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
 ## Quick start
@@ -89,7 +89,7 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::limits` | `OnLimit` and the parking rule for provider usage limits |
 | `ai6::directorates::m::identity` | Validated `MissionId`, provider-issued `SessionId` and access-token records |
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
-| `ai6::directorates::m::access` | Authenticator, Directory and Authorizer kinds and the built-in `RoleAuthorizer` |
+| `ai6::directorates::m::access` | The shared `coqui-access` kinds and `coqui-roles` authorizer, AI6's scope kinds and actions, and the `access.toml` reader |
 | `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
 | `ai6::directorates::registry::sessions` | Shared, fenced Session records: lease, fencing token, attempt and predecessor |
 | `ai6::directorates::registry::sleepers` | Sleepers: cron standing orders, their authorization and per-window briefs |
@@ -161,8 +161,12 @@ scope = "operation:G"
 role = "viewer"
 ```
 
-It is also the `ai6_roles` Guatiao provider. Authentication and directories come from the
-`ai6-access-*` provider crates.
+`ai6::role_authorizer_from_toml` reads this format into a `coqui-roles` `RoleAuthorizer` that
+accepts only AI6's scope kinds. The same authorizer is the `coqui_roles` Guatiao provider
+(configured with `scope_kinds`, `roles` and `rules`). Authentication and directories come from
+the [`coqui-access`](https://github.com/Boriken-Dev/coqui-access) provider libraries
+(`coqui_access_local`, `_key`, `_ldap`, `_proxy` and `_peer`), which a Station or Universal
+Exports loads from `--plugin-path`.
 
 ## Development
 

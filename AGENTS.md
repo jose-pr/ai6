@@ -13,7 +13,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | `crates/universal-exports/` | Universal Exports: the authenticated public API gateway and `universal-exports` command |
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The read-only operator command |
-| `crates/providers/{agents,terminals,safehouses,sources,access}/` | Guatiao providers: Claude/Codex handlers, the `pty` terminal, the `git` and `copy` safe houses, GitHub and Jira Sources, access providers |
+| `crates/providers/{agents,terminals,safehouses,sources}/` | Guatiao providers: Claude/Codex handlers, the `pty` terminal, the `git` and `copy` safe houses, GitHub and Jira Sources |
 | `clients/moneypenny/` | Moneypenny, the Flutter desktop/web operator app |
 | `examples/config/` | A runnable Operation and Agent roster |
 | `docs/`, `mkdocs.yml` | Narrative guides; the Rust API reference is published under `/rust/` |
@@ -50,6 +50,11 @@ The Flutter app needs the isolated Flutter `main` SDK described in
   distinct contracts.
 - Directorates are modules of the `ai6` crate. Providers live under `crates/providers/` and
   carry their own Guatiao entry point; do not add forwarding-only crates.
+- Access kinds, the role authorizer, the access providers and Station mutual TLS are the shared
+  `coqui-access`, `coqui-roles`, `coqui-peer` and `coqui-peer-tls` crates, pinned by git
+  revision beside Guatiao; AI6 keeps only its scope kinds, actions and where it stores things.
+  The host's tests build the access plugins as dev-dependencies and load them from beside the
+  test binary: clean `target/` after a plugin is renamed, since the host loads every library.
 - A project's `.ai6/` configuration is read only for a registered Operation.
 - Names come from the Bond / SIS lore in `docs/organization.md`; use a field name only
   where the code has the thing.

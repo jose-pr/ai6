@@ -197,6 +197,7 @@ stream so an attached viewer's emulator does not answer a second time.
 | `crates/providers/agents/` | Rust | Claude and Codex AgentHandler providers |
 | `crates/providers/terminals/pty/` | Rust | The `pty` terminal provider (openpty / ConPTY) |
 | `crates/providers/safehouses/` | Rust | The `git` (worktree) and `copy` (plain directory) safe-house providers |
-| `crates/providers/access/` | Rust | Key, LDAP, local, peer-certificate and reverse-proxy access providers |
+| `coqui-access` (shared, git dependency) | Rust | Access kinds, the role authorizer and the key, LDAP, local, peer-certificate and reverse-proxy access providers, loaded as plugin libraries |
+| `coqui-peer-tls` (shared, git dependency) | Rust | Station identity, fingerprints, trust store and mutual TLS |
 | `clients/moneypenny/` | Dart/Flutter | The Moneypenny operator app for desktop and web |
 | `examples/config/` | TOML | A runnable Operation and Agent roster |

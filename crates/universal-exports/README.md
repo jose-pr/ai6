@@ -68,15 +68,16 @@ universal-exports --public-origin https://exports.example
 
 User access requires a Directory and an authorization policy. Login can use a
 Guatiao Authenticator or an identity asserted by the trusted reverse proxy.
-Provider config is
-read from a JSON object file and validated against each provider's Guatiao schema.
-For example, local accounts use the same `{"path":"accounts.toml"}` config for
-both provider kinds. Pass its path with `--authenticator-config` and
-`--directory-config`; select the provider IDs with `--authenticator` and
-`--directory`.
+Providers are the loadable libraries of
+[`coqui-access`](https://github.com/Boriken-Dev/coqui-access) (`--plugin-path` names the
+directory they are in). Provider config is read from a JSON object file and validated
+against each provider's Guatiao schema. For example, local accounts use the same config
+for both provider kinds. Pass its path with `--authenticator-config` and
+`--directory-config`; select the provider IDs (`coqui_access_local`) with `--authenticator`
+and `--directory`.
 
 ```json
-{"path":"accounts.toml"}
+{"source": {"file": {"path": "accounts.toml", "format": "toml"}}}
 ```
 
 The JSON config is limited to 1 MiB and 64 nested values. Provider-specific data
@@ -86,7 +87,7 @@ For an existing authenticated reverse proxy, configure the same identity header
 it already asserts upstream:
 
 ```powershell
-$env:AI6_EXPORTS_DIRECTORY = 'ai6-access-local'
+$env:AI6_EXPORTS_DIRECTORY = 'coqui_access_local'
 $env:AI6_EXPORTS_DIRECTORY_CONFIG = 'C:\secure\accounts.json'
 $env:AI6_EXPORTS_PROXY_USER_HEADER = 'X-Forwarded-User'
 $env:AI6_EXPORTS_PROXY_LOOKUP_BY = 'name'
@@ -158,6 +159,13 @@ or absent proxy identity is rejected. For local desktop sign-in, an Authenticato
 can be configured alongside the proxy identity or used on its own. Browser
 `/v1/auth/login` requests must pass through the configured same-origin HTTPS proxy;
 the native desktop client can reach the loopback listener without an Origin header.
+Password and key tries are limited: before an Authenticator is asked, a try is counted against
+the client address and against the account name, and one past either count is refused with
+`429` and a `Retry-After`, whether or not its secret is right. The defaults are 5 a minute
+per address and 10 in ten minutes per name; `--login-tries-per-address`,
+`--login-tries-per-name` and `--client-address-header` change them. Behind the reverse proxy
+every connection comes from the proxy, so name the header it fills with the client address
+(`x-forwarded-for` or `x-real-ip`) or every client shares one count.
 Successful login returns a short-lived user bearer token. Password secrets are
 never logged or persisted. `/v1/auth/logout`
 revokes that token in the shared Registry. The I Registry stores only a domain-separated
@@ -205,6 +213,9 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 | `AI6_EXPORTS_ACCESS_POLICY` | TOML policy for the built-in RoleAuthorizer; alternative to `AI6_EXPORTS_AUTHORIZER`. | Deny all |
 | `AI6_EXPORTS_AUTHORIZER` | Optional custom Guatiao Authorizer provider ID; alternative to `AI6_EXPORTS_ACCESS_POLICY`. | None |
 | `AI6_EXPORTS_AUTHORIZER_CONFIG` | Path to the custom Authorizer's JSON config object. | None |
+| `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address. | `5` |
+| `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
+| `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None |
 | `AI6_REGISTRY` | Shared file Registry used for issued access-token records; SQL URLs are not supported by this Rust gateway yet. | AI6 state Registry |
 
 ## Exit status

@@ -94,5 +94,14 @@ omitted.
 ## Station identity
 
 With the `station-tls` feature, each Station has a persistent certificate:
-`ai6 identity` prints its fingerprint, `ai6 peer waiting` lists peers a listener refused,
-and `ai6 peer accept FINGERPRINT` pins one.
+`ai6 identity` prints its fingerprint (`sha256:` and 64 hex digits), `ai6 peer waiting` lists
+peers a listener refused together with the address each came from, and
+`ai6 peer accept FINGERPRINT` pins one. Any spelling of a fingerprint is read, including the
+grouped base32 earlier versions printed.
+
+Stations speak the `ai6-station/1` protocol over mutual TLS with the strict policy by default
+(TLS 1.3, SHA-2 pins). A peer is listed as waiting only after it has proved it holds its key,
+and the list is bounded per source address, in total, and by how often one peer from one
+address is written down again. A Station's `identity.pem` and `peers/` directory from an
+earlier version are read as they are. The mechanism is the shared
+[coqui-peer-tls](https://boriken-dev.github.io/coqui-peer-tls/) crate.

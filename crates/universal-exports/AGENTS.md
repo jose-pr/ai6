@@ -48,6 +48,13 @@ impl GatewayConfig {
         write_lease_ttl: Duration,
     ) -> Result<Self, GatewayError>;
     pub fn public_origin(&self) -> &str;
+    pub fn with_login_limits(self, login: LoginLimits) -> Self;
+}
+
+pub struct LoginLimits {
+    pub per_address: std::num::NonZeroU32,       // tries a minute from one address; default 5
+    pub per_name: std::num::NonZeroU32,          // tries in ten minutes for one name; default 10
+    pub address_header: Option<axum::http::HeaderName>,  // default None
 }
 ```
 
@@ -58,6 +65,18 @@ inputs and 8 fanout events. Config validation requires an HTTPS origin, a
 seconds, at most 100,000 client slots, and a maximum aggregate 512 MiB budget
 for history, fanout, input and socket write buffers. `GatewayConfig` formats its
 Station credential as `[REDACTED]`.
+
+`LoginLimits` bounds `POST /v1/auth/login` when a password or key is checked (an identity the
+trusted proxy asserts is not counted). Before any Authenticator is asked, a try is counted
+against the client address (an IPv6 address counts as its /64 network) and against the account
+name (trimmed, lowercased, the first 64 bytes). A try past either count is refused with `429`
+and a `Retry-After` of the seconds to wait, even if its secret is right; an address that is
+held off does not use up a name's tries. The gateway listens on loopback behind a reverse
+proxy, so every connection comes from the proxy: set `address_header` to the header the proxy
+fills with the client address (`x-forwarded-for`, where the last entry counts, or
+`x-real-ip`); without it, or when the header holds no address, the connection's address is
+used. The address is also given to the Authenticator as `Attempt::peer`. The counts are
+in memory and start empty at every restart.
 
 ## Authorization types
 
@@ -395,7 +414,8 @@ policy rule denies access.
 invalid configuration, authentication, scope, missing Session, capacity
 conflict, oversized/invalid frames, queue backpressure, or an invalid/expired
 credential. Error text is fixed and does not quote request data. HTTP routes
-map these to 400, 401, 403, 404, 409 or 413 responses.
+map these to 400, 401, 403, 404, 409 or 413 responses. The login route also answers
+`429` with `Retry-After` past its limits.
 
 ## Command line
 
@@ -413,7 +433,11 @@ The optional `cli` feature builds the service command:
   nested values, and is schema-validated by Guatiao. The same file can configure a
   provider used for both authentication and directory lookup. `AI6_EXPORTS_ACCESS_POLICY`
   loads the built-in role policy; `AI6_EXPORTS_AUTHORIZER` selects a custom provider
-  instead. Repeat `--plugin-path` for each provider directory or library.
+  instead. Repeat `--plugin-path` for each provider directory or library. Provider IDs
+  are those of the `coqui-access` plugin libraries (`coqui_access_local`, `coqui_access_key`,
+  `coqui_access_ldap`, `coqui_access_proxy`, `coqui_access_peer`, `coqui_roles`).
+  `--login-tries-per-address`, `--login-tries-per-name` and `--client-address-header` set
+  the login limits above.
 
 `universal-exports` returns `0` after graceful shutdown, `1` when configuration or
 listener startup fails, and `2` for invalid arguments. The read-only operator client is
@@ -437,6 +461,9 @@ The library reads no environment variables. The commands read:
 | `AI6_EXPORTS_ACCESS_POLICY` | TOML configuration for the built-in role Authorizer. | Deny all |
 | `AI6_EXPORTS_AUTHORIZER` | Optional custom Authorizer provider ID; conflicts with access-policy. | None |
 | `AI6_EXPORTS_AUTHORIZER_CONFIG` | Path to a JSON object containing the custom Authorizer's Guatiao config. | None |
+| `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address at the login route. | `5` |
+| `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
+| `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None (the connection's address) |
 | `AI6_EXPORTS_URL` | API origin for `ai6ctl`; overridden by `--server`. | `http://127.0.0.1:7082` |
 | `AI6_ACCESS_TOKEN` | User bearer required by `ai6ctl missions`, `mission`, `sessions` and `session`. | None |
 

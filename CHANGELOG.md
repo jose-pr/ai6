@@ -79,10 +79,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Q Branch: bounded loadout catalogs, Mission-scoped secret leases, Claude MCP
   configuration and bubblewrap argument translation.
 - Station identities (`station-tls` feature): persistent certificates, SHA-256
-  fingerprints, pinned-peer or CA mutual TLS and a waiting/accepted peer store.
-- Access kinds: Authenticator, Directory and Authorizer as Guatiao kinds, the built-in
-  first-match `RoleAuthorizer`, and providers `ai6-access-key`, `ai6-access-ldap`,
-  `ai6-access-local`, `ai6-access-peer` and `ai6-access-proxy`.
+  fingerprints, pinned-peer or CA mutual TLS and a waiting/accepted peer store, on the shared
+  `coqui-peer-tls` and `coqui-peer` crates. The strict policy is the default (TLS 1.3, SHA-2
+  pins); the waiting list is bounded per source address, in total and by re-record time, a peer
+  is listed only after it proved its key, and `ai6 peer waiting` shows each source address.
+- Access kinds: Authenticator, Directory, Authorizer and Accounts as Guatiao kinds from the shared
+  `coqui-access` crate, the first-match `RoleAuthorizer` from `coqui-roles`, and the providers
+  `coqui_access_local`, `_key`, `_ldap`, `_proxy`, `_peer` and `coqui_roles`, loaded as plugin
+  libraries from `--plugin-path`.
+- Universal Exports limits login tries: 5 a minute per client address and 10 in ten minutes per
+  account name by default, refused with `429` and `Retry-After` before any Authenticator is
+  asked. `--login-tries-per-address`, `--login-tries-per-name` and `--client-address-header`
+  (or `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS`, `_PER_NAME`, `AI6_EXPORTS_CLIENT_ADDRESS_HEADER`)
+  change them; `LoginLimits` and `GatewayConfig::with_login_limits` do the same in code.
 - Agent handlers `ai6-agent-claude` (Claude Code stream-json) and `ai6-agent-codex` (Codex
   app-server), and the `ai6-terminal-pty` terminal provider (openpty on Unix, ConPTY with
   Job Objects on Windows).
@@ -125,8 +134,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Projects are configured as Operations in `operations.toml` (formerly `stations.toml`);
   Agents and roles in `agents.toml`. A Station is now the node running the daemon.
 
+- The guatiao pin moved to the revision the shared crates use.
+- Breaking, access kinds. The kinds are `coqui_authenticator`, `coqui_directory`,
+  `coqui_authorizer` and `coqui_accounts` (they were `lineupmux_*`), so providers built for
+  any host load here. `Attempt::headers` is an ordered `Vec<(String, String)>` instead of a
+  map. `ai6::RoleAuthorizer::from_toml` and `load` are `ai6::role_authorizer_from_toml` and
+  `load_role_authorizer`; `RoleAuthorizerConfig` and `RoleAuthorizerProvider` are gone. The
+  `access.toml` format is unchanged. The `coqui_roles` provider replaces `ai6_roles` and takes
+  `scope_kinds`, `roles` and `rules` instead of `policy_toml`.
+- Breaking, provider ids and configuration. Pass `--plugin-path` to the directory of the
+  `coqui-access` plugin libraries and change the ids and configs:
+  - `ai6_auth_local` is `coqui_access_local`: `{"path": P}` is
+    `{"source": {"file": {"path": P}}}`. The `[[accounts]]` file is unchanged.
+  - `ai6_auth_key` is `coqui_access_key`: `{"path": P}` is
+    `{"source": {"file": {"path": P}}, "prefix": "ai6_"}` (the prefix keeps issued keys
+    working; new keys use it too). Every `hash` in the `[[keys]]` file gets a `sha256:` label
+    (`sha256:<hex>`); a bare digest is refused.
+  - `ai6_auth_peer` is `coqui_access_peer`: `{"path": P}` is `{"source": {"file": {"path": P}}}`.
+    The `[[peers]]` file is unchanged and its `certificate` may stay in any fingerprint spelling.
+  - `ai6_auth_ldap` is `coqui_access_ldap` and `ai6_auth_proxy` is `coqui_access_proxy`; their
+    configs are unchanged.
+- Breaking, Station TLS. `ai6::station::identity` is built on `coqui-peer-tls`: `StationIdentity`
+  is `Identity`, `StationFingerprint` is `Fingerprint`, `PeerTrustStore` is `TrustStore`,
+  `TlsTrust` is `Trust`, and `client_config`/`server_config` take a `Policy` and return
+  `Built<..>`; none is re-exported at the crate root. Handshakes are TLS 1.3 only unless the
+  policy allows 1.2. Fingerprints print as `sha256:<hex>`; every earlier spelling is still read.
+  An `identity.pem` and a `peers/` store from before load unchanged.
+
 ### Removed
 
+- The crates `ai6-access-key`, `ai6-access-ldap`, `ai6-access-local`, `ai6-access-peer` and
+  `ai6-access-proxy`; the `coqui-access` plugin libraries replace them.
 - The Python packages `coagent-00`, `coagent-i` and `coagent-m`, their commands and their
   `COAGENT_*` environment variables, and the `q/` placeholder.
 

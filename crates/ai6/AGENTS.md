@@ -10,13 +10,12 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | `daemon` | The Station's HTTP service, scheduler and Guatiao provider host. | No |
 | `publisher` | Bounded lifecycle and raw terminal-byte publication to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
-| `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS. | No |
+| `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS (`coqui-peer-tls`). | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
-MSRV: Rust 1.89. The crate depends on Guatiao, serde, fs2, sha2, lru and zeroize.
+MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, serde, toml, fs2, sha2, lru and zeroize.
 `daemon` adds Axum, Tokio and Guatiao provider loading, `publisher` adds `ureq` and
-`url`, and `station-tls` adds rustls, tokio-rustls, rcgen, PEM/X.509 parsing and
-certificate-name globs. `cli` adds clap and Tokio signal support. The crate builds as a
+`url`, and `station-tls` adds `coqui-peer-tls`, `coqui-peer` and rustls. `cli` adds clap and Tokio signal support. The crate builds as a
 Rust library and contains no `unsafe` code. `cables-mcp` adds RMCP's Streamable HTTP
 server, JSON Schema support, constant-time bearer checks and per-Session tokens; the
 default feature set remains dependency-light.
@@ -33,66 +32,58 @@ exposes `ai6 serve`, `ai6 identity` and `ai6 peer waiting|accept`.
 
 ## Access contracts (`ai6::directorates::m::access`)
 
+The access kinds, their models and the first-match role authorizer belong to the shared
+[`coqui-access`](https://github.com/Boriken-Dev/coqui-access) and `coqui-roles` crates
+(their API headers describe every field and method) and are re-exported here and at the
+`ai6` root: `Authenticator`, `Directory`, `Authorizer`, `Accounts`, `Attempt`, `Lookup`,
+`Verdict`, `Person`, `AuthorizationRequest`, `AuthorizationDecision`, `AccountInfo`,
+`AccountPut`, `PutOutcome`, `Waiting`, `Description`, `KIND_PREFIX`, `Role`, `Rule`,
+`RolePolicy`, `RolePolicyError`, `RoleAuthorizer` and `RoleAuthorizerBuilder`. The Guatiao
+kinds are `coqui_authenticator`, `coqui_directory`, `coqui_authorizer` and `coqui_accounts`;
+the old `lineupmux_*` names are gone, so a provider built for any host loads here.
+`Attempt::headers` is an ordered `Vec<(String, String)>`.
+
+What AI6 adds:
+
 ```rust
-pub struct Attempt {
-    pub name: Option<String>,
-    pub secret: Option<String>,
-    pub headers: BTreeMap<String, String>,
-    pub peer: Option<String>,
-    pub secure: Option<bool>,
-    pub certificate: Option<String>,
-}
-pub struct Lookup { pub by: String, pub value: String }
-pub enum Verdict { Unknown, Invalid, Valid(Lookup) }
-pub struct Person {
-    pub id: String,
-    pub name: String,
-    pub display_name: Option<String>,
-    pub email: Option<String>,
-    pub groups: Vec<String>,
-    pub attributes: BTreeMap<String, guatiao::Value>,
-}
-pub trait Authenticator {
-    fn authenticate(&self, attempt: Attempt) -> Result<Verdict, guatiao::library::ProviderError>;
-}
-pub trait Directory {
-    fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, guatiao::library::ProviderError>;
-}
-pub struct AuthorizationRequest { pub person: Person, pub action: String, pub resource: String }
-pub struct AuthorizationDecision {
-    pub allowed: bool,
-    pub limits: BTreeMap<String, guatiao::Value>,
-}
-pub trait Authorizer {
-    fn authorize(&self, request: AuthorizationRequest)
-        -> Result<AuthorizationDecision, guatiao::library::ProviderError>;
-}
-pub struct RoleAuthorizer;
-#[non_exhaustive]
-pub struct RolePolicyError;
-impl core::error::Error for RolePolicyError;
-impl RoleAuthorizer {
-    pub fn from_toml(source: &str) -> Result<Self, RolePolicyError>;
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, RolePolicyError>;
-}
-#[non_exhaustive]
-pub struct RoleAuthorizerConfig { pub policy_toml: String }
-pub struct RoleAuthorizerProvider;
+pub const SCOPE_KINDS: [&str; 3] = ["station", "operation", "theater"];
+pub const ACTIONS: &[&str];   // agent.configure, agent.read, audit.read, mission.create,
+                              // mission.read, session.input, session.read,
+                              // station.configure, station.read
+pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
+pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError>;
+pub fn load_role_authorizer(path: impl AsRef<Path>) -> Result<RoleAuthorizer, AccessPolicyError>;
+#[non_exhaustive] pub struct AccessPolicyError;   // Display, Error
 ```
 
-These types are re-exported from `ai6`. The Guatiao kinds are
-`lineupmux_authenticator`, `lineupmux_directory` and `lineupmux_authorizer`.
-`Verdict::Valid` carries only a `Lookup`; the authoritative Directory supplies the full
-`Person`. `Attempt` debug output redacts its name, credentials, request headers, peer and
-certificate identity. `Plugins` discovers, lists and constructs these kinds; the caller
-composes authentication, directory lookup and authorization. Daemon plugin scans also
-register the `ai6_roles` provider, configured with `RoleAuthorizerConfig`. The built-in `RoleAuthorizer`
-loads a first-match `[role.*]` and `[[rule]]` policy from TOML; rules match `account:<name>`,
-`person:<id>` or `group:<name>` at an exact `station:<id>`, `operation:<id>`, `theater:<id>`
-or `*` scope.
-No matching rule is deny, and the first matching role is decisive even when its action list
-does not include the requested action. The Universal Exports gateway loads and enforces
-this policy for user requests.
+`role_authorizer_from_toml` reads the `access.toml` format: `[role.<name>]` tables with
+`actions`, then `[[rule]]` entries (`subject`, `scope`, `role`) tried in order. A subject is
+`account:<name>`, `person:<id>` or `group:<name>`; a scope is `*` or one of `SCOPE_KINDS`
+followed by `:<id>`. No matching rule is deny, and the first matching rule is decisive even
+when its role lacks the action. The file is read up to 1 MiB. The Universal Exports gateway
+loads and enforces this policy for user requests.
+
+`station::plugins::Plugins` scans the plugin paths for libraries that declare an AI6 kind or
+any kind beginning with `KIND_PREFIX`, and lists and constructs `Authenticator`,
+`Directory`, `Authorizer` and `Accounts` providers by id (`authenticators()`,
+`account_managers()`, `authenticator(id, config)`, `accounts(id, config)` and the
+rest); the caller composes authentication, directory lookup and authorization. AI6
+registers no access provider of its own. The providers are the loadable libraries of
+`coqui-access`, built from <https://github.com/Boriken-Dev/coqui-access>:
+
+| Id | Kinds | Config (a Guatiao value; every key optional) |
+| --- | --- | --- |
+| `coqui_access_local` | Authenticator, Directory, Accounts | `source`, `max_accounts`, `argon2` |
+| `coqui_access_key` | Authenticator, Directory, Accounts | `source`, `prefix`, `key_hash`, `argon2`, `max_keys` |
+| `coqui_access_peer` | Authenticator, Directory, Accounts | `source`, `waiting`, `max_peers`, `waiting_places`, `seen_every_secs` |
+| `coqui_access_ldap` | Authenticator, Directory | `url`, `start_tls`, `ca_file`, `base`, `bind`, `bind_password`, `user_filter`, `name_attribute`, `group_attribute`, `group_filter`, `group_base`, `nested_groups`, `timeout_seconds` |
+| `coqui_access_proxy` | Authenticator | `trusted`, `user_header`, `subject_header`, `subject_field` |
+| `coqui_roles` | Authorizer | `scope_kinds`, `roles`, `rules` |
+
+`source` is `{ "file": { "path": "<file>", "format": "toml" } }`; with none, records live in
+memory. The host's own tests build the plugin libraries as dev-dependencies and load them from
+beside the test binary; after removing or renaming a plugin, clean `target/`, because the host
+loads every library it finds.
 
 ## Watchdog (`ai6::directorates::medical::watchdog`)
 
@@ -693,15 +684,37 @@ validate non-empty values up to 256 UTF-8 bytes with no control characters. Both
 implement `FromStr` and `Display`. A Mission can group several provider Sessions; a
 Session ID is issued by the provider and stays stable when that Session resumes.
 
-With `station-tls` (`ai6::station::identity`, re-exported at the root), `StationFingerprint` is the SHA-256 fingerprint of the Station certificate, rendered
-as uppercase base32 in groups of four. `StationIdentity::open_or_create(state_dir)` stores
-the combined certificate and private key in `identity.pem`; Unix writes use mode `0600`.
-`client_config` pins the expected certificate fingerprint and verifies the handshake's
-signature proof. `server_config` requires a client certificate and accepts either a peer
-explicitly placed in the `PeerTrustStore` or a certificate signed by the configured CA
-and matching the optional subject/SAN globs in `TlsTrust`. Unknown peer certificates are
-bounded and placed in `peers/waiting`; an operator lists and accepts them with the CLI.
-The default AI6 state location can be overridden with `AI6_STATE` or `AI6_HOME`.
+With `station-tls` (`ai6::station::identity`), a Station's mutual TLS is
+[`coqui-peer-tls`](https://github.com/Boriken-Dev/coqui-peer-tls) and `coqui-peer`, and this
+module fixes where AI6 keeps things and the protocol it speaks:
+
+```rust
+pub const STATION_ALPN: &[u8] = b"ai6-station/1";
+pub const IDENTITY_FILE: &str = "identity.pem";
+pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError>;
+pub fn open_peers(state_dir: &Path, policy: &Policy) -> Result<TrustStore, StationIdentityError>;
+pub fn trust_peers(store: TrustStore) -> Trust;
+pub fn client_config(identity: &Identity, server: &Fingerprint, policy: &Policy)
+    -> Result<Built<ClientConfig>, StationIdentityError>;
+pub fn server_config(identity: &Identity, trust: &Trust, policy: &Policy)
+    -> Result<Built<ServerConfig>, StationIdentityError>;
+```
+
+`Fingerprint` (a `PeerId`) is the SHA-256 of the certificate, printed `sha256:<hex>` and read in
+any spelling (`sha256:HEX`, bare hex, colon pairs, the grouped base32 earlier versions
+printed). `Identity`, `Trust` (`Pinned`, `Ca`, `PinnedOrCa`, `AnyWithKeyProof`), `CaPolicy`,
+`Policy`, `TrustStore`, `WaitingEntry` and the rest are re-exported from those crates; their
+API headers describe them. `open_identity` stores the certificate and private key in
+`identity.pem` (Unix mode `0600`). `Policy::strict()` is the default: TLS 1.3, SHA-2 pins;
+`Policy::compatible()` and `legacy()` loosen it and `Built::weakened` lists what is looser.
+`client_config` pins the server's fingerprint; `server_config` requires a client certificate
+and proof of its key, then applies `trust`. A peer not in the store is refused and, once it
+has proved its key, recorded under `peers/waiting` with the address it came from; waiting is
+bounded per source address, in total, and by how often one peer is written down again (the
+policy's `waiting_per_source`, `waiting_total` and `waiting_rerecord_secs`). An operator lists
+them with `ai6 peer waiting` (fingerprint and source address) and accepts one with
+`ai6 peer accept <fingerprint>`. A store and an identity written by an earlier version load
+as they are. The default AI6 state location can be overridden with `AI6_STATE` or `AI6_HOME`.
 `AccessTokenRecord` is the versioned device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
 expiry and optional revocation times; its debug output redacts the digest. `FileRegistry`

@@ -30,6 +30,7 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Organization: organization.md
+  - Access and sign-in: access.md
   - Guides:
       - Operations: operations.md
       - Stations and failover: stations.md
@@ -55,6 +56,10 @@ nav:
           - ai6-safehouse-copy: https://jose-pr.github.io/ai6/rust/ai6_safehouse_copy/index.html
           - ai6-source-github: https://jose-pr.github.io/ai6/rust/ai6_source_github/index.html
           - ai6-source-jira: https://jose-pr.github.io/ai6/rust/ai6_source_jira/index.html
+      # The access kinds, providers and Station mutual TLS are shared crates with their own sites.
+      - Shared crates:
+          - coqui-access: https://boriken-dev.github.io/coqui-access/
+          - coqui-peer-tls: https://boriken-dev.github.io/coqui-peer-tls/
   - Changelog: changelog.md
 
 plugins:
