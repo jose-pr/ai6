@@ -2,14 +2,14 @@
 
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::q::terminal::AgentTerminal;
 
 /// The first instruction for one agent operation in a Mission.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct AgentStart {
     /// AI6's identifier for the unit of work; a Mission may have several Sessions.
@@ -36,7 +36,7 @@ pub struct AgentStart {
 }
 
 /// How AI6 resumes a provider-issued Session.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct AgentResume {
     /// The Mission this Session is working on.
@@ -59,7 +59,7 @@ pub struct AgentResume {
 }
 
 /// A message AI6 sends to an already running Agent Session.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct AgentMessage {
     /// Message text, kept separate from the initial context.
@@ -74,7 +74,7 @@ pub const LIMIT_EVENT: &str = "limit";
 ///
 /// A handler emits it as an [`AgentEvent`] of kind [`LIMIT_EVENT`] in place of the
 /// `completed` or `failed` event the same output would otherwise produce.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[map(crate = ::guatiao)]
 pub struct UsageLimit {
     /// When the provider says the quota resets, as Unix seconds. `None` when it did not say.
@@ -86,7 +86,9 @@ pub struct UsageLimit {
 /// Tokens and cost a provider reported for a Session, as the provider reports them.
 ///
 /// Money is an integer count of millionths of a dollar so records never carry floats.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(
+    ToValue, FromValue, Schema, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
 #[map(crate = ::guatiao)]
 pub struct TokenUsage {
     /// Prompt tokens that were not served from the cache.
@@ -105,7 +107,7 @@ pub struct TokenUsage {
 }
 
 /// One provider event returned to the daemon.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[map(crate = ::guatiao)]
 pub struct AgentEvent {
     /// Provider-neutral event name such as `text`, `blocked`, `tool`, `completed` or `limit`.

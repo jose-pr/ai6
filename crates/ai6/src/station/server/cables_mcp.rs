@@ -41,6 +41,7 @@ pub(super) struct Endpoint {
     principal: Arc<RwLock<Option<CablePrincipal>>>,
     token: String,
     url: String,
+    address: std::net::SocketAddr,
     server: JoinHandle<()>,
     registered: Option<CableEndpoint>,
     green_ink: Arc<OnceLock<Desk>>,
@@ -109,6 +110,7 @@ impl Endpoint {
             principal,
             token,
             url: format!("http://{address}/mcp"),
+            address,
             server,
             registered: None,
             green_ink,
@@ -119,6 +121,21 @@ impl Endpoint {
     /// green ink is unavailable.
     pub(super) fn open_green_ink(&self, desk: Desk) {
         let _ = self.green_ink.set(desk);
+    }
+
+    /// The endpoint's URL, on a loopback port of the Station.
+    pub(super) fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The loopback address the endpoint listens on.
+    pub(super) fn address(&self) -> std::net::SocketAddr {
+        self.address
+    }
+
+    /// The bearer token the endpoint requires.
+    pub(super) fn token(&self) -> &str {
+        &self.token
     }
 
     pub(super) fn add_environment(

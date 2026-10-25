@@ -172,3 +172,94 @@ fn agents_are_quarantined_listed_and_released() {
     );
     assert!(run(&["list"]).1.contains("No Agents are quarantined"));
 }
+
+#[test]
+fn a_detached_runner_answers_calls_until_it_stops() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let state = tempfile::tempdir().unwrap();
+    let mut starter = ai6()
+        .args(["runner", "serve", "--detach", "--state-dir"])
+        .arg(state.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("the AI6 command should start");
+    // Only the first line is read: on Windows the runner inherits the starter's output pipe,
+    // so the pipe stays open for as long as the runner runs.
+    let mut line = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(starter.stdout.take().unwrap()),
+        &mut line,
+    )
+    .unwrap();
+    assert!(starter.wait().unwrap().success());
+    let info: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let pid = info["pid"].as_u64().unwrap();
+    assert!(
+        info["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://127.0.0.1:")
+    );
+
+    let call = |method: &str, path: &str, body: Option<&str>| {
+        let mut child = ai6()
+            .args(["runner", "call", "--state-dir"])
+            .arg(state.path())
+            .args([method, path])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        if let Some(body) = body {
+            stdin.write_all(body.as_bytes()).unwrap();
+        }
+        drop(stdin);
+        let output = child.wait_with_output().unwrap();
+        let answer = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            .unwrap_or(serde_json::Value::Null);
+        (output.status.code(), answer)
+    };
+
+    let (code, health) = call("GET", "/v1/health", None);
+    assert_eq!(code, Some(0));
+    assert_eq!(health["status"], 200);
+    assert_eq!(health["body"]["pid"], pid);
+
+    // A request body comes on standard input; the runner's refusal is relayed, not hidden.
+    let (code, refused) = call(
+        "POST",
+        "/v1/sessions",
+        Some(
+            r#"{"key":"k1","handler":"absent","launch":{"start":{"mission_id":"m-1","agent_id":"007","prompt":"p","initial_context":[],"working_directory":".","clearance":"field","environment":{},"model":null,"effort":null,"max_cost_micro_usd":null}}}"#,
+        ),
+    );
+    assert_eq!(code, Some(0));
+    assert_eq!(refused["status"], 409, "{refused}");
+    assert!(refused["body"]["error"].as_str().is_some());
+
+    let stopped = if cfg!(windows) {
+        Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output()
+    } else {
+        Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output()
+    }
+    .unwrap();
+    assert!(stopped.status.success());
+    let mut code = Some(0);
+    for _ in 0..200 {
+        code = call("GET", "/v1/health", None).0;
+        if code != Some(0) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    assert_eq!(code, Some(3), "a call with no runner to answer exits 3");
+}

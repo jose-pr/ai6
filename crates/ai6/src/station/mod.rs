@@ -8,6 +8,8 @@ pub mod identity;
 pub mod plugins;
 #[cfg(feature = "publisher")]
 pub mod publisher;
+#[cfg(feature = "daemon")]
+pub mod runner;
 pub mod safehouse;
 #[cfg(feature = "daemon")]
 pub mod server;

@@ -12,10 +12,11 @@ exclude = [".*", "*.local.*"]
 
 [features]
 default = []
-daemon = ["dep:axum", "dep:tokio", "guatiao/load"]
+# The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
+daemon = ["dep:axum", "dep:tokio", "dep:ureq", "dep:subtle", "dep:futures-util", "guatiao/load"]
 # Adds bounded background event publication to the Universal Exports gateway.
-publisher = ["daemon", "dep:ai6-diptel", "dep:ureq", "dep:url"]
-cables-mcp = ["daemon", "dep:rmcp", "dep:schemars", "dep:subtle"]
+publisher = ["daemon", "dep:ai6-diptel", "dep:url"]
+cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]
 station-tls = ["dep:coqui-peer", "dep:coqui-peer-tls", "dep:rustls"]
 cli = ["daemon", "publisher", "cables-mcp", "station-tls", "dep:clap", "tokio/signal"]
 
@@ -36,6 +37,7 @@ coqui-access.workspace = true
 coqui-roles.workspace = true
 guatiao = { workspace = true, features = ["provider"] }
 fs2 = "0.4"
+futures-util = { workspace = true, optional = true }
 serde = { workspace = true, features = ["alloc"] }
 serde_json.workspace = true
 rmcp = { workspace = true, optional = true }

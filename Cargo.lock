@@ -67,6 +67,7 @@ dependencies = [
  "coqui-roles-plugin",
  "data-encoding",
  "fs2",
+ "futures-util",
  "globset",
  "guatiao",
  "lru",

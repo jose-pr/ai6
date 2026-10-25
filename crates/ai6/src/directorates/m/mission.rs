@@ -107,6 +107,9 @@ pub(crate) struct LaunchManifest {
     /// written before Session records were shared.
     #[serde(default)]
     pub(crate) session: Option<SessionHold>,
+    /// The key of the Session on the Theater's runner, when a runner supervises the harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) runner: Option<String>,
 }
 
 /// What a Station needs to act on its Session record: the record's ID and the fencing token
@@ -802,6 +805,7 @@ mod tests {
                     theater_id: Some("local".to_owned()),
                     mode: ExecutionMode::Field,
                     session: None,
+                    runner: None,
                 },
             )
             .unwrap();
@@ -856,6 +860,7 @@ mod tests {
                     theater_id: Some("local".to_owned()),
                     mode: ExecutionMode::Field,
                     session: None,
+                    runner: None,
                 },
             )
             .unwrap();
@@ -1014,6 +1019,7 @@ mod tests {
                     theater_id: Some("local".to_owned()),
                     mode: ExecutionMode::Field,
                     session: None,
+                    runner: None,
                 },
             )
             .unwrap();

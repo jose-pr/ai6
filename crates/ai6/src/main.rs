@@ -42,6 +42,50 @@ enum Command {
         #[command(subcommand)]
         command: QuarantineCommand,
     },
+    /// The field runner: supervise agent harnesses on this host so Sessions outlive their Station.
+    Runner {
+        #[command(subcommand)]
+        command: RunnerCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RunnerCommand {
+    /// Serve the runner until interrupted; the harnesses it supervises end with it.
+    Serve(RunnerServeArgs),
+    /// Send one request to the runner on this host and print its status and JSON answer.
+    ///
+    /// A Station that reaches this host through a transport talks to the runner this way. A
+    /// request body is read from standard input. Exits 3 when no runner answers.
+    Call {
+        /// The runner's state directory (default: `runner` in AI6's state directory).
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+        /// HTTP method.
+        method: String,
+        /// Request path, such as `/v1/sessions`.
+        path: String,
+    },
+}
+
+#[derive(Debug, Args)]
+struct RunnerServeArgs {
+    /// State directory for the token, the address and spooled events (default: `runner` in
+    /// AI6's state directory).
+    #[arg(long)]
+    state_dir: Option<PathBuf>,
+    /// Loopback address to listen on (default: a port the host chooses).
+    #[arg(long)]
+    listen: Option<SocketAddr>,
+    /// A directory or library path to scan for AgentHandler and Terminal providers.
+    #[arg(long = "plugin-path")]
+    plugin_paths: Vec<PathBuf>,
+    /// Pin the terminal provider harnesses run in (default: an available one, preferring `pty`).
+    #[arg(long)]
+    terminal: Option<String>,
+    /// Start in the background, detached from this terminal, and print where it listens.
+    #[arg(long)]
+    detach: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -201,6 +245,7 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Runner { command } => runner_command(command).await,
         Command::Serve(args) => {
             let ServeArgs {
                 listen,
@@ -273,6 +318,145 @@ async fn main() -> ExitCode {
             }
         }
     }
+}
+
+async fn runner_command(command: RunnerCommand) -> ExitCode {
+    let resolve = |state_dir: Option<PathBuf>| match state_dir {
+        Some(dir) => Ok(dir),
+        None => ai6::station::runner::default_state_dir(),
+    };
+    match command {
+        RunnerCommand::Serve(args) => {
+            let state_dir = match resolve(args.state_dir) {
+                Ok(dir) => dir,
+                Err(error) => {
+                    eprintln!("ai6: runner state directory: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if args.detach {
+                let mut arguments: Vec<std::ffi::OsString> =
+                    vec!["--state-dir".into(), state_dir.clone().into()];
+                if let Some(listen) = args.listen {
+                    arguments.extend(["--listen".into(), listen.to_string().into()]);
+                }
+                for path in &args.plugin_paths {
+                    arguments.extend(["--plugin-path".into(), path.into()]);
+                }
+                if let Some(terminal) = &args.terminal {
+                    arguments.extend(["--terminal".into(), terminal.into()]);
+                }
+                let started = std::env::current_exe().and_then(|program| {
+                    ai6::station::runner::spawn_detached(&program, &arguments, &state_dir)
+                });
+                return match started {
+                    Ok(info) => {
+                        println!(
+                            "{}",
+                            serde_json::to_string(&info).unwrap_or_else(|_| info.url.clone())
+                        );
+                        ExitCode::SUCCESS
+                    }
+                    Err(error) => {
+                        eprintln!("ai6: runner did not start: {error}");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
+            let mut config = ai6::station::runner::RunnerConfig::new(&state_dir)
+                .with_plugin_paths(args.plugin_paths);
+            if let Some(listen) = args.listen {
+                config = config.with_listen(listen);
+            }
+            if let Some(terminal) = args.terminal {
+                config = config.with_terminal(terminal);
+            }
+            match ai6::station::runner::serve(config, termination_signal()).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("ai6: runner failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        RunnerCommand::Call {
+            state_dir,
+            method,
+            path,
+        } => {
+            let state_dir = match resolve(state_dir) {
+                Ok(dir) => dir,
+                Err(error) => {
+                    eprintln!("ai6: runner state directory: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let body = match runner_request_body() {
+                Ok(body) => body,
+                Err(error) => {
+                    eprintln!("ai6: runner request body: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let answered = tokio::task::spawn_blocking(move || {
+                ai6::station::runner::call(&state_dir, &method, &path, body.as_ref())
+            })
+            .await;
+            match answered {
+                Ok(Ok((status, body))) => {
+                    println!("{}", serde_json::json!({ "status": status, "body": body }));
+                    ExitCode::SUCCESS
+                }
+                Ok(Err(error)) => {
+                    eprintln!("ai6: {error}");
+                    ExitCode::from(ai6::station::runner::CALL_NOT_RUNNING)
+                }
+                Err(error) => {
+                    eprintln!("ai6: runner request failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+    }
+}
+
+/// The JSON body on standard input, if any. An interactive terminal is never read.
+fn runner_request_body() -> Result<Option<serde_json::Value>, String> {
+    use std::io::{IsTerminal, Read};
+    let mut stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        return Ok(None);
+    }
+    let mut text = String::new();
+    stdin
+        .read_to_string(&mut text)
+        .map_err(|error| error.to_string())?;
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str(&text)
+        .map(Some)
+        .map_err(|error| format!("not JSON: {error}"))
+}
+
+/// Resolves on Ctrl-C, and on SIGTERM where there is one, so a service manager's stop is a
+/// clean shutdown.
+async fn termination_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = terminate.recv() => {}
+                    _ = shutdown_signal() => {}
+                }
+            }
+            Err(_) => shutdown_signal().await,
+        }
+    }
+    #[cfg(not(unix))]
+    shutdown_signal().await;
 }
 
 fn parse_duration(value: &str) -> Result<Duration, String> {

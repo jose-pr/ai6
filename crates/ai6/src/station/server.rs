@@ -46,6 +46,8 @@ use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
 use crate::directorates::q::safehouse::{SafeHouseReport, SafeHouseSpec};
 use crate::directorates::q::terminal::TerminalBridge;
+#[cfg(feature = "cables-mcp")]
+use crate::directorates::q::transport::TransportClient;
 use crate::directorates::registry::cables::{
     CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
     CableRelayError, CableRelease, CableSendRequest, CableTarget,
@@ -64,6 +66,10 @@ use crate::station::plugins;
 use crate::station::publisher::MissionPublication;
 #[cfg(feature = "publisher")]
 use crate::station::publisher::{self, Config as PublisherConfig, Publisher, SessionTelemetry};
+#[cfg(feature = "cables-mcp")]
+use crate::station::runner::Upstream;
+use crate::station::runner::client::{RunnerLink, RunnerSession};
+use crate::station::runner::{Launch, SessionReport};
 use crate::station::safehouse::SafeHouse;
 use crate::station::sources::SourceDesk;
 use crate::station::transports::Transports;
@@ -1315,6 +1321,13 @@ fn fence_out(state: &DaemonState, mission_id: &str) {
         .ok()
         .and_then(|mut sessions| sessions.remove(mission_id))
         .inspect(|operation| operation.gate.close());
+    // The Station that took the lease re-attaches to a runner's harness, so it keeps running.
+    if let Some(runner) = operation
+        .as_ref()
+        .and_then(|operation| operation.runner.as_ref())
+    {
+        runner.detached.store(true, Ordering::Release);
+    }
     if let Some(operation) = operation
         && let Ok(session) = operation.session.lock()
     {
@@ -1508,11 +1521,10 @@ fn local_theater_of(theaters: &Theaters, operation: &roster::Operation) -> Optio
 struct LaunchPlan {
     theater_id: String,
     mode: ExecutionMode,
-    /// The Mission's working directory on the Theater, in remote-hands mode.
-    #[cfg_attr(
-        not(feature = "cables-mcp"),
-        allow(dead_code, reason = "only the Theater tools use it")
-    )]
+    /// The Theater is the Station's own host.
+    own_host: bool,
+    /// The Mission's working directory on a Theater other than the Station's own host, or
+    /// in remote-hands mode.
     root: Option<String>,
 }
 
@@ -1530,15 +1542,252 @@ fn launch_plan(state: &DaemonState, operation_id: Option<&str>) -> Result<Launch
         .ok_or_else(|| format!("this Station does not reach a Theater {theater_id:?}"))?;
     let mode = placement::execution_mode(&summary)
         .map_err(|reason| format!("Theater {theater_id:?} cannot host this Session: {reason}"))?;
+    let own_host = state
+        .transports
+        .theater(&theater_id)
+        .is_none_or(|theater| theater.access == TheaterAccess::Local);
     let root = match mode {
-        ExecutionMode::Field => None,
-        ExecutionMode::RemoteHands => remote_root(state, operation, &theater_id),
+        ExecutionMode::Field if own_host => None,
+        _ => remote_root(state, operation, &theater_id),
     };
     Ok(LaunchPlan {
         theater_id,
         mode,
+        own_host,
         root,
     })
+}
+
+/// The runner that supervises harnesses on a Theater; `None` when the Theater declares none.
+fn runner_link(state: &DaemonState, theater_id: &str) -> Result<Option<Arc<RunnerLink>>, String> {
+    let Some(theater) = state.transports.theater(theater_id) else {
+        return Ok(None);
+    };
+    if theater.runner.is_none() {
+        return Ok(None);
+    }
+    let transport = match theater.access {
+        TheaterAccess::Local => None,
+        _ => Some(state.transports.client(theater_id)?),
+    };
+    Ok(RunnerLink::for_theater(theater, transport)?.map(Arc::new))
+}
+
+/// The working directory of a Mission whose harness runs on a Theater other than the
+/// Station's own host: the Operation's path there, or the Theater's `workdir`.
+fn theater_area(
+    requested: Option<&str>,
+    root: Option<&str>,
+    theater_id: &str,
+) -> Result<WorkingArea, String> {
+    if requested.is_some_and(|path| !path.trim().is_empty()) {
+        return Err(format!(
+            "a Mission on Theater {theater_id:?} works in the Theater's directory, not in a \
+             working_directory on the Station"
+        ));
+    }
+    let path = root.ok_or_else(|| {
+        format!(
+            "Theater {theater_id:?} has no `workdir` and the Operation is not bound to it, so \
+             there is no directory to work in there"
+        )
+    })?;
+    Ok(WorkingArea {
+        path: path.to_owned(),
+        safe_house: None,
+    })
+}
+
+/// A Session a runner supervises. The Station's side of it can go away without stopping it.
+struct RunnerAttachment {
+    key: String,
+    /// Set when this Station lets go: closing its side then leaves the harness running.
+    detached: Arc<AtomicBool>,
+    /// The reverse forward that carries the harness's Cable requests to this Station, for a
+    /// runner on another host.
+    #[cfg_attr(
+        not(feature = "cables-mcp"),
+        allow(dead_code, reason = "only the Cable endpoint is forwarded")
+    )]
+    forward: Arc<Mutex<Option<crate::directorates::q::transport::Forward>>>,
+}
+
+/// How the harness on a Theater reaches this Station's Cable endpoint, and the forward that
+/// carries it when the Theater is another host.
+#[cfg(feature = "cables-mcp")]
+struct CableRoute {
+    upstream: Upstream,
+    transport: Option<(Arc<TransportClient>, String)>,
+}
+
+/// The Station's Cable endpoint as a harness on `theater_id` reaches it: the endpoint itself on
+/// the Station's own host, else a reverse forward from a loopback port on the Theater.
+///
+/// Opening a forward blocks; call this from `spawn_blocking`.
+#[cfg(feature = "cables-mcp")]
+fn cable_route(
+    state: &DaemonState,
+    own_host: bool,
+    theater_id: &str,
+    endpoint: (&str, std::net::SocketAddr, &str),
+    forward: &Mutex<Option<crate::directorates::q::transport::Forward>>,
+) -> Result<CableRoute, String> {
+    let (url, address, token) = endpoint;
+    if own_host {
+        return Ok(CableRoute {
+            upstream: Upstream {
+                url: url.to_owned(),
+                token: token.to_owned(),
+            },
+            transport: None,
+        });
+    }
+    let client = state.transports.client(theater_id)?;
+    let target = address.to_string();
+    let url = reopen_forward(&client, &target, forward, None)?;
+    Ok(CableRoute {
+        upstream: Upstream {
+            url,
+            token: token.to_owned(),
+        },
+        transport: Some((client, target)),
+    })
+}
+
+/// Routes the Station's Cable endpoint to the harness on a runner's Theater, pointing
+/// `environment` at it.
+#[cfg(feature = "cables-mcp")]
+async fn route_cables(
+    state: &DaemonState,
+    plan: (bool, &str),
+    endpoint: Option<&cables_mcp::Endpoint>,
+    forward: &Arc<Mutex<Option<crate::directorates::q::transport::Forward>>>,
+    environment: &mut BTreeMap<String, String>,
+) -> Result<Option<CableRoute>, ApiErrorResponse> {
+    let Some(endpoint) = endpoint else {
+        return Ok(None);
+    };
+    let (own_host, theater_id) = (plan.0, plan.1.to_owned());
+    let (url, address, token) = (
+        endpoint.url().to_owned(),
+        endpoint.address(),
+        endpoint.token().to_owned(),
+    );
+    let (worker_state, worker_forward) = (state.clone(), forward.clone());
+    let route = tokio::task::spawn_blocking(move || {
+        cable_route(
+            &worker_state,
+            own_host,
+            &theater_id,
+            (&url, address, &token),
+            &worker_forward,
+        )
+    })
+    .await
+    .map_err(|error| runtime_error(format!("Cable forward worker failed: {error}")))?
+    .map_err(configuration_error)?;
+    environment.insert(
+        crate::station::runner::CABLE_URL_KEY.to_owned(),
+        route.upstream.url.clone(),
+    );
+    Ok(Some(route))
+}
+
+/// Opens the reverse forward to `target` on `port` (any port when `None`), replacing the one
+/// in `slot`, and answers the URL the Theater reaches the Cable endpoint at.
+#[cfg(feature = "cables-mcp")]
+fn reopen_forward(
+    client: &TransportClient,
+    target: &str,
+    slot: &Mutex<Option<crate::directorates::q::transport::Forward>>,
+    port: Option<u16>,
+) -> Result<String, String> {
+    use crate::directorates::q::transport::ForwardSpec;
+    let mut slot = slot
+        .lock()
+        .map_err(|_| "forward lock was poisoned".to_owned())?;
+    if let Some(old) = slot.take() {
+        let _ = old.close();
+    }
+    let open = |remote_port: u16| {
+        client.forward(&ForwardSpec {
+            remote_host: "127.0.0.1".to_owned(),
+            remote_port,
+            target: target.to_owned(),
+        })
+    };
+    // The same port keeps a URL the harness already holds valid.
+    let forward = match port {
+        Some(port) => open(port).or_else(|_| open(0)),
+        None => open(0),
+    }
+    .map_err(|error| {
+        format!(
+            "the Cable endpoint could not be forwarded to the Theater: {}",
+            crate::directorates::q::transport::describe(&error)
+        )
+    })?;
+    let url = format!("http://127.0.0.1:{}/mcp", forward.info().remote_port);
+    *slot = Some(forward);
+    Ok(url)
+}
+
+/// The Station's side of a Session on a runner. A Session on another host re-opens its Cable
+/// forward when the link comes back, and repoints the runner's relay at it.
+fn runner_session(
+    link: Arc<RunnerLink>,
+    key: &str,
+    session_id: Option<SessionId>,
+    attachment: &RunnerAttachment,
+    #[cfg(feature = "cables-mcp")] route: Option<&CableRoute>,
+) -> guatiao::library::Object<dyn AgentSession> {
+    let session = RunnerSession::attach(link.clone(), key, session_id, attachment.detached.clone());
+    #[cfg(feature = "cables-mcp")]
+    if let Some(CableRoute {
+        upstream,
+        transport: Some((client, target)),
+    }) = route
+    {
+        let (client, target, token) = (client.clone(), target.clone(), upstream.token.clone());
+        let (forward, key) = (attachment.forward.clone(), key.to_owned());
+        return session
+            .on_relink(move || {
+                let port = forward
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.as_ref().map(|open| open.info().remote_port));
+                match reopen_forward(&client, &target, &forward, port) {
+                    Ok(url) => {
+                        let upstream = Upstream {
+                            url,
+                            token: token.clone(),
+                        };
+                        if let Err(error) = link.set_cable(&key, &upstream) {
+                            eprintln!(
+                                "ai6: runner Session {key:?} Cable relay not repointed: {error}"
+                            );
+                        }
+                    }
+                    Err(error) => eprintln!("ai6: runner Session {key:?}: {error}"),
+                }
+            })
+            .into_object();
+    }
+    session.into_object()
+}
+
+/// Records which runner Session a Mission's harness is, and the terminal the runner chose.
+fn record_runner_session(state: &DaemonState, mission_id: &str, report: &SessionReport) {
+    let Ok(mut missions) = state.missions.lock() else {
+        return;
+    };
+    if let Some(mut manifest) = missions.operation(mission_id) {
+        manifest.runner = Some(report.key.clone());
+        manifest.terminal_provider = report.terminal.clone();
+        if let Err(error) = missions.set_operation(mission_id, manifest) {
+            eprintln!("ai6: Mission {mission_id:?} runner Session not recorded: {error:?}");
+        }
+    }
 }
 
 /// The Mission's working directory on a Theater it works on through its transport: the
@@ -2106,6 +2355,8 @@ struct AgentOperation {
     exposure: ExposureGate,
     gate: SessionGate,
     session_id: Option<SessionId>,
+    /// Set when a runner on the Theater supervises the harness.
+    runner: Option<RunnerAttachment>,
     #[cfg(feature = "cables-mcp")]
     _cables_mcp: Option<cables_mcp::Endpoint>,
     #[cfg(feature = "cables-mcp")]
@@ -2612,6 +2863,16 @@ async fn start_mission(
     }
     let plan = launch_plan(&state, mission.operation_id.as_deref()).map_err(configuration_error)?;
     let theater_id = plan.theater_id.clone();
+    let runner = match plan.mode {
+        ExecutionMode::Field => runner_link(&state, &theater_id).map_err(configuration_error)?,
+        ExecutionMode::RemoteHands => None,
+    };
+    let remote_field = plan.mode == ExecutionMode::Field && !plan.own_host;
+    if remote_field && runner.is_none() {
+        return Err(configuration_error(format!(
+            "Theater {theater_id:?} is another host and declares no runner to supervise the harness there"
+        )));
+    }
     let _reservation = reserve_mission_start(&state, &mission, &agent)?;
     let handler_provider = agent
         .handler
@@ -2619,7 +2880,11 @@ async fn start_mission(
         .ok_or_else(|| configuration_error(format!("Agent {agent_id:?} has no handler")))?;
     let model = agent.model.clone();
     let effort = agent.effort.clone();
-    let terminal_provider = station_terminal(&state).map_err(configuration_error)?;
+    // A runner reports the terminal it chose once the harness starts.
+    let terminal_provider = match &runner {
+        Some(link) => link.terminal().unwrap_or(DEFAULT_TERMINAL).to_owned(),
+        None => station_terminal(&state).map_err(configuration_error)?,
+    };
     #[cfg(feature = "publisher")]
     let telemetry = state.publisher.as_ref().and_then(|publisher| {
         mission
@@ -2628,23 +2893,36 @@ async fn start_mission(
             .map(|operation_id| publisher.session(operation_id.clone(), mission.mission_id.clone()))
     });
     let watchdog = Watchdog::with_config(agent.limits.apply_to(&state.watchdog));
-    let terminal = state
-        .plugins
-        .terminal(&terminal_provider, None)
-        .map_err(provider_error)?;
-    let handler = state
-        .plugins
-        .handler(&handler_provider, None)
-        .map_err(provider_error)?;
+    // The Station loads the harness's providers only when it supervises the harness itself.
+    let in_process = match &runner {
+        Some(_) => None,
+        None => Some((
+            state
+                .plugins
+                .terminal(&terminal_provider, None)
+                .map_err(provider_error)?,
+            state
+                .plugins
+                .handler(&handler_provider, None)
+                .map_err(provider_error)?,
+        )),
+    };
     let roster = state.roster.clone();
     let plugins = state.plugins.clone();
     let operation_id = mission.operation_id.clone();
     let requested_directory = request.working_directory.clone();
     let area_mission = mission.clone();
     let remote_hands = plan.mode == ExecutionMode::RemoteHands;
+    let (area_theater, area_root) = (theater_id.clone(), plan.root.clone());
     let area = tokio::task::spawn_blocking(move || {
         if remote_hands {
             remote_hands_area(requested_directory.as_deref(), &area_mission)
+        } else if remote_field {
+            theater_area(
+                requested_directory.as_deref(),
+                area_root.as_deref(),
+                &area_theater,
+            )
         } else {
             resolve_working_area(
                 &roster,
@@ -2726,6 +3004,21 @@ async fn start_mission(
     } else {
         None
     };
+    let forward = Arc::new(Mutex::new(None));
+    #[cfg(feature = "cables-mcp")]
+    let cable = match &runner {
+        Some(_) => {
+            route_cables(
+                &state,
+                (plan.own_host, &theater_id),
+                cables_mcp.as_ref(),
+                &forward,
+                &mut environment,
+            )
+            .await?
+        }
+        None => None,
+    };
     #[cfg(feature = "cables-mcp")]
     let theater_mcp = if remote_hands {
         let (endpoint, instructions) =
@@ -2747,6 +3040,10 @@ async fn start_mission(
     // A Mission started again (a later attempt) keeps the lease of the attempt it replaces
     // until the new Session is recorded.
     let previous_hold = session_hold(&state, &mission_id);
+    // Recorded before the harness starts, so a Station that dies while it starts can find it.
+    let runner_key = runner
+        .as_ref()
+        .map(|_| uuid::Uuid::new_v4().simple().to_string());
     let operation = LaunchManifest {
         handler_provider: handler_provider.clone(),
         terminal_provider: terminal_provider.clone(),
@@ -2758,6 +3055,7 @@ async fn start_mission(
         theater_id: Some(theater_id.clone()),
         mode: plan.mode,
         session: previous_hold.clone(),
+        runner: runner_key.clone(),
     };
     let persisted = state
         .missions
@@ -2802,19 +3100,61 @@ async fn start_mission(
         effort: effort.clone(),
         max_cost_micro_usd: medical::remaining_mission_cost(&state, &mission_id),
     };
-    #[cfg(feature = "publisher")]
-    let terminal_handle = match &telemetry {
-        Some(telemetry) => TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
-            terminal,
-            telemetry.clone(),
-            watchdog.clone(),
-        ),
-        None => TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone()),
+    let attachment = runner_key.clone().map(|key| RunnerAttachment {
+        key,
+        detached: Arc::new(AtomicBool::new(false)),
+        forward: forward.clone(),
+    });
+    let started = match (in_process, &runner, &attachment) {
+        (Some((terminal, handler)), _, _) => {
+            #[cfg(feature = "publisher")]
+            let terminal_handle = match &telemetry {
+                Some(telemetry) => TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
+                    terminal,
+                    telemetry.clone(),
+                    watchdog.clone(),
+                ),
+                None => TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone()),
+            };
+            #[cfg(not(feature = "publisher"))]
+            let terminal_handle =
+                TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
+            tokio::task::spawn_blocking(move || {
+                handler
+                    .start(start_request, terminal_handle)
+                    .map_err(|error| error.to_string())
+            })
+            .await
+        }
+        (None, Some(link), Some(attachment)) => {
+            let (link, handler) = (link.clone(), handler_provider.clone());
+            let key = attachment.key.clone();
+            let session_attachment = RunnerAttachment {
+                key: key.clone(),
+                detached: attachment.detached.clone(),
+                forward: attachment.forward.clone(),
+            };
+            #[cfg(feature = "cables-mcp")]
+            let route = cable;
+            let (worker_state, worker_mission) = (state.clone(), mission_id.clone());
+            tokio::task::spawn_blocking(move || {
+                link.ensure()?;
+                let report = link.launch(&key, &handler, Launch::Start(start_request))?;
+                record_runner_session(&worker_state, &worker_mission, &report);
+                Ok(runner_session(
+                    link,
+                    &key,
+                    report.session_id,
+                    &session_attachment,
+                    #[cfg(feature = "cables-mcp")]
+                    route.as_ref(),
+                ))
+            })
+            .await
+        }
+        // A Session runs in this process or on a runner; nothing else builds a launch.
+        _ => return Err(internal_error()),
     };
-    #[cfg(not(feature = "publisher"))]
-    let terminal_handle = TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
-    let started =
-        tokio::task::spawn_blocking(move || handler.start(start_request, terminal_handle)).await;
     let started = match started {
         Ok(started) => started,
         Err(error) => {
@@ -2961,6 +3301,7 @@ async fn start_mission(
             exposure,
             gate: SessionGate::default(),
             session_id: session_id.clone(),
+            runner: attachment,
             #[cfg(feature = "cables-mcp")]
             _cables_mcp: cables_mcp,
             #[cfg(feature = "cables-mcp")]
@@ -3141,11 +3482,6 @@ async fn resume_mission(
         &mut environment,
     )
     .map_err(configuration_error)?;
-    let session_id = stored_session_id
-        .or_else(|| mission.session_ids.last().cloned())
-        .ok_or_else(|| conflict("Provider has not issued a Session ID yet"))?;
-    acquire_session_hold(&state, &mission, &session_id)?;
-    let exposure = medical::open_gate(&state, &mission);
     let resume_manifest = state
         .missions
         .lock()
@@ -3154,6 +3490,51 @@ async fn resume_mission(
     let resume_mode = resume_manifest
         .as_ref()
         .map_or_else(ExecutionMode::default, |manifest| manifest.mode);
+    let resume_theater = resume_manifest
+        .as_ref()
+        .and_then(|manifest| manifest.theater_id.clone())
+        .unwrap_or_else(|| LOCAL_THEATER.to_owned());
+    let resume_own_host = state
+        .transports
+        .theater(&resume_theater)
+        .is_none_or(|theater| theater.access == TheaterAccess::Local);
+    let runner = match resume_mode {
+        ExecutionMode::Field => {
+            runner_link(&state, &resume_theater).map_err(configuration_error)?
+        }
+        ExecutionMode::RemoteHands => None,
+    };
+    // A Session its runner still supervises, or still has unread events of, is re-attached
+    // instead of started again. A parked Mission's Session ended at its limit.
+    let reattach = match (
+        &runner,
+        resume_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.runner.clone()),
+        &old_session,
+    ) {
+        (Some(link), Some(key), None) if mission.state != MissionState::Parked => {
+            let link = link.clone();
+            tokio::task::spawn_blocking(move || link.status(&key))
+                .await
+                .map_err(|error| runtime_error(format!("runner status worker failed: {error}")))?
+                .map_err(|why| {
+                    unavailable(&format!("the Theater's runner cannot be reached: {why}"))
+                })?
+                .filter(|report| !report.ended || report.last > report.cursor)
+        }
+        _ => None,
+    };
+    let session_id = stored_session_id
+        .or_else(|| mission.session_ids.last().cloned())
+        .or_else(|| {
+            reattach
+                .as_ref()
+                .and_then(|report| report.session_id.clone())
+        })
+        .ok_or_else(|| conflict("Provider has not issued a Session ID yet"))?;
+    acquire_session_hold(&state, &mission, &session_id)?;
+    let exposure = medical::open_gate(&state, &mission);
     #[cfg(feature = "publisher")]
     let telemetry = state.publisher.as_ref().and_then(|publisher| {
         mission.operation_id.as_ref().map(|operation_id| {
@@ -3177,14 +3558,19 @@ async fn resume_mission(
         })
     });
     let watchdog = Watchdog::with_config(resume_agent.limits.apply_to(&state.watchdog));
-    let terminal = state
-        .plugins
-        .terminal(&terminal_provider, None)
-        .map_err(provider_error)?;
-    let handler = state
-        .plugins
-        .handler(&handler_provider, None)
-        .map_err(provider_error)?;
+    let in_process = match &runner {
+        Some(_) => None,
+        None => Some((
+            state
+                .plugins
+                .terminal(&terminal_provider, None)
+                .map_err(provider_error)?,
+            state
+                .plugins
+                .handler(&handler_provider, None)
+                .map_err(provider_error)?,
+        )),
+    };
     #[cfg(feature = "cables-mcp")]
     let cables_mcp = if let Some(operation_id) = mission.operation_id.as_deref() {
         let theater = state
@@ -3246,49 +3632,130 @@ async fn resume_mission(
             "this build has no Theater tools, which remote-hands mode needs",
         ));
     }
-    #[cfg(feature = "publisher")]
-    let terminal_handle = match &telemetry {
-        Some(telemetry) => TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
-            terminal,
-            telemetry.clone(),
-            watchdog.clone(),
-        ),
-        None => TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone()),
+    let forward = Arc::new(Mutex::new(None));
+    #[cfg(feature = "cables-mcp")]
+    let cable = match &runner {
+        Some(_) => {
+            route_cables(
+                &state,
+                (resume_own_host, &resume_theater),
+                cables_mcp.as_ref(),
+                &forward,
+                &mut environment,
+            )
+            .await?
+        }
+        None => None,
     };
-    #[cfg(not(feature = "publisher"))]
-    let terminal_handle = TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
+    #[cfg(not(feature = "cables-mcp"))]
+    let _ = resume_own_host;
+    let message = request.message;
     let resume_request = AgentResume {
         mission_id: mission.mission_id.clone(),
         session_id: session_id.clone(),
-        message: request.message,
+        message: message.clone(),
         working_directory: working_directory.clone(),
         environment: environment.clone(),
         model: model.clone(),
         effort: effort.clone(),
         max_cost_micro_usd: medical::remaining_mission_cost(&state, &mission_id),
     };
-    let resumed = tokio::task::spawn_blocking(move || {
-        let expected_session_id = resume_request.session_id.clone();
-        let resumed = handler
-            .resume(resume_request, terminal_handle)
-            .map_err(|error| error.to_string())?;
-        let resumed_session_id = resumed.session_id().map_err(|error| error.to_string())?;
-        if resumed_session_id.as_ref() != Some(&expected_session_id) {
-            let _ = resumed.close();
-            return Err("AgentHandler resume did not retain the provider Session ID".to_owned());
+    let attachment = runner.as_ref().map(|_| RunnerAttachment {
+        key: reattach.as_ref().map_or_else(
+            || uuid::Uuid::new_v4().simple().to_string(),
+            |report| report.key.clone(),
+        ),
+        detached: Arc::new(AtomicBool::new(false)),
+        forward: forward.clone(),
+    });
+    let resumed = match (in_process, &runner, &attachment) {
+        (Some((terminal, handler)), _, _) => {
+            #[cfg(feature = "publisher")]
+            let terminal_handle = match &telemetry {
+                Some(telemetry) => TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
+                    terminal,
+                    telemetry.clone(),
+                    watchdog.clone(),
+                ),
+                None => TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone()),
+            };
+            #[cfg(not(feature = "publisher"))]
+            let terminal_handle =
+                TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
+            tokio::task::spawn_blocking(move || {
+                let expected_session_id = resume_request.session_id.clone();
+                let resumed = handler
+                    .resume(resume_request, terminal_handle)
+                    .map_err(|error| error.to_string())?;
+                let resumed_session_id = resumed.session_id().map_err(|error| error.to_string())?;
+                if resumed_session_id.as_ref() != Some(&expected_session_id) {
+                    let _ = resumed.close();
+                    return Err(
+                        "AgentHandler resume did not retain the provider Session ID".to_owned()
+                    );
+                }
+                close_replaced(old_session)?;
+                Ok::<_, String>(resumed)
+            })
+            .await
         }
-        if let Some(old_session) = old_session {
-            let old_session = old_session
-                .lock()
-                .map_err(|_| "provider Session lock was poisoned".to_owned())?;
-            old_session.interrupt().map_err(|error| error.to_string())?;
-            old_session.close().map_err(|error| error.to_string())?;
+        (None, Some(link), Some(attachment)) => {
+            let (link, handler) = (link.clone(), handler_provider.clone());
+            let key = attachment.key.clone();
+            let session_attachment = RunnerAttachment {
+                key: key.clone(),
+                detached: attachment.detached.clone(),
+                forward: attachment.forward.clone(),
+            };
+            #[cfg(feature = "cables-mcp")]
+            let route = cable;
+            let reattaching = reattach.is_some();
+            let (worker_state, worker_mission) = (state.clone(), mission_id.clone());
+            tokio::task::spawn_blocking(move || {
+                let expected_session_id = resume_request.session_id.clone();
+                if reattaching {
+                    #[cfg(feature = "cables-mcp")]
+                    if let Some(route) = &route
+                        && let Err(error) = link.set_cable(&key, &route.upstream)
+                    {
+                        eprintln!("ai6: runner Session {key:?} Cable relay not repointed: {error}");
+                    }
+                } else {
+                    link.ensure()?;
+                    let report = link.launch(&key, &handler, Launch::Resume(resume_request))?;
+                    record_runner_session(&worker_state, &worker_mission, &report);
+                    if report.session_id.as_ref() != Some(&expected_session_id) {
+                        let _ = link.call("POST", &format!("/v1/sessions/{key}/close"), None);
+                        return Err(
+                            "AgentHandler resume did not retain the provider Session ID".to_owned()
+                        );
+                    }
+                }
+                let resumed = runner_session(
+                    link,
+                    &key,
+                    Some(expected_session_id),
+                    &session_attachment,
+                    #[cfg(feature = "cables-mcp")]
+                    route.as_ref(),
+                );
+                // A re-attached harness is still in its turn; the message is the next one.
+                if reattaching && let Some(text) = message {
+                    resumed
+                        .send_message(AgentMessage { text })
+                        .map_err(|error| error.to_string())?;
+                }
+                close_replaced(old_session)?;
+                Ok::<_, String>(resumed)
+            })
+            .await
         }
-        Ok::<_, String>(resumed)
-    })
-    .await
-    .map_err(|error| runtime_error(format!("AgentHandler resume worker failed: {error}")))?
-    .map_err(provider_error)?;
+        // A Session runs in this process or on a runner; nothing else builds a launch.
+        _ => return Err(internal_error()),
+    };
+    let resumed = resumed
+        .map_err(|error| runtime_error(format!("AgentHandler resume worker failed: {error}")))?
+        .map_err(provider_error)?;
     let resumed = Arc::new(Mutex::new(resumed));
     state.sessions.lock().map_err(|_| internal_error())?.insert(
         mission_id.clone(),
@@ -3306,6 +3773,7 @@ async fn resume_mission(
             exposure,
             gate: SessionGate::default(),
             session_id: Some(session_id.clone()),
+            runner: attachment,
             #[cfg(feature = "cables-mcp")]
             _cables_mcp: cables_mcp,
             #[cfg(feature = "cables-mcp")]
@@ -3335,6 +3803,20 @@ async fn resume_mission(
             provider_session_id: Some(session_id),
         }),
     ))
+}
+
+/// Stops the Session a resume replaces, once the new one runs.
+fn close_replaced(
+    old_session: Option<Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>>,
+) -> Result<(), String> {
+    if let Some(old_session) = old_session {
+        let old_session = old_session
+            .lock()
+            .map_err(|_| "provider Session lock was poisoned".to_owned())?;
+        old_session.interrupt().map_err(|error| error.to_string())?;
+        old_session.close().map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 async fn send_message(
@@ -4211,6 +4693,16 @@ fn stop_operation(
     let Some(operation) = operation else {
         return;
     };
+    // A runner keeps the harness going without this Station; the Mission stays Working, so the
+    // next start re-attaches to it.
+    if let Some(runner) = &operation.runner {
+        runner.detached.store(true, Ordering::Release);
+        eprintln!(
+            "ai6: Mission {mission_id:?} keeps running on its runner (Session {:?})",
+            runner.key
+        );
+        return;
+    }
     if let Ok(session) = operation.session.lock() {
         let _ = session.interrupt();
         let _ = session.close();
@@ -4661,6 +5153,7 @@ mod tests {
                     exposure: ExposureGate::default(),
                     gate: SessionGate::default(),
                     session_id: Some(session),
+                    runner: None,
                     #[cfg(feature = "cables-mcp")]
                     _cables_mcp: None,
                     #[cfg(feature = "cables-mcp")]
@@ -5140,6 +5633,7 @@ mod tests {
             MockLimitedHandler,
             MockSpendHandler,
             MockRecordingHandler,
+            MockDripHandler,
             MockTerminalProvider,
             MockSafeHouseProvider,
             MockPlainProvider
@@ -5910,7 +6404,13 @@ mod tests {
         );
         assert_eq!(
             stations[0].info()["handlers"],
-            serde_json::json!(["mock-agent", "mock-limit", "mock-recorder", "mock-spend"])
+            serde_json::json!([
+                "mock-agent",
+                "mock-drip",
+                "mock-limit",
+                "mock-recorder",
+                "mock-spend"
+            ])
         );
 
         schedule_intake_once(&state);
@@ -6499,6 +6999,7 @@ mod tests {
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                runner: None,
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
                 #[cfg(feature = "cables-mcp")]
@@ -6604,6 +7105,7 @@ mod tests {
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                runner: None,
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
                 #[cfg(feature = "cables-mcp")]
@@ -6789,6 +7291,7 @@ mod tests {
                 exposure: ExposureGate::default(),
                 gate,
                 session_id: Some(session_id),
+                runner: None,
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
                 #[cfg(feature = "cables-mcp")]
@@ -7160,6 +7663,7 @@ mod tests {
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                runner: None,
                 #[cfg(feature = "cables-mcp")]
                 _cables_mcp: None,
                 #[cfg(feature = "cables-mcp")]
@@ -7896,5 +8400,330 @@ mod tests {
             ("local", ExecutionMode::Field)
         );
         assert!(plan.root.is_none());
+    }
+
+    /// Ticks the drip harness emits before it completes, one every [`DRIP_INTERVAL`].
+    const DRIP_TICKS: u32 = 60;
+    const DRIP_INTERVAL: Duration = Duration::from_millis(50);
+
+    /// A harness that says `tick N` for N in 1 through [`DRIP_TICKS`] at a steady pace and
+    /// then completes, whoever is listening.
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "mock-drip", name = "Mock Drip", crate = crate::guatiao)]
+    struct MockDripHandler;
+
+    impl AgentHandler for MockDripHandler {
+        fn start(
+            &self,
+            _request: AgentStart,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(DripSession::new(
+                SessionId::try_new("provider-session-drip")
+                    .map_err(|error| test_provider_error(&error.to_string()))?,
+            )
+            .into_object())
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(DripSession::new(request.session_id).into_object())
+        }
+    }
+
+    struct DripSession {
+        session_id: SessionId,
+        next: Mutex<(u32, std::time::Instant)>,
+    }
+
+    impl DripSession {
+        fn new(session_id: SessionId) -> Self {
+            Self {
+                session_id,
+                next: Mutex::new((1, std::time::Instant::now() + DRIP_INTERVAL)),
+            }
+        }
+    }
+
+    impl AgentSession for DripSession {
+        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
+            Ok(Some(self.session_id.clone()))
+        }
+
+        fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
+            let mut next = self.next.lock().unwrap();
+            let (tick, due) = *next;
+            if tick > DRIP_TICKS + 1 {
+                drop(next);
+                std::thread::sleep(Duration::from_millis(10));
+                return Ok(None);
+            }
+            let wait = due.saturating_duration_since(std::time::Instant::now());
+            if wait > Duration::from_millis(timeout_ms as u64) {
+                drop(next);
+                std::thread::sleep(Duration::from_millis(timeout_ms as u64));
+                return Ok(None);
+            }
+            std::thread::sleep(wait);
+            *next = (tick + 1, due + DRIP_INTERVAL);
+            let (kind, text) = if tick > DRIP_TICKS {
+                ("completed", "all ticks said".to_owned())
+            } else {
+                ("text", format!("tick {tick}"))
+            };
+            Ok(Some(AgentEvent {
+                kind: kind.to_owned(),
+                text: Some(text),
+                data: None,
+                limit: None,
+                usage: None,
+                tools: Vec::new(),
+            }))
+        }
+
+        fn interrupt(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn close(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    /// Serves a runner with the mock providers until the returned sender is dropped.
+    async fn start_test_runner(state_dir: &Path) -> tokio::sync::oneshot::Sender<()> {
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let config = crate::station::runner::RunnerConfig::new(state_dir);
+        tokio::spawn(crate::station::runner::serve_with_plugins(
+            config,
+            Arc::new(test_plugins()),
+            async move {
+                let _ = stopped.await;
+            },
+        ));
+        for _ in 0..500 {
+            if crate::station::runner::RunnerInfo::read(state_dir).is_ok() {
+                return stop;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the runner did not start");
+    }
+
+    /// A Station whose own host runs a runner, with Mission `mission-1` queued for the drip
+    /// harness and its Mission book on disk, as a restarted Station finds it.
+    fn runner_station(root: &Path, runner_dir: &Path) -> DaemonState {
+        let mut state = test_state(root, "", "[agent.007]\nhandler = \"mock-drip\"\n");
+        let book = root.join("missions.json");
+        let mut missions = MissionStore::open(&book).unwrap();
+        if missions.get("mission-1").is_none() {
+            missions
+                .create(
+                    MissionId::try_new("mission-1").unwrap(),
+                    Some("G".to_owned()),
+                    "say every tick".to_owned(),
+                    Some("007".to_owned()),
+                    None,
+                )
+                .unwrap();
+        }
+        let recovered = recover_startup_missions(&mut missions).unwrap();
+        state.missions = Arc::new(Mutex::new(missions));
+        state.startup_recovery = Arc::new(Mutex::new(recovered));
+        let mut theaters = Theaters::default();
+        theaters
+            .insert(
+                Theater::new(LOCAL_THEATER, TheaterAccess::Local).with_runner(
+                    crate::RunnerSettings::default()
+                        .with_state_dir(runner_dir.to_string_lossy().into_owned()),
+                ),
+            )
+            .unwrap();
+        state.transports = Arc::new(Transports::build(&theaters, &plugins::Plugins::scan(&[])));
+        state
+    }
+
+    /// The tick numbers among `events`, and whether the Session completed.
+    fn ticks(events: &[AgentEvent]) -> (Vec<u32>, bool) {
+        let ticks = events
+            .iter()
+            .filter_map(|event| event.text.as_deref()?.strip_prefix("tick ")?.parse().ok())
+            .collect();
+        (ticks, events.iter().any(|event| event.kind == "completed"))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_session_on_a_runner_outlives_its_station_and_a_restarted_station_replays_what_it_missed()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let runner_dir = root.path().join("runner");
+        let _runner = start_test_runner(&runner_dir).await;
+
+        // Station A starts the Mission; the harness runs on the runner, not in A.
+        let first = runner_station(root.path(), &runner_dir);
+        let _ = start_mission(
+            State(first.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        let manifest = first
+            .missions
+            .lock()
+            .unwrap()
+            .operation("mission-1")
+            .unwrap();
+        let key = manifest
+            .runner
+            .clone()
+            .expect("the runner Session is recorded");
+        assert_eq!(manifest.terminal_provider, "mock-terminal");
+        let mut seen = Vec::new();
+        while ticks(&seen).0.len() < 5 {
+            seen.push(wait_for_event(&first, "mission-1").await);
+        }
+        let (before, _) = ticks(&seen);
+
+        // Station A dies: it lets go of nothing and tells the runner nothing.
+        let crashed = first.sessions.lock().unwrap().remove("mission-1").unwrap();
+        drop(crashed);
+        assert_eq!(
+            first
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .state,
+            MissionState::Working
+        );
+        let link = RunnerLink::local(runner_dir.clone(), PathBuf::from("unused"));
+        let at_crash = link.status(&key).unwrap().unwrap().last;
+        tokio::time::sleep(DRIP_INTERVAL * 10).await;
+        let unattended = link.status(&key).unwrap().unwrap();
+        assert!(
+            !unattended.ended,
+            "the harness keeps running without a Station"
+        );
+        assert!(
+            unattended.last >= at_crash + 5,
+            "the runner kept spooling events: {at_crash} then {}",
+            unattended.last
+        );
+
+        // Station A comes back with the same Mission book and re-attaches.
+        let second = runner_station(root.path(), &runner_dir);
+        assert!(
+            second
+                .startup_recovery
+                .lock()
+                .unwrap()
+                .contains("mission-1")
+        );
+        schedule_recovered_once(&second).await;
+        assert!(
+            second
+                .sessions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .is_some_and(
+                    |operation| operation.runner.as_ref().map(|r| r.key.as_str())
+                        == Some(key.as_str())
+                ),
+            "the restarted Station re-attached to the same runner Session"
+        );
+        let mut replayed = Vec::new();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while !ticks(&replayed).1 {
+                if let Some(event) = pop_event(&second, "mission-1") {
+                    replayed.push(event);
+                } else {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            }
+        })
+        .await
+        .expect("the restarted Station receives the rest of the Session");
+        wait_for_state(&second, "mission-1", MissionState::Done).await;
+
+        // Every tick arrives: what A did not take is replayed, at most the last one twice.
+        let (after, completed) = ticks(&replayed);
+        assert!(completed);
+        let last_before = *before.last().unwrap();
+        assert!(
+            after[0] <= last_before + 1 && after[0] >= last_before,
+            "replay starts after the last tick A took ({last_before}): {after:?}"
+        );
+        assert_eq!(
+            after,
+            (after[0]..=DRIP_TICKS).collect::<Vec<_>>(),
+            "no tick is lost or reordered"
+        );
+        let report = link.status(&key).unwrap().unwrap();
+        assert!(report.ended);
+        assert_eq!(report.cursor, report.last, "everything was acknowledged");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_station_that_shuts_down_leaves_its_runner_session_running() {
+        let root = tempfile::tempdir().unwrap();
+        let runner_dir = root.path().join("runner");
+        let _runner = start_test_runner(&runner_dir).await;
+        let state = runner_station(root.path(), &runner_dir);
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_event(&state, "mission-1").await;
+        let key = state
+            .missions
+            .lock()
+            .unwrap()
+            .operation("mission-1")
+            .and_then(|manifest| manifest.runner)
+            .unwrap();
+
+        state.stopping.store(true, Ordering::Release);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state.sessions.lock().unwrap().contains_key("mission-1") {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the event pump lets go of the Session");
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .state,
+            MissionState::Working,
+            "the Mission stays Working, so the next start re-attaches"
+        );
+        let link = RunnerLink::local(runner_dir, PathBuf::from("unused"));
+        let report = link.status(&key).unwrap().unwrap();
+        assert!(!report.ended, "the runner's harness is not stopped");
     }
 }
