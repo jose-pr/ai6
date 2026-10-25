@@ -182,6 +182,15 @@ pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::va
 impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
 pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 pub const ai6::directorates::m::identity::MAX_ID_BYTES: usize
+pub mod ai6::directorates::m::limits
+#[non_exhaustive] pub enum ai6::directorates::m::limits::OnLimit
+pub ai6::directorates::m::limits::OnLimit::Backup
+pub ai6::directorates::m::limits::OnLimit::Wait
+impl ai6::directorates::m::limits::OnLimit
+pub fn ai6::directorates::m::limits::OnLimit::as_str(self) -> &'static str
+pub const ai6::directorates::m::limits::DEFAULT_LIMIT_FALLBACK_SECS: u64
+pub const ai6::directorates::m::limits::RESET_GRACE_SECS: i64
+pub fn ai6::directorates::m::limits::parked_until(i64, core::option::Option<i64>, u64) -> i64
 pub mod ai6::directorates::m::mission
 pub enum ai6::directorates::m::mission::MissionError
 pub ai6::directorates::m::mission::MissionError::AlreadyExists
@@ -200,6 +209,7 @@ pub ai6::directorates::m::mission::MissionState::Blocked
 pub ai6::directorates::m::mission::MissionState::Blown
 pub ai6::directorates::m::mission::MissionState::Done
 pub ai6::directorates::m::mission::MissionState::Failed
+pub ai6::directorates::m::mission::MissionState::Parked
 pub ai6::directorates::m::mission::MissionState::Queued
 pub ai6::directorates::m::mission::MissionState::Stalled
 pub ai6::directorates::m::mission::MissionState::Working
@@ -208,6 +218,7 @@ pub ai6::directorates::m::mission::Mission::agent_id: core::option::Option<alloc
 pub ai6::directorates::m::mission::Mission::cover: core::option::Option<ai6::directorates::m::cover::CoverReport>
 pub ai6::directorates::m::mission::Mission::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::m::mission::Mission::operation_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::parked_until: core::option::Option<i64>
 pub ai6::directorates::m::mission::Mission::prompt: alloc::string::String
 pub ai6::directorates::m::mission::Mission::revision: u64
 pub ai6::directorates::m::mission::Mission::role_id: core::option::Option<alloc::string::String>
@@ -218,9 +229,12 @@ pub struct ai6::directorates::m::mission::MissionStore
 impl ai6::directorates::m::mission::MissionStore
 pub fn ai6::directorates::m::mission::MissionStore::attach_session(&mut self, &str, ai6::directorates::m::identity::SessionId) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::create(&mut self, ai6::directorates::m::identity::MissionId, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::due_parked(&self, i64) -> alloc::vec::Vec<ai6::directorates::m::mission::Mission>
 pub fn ai6::directorates::m::mission::MissionStore::get(&self, &str) -> core::option::Option<&ai6::directorates::m::mission::Mission>
 pub fn ai6::directorates::m::mission::MissionStore::list(&self) -> alloc::vec::Vec<ai6::directorates::m::mission::Mission>
 pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
+pub fn ai6::directorates::m::mission::MissionStore::park(&mut self, &str, i64) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::requeue_for(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::directorates::q::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::transition(&mut self, &str, ai6::directorates::m::mission::MissionState) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -312,9 +326,11 @@ pub ai6::directorates::m::roster::Operation::cover: alloc::string::String
 pub ai6::directorates::m::roster::Operation::cover_identity: core::option::Option<ai6::directorates::m::roster::CoverIdentity>
 pub ai6::directorates::m::roster::Operation::description: alloc::string::String
 pub ai6::directorates::m::roster::Operation::id: alloc::string::String
+pub ai6::directorates::m::roster::Operation::limit_fallback_secs: u64
 pub ai6::directorates::m::roster::Operation::max_concurrent: core::option::Option<usize>
 pub ai6::directorates::m::roster::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::on_blown: alloc::string::String
+pub ai6::directorates::m::roster::Operation::on_limit: ai6::directorates::m::limits::OnLimit
 pub ai6::directorates::m::roster::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
@@ -873,6 +889,49 @@ pub const ai6::directorates::registry::cables::DEFAULT_CABLE_TTL: f64
 pub const ai6::directorates::registry::cables::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::directorates::registry::cables::MAX_CABLE_FANOUT: usize
 pub const ai6::directorates::registry::cables::MAX_CABLE_TTL: f64
+pub mod ai6::directorates::registry::sessions
+#[non_exhaustive] pub enum ai6::directorates::registry::sessions::SessionError
+pub ai6::directorates::registry::sessions::SessionError::Ended
+pub ai6::directorates::registry::sessions::SessionError::Exists
+pub ai6::directorates::registry::sessions::SessionError::HeldBy(alloc::string::String)
+pub ai6::directorates::registry::sessions::SessionError::Io(core::io::error::Error)
+pub ai6::directorates::registry::sessions::SessionError::NotFound
+pub ai6::directorates::registry::sessions::SessionError::Stale
+impl core::convert::From<core::io::error::Error> for ai6::directorates::registry::sessions::SessionError
+pub fn ai6::directorates::registry::sessions::SessionError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::registry::sessions::SessionError
+pub fn ai6::directorates::registry::sessions::SessionError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for ai6::directorates::registry::sessions::SessionError
+pub fn ai6::directorates::registry::sessions::SessionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::registry::sessions::SessionStatus
+pub ai6::directorates::registry::sessions::SessionStatus::Active
+pub ai6::directorates::registry::sessions::SessionStatus::Ended
+pub ai6::directorates::registry::sessions::SessionStatus::Parked
+pub struct ai6::directorates::registry::sessions::NewSession
+impl ai6::directorates::registry::sessions::NewSession
+pub fn ai6::directorates::registry::sessions::NewSession::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_attempt(self, u32, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionRecord
+pub ai6::directorates::registry::sessions::SessionRecord::attempt: u32
+pub ai6::directorates::registry::sessions::SessionRecord::fence: u64
+pub ai6::directorates::registry::sessions::SessionRecord::lease_expires: f64
+pub ai6::directorates::registry::sessions::SessionRecord::mission_id: alloc::string::String
+pub ai6::directorates::registry::sessions::SessionRecord::parked_until: core::option::Option<f64>
+pub ai6::directorates::registry::sessions::SessionRecord::predecessor: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionRecord::session_id: alloc::string::String
+pub ai6::directorates::registry::sessions::SessionRecord::station: alloc::string::String
+pub ai6::directorates::registry::sessions::SessionRecord::status: ai6::directorates::registry::sessions::SessionStatus
+pub ai6::directorates::registry::sessions::SessionRecord::theater: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::sessions::SessionRecord
+pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
+pub struct ai6::directorates::registry::sessions::SessionUpdate
+impl ai6::directorates::registry::sessions::SessionUpdate
+pub fn ai6::directorates::registry::sessions::SessionUpdate::parked_until(self, f64) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::directorates::registry::sessions::SessionStatus) -> Self
 pub mod ai6::directorates::registry::sleepers
 pub enum ai6::directorates::registry::sleepers::Fire
 pub ai6::directorates::registry::sleepers::Fire::AlreadyFired
@@ -1031,10 +1090,18 @@ pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&s
 pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
+impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 #[non_exhaustive] pub struct ai6::directorates::registry::store::HeadquartersLease
 impl ai6::directorates::registry::store::HeadquartersLease
 pub fn ai6::directorates::registry::store::HeadquartersLease::expires(&self) -> f64
 pub fn ai6::directorates::registry::store::HeadquartersLease::station(&self) -> &str
+pub fn ai6::directorates::registry::store::HeadquartersLease::term(&self) -> u64
 #[non_exhaustive] pub struct ai6::directorates::registry::store::Lease
 impl ai6::directorates::registry::store::Lease
 pub fn ai6::directorates::registry::store::Lease::attempt(&self) -> u32
@@ -1073,6 +1140,7 @@ pub mod ai6::directorates::section_00::agent
 pub struct ai6::directorates::section_00::agent::AgentEvent
 pub ai6::directorates::section_00::agent::AgentEvent::data: core::option::Option<alloc::vec::Vec<u8>>
 pub ai6::directorates::section_00::agent::AgentEvent::kind: alloc::string::String
+pub ai6::directorates::section_00::agent::AgentEvent::limit: core::option::Option<ai6::directorates::section_00::agent::UsageLimit>
 pub ai6::directorates::section_00::agent::AgentEvent::text: core::option::Option<alloc::string::String>
 pub struct ai6::directorates::section_00::agent::AgentMessage
 pub ai6::directorates::section_00::agent::AgentMessage::text: alloc::string::String
@@ -1094,6 +1162,10 @@ pub ai6::directorates::section_00::agent::AgentStart::mission_id: ai6::directora
 pub ai6::directorates::section_00::agent::AgentStart::model: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentStart::prompt: alloc::string::String
 pub ai6::directorates::section_00::agent::AgentStart::working_directory: alloc::string::String
+pub struct ai6::directorates::section_00::agent::UsageLimit
+pub ai6::directorates::section_00::agent::UsageLimit::resets_at: core::option::Option<i64>
+pub ai6::directorates::section_00::agent::UsageLimit::window: core::option::Option<alloc::string::String>
+pub const ai6::directorates::section_00::agent::LIMIT_EVENT: &str
 pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
@@ -1360,6 +1432,23 @@ pub ai6::SecretError::InvalidTtl
 impl core::error::Error for ai6::SecretError
 impl core::fmt::Display for ai6::SecretError
 pub fn ai6::SecretError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::SessionError
+pub ai6::SessionError::Ended
+pub ai6::SessionError::Exists
+pub ai6::SessionError::HeldBy(alloc::string::String)
+pub ai6::SessionError::Io(core::io::error::Error)
+pub ai6::SessionError::NotFound
+pub ai6::SessionError::Stale
+impl core::convert::From<core::io::error::Error> for ai6::directorates::registry::sessions::SessionError
+pub fn ai6::directorates::registry::sessions::SessionError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::registry::sessions::SessionError
+pub fn ai6::directorates::registry::sessions::SessionError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for ai6::directorates::registry::sessions::SessionError
+pub fn ai6::directorates::registry::sessions::SessionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::SessionStatus
+pub ai6::SessionStatus::Active
+pub ai6::SessionStatus::Ended
+pub ai6::SessionStatus::Parked
 #[non_exhaustive] pub enum ai6::StationIdentityError
 pub ai6::StationIdentityError::AlreadyAccepted
 pub ai6::StationIdentityError::Certificate
@@ -1414,6 +1503,7 @@ pub fn ai6::directorates::m::identity::AccessTokenRecord::fmt(&self, &mut core::
 pub struct ai6::AgentEvent
 pub ai6::AgentEvent::data: core::option::Option<alloc::vec::Vec<u8>>
 pub ai6::AgentEvent::kind: alloc::string::String
+pub ai6::AgentEvent::limit: core::option::Option<ai6::directorates::section_00::agent::UsageLimit>
 pub ai6::AgentEvent::text: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::AgentFacts
 pub ai6::AgentFacts::handler: core::option::Option<alloc::string::String>
@@ -1733,6 +1823,13 @@ pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&s
 pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
+impl ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub struct ai6::FinishedSourceBrief
 pub ai6::FinishedSourceBrief::brief: ai6::directorates::registry::store::Brief
 pub ai6::FinishedSourceBrief::ok: bool
@@ -1741,6 +1838,7 @@ pub ai6::FinishedSourceBrief::outcome: serde_json::value::Value
 impl ai6::directorates::registry::store::HeadquartersLease
 pub fn ai6::directorates::registry::store::HeadquartersLease::expires(&self) -> f64
 pub fn ai6::directorates::registry::store::HeadquartersLease::station(&self) -> &str
+pub fn ai6::directorates::registry::store::HeadquartersLease::term(&self) -> u64
 #[non_exhaustive] pub struct ai6::InvalidIdentity
 impl core::error::Error for ai6::directorates::m::identity::InvalidIdentity
 impl core::fmt::Display for ai6::directorates::m::identity::InvalidIdentity
@@ -1815,6 +1913,12 @@ pub ai6::MissionProposal::proposer_agent_id: alloc::string::String
 pub ai6::MissionProposal::proposer_session_id: ai6::directorates::m::identity::SessionId
 impl ai6::directorates::registry::store::MissionProposal
 pub fn ai6::directorates::registry::store::MissionProposal::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::SessionId, &str, ai6::directorates::registry::store::Brief) -> core::io::error::Result<Self>
+pub struct ai6::NewSession
+impl ai6::directorates::registry::sessions::NewSession
+pub fn ai6::directorates::registry::sessions::NewSession::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_attempt(self, u32, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::Operation
 pub ai6::Operation::clearance: alloc::string::String
 pub ai6::Operation::config: core::option::Option<std::path::PathBuf>
@@ -1822,9 +1926,11 @@ pub ai6::Operation::cover: alloc::string::String
 pub ai6::Operation::cover_identity: core::option::Option<ai6::directorates::m::roster::CoverIdentity>
 pub ai6::Operation::description: alloc::string::String
 pub ai6::Operation::id: alloc::string::String
+pub ai6::Operation::limit_fallback_secs: u64
 pub ai6::Operation::max_concurrent: core::option::Option<usize>
 pub ai6::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::Operation::on_blown: alloc::string::String
+pub ai6::Operation::on_limit: ai6::directorates::m::limits::OnLimit
 pub ai6::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
@@ -2050,6 +2156,25 @@ pub const ai6::directorates::m::identity::SessionId::KINDS: guatiao::value::conv
 pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
 impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
 pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6::SessionRecord
+pub ai6::SessionRecord::attempt: u32
+pub ai6::SessionRecord::fence: u64
+pub ai6::SessionRecord::lease_expires: f64
+pub ai6::SessionRecord::mission_id: alloc::string::String
+pub ai6::SessionRecord::parked_until: core::option::Option<f64>
+pub ai6::SessionRecord::predecessor: core::option::Option<alloc::string::String>
+pub ai6::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
+pub ai6::SessionRecord::session_id: alloc::string::String
+pub ai6::SessionRecord::station: alloc::string::String
+pub ai6::SessionRecord::status: ai6::directorates::registry::sessions::SessionStatus
+pub ai6::SessionRecord::theater: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::sessions::SessionRecord
+pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
+pub struct ai6::SessionUpdate
+impl ai6::directorates::registry::sessions::SessionUpdate
+pub fn ai6::directorates::registry::sessions::SessionUpdate::parked_until(self, f64) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::directorates::registry::sessions::SessionStatus) -> Self
 pub struct ai6::Sleeper
 pub ai6::Sleeper::agent: core::option::Option<alloc::string::String>
 pub ai6::Sleeper::priority: i64
@@ -2188,6 +2313,9 @@ pub fn ai6::directorates::m::theaters::Theaters::merge(&mut self, ai6::directora
 pub fn ai6::directorates::m::theaters::Theaters::parse(&str) -> core::result::Result<Self, ai6::directorates::m::theaters::TheaterError>
 pub fn ai6::directorates::m::theaters::Theaters::reachable(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::Theater>
 pub fn ai6::directorates::m::theaters::Theaters::summaries(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
+pub struct ai6::UsageLimit
+pub ai6::UsageLimit::resets_at: core::option::Option<i64>
+pub ai6::UsageLimit::window: core::option::Option<alloc::string::String>
 pub struct ai6::Watchdog
 impl ai6::directorates::medical::watchdog::Watchdog
 pub fn ai6::directorates::medical::watchdog::Watchdog::is_max_runtime_exceeded(&self) -> bool
@@ -2244,6 +2372,7 @@ pub const ai6::DEFAULT_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
 pub const ai6::DEFAULT_TERMINAL: &str
 pub const ai6::GONE_DARK_AFTER: core::time::Duration
+pub const ai6::LIMIT_EVENT: &str
 pub const ai6::LOCAL_THEATER: &str
 pub const ai6::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::MAX_CABLE_FANOUT: usize
