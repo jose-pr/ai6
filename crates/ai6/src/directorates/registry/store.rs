@@ -446,6 +446,7 @@ impl StationRecord {
 pub struct HeadquartersLease {
     station: String,
     expires: f64,
+    term: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -453,6 +454,8 @@ pub struct HeadquartersLease {
 struct HeadquartersLeaseFile {
     station: String,
     expires: f64,
+    #[serde(default)]
+    term: u64,
 }
 
 impl HeadquartersLeaseFile {
@@ -464,11 +467,19 @@ impl HeadquartersLeaseFile {
         Ok(HeadquartersLease {
             station: self.station,
             expires: self.expires,
+            term: self.term,
         })
     }
 }
 
 impl HeadquartersLease {
+    /// Returns the election term: it grows by one each time a different Station takes the
+    /// lease and never repeats, so it orders Headquarters holders. A lease written before
+    /// terms existed reads as term 0.
+    pub fn term(&self) -> u64 {
+        self.term
+    }
+
     /// Returns the station that holds or last held the Headquarters lease.
     pub fn station(&self) -> &str {
         &self.station
@@ -1097,15 +1108,13 @@ impl FileRegistry {
         let path = directory.join("lease.json");
         let current = read_headquarters(&path)?;
         let now = unix_time()?;
-        if current
-            .as_ref()
-            .is_some_and(|lease| lease.station == station)
-        {
+        if let Some(held) = current.as_ref().filter(|lease| lease.station == station) {
             return write_headquarters(
                 &path,
                 &HeadquartersLease {
                     station: station.to_owned(),
                     expires: now + ttl.as_secs_f64(),
+                    term: held.term,
                 },
             )
             .map(|()| true);
@@ -1129,6 +1138,7 @@ impl FileRegistry {
             &HeadquartersLease {
                 station: station.to_owned(),
                 expires: now + ttl.as_secs_f64(),
+                term: current.as_ref().map_or(0, |lease| lease.term) + 1,
             },
         )?;
         Ok(true)
@@ -2173,7 +2183,7 @@ fn remove_lease(root: &Path, key: &str) -> io::Result<()> {
     }
 }
 
-fn unix_time() -> io::Result<f64> {
+pub(super) fn unix_time() -> io::Result<f64> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(io::Error::other)?
@@ -2231,7 +2241,7 @@ fn registry_station_component(station: &str) -> String {
         .collect()
 }
 
-fn read_headquarters(path: &Path) -> io::Result<Option<HeadquartersLease>> {
+pub(super) fn read_headquarters(path: &Path) -> io::Result<Option<HeadquartersLease>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -2537,6 +2547,34 @@ mod tests {
             registry.headquarters().unwrap().unwrap().station(),
             "new/station"
         );
+    }
+
+    #[test]
+    fn the_headquarters_term_grows_on_takeover_and_survives_renewal() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("headquarters");
+        fs::create_dir_all(&directory).unwrap();
+        // A lease written before terms existed still loads, as term 0.
+        fs::write(
+            directory.join("lease.json"),
+            r#"{"station":"old-station","expires":0}"#,
+        )
+        .unwrap();
+        let registry = FileRegistry::open(root.path());
+        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 0);
+
+        assert!(registry.elect("station-a", DEFAULT_LEASE).unwrap());
+        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 1);
+        assert!(registry.elect("station-a", DEFAULT_LEASE).unwrap());
+        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 1);
+
+        fs::write(
+            directory.join("lease.json"),
+            r#"{"station":"station-a","expires":0,"term":1}"#,
+        )
+        .unwrap();
+        assert!(registry.elect("station-b", DEFAULT_LEASE).unwrap());
+        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 2);
     }
 
     #[test]

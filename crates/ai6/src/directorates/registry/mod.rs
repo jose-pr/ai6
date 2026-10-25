@@ -3,6 +3,7 @@
 //! access tokens, Source cursors and Sleeper approvals; its relay carries Cables between Agents.
 
 pub mod cables;
+pub mod sessions;
 pub mod sleepers;
 pub mod sources;
 pub mod store;

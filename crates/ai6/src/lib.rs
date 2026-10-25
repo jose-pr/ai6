@@ -53,6 +53,9 @@ pub use directorates::registry::cables::{
     CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_BODY_BYTES,
     MAX_CABLE_FANOUT, MAX_CABLE_TTL,
 };
+pub use directorates::registry::sessions::{
+    NewSession, SessionError, SessionRecord, SessionStatus, SessionUpdate,
+};
 pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization,
 };
