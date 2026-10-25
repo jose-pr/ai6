@@ -80,7 +80,7 @@ impl Agent {
         outcome.map_err(|failure| match failure {
             Failure::Io(why) => refuse(
                 Status::GUATIAO_ERR_INTERNAL,
-                format!("guest agent connection: {why}"),
+                format!("guest agent connection to {}: {why}", self.place()),
             ),
             Failure::Agent(why) => {
                 refuse(Status::GUATIAO_ERR_INTERNAL, format!("{command}: {why}"))
@@ -106,9 +106,10 @@ impl Agent {
                 ));
             }
         };
+        let place = self.place();
         stream
             .set_timeout(self.timeout)
-            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, format!("{place}: {error}")))?;
         let mut connection = BufReader::new(stream);
 
         // The agent may hold the tail of an earlier request: 0xFF makes it discard that, and a
@@ -117,21 +118,29 @@ impl Agent {
         connection
             .get_mut()
             .write_all(&[0xFF])
-            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, format!("{place}: {error}")))?;
         let reply = exchange(&mut connection, "guest-sync-delimited", json!({ "id": id }))
             .map_err(|failure| match failure {
                 Failure::Io(why) | Failure::Agent(why) => refuse(
                     Status::GUATIAO_ERR_INTERNAL,
-                    format!("the guest agent did not answer a sync: {why}"),
+                    format!("{place}: the guest agent did not answer a sync: {why}"),
                 ),
             })?;
         if reply.as_u64() != Some(id) {
             return Err(refuse(
                 Status::GUATIAO_ERR_INTERNAL,
-                "the guest agent answered a sync with the wrong ID",
+                format!("{place}: the guest agent answered a sync with the wrong ID"),
             ));
         }
         Ok(connection)
+    }
+
+    /// The agent's address or socket path, for error messages.
+    fn place(&self) -> &str {
+        match &self.endpoint {
+            Endpoint::Tcp(address) => address,
+            Endpoint::Unix(path) => path,
+        }
     }
 }
 
