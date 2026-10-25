@@ -1284,6 +1284,8 @@ class TheaterSummary {
     this.harnesses = const [],
     this.unavailable,
     this.weakened = const [],
+    this.requires,
+    this.report,
   });
 
   final String id;
@@ -1303,8 +1305,18 @@ class TheaterSummary {
   /// Why the Station cannot reach the Theater now, when it cannot.
   final String? unavailable;
 
-  /// Settings looser than their defaults.
+  /// Settings looser than their defaults, and credentials found on the Theater outside
+  /// AI6's leases.
   final List<String> weakened;
+
+  /// What the Theater must have before Sessions run there.
+  final TheaterRequirements? requires;
+
+  /// What the Station's last probe found there.
+  final TheaterReport? report;
+
+  /// The Theater declares requirements that are unchecked or unmet.
+  bool get unfit => requires != null && (report == null || !report!.fit);
 
   factory TheaterSummary.fromJson(Map<String, dynamic> json) => TheaterSummary(
     id: json['id'] as String,
@@ -1325,6 +1337,14 @@ class TheaterSummary {
         .cast<String>(),
     unavailable: json['unavailable'] as String?,
     weakened: ((json['weakened'] as List<dynamic>?) ?? const []).cast<String>(),
+    requires: json['requires'] == null
+        ? null
+        : TheaterRequirements.fromJson(
+            json['requires'] as Map<String, dynamic>,
+          ),
+    report: json['report'] == null
+        ? null
+        : TheaterReport.fromJson(json['report'] as Map<String, dynamic>),
   );
 
   String get description {
@@ -1338,9 +1358,85 @@ class TheaterSummary {
       ...?capabilities?.notes,
       'agents $agents · egress $egress',
       if (harnesses.isNotEmpty) 'harnesses ${harnesses.join(', ')}',
+      if (requires != null) 'requires ${requires!.description}',
+      if (requires != null && report == null) 'requirements not checked yet',
+      ...?report?.lines,
       ...weakened.map((setting) => 'weakened: $setting'),
     ].join('\n');
   }
+}
+
+/// What a Theater must have before Sessions run there.
+class TheaterRequirements {
+  const TheaterRequirements({
+    this.os,
+    this.harnesses = const [],
+    this.tools = const [],
+    this.diskMb,
+  });
+
+  final String? os;
+  final List<String> harnesses;
+  final List<String> tools;
+  final int? diskMb;
+
+  factory TheaterRequirements.fromJson(Map<String, dynamic> json) =>
+      TheaterRequirements(
+        os: json['os'] as String?,
+        harnesses: ((json['harnesses'] as List<dynamic>?) ?? const [])
+            .cast<String>(),
+        tools: ((json['tools'] as List<dynamic>?) ?? const []).cast<String>(),
+        diskMb: json['disk_mb'] as int?,
+      );
+
+  String get description => [
+    ?os,
+    ...harnesses,
+    ...tools,
+    if (diskMb != null) '$diskMb MiB free',
+  ].join(', ');
+}
+
+/// What a Station's probe found on a Theater.
+class TheaterReport {
+  const TheaterReport({
+    this.found = const {},
+    this.freeMb,
+    this.unmet = const [],
+    this.error,
+  });
+
+  /// Programs found, with the first line each printed for `--version`.
+  final Map<String, String> found;
+  final int? freeMb;
+
+  /// Each unmet requirement as `requirement: reason`.
+  final List<String> unmet;
+
+  /// Why the probe could not finish.
+  final String? error;
+
+  bool get fit => error == null && unmet.isEmpty;
+
+  factory TheaterReport.fromJson(Map<String, dynamic> json) => TheaterReport(
+    found: ((json['found'] as Map<String, dynamic>?) ?? const {}).map(
+      (key, value) => MapEntry(key, value as String),
+    ),
+    freeMb: json['free_mb'] as int?,
+    unmet: ((json['unmet'] as List<dynamic>?) ?? const [])
+        .cast<Map<String, dynamic>>()
+        .map((unmet) => '${unmet['requirement']}: ${unmet['reason']}')
+        .toList(),
+    error: json['error'] as String?,
+  );
+
+  List<String> get lines => [
+    if (error != null) 'not checked: $error',
+    ...unmet.map((unmet) => 'unmet: $unmet'),
+    if (found.isNotEmpty)
+      'found ${found.entries.map((e) => '${e.key} ${e.value}'.trim()).join(', ')}',
+    if (freeMb != null) '$freeMb MiB free',
+  ];
 }
 
 class PlacementChoice {
@@ -3586,6 +3682,8 @@ class _StationCard extends StatelessWidget {
                       avatar: Icon(
                         theater.unavailable != null
                             ? Icons.link_off
+                            : theater.unfit
+                            ? Icons.build_outlined
                             : theater.access == 'local'
                             ? Icons.computer
                             : Icons.cloud_outlined,

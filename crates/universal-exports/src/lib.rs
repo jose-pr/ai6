@@ -1334,6 +1334,8 @@ fn station_theaters(info: &BTreeMap<String, serde_json::Value>) -> Vec<BoardThea
             workdir: theater.workdir,
             unavailable: theater.unavailable,
             weakened: theater.weakened,
+            requires: theater.requires,
+            report: theater.report,
         })
         .collect()
 }
@@ -3116,9 +3118,16 @@ pub struct BoardTheater {
     /// Why the Station cannot reach the Theater now, when it cannot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unavailable: Option<String>,
-    /// Settings looser than their defaults.
+    /// Settings looser than their defaults, and credentials found on the Theater outside
+    /// AI6's leases.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub weakened: Vec<String>,
+    /// What the Theater must have before Sessions run there.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires: Option<ai6::Requirements>,
+    /// What the Station's last probe found there: versions, free space, unmet requirements.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<ai6::ProbeReport>,
 }
 
 /// Mission instructions and non-secret launch metadata published by AI6.

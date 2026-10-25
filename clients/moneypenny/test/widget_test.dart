@@ -38,6 +38,29 @@ String stationBoardResponse() => jsonEncode({
           'agents': 'remote-hands',
           'egress': 'none',
         },
+        {
+          'id': 'lab',
+          'access': 'local',
+          'labels': {},
+          'requires': {
+            'harnesses': ['claude>=2.1'],
+            'tools': ['git'],
+          },
+          'report': {
+            'checked_at': 1000,
+            'found': {'git': 'git version 2.47.0'},
+            'unmet': [
+              {
+                'name': 'claude',
+                'requirement': 'claude>=2.1',
+                'reason': 'not installed',
+              },
+            ],
+          },
+          'weakened': [
+            'ambient credential on the Theater: an SSH agent (SSH_AUTH_SOCK)',
+          ],
+        },
       ],
     },
   ],
@@ -751,6 +774,14 @@ void main() {
                   'agent': '008',
                   'reason': 'it has no handler configured',
                 },
+                {
+                  'station': 'station-alpha',
+                  'theater': 'lab',
+                  'agent': '007',
+                  'reason':
+                      'harness "claude" is missing on this Theater: '
+                      'claude>=2.1: not installed',
+                },
               ],
             }),
             200,
@@ -841,6 +872,18 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(find.text('Theater lab'), findsOneWidget);
+    expect(
+      find.byTooltip(
+        'local\n'
+        'agents auto \u00b7 egress direct\n'
+        'requires claude>=2.1, git\n'
+        'unmet: claude>=2.1: not installed\n'
+        'found git git version 2.47.0\n'
+        'weakened: ambient credential on the Theater: an SSH agent (SSH_AUTH_SOCK)',
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Preview placement'));
     await tester.pumpAndSettle();
     expect(find.text('station-alpha \u00b7 local \u00b7 007'), findsOneWidget);
@@ -856,6 +899,13 @@ void main() {
     );
     expect(
       find.text('Agent 008: it has no handler configured'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'station-alpha / lab / Agent 007: harness "claude" is missing on this '
+        'Theater: claude>=2.1: not installed',
+      ),
       findsOneWidget,
     );
     expect(find.text('operation-alpha'), findsNWidgets(2));
