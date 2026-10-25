@@ -124,7 +124,11 @@ Moneypenny's Class authorisations tab.
 Decisions and class authorisations are audited (`green_ink.approved`,
 `green_ink.rejected`, `class_authorization.created`, `class_authorization.revoked`); the
 reason text is not. AI6 does not yet stop a step an Agent takes without green ink: the
-request is how a well-behaved Agent asks, not a lock.
+request is how a well-behaved Agent asks, not a lock. What does hold is the credential: a
+loadout secret marked `green_ink` (say, the token that can push to `main`) reaches a
+Session only while the Mission holds a live approval of a kind it names, once per approval
+(see [Credentials](agents.md#credentials)). Credentials already on the Theater are outside
+that, which is why the Station reports them.
 
 ## Activity timeline
 

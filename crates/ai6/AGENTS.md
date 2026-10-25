@@ -845,7 +845,9 @@ placement policy (`operation_policies`, omitted with a log line when over 512 Ki
 each Station check-in every 15 seconds, alongside host and
 platform metadata. `StationConfig` defaults to both `Control` and `Execution`, no
 pinned terminal and only the `local` Theater; `with_roles` replaces the role set, `with_label`
-adds a placement label, `with_theater` declares a Theater in code and
+adds a placement label, `with_theater` declares a Theater in code,
+`with_loadouts(LoadoutCatalog)` replaces `loadouts.toml`,
+`with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets` and
 `with_terminal` pins the terminal provider. Without a pin the Station uses an available
 terminal provider, preferring `DEFAULT_TERMINAL`. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
 distributed placement. Station and Agent limits count assignments in the shared Registry.
@@ -1275,17 +1277,29 @@ impl LoadoutCatalog {
     pub fn loadouts(&self) -> impl Iterator<Item = &Loadout>;
     pub fn sandboxes(&self) -> impl Iterator<Item = &SandboxProfile>;
     pub fn mcp_servers(&self) -> impl Iterator<Item = &McpServer>;
+    pub fn secret(&self, name: &str) -> SecretDefinition;   // its [secret.<name>], or every default
+    pub fn secrets(&self) -> Vec<SecretDefinition>;         // every name a loadout or table names
 }
 impl FromStr for LoadoutCatalog { type Err = QError; }
+pub struct SecretDefinition;
+impl SecretDefinition {
+    pub fn new(name: impl Into<String>) -> Self;  // env = NAME upper, -/. as _; source Env("AI6_SECRET_<env>")
+    pub fn name(&self) -> &str; pub fn env(&self) -> &str;
+    pub fn green_ink(&self) -> bool; pub fn kinds(&self) -> &[String];   // empty: any approval kind
+    pub fn source(&self) -> &SecretSource;
+}
+#[non_exhaustive] pub enum SecretSource { Env(String), File(PathBuf) }
 ```
 
-Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]` and `[mcp.<name>]` TOML
-tables. Parsing is bounded to one MiB, denies unknown fields and invalid or duplicate
-names, and validates references before returning a catalog. Errors distinguish I/O,
-size, encoding, TOML syntax and schema failures; diagnostics expose source positions but
-never document contents. The catalog is inert: it does not expand environment variables,
-resolve paths, launch MCP servers or create sandboxes. Loading the catalog is a caller
-responsibility, and the daemon does not yet apply its declarations during provider startup.
+Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]` and
+`[secret.<name>]` (`env`, `green_ink`, `kinds` (only with `green_ink`), `from = { env = "…" }
+| { file = "…" }`; never a value) TOML tables. Parsing is bounded to one MiB, denies unknown
+fields and invalid or duplicate names, and validates references before returning a catalog.
+Errors distinguish I/O, size, encoding, TOML syntax and schema failures; diagnostics expose
+source positions but never document contents. The catalog is inert: it does not expand
+environment variables, resolve paths, launch MCP servers or create sandboxes. A Station
+loads `loadouts.toml` from its configuration directory (or `StationConfig::with_loadouts`)
+and applies only the secrets: see "Credentials" under the Station daemon.
 
 Secret references can be leased through `SecretBroker`:
 
@@ -1323,7 +1337,15 @@ impl SecretBroker {
     pub fn with_max_ttl(self, max_ttl: Duration) -> Result<Self, SecretError>;
     pub fn lease(&self, loadout: &Loadout, request: SecretLeaseRequest)
         -> Result<SecretLease, SecretError>;
+    /// Some of the loadout's names; an undeclared one is AccessDenied and nothing is acquired.
+    pub fn lease_names(&self, loadout: &Loadout, names: &[String], request: SecretLeaseRequest)
+        -> Result<SecretLease, SecretError>;
 }
+/// The Station's own backend: reads each value at lease time from its SecretSource (a file
+/// loses one trailing newline); missing or empty fails; revoke is a no-op.
+pub struct StationSecrets;
+impl StationSecrets { pub fn new(definitions: impl IntoIterator<Item = SecretDefinition>) -> Self; }
+impl SecretBackend for StationSecrets;
 pub struct SecretValue;
 impl SecretValue {
     pub fn new(value: impl Into<String>) -> Self;
@@ -1654,6 +1676,19 @@ an `AgentMessage` to a live Session, or a resume whose message carries the decis
 the Session ended, then the Mission returns to Working once nothing it asked for is
 pending. Requests and deliveries are `green_ink` timeline events; the lifecycle carries the
 reason (`green-ink`, `budget`) to Universal Exports.
+Credentials: a Station with a loadout catalog (`loadouts.toml` in the configuration
+directory, or `StationConfig::with_loadouts`) leases the Agent's loadout secrets at every
+Session start and resume (one-hour lease, from `with_secret_backend` or `StationSecrets`)
+and puts each value in the start or resume request's `environment` under its `env`, after
+removing the loadout's variables an earlier Session held. A backend refusal of an ordinary
+secret fails the start. A `green_ink` secret is leased only while the Mission holds a live
+approval (`FileRegistry::mission_approvals`) of one of its `kinds`, once per approval (kept
+in memory), with the approval's remaining time as the TTL; otherwise its variable is absent.
+An exposed Session under the `secrets` restriction gets none. Leases are revoked when the
+Session's operation is finished, stopped or finalized, and on a failed start. Each issue is a
+`credential`/`leased` timeline event (`secrets` = names, `approval` = request ID). Values are
+never written: the launch record and publication carry variable names only, the detached
+wrapper passes the environment through a FIFO, and a runner keeps it in memory.
 On graceful shutdown, event workers interrupt and close active Sessions and move Working
 Missions to Blocked while preserving their safe houses; a Session on a runner is left
 running and its Mission stays Working, so the next start re-attaches to it (see Field

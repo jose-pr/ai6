@@ -71,9 +71,10 @@ geometry, used natively and from WebAssembly.
    context, accepts later messages and decodes events. Claude and Codex handlers are
    Guatiao providers in `crates/providers/agents/`.
 2. **Q Branch owns gear.** Terminals (`ai6::directorates::q::terminal`, provider `pty`),
-   validated loadouts, Mission-scoped secret leases, Claude MCP configuration and
-   bubblewrap argument translation. The loadout catalog is not yet applied at provider
-   startup. Secrets never enter a worktree, event log or terminal stream.
+   validated loadouts, Mission-scoped secret leases, Claude MCP configuration,
+   bubblewrap argument translation and Theater provisioning. A Session's loadout secrets
+   are leased when it starts and handed to the harness in its environment only. Secrets
+   never enter a worktree, event log or terminal stream.
 3. **The Registry owns the shared record.** The file-backed Registry holds briefs,
    leases, Station check-ins, the Headquarters lease, audit, role overrides and
    access-token digests; the Cable relay delivers agent-to-agent messages.
@@ -97,8 +98,8 @@ same-origin and TLS-only, and operator input counts as watchdog activity.
 - Central placement: Stations sharing a Registry each lease the briefs they can run
   themselves; the Headquarters lease does not yet drive placement. The Registry is
   file-backed only (no SQL backend).
-- The Q loadout catalog is parsed and validated but not yet applied when a provider
-  starts.
+- Of a loadout, only its secrets are applied when a Session starts; its sandbox profile
+  and MCP servers are parsed and validated but not yet applied.
 - External A2A interoperability (see below).
 
 ## Agent Cables

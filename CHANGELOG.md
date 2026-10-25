@@ -44,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   THEATER [--check]` fits a Theater out over its transport, checking before each step:
   `ok`, `changed` or `failed` per step, so a second run changes nothing, and `--check`
   writes nothing (`ai6::directorates::q::provision`).
+- Credentials as Q leases. A Station reads `loadouts.toml` and, at every Session start and
+  resume, leases the Agent's loadout secrets from its secret backend and hands each value to
+  the harness in its environment only (`[secret.NAME]`: `env`, `from = { env | file }` on
+  the Station, `green_ink`, `kinds`). The Station's own backend (`StationSecrets`) reads the
+  Station's environment or a file; `StationConfig::with_secret_backend` replaces it. A
+  `green_ink` secret is leased only while the Mission holds a live green ink approval of a
+  kind it names, once per approval and no longer than it lasts. Leases are revoked when the
+  Mission ends or its Session stops; each issue is a `credential` timeline event naming the
+  secrets, never a value. `SecretBroker::lease_names` leases part of a loadout.
 - Green ink: a person's recorded approval of one irreversible step. An Agent calls the
   `request_approval` tool on its Session's AI6 endpoint with the step's kind (`push`,
   `merge`, `release`, `delete`, `clearance` or one its Operation adds) and target. The
@@ -275,6 +284,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The detached wrapper passes a harness's environment through a FIFO instead of an `env`
+  file, so nothing it carries is written on the Theater.
 - The project is renamed from coagent to AI6.
 - The Python packages are replaced by the Rust workspace; Python is no longer needed at
   runtime.

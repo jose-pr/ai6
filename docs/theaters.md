@@ -261,9 +261,10 @@ Station starts the harness over the transport in a session of its own (`setsid`,
 where there is none), so the link that started it can drop without ending it:
 
 - Its files are in `~/.ai6/detached/<mission>-<id>/` on the Theater (the login user's home
-  over SSH; readable only by that user): `env` (the Session's environment, so no value appears
-  on a command line), `in` (a FIFO it reads), `out` (everything it writes), `pid` and, once it
-  ends, `exit`. The directory stays after the Mission for inspection.
+  over SSH; readable only by that user): `env` (a FIFO the Session's environment passes
+  through once, so no value is on a command line or on disk; removed after it is read), `in`
+  (a FIFO it reads), `out` (everything it writes), `pid` and, once it ends, `exit`. The
+  directory stays after the Mission for inspection.
 - The Station reads `out` from the last byte it took and writes to `in`. While the link is
   down a read finds nothing new and the harness keeps running; once the transport
   reconnects, the Station reads on from where it stopped, so nothing is lost.

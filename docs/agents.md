@@ -119,6 +119,56 @@ An Operation refuses an Agent above its clearance or outside its roster. M retai
 authorization authority; Agent role policy is guidance only. Q Branch controls which
 credentials are issued.
 
+## Credentials
+
+Q issues each Session the credentials its Agent's loadout names, as leases, and nothing
+else of its own: harness keys or tokens, git and forge tokens. A Station reads loadouts from
+`loadouts.toml` in its configuration directory:
+
+```toml
+[loadout.007]
+secrets = ["anthropic", "forge", "release"]
+
+[secret.anthropic]
+env = "ANTHROPIC_API_KEY"                    # default: the name in upper case, - and . as _
+from = { env = "AI6_SECRET_ANTHROPIC_API_KEY" } # default: AI6_SECRET_<env>; or { file = "…" }
+
+[secret.forge]
+env = "GH_TOKEN"
+from = { file = "/etc/ai6/secrets/forge" }
+
+[secret.release]                             # a credential for protected targets
+env = "RELEASE_TOKEN"
+green_ink = true
+kinds = ["release", "push"]                  # approvals that unlock it; default: any
+```
+
+- When a Session starts or resumes, the Station leases the Agent's secrets from its secret
+  backend and puts each value in the harness's environment under `env`, replacing what the
+  Mission's earlier Session held. A value is never written to disk: not in the safe house,
+  the launch record, the Registry, nor on the Theater. The [detached
+  wrapper](theaters.md#the-detached-wrapper) hands the environment over through a FIFO; a
+  runner keeps it in memory. A Session refuses to start when its backend refuses an
+  ordinary secret.
+- The Station's own backend reads each value when it is leased from the Station's
+  environment or a file there (`from`); `StationConfig::with_secret_backend` puts another in
+  its place, such as a vault client whose leases expire on their own. Leases last at most
+  an hour and are revoked when the Mission ends or its Session stops on that Station; a
+  value already in a harness's environment stays there until the harness ends.
+- A `green_ink` secret is leased only while the Mission holds a live [green
+  ink](missions.md#green-ink) approval of one of its `kinds`: once per approval, for no
+  longer than the approval lasts. The Agent asks with `request_approval`, and the
+  credential is in its environment from the next Session start or resume after the
+  operator signs.
+- A Session the Operation's [exposure](medical.md) policy restricts with `secrets` gets no
+  new leases.
+- Each lease is on the Mission's timeline (`credential` / `leased`), naming the secrets and
+  the approval, never a value.
+
+Credentials already on a Theater outside these leases (a git credential helper, an SSH
+agent, a CLI login) are reported as weakenings; see [Fitting a Theater
+out](theaters.md#fitting-a-theater-out).
+
 ## Commands
 
 Run `ai6 serve --help` to configure a Station and `ai6ctl --help` for the operator
