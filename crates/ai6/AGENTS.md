@@ -24,10 +24,10 @@ default feature set remains dependency-light.
 The library root re-exports common contracts. Two public modules group the rest.
 `directorates` holds the decisions: `directorates::m` owns access, identity, Missions, the
 roster and cover; `directorates::registry` owns the Registry (intake) and Cables; `directorates::q`
-owns loadouts, secret leases and terminal contracts; `directorates::section_00` owns the
+owns loadouts, secret leases, terminal contracts and the safe-house contract; `directorates::section_00` owns the
 AgentHandler contract; `directorates::medical` owns Session monitoring. `station` holds the
 node that runs them: `station::server` (daemon service and `serve*`), `station::plugins`
-(provider host), `station::safehouse` (Mission worktrees), `station::publisher`
+(provider host), `station::safehouse` (opens a Mission's safe house through a provider), `station::publisher`
 (`publisher` feature) and `station::identity` (`station-tls` feature). The command
 exposes `ai6 serve`, `ai6 identity` and `ai6 peer waiting|accept`.
 
@@ -185,17 +185,26 @@ pub struct Operation {
     pub theater: Option<String>,
     pub config: Option<PathBuf>,
     pub roster: Vec<String>,
-    pub repos: Vec<String>,
     pub clearance: String,
     pub max_concurrent: Option<usize>,
-    pub safe_houses: bool,
-    pub branch: String,
-    pub base: String,
+    pub workspace: Workspace,
     pub station_labels: BTreeMap<String, String>,
     pub cover: String,
     pub cover_identity: Option<CoverIdentity>,
     pub on_blown: String,
     pub sources: toml::Table,
+}
+impl Operation {
+    /// `workspace.provider`, else `"git"` when the source or `path` holds a `.git`, else `None`.
+    pub fn safe_house_provider(&self) -> Option<String>;
+}
+#[non_exhaustive]
+pub struct Workspace {
+    pub provider: Option<String>,
+    pub source: Option<PathBuf>,   // defaults to the Operation's `path`
+    pub base: String,              // default "HEAD"
+    pub branch: String,            // template, default "{id}-{slug}"
+    pub isolate: bool,             // default true
 }
 pub struct CoverIdentity { pub name: String, pub email: String }
 #[non_exhaustive]
@@ -666,13 +675,14 @@ loads `covers.toml`, with custom entries replacing built-ins of the same name;
 `check_commits(commits, identity, model)` returns ordered `CoverViolation` values for
 identity, attribution trailer, model mention, announcement, forbidden-pattern and footer
 rules. Forbidden patterns match case-insensitively. `CoverReport` records the policy,
-number of commits, `blown` flag and violations; the daemon persists it to the Mission after
-checking commits since the Mission's starting revision.
+number of commits, `checkable`, `blown` flag and violations; the daemon persists it to the
+Mission after checking the safe house's changes since the Mission's starting revision. A
+safe house whose provider keeps no history reports `checkable = false` (and `blown = false`):
+that is "not checkable", not a pass.
 
 ```rust
-pub struct CoverCommit { pub sha: String, pub author: String, pub committer: String, pub message: String }
 pub struct CoverViolation { pub commit: String, pub rule: String, pub detail: String }
-pub struct CoverReport { pub policy: String, pub commits: usize, pub blown: bool, pub violations: Vec<CoverViolation> }
+pub struct CoverReport { pub policy: String, pub commits: usize, pub checkable: bool, pub blown: bool, pub violations: Vec<CoverViolation> }
 pub struct Covers;
 impl Covers {
     pub fn load(config_dir: impl AsRef<Path>) -> Result<Self, CoverError>;
@@ -683,7 +693,7 @@ impl Covers {
 impl Cover {
     pub fn name(&self) -> &str;
     pub fn briefing(&self, identity: Option<&CoverIdentity>, agent: &str, model: &str) -> String;
-    pub fn check_commits(&self, commits: &[CoverCommit], identity: Option<&CoverIdentity>, model: &str) -> Vec<CoverViolation>;
+    pub fn check_commits(&self, commits: &[Change], identity: Option<&CoverIdentity>, model: &str) -> Vec<CoverViolation>;
 }
 ```
 
@@ -739,8 +749,9 @@ provider Session. Resume passes the same provider-issued Session ID back to its 
 and rejects a handler that returns a different ID. After a process restart, resume rebuilds
 handler settings from the persisted operation and current Agent roster. The optional
 `environment` map in a resume request supplies fresh, non-persisted values such as new
-short-lived credentials. Active safe houses are reopened only after their Git worktree,
-Operation repository, branch and base commit are verified.
+short-lived credentials. Active safe houses are re-attached through their provider, which
+verifies them against the Mission report (the `git` provider checks worktree, repository,
+branch and base commit).
 `GET /internal/missions/{mission_id}/cables` discovers grant-visible active peers;
 `GET .../cables/inbox?limit=` reads authorized deliveries; `POST .../cables` sends a
 Cable without caller-selected sender identity; `GET .../cables/held?limit=` lists body-free
@@ -763,9 +774,13 @@ daemon restarts, and a blocked Mission can reattach to its provider Session thro
 handler. `ai6::directorates::m::roster`
 loads global `operations.toml` and `agents.toml`; local `.ai6/agents.toml` is read only for
 a registered Operation. Agent watchdog `limits` inherit and merge by field, then override the
-daemon's `WatchdogConfig`. A local Operation with `safe_houses = true` gets a Git worktree under
-AI6's state directory. Untouched worktrees and branches are removed when the Mission
-ends; worktrees containing commits or changes are kept and included in the Mission report.
+daemon's `WatchdogConfig`. A local Operation whose `workspace` names a safe-house provider
+(or whose path is a Git checkout, which selects `git`) gets an isolated safe house under
+AI6's state directory. Untouched ones are removed when the Mission ends; ones holding
+changes are kept and included in the Mission report. `workspace.isolate = false` works in
+the Operation's directory instead. The earlier Operation keys `repos`, `safe_houses`,
+`branch` and `base` are refused at load time with a message naming the `workspace` field
+that replaced them.
 Remote Theaters are not implemented: Missions run on the Station's own host.
 This private listener is for
 daemon health, provider discovery and Universal Exports-to-daemon operations; user-facing
@@ -790,28 +805,61 @@ pre-registration output buffer are each bounded to 1 MiB. Output read before the
 Session ID is observed is queued until registration; overflowing that buffer disables
 publication.
 
-## Safe houses (`ai6::station::safehouse`)
+## Safe houses (`ai6::directorates::q::safehouse`, `ai6::station::safehouse`)
 
-`SafeHouse::create(repository, root, station_id, mission_id, title, branch_template, base)`
-creates a Git worktree under `root/safe-houses/<station>/<mission>` and returns its path,
-branch and base commit. The canonical state root must be outside the repository, and the
-Mission path must not already exist. Branch templates expand `{id}`, `{slug}` and
-`{station}`; Git validates the final ref and base commit. `finish()` removes an untouched
-worktree and branch; it retains changed or committed work and returns a `SafeHouseReport`
-with the path, branch, base and commit summaries. `SafeHouse::reopen(repository, report)`
-validates the Mission report against the registered Git worktree, branch and base commit
-before restoring cleanup ownership after a daemon restart. `state_dir()` resolves `AI6_STATE`, then
+A safe house is the isolated working directory a Mission's Agent works in. Providers are
+Guatiao libraries of two kinds; the Station loads them where the Session runs, and the
+daemon runs no version-control command itself. Slot order is the ABI: append, never reorder.
+
+```rust
+#[guatiao::kind(name = "ai6_safehouse")]
+pub trait SafeHouseProvider: Send + Sync {
+    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError>; // SafeHouseSpec
+}
+#[guatiao::kind(object, name = "ai6_safehouse_session")]
+pub trait SafeHouseSession: Send + Sync {
+    fn info(&self) -> Result<Value, ProviderError>;    // SafeHouseInfo
+    fn changes(&self) -> Result<Value, ProviderError>; // ChangeLog, newest first; empty without history
+    fn finish(&self) -> Result<Value, ProviderError>;  // SafeHouseReport; idempotent
+}
+pub struct SafeHouseSpec {
+    pub operation_id: String, pub mission_id: String, pub title: String,
+    pub source: String,    // a local path today
+    pub base: String,      // revision to start from; ignored by providers without revisions
+    pub branch: String,    // template: {id} {slug} {operation}
+    pub isolate: bool,     // false: work in `source` itself
+    pub state_root: String,
+    pub reopen: Option<SafeHouseReport>, // re-attach to a safe house kept by an earlier run
+}
+pub struct SafeHouseInfo {
+    pub path: String, pub branch: Option<String>, pub base: Option<String>,
+    pub supports_history: bool, // false: cover is "not checkable"
+    pub isolated: bool,
+}
+pub struct Change { pub id: String, pub author: String, pub committer: String, pub message: String }
+pub struct ChangeLog { pub changes: Vec<Change> }
+pub struct SafeHouseReport { pub path: String, pub branch: Option<String>, pub base: Option<String>, pub kept: bool, pub changes: Vec<String> }
+```
+
+`finish` removes an untouched isolated safe house and keeps one that holds work; it leaves
+a safe house in place alone. Floor hashes are pinned by tests in `safehouse.rs`; a model
+grows by optional fields only. Providers: `git` (`ai6-safehouse-git`).
+
+`station::safehouse::SafeHouse::open(&dyn SafeHouseProvider, &SafeHouseSpec)` wraps a
+session: `path()`, `branch()`, `base()`, `supports_history()`, `is_isolated()`,
+`changes()`, `finish()` and `active_report()`. Only isolated safe houses are recorded on
+the Mission and finished by the daemon. `state_dir()` resolves `AI6_STATE`, then
 `AI6_HOME/state`, then `%LOCALAPPDATA%/AI6` on Windows, then `XDG_STATE_HOME/AI6` or
 `~/.local/state/AI6`.
 
 ## Plugin discovery (`ai6::station::plugins`)
 
 `Plugins::scan(paths: &[PathBuf]) -> Plugins` filters Guatiao libraries for
-`ai6_agent_handler`, `ai6_terminal` and the three access kinds before mapping them and
-retains the registry for the daemon process lifetime. `handlers()`, `terminals()`,
-`authenticators()`, `directories()` and `authorizers()` list providers and their
+`ai6_agent_handler`, `ai6_terminal`, `ai6_safehouse` and the three access kinds before
+mapping them and retains the registry for the daemon process lifetime. `handlers()`,
+`terminals()`, `safehouses()`, `authenticators()`, `directories()` and `authorizers()` list providers and their
 availability. `handler(provider, config)`, `terminal(provider, config)`,
-`authenticator(provider, config)`, `directory(provider, config)` and
+`safehouse(provider, config)`, `authenticator(provider, config)`, `directory(provider, config)` and
 `authorizer(provider, config)` construct typed providers, validating a supplied `Value`
 against the provider's schema. Pass `None` only for a provider with a default instance.
 `scan_summary()` reports loaded, skipped, failed and unreadable paths.

@@ -23,8 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   qualified Agent is the backup. Operators can override roles per Operation.
 - The Station picks the terminal provider automatically, preferring `pty` when several
   are available; `ai6 serve --terminal ID` pins one. Agents do not choose a terminal.
-- Safe houses: an isolated Git worktree per Mission, removed when untouched and kept with
-  a report when it holds work.
+- Safe houses: an isolated workspace per Mission, removed when untouched and kept with
+  a report when it holds work. A safe house is made by a provider of the new
+  `ai6_safehouse` Guatiao kind (`ai6::directorates::q::safehouse`); `ai6-safehouse-git`
+  is the `git` provider (a worktree on its own branch). An Operation chooses one with
+  `workspace = { provider, source, base, branch, isolate }`; the provider defaults to `git`
+  for a Git checkout. The daemon runs no Git commands itself.
+- Cover checks read the safe house's changes through the provider. A provider that keeps
+  no history makes the cover report say `checkable = false` instead of passing.
 - Cover policies (`covert`, `partial`, `overt`, or `covers.toml`) with an Operation
   author identity; Mission commits are audited and a violation marks the Mission `blown`
   when the Operation sets `on_blown = "fail"`.

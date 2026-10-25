@@ -20,7 +20,7 @@ and the [guides](https://jose-pr.github.io/ai6/).
   durable Mission records and automatic provider-Session reattachment after a restart.
 - Agent selection by role and priority; when an Agent's handler is unavailable, the next
   qualified Agent is posted instead.
-- Isolated Mission worktrees (safe houses), commit cover audits and Session watchdogs.
+- Isolated Mission workspaces (safe houses, made by providers such as `git`), commit cover audits and Session watchdogs.
 - Scoped agent-to-agent Cables with per-Session MCP tools.
 - Station identities with pinned-peer or CA mutual TLS.
 
@@ -90,7 +90,8 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::medical::watchdog` | Stall, loop and blocked-prompt detection for Sessions |
 | `ai6::station::server` | `ServeConfig`, `StationConfig` and the `serve*` entry points |
 | `ai6::station::plugins` | Guatiao provider discovery and typed construction |
-| `ai6::station::safehouse` | Mission Git worktrees and retained-work reports |
+| `ai6::station::safehouse` | Opens a Mission's safe house through a provider; state directory |
+| `ai6::directorates::q::safehouse` | The safe-house provider contract and its models |
 | `ai6::station::publisher` | The Universal Exports publisher (`publisher` feature) |
 | `ai6::station::identity` | Station certificates, fingerprints and peer trust (`station-tls` feature) |
 

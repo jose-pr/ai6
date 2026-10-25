@@ -89,19 +89,15 @@ pub mod ai6::directorates::m::cover
 #[non_exhaustive] pub struct ai6::directorates::m::cover::Cover
 impl ai6::directorates::m::cover::Cover
 pub fn ai6::directorates::m::cover::Cover::briefing(&self, core::option::Option<&ai6::directorates::m::roster::CoverIdentity>, &str, &str) -> alloc::string::String
-pub fn ai6::directorates::m::cover::Cover::check_commits(&self, &[ai6::directorates::m::cover::CoverCommit], core::option::Option<&ai6::directorates::m::roster::CoverIdentity>, &str) -> alloc::vec::Vec<ai6::directorates::m::cover::CoverViolation>
+pub fn ai6::directorates::m::cover::Cover::check_commits(&self, &[ai6::directorates::q::safehouse::Change], core::option::Option<&ai6::directorates::m::roster::CoverIdentity>, &str) -> alloc::vec::Vec<ai6::directorates::m::cover::CoverViolation>
 pub fn ai6::directorates::m::cover::Cover::name(&self) -> &str
-#[non_exhaustive] pub struct ai6::directorates::m::cover::CoverCommit
-pub ai6::directorates::m::cover::CoverCommit::author: alloc::string::String
-pub ai6::directorates::m::cover::CoverCommit::committer: alloc::string::String
-pub ai6::directorates::m::cover::CoverCommit::message: alloc::string::String
-pub ai6::directorates::m::cover::CoverCommit::sha: alloc::string::String
 #[non_exhaustive] pub struct ai6::directorates::m::cover::CoverError(_)
 impl core::error::Error for ai6::directorates::m::cover::CoverError
 impl core::fmt::Display for ai6::directorates::m::cover::CoverError
 pub fn ai6::directorates::m::cover::CoverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::m::cover::CoverReport
 pub ai6::directorates::m::cover::CoverReport::blown: bool
+pub ai6::directorates::m::cover::CoverReport::checkable: bool
 pub ai6::directorates::m::cover::CoverReport::commits: usize
 pub ai6::directorates::m::cover::CoverReport::policy: alloc::string::String
 pub ai6::directorates::m::cover::CoverReport::violations: alloc::vec::Vec<ai6::directorates::m::cover::CoverViolation>
@@ -210,7 +206,7 @@ pub ai6::directorates::m::mission::Mission::operation_id: core::option::Option<a
 pub ai6::directorates::m::mission::Mission::prompt: alloc::string::String
 pub ai6::directorates::m::mission::Mission::revision: u64
 pub ai6::directorates::m::mission::Mission::role_id: core::option::Option<alloc::string::String>
-pub ai6::directorates::m::mission::Mission::safe_house: core::option::Option<ai6::station::safehouse::SafeHouseReport>
+pub ai6::directorates::m::mission::Mission::safe_house: core::option::Option<ai6::directorates::q::safehouse::SafeHouseReport>
 pub ai6::directorates::m::mission::Mission::session_ids: alloc::vec::Vec<ai6::directorates::m::identity::SessionId>
 pub ai6::directorates::m::mission::Mission::state: ai6::directorates::m::mission::MissionState
 pub struct ai6::directorates::m::mission::MissionStore
@@ -221,7 +217,7 @@ pub fn ai6::directorates::m::mission::MissionStore::get(&self, &str) -> core::op
 pub fn ai6::directorates::m::mission::MissionStore::list(&self) -> alloc::vec::Vec<ai6::directorates::m::mission::Mission>
 pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
-pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::station::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::directorates::q::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::transition(&mut self, &str, ai6::directorates::m::mission::MissionState) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub mod ai6::directorates::m::roster
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Agent
@@ -249,8 +245,6 @@ pub struct ai6::directorates::m::roster::CoverIdentity
 pub ai6::directorates::m::roster::CoverIdentity::email: alloc::string::String
 pub ai6::directorates::m::roster::CoverIdentity::name: alloc::string::String
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Operation
-pub ai6::directorates::m::roster::Operation::base: alloc::string::String
-pub ai6::directorates::m::roster::Operation::branch: alloc::string::String
 pub ai6::directorates::m::roster::Operation::clearance: alloc::string::String
 pub ai6::directorates::m::roster::Operation::config: core::option::Option<std::path::PathBuf>
 pub ai6::directorates::m::roster::Operation::cover: alloc::string::String
@@ -261,12 +255,13 @@ pub ai6::directorates::m::roster::Operation::max_concurrent: core::option::Optio
 pub ai6::directorates::m::roster::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::on_blown: alloc::string::String
 pub ai6::directorates::m::roster::Operation::path: core::option::Option<std::path::PathBuf>
-pub ai6::directorates::m::roster::Operation::repos: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::m::roster::Operation::safe_houses: bool
 pub ai6::directorates::m::roster::Operation::sources: toml::table::Table
 pub ai6::directorates::m::roster::Operation::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::m::roster::Operation::theater: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::Operation::workspace: ai6::directorates::m::roster::Workspace
+impl ai6::directorates::m::roster::Operation
+pub fn ai6::directorates::m::roster::Operation::safe_house_provider(&self) -> core::option::Option<alloc::string::String>
 pub struct ai6::directorates::m::roster::Roster
 impl ai6::directorates::m::roster::Roster
 pub fn ai6::directorates::m::roster::Roster::agent(&self, core::option::Option<&str>, &str) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
@@ -281,6 +276,12 @@ pub struct ai6::directorates::m::roster::RosterError(_)
 impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::roster::Workspace
+pub ai6::directorates::m::roster::Workspace::base: alloc::string::String
+pub ai6::directorates::m::roster::Workspace::branch: alloc::string::String
+pub ai6::directorates::m::roster::Workspace::isolate: bool
+pub ai6::directorates::m::roster::Workspace::provider: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::Workspace::source: core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::m::roster::config_dir() -> core::result::Result<std::path::PathBuf, ai6::directorates::m::roster::RosterError>
 pub mod ai6::directorates::medical
 pub mod ai6::directorates::medical::watchdog
@@ -328,6 +329,58 @@ pub const ai6::directorates::medical::watchdog::DEFAULT_LINE_HISTORY: usize
 pub const ai6::directorates::medical::watchdog::DEFAULT_LOOP_MIN_LINES: usize
 pub const ai6::directorates::medical::watchdog::DEFAULT_STALL_TIMEOUT: core::time::Duration
 pub mod ai6::directorates::q
+pub mod ai6::directorates::q::safehouse
+pub struct ai6::directorates::q::safehouse::Change
+pub ai6::directorates::q::safehouse::Change::author: alloc::string::String
+pub ai6::directorates::q::safehouse::Change::committer: alloc::string::String
+pub ai6::directorates::q::safehouse::Change::id: alloc::string::String
+pub ai6::directorates::q::safehouse::Change::message: alloc::string::String
+pub struct ai6::directorates::q::safehouse::ChangeLog
+pub ai6::directorates::q::safehouse::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
+pub struct ai6::directorates::q::safehouse::SafeHouseInfo
+pub ai6::directorates::q::safehouse::SafeHouseInfo::base: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::SafeHouseInfo::branch: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::SafeHouseInfo::isolated: bool
+pub ai6::directorates::q::safehouse::SafeHouseInfo::path: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseInfo::supports_history: bool
+pub struct ai6::directorates::q::safehouse::SafeHouseReport
+pub ai6::directorates::q::safehouse::SafeHouseReport::base: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::SafeHouseReport::branch: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::SafeHouseReport::changes: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::safehouse::SafeHouseReport::kept: bool
+pub ai6::directorates::q::safehouse::SafeHouseReport::path: alloc::string::String
+pub struct ai6::directorates::q::safehouse::SafeHouseSpec
+pub ai6::directorates::q::safehouse::SafeHouseSpec::base: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseSpec::branch: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseSpec::isolate: bool
+pub ai6::directorates::q::safehouse::SafeHouseSpec::mission_id: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseSpec::operation_id: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseSpec::reopen: core::option::Option<ai6::directorates::q::safehouse::SafeHouseReport>
+pub ai6::directorates::q::safehouse::SafeHouseSpec::source: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseSpec::state_root: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseSpec::title: alloc::string::String
+pub trait ai6::directorates::q::safehouse::SafeHouseProvider: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::safehouse::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseProvider>::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+pub trait ai6::directorates::q::safehouse::SafeHouseSession: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::changes(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
+impl ai6::directorates::q::safehouse::SafeHouseSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
 pub mod ai6::directorates::q::terminal
 pub use ai6::directorates::q::terminal::guatiao
 pub struct ai6::directorates::q::terminal::ExitInfo
@@ -961,6 +1014,8 @@ pub fn ai6::station::plugins::Plugins::directories(&self) -> alloc::vec::Vec<ai6
 pub fn ai6::station::plugins::Plugins::directory(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::m::access::Directory>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::handler(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::handlers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::safehouse(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::safehouse::SafeHouseProvider>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::safehouses(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::scan(&[std::path::PathBuf]) -> Self
 pub fn ai6::station::plugins::Plugins::scan_summary(&self) -> &ai6::station::plugins::PluginScanSummary
 pub fn ai6::station::plugins::Plugins::terminal(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>, ai6::station::plugins::PluginBuildError>
@@ -983,29 +1038,24 @@ pub fn ai6::station::publisher::Config::try_new(&str, impl core::convert::Into<a
 impl core::fmt::Debug for ai6::station::publisher::Config
 pub fn ai6::station::publisher::Config::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub mod ai6::station::safehouse
-#[non_exhaustive] pub struct ai6::station::safehouse::SafeHouse
-pub ai6::station::safehouse::SafeHouse::base: alloc::string::String
-pub ai6::station::safehouse::SafeHouse::branch: alloc::string::String
-pub ai6::station::safehouse::SafeHouse::path: std::path::PathBuf
-pub ai6::station::safehouse::SafeHouse::repository: std::path::PathBuf
+pub struct ai6::station::safehouse::SafeHouse
 impl ai6::station::safehouse::SafeHouse
-pub fn ai6::station::safehouse::SafeHouse::active_report(&self) -> ai6::station::safehouse::SafeHouseReport
-pub fn ai6::station::safehouse::SafeHouse::commits(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, ai6::station::safehouse::SafeHouseError>
-pub fn ai6::station::safehouse::SafeHouse::create(impl core::convert::AsRef<std::path::Path>, impl core::convert::AsRef<std::path::Path>, &str, &ai6::directorates::m::identity::MissionId, &str, &str, &str) -> core::result::Result<Self, ai6::station::safehouse::SafeHouseError>
-pub fn ai6::station::safehouse::SafeHouse::finish(&self) -> core::result::Result<ai6::station::safehouse::SafeHouseReport, ai6::station::safehouse::SafeHouseError>
-pub fn ai6::station::safehouse::SafeHouse::reopen(impl core::convert::AsRef<std::path::Path>, &ai6::station::safehouse::SafeHouseReport) -> core::result::Result<Self, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::active_report(&self) -> ai6::directorates::q::safehouse::SafeHouseReport
+pub fn ai6::station::safehouse::SafeHouse::base(&self) -> core::option::Option<&str>
+pub fn ai6::station::safehouse::SafeHouse::branch(&self) -> core::option::Option<&str>
+pub fn ai6::station::safehouse::SafeHouse::changes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::safehouse::Change>, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::finish(&self) -> core::result::Result<ai6::directorates::q::safehouse::SafeHouseReport, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::is_isolated(&self) -> bool
+pub fn ai6::station::safehouse::SafeHouse::open(&dyn ai6::directorates::q::safehouse::SafeHouseProvider, &ai6::directorates::q::safehouse::SafeHouseSpec) -> core::result::Result<Self, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::path(&self) -> &std::path::Path
+pub fn ai6::station::safehouse::SafeHouse::supports_history(&self) -> bool
+impl core::fmt::Debug for ai6::station::safehouse::SafeHouse
+pub fn ai6::station::safehouse::SafeHouse::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::station::safehouse::SafeHouseError(_)
 impl core::error::Error for ai6::station::safehouse::SafeHouseError
 impl core::fmt::Display for ai6::station::safehouse::SafeHouseError
 pub fn ai6::station::safehouse::SafeHouseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-#[non_exhaustive] pub struct ai6::station::safehouse::SafeHouseReport
-pub ai6::station::safehouse::SafeHouseReport::base: alloc::string::String
-pub ai6::station::safehouse::SafeHouseReport::branch: alloc::string::String
-pub ai6::station::safehouse::SafeHouseReport::commits: alloc::vec::Vec<alloc::string::String>
-pub ai6::station::safehouse::SafeHouseReport::kept: bool
-pub ai6::station::safehouse::SafeHouseReport::path: alloc::string::String
 pub const ai6::station::safehouse::STATE_ENV: &str
-pub fn ai6::station::safehouse::branch_name(&str, &str, &str, &str) -> alloc::string::String
 pub fn ai6::station::safehouse::state_dir() -> core::result::Result<std::path::PathBuf, ai6::station::safehouse::SafeHouseError>
 pub mod ai6::station::server
 #[non_exhaustive] pub enum ai6::station::server::StationRole
@@ -1374,6 +1424,13 @@ impl ai6::directorates::registry::cables::CableTarget
 pub fn ai6::directorates::registry::cables::CableTarget::name(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::CableTarget::scope(&self) -> ai6::directorates::registry::cables::CableScope
 pub fn ai6::directorates::registry::cables::CableTarget::try_new(ai6::directorates::registry::cables::CableScope, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub struct ai6::Change
+pub ai6::Change::author: alloc::string::String
+pub ai6::Change::committer: alloc::string::String
+pub ai6::Change::id: alloc::string::String
+pub ai6::Change::message: alloc::string::String
+pub struct ai6::ChangeLog
+pub ai6::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
 pub struct ai6::CoverIdentity
 pub ai6::CoverIdentity::email: alloc::string::String
 pub ai6::CoverIdentity::name: alloc::string::String
@@ -1502,8 +1559,6 @@ pub ai6::MissionProposal::proposer_session_id: ai6::directorates::m::identity::S
 impl ai6::directorates::registry::store::MissionProposal
 pub fn ai6::directorates::registry::store::MissionProposal::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::SessionId, &str, ai6::directorates::registry::store::Brief) -> core::io::error::Result<Self>
 #[non_exhaustive] pub struct ai6::Operation
-pub ai6::Operation::base: alloc::string::String
-pub ai6::Operation::branch: alloc::string::String
 pub ai6::Operation::clearance: alloc::string::String
 pub ai6::Operation::config: core::option::Option<std::path::PathBuf>
 pub ai6::Operation::cover: alloc::string::String
@@ -1514,12 +1569,13 @@ pub ai6::Operation::max_concurrent: core::option::Option<usize>
 pub ai6::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::Operation::on_blown: alloc::string::String
 pub ai6::Operation::path: core::option::Option<std::path::PathBuf>
-pub ai6::Operation::repos: alloc::vec::Vec<alloc::string::String>
 pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
-pub ai6::Operation::safe_houses: bool
 pub ai6::Operation::sources: toml::table::Table
 pub ai6::Operation::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::Operation::theater: core::option::Option<alloc::string::String>
+pub ai6::Operation::workspace: ai6::directorates::m::roster::Workspace
+impl ai6::directorates::m::roster::Operation
+pub fn ai6::directorates::m::roster::Operation::safe_house_provider(&self) -> core::option::Option<alloc::string::String>
 pub struct ai6::PeerTrustStore
 impl ai6::station::identity::PeerTrustStore
 pub fn ai6::station::identity::PeerTrustStore::accept(&self, &ai6::station::identity::StationFingerprint) -> core::result::Result<(), ai6::station::identity::StationIdentityError>
@@ -1586,6 +1642,28 @@ pub struct ai6::RosterError(_)
 impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SafeHouseInfo
+pub ai6::SafeHouseInfo::base: core::option::Option<alloc::string::String>
+pub ai6::SafeHouseInfo::branch: core::option::Option<alloc::string::String>
+pub ai6::SafeHouseInfo::isolated: bool
+pub ai6::SafeHouseInfo::path: alloc::string::String
+pub ai6::SafeHouseInfo::supports_history: bool
+pub struct ai6::SafeHouseReport
+pub ai6::SafeHouseReport::base: core::option::Option<alloc::string::String>
+pub ai6::SafeHouseReport::branch: core::option::Option<alloc::string::String>
+pub ai6::SafeHouseReport::changes: alloc::vec::Vec<alloc::string::String>
+pub ai6::SafeHouseReport::kept: bool
+pub ai6::SafeHouseReport::path: alloc::string::String
+pub struct ai6::SafeHouseSpec
+pub ai6::SafeHouseSpec::base: alloc::string::String
+pub ai6::SafeHouseSpec::branch: alloc::string::String
+pub ai6::SafeHouseSpec::isolate: bool
+pub ai6::SafeHouseSpec::mission_id: alloc::string::String
+pub ai6::SafeHouseSpec::operation_id: alloc::string::String
+pub ai6::SafeHouseSpec::reopen: core::option::Option<ai6::directorates::q::safehouse::SafeHouseReport>
+pub ai6::SafeHouseSpec::source: alloc::string::String
+pub ai6::SafeHouseSpec::state_root: alloc::string::String
+pub ai6::SafeHouseSpec::title: alloc::string::String
 pub struct ai6::SandboxProfile
 impl ai6::directorates::q::SandboxProfile
 pub fn ai6::directorates::q::SandboxProfile::backend(&self) -> &str
@@ -1777,6 +1855,12 @@ pub ai6::WatchdogOverrides::normalize_digits: core::option::Option<bool>
 pub ai6::WatchdogOverrides::stall_timeout: core::option::Option<core::time::Duration>
 impl ai6::directorates::medical::watchdog::WatchdogOverrides
 pub fn ai6::directorates::medical::watchdog::WatchdogOverrides::apply_to(&self, &ai6::directorates::medical::watchdog::WatchdogConfig) -> ai6::directorates::medical::watchdog::WatchdogConfig
+#[non_exhaustive] pub struct ai6::Workspace
+pub ai6::Workspace::base: alloc::string::String
+pub ai6::Workspace::branch: alloc::string::String
+pub ai6::Workspace::isolate: bool
+pub ai6::Workspace::provider: core::option::Option<alloc::string::String>
+pub ai6::Workspace::source: core::option::Option<std::path::PathBuf>
 pub const ai6::DEFAULT_BLOCKED_AFTER: core::time::Duration
 pub const ai6::DEFAULT_CABLE_TTL: f64
 pub const ai6::DEFAULT_LEASE: core::time::Duration
@@ -1848,6 +1932,28 @@ impl ai6::directorates::m::access::Directory for guatiao::library::kind::proxy::
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::m::access::Directory>::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::m::access::Directory for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Directory>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::m::access::Directory>::lookup(&self, ai6::directorates::m::access::Lookup) -> core::result::Result<core::option::Option<ai6::directorates::m::access::Person>, guatiao::library::kind::ProviderError>
+pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
+pub fn ai6::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseProvider>::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+pub trait ai6::SafeHouseSession: core::marker::Send + core::marker::Sync
+pub fn ai6::SafeHouseSession::changes(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
+impl ai6::directorates::q::safehouse::SafeHouseSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
 pub trait ai6::SecretBackend: core::marker::Send + core::marker::Sync
 pub fn ai6::SecretBackend::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
 pub fn ai6::SecretBackend::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>

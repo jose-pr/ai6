@@ -1,4 +1,5 @@
 [operation.G]
 name = "AI6"
 path = "."
+workspace = { provider = "git", base = "HEAD", branch = "ai6/{id}-{slug}", isolate = true }
 roster = ["007", "008", "Tanner"]

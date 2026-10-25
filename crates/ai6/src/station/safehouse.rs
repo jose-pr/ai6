@@ -2,7 +2,7 @@
 //! finishing it, and the state directory that holds them.
 //!
 //! The Station never runs a version-control command itself; a
-//! [`SafeHouseProvider`](crate::directorates::q::safehouse::SafeHouseProvider) does.
+//! [`SafeHouseProvider`] does.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

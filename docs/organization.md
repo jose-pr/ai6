@@ -38,7 +38,7 @@ Infrastructure  Station ──────────────────�
   or both. The elected **Headquarters Station (HQS)** holds M's authority by lease.
 - **Theater**: the host or environment a Session runs in. Today that is always the
   Station's own host; remote Theaters reached over SSH are designed, not built.
-- **Safe house**: a Mission's isolated Git worktree inside its Theater.
+- **Safe house**: a Mission's isolated workspace inside its Theater, made by a safe-house provider (`git` cuts a worktree).
 
 **Campaign** (above Operations), **Objective** (a Mission's intended outcome), **Task**
 and **Step** (planning detail inside a Mission) are words for briefs and plans; AI6 does
@@ -114,7 +114,7 @@ a deletion).
 | **Outstation** | an execution-only Station |
 | **Check-in / gone dark** | a Station's recurring Registry record / a Station whose check-ins lapsed |
 | **Theater** | the host or environment a Session runs in (an Operation's `theater`) |
-| **Safe house** | a Mission's Git worktree (`SafeHouse`) |
+| **Safe house** | a Mission's isolated workspace, made by a safe-house provider (`SafeHouseProvider`; the `workspace` key on an Operation) |
 | **Registry** | the shared store for briefs, leases, check-ins and audit (`FileRegistry`) |
 | **Brief / debrief** | a Mission's request / the outcome the Registry files when it ends |
 | **Dead drop** | how the Registry works: briefs and outcomes exchanged without the sides meeting |
@@ -124,4 +124,4 @@ a deletion).
 | **Cover / blown** | an Operation's commit attribution policy / a commit that broke it |
 | **Clearance** | `desk`, `field` or `00`: what an Agent may do without asking |
 | **HUMINT / SIGINT** | briefs from people / briefs from signals such as CI failures and alerts |
-| **Exfiltration route** | how work leaves a safe house: the kept branch and its commits |
+| **Exfiltration route** | how work leaves a safe house: with `git`, the kept branch and its commits |

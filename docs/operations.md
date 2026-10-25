@@ -3,20 +3,17 @@
 An Operation is a registered project or workspace and its policy. Operations are global:
 no Station owns one, and any Station whose labels match the Operation's `station_labels` (and
 that has its checkout) can run its Missions. The configuration owns the checkout, Agent
-roster, clearance ceiling, concurrency budget, safe-house policy and placement. AI6 reads Operations from `operations.toml` in its configuration directory.
+roster, clearance ceiling, concurrency budget, workspace and placement. AI6 reads Operations from `operations.toml` in its configuration directory.
 Only registered Operations may contribute a local `.ai6/agents.toml` override.
 
 ```toml
 [operation.G]
 name = "guatiao"
 path = "~/projects/guatiao"
-repos = ["https://github.com/Boriken-Dev/guatiao"]
 roster = ["007", "006"]
 clearance = "field"
 max_concurrent = 3
-safe_houses = true
-branch = "agent/{id}-{slug}"
-base = "origin/main"
+workspace = { provider = "git", base = "origin/main", branch = "agent/{id}-{slug}", isolate = true }
 station_labels = { gpu = "yes", os = "linux" }
 cover = "covert"
 on_blown = "flag"
@@ -29,10 +26,25 @@ remote Theaters are not implemented yet, so such an Operation is not admitted. `
 configured Agent is eligible. `clearance` sets the highest authority available to its
 Missions. `station_labels` is matched against the labels of an execution Station.
 
-Each Mission can receive a dedicated Git worktree under the AI6 state directory. An
-untouched worktree is removed when the Mission ends; a worktree with changes or commits
-is retained and recorded in the Mission report. Set `safe_houses = false` to use the
-registered checkout directly.
+## Workspace
+
+`workspace` says where a Mission's Agent works. A **safe-house provider** makes the
+workspace: `git` cuts a worktree on a new branch under the AI6 state directory. An
+untouched safe house is removed when the Mission ends; one with changes is retained and
+recorded in the Mission report.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `provider` | `git` when the path is a Git checkout, else none | The safe-house provider ID. With none, Missions work in `path` directly and cover is not checked |
+| `source` | the Operation's `path` | Where the work comes from (a local path) |
+| `base` | `HEAD` | Revision a safe house starts from |
+| `branch` | `{id}-{slug}` | Branch name template; `{id}`, `{slug}` and `{operation}` are filled in |
+| `isolate` | `true` | `false` works in `source` itself instead of a separate copy |
+
+Providers are loaded by the Station that runs the Session (`ai6 serve --plugin-path`). A
+provider that keeps no history makes the Mission's cover report say it was **not
+checkable** instead of passing. The earlier keys `repos`, `safe_houses`, `branch` and
+`base` are no longer accepted; loading fails and names the `workspace` field to use.
 
 ## Cover
 
