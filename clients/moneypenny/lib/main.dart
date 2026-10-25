@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guatiao/guatiao.dart' as guatiao;
 
+import 'controls/mission_actions.dart';
 import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
 
@@ -150,6 +151,7 @@ class MissionBoard extends ChangeNotifier {
             operationId: 'G',
             actions: [
               'mission.read',
+              'mission.control',
               'session.read',
               'audit.read',
               'agent.read',
@@ -321,6 +323,100 @@ class MissionBoard extends ChangeNotifier {
             operation.actions.contains('mission.create'),
       ) ??
       false;
+
+  bool canControlMission(String operationId) =>
+      userSession?.operations.any(
+        (operation) =>
+            operation.operationId == operationId &&
+            operation.actions.contains('mission.control'),
+      ) ??
+      false;
+
+  /// The latest control asked for each Mission, by Operation and Mission ID.
+  Map<(String, String), ControlStatusSummary> controls = const {};
+  int _controlSerial = 0;
+
+  void _recordControl(ControlStatusSummary status) {
+    controls = Map.unmodifiable({
+      ...controls,
+      (status.operationId, status.missionId): status,
+    });
+    notifyListeners();
+  }
+
+  /// Asks the Station holding a Mission to cancel, retry, resume or interrupt it, and
+  /// follows the control for up to [wait] until the Station reports its outcome.
+  Future<ControlStatusSummary> requestControl({
+    required String operationId,
+    required String missionId,
+    required String action,
+    String? agent,
+    String? message,
+    String? sessionId,
+    Duration wait = const Duration(seconds: 10),
+    Duration pollEvery = const Duration(milliseconds: 500),
+  }) async {
+    if (demo) {
+      throw StateError('Mission controls are unavailable in preview.');
+    }
+    if (!canControlMission(operationId)) {
+      throw StateError(
+        'This account cannot control Missions in this Operation.',
+      );
+    }
+    final token = accessToken;
+    if (token == null) {
+      throw StateError('Sign in before controlling a Mission.');
+    }
+    final path =
+        '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+        '/missions/${Uri.encodeComponent(missionId)}/actions';
+    final response = await _client.post(
+      apiOrigin.resolve(path),
+      headers: {
+        'authorization': 'Bearer $token',
+        'content-type': 'application/json',
+      },
+      body: jsonEncode({
+        'action': action,
+        'idempotency_key':
+            'moneypenny-${DateTime.now().microsecondsSinceEpoch}-${_controlSerial++}',
+        'agent': ?agent,
+        'message': ?message,
+        'session_id': ?sessionId,
+      }),
+    );
+    if (response.statusCode != 202 && response.statusCode != 200) {
+      throw StateError(switch (response.statusCode) {
+        403 => 'This account cannot control Missions in this Operation.',
+        404 =>
+          'Universal Exports does not know this Mission in this Operation.',
+        409 =>
+          'The Mission moved on to another Session; refresh and try again.',
+        503 => 'No Station can take the control now; try again shortly.',
+        _ => 'The gateway refused the control.',
+      });
+    }
+    var status = ControlStatusSummary.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+    _recordControl(status);
+    final deadline = DateTime.now().add(wait);
+    while (status.isOpen && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(pollEvery);
+      final polled = await _client.get(
+        apiOrigin.resolve('$path/${Uri.encodeComponent(status.controlId)}'),
+        headers: {'authorization': 'Bearer $token'},
+      );
+      if (polled.statusCode != 200) break;
+      status = ControlStatusSummary.fromJson(
+        jsonDecode(polled.body) as Map<String, dynamic>,
+      );
+      _recordControl(status);
+    }
+    await refresh();
+    return status;
+  }
 
   List<String> get proposalOperations => demo
       ? const ['G']
@@ -1286,6 +1382,7 @@ class SessionSummary {
     required this.sessionId,
     required this.state,
     required this.sequence,
+    this.updatedAt,
     this.exposure = const [],
   });
 
@@ -1294,6 +1391,10 @@ class SessionSummary {
   final String sessionId;
   final String? state;
   final int sequence;
+
+  /// When the gateway last received this Session's state, as Unix seconds; the most
+  /// recently updated Session of a Mission carries the Mission's current state.
+  final double? updatedAt;
 
   /// The untrusted input the Session has read (`brief:source`, `tool:WebFetch`, ...).
   final List<String> exposure;
@@ -1304,6 +1405,9 @@ class SessionSummary {
     sessionId: sessionId,
     state: state ?? this.state,
     sequence: sequence ?? this.sequence,
+    updatedAt: state == null
+        ? updatedAt
+        : DateTime.now().millisecondsSinceEpoch / 1000,
     exposure: exposure,
   );
 
@@ -1313,6 +1417,7 @@ class SessionSummary {
     sessionId: json['session_id'] as String,
     state: json['state'] as String?,
     sequence: json['sequence'] as int,
+    updatedAt: (json['updated_at'] as num?)?.toDouble(),
     exposure: [
       for (final source in (json['exposure'] as List<dynamic>? ?? const []))
         source as String,
@@ -3237,6 +3342,7 @@ class _BoardHeader extends StatelessWidget {
                 onPressed: () => onSelectState(null),
               ),
               for (final state in const [
+                'queued',
                 'working',
                 'blocked',
                 'stalled',
@@ -3244,6 +3350,7 @@ class _BoardHeader extends StatelessWidget {
                 'quarantined',
                 'done',
                 'failed',
+                'abandoned',
               ])
                 _CountChip(
                   label: state,
@@ -3377,6 +3484,12 @@ class _MissionCard extends StatelessWidget {
                   ),
                   icon: const Icon(Icons.description_outlined),
                 ),
+              MissionActionsMenu(
+                board: board,
+                operationId: mission.operationId,
+                missionId: mission.missionId,
+                sessions: mission.sessions,
+              ),
             ],
           ),
           Padding(
@@ -3387,6 +3500,15 @@ class _MissionCard extends StatelessWidget {
                   ?.copyWith(color: const Color(0xff9aafb0)),
             ),
           ),
+          if (board.controls[(mission.operationId, mission.missionId)]
+              case final control?)
+            Padding(
+              padding: const EdgeInsets.only(left: 27, bottom: 12),
+              child: Text(
+                control.describe(),
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            ),
           for (final session in mission.sessions)
             _SessionRow(
               session: session,
@@ -3910,7 +4032,9 @@ Color _stateColor(String state) => switch (state) {
   'stalled' => const Color(0xffff7777),
   'parked' => const Color(0xff8fb7ff),
   'quarantined' => const Color(0xffd98cff),
+  'queued' => const Color(0xffb5c4c5),
   'done' => const Color(0xff9da8b5),
   'failed' => const Color(0xffff4e66),
+  'abandoned' => const Color(0xff6f7f86),
   _ => const Color(0xff9da8b5),
 };
