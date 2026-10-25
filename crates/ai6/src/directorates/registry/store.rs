@@ -2277,9 +2277,13 @@ pub(super) fn registry_lock(root: &Path) -> io::Result<File> {
     #[cfg(windows)]
     let file = {
         let mut file = file;
-        if file.metadata()?.len() == 0 {
-            file.write_all(b"\0")?;
-            file.flush()?;
+        // Another handle may have written the byte and locked it between the length check
+        // and this write; Windows then refuses the write (lock violation), which is fine.
+        if file.metadata()?.len() == 0
+            && let Err(error) = file.write_all(b"\0").and_then(|()| file.flush())
+            && !lock_is_contended(&error)
+        {
+            return Err(error);
         }
         file
     };
