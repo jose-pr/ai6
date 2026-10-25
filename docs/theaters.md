@@ -33,9 +33,74 @@ workdir = "/srv/work"
 | `harnesses` | Harnesses installed on the Theater (`"claude"`, `"codex"`). Another host without a runner needs one here before a harness runs on it, in the [detached wrapper](#the-detached-wrapper). |
 | `workdir` | Where a Mission works on this Theater when its Operation names no path there. |
 | `runner` | The [field runner](#the-field-runner) that supervises harnesses on the Theater: `{}` for every default, or `command`, `state_dir`, `plugin_paths` and `terminal`. |
+| `requires` | What the Theater must have before Sessions run there: `os`, `harnesses`, `tools`, `disk_mb`. See [Fitting a Theater out](#fitting-a-theater-out). |
+| `provision` | How `ai6 theater provision` installs what it lacks: `runner`, `plugins`, `install`, `install_timeout_secs`. |
 
 A Station's own host is always reachable as the Theater `local` without any configuration;
 declaring `[theater.local]` only adds labels, facts or a runner to it.
+
+## Fitting a Theater out
+
+Q Branch fits Theaters out. A Theater says what Sessions need there and how to install what
+is missing, and the Station checks it before it sends work there:
+
+```toml
+[theater.build-box.requires]
+os = "linux"
+harnesses = ["claude>=2.1", "codex"]   # AgentHandler provider IDs, also the command names
+tools = ["git", "cargo>=1.89"]
+disk_mb = 2048                         # free MiB in `workdir` (the default directory without one)
+
+[theater.build-box.provision]
+runner = "dist/linux-aarch64/ai6"      # an ai6 build for the Theater, on the Station
+plugins = ["dist/linux-aarch64/libai6_agent_claude.so", "dist/linux-aarch64/libai6_terminal_pty.so"]
+install = { git = "sudo dnf install -y git", claude = "npm install -g @anthropic-ai/claude-code" }
+install_timeout_secs = 600
+```
+
+A program is written `name` (any version) or `name>=version`, compared number by number, so
+`2.10` is after `2.9`. Its version is the first number in what `name --version` prints.
+
+**The probe.** A Station looks over each POSIX Theater it reaches through the transport's
+`run` (a few `command -v`, `--version` and `df` calls, no writes) when it first contacts it
+and every five minutes after. It publishes what it found at check-in: versions, free space,
+the requirements that are unmet and why. Placement uses it:
+
+- A Theater whose requirements are unchecked, or whose `os`, `tools` or `disk_mb` are unmet,
+  is ruled out with the reason.
+- In field mode the harness runs on the Theater, so a Theater that lists `harnesses` hosts
+  only Agents whose handler is listed and installed there; the others are ruled out there,
+  each with the reason (`harness "claude" is missing on this Theater: claude>=2.1: not
+  installed`). Remote-hands mode runs the harness on the Station and is not affected.
+- A Theater without `requires` is not checked.
+
+The probe also reports **ambient credentials**: credentials already on the Theater that AI6
+did not lease (a `~/.git-credentials` store, a git credential helper, an SSH agent or
+private key, a GitHub CLI, Claude Code or Codex login, a provider key in the login
+environment). It names where they are, never their values, and each is a weakening the
+Station publishes and Moneypenny shows: a Session there can use them whatever its own leases
+allow. Removing them is the operator's choice; AI6 does not refuse the Theater.
+
+**Provisioning.** `ai6 theater provision THEATER` fits a Theater out over its own transport,
+checking before each step and acting only where the Theater differs:
+
+| Step | Checks | Acts |
+| --- | --- | --- |
+| `os`, `disk` | the probe | never: a mismatch fails |
+| each program in `tools`, then `harnesses` | the probe | runs its `provision.install` command with `sh -c`, then probes again |
+| `runner` | SHA-256 of `runner.command` on the Theater | copies `provision.runner` (the Station's own executable when the Theater has the Station's OS and architecture) |
+| `plugin NAME` | SHA-256 in the first `runner.plugin_paths` directory | copies each of `provision.plugins` |
+
+Each step prints `ok`, `changed` or `failed`, so a second run on a fit Theater prints `ok`
+for every step. A file is written beside its destination and moved over it, so a running
+runner is replaced safely. `--check` only looks: a step that would act prints
+`would-change`, and nothing on the Theater is written. The command exits non-zero when a
+step failed, or with `--check` when one would change. Pass `--plugin-path` for the
+Theater's transport provider and `--config-dir` for another configuration directory.
+
+`runner.command` must be a path for the runner to be installed (`~/` is the transport's
+default directory, the login user's home over SSH). Provisioning carries no secret: harness
+and forge credentials reach a Session as leases, never as files on the Theater.
 
 ### SSH access
 
@@ -216,8 +281,10 @@ runner keeps the work going while no Station is attached.
 
 A Station publishes the Theaters it reaches at each check-in: ID, access (`local`, `ssh` or
 `transport`), the SSH host or transport provider, labels, capabilities, `agents`, the kind of
-`egress` (never a proxy URL), `harnesses` and why a Theater is unreachable. The SSH user, port
-and key path stay on the Station. `GET /v1/stations` and Moneypenny's Stations view list them.
+`egress` (never a proxy URL), `harnesses`, `requires` with the last probe's report, and why a
+Theater is unreachable. The SSH user, port, key path and `provision` settings stay on the
+Station. `GET /v1/stations` and Moneypenny's Stations view list them; a Theater whose
+requirements are unmet or unchecked shows a tool icon, and its tooltip says what is missing.
 
 A Session records the Station that supervises it, the Theater it works on and the mode
 (`station_id`, `theater_id`, `mode`); Moneypenny shows them on the Mission detail. Records

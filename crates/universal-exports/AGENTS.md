@@ -189,7 +189,9 @@ pub struct BoardTheater {
     pub harnesses: Vec<String>,
     pub workdir: Option<String>,     // where a remote-hands Mission works without an Operation path
     pub unavailable: Option<String>, // why the Station cannot reach it now
-    pub weakened: Vec<String>,       // settings looser than their defaults
+    pub weakened: Vec<String>,       // loose settings and ambient credentials found there
+    pub requires: Option<ai6::Requirements>, // what Sessions need there
+    pub report: Option<ai6::ProbeReport>,    // the Station's last probe: unmet, found, free space
 }
 
 #[non_exhaustive]

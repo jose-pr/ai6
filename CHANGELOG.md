@@ -30,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (`universal_exports::MissionAttempt`: Station, Theater, status, why it was lost and its
   checkpoint branch), and Moneypenny shows them on the Mission card.
 
+- Theater provisioning. A Theater declares what Sessions need there
+  (`[theater.ID.requires]`: `os`, `harnesses` such as `"claude>=2.1"`, `tools`, `disk_mb`)
+  and how to install what is missing (`[theater.ID.provision]`: an ai6 build for its
+  runner, provider libraries, an install command per program). The Station probes each
+  POSIX Theater over its transport every five minutes and publishes the report at check-in
+  (`TheaterSummary::requires`, `report`; `BoardTheater` likewise): placement rules out a
+  Theater whose requirements are unchecked or unmet, and in field mode an Agent whose
+  harness is missing there, each with the reason; Moneypenny marks such a Theater and says
+  what is missing. Credentials already on a Theater outside AI6's leases (a git credential
+  store or helper, an SSH agent or key, a CLI login, a provider key in the login
+  environment) are reported as weakenings, by location only. `ai6 theater provision
+  THEATER [--check]` fits a Theater out over its transport, checking before each step:
+  `ok`, `changed` or `failed` per step, so a second run changes nothing, and `--check`
+  writes nothing (`ai6::directorates::q::provision`).
 - Green ink: a person's recorded approval of one irreversible step. An Agent calls the
   `request_approval` tool on its Session's AI6 endpoint with the step's kind (`push`,
   `merge`, `release`, `delete`, `clearance` or one its Operation adds) and target. The

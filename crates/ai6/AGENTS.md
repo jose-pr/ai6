@@ -319,7 +319,8 @@ resumes.
 
 A Theater is where a Session works; a Station reaches it through a transport. Each Station
 reads its own `theaters.toml` (`[theater.<id>]` with `access`, `labels`, `agents`, `egress`,
-`harnesses`, `workdir` and `runner`; `docs/theaters.md` has the table). The Station's own
+`harnesses`, `workdir`, `runner`, `requires` and `provision`; `docs/theaters.md` has the
+table). The Station's own
 host is always reachable as the implicit `local` Theater; declaring `[theater.local]` only
 adds labels, facts or a runner.
 
@@ -379,6 +380,8 @@ pub struct Theater {
     pub id: String, pub access: TheaterAccess, pub labels: BTreeMap<String, String>,
     pub agents: AgentMode, pub egress: Egress, pub harnesses: Vec<String>, pub workdir: Option<String>,
     pub runner: Option<RunnerSettings>,
+    pub requires: Option<Requirements>,      // what Sessions need there; unchecked when absent
+    pub provision: Option<ProvisionSpec>,    // how `ai6 theater provision` installs it; never published
 }
 impl Theater {
     pub fn new(id: impl Into<String>, access: TheaterAccess) -> Self;
@@ -388,6 +391,8 @@ impl Theater {
     pub fn with_harness(self, harness: impl Into<String>) -> Self;
     pub fn with_workdir(self, workdir: impl Into<String>) -> Self;
     pub fn with_runner(self, runner: RunnerSettings) -> Self;
+    pub fn with_requirements(self, requires: Requirements) -> Self;
+    pub fn with_provision(self, provision: ProvisionSpec) -> Self;
     pub fn weakenings(&self) -> Vec<String>;    // settings looser than their defaults
     pub fn summary(&self) -> TheaterSummary;     // no capabilities: the Station adds them
 }
@@ -400,7 +405,10 @@ pub struct TheaterSummary {                  // what a Station publishes; no use
     pub agents: AgentMode, pub egress: EgressKind, pub harnesses: Vec<String>,
     pub workdir: Option<String>,
     pub runner: bool,                        // a runner supervises harnesses there; omitted when false
-    pub unavailable: Option<String>, pub weakened: Vec<String>,
+    pub unavailable: Option<String>,
+    pub weakened: Vec<String>,               // loose settings + "ambient credential on the Theater: …"
+    pub requires: Option<Requirements>,
+    pub report: Option<ProbeReport>,         // the Station's last probe; absent until one finishes
 }
 impl TheaterSummary { pub fn local() -> Self; }
 pub fn is_sha256_pin(pin: &str) -> bool;    // "sha256:" and 64 hex digits
@@ -430,6 +438,61 @@ Theater's `access` names; no host is contacted), publishes each Theater's `Capab
 (`unavailable` carries the reason until then). On its own host the Station sets `terminal`
 from its Terminal provider; a `local` Theater without a loaded `local` transport library
 still hosts a harness (field mode) but offers no `run`. Weakened settings are logged at start.
+Every five minutes it also runs `q::provision::probe` on each Theater whose transport can
+`run` (not on a Windows host that declares no `requires`) and publishes the report: unmet
+requirements, programs found, free space, and each ambient credential as a `weakened` line.
+A harness the probe found and accepted is added to `harnesses`.
+
+### Provisioning (`ai6::directorates::q::provision`)
+
+```rust
+pub const DEFAULT_INSTALL_TIMEOUT_SECS: u64 = 600;
+pub struct RequiredProgram;                  // "claude>=2.1" or "git"; serde as that string; Display, FromStr
+impl RequiredProgram {
+    pub fn new(name: impl Into<String>) -> Result<Self, String>;           // 1-64 of [A-Za-z0-9._+-], not leading - or .
+    pub fn at_least(self, minimum: impl Into<String>) -> Result<Self, String>; // digits and dots
+    pub fn name(&self) -> &str; pub fn minimum(&self) -> Option<&str>;
+    pub fn refuses(&self, version: &str) -> Option<String>;   // why a `--version` line is too old; None = accepted
+}
+#[non_exhaustive] #[derive(Default)]
+pub struct Requirements { pub os: Option<String>, pub harnesses: Vec<RequiredProgram>,
+    pub tools: Vec<RequiredProgram>, pub disk_mb: Option<u64> }   // TOML [theater.ID.requires], unknown keys refused
+impl Requirements {
+    pub fn with_os(self, os) -> Self; pub fn with_harness(self, RequiredProgram) -> Self;
+    pub fn with_tool(self, RequiredProgram) -> Self; pub fn with_disk_mb(self, u64) -> Self;
+    pub fn programs(&self) -> impl Iterator<Item = &RequiredProgram>;     // harnesses, then tools
+    pub fn allows_harness(&self, harness: &str) -> bool;                  // listed, or none listed
+    pub fn check(&self, report: &ProbeReport) -> Vec<Unmet>;
+}
+#[non_exhaustive] #[derive(Default)]
+pub struct ProvisionSpec { pub runner: Option<String> /* path on the Station */, pub plugins: Vec<String>,
+    pub install: BTreeMap<String, String> /* program -> sh -c command */, pub install_timeout_secs: Option<u64> }
+impl ProvisionSpec { pub fn with_runner(self, path) -> Self; pub fn with_plugin(self, path) -> Self;
+    pub fn with_install(self, program, command) -> Self; }
+#[non_exhaustive] pub struct Unmet { pub name: String /* program, "os" or "disk" */, pub requirement: String, pub reason: String } // Display "requirement: reason"
+#[non_exhaustive] #[derive(Default)]
+pub struct ProbeReport { pub checked_at: u64, pub os: Option<String>, pub found: BTreeMap<String, String> /* name -> --version line */,
+    pub free_mb: Option<u64>, pub unmet: Vec<Unmet>, pub ambient: Vec<String>, pub error: Option<String> }
+impl ProbeReport { pub fn failed(error: impl Into<String>) -> Self; pub fn is_fit(&self) -> bool; }
+#[non_exhaustive] pub enum StepStatus { Ok, Changed, WouldChange, Failed }   // as_str(): ok | changed | would-change | failed
+#[non_exhaustive] pub struct ProvisionStep { pub name: String, pub status: StepStatus, pub detail: String }
+/// Never fails: an unprobeable Theater answers a report with only `error` set.
+pub fn probe(client: &TransportClient, capabilities: &Capabilities, requires: Option<&Requirements>, dir: Option<&str>) -> ProbeReport;
+/// Steps in order: os, disk, tools, harnesses, runner, plugins. `check` writes nothing.
+pub fn provision(client: &TransportClient, theater: &Theater, check: bool) -> Vec<ProvisionStep>;
+```
+
+Both block on the transport and need a POSIX `sh` there (`command -v`, `df -Pk`, `sha256sum`
+or `shasum -a 256`, `chmod`, `mv`). The probe names ambient credentials (git credential store
+or helper, SSH agent or private keys, GitHub CLI, Claude Code and Codex logins, provider keys
+in the login environment) and never reads their values. A copied file is written to
+`<dest>.ai6-partial` and moved over `<dest>`, so a running runner binary can be replaced; it
+is copied only when its SHA-256 differs. `runner.command` must be a path (`~/` = the
+transport's default directory); without `provision.runner` the Station's own executable is
+used only when the Theater reports the Station's `os` and `arch`. The `ai6 theater
+provision THEATER [--check] [--config-dir DIR] [--plugin-path P]...` command prints one line
+per step and exits 1 when a step failed, or with `--check` when one would change.
+`Plugins::theater_transport(&TheaterAccess)` builds the `TransportClient` it uses.
 
 ## Transports (`ai6::directorates::q::transport`)
 
@@ -557,6 +620,10 @@ pub struct PlacementChoice { pub station: String, pub theater: String, pub agent
 pub enum ExecutionMode { Field, RemoteHands }   // default Field; as_str() -> "field" | "remote-hands"
 /// How a Session would run on `theater`, or the capability that is missing.
 pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String>;
+/// Why the Theater's `requires` rule it out: unchecked, or an unmet os/tool/disk. Ok without `requires`.
+pub fn fitness(theater: &TheaterSummary) -> Result<(), String>;
+/// In field mode only: the handler must be one of `requires.harnesses` (when any) and installed.
+pub fn harness_verdict(theater: &TheaterSummary, mode: ExecutionMode, handler: &str) -> Result<(), String>;
 #[non_exhaustive]
 pub struct PlacementRejection { pub station: Option<String>, pub theater: Option<String>, pub agent: Option<String>, pub reason: String }
 #[non_exhaustive]
@@ -569,7 +636,7 @@ pub fn place(policy: &OperationPolicy, request: &PlacementRequest, stations: &[S
 rejection for everything ruled out; the `reason` is a sentence an operator can act on.
 Checks, in order: the Operation's `stations` list, the Mission's `stations`, the `execution`
 role, health (a check-in no older than `DEFAULT_LEASE`), capacity, then per Theater: the
-Operation's `theater` binding, reachability and capabilities (`execution_mode`),
+Operation's `theater` binding, reachability and capabilities (`execution_mode`), `fitness`,
 `station_labels` (matched as globs against the Station's labels overlaid by the Theater's)
 and the Operation's checkout (on the Station's own host in field mode; on any other Theater,
 or in remote-hands mode, the Operation must be bound to the Theater or the Theater must set a
@@ -584,7 +651,9 @@ declared harness. Otherwise it is remote-hands mode when the transport can `run`
 `agents = "local"` or `"remote-hands"` allow only that mode. A Theater that reported no
 capabilities is rejected unless it is the Station's own host. The reason names what is missing.
 A posted Agent is skipped for a missing handler on that Station (a Station that reported no
-handlers is not excluded), so the next qualified Agent is the backup. Order is the
+handlers is not excluded), so the next qualified Agent is the backup, and per Theater by
+`harness_verdict` (with `station`, `theater` and `agent` set). A Station refuses to start a
+Session the same two checks rule out. Order is the
 least-loaded Station (the deciding Station wins a tie, then Station ID), the `local`
 Theater first, then Agent priority. Reasons that apply to an Agent everywhere (not the
 requested Agent, no handler configured, role or tag mismatch) have no `station`.

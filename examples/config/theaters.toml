@@ -24,6 +24,17 @@ harnesses = ["claude"]
 # Where a Mission works on this host when its Operation names no path on it.
 workdir = "/srv/work"
 
+# What Sessions need on the host. The Station probes it and rules it out, with the reason,
+# while a requirement is unmet; `ai6 theater provision build-box` installs what is missing.
+[theater.build-box.requires]
+os = "linux"
+harnesses = ["claude>=2.1"]
+tools = ["git"]
+disk_mb = 2048
+
+[theater.build-box.provision]
+install = { git = "sudo dnf install -y git", claude = "npm install -g @anthropic-ai/claude-code" }
+
 # A host with no internet access: the harness cannot run there, so Missions work on it from
 # this Station in remote-hands mode.
 [theater.airgapped]
