@@ -595,11 +595,16 @@ impl Gateway {
     async fn enrich_missions(&self, mut missions: Vec<BoardMission>) -> Vec<BoardMission> {
         if let Some(registry) = self.registry.clone() {
             missions = tokio::task::spawn_blocking(move || {
+                let mut attempts = registry
+                    .sessions()
+                    .map(attempts_by_mission)
+                    .unwrap_or_default();
                 for mission in &mut missions {
                     mission.usage = registry
                         .mission_usage(Some(&mission.operation_id), &mission.mission_id)
                         .ok()
                         .flatten();
+                    mission.attempts = attempts.remove(&mission.mission_id).unwrap_or_default();
                 }
                 missions
             })
@@ -1371,12 +1376,17 @@ async fn mission_detail(
         .cloned();
     if let Some(registry) = gateway.registry.clone() {
         let (operation, mission_id) = (mission.operation_id.clone(), mission.mission_id.clone());
-        mission.usage = tokio::task::spawn_blocking(move || {
-            registry.mission_usage(Some(&operation), &mission_id)
+        let (usage, mut attempts) = tokio::task::spawn_blocking(move || {
+            Ok::<_, std::io::Error>((
+                registry.mission_usage(Some(&operation), &mission_id)?,
+                attempts_by_mission(registry.sessions()?),
+            ))
         })
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
+        mission.usage = usage;
+        mission.attempts = attempts.remove(&mission.mission_id).unwrap_or_default();
     }
     Ok(Json(mission))
 }
@@ -1792,6 +1802,7 @@ fn group_missions(sessions: Vec<BoardSession>) -> Vec<BoardMission> {
             sessions,
             brief: None,
             usage: None,
+            attempts: Vec::new(),
         })
         .collect()
 }
@@ -2971,6 +2982,70 @@ pub struct BoardMission {
     /// Tokens and cost the Mission's Sessions consumed, from the shared Registry ledger;
     /// absent until a provider reports usage.
     pub usage: Option<MissionUsage>,
+    /// Every attempt at the Mission, first first, from the shared Session records; empty
+    /// when no Session was recorded.
+    pub attempts: Vec<MissionAttempt>,
+}
+
+/// One attempt at a Mission: which Station ran it on which Theater, and how it stands.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MissionAttempt {
+    /// Which try at the Mission this is, starting at 1.
+    pub attempt: u32,
+    /// AI6's Session ID.
+    pub session_id: String,
+    /// The provider's Session ID, once issued.
+    pub provider_session_id: Option<String>,
+    /// The AI6 Session ID of the attempt this one replaced.
+    pub predecessor: Option<String>,
+    /// The Station that holds, or last held, the Session.
+    pub station: String,
+    /// The Theater the harness ran in.
+    pub theater: Option<String>,
+    /// `active`, `parked`, `ended` or `lost`.
+    pub status: String,
+    /// Why the attempt was lost; set only when `status` is `lost`.
+    pub lost: Option<String>,
+    /// The branch its work was last checkpointed to, when it was.
+    pub checkpoint_branch: Option<String>,
+}
+
+impl MissionAttempt {
+    fn from_record(record: &ai6::SessionRecord) -> Self {
+        Self {
+            attempt: record.attempt,
+            session_id: record.session_id.clone(),
+            provider_session_id: record.provider_session_id.clone(),
+            predecessor: record.predecessor.clone(),
+            station: record.station.clone(),
+            theater: record.theater.clone(),
+            status: serde_json::to_value(record.status)
+                .ok()
+                .and_then(|status| status.as_str().map(str::to_owned))
+                .unwrap_or_default(),
+            lost: record.lost.clone(),
+            checkpoint_branch: record
+                .checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.branch.clone()),
+        }
+    }
+}
+
+/// The attempts at each Mission among `records`, in attempt order.
+fn attempts_by_mission(records: Vec<ai6::SessionRecord>) -> BTreeMap<String, Vec<MissionAttempt>> {
+    let mut attempts = BTreeMap::<String, Vec<MissionAttempt>>::new();
+    for record in &records {
+        attempts
+            .entry(record.mission_id.clone())
+            .or_default()
+            .push(MissionAttempt::from_record(record));
+    }
+    for list in attempts.values_mut() {
+        list.sort_by_key(|attempt| attempt.attempt);
+    }
+    attempts
 }
 
 /// AI6 Station overview derived from the shared check-in Registry.
@@ -5333,6 +5408,27 @@ mod tests {
                 1_790_000_000,
             )
             .unwrap();
+        // The first attempt was lost with its Station; the second runs elsewhere.
+        let registry = FileRegistry::open(directory.path());
+        registry
+            .open_session(
+                ai6::NewSession::new("attempt-1", "mission-g", "hq").with_theater("local"),
+                Duration::from_nanos(1),
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        registry
+            .lose_session("attempt-1", "Station \"hq\" went dark")
+            .unwrap();
+        registry
+            .open_session(
+                ai6::NewSession::new("attempt-2", "mission-g", "worker")
+                    .with_theater("local")
+                    .with_provider_session("session-g")
+                    .with_attempt(2, Some("attempt-1".to_owned())),
+                Duration::from_secs(60),
+            )
+            .unwrap();
         let mission_detail = client
             .get(format!("{base}/v1/operations/G/missions/mission-g"))
             .bearer_auth(&viewer_token)
@@ -5341,6 +5437,22 @@ mod tests {
             .unwrap();
         assert_eq!(mission_detail.status(), StatusCode::OK);
         let mission_detail: serde_json::Value = mission_detail.json().await.unwrap();
+        assert_eq!(
+            mission_detail["attempts"],
+            serde_json::json!([
+                {
+                    "attempt": 1, "session_id": "attempt-1", "provider_session_id": null,
+                    "predecessor": null, "station": "hq", "theater": "local",
+                    "status": "lost", "lost": "Station \"hq\" went dark",
+                    "checkpoint_branch": null
+                },
+                {
+                    "attempt": 2, "session_id": "attempt-2", "provider_session_id": "session-g",
+                    "predecessor": "attempt-1", "station": "worker", "theater": "local",
+                    "status": "active", "lost": null, "checkpoint_branch": null
+                }
+            ])
+        );
         assert_eq!(mission_detail["usage"]["total"]["input"], 120);
         assert_eq!(mission_detail["usage"]["total"]["cost_micro_usd"], 4_500);
         assert_eq!(
