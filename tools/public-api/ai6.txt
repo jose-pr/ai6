@@ -218,6 +218,11 @@ pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, 
 pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::directorates::q::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::transition(&mut self, &str, ai6::directorates::m::mission::MissionState) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub mod ai6::directorates::m::placement
+#[non_exhaustive] pub enum ai6::directorates::m::placement::ExecutionMode
+pub ai6::directorates::m::placement::ExecutionMode::Field
+pub ai6::directorates::m::placement::ExecutionMode::RemoteHands
+impl ai6::directorates::m::placement::ExecutionMode
+pub fn ai6::directorates::m::placement::ExecutionMode::as_str(self) -> &'static str
 #[non_exhaustive] pub struct ai6::directorates::m::placement::AgentFacts
 pub ai6::directorates::m::placement::AgentFacts::handler: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::AgentFacts::id: alloc::string::String
@@ -244,6 +249,7 @@ pub fn ai6::directorates::m::placement::Placement::best(&self) -> core::option::
 #[non_exhaustive] pub struct ai6::directorates::m::placement::PlacementChoice
 pub ai6::directorates::m::placement::PlacementChoice::agent: alloc::string::String
 pub ai6::directorates::m::placement::PlacementChoice::handler: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementChoice::mode: ai6::directorates::m::placement::ExecutionMode
 pub ai6::directorates::m::placement::PlacementChoice::station: alloc::string::String
 pub ai6::directorates::m::placement::PlacementChoice::theater: alloc::string::String
 #[non_exhaustive] pub struct ai6::directorates::m::placement::PlacementRejection
@@ -270,6 +276,7 @@ pub ai6::directorates::m::placement::StationFacts::station: alloc::string::Strin
 pub ai6::directorates::m::placement::StationFacts::theaters: alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
 impl ai6::directorates::m::placement::StationFacts
 pub fn ai6::directorates::m::placement::StationFacts::from_record(&ai6::directorates::registry::store::StationRecord, f64, core::time::Duration, usize) -> Self
+pub fn ai6::directorates::m::placement::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
 pub fn ai6::directorates::m::placement::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub mod ai6::directorates::m::roster
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Agent
@@ -347,41 +354,88 @@ pub ai6::directorates::m::roster::Workspace::provider: core::option::Option<allo
 pub ai6::directorates::m::roster::Workspace::source: core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::m::roster::config_dir() -> core::result::Result<std::path::PathBuf, ai6::directorates::m::roster::RosterError>
 pub mod ai6::directorates::m::theaters
+#[non_exhaustive] pub enum ai6::directorates::m::theaters::AgentMode
+pub ai6::directorates::m::theaters::AgentMode::Auto
+pub ai6::directorates::m::theaters::AgentMode::Local
+pub ai6::directorates::m::theaters::AgentMode::RemoteHands
+impl ai6::directorates::m::theaters::AgentMode
+pub fn ai6::directorates::m::theaters::AgentMode::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::directorates::m::theaters::Egress
+pub ai6::directorates::m::theaters::Egress::Direct
+pub ai6::directorates::m::theaters::Egress::Isolated
+pub ai6::directorates::m::theaters::Egress::Proxy(alloc::string::String)
+pub ai6::directorates::m::theaters::Egress::Station
+impl ai6::directorates::m::theaters::Egress
+pub fn ai6::directorates::m::theaters::Egress::kind(&self) -> ai6::directorates::m::theaters::EgressKind
+#[non_exhaustive] pub enum ai6::directorates::m::theaters::EgressKind
+pub ai6::directorates::m::theaters::EgressKind::Direct
+pub ai6::directorates::m::theaters::EgressKind::Isolated
+pub ai6::directorates::m::theaters::EgressKind::Proxy
+pub ai6::directorates::m::theaters::EgressKind::Station
+impl ai6::directorates::m::theaters::EgressKind
+pub fn ai6::directorates::m::theaters::EgressKind::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::directorates::m::theaters::TheaterAccess
 pub ai6::directorates::m::theaters::TheaterAccess::Local
 pub ai6::directorates::m::theaters::TheaterAccess::Ssh(ai6::directorates::m::theaters::SshAccess)
+pub ai6::directorates::m::theaters::TheaterAccess::Transport(ai6::directorates::m::theaters::TransportAccess)
+impl ai6::directorates::m::theaters::TheaterAccess
+pub fn ai6::directorates::m::theaters::TheaterAccess::transport(&self) -> core::result::Result<(alloc::string::String, alloc::string::String), ai6::directorates::m::theaters::TheaterError>
 #[non_exhaustive] pub enum ai6::directorates::m::theaters::TheaterKind
 pub ai6::directorates::m::theaters::TheaterKind::Local
 pub ai6::directorates::m::theaters::TheaterKind::Ssh
+pub ai6::directorates::m::theaters::TheaterKind::Transport
 impl ai6::directorates::m::theaters::TheaterKind
 pub fn ai6::directorates::m::theaters::TheaterKind::as_str(self) -> &'static str
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::SshAccess
+pub ai6::directorates::m::theaters::SshAccess::connect_timeout_secs: core::option::Option<u64>
 pub ai6::directorates::m::theaters::SshAccess::host: alloc::string::String
+pub ai6::directorates::m::theaters::SshAccess::host_key: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::theaters::SshAccess::identity: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::theaters::SshAccess::port: core::option::Option<u16>
+pub ai6::directorates::m::theaters::SshAccess::trust_on_first_use: bool
 pub ai6::directorates::m::theaters::SshAccess::user: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::SshAccess
 pub fn ai6::directorates::m::theaters::SshAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::trusting_on_first_use(self) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_connect_timeout_secs(self, u64) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_host_key(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_identity(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_port(self, u16) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_user(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::Theater
 pub ai6::directorates::m::theaters::Theater::access: ai6::directorates::m::theaters::TheaterAccess
+pub ai6::directorates::m::theaters::Theater::agents: ai6::directorates::m::theaters::AgentMode
+pub ai6::directorates::m::theaters::Theater::egress: ai6::directorates::m::theaters::Egress
+pub ai6::directorates::m::theaters::Theater::harnesses: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::theaters::Theater::id: alloc::string::String
 pub ai6::directorates::m::theaters::Theater::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::theaters::Theater::workdir: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::Theater
 pub fn ai6::directorates::m::theaters::Theater::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::theaters::TheaterAccess) -> Self
 pub fn ai6::directorates::m::theaters::Theater::summary(&self) -> ai6::directorates::m::theaters::TheaterSummary
+pub fn ai6::directorates::m::theaters::Theater::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::theaters::Theater::with_agents(self, ai6::directorates::m::theaters::AgentMode) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_egress(self, ai6::directorates::m::theaters::Egress) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_harness(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_workdir(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::directorates::m::theaters::TheaterError(_)
 impl core::error::Error for ai6::directorates::m::theaters::TheaterError
 impl core::fmt::Display for ai6::directorates::m::theaters::TheaterError
 pub fn ai6::directorates::m::theaters::TheaterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::TheaterSummary
 pub ai6::directorates::m::theaters::TheaterSummary::access: ai6::directorates::m::theaters::TheaterKind
+pub ai6::directorates::m::theaters::TheaterSummary::agents: ai6::directorates::m::theaters::AgentMode
+pub ai6::directorates::m::theaters::TheaterSummary::capabilities: core::option::Option<ai6::directorates::q::transport::Capabilities>
+pub ai6::directorates::m::theaters::TheaterSummary::egress: ai6::directorates::m::theaters::EgressKind
+pub ai6::directorates::m::theaters::TheaterSummary::harnesses: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::theaters::TheaterSummary::host: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::theaters::TheaterSummary::id: alloc::string::String
 pub ai6::directorates::m::theaters::TheaterSummary::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::theaters::TheaterSummary::provider: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::TheaterSummary::unavailable: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::TheaterSummary::weakened: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::theaters::TheaterSummary::workdir: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::TheaterSummary
 pub fn ai6::directorates::m::theaters::TheaterSummary::local() -> Self
 pub struct ai6::directorates::m::theaters::Theaters
@@ -393,7 +447,14 @@ pub fn ai6::directorates::m::theaters::Theaters::merge(&mut self, ai6::directora
 pub fn ai6::directorates::m::theaters::Theaters::parse(&str) -> core::result::Result<Self, ai6::directorates::m::theaters::TheaterError>
 pub fn ai6::directorates::m::theaters::Theaters::reachable(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::Theater>
 pub fn ai6::directorates::m::theaters::Theaters::summaries(&self) -> alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
+#[non_exhaustive] pub struct ai6::directorates::m::theaters::TransportAccess
+pub ai6::directorates::m::theaters::TransportAccess::config: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub ai6::directorates::m::theaters::TransportAccess::provider: alloc::string::String
+impl ai6::directorates::m::theaters::TransportAccess
+pub fn ai6::directorates::m::theaters::TransportAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::TransportAccess::with_setting(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<serde_json::value::Value>) -> Self
 pub const ai6::directorates::m::theaters::LOCAL_THEATER: &str
+pub fn ai6::directorates::m::theaters::is_sha256_pin(&str) -> bool
 pub mod ai6::directorates::medical
 pub mod ai6::directorates::medical::exposure
 #[non_exhaustive] pub enum ai6::directorates::medical::exposure::ExposurePreset
@@ -671,6 +732,152 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal:
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::read(&self, &mut [u8], i64) -> core::result::Result<i64, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub mod ai6::directorates::q::transport
+pub mod ai6::directorates::q::transport::contract
+pub struct ai6::directorates::q::transport::contract::Host<'a>
+pub ai6::directorates::q::transport::contract::Host::expand: fn(&str) -> alloc::string::String
+pub ai6::directorates::q::transport::contract::Host::scratch: &'a str
+pub ai6::directorates::q::transport::contract::Host::shell: &'a [&'a str]
+pub fn ai6::directorates::q::transport::contract::check(alloc::boxed::Box<dyn ai6::directorates::q::transport::Transport>, &ai6::directorates::q::transport::contract::Host<'_>)
+pub mod ai6::directorates::q::transport::kit
+pub struct ai6::directorates::q::transport::kit::ProcessInput<'a>
+pub ai6::directorates::q::transport::kit::ProcessInput::max_output: u64
+pub ai6::directorates::q::transport::kit::ProcessInput::stdin: core::option::Option<&'a [u8]>
+pub ai6::directorates::q::transport::kit::ProcessInput::timeout_ms: u64
+pub const ai6::directorates::q::transport::kit::EXIT_NOT_FOUND: i64
+pub trait ai6::directorates::q::transport::kit::Shell
+pub fn ai6::directorates::q::transport::kit::Shell::sh(&self, &str, core::option::Option<&[u8]>, u64) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::kit::command_line(&[alloc::string::String], core::option::Option<&str>, core::option::Option<&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, alloc::string::String>
+pub fn ai6::directorates::q::transport::kit::io_error(&core::io::error::Error, &str) -> guatiao::library::kind::ProviderError
+pub fn ai6::directorates::q::transport::kit::is_variable_name(&str) -> bool
+pub fn ai6::directorates::q::transport::kit::list_dir(&dyn ai6::directorates::q::transport::kit::Shell, &str) -> core::result::Result<ai6::directorates::q::transport::DirListing, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::kit::quote(&str) -> alloc::string::String
+pub fn ai6::directorates::q::transport::kit::read_file(&dyn ai6::directorates::q::transport::kit::Shell, &ai6::directorates::q::transport::ReadSpec) -> core::result::Result<ai6::directorates::q::transport::FileData, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::kit::run_process(&mut std::process::Command, &ai6::directorates::q::transport::kit::ProcessInput<'_>) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::kit::write_file(&dyn ai6::directorates::q::transport::kit::Shell, &ai6::directorates::q::transport::WriteSpec) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub struct ai6::directorates::q::transport::Capabilities
+pub ai6::directorates::q::transport::Capabilities::arch: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::transport::Capabilities::files: bool
+pub ai6::directorates::q::transport::Capabilities::forward: bool
+pub ai6::directorates::q::transport::Capabilities::notes: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::transport::Capabilities::os: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::transport::Capabilities::run: bool
+pub ai6::directorates::q::transport::Capabilities::terminal: bool
+pub struct ai6::directorates::q::transport::DirEntry
+pub ai6::directorates::q::transport::DirEntry::kind: alloc::string::String
+pub ai6::directorates::q::transport::DirEntry::name: alloc::string::String
+pub ai6::directorates::q::transport::DirEntry::size: u64
+pub struct ai6::directorates::q::transport::DirListing
+pub ai6::directorates::q::transport::DirListing::entries: alloc::vec::Vec<ai6::directorates::q::transport::DirEntry>
+pub struct ai6::directorates::q::transport::FileData
+pub ai6::directorates::q::transport::FileData::data: guatiao::value::convert::Bytes
+pub ai6::directorates::q::transport::FileData::size: u64
+pub struct ai6::directorates::q::transport::Forward
+impl ai6::directorates::q::transport::Forward
+pub fn ai6::directorates::q::transport::Forward::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Forward::info(&self) -> &ai6::directorates::q::transport::ForwardInfo
+pub struct ai6::directorates::q::transport::ForwardInfo
+pub ai6::directorates::q::transport::ForwardInfo::remote_host: alloc::string::String
+pub ai6::directorates::q::transport::ForwardInfo::remote_port: u16
+pub struct ai6::directorates::q::transport::ForwardSpec
+pub ai6::directorates::q::transport::ForwardSpec::remote_host: alloc::string::String
+pub ai6::directorates::q::transport::ForwardSpec::remote_port: u16
+pub ai6::directorates::q::transport::ForwardSpec::target: alloc::string::String
+pub struct ai6::directorates::q::transport::Output
+pub ai6::directorates::q::transport::Output::code: core::option::Option<i64>
+pub ai6::directorates::q::transport::Output::signal: core::option::Option<i64>
+pub ai6::directorates::q::transport::Output::stderr: guatiao::value::convert::Bytes
+pub ai6::directorates::q::transport::Output::stdout: guatiao::value::convert::Bytes
+pub ai6::directorates::q::transport::Output::timed_out: bool
+pub ai6::directorates::q::transport::Output::truncated: bool
+pub struct ai6::directorates::q::transport::ReadSpec
+pub ai6::directorates::q::transport::ReadSpec::limit: u64
+pub ai6::directorates::q::transport::ReadSpec::offset: u64
+pub ai6::directorates::q::transport::ReadSpec::path: alloc::string::String
+pub struct ai6::directorates::q::transport::RunSpec
+pub ai6::directorates::q::transport::RunSpec::argv: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::transport::RunSpec::cwd: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::transport::RunSpec::env: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
+pub ai6::directorates::q::transport::RunSpec::max_output: u64
+pub ai6::directorates::q::transport::RunSpec::stdin: core::option::Option<guatiao::value::convert::Bytes>
+pub ai6::directorates::q::transport::RunSpec::timeout_ms: u64
+impl core::default::Default for ai6::directorates::q::transport::RunSpec
+pub fn ai6::directorates::q::transport::RunSpec::default() -> Self
+pub struct ai6::directorates::q::transport::TransportClient
+impl ai6::directorates::q::transport::TransportClient
+pub fn ai6::directorates::q::transport::TransportClient::capabilities(&self) -> core::result::Result<ai6::directorates::q::transport::Capabilities, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::forward(&self, &ai6::directorates::q::transport::ForwardSpec) -> core::result::Result<ai6::directorates::q::transport::Forward, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::list_dir(&self, &str) -> core::result::Result<ai6::directorates::q::transport::DirListing, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::new(alloc::boxed::Box<dyn ai6::directorates::q::transport::Transport>) -> Self
+pub fn ai6::directorates::q::transport::TransportClient::open_terminal(&self, &ai6::directorates::q::terminal::Spec) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::probe(&self) -> core::result::Result<ai6::directorates::q::transport::Capabilities, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::read_file(&self, &ai6::directorates::q::transport::ReadSpec) -> core::result::Result<ai6::directorates::q::transport::FileData, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::run(&self, &ai6::directorates::q::transport::RunSpec) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::write_file(&self, &ai6::directorates::q::transport::WriteSpec) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub struct ai6::directorates::q::transport::TransportConfig
+pub ai6::directorates::q::transport::TransportConfig::settings_toml: alloc::string::String
+pub struct ai6::directorates::q::transport::WriteSpec
+pub ai6::directorates::q::transport::WriteSpec::append: bool
+pub ai6::directorates::q::transport::WriteSpec::create_dirs: bool
+pub ai6::directorates::q::transport::WriteSpec::data: guatiao::value::convert::Bytes
+pub ai6::directorates::q::transport::WriteSpec::path: alloc::string::String
+pub const ai6::directorates::q::transport::DEFAULT_MAX_OUTPUT: u64
+pub const ai6::directorates::q::transport::DEFAULT_READ_LIMIT: u64
+pub trait ai6::directorates::q::transport::Transport: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::transport::Transport::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::capabilities_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::list_dir_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::probe_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::read_file_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::run_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Transport::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::transport::Transport for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::capabilities_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::list_dir_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::probe_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::read_file_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::run_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::transport::Transport for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::capabilities_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::list_dir_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::probe_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::read_file_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::run_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub trait ai6::directorates::q::transport::TransportForward: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::transport::TransportForward::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportForward::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportForward::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportForward::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward> where Self: core::marker::Sized + core::marker::Send + 'static
+impl ai6::directorates::q::transport::TransportForward for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::q::transport::describe(&guatiao::library::kind::ProviderError) -> alloc::string::String
+pub fn ai6::directorates::q::transport::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
+pub fn ai6::directorates::q::transport::unsupported(&str) -> guatiao::library::kind::ProviderError
 #[non_exhaustive] pub enum ai6::directorates::q::QErrorKind
 pub ai6::directorates::q::QErrorKind::InvalidUtf8
 pub ai6::directorates::q::QErrorKind::Io
@@ -1415,6 +1622,8 @@ pub fn ai6::station::plugins::Plugins::source(&self, &str, core::option::Option<
 pub fn ai6::station::plugins::Plugins::sources(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::terminal(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::terminals(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::transport(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::transport::Transport>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::transports(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub struct ai6::station::plugins::ProviderInfo
 pub ai6::station::plugins::ProviderInfo::id: alloc::string::String
 pub ai6::station::plugins::ProviderInfo::name: alloc::string::String
@@ -1483,6 +1692,12 @@ pub async fn ai6::station::server::serve_with_config_dir_and_capacity<F>(core::n
 pub async fn ai6::station::server::serve_with_options<F>(ai6::station::server::ServeConfig, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_plugins<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_plugins_and_capacity<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+#[non_exhaustive] pub enum ai6::AgentMode
+pub ai6::AgentMode::Auto
+pub ai6::AgentMode::Local
+pub ai6::AgentMode::RemoteHands
+impl ai6::directorates::m::theaters::AgentMode
+pub fn ai6::directorates::m::theaters::AgentMode::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::BudgetLevel
 pub ai6::BudgetLevel::Limit
 pub ai6::BudgetLevel::Warn
@@ -1526,6 +1741,25 @@ pub ai6::CableState::Failed
 pub ai6::CableState::Held
 pub ai6::CableState::Queued
 pub ai6::CableState::Refused
+#[non_exhaustive] pub enum ai6::Egress
+pub ai6::Egress::Direct
+pub ai6::Egress::Isolated
+pub ai6::Egress::Proxy(alloc::string::String)
+pub ai6::Egress::Station
+impl ai6::directorates::m::theaters::Egress
+pub fn ai6::directorates::m::theaters::Egress::kind(&self) -> ai6::directorates::m::theaters::EgressKind
+#[non_exhaustive] pub enum ai6::EgressKind
+pub ai6::EgressKind::Direct
+pub ai6::EgressKind::Isolated
+pub ai6::EgressKind::Proxy
+pub ai6::EgressKind::Station
+impl ai6::directorates::m::theaters::EgressKind
+pub fn ai6::directorates::m::theaters::EgressKind::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::ExecutionMode
+pub ai6::ExecutionMode::Field
+pub ai6::ExecutionMode::RemoteHands
+impl ai6::directorates::m::placement::ExecutionMode
+pub fn ai6::directorates::m::placement::ExecutionMode::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::ExposurePreset
 pub ai6::ExposurePreset::Observe
 pub ai6::ExposurePreset::Strict
@@ -1605,9 +1839,13 @@ pub ai6::StationRole::Execution
 #[non_exhaustive] pub enum ai6::TheaterAccess
 pub ai6::TheaterAccess::Local
 pub ai6::TheaterAccess::Ssh(ai6::directorates::m::theaters::SshAccess)
+pub ai6::TheaterAccess::Transport(ai6::directorates::m::theaters::TransportAccess)
+impl ai6::directorates::m::theaters::TheaterAccess
+pub fn ai6::directorates::m::theaters::TheaterAccess::transport(&self) -> core::result::Result<(alloc::string::String, alloc::string::String), ai6::directorates::m::theaters::TheaterError>
 #[non_exhaustive] pub enum ai6::TheaterKind
 pub ai6::TheaterKind::Local
 pub ai6::TheaterKind::Ssh
+pub ai6::TheaterKind::Transport
 impl ai6::directorates::m::theaters::TheaterKind
 pub fn ai6::directorates::m::theaters::TheaterKind::as_str(self) -> &'static str
 #[non_exhaustive] pub struct ai6::AccessPolicyError(_)
@@ -1877,6 +2115,14 @@ impl ai6::directorates::registry::cables::CableTarget
 pub fn ai6::directorates::registry::cables::CableTarget::name(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::CableTarget::scope(&self) -> ai6::directorates::registry::cables::CableScope
 pub fn ai6::directorates::registry::cables::CableTarget::try_new(ai6::directorates::registry::cables::CableScope, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub struct ai6::Capabilities
+pub ai6::Capabilities::arch: core::option::Option<alloc::string::String>
+pub ai6::Capabilities::files: bool
+pub ai6::Capabilities::forward: bool
+pub ai6::Capabilities::notes: alloc::vec::Vec<alloc::string::String>
+pub ai6::Capabilities::os: core::option::Option<alloc::string::String>
+pub ai6::Capabilities::run: bool
+pub ai6::Capabilities::terminal: bool
 pub struct ai6::Change
 pub ai6::Change::author: alloc::string::String
 pub ai6::Change::committer: alloc::string::String
@@ -1901,6 +2147,12 @@ pub ai6::CxReport::branch: core::option::Option<alloc::string::String>
 pub ai6::CxReport::item_id: alloc::string::String
 pub ai6::CxReport::mission_id: alloc::string::String
 pub ai6::CxReport::outcome: alloc::string::String
+pub struct ai6::DirEntry
+pub ai6::DirEntry::kind: alloc::string::String
+pub ai6::DirEntry::name: alloc::string::String
+pub ai6::DirEntry::size: u64
+pub struct ai6::DirListing
+pub ai6::DirListing::entries: alloc::vec::Vec<ai6::directorates::q::transport::DirEntry>
 pub struct ai6::ExitInfo
 pub ai6::ExitInfo::code: core::option::Option<i64>
 pub ai6::ExitInfo::running: bool
@@ -1929,6 +2181,9 @@ pub fn ai6::directorates::medical::exposure::ExposurePolicy::restricts(&self, ai
 pub fn ai6::directorates::medical::exposure::ExposurePolicy::tools(&self) -> &[alloc::string::String]
 impl core::default::Default for ai6::directorates::medical::exposure::ExposurePolicy
 pub fn ai6::directorates::medical::exposure::ExposurePolicy::default() -> Self
+pub struct ai6::FileData
+pub ai6::FileData::data: guatiao::value::convert::Bytes
+pub ai6::FileData::size: u64
 pub struct ai6::FileRegistry
 impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
@@ -2004,6 +2259,17 @@ pub struct ai6::FinishedSourceBrief
 pub ai6::FinishedSourceBrief::brief: ai6::directorates::registry::store::Brief
 pub ai6::FinishedSourceBrief::ok: bool
 pub ai6::FinishedSourceBrief::outcome: serde_json::value::Value
+pub struct ai6::Forward
+impl ai6::directorates::q::transport::Forward
+pub fn ai6::directorates::q::transport::Forward::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::Forward::info(&self) -> &ai6::directorates::q::transport::ForwardInfo
+pub struct ai6::ForwardInfo
+pub ai6::ForwardInfo::remote_host: alloc::string::String
+pub ai6::ForwardInfo::remote_port: u16
+pub struct ai6::ForwardSpec
+pub ai6::ForwardSpec::remote_host: alloc::string::String
+pub ai6::ForwardSpec::remote_port: u16
+pub ai6::ForwardSpec::target: alloc::string::String
 #[non_exhaustive] pub struct ai6::HeadquartersLease
 impl ai6::directorates::registry::store::HeadquartersLease
 pub fn ai6::directorates::registry::store::HeadquartersLease::expires(&self) -> f64
@@ -2129,6 +2395,13 @@ pub ai6::OperationPolicy::theater: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::placement::OperationPolicy
 pub fn ai6::directorates::m::placement::OperationPolicy::from_roster(&ai6::directorates::m::roster::Roster, &str) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::placement::OperationPolicy::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub struct ai6::Output
+pub ai6::Output::code: core::option::Option<i64>
+pub ai6::Output::signal: core::option::Option<i64>
+pub ai6::Output::stderr: guatiao::value::convert::Bytes
+pub ai6::Output::stdout: guatiao::value::convert::Bytes
+pub ai6::Output::timed_out: bool
+pub ai6::Output::truncated: bool
 #[non_exhaustive] pub struct ai6::Placement
 pub ai6::Placement::choices: alloc::vec::Vec<ai6::directorates::m::placement::PlacementChoice>
 pub ai6::Placement::rejections: alloc::vec::Vec<ai6::directorates::m::placement::PlacementRejection>
@@ -2137,6 +2410,7 @@ pub fn ai6::directorates::m::placement::Placement::best(&self) -> core::option::
 #[non_exhaustive] pub struct ai6::PlacementChoice
 pub ai6::PlacementChoice::agent: alloc::string::String
 pub ai6::PlacementChoice::handler: core::option::Option<alloc::string::String>
+pub ai6::PlacementChoice::mode: ai6::directorates::m::placement::ExecutionMode
 pub ai6::PlacementChoice::station: alloc::string::String
 pub ai6::PlacementChoice::theater: alloc::string::String
 #[non_exhaustive] pub struct ai6::PlacementRejection
@@ -2182,6 +2456,10 @@ impl ai6::directorates::medical::quarantine::QuarantinePolicy
 pub fn ai6::directorates::medical::quarantine::QuarantinePolicy::reason(&self, &[ai6::directorates::medical::quarantine::Incident], f64) -> core::option::Option<alloc::string::String>
 impl core::default::Default for ai6::directorates::medical::quarantine::QuarantinePolicy
 pub fn ai6::directorates::medical::quarantine::QuarantinePolicy::default() -> Self
+pub struct ai6::ReadSpec
+pub ai6::ReadSpec::limit: u64
+pub ai6::ReadSpec::offset: u64
+pub ai6::ReadSpec::path: alloc::string::String
 pub struct ai6::Roster
 impl ai6::directorates::m::roster::Roster
 pub fn ai6::directorates::m::roster::Roster::agent(&self, core::option::Option<&str>, &str) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
@@ -2197,6 +2475,15 @@ pub struct ai6::RosterError(_)
 impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::RunSpec
+pub ai6::RunSpec::argv: alloc::vec::Vec<alloc::string::String>
+pub ai6::RunSpec::cwd: core::option::Option<alloc::string::String>
+pub ai6::RunSpec::env: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
+pub ai6::RunSpec::max_output: u64
+pub ai6::RunSpec::stdin: core::option::Option<guatiao::value::convert::Bytes>
+pub ai6::RunSpec::timeout_ms: u64
+impl core::default::Default for ai6::directorates::q::transport::RunSpec
+pub fn ai6::directorates::q::transport::RunSpec::default() -> Self
 pub struct ai6::SafeHouseInfo
 pub ai6::SafeHouseInfo::base: core::option::Option<alloc::string::String>
 pub ai6::SafeHouseInfo::branch: core::option::Option<alloc::string::String>
@@ -2373,12 +2660,18 @@ pub ai6::Spec::cwd: core::option::Option<alloc::string::String>
 pub ai6::Spec::env: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
 pub ai6::Spec::rows: u16
 #[non_exhaustive] pub struct ai6::SshAccess
+pub ai6::SshAccess::connect_timeout_secs: core::option::Option<u64>
 pub ai6::SshAccess::host: alloc::string::String
+pub ai6::SshAccess::host_key: core::option::Option<alloc::string::String>
 pub ai6::SshAccess::identity: core::option::Option<alloc::string::String>
 pub ai6::SshAccess::port: core::option::Option<u16>
+pub ai6::SshAccess::trust_on_first_use: bool
 pub ai6::SshAccess::user: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::SshAccess
 pub fn ai6::directorates::m::theaters::SshAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::trusting_on_first_use(self) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_connect_timeout_secs(self, u64) -> Self
+pub fn ai6::directorates::m::theaters::SshAccess::with_host_key(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_identity(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_port(self, u16) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_user(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -2421,21 +2714,38 @@ pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guat
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 #[non_exhaustive] pub struct ai6::Theater
 pub ai6::Theater::access: ai6::directorates::m::theaters::TheaterAccess
+pub ai6::Theater::agents: ai6::directorates::m::theaters::AgentMode
+pub ai6::Theater::egress: ai6::directorates::m::theaters::Egress
+pub ai6::Theater::harnesses: alloc::vec::Vec<alloc::string::String>
 pub ai6::Theater::id: alloc::string::String
 pub ai6::Theater::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::Theater::workdir: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::Theater
 pub fn ai6::directorates::m::theaters::Theater::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::theaters::TheaterAccess) -> Self
 pub fn ai6::directorates::m::theaters::Theater::summary(&self) -> ai6::directorates::m::theaters::TheaterSummary
+pub fn ai6::directorates::m::theaters::Theater::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::theaters::Theater::with_agents(self, ai6::directorates::m::theaters::AgentMode) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_egress(self, ai6::directorates::m::theaters::Egress) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_harness(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_workdir(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::TheaterError(_)
 impl core::error::Error for ai6::directorates::m::theaters::TheaterError
 impl core::fmt::Display for ai6::directorates::m::theaters::TheaterError
 pub fn ai6::directorates::m::theaters::TheaterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::TheaterSummary
 pub ai6::TheaterSummary::access: ai6::directorates::m::theaters::TheaterKind
+pub ai6::TheaterSummary::agents: ai6::directorates::m::theaters::AgentMode
+pub ai6::TheaterSummary::capabilities: core::option::Option<ai6::directorates::q::transport::Capabilities>
+pub ai6::TheaterSummary::egress: ai6::directorates::m::theaters::EgressKind
+pub ai6::TheaterSummary::harnesses: alloc::vec::Vec<alloc::string::String>
 pub ai6::TheaterSummary::host: core::option::Option<alloc::string::String>
 pub ai6::TheaterSummary::id: alloc::string::String
 pub ai6::TheaterSummary::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::TheaterSummary::provider: core::option::Option<alloc::string::String>
+pub ai6::TheaterSummary::unavailable: core::option::Option<alloc::string::String>
+pub ai6::TheaterSummary::weakened: alloc::vec::Vec<alloc::string::String>
+pub ai6::TheaterSummary::workdir: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::TheaterSummary
 pub fn ai6::directorates::m::theaters::TheaterSummary::local() -> Self
 pub struct ai6::Theaters
@@ -2454,6 +2764,25 @@ pub ai6::TokenUsage::cost_micro_usd: u64
 pub ai6::TokenUsage::cumulative: bool
 pub ai6::TokenUsage::input: u64
 pub ai6::TokenUsage::output: u64
+#[non_exhaustive] pub struct ai6::TransportAccess
+pub ai6::TransportAccess::config: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub ai6::TransportAccess::provider: alloc::string::String
+impl ai6::directorates::m::theaters::TransportAccess
+pub fn ai6::directorates::m::theaters::TransportAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::TransportAccess::with_setting(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<serde_json::value::Value>) -> Self
+pub struct ai6::TransportClient
+impl ai6::directorates::q::transport::TransportClient
+pub fn ai6::directorates::q::transport::TransportClient::capabilities(&self) -> core::result::Result<ai6::directorates::q::transport::Capabilities, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::forward(&self, &ai6::directorates::q::transport::ForwardSpec) -> core::result::Result<ai6::directorates::q::transport::Forward, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::list_dir(&self, &str) -> core::result::Result<ai6::directorates::q::transport::DirListing, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::new(alloc::boxed::Box<dyn ai6::directorates::q::transport::Transport>) -> Self
+pub fn ai6::directorates::q::transport::TransportClient::open_terminal(&self, &ai6::directorates::q::terminal::Spec) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::probe(&self) -> core::result::Result<ai6::directorates::q::transport::Capabilities, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::read_file(&self, &ai6::directorates::q::transport::ReadSpec) -> core::result::Result<ai6::directorates::q::transport::FileData, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::run(&self, &ai6::directorates::q::transport::RunSpec) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::TransportClient::write_file(&self, &ai6::directorates::q::transport::WriteSpec) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub struct ai6::TransportConfig
+pub ai6::TransportConfig::settings_toml: alloc::string::String
 pub struct ai6::UsageLimit
 pub ai6::UsageLimit::resets_at: core::option::Option<i64>
 pub ai6::UsageLimit::window: core::option::Option<alloc::string::String>
@@ -2515,6 +2844,11 @@ pub ai6::Workspace::branch: alloc::string::String
 pub ai6::Workspace::isolate: bool
 pub ai6::Workspace::provider: core::option::Option<alloc::string::String>
 pub ai6::Workspace::source: core::option::Option<std::path::PathBuf>
+pub struct ai6::WriteSpec
+pub ai6::WriteSpec::append: bool
+pub ai6::WriteSpec::create_dirs: bool
+pub ai6::WriteSpec::data: guatiao::value::convert::Bytes
+pub ai6::WriteSpec::path: alloc::string::String
 pub const ai6::ACTIONS: &[&str]
 pub const ai6::BRIEF_EXPOSURE_KEY: &str
 pub const ai6::BRIEF_SOURCE: &str
@@ -2527,6 +2861,8 @@ pub const ai6::DEFAULT_LINE_HISTORY: usize
 pub const ai6::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::DEFAULT_LOOP_MIN_LINES: usize
 pub const ai6::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
+pub const ai6::DEFAULT_MAX_OUTPUT: u64
+pub const ai6::DEFAULT_READ_LIMIT: u64
 pub const ai6::DEFAULT_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::DEFAULT_STALLS: u32
 pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
@@ -2637,8 +2973,64 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal:
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::read(&self, &mut [u8], i64) -> core::result::Result<i64, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub trait ai6::Transport: core::marker::Send + core::marker::Sync
+pub fn ai6::Transport::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::capabilities_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::list_dir_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::probe_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::read_file_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::run_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::Transport::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::transport::Transport for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::capabilities_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::list_dir_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::probe_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::read_file_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::run_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::transport::Transport>::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::transport::Transport for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::capabilities_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::list_dir_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::probe_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::read_file_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::run_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::Transport>::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub trait ai6::TransportForward: core::marker::Send + core::marker::Sync
+pub fn ai6::TransportForward::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::TransportForward::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::TransportForward::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::TransportForward::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward> where Self: core::marker::Sized + core::marker::Send + 'static
+impl ai6::directorates::q::transport::TransportForward for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::transport::TransportForward>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::cable_source(&str) -> alloc::string::String
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
+pub fn ai6::describe(&guatiao::library::kind::ProviderError) -> alloc::string::String
+pub fn ai6::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
+pub fn ai6::is_sha256_pin(&str) -> bool
+pub fn ai6::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
 pub fn ai6::load_role_authorizer(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::micro_usd(f64) -> u64
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
@@ -2653,4 +3045,5 @@ pub async fn ai6::serve_with_plugins<F>(core::net::socket_addr::SocketAddr, &[st
 pub async fn ai6::serve_with_plugins_and_capacity<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub fn ai6::source_brief(&str, &str, &ai6::directorates::registry::sources::SourceItem) -> ai6::directorates::registry::store::Brief
 pub fn ai6::tool_source(&str) -> alloc::string::String
+pub fn ai6::unsupported(&str) -> guatiao::library::kind::ProviderError
 pub fn ai6::utc_day(i64) -> alloc::string::String
