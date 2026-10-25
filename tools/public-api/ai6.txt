@@ -1065,6 +1065,7 @@ pub fn ai6::directorates::registry::store::StationSettings::max_concurrent_missi
 pub fn ai6::directorates::registry::store::StationSettings::station(&self) -> &str
 pub fn ai6::directorates::registry::store::StationSettings::try_new(impl core::convert::Into<alloc::string::String>, usize) -> core::io::error::Result<Self>
 pub const ai6::directorates::registry::store::DEFAULT_LEASE: core::time::Duration
+pub const ai6::directorates::registry::store::GONE_DARK_AFTER: core::time::Duration
 pub const ai6::directorates::registry::store::MAX_STATION_MISSION_CAPACITY: usize
 pub fn ai6::directorates::registry::store::default_registry_dir() -> core::io::error::Result<std::path::PathBuf>
 pub mod ai6::directorates::section_00
@@ -2242,6 +2243,7 @@ pub const ai6::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
 pub const ai6::DEFAULT_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
 pub const ai6::DEFAULT_TERMINAL: &str
+pub const ai6::GONE_DARK_AFTER: core::time::Duration
 pub const ai6::LOCAL_THEATER: &str
 pub const ai6::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::MAX_CABLE_FANOUT: usize

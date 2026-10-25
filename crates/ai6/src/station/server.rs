@@ -36,7 +36,9 @@ use crate::directorates::registry::cables::{
     CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
     CableRelayError, CableRelease, CableSendRequest, CableTarget,
 };
-use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, FileRegistry, Lease};
+use crate::directorates::registry::store::{
+    Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, Lease,
+};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart,
 };
@@ -1395,7 +1397,7 @@ fn place_brief(
                 .iter()
                 .filter(|lease| lease.station() == record.station())
                 .count();
-            StationFacts::from_record(record, now, DEFAULT_LEASE, load)
+            StationFacts::from_record(record, now, GONE_DARK_AFTER, load)
         })
         .collect();
     let request = PlacementRequest {

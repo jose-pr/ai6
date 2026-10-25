@@ -61,8 +61,8 @@ pub use directorates::registry::sources::{
     SourceItem, SourcePoll, source_brief,
 };
 pub use directorates::registry::store::{
-    AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, HeadquartersLease, Lease, LeaseRecovery,
-    MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,
+    AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, HeadquartersLease, Lease,
+    LeaseRecovery, MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,
 };
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart,

@@ -36,7 +36,6 @@ use uuid::Uuid;
 
 const MAX_BUFFER_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const MAX_CLIENT_SLOTS: usize = 100_000;
-const SITE_HEALTH_MAX_AGE: Duration = Duration::from_secs(45);
 
 /// Limits and trusted origin for one gateway instance.
 ///
@@ -1138,7 +1137,7 @@ fn board_station(
     };
     BoardStation {
         station_id: record.station().to_owned(),
-        healthy: now - record.seen() <= SITE_HEALTH_MAX_AGE.as_secs_f64(),
+        healthy: now - record.seen() <= ai6::GONE_DARK_AFTER.as_secs_f64(),
         headquarters: headquarters
             .is_some_and(|lease| lease.station() == record.station() && lease.expires() > now),
         seen: record.seen(),
@@ -1398,7 +1397,7 @@ async fn placement_preview(
                     .iter()
                     .filter(|lease| lease.station() == record.station())
                     .count();
-                ai6::StationFacts::from_record(record, now, ai6::DEFAULT_LEASE, load)
+                ai6::StationFacts::from_record(record, now, ai6::GONE_DARK_AFTER, load)
             })
             .collect::<Vec<_>>();
         let placement = ai6::place(&policy, &request, &stations);

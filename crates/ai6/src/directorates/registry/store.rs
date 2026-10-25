@@ -39,6 +39,8 @@ const MAX_MISSION_PROPOSAL_RESULTS: usize = 500;
 const MAX_PROPOSAL_IDEMPOTENCY_KEY_BYTES: usize = 256;
 /// Default duration for a file-backed Registry claim.
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
+/// A Station whose last check-in is older than this has gone dark: three missed check-ins.
+pub const GONE_DARK_AFTER: Duration = Duration::from_secs(45);
 
 /// One queued brief with a bounded, versioned file representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

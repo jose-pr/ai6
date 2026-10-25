@@ -46,7 +46,7 @@ combinations that pass these checks:
 | Operation `stations` | the Operation lists Stations and this one is not among them |
 | Mission `stations` | the brief narrows to Stations and this one is not among them. A Mission can only narrow the Operation's list, never widen it |
 | Role | the Station has no `execution` role |
-| Health | its last check-in is older than 60 seconds (gone dark) |
+| Health | its last check-in is older than 45 seconds (gone dark; `GONE_DARK_AFTER`) |
 | Capacity | its capacity is 0, or it already holds that many leased Missions |
 | Theater binding | the Operation's `theater` names a different Theater |
 | Theater access | the Theater is reached over SSH, which placement does not choose yet |
