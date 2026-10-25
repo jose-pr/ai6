@@ -15,16 +15,21 @@ clearance = "field"
 max_concurrent = 3
 workspace = { provider = "git", base = "origin/main", branch = "agent/{id}-{slug}", isolate = true }
 station_labels = { gpu = "yes", os = "linux" }
+stations = ["lab-gpu", "hq-1"]
 cover = "covert"
 on_blown = "flag"
 sources = { jira = "GUA" }
 ```
 
 The Operation ID (`G`) and project name (`guatiao`) both resolve to the same registered
-Operation. `path` is the local checkout. `theater` names a remote execution environment instead;
-remote Theaters are not implemented yet, so such an Operation is not admitted. `roster` limits which Agents may be assigned; when omitted or empty, every
+Operation. `path` is the local checkout. `theater` binds the Operation to one
+[Theater](theaters.md) by ID; Sessions run on a Theater a Station reaches with local access,
+and an SSH Theater is not chosen yet. `roster` limits which Agents may be assigned; when omitted or empty, every
 configured Agent is eligible. `clearance` sets the highest authority available to its
-Missions. `station_labels` is matched against the labels of an execution Station.
+Missions. `station_labels` is matched against the labels of an execution Station and its
+Theater. `stations` optionally lists the Stations allowed to run the Operation's Missions;
+empty or absent allows every Station. A Mission can narrow that list but never widen it.
+See [Placement](stations.md#placement) for the full set of checks.
 
 ## Workspace
 

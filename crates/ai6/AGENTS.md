@@ -189,6 +189,7 @@ pub struct Operation {
     pub max_concurrent: Option<usize>,
     pub workspace: Workspace,
     pub station_labels: BTreeMap<String, String>,
+    pub stations: Vec<String>,                    // Stations allowed to run it; empty allows all
     pub cover: String,
     pub cover_identity: Option<CoverIdentity>,
     pub on_blown: String,
@@ -235,6 +236,8 @@ pub fn config_dir() -> Result<PathBuf, RosterError>;
 `load` reads `operations.toml` and `agents.toml`; missing files produce an empty roster and
 invalid files fail closed. Operations are global: an Operation is not owned by a Station,
 and its `station_labels` lists the Station labels a Station must carry to run its Missions.
+`stations = ["id", ..]` optionally lists the Stations allowed to run them; a Mission's brief
+may narrow that list but never widen it. `theater` binds the Operation to one Theater by ID.
 
 An Agent is a codename; its `handler`, `model` and `effort` are the codename's current
 occupant. An `AgentRole` (`[role.<id>]`) is a job description only: a `purpose` and a
@@ -252,6 +255,118 @@ Agent matched. `operations` yields stable codename order. `config_dir` resolves
 `AI6_CONFIG_DIR`, then `XDG_CONFIG_HOME/ai6`, then the platform configuration directory.
 `Agent.limits` is layered over the daemon-wide watchdog settings when a Mission starts or
 resumes.
+
+## Theaters (`ai6::directorates::m::theaters`)
+
+A Theater is where a Session's harness runs; a Station reaches it. Each Station reads its
+own `theaters.toml` (`[theater.<id>]` with `access = "local"` or
+`access = { ssh = { host, user, port, identity } }`, and `labels`). The Station's own host
+is always reachable as the implicit `local` Theater; declaring `[theater.local]` only adds
+labels. An `ssh` Theater is recorded and published, but placement does not choose it yet.
+
+```rust
+pub const LOCAL_THEATER: &str; // "local"
+#[non_exhaustive]
+pub enum TheaterAccess { Local, Ssh(SshAccess) }
+#[non_exhaustive]
+pub struct SshAccess { pub host: String, pub user: Option<String>, pub port: Option<u16>, pub identity: Option<String> }
+impl SshAccess {
+    pub fn new(host: impl Into<String>) -> Self;
+    pub fn with_user(self, user: impl Into<String>) -> Self;
+    pub fn with_port(self, port: u16) -> Self;
+    pub fn with_identity(self, identity: impl Into<String>) -> Self;
+}
+#[non_exhaustive]
+pub struct Theater { pub id: String, pub access: TheaterAccess, pub labels: BTreeMap<String, String> }
+impl Theater {
+    pub fn new(id: impl Into<String>, access: TheaterAccess) -> Self;
+    pub fn with_label(self, key: impl Into<String>, value: impl Into<String>) -> Self;
+    pub fn summary(&self) -> TheaterSummary;
+}
+#[non_exhaustive]
+pub enum TheaterKind { Local, Ssh }          // as_str() -> "local" | "ssh"
+#[non_exhaustive]
+pub struct TheaterSummary {                  // what a Station publishes; no user, port or key path
+    pub id: String, pub access: TheaterKind, pub host: Option<String>, pub labels: BTreeMap<String, String>,
+}
+impl TheaterSummary { pub fn local() -> Self; }
+pub struct Theaters { /* declared Theaters */ }   // Default: none declared
+impl Theaters {
+    pub fn load(root: impl AsRef<Path>) -> Result<Self, TheaterError>; // missing file: none declared
+    pub fn parse(text: &str) -> Result<Self, TheaterError>;
+    pub fn insert(&mut self, theater: Theater) -> Result<(), TheaterError>;
+    pub fn merge(&mut self, other: Theaters);                           // other wins on a shared ID
+    pub fn reachable(&self) -> Vec<Theater>;                            // declared + implicit `local`
+    pub fn find(&self, id: &str) -> Option<Theater>;
+    pub fn summaries(&self) -> Vec<TheaterSummary>;
+}
+pub struct TheaterError(String);             // Display, Error
+```
+
+Theater IDs use letters, digits, `.`, `_` and `-`. An SSH host or user must be a word that
+does not start with `-`, and a port is 1 through 65535. `ServeConfig` loads `theaters.toml`
+from the configuration directory; `StationConfig::with_theater` adds one in code and wins on
+a shared ID. A Session's launch record carries `station_id` and `theater_id` separately.
+
+## Placement (`ai6::directorates::m::placement`)
+
+M's decision on where a Mission may run. It is a pure function of plain facts, so the
+scheduler and the Universal Exports preview share it.
+
+```rust
+#[non_exhaustive]
+pub struct OperationPolicy {
+    pub operation: String,
+    pub station_labels: BTreeMap<String, String>,
+    pub stations: Vec<String>,        // empty allows every Station
+    pub theater: Option<String>,      // bound Theater, if any
+    pub checkout: bool,               // the Operation has a local checkout the Station must hold
+    pub agents: Vec<AgentFacts>,
+}
+impl OperationPolicy {
+    pub fn new(operation: impl Into<String>) -> Self;
+    pub fn from_roster(roster: &Roster, operation_key: &str) -> Result<Self, RosterError>;
+}
+#[non_exhaustive]
+pub struct AgentFacts { pub id: String, pub handler: Option<String>, pub priority: i64, pub roles: Vec<String>, pub tags: Vec<String> }
+#[non_exhaustive]
+pub struct StationFacts {
+    pub station: String, pub healthy: bool, pub silent_for: u64, pub roles: Vec<String>,
+    pub capacity: usize, pub load: usize, pub labels: BTreeMap<String, String>,
+    pub checkouts: Vec<String>, pub handlers: Option<Vec<String>>, pub theaters: Vec<TheaterSummary>,
+}
+impl StationFacts {
+    /// `load` = Missions already leased to the Station; silent for longer than `window` = unhealthy.
+    pub fn from_record(record: &StationRecord, now: f64, window: Duration, load: usize) -> Self;
+}
+#[non_exhaustive]
+#[derive(Default)]
+pub struct PlacementRequest {
+    pub stations: Vec<String>,        // the Mission's narrowing; never widens the Operation's list
+    pub agent: Option<String>, pub role: Option<String>, pub tags: Vec<String>,
+    pub deciding_station: Option<String>, // wins a tie on load
+}
+#[non_exhaustive]
+pub struct PlacementChoice { pub station: String, pub theater: String, pub agent: String, pub handler: Option<String> }
+#[non_exhaustive]
+pub struct PlacementRejection { pub station: Option<String>, pub theater: Option<String>, pub agent: Option<String>, pub reason: String }
+#[non_exhaustive]
+pub struct Placement { pub choices: Vec<PlacementChoice>, pub rejections: Vec<PlacementRejection> }
+impl Placement { pub fn best(&self) -> Option<&PlacementChoice>; }
+pub fn place(policy: &OperationPolicy, request: &PlacementRequest, stations: &[StationFacts]) -> Placement;
+```
+
+`place` returns every eligible (Station, Theater, Agent) choice, best first, and one
+rejection for everything ruled out; the `reason` is a sentence an operator can act on.
+Checks, in order: the Operation's `stations` list, the Mission's `stations`, the `execution`
+role, health (a check-in no older than `DEFAULT_LEASE`), capacity, then per Theater: the
+Operation's `theater` binding, SSH access (not chosen yet), `station_labels` (matched as
+globs against the Station's labels overlaid by the Theater's) and the Operation's checkout.
+A posted Agent is skipped for a missing handler on that Station (a Station that reported no
+handlers is not excluded), so the next qualified Agent is the backup. Order is the
+least-loaded Station (the deciding Station wins a tie, then Station ID), the `local`
+Theater first, then Agent priority. Reasons that apply to an Agent everywhere (not the
+requested Agent, no handler configured, role or tag mismatch) have no `station`.
 
 ## Registry store (`ai6::directorates::registry::store`)
 
@@ -373,16 +488,21 @@ acquires or renews the lease and `false` when another Station still holds it. An
 record moves to `headquarters/lease.lapsed.<station>` before the new lease is written.
 `headquarters` returns the current record even when its lease has expired. Headquarters
 leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating Stations
-need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`
-and local Operation paths with each Station check-in every 15 seconds, alongside host and
-platform metadata. `StationConfig` defaults to both `Control` and `Execution` and no
-pinned terminal; `with_roles` replaces the role set, `with_label` adds a placement label and
+need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`,
+local Operation paths, available `handlers`, reachable `theaters` and each Operation's
+placement policy (`operation_policies`, omitted with a log line when over 512 KiB) with
+each Station check-in every 15 seconds, alongside host and
+platform metadata. `StationConfig` defaults to both `Control` and `Execution`, no
+pinned terminal and only the `local` Theater; `with_roles` replaces the role set, `with_label`
+adds a placement label, `with_theater` declares a Theater in code and
 `with_terminal` pins the terminal provider. Without a pin the Station uses an available
 terminal provider, preferring `DEFAULT_TERMINAL`. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
 distributed placement. Station and Agent limits count assignments in the shared Registry.
 The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID` set an
 explicit identity.
 `Brief::key()` and `Brief::prompt()` expose the key and prompt fields used by Registry intake.
+`Brief.stations` (default empty) limits a Mission to those Stations; it can only narrow the
+Operation's `stations` list. The scheduler places each brief with `placement::place`.
 
 ## Sources (`ai6::directorates::registry::sources`)
 

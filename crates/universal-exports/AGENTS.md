@@ -135,6 +135,25 @@ pub struct BoardStation {
     pub headquarters: bool,
     pub seen: f64,
     pub operations: Vec<String>,
+    pub theaters: Vec<BoardTheater>,
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BoardTheater {
+    pub id: String,
+    pub access: String,              // "local" or "ssh"
+    pub host: Option<String>,        // ssh host only; user, port and key path are never published
+    pub labels: BTreeMap<String, String>,
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlacementPreview {
+    pub operation_id: String,
+    pub policy_station: String,      // the Station whose copy of the Operation's policy was used
+    pub choices: Vec<ai6::PlacementChoice>,
+    pub rejections: Vec<ai6::PlacementRejection>,
 }
 
 #[non_exhaustive]
@@ -149,6 +168,8 @@ pub struct LaunchManifest {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub environment_keys: Vec<String>,
+    pub station_id: Option<String>,  // Station that supervises the Session (absent in older registrations)
+    pub theater_id: Option<String>,  // Theater the harness runs in
 }
 ```
 
@@ -167,7 +188,16 @@ from the shared I Registry. A Station is healthy when its check-in is no older t
 seconds; stale check-ins remain visible as offline. `headquarters_station` and each
 Station's `headquarters` marker are populated only for an unexpired elected Headquarters
 lease. The route filters Operations using `mission.read` and omits host and process
-metadata.
+metadata. Each Station lists the Theaters it reaches (`theaters`; a Station that published
+none reaches only its own `local` host).
+
+`GET /v1/user/operations/{operation_id}/placement-preview` answers where a Mission for the
+Operation would run, and why the other places would not (see `ai6::place`). It requires
+`mission.read` on the Operation. The query may carry `agent`, `role`, `stations` and `tags`
+(comma-separated), which only narrow the Operation's policy, as a Mission's brief does. The
+policy comes from the Headquarters Station's check-in when it publishes one, otherwise from
+the first Station that does (`policy_station`); `404` when none does. Rejections name every
+Station in the Registry, not only those hosting the Operation.
 
 ## Gateway state
 
@@ -325,6 +355,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /health` | Returns `204 No Content` while the gateway is serving. |
 | `GET /v1/board` | Requires a user bearer and returns Sessions for Operations allowed by `mission.read`. |
 | `GET /v1/stations` | Requires a user bearer; returns visible Station health, hosted Operations and current Headquarters Station. |
+| `GET /v1/user/operations/{operation_id}/placement-preview` | Requires `mission.read` at the Operation; returns the eligible (Station, Theater, Agent) choices, best first, and a reason for each rejection. Optional `agent`, `role`, `stations`, `tags` query parameters narrow it. |
 | `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. |
 | `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission and its AI6-published brief when available. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret. |
@@ -337,7 +368,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/stations/{station_id}/settings` | Requires `station.read`; returns the live concurrent Mission limit, whether it has an explicit Registry override, and whether the Station has the execution role. |
 | `PUT /v1/user/stations/{station_id}/settings` | Requires `station.configure`; execution Stations only; validates a 1–1,024 concurrent Mission limit, persists it in the shared I Registry, and records a Station-scoped metadata-only audit event. |
 | `POST /v1/user/attach-grants` | Requires a user bearer; checks `session.read` or `session.input` at the registered Operation before issuing an attach token. |
-| `POST /v1/user/operations/{operation_id}/missions` | Requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared I Registry; returns the queued Mission ID. |
+| `POST /v1/user/operations/{operation_id}/missions` | Requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared I Registry; returns the queued Mission ID. The body may carry `stations` to limit the Mission to those Stations (it can only narrow the Operation's list). |
 | `GET /v1/auth/session` | Validates a user bearer and reports its token ID, person ID and expiry. |
 | `POST /v1/station/sessions` | Bearer-authenticated registration request with `operation_id`, `mission_id`, `session_id`, and optional sanitized Mission brief metadata. |
 | `POST /v1/station/sessions/{session_id}/lifecycle/{sequence}` | Bearer-authenticated JSON lifecycle update with Station, Mission ID and state. |

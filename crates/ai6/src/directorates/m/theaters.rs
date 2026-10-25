@@ -348,6 +348,13 @@ mod tests {
     }
 
     #[test]
+    fn the_sample_configuration_parses() {
+        let theaters =
+            Theaters::parse(include_str!("../../../../../examples/config/theaters.toml")).unwrap();
+        assert!(theaters.find("build-box").is_some());
+    }
+
+    #[test]
     fn rejects_invalid_theaters() {
         for text in [
             "[theater.x]\n",

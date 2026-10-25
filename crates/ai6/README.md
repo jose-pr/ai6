@@ -83,6 +83,8 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | Path | Purpose |
 | --- | --- |
 | `ai6::directorates::m::roster` | Operations, Agents (inheritance, aliases, clearance, priority) and Agent roles |
+| `ai6::directorates::m::theaters` | Theaters (`theaters.toml`): the hosts a Station reaches, local or over SSH |
+| `ai6::directorates::m::placement` | Placement: eligible (Station, Theater, Agent) choices with a reason for every rejection |
 | `ai6::directorates::m::mission` | Durable Mission lifecycle, provider Session association and resume settings |
 | `ai6::directorates::m::identity` | Validated `MissionId`, provider-issued `SessionId` and access-token records |
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
@@ -116,7 +118,9 @@ The scheduler leases briefs from the file-backed Registry, uses each brief's
 `source--id` key as the Mission ID, selects an Agent by role, tags and priority among
 those whose handler is available, and files outcomes back. Station and Agent
 concurrency limits count leases across the shared Registry. The Station checks in its
-roles, labels, capacity, active work and local Operation checkouts every 15 seconds.
+roles, labels, capacity, active work, local Operation checkouts, handlers, reachable Theaters
+and each Operation's placement policy every 15 seconds. Placement chooses the Station,
+Theater and Agent and can say why it ruled the others out.
 
 Each Mission snapshots its Operation's cover policy and starting commit; at completion AI6
 audits commit authors and messages and attaches a `cover` report. A violation marks the

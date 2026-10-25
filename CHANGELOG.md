@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Theaters: a Station reads `theaters.toml` (`[theater.<id>]` with `access = "local"` or an
+  `ssh` host, plus labels), always reaches its own host as the implicit `local` Theater and
+  publishes its Theaters at check-in. A Session's launch record carries `station_id` and
+  `theater_id` separately (older records still load). `GET /v1/stations` lists each
+  Station's Theaters, and Moneypenny shows them and the Station and Theater of each Session.
+  An SSH Theater is recorded and shown but not yet chosen for Sessions.
+- Placement is now M's decision (`ai6::directorates::m::placement`, extracted from the
+  Station scheduler). It filters by Station role, health, capacity, labels, checkout, Theater
+  and available handler, orders by load then Agent priority, and gives a reason for every
+  rejection. An Operation may list the Stations allowed to run it (`stations = [..]`); a
+  Mission's brief may narrow the list but never widen it. Stations also publish their
+  handlers, Theaters and each Operation's placement policy at check-in.
+- Universal Exports `GET /v1/user/operations/{id}/placement-preview` (needs `mission.read`)
+  returns the eligible Station, Theater and Agent choices and the reason for each rejection,
+  and Moneypenny's Stations view has a placement preview panel.
+
 - `ai6`: the Station daemon and AI6's public contracts in one Rust crate. Directorates
   under `ai6::directorates` (M, the Registry, Q Branch, 00 Section, Medical) and the Station
   runtime under `ai6::station` (server, provider host, safe houses, publisher, identity).

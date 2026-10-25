@@ -1,0 +1,7 @@
+# Theaters this Station reaches. Its own host is always the Theater `local`;
+# declare it here only to give it labels.
+#
+# An `ssh` Theater is recorded and shown in Moneypenny, but Sessions are not placed on it yet.
+[theater.build-box]
+access = { ssh = { host = "build.example.net", user = "ci", port = 22, identity = "~/.ssh/ci_ed25519" } }
+labels = { os = "linux" }
