@@ -1761,7 +1761,7 @@ async fn authenticate_password(
     let attempt = Attempt {
         name: Some(request.name),
         secret: Some(request.secret),
-        headers: BTreeMap::new(),
+        headers: Vec::new(),
         peer: None,
         secure: Some(true),
         certificate: None,
@@ -3934,7 +3934,7 @@ mod tests {
             }
         }
 
-        let authorizer = RoleAuthorizer::from_toml(
+        let authorizer = ai6::role_authorizer_from_toml(
             r#"
                 [role.viewer]
                 actions = ["mission.read", "session.read"]

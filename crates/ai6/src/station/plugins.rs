@@ -8,19 +8,11 @@ use guatiao::library::{Instance, Kind, KindMismatch, Order, Registry, SearchPath
 use guatiao::{Status, Value};
 use serde::Serialize;
 
-use crate::directorates::m::access::{
-    Authenticator, Authorizer, Directory, RoleAuthorizerProvider,
-};
+use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
 use crate::directorates::q::safehouse::SafeHouseProvider;
 use crate::directorates::q::terminal::Terminal;
 use crate::directorates::registry::sources::Source;
 use crate::directorates::section_00::agent::AgentHandler;
-
-guatiao::local_providers!(
-    id = "ai6-built-in-access",
-    version = "0.1.0",
-    providers = [RoleAuthorizerProvider]
-);
 
 /// A loaded provider visible to the daemon.
 #[derive(Debug, Clone, Serialize)]
@@ -105,25 +97,17 @@ impl Plugins {
     /// may call code from the loaded libraries after construction.
     pub fn scan(paths: &[PathBuf]) -> Self {
         let mut registry = Registry::new("ai6", env!("CARGO_PKG_VERSION"));
-        registry
-            .register_local("ai6-built-in-access", library)
-            .expect("built-in access provider library must register");
         let mut search = SearchPath::new();
         for path in paths {
             search.push(path.clone());
         }
         let report = scan_path_with(&mut registry, &search, Order::Ascending, |declared| {
             if declared.kinds().any(|kind| {
-                matches!(
-                    kind,
-                    "ai6_agent_handler"
-                        | "ai6_terminal"
-                        | "ai6_safehouse"
-                        | "ai6_source"
-                        | "lineupmux_authenticator"
-                        | "lineupmux_directory"
-                        | "lineupmux_authorizer"
-                )
+                kind.starts_with(KIND_PREFIX)
+                    || matches!(
+                        kind,
+                        "ai6_agent_handler" | "ai6_terminal" | "ai6_safehouse" | "ai6_source"
+                    )
             }) {
                 Ok(())
             } else {
@@ -199,6 +183,20 @@ impl Plugins {
     /// Returns the configured authorization policy providers.
     pub fn authorizers(&self) -> Vec<ProviderInfo> {
         providers(&self.registry, <dyn Authorizer>::NAME)
+    }
+
+    /// Returns the providers that manage their accounts, such as the local, key and peer ones.
+    pub fn account_managers(&self) -> Vec<ProviderInfo> {
+        providers(&self.registry, <dyn Accounts>::NAME)
+    }
+
+    /// Constructs an account manager from its provider ID and optional Guatiao config.
+    pub fn accounts(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+    ) -> Result<Box<dyn Accounts>, PluginBuildError> {
+        build::<dyn Accounts>(&self.registry, provider, config)
     }
 
     /// Constructs an AgentHandler from its provider ID and optional Guatiao config.
@@ -332,6 +330,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use guatiao::ToValue;
+
     use super::*;
 
     #[test]
@@ -367,39 +367,170 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn built_in_role_provider_is_registered_and_uses_its_config() {
-        use crate::{AuthorizationRequest, Person, RoleAuthorizerConfig};
-        use guatiao::ToValue;
-        use std::collections::BTreeMap;
+    /// The directory the test binary sits in: Cargo builds the access plugins that the
+    /// dev-dependencies name (never used in code) beside it.
+    fn plugin_directory() -> PathBuf {
+        std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    }
 
-        let plugins = Plugins::scan(&[]);
-        assert!(
-            plugins
-                .authorizers()
-                .iter()
-                .any(|provider| provider.id == "ai6_roles")
-        );
-        let config = RoleAuthorizerConfig {
-            policy_toml: "[role.viewer]\nactions=['mission.read']\n[[rule]]\nsubject='account:007'\nscope='operation:G'\nrole='viewer'".to_owned(),
+    fn text(value: &str) -> Value {
+        value.to_owned().to_value().unwrap()
+    }
+
+    fn list(values: Vec<Value>) -> Value {
+        std::collections::VecDeque::from(values).to_value().unwrap()
+    }
+
+    fn object(entries: Vec<(&str, Value)>) -> Value {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect::<std::collections::BTreeMap<String, Value>>()
+            .to_value()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_shared_access_plugins_load_under_their_ids() {
+        let plugins = Plugins::scan(&[plugin_directory()]);
+        let ids = |providers: Vec<ProviderInfo>| -> Vec<String> {
+            providers.into_iter().map(|provider| provider.id).collect()
+        };
+        let authenticators = ids(plugins.authenticators());
+        for id in [
+            "coqui_access_local",
+            "coqui_access_key",
+            "coqui_access_ldap",
+            "coqui_access_proxy",
+            "coqui_access_peer",
+        ] {
+            assert!(
+                authenticators.iter().any(|loaded| loaded == id),
+                "{id} in {authenticators:?}; {:?}",
+                plugins.scan_summary()
+            );
         }
-        .to_value()
-        .unwrap();
-        let authorizer = plugins.authorizer("ai6_roles", Some(&config)).unwrap();
+        let directories = ids(plugins.directories());
+        for id in [
+            "coqui_access_local",
+            "coqui_access_key",
+            "coqui_access_ldap",
+            "coqui_access_peer",
+        ] {
+            assert!(directories.iter().any(|loaded| loaded == id), "{id}");
+        }
+        assert!(ids(plugins.authorizers()).contains(&"coqui_roles".to_owned()));
+        assert!(ids(plugins.account_managers()).contains(&"coqui_access_local".to_owned()));
+        assert!(plugins.scan_summary().failed.is_empty());
+    }
+
+    #[test]
+    fn the_local_provider_reads_a_file_source_and_logs_a_person_in() {
+        use crate::{AccountPut, Attempt, Verdict};
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("accounts.toml");
+        let plugins = Plugins::scan(&[plugin_directory()]);
+        let config = object(vec![
+            (
+                "source",
+                object(vec![(
+                    "file",
+                    object(vec![("path", text(path.to_str().unwrap()))]),
+                )]),
+            ),
+            (
+                "argon2",
+                object(vec![
+                    ("memory_kib", 64_u32.to_value().unwrap()),
+                    ("iterations", 1_u32.to_value().unwrap()),
+                ]),
+            ),
+        ]);
+        let accounts = plugins
+            .accounts("coqui_access_local", Some(&config))
+            .unwrap();
+        accounts
+            .put(AccountPut {
+                name: "007".to_owned(),
+                secret: Some("correct horse".to_owned()),
+                groups: Some(vec!["field".to_owned()]),
+                ..AccountPut::default()
+            })
+            .unwrap();
+        let authenticator = plugins
+            .authenticator("coqui_access_local", Some(&config))
+            .unwrap();
+        let people = plugins
+            .directory("coqui_access_local", Some(&config))
+            .unwrap();
+        let attempt = |secret: &str| Attempt {
+            name: Some("007".to_owned()),
+            secret: Some(secret.to_owned()),
+            ..Attempt::default()
+        };
+        assert_eq!(
+            authenticator.authenticate(attempt("wrong")).unwrap(),
+            Verdict::Invalid
+        );
+        let Verdict::Valid(lookup) = authenticator
+            .authenticate(attempt("correct horse"))
+            .unwrap()
+        else {
+            panic!("the stored account should log in");
+        };
+        let person = people.lookup(lookup).unwrap().unwrap();
+        assert_eq!(person.name, "007");
+        assert_eq!(person.groups, ["field"]);
+    }
+
+    #[test]
+    fn the_roles_plugin_takes_scope_kinds_from_its_config_and_refuses_others() {
+        use crate::{AuthorizationRequest, Person};
+
+        let plugins = Plugins::scan(&[plugin_directory()]);
+        let policy = |scope: &str| {
+            object(vec![
+                ("scope_kinds", list(vec![text("operation")])),
+                (
+                    "roles",
+                    list(vec![object(vec![
+                        ("name", text("viewer")),
+                        ("actions", list(vec![text("mission.read")])),
+                    ])]),
+                ),
+                (
+                    "rules",
+                    list(vec![object(vec![
+                        ("subject", text("account:007")),
+                        ("scope", text(scope)),
+                        ("role", text("viewer")),
+                    ])]),
+                ),
+            ])
+        };
+        let authorizer = plugins
+            .authorizer("coqui_roles", Some(&policy("operation:G")))
+            .unwrap();
         let decision = authorizer
             .authorize(AuthorizationRequest {
                 person: Person {
                     id: "person-007".to_owned(),
                     name: "007".to_owned(),
-                    display_name: None,
-                    email: None,
-                    groups: Vec::new(),
-                    attributes: BTreeMap::new(),
+                    ..Person::default()
                 },
                 action: "mission.read".to_owned(),
                 resource: "operation:G".to_owned(),
             })
             .unwrap();
         assert!(decision.allowed);
+        assert!(matches!(
+            plugins.authorizer("coqui_roles", Some(&policy("universe:all"))),
+            Err(PluginBuildError::InvalidConfiguration { .. })
+        ));
     }
 }

@@ -18,6 +18,14 @@ dependencies = [
  "ai6-diptel",
  "axum",
  "clap",
+ "coqui-access",
+ "coqui-access-key-plugin",
+ "coqui-access-ldap-plugin",
+ "coqui-access-local-plugin",
+ "coqui-access-peer-plugin",
+ "coqui-access-proxy-plugin",
+ "coqui-roles",
+ "coqui-roles-plugin",
  "data-encoding",
  "fs2",
  "globset",
@@ -42,61 +50,6 @@ dependencies = [
  "uuid",
  "x509-parser",
  "zeroize",
-]
-
-[[package]]
-name = "ai6-access-key"
-version = "0.1.0"
-dependencies = [
- "ai6",
- "getrandom 0.3.4",
- "serde",
- "sha2",
- "subtle",
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "ai6-access-ldap"
-version = "0.1.0"
-dependencies = [
- "ai6",
- "ldap3",
- "rustls",
- "serde",
- "tempfile",
-]
-
-[[package]]
-name = "ai6-access-local"
-version = "0.1.0"
-dependencies = [
- "ai6",
- "argon2",
- "serde",
- "tempfile",
- "toml",
- "uuid",
-]
-
-[[package]]
-name = "ai6-access-peer"
-version = "0.1.0"
-dependencies = [
- "ai6",
- "serde",
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "ai6-access-proxy"
-version = "0.1.0"
-dependencies = [
- "ai6",
- "serde",
- "tempfile",
 ]
 
 [[package]]
@@ -311,7 +264,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
- "sha1",
+ "sha1 0.10.7",
  "sync_wrapper",
  "tokio",
  "tokio-tungstenite",
@@ -523,6 +476,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
+name = "const-oid"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
 name = "cookie"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -549,6 +508,174 @@ dependencies = [
  "serde_json",
  "time",
  "url",
+]
+
+[[package]]
+name = "coqui-access"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "guatiao",
+]
+
+[[package]]
+name = "coqui-access-key"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "serde",
+]
+
+[[package]]
+name = "coqui-access-key-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-key",
+ "coqui-access-kit",
+ "coqui-access-plugin-support",
+]
+
+[[package]]
+name = "coqui-access-kit"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "argon2",
+ "getrandom 0.3.4",
+ "sha2",
+ "subtle",
+]
+
+[[package]]
+name = "coqui-access-ldap"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "ldap3",
+ "rustls",
+]
+
+[[package]]
+name = "coqui-access-ldap-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-ldap",
+]
+
+[[package]]
+name = "coqui-access-local"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "serde",
+]
+
+[[package]]
+name = "coqui-access-local-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-access-local",
+ "coqui-access-plugin-support",
+]
+
+[[package]]
+name = "coqui-access-peer"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-peer-tls",
+ "serde",
+]
+
+[[package]]
+name = "coqui-access-peer-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-access-peer",
+ "coqui-access-plugin-support",
+]
+
+[[package]]
+name = "coqui-access-plugin-support"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "coqui-access-proxy"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+]
+
+[[package]]
+name = "coqui-access-proxy-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-access-proxy",
+]
+
+[[package]]
+name = "coqui-peer"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-peer?rev=ed5a5c401bc2da942c5c1f0de42c38e90927a8a9#ed5a5c401bc2da942c5c1f0de42c38e90927a8a9"
+dependencies = [
+ "data-encoding",
+ "sha1 0.11.0",
+ "sha2",
+ "subtle",
+]
+
+[[package]]
+name = "coqui-peer-tls"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-peer-tls?rev=fa409d770baf5086619480d68fadfc9dc7cfa6dd#fa409d770baf5086619480d68fadfc9dc7cfa6dd"
+dependencies = [
+ "coqui-peer",
+ "data-encoding",
+ "rustls",
+]
+
+[[package]]
+name = "coqui-roles"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+]
+
+[[package]]
+name = "coqui-roles-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=668cd761a92ba8259aab8a027e482da70fe39369#668cd761a92ba8259aab8a027e482da70fe39369"
+dependencies = [
+ "coqui-access",
+ "coqui-roles",
 ]
 
 [[package]]
@@ -690,6 +817,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
+ "const-oid",
  "crypto-common 0.2.2",
  "ctutils",
 ]
@@ -2158,6 +2286,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+ "digest 0.11.3",
+]
+
+[[package]]
 name = "sha2"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2614,7 +2753,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.5",
- "sha1",
+ "sha1 0.10.7",
  "thiserror 2.0.21",
 ]
 

@@ -13,9 +13,11 @@ pub mod directorates;
 pub mod station;
 
 pub use directorates::m::access::{
-    Attempt, Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer, Directory,
-    Lookup, Person, RoleAuthorizer, RoleAuthorizerConfig, RoleAuthorizerProvider, RolePolicyError,
-    Verdict,
+    ACTIONS, AccessPolicyError, AccountInfo, AccountPut, Accounts, Attempt, Authenticator,
+    AuthorizationDecision, AuthorizationRequest, Authorizer, Description, Directory, KIND_PREFIX,
+    Lookup, Person, PutOutcome, Role, RoleAuthorizer, RoleAuthorizerBuilder, RolePolicy,
+    RolePolicyError, Rule, SCOPE_KINDS, Verdict, Waiting, load_role_authorizer, role_authorizer,
+    role_authorizer_from_toml,
 };
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
 pub use directorates::m::placement::{

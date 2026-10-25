@@ -177,7 +177,7 @@ fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {
                 .map_err(|error| error.to_string())?,
         )
     } else if let Some(path) = &cli.access_policy {
-        Arc::new(RoleAuthorizer::load(path).map_err(|error| error.to_string())?)
+        Arc::new(ai6::load_role_authorizer(path).map_err(|error| error.to_string())?)
     } else {
         Arc::new(RoleAuthorizer::default())
     };
