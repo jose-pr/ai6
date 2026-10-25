@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
+use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
 use crate::directorates::registry::sleepers::Sleeper;
 use crate::directorates::registry::store::validate_station_id;
@@ -121,6 +122,10 @@ pub struct Operation {
     pub cover_identity: Option<CoverIdentity>,
     /// Response when a commit violates the cover policy.
     pub on_blown: String,
+    /// Response when a provider usage limit stops a Session.
+    pub on_limit: OnLimit,
+    /// Seconds to park when a limit reports no reset time.
+    pub limit_fallback_secs: u64,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
@@ -462,6 +467,8 @@ struct OperationDefinition {
     cover: String,
     cover_identity: Option<CoverIdentity>,
     on_blown: String,
+    on_limit: OnLimit,
+    limit_fallback_secs: Option<u64>,
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
 }
@@ -560,6 +567,10 @@ impl OperationDefinition {
             } else {
                 self.on_blown
             },
+            on_limit: self.on_limit,
+            limit_fallback_secs: self
+                .limit_fallback_secs
+                .unwrap_or(DEFAULT_LIMIT_FALLBACK_SECS),
             sources: self.sources,
             sleepers: self.sleepers,
         };
@@ -616,6 +627,13 @@ impl OperationDefinition {
         if !matches!(operation.on_blown.as_str(), "flag" | "fail") {
             return Err(error(format!(
                 "{}: Operation {:?}: on_blown must be flag or fail",
+                source.display(),
+                operation.id
+            )));
+        }
+        if operation.limit_fallback_secs == 0 {
+            return Err(error(format!(
+                "{}: Operation {:?}: limit_fallback_secs must be greater than zero",
                 source.display(),
                 operation.id
             )));
@@ -1053,6 +1071,27 @@ sources = {{ jira = \"GUA\" }}\n",
         directory.write("agents.toml", "[agent.007.limits]\nstall_timeout = -1.0\n");
 
         assert!(Roster::load(&directory.0).is_err());
+    }
+
+    #[test]
+    fn an_operation_waits_out_a_provider_limit_unless_it_asks_for_a_backup() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "operations.toml",
+            "[operation.A]\n[operation.B]\non_limit = \"backup\"\nlimit_fallback_secs = 90\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        let wait = roster.operation("A").unwrap();
+        assert_eq!(wait.on_limit, OnLimit::Wait);
+        assert_eq!(wait.limit_fallback_secs, DEFAULT_LIMIT_FALLBACK_SECS);
+        let backup = roster.operation("B").unwrap();
+        assert_eq!(backup.on_limit, OnLimit::Backup);
+        assert_eq!(backup.limit_fallback_secs, 90);
+
+        for invalid in ["on_limit = \"retry\"", "limit_fallback_secs = 0"] {
+            directory.write("operations.toml", &format!("[operation.C]\n{invalid}\n"));
+            assert!(Roster::load(&directory.0).is_err(), "{invalid}");
+        }
     }
 
     #[test]

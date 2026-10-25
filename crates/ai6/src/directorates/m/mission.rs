@@ -32,6 +32,8 @@ pub enum MissionState {
     Blown,
     /// The work was withdrawn or handed off.
     Abandoned,
+    /// A provider usage limit paused the work; it resumes when `parked_until` passes.
+    Parked,
 }
 
 /// A Mission as stored and returned by the daemon.
@@ -58,6 +60,9 @@ pub struct Mission {
     pub cover: Option<CoverReport>,
     /// Monotonically increasing state revision.
     pub revision: u64,
+    /// When a parked Mission resumes, as Unix seconds; set only while `state` is `Parked`.
+    #[serde(default)]
+    pub parked_until: Option<i64>,
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -179,6 +184,7 @@ impl MissionStore {
             safe_house: None,
             cover: None,
             revision: 1,
+            parked_until: None,
         };
         let mut next = self.missions.clone();
         next.insert(key, mission.clone());
@@ -272,6 +278,75 @@ impl MissionStore {
             });
         }
         mission.state = state;
+        mission.parked_until = None;
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
+    /// Parks an active Mission until `until` (Unix seconds), when a provider limit resets.
+    ///
+    /// Parking again moves the resume time, so a repeated limit report is harmless.
+    pub fn park(&mut self, mission_id: &str, until: i64) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if !matches!(
+            mission.state,
+            MissionState::Working
+                | MissionState::Blocked
+                | MissionState::Stalled
+                | MissionState::Parked
+        ) {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Parked,
+            });
+        }
+        mission.state = MissionState::Parked;
+        mission.parked_until = Some(until);
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
+    /// Lists parked Missions whose resume time is `now` or earlier, in identity order.
+    pub fn due_parked(&self, now: i64) -> Vec<Mission> {
+        self.missions
+            .values()
+            .filter(|mission| {
+                mission.state == MissionState::Parked
+                    && mission.parked_until.is_some_and(|until| until <= now)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Hands an interrupted Mission to another Agent as a new attempt: it is queued again
+    /// with `agent_id` assigned and keeps its Sessions and safe house.
+    pub fn requeue_for(
+        &mut self,
+        mission_id: &str,
+        agent_id: String,
+    ) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if !matches!(
+            mission.state,
+            MissionState::Working
+                | MissionState::Blocked
+                | MissionState::Stalled
+                | MissionState::Parked
+        ) {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Queued,
+            });
+        }
+        mission.state = MissionState::Queued;
+        mission.parked_until = None;
+        mission.agent_id = Some(agent_id);
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
@@ -400,7 +475,7 @@ pub enum MissionError {
 }
 
 fn valid_transition(from: MissionState, to: MissionState) -> bool {
-    use MissionState::{Abandoned, Blocked, Blown, Done, Failed, Queued, Stalled, Working};
+    use MissionState::{Abandoned, Blocked, Blown, Done, Failed, Parked, Queued, Stalled, Working};
     matches!(
         (from, to),
         (Queued, Working | Failed | Abandoned)
@@ -409,6 +484,7 @@ fn valid_transition(from: MissionState, to: MissionState) -> bool {
             | (Working, Blown)
             | (Blocked, Blown)
             | (Stalled, Working | Failed | Blown | Abandoned)
+            | (Parked, Working | Failed | Abandoned)
     )
 }
 
@@ -650,6 +726,87 @@ mod tests {
         assert_eq!(manifest.station_id, None);
         assert_eq!(manifest.theater_id, None);
         assert_eq!(manifest.session, None);
+    }
+
+    fn working_mission(book: &mut MissionStore, id: &str) {
+        book.create(
+            MissionId::try_new(id).unwrap(),
+            Some("operation-a".to_owned()),
+            "inspect".to_owned(),
+            Some("007".to_owned()),
+            None,
+        )
+        .unwrap();
+        book.transition(id, MissionState::Working).unwrap();
+    }
+
+    #[test]
+    fn a_parked_mission_is_due_only_once_its_time_has_passed() {
+        let mut book = book();
+        working_mission(&mut book, "parked-1");
+        working_mission(&mut book, "parked-2");
+        book.park("parked-1", 1_000).unwrap();
+        book.park("parked-2", 2_000).unwrap();
+
+        assert!(book.due_parked(999).is_empty());
+        assert_eq!(book.due_parked(1_000).len(), 1);
+        let ids: Vec<_> = book
+            .due_parked(2_000)
+            .iter()
+            .map(|mission| mission.mission_id.to_string())
+            .collect();
+        assert_eq!(ids, ["parked-1", "parked-2"]);
+
+        // Resuming clears the time; parking only applies to an active Mission.
+        let resumed = book.transition("parked-1", MissionState::Working).unwrap();
+        assert_eq!(
+            (resumed.state, resumed.parked_until),
+            (MissionState::Working, None)
+        );
+        book.transition("parked-1", MissionState::Failed).unwrap();
+        assert!(matches!(
+            book.park("parked-1", 5),
+            Err(MissionError::InvalidTransition { .. })
+        ));
+        // Parking is not an ordinary transition: it needs a resume time.
+        working_mission(&mut book, "parked-4");
+        assert!(matches!(
+            book.transition("parked-4", MissionState::Parked),
+            Err(MissionError::InvalidTransition { .. })
+        ));
+    }
+
+    #[test]
+    fn parking_again_moves_the_resume_time_and_requeueing_clears_it() {
+        let mut book = book();
+        working_mission(&mut book, "parked-3");
+        book.park("parked-3", 100).unwrap();
+        let moved = book.park("parked-3", 900).unwrap();
+        assert_eq!(moved.parked_until, Some(900));
+
+        let handed_off = book.requeue_for("parked-3", "008".to_owned()).unwrap();
+        assert_eq!(handed_off.state, MissionState::Queued);
+        assert_eq!(handed_off.agent_id.as_deref(), Some("008"));
+        assert_eq!(handed_off.parked_until, None);
+        assert!(book.due_parked(i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn missions_written_before_parking_still_load() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missions.json");
+        {
+            let mut book = MissionStore::open(&path).unwrap();
+            working_mission(&mut book, "old-2");
+        }
+        let mut snapshot: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let mission = snapshot["missions"]["old-2"].as_object_mut().unwrap();
+        mission.remove("parked_until").unwrap();
+        fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+
+        let reopened = MissionStore::open(&path).unwrap();
+        assert_eq!(reopened.get("old-2").unwrap().parked_until, None);
     }
 
     #[test]

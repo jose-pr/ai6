@@ -60,16 +60,35 @@ pub struct AgentMessage {
     pub text: String,
 }
 
+/// The event kind a handler emits when the provider refuses further work until a quota
+/// resets. The event carries the details in [`AgentEvent::limit`].
+pub const LIMIT_EVENT: &str = "limit";
+
+/// A provider usage or rate limit that stopped the Session.
+///
+/// A handler emits it as an [`AgentEvent`] of kind [`LIMIT_EVENT`] in place of the
+/// `completed` or `failed` event the same output would otherwise produce.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize)]
+#[map(crate = ::guatiao)]
+pub struct UsageLimit {
+    /// When the provider says the quota resets, as Unix seconds. `None` when it did not say.
+    pub resets_at: Option<i64>,
+    /// Which window was exhausted (`five_hour`, `weekly`, ...) when the provider names it.
+    pub window: Option<String>,
+}
+
 /// One provider event returned to the daemon.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize)]
 #[map(crate = ::guatiao)]
 pub struct AgentEvent {
-    /// Provider-neutral event name such as `text`, `blocked`, `tool` or `completed`.
+    /// Provider-neutral event name such as `text`, `blocked`, `tool`, `completed` or `limit`.
     pub kind: String,
     /// Human-readable event text when the provider supplies it.
     pub text: Option<String>,
     /// Provider data that has no text representation.
     pub data: Option<Vec<u8>>,
+    /// The limit that stopped the Session; set only on a `limit` event.
+    pub limit: Option<UsageLimit>,
 }
 
 /// Starts or resumes the configured Agent implementation.

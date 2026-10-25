@@ -21,6 +21,7 @@ use tokio::time::Instant;
 
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::identity::MAX_ID_BYTES;
+use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, parked_until};
 use crate::directorates::m::mission::{
     LaunchManifest, Mission, MissionError, MissionState, MissionStore, SessionHold,
 };
@@ -43,7 +44,7 @@ use crate::directorates::registry::store::{
     Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, Lease,
 };
 use crate::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart,
+    AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
 use crate::station::plugins;
 #[cfg(feature = "publisher")]
@@ -454,6 +455,7 @@ where
         event_ready: Arc::new(Notify::new()),
         stopping: Arc::new(AtomicBool::new(false)),
         event_pumps: Arc::new(Mutex::new(Vec::new())),
+        clock: Clock::system(),
         #[cfg(feature = "publisher")]
         publisher,
     };
@@ -850,6 +852,7 @@ struct DaemonState {
     event_ready: Arc<Notify>,
     stopping: Arc<AtomicBool>,
     event_pumps: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    clock: Clock,
 }
 
 impl DaemonState {
@@ -969,6 +972,7 @@ async fn scheduler_loop(state: DaemonState) {
             renew_session_leases(&state);
         }
         schedule_recovered_once(&state).await;
+        schedule_parked_once(&state).await;
         schedule_queued_once(&state).await;
         let is_headquarters = schedule_intake_once(&state);
         if is_headquarters && SourceDesk::has_work(&state.roster) && desk.begin() {
@@ -1183,6 +1187,9 @@ fn sync_session_record(state: &DaemonState, mission_id: &str) {
     }
     update = match mission.state {
         MissionState::Queued => return,
+        MissionState::Parked => update
+            .status(SessionStatus::Parked)
+            .parked_until(mission.parked_until.unwrap_or_default() as f64),
         state if is_terminal_state(state) => update.status(SessionStatus::Ended),
         _ => update.status(SessionStatus::Active),
     };
@@ -1449,6 +1456,21 @@ fn unix_now() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0.0, |time| time.as_secs_f64())
+}
+
+/// The daemon's wall clock in Unix seconds, for parking and resuming. Tests substitute a
+/// manual one so a quota reset needs no real waiting.
+#[derive(Clone)]
+struct Clock(Arc<dyn Fn() -> i64 + Send + Sync>);
+
+impl Clock {
+    fn system() -> Self {
+        Self(Arc::new(|| unix_now() as i64))
+    }
+
+    fn now(&self) -> i64 {
+        (self.0)()
+    }
 }
 
 fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &str) -> bool {
@@ -1842,9 +1864,23 @@ async fn schedule_queued_once(state: &DaemonState) {
         .iter()
         .map(|mission| mission.mission_id.to_string())
         .collect::<BTreeSet<_>>();
+    let parked_ids = state
+        .missions
+        .lock()
+        .map(|missions| {
+            missions
+                .list()
+                .into_iter()
+                .filter(|mission| mission.state == MissionState::Parked)
+                .map(|mission| mission.mission_id.to_string())
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
     if let Ok(mut retries) = state.retry_after.lock() {
         retries.retain(|mission_id, _| {
-            queued_ids.contains(mission_id) || recovery_ids.contains(mission_id)
+            queued_ids.contains(mission_id)
+                || recovery_ids.contains(mission_id)
+                || parked_ids.contains(mission_id)
         });
     }
 
@@ -2171,7 +2207,8 @@ fn resolve_working_area(
         &mission.prompt,
         state_root,
         isolate,
-        None,
+        // A later attempt continues in the safe house the earlier one left.
+        mission.safe_house.clone().filter(|report| report.kept),
     )?;
     let path = match safe_house.as_ref().filter(|house| house.is_isolated()) {
         Some(house) => house.path().to_string_lossy().into_owned(),
@@ -2419,6 +2456,13 @@ async fn start_mission(
     if let Some(role) = &role {
         initial_context.push(format!("Role purpose: {}", role.purpose));
         initial_context.push(format!("Role policy: {}", role.policy));
+    }
+    if session_hold(&state, &mission_id).is_some() {
+        initial_context.push(
+            "This Mission continues an earlier attempt that stopped at a provider usage limit. \
+             Its work is in your working directory: inspect it, then continue the task."
+                .to_owned(),
+        );
     }
     initial_context.extend(request.initial_context);
     let mut environment = agent.env.clone();
@@ -2712,8 +2756,13 @@ async fn resume_mission(
         .get(&mission_id)
         .cloned()
         .ok_or_else(|| mission_error(MissionError::NotFound))?;
-    if !matches!(mission.state, MissionState::Blocked | MissionState::Stalled) {
-        return Err(conflict("Only a blocked or stalled Mission can resume"));
+    if !matches!(
+        mission.state,
+        MissionState::Blocked | MissionState::Stalled | MissionState::Parked
+    ) {
+        return Err(conflict(
+            "Only a blocked, stalled or parked Mission can resume",
+        ));
     }
     let agent_id = mission
         .agent_id
@@ -3175,6 +3224,10 @@ fn spawn_event_pump_with_monitor(
                 Ok((Some(event), session_id)) => {
                     monitor.record_activity();
                     attach_observed_session(&state, &mission_id, &session, session_id);
+                    if event.kind == LIMIT_EVENT {
+                        handle_limit(&state, &mission_id, &session, event);
+                        break;
+                    }
                     if matches!(event.kind.as_str(), "completed" | "failed") {
                         let finished = finish_operation(&state, &mission_id, &session);
                         publish_finished_event(&state, &mission_id, event, finished);
@@ -3191,6 +3244,7 @@ fn spawn_event_pump_with_monitor(
                         kind: "failed".to_owned(),
                         text: Some(error),
                         data: None,
+                        limit: None,
                     };
                     let finished = finish_operation(&state, &mission_id, &session);
                     publish_finished_event(&state, &mission_id, event, finished);
@@ -3218,6 +3272,7 @@ fn spawn_event_pump_with_monitor(
                             kind: "working".to_owned(),
                             text: Some("terminal output resumed".to_owned()),
                             data: None,
+                            limit: None,
                         },
                     );
                 }
@@ -3235,6 +3290,7 @@ fn spawn_event_pump_with_monitor(
                     kind: "blocked".to_owned(),
                     text: Some("waiting at a terminal prompt".to_owned()),
                     data: None,
+                    limit: None,
                 };
                 apply_event_state(&state, &mission_id, &event);
                 queue_event(&state, &mission_id, event);
@@ -3268,6 +3324,7 @@ fn spawn_event_pump_with_monitor(
                     kind: "stalled".to_owned(),
                     text: Some(reason),
                     data: None,
+                    limit: None,
                 };
                 apply_event_state(&state, &mission_id, &event);
                 queue_event(&state, &mission_id, event);
@@ -3432,7 +3489,166 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
         MissionState::Done => Some("done"),
         MissionState::Failed => Some("failed"),
         MissionState::Blown => Some("failed"),
+        MissionState::Parked => Some("parked"),
         MissionState::Queued | MissionState::Abandoned => None,
+    }
+}
+
+/// Sent to a resumed provider Session so it carries on after its quota reset; a resumed
+/// harness otherwise waits for input.
+const LIMIT_RESET_MESSAGE: &str =
+    "The provider usage limit has reset. Continue the task where you left off.";
+
+/// Stops a Session a provider limit ended, then parks the Mission until the quota resets or,
+/// when the Operation asks for it and another qualified Agent is available, hands it to
+/// that Agent as a new attempt. The safe house stays: either way the work continues in it.
+fn handle_limit(
+    state: &DaemonState,
+    mission_id: &str,
+    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    event: AgentEvent,
+) {
+    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
+        if sessions
+            .get(mission_id)
+            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
+        {
+            sessions.remove(mission_id)
+        } else {
+            None
+        }
+    });
+    let Some(operation) = operation else {
+        return;
+    };
+    if let Ok(session) = operation.session.lock() {
+        let _ = session.interrupt();
+        let _ = session.close();
+    }
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+    else {
+        return;
+    };
+    let policy = mission
+        .operation_id
+        .as_deref()
+        .and_then(|id| state.roster.operation(id).ok())
+        .map_or((OnLimit::Wait, DEFAULT_LIMIT_FALLBACK_SECS), |operation| {
+            (operation.on_limit, operation.limit_fallback_secs)
+        });
+    let resets_at = event.limit.as_ref().and_then(|limit| limit.resets_at);
+
+    if policy.0 == OnLimit::Backup
+        && let Some(agent) = backup_agent(state, &mission, &operation.handler_provider)
+    {
+        let handed_off =
+            state.missions.lock().ok().is_some_and(|mut missions| {
+                missions.requeue_for(mission_id, agent.id.clone()).is_ok()
+            });
+        if handed_off {
+            // The limited attempt is over; the next start records the replacement.
+            if let Some(hold) = session_hold(state, mission_id) {
+                let _ = state.intake.update_session(
+                    &hold.id,
+                    &state.station_id,
+                    hold.fence,
+                    SessionUpdate::default().status(SessionStatus::Ended),
+                );
+            }
+            eprintln!(
+                "ai6: Mission {mission_id:?} hit a provider limit; posting Agent {:?} as a new attempt",
+                agent.id
+            );
+            queue_event(state, mission_id, event);
+            return;
+        }
+    }
+
+    let until = parked_until(state.clock.now(), resets_at, policy.1);
+    let parked = state
+        .missions
+        .lock()
+        .ok()
+        .is_some_and(|mut missions| missions.park(mission_id, until).is_ok());
+    if !parked {
+        return;
+    }
+    sync_session_record(state, mission_id);
+    publish_lifecycle(state, mission_id, MissionState::Parked);
+    queue_event(state, mission_id, event);
+}
+
+/// The next qualified Agent whose handler is not the one that hit the limit.
+fn backup_agent(
+    state: &DaemonState,
+    mission: &Mission,
+    limited_handler: &str,
+) -> Option<roster::Agent> {
+    let handlers = available_handlers(state)
+        .into_iter()
+        .filter(|handler| handler != limited_handler)
+        .collect::<Vec<_>>();
+    state
+        .roster
+        .select_agent(
+            mission.operation_id.as_deref(),
+            mission.role_id.as_deref(),
+            &[],
+            Some(&handlers),
+        )
+        .ok()
+}
+
+/// Resumes parked Missions whose quota reset time has passed, on the same provider Session.
+async fn schedule_parked_once(state: &DaemonState) {
+    if !state.station.roles.contains(&StationRole::Execution) {
+        return;
+    }
+    let due = state
+        .missions
+        .lock()
+        .map(|missions| missions.due_parked(state.clock.now()))
+        .unwrap_or_default();
+    for mission in due {
+        if state.stopping.load(Ordering::Acquire) {
+            break;
+        }
+        let mission_id = mission.mission_id.to_string();
+        let should_wait = state
+            .retry_after
+            .lock()
+            .ok()
+            .and_then(|retries| retries.get(&mission_id).copied())
+            .is_some_and(|retry_at| retry_at > Instant::now());
+        if should_wait {
+            continue;
+        }
+        let result = resume_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(ResumeMission {
+                message: Some(LIMIT_RESET_MESSAGE.to_owned()),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await;
+        match result {
+            Ok(_) => {
+                if let Ok(mut retries) = state.retry_after.lock() {
+                    retries.remove(&mission_id);
+                }
+            }
+            Err(ApiErrorResponse(StatusCode::TOO_MANY_REQUESTS, _)) => break,
+            Err(_) => {
+                if let Ok(mut retries) = state.retry_after.lock() {
+                    retries.insert(mission_id, Instant::now() + SCHEDULER_RETRY_DELAY);
+                }
+            }
+        }
     }
 }
 
@@ -3849,6 +4065,7 @@ mod tests {
             kind: "completed".to_owned(),
             text: None,
             data: None,
+            limit: None,
         };
         let finished = FinishOutcome {
             cover_blown: true,
@@ -3870,6 +4087,7 @@ mod tests {
             kind: "completed".to_owned(),
             text: None,
             data: None,
+            limit: None,
         };
         let finished = FinishOutcome {
             cover_blown: true,
@@ -3883,6 +4101,7 @@ mod tests {
 
         assert_eq!(event.kind, "completed");
     }
+    use crate::directorates::m::limits::RESET_GRACE_SECS;
     use crate::directorates::q::safehouse::{
         ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseSession,
     };
@@ -3890,9 +4109,12 @@ mod tests {
     use crate::directorates::registry::cables::{
         CableAction, CableGrant, CablePolicy, CableScope, CableTarget,
     };
-    use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
+    use crate::directorates::section_00::agent::{
+        AgentHandler, AgentResume, AgentStart, UsageLimit,
+    };
     use crate::guatiao::library::{Object, ProviderError, Registry};
     use crate::guatiao::{FromValue, Provider, Status, ToValue, Value};
+    use std::sync::atomic::AtomicI64;
 
     fn no_op_cables() -> Arc<CableRelay> {
         Arc::new(CableRelay::new(
@@ -3945,6 +4167,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
 
         let Json(briefs) = list_intake_briefs(State(state)).await.unwrap();
@@ -4098,6 +4321,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
 
         let response = send_cable(
@@ -4195,14 +4419,69 @@ mod tests {
 
     impl MockSession {
         fn new(session_id: SessionId, event: &str) -> Self {
-            Self {
+            Self::with_event(
                 session_id,
-                events: Mutex::new(VecDeque::from([AgentEvent {
+                AgentEvent {
                     kind: event.to_owned(),
                     text: None,
                     data: None,
-                }])),
+                    limit: None,
+                },
+            )
+        }
+
+        fn with_event(session_id: SessionId, event: AgentEvent) -> Self {
+            Self {
+                session_id,
+                events: Mutex::new(VecDeque::from([event])),
             }
+        }
+    }
+
+    /// The reset time the limited mock reports, unless its Agent sets `MOCK_LIMIT_RESET=none`.
+    const MOCK_RESET: i64 = 1_790_000_000;
+
+    /// A provider whose first turn ends at a usage limit and whose resumed turn completes.
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "mock-limit", name = "Mock Limit", crate = crate::guatiao)]
+    struct MockLimitedHandler;
+
+    impl AgentHandler for MockLimitedHandler {
+        fn start(
+            &self,
+            request: AgentStart,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            let resets_at = match request.environment.get("MOCK_LIMIT_RESET") {
+                Some(value) if value == "none" => None,
+                _ => Some(MOCK_RESET),
+            };
+            Ok(MockSession::with_event(
+                SessionId::try_new("provider-session-limited")
+                    .map_err(|error| test_provider_error(&error.to_string()))?,
+                AgentEvent {
+                    kind: LIMIT_EVENT.to_owned(),
+                    text: Some("usage limit reached".to_owned()),
+                    data: None,
+                    limit: Some(UsageLimit {
+                        resets_at,
+                        window: Some("five_hour".to_owned()),
+                    }),
+                },
+            )
+            .into_object())
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            assert!(
+                request.message.is_some(),
+                "a Session resumed after a limit is told to carry on"
+            );
+            Ok(MockSession::new(request.session_id, "completed").into_object())
         }
     }
 
@@ -4360,6 +4639,7 @@ mod tests {
         version = "0.0.0",
         providers = [
             MockHandler,
+            MockLimitedHandler,
             MockTerminalProvider,
             MockSafeHouseProvider,
             MockPlainProvider
@@ -4392,21 +4672,26 @@ mod tests {
     }
 
     fn capacity_test_state(root: &Path, station_limit: usize, agent_limit: usize) -> DaemonState {
+        test_state(
+            root,
+            &format!("max_concurrent = {station_limit}\n"),
+            &format!("[agent.007]\nhandler = \"mock-agent\"\nmax_concurrent = {agent_limit}\n"),
+        )
+    }
+
+    /// A state with Missions `mission-1` and `mission-2` queued for Agent 007 of Operation G.
+    fn test_state(root: &Path, operation_settings: &str, agents: &str) -> DaemonState {
         let checkout = root.join("checkout");
         fs::create_dir_all(&checkout).unwrap();
         fs::write(
             root.join("operations.toml"),
             format!(
-                "[operation.G]\npath = {:?}\nmax_concurrent = {station_limit}\n",
+                "[operation.G]\npath = {:?}\n{operation_settings}",
                 checkout.to_string_lossy()
             ),
         )
         .unwrap();
-        fs::write(
-            root.join("agents.toml"),
-            format!("[agent.007]\nhandler = \"mock-agent\"\nmax_concurrent = {agent_limit}\n"),
-        )
-        .unwrap();
+        fs::write(root.join("agents.toml"), agents).unwrap();
         let mut missions = MissionStore::default();
         for id in ["mission-1", "mission-2"] {
             missions
@@ -4440,6 +4725,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         }
     }
 
@@ -4520,7 +4806,7 @@ mod tests {
     }
 
     async fn start_first_mission(state: &DaemonState) {
-        start_mission(
+        let _ = start_mission(
             State(state.clone()),
             axum::extract::Path("mission-1".to_owned()),
             Json(StartMission {
@@ -4574,7 +4860,7 @@ mod tests {
         assert_eq!(other.session(&hold.id).unwrap().unwrap().station, "test");
 
         // Finishing the Mission closes the record.
-        transition_mission(
+        let _ = transition_mission(
             State(state.clone()),
             axum::extract::Path("mission-1".to_owned()),
             Json(TransitionMission {
@@ -4658,7 +4944,7 @@ mod tests {
             .set_operation("mission-1", manifest)
             .unwrap();
 
-        resume_mission(
+        let _ = resume_mission(
             State(state.clone()),
             axum::extract::Path("mission-1".to_owned()),
             Json(ResumeMission {
@@ -4675,6 +4961,225 @@ mod tests {
             record.provider_session_id.as_deref(),
             Some("provider-session-007")
         );
+    }
+
+    /// A state whose clock stands at `start` and moves only when the test stores a new time.
+    fn limited_state(
+        root: &Path,
+        operation_settings: &str,
+        agents: &str,
+        start: i64,
+    ) -> (DaemonState, Arc<AtomicI64>) {
+        let mut state = test_state(root, operation_settings, agents);
+        let now = Arc::new(AtomicI64::new(start));
+        let reading = now.clone();
+        state.clock = Clock(Arc::new(move || reading.load(Ordering::SeqCst)));
+        (state, now)
+    }
+
+    async fn start_mission_one(state: &DaemonState) {
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+    }
+
+    #[tokio::test]
+    async fn a_limit_parks_the_mission_and_a_fake_clock_resumes_the_same_provider_session() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, now) = limited_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-limit\"\n",
+            MOCK_RESET - 3_600,
+        );
+        start_mission_one(&state).await;
+        wait_for_state(&state, "mission-1", MissionState::Parked).await;
+
+        let resume_at = MOCK_RESET + RESET_GRACE_SECS;
+        let parked = state
+            .missions
+            .lock()
+            .unwrap()
+            .get("mission-1")
+            .unwrap()
+            .clone();
+        assert_eq!(parked.parked_until, Some(resume_at));
+        assert!(
+            state.sessions.lock().unwrap().is_empty(),
+            "the harness is closed"
+        );
+        let event = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(event) = pop_event(&state, "mission-1") {
+                    return event;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the limit is reported");
+        assert_eq!(event.kind, LIMIT_EVENT);
+        assert_eq!(event.limit.unwrap().resets_at, Some(MOCK_RESET));
+        let hold = session_hold(&state, "mission-1").unwrap();
+        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        assert_eq!(record.status, SessionStatus::Parked);
+        assert_eq!(record.parked_until, Some(resume_at as f64));
+
+        // Before the reset nothing resumes.
+        schedule_parked_once(&state).await;
+        now.store(resume_at - 1, Ordering::SeqCst);
+        schedule_parked_once(&state).await;
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .state,
+            MissionState::Parked
+        );
+        assert!(state.sessions.lock().unwrap().is_empty());
+
+        // Once the clock passes the reset the same provider Session resumes.
+        now.store(resume_at, Ordering::SeqCst);
+        schedule_parked_once(&state).await;
+        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        let done = state
+            .missions
+            .lock()
+            .unwrap()
+            .get("mission-1")
+            .unwrap()
+            .clone();
+        assert_eq!(done.parked_until, None);
+        let provider_ids: Vec<_> = done.session_ids.iter().map(SessionId::as_str).collect();
+        assert_eq!(provider_ids, ["provider-session-limited"]);
+        assert_eq!(session_hold(&state, "mission-1").unwrap().id, hold.id);
+        assert_eq!(
+            state.intake.session(&hold.id).unwrap().unwrap().status,
+            SessionStatus::Ended
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limit_without_a_reset_time_waits_the_operation_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = limited_state(
+            root.path(),
+            "limit_fallback_secs = 90\n",
+            "[agent.007]\nhandler = \"mock-limit\"\n[agent.007.env]\nMOCK_LIMIT_RESET = \"none\"\n",
+            1_000,
+        );
+        start_mission_one(&state).await;
+        wait_for_state(&state, "mission-1", MissionState::Parked).await;
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .parked_until,
+            Some(1_090)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_backup_policy_posts_the_next_qualified_agent_as_a_new_attempt() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = limited_state(
+            root.path(),
+            "on_limit = \"backup\"\n",
+            "[agent.007]\nhandler = \"mock-limit\"\npriority = 5\n[agent.008]\nhandler = \"mock-agent\"\n",
+            1_000,
+        );
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .transition("mission-2", MissionState::Abandoned)
+            .unwrap();
+        start_mission_one(&state).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .map(|mission| (mission.state, mission.agent_id.clone()))
+                != Some((MissionState::Queued, Some("008".to_owned())))
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the limited Mission is handed to Agent 008");
+        let first = session_hold(&state, "mission-1").unwrap();
+        assert_eq!(
+            state.intake.session(&first.id).unwrap().unwrap().status,
+            SessionStatus::Ended,
+            "the limited attempt is closed"
+        );
+
+        schedule_queued_once(&state).await;
+        wait_for_state(&state, "mission-1", MissionState::Blocked).await;
+        let second = session_hold(&state, "mission-1").unwrap();
+        assert_eq!((second.attempt, first.attempt), (2, 1));
+        let record = state.intake.session(&second.id).unwrap().unwrap();
+        assert_eq!(record.predecessor.as_deref(), Some(first.id.as_str()));
+        assert_eq!(record.status, SessionStatus::Active);
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .session_ids
+                .len(),
+            2,
+            "a new provider Session, not a resume"
+        );
+
+        let _ = transition_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(TransitionMission {
+                state: MissionState::Failed,
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("transition failed: {:?}", error.1.0.error));
+    }
+
+    #[tokio::test]
+    async fn a_backup_policy_with_no_other_agent_still_waits_for_the_reset() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = limited_state(
+            root.path(),
+            "on_limit = \"backup\"\n",
+            "[agent.007]\nhandler = \"mock-limit\"\n",
+            1_000,
+        );
+        start_mission_one(&state).await;
+        wait_for_state(&state, "mission-1", MissionState::Parked).await;
+        let parked = state
+            .missions
+            .lock()
+            .unwrap()
+            .get("mission-1")
+            .unwrap()
+            .clone();
+        assert_eq!(parked.agent_id.as_deref(), Some("007"));
     }
 
     #[tokio::test]
@@ -4728,6 +5233,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
 
         schedule_queued_once(&state).await;
@@ -4850,6 +5356,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
 
         publish_station_check_in(&state);
@@ -4880,7 +5387,7 @@ mod tests {
         );
         assert_eq!(
             stations[0].info()["handlers"],
-            serde_json::json!(["mock-agent"])
+            serde_json::json!(["mock-agent", "mock-limit"])
         );
 
         schedule_intake_once(&state);
@@ -5056,6 +5563,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
 
         publish_station_check_in(&state);
@@ -5116,6 +5624,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
         let result = create_mission(
             State(state.clone()),
@@ -5223,6 +5732,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
         let mission_id = MissionId::try_new("mission-lifecycle").unwrap();
         let result = create_mission(
@@ -5446,6 +5956,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(true)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
         state.sessions.lock().unwrap().insert(
             mission_id.to_string(),
@@ -5540,6 +6051,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
         let monitor = Watchdog::with_limits(
             std::time::Duration::from_secs(5),
@@ -5722,6 +6234,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
         state.sessions.lock().unwrap().insert(
             mission_id.to_string(),
@@ -5983,6 +6496,7 @@ mod tests {
             event_ready: Arc::new(Notify::new()),
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
         };
         let spec = SafeHouseSpec {
             operation_id: "G".to_owned(),

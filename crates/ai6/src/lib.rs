@@ -68,7 +68,8 @@ pub use directorates::registry::store::{
     LeaseRecovery, MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,
 };
 pub use directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart,
+    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
+    UsageLimit,
 };
 pub use guatiao;
 #[cfg(feature = "station-tls")]

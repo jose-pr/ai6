@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart,
+    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
+    UsageLimit,
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
@@ -165,6 +166,8 @@ struct CodexSession {
     thread_id: Option<SessionId>,
     request_id: AtomicU64,
     effort: Option<String>,
+    /// The latest quota window the account reported as used up.
+    exhausted: Mutex<Option<UsageLimit>>,
 }
 
 impl CodexSession {
@@ -176,6 +179,7 @@ impl CodexSession {
             thread_id: None,
             request_id: AtomicU64::new(0),
             effort,
+            exhausted: Mutex::new(None),
         }
     }
 
@@ -269,15 +273,95 @@ impl CodexSession {
     }
 
     fn collect_event(&self, message: Value) -> Result<(), ProviderError> {
-        if let Some(event) = decode_event(&message) {
+        if let Some(exhausted) = exhausted_window(&message) {
+            *lock(&self.exhausted)? = Some(exhausted);
+        }
+        let hint = lock(&self.exhausted)?.clone();
+        if let Some(event) = decode_event(&message, hint.as_ref()) {
             lock(&self.events)?.push_back(event);
         }
         Ok(())
     }
 }
 
-fn decode_event(message: &Value) -> Option<AgentEvent> {
+/// The quota window an `account/rateLimits/updated` notification reports as used up.
+///
+/// The usage-limit error that follows does not always repeat the reset time, so the session
+/// keeps the latest exhausted window as a hint.
+fn exhausted_window(message: &Value) -> Option<UsageLimit> {
+    if message.get("method")?.as_str()? != "account/rateLimits/updated" {
+        return None;
+    }
+    let limits = message.pointer("/params/rateLimits")?;
+    ["primary", "secondary"]
+        .iter()
+        .filter_map(|key| {
+            let window = limits.get(key)?;
+            (window.get("usedPercent")?.as_f64()? >= 100.0).then(|| UsageLimit {
+                resets_at: window.get("resetsAt").and_then(Value::as_i64),
+                window: match window.get("windowDurationMins").and_then(Value::as_i64) {
+                    Some(300) => Some("five_hour".to_owned()),
+                    Some(10_080) => Some("weekly".to_owned()),
+                    _ => None,
+                },
+            })
+        })
+        // Work resumes only when every exhausted window has reset.
+        .max_by_key(|limit| limit.resets_at)
+}
+
+/// Recognises the usage-limit error Codex reports on a failed turn.
+///
+/// The error object (`params.error`, or `params.turn.error` on `turn/failed` and a failed
+/// `turn/completed`) names the limit in `codexErrorInfo`; its reset time is `resetsAt` in
+/// Unix seconds when present, else the exhausted window last reported by the account.
+fn decode_limit(
+    message: &Value,
+    hint: Option<&UsageLimit>,
+) -> Option<(UsageLimit, Option<String>)> {
+    let params = message.get("params")?;
+    let error = match message.get("method")?.as_str()? {
+        "error" => params.get("error")?,
+        "turn/failed" => params
+            .get("error")
+            .or_else(|| params.pointer("/turn/error"))?,
+        "turn/completed"
+            if params.pointer("/turn/status").and_then(Value::as_str) == Some("failed") =>
+        {
+            params.pointer("/turn/error")?
+        }
+        _ => return None,
+    };
+    let info = error
+        .get("codexErrorInfo")
+        .and_then(Value::as_str)?
+        .to_lowercase()
+        .replace('_', "");
+    if !(info.contains("usagelimit") || info.contains("ratelimit")) {
+        return None;
+    }
+    let resets_at = error
+        .get("resetsAt")
+        .and_then(Value::as_i64)
+        .or_else(|| hint.and_then(|hint| hint.resets_at));
+    let window = hint.and_then(|hint| hint.window.clone());
+    let text = error
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Some((UsageLimit { resets_at, window }, text))
+}
+
+fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent> {
     let method = message.get("method")?.as_str().unwrap_or("event");
+    if let Some((limit, text)) = decode_limit(message, hint) {
+        return Some(AgentEvent {
+            kind: LIMIT_EVENT.to_owned(),
+            text,
+            data: serde_json::to_vec(message).ok(),
+            limit: Some(limit),
+        });
+    }
     let kind = match method {
         "item/agentMessage/delta" => "text",
         "turn/completed" => "completed",
@@ -293,6 +377,7 @@ fn decode_event(message: &Value) -> Option<AgentEvent> {
         kind: kind.to_string(),
         text,
         data: serde_json::to_vec(message).ok(),
+        limit: None,
     })
 }
 
@@ -876,7 +961,7 @@ mod tests {
             "method": "item/agentMessage/delta",
             "params": { "delta": "hello from Codex" }
         });
-        let event = decode_event(&message).unwrap();
+        let event = decode_event(&message, None).unwrap();
         assert_eq!(event.kind, "text");
         assert_eq!(event.text.as_deref(), Some("hello from Codex"));
         assert_eq!(
@@ -886,8 +971,78 @@ mod tests {
     }
 
     #[test]
+    fn a_usage_limit_error_becomes_a_limit_with_the_reset_it_names() {
+        let message = json!({
+            "method": "error",
+            "params": {
+                "error": {
+                    "message": "You've hit your usage limit.",
+                    "codexErrorInfo": "usageLimitExceeded",
+                    "resetsAt": 1_790_000_000
+                },
+                "willRetry": false
+            }
+        });
+        let event = decode_event(&message, None).unwrap();
+        assert_eq!(event.kind, LIMIT_EVENT);
+        assert_eq!(event.text.as_deref(), Some("You've hit your usage limit."));
+        assert_eq!(event.limit.unwrap().resets_at, Some(1_790_000_000));
+    }
+
+    #[test]
+    fn a_failed_turn_with_a_usage_limit_uses_the_exhausted_window_for_the_reset() {
+        let snapshot = json!({
+            "method": "account/rateLimits/updated",
+            "params": { "rateLimits": {
+                "primary": { "usedPercent": 100.0, "windowDurationMins": 300, "resetsAt": 1_790_000_000 },
+                "secondary": { "usedPercent": 40.0, "windowDurationMins": 10_080, "resetsAt": 1_790_500_000 }
+            } }
+        });
+        let hint = exhausted_window(&snapshot).unwrap();
+        assert_eq!(hint.window.as_deref(), Some("five_hour"));
+
+        let failed = json!({
+            "method": "turn/completed",
+            "params": { "turn": { "status": "failed", "error": {
+                "message": "usage limit",
+                "codexErrorInfo": "usage_limit_exceeded"
+            } } }
+        });
+        let event = decode_event(&failed, Some(&hint)).unwrap();
+        assert_eq!(event.kind, LIMIT_EVENT);
+        let limit = event.limit.unwrap();
+        assert_eq!(limit.resets_at, Some(1_790_000_000));
+        assert_eq!(limit.window.as_deref(), Some("five_hour"));
+        assert_eq!(
+            decode_event(&failed, None)
+                .unwrap()
+                .limit
+                .unwrap()
+                .resets_at,
+            None
+        );
+    }
+
+    #[test]
+    fn a_usage_snapshot_below_the_limit_and_other_errors_are_not_limits() {
+        let below = json!({
+            "method": "account/rateLimits/updated",
+            "params": { "rateLimits": { "primary": { "usedPercent": 99.0, "resetsAt": 1 } } }
+        });
+        assert_eq!(exhausted_window(&below), None);
+        let other = json!({
+            "method": "error",
+            "params": { "error": { "message": "boom", "codexErrorInfo": "internalServerError" } }
+        });
+        let event = decode_event(&other, None).unwrap();
+        assert_eq!(event.kind, "error");
+        assert_eq!(event.limit, None);
+    }
+
+    #[test]
     fn turn_completed_fixture_maps_to_completed() {
-        let event = decode_event(&json!({ "method": "turn/completed", "params": {} })).unwrap();
+        let event =
+            decode_event(&json!({ "method": "turn/completed", "params": {} }), None).unwrap();
         assert_eq!(event.kind, "completed");
     }
 

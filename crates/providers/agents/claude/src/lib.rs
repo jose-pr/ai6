@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart,
+    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
+    UsageLimit,
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
@@ -205,7 +206,7 @@ impl ClaudeSession {
                         "Claude did not report a Session ID while resuming",
                     )
                 })?;
-            let ended = matches!(event.kind.as_str(), "completed" | "failed");
+            let ended = matches!(event.kind.as_str(), "completed" | "failed" | LIMIT_EVENT);
             lock(&self.events)?.push_back(event);
             if ended && self.session_id()?.is_none() {
                 return Err(refuse(
@@ -382,6 +383,67 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
         kind: kind.to_string(),
         text,
         data: None,
+        limit: None,
+    }
+}
+
+/// Recognises Claude Code's refusal to continue until a quota resets.
+///
+/// Two stream shapes carry it: a `rate_limit_event` whose status is `rejected` (with
+/// `resetsAt` in Unix seconds), and an error `result` whose text names the limit, either as
+/// `... usage limit reached|<unix seconds>` or as prose with only a local clock time, which
+/// leaves `resets_at` unset rather than guessing a date.
+fn decode_limit(value: &Value) -> Option<(UsageLimit, Option<String>)> {
+    match value.get("type").and_then(Value::as_str)? {
+        "rate_limit_event" => {
+            let info = value.get("rate_limit_info")?;
+            if info.get("status").and_then(Value::as_str) != Some("rejected") {
+                return None;
+            }
+            let limit = UsageLimit {
+                resets_at: info
+                    .get("resetsAt")
+                    .and_then(Value::as_i64)
+                    .map(unix_seconds),
+                window: info
+                    .get("rateLimitType")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            };
+            Some((limit, None))
+        }
+        "result" if value.get("is_error").and_then(Value::as_bool) == Some(true) => {
+            let text = value.get("result").and_then(Value::as_str)?;
+            let lower = text.to_lowercase();
+            let limited = ["usage limit", "limit reached", "hit your limit"]
+                .iter()
+                .any(|phrase| lower.contains(phrase));
+            if !limited {
+                return None;
+            }
+            let resets_at = text
+                .rsplit_once('|')
+                .and_then(|(_, tail)| tail.trim().parse::<i64>().ok())
+                .map(unix_seconds);
+            let window = if lower.contains("5-hour") || lower.contains("five-hour") {
+                Some("five_hour".to_owned())
+            } else if lower.contains("weekly") || lower.contains("7-day") {
+                Some("weekly".to_owned())
+            } else {
+                None
+            };
+            Some((UsageLimit { resets_at, window }, Some(text.to_owned())))
+        }
+        _ => None,
+    }
+}
+
+/// A Unix timestamp that may be in seconds or milliseconds.
+fn unix_seconds(value: i64) -> i64 {
+    if value > 100_000_000_000 {
+        value / 1000
+    } else {
+        value
     }
 }
 
@@ -389,6 +451,14 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
     let event_type = value.get("type").and_then(Value::as_str).unwrap_or("event");
     if event_type == "user" {
         return None;
+    }
+    if let Some((limit, text)) = decode_limit(value) {
+        return Some(AgentEvent {
+            kind: LIMIT_EVENT.to_owned(),
+            text,
+            data: Some(line),
+            limit: Some(limit),
+        });
     }
     let kind = match event_type {
         "result" => "completed",
@@ -410,6 +480,7 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
         kind: kind.to_string(),
         text,
         data: Some(line),
+        limit: None,
     })
 }
 
@@ -922,6 +993,84 @@ mod tests {
         assert_eq!(event.kind, "completed");
         assert_eq!(event.text.as_deref(), Some("Mission work finished"));
         assert_eq!(value["session_id"], "claude-session-7");
+    }
+
+    #[test]
+    fn a_rejected_rate_limit_event_becomes_a_limit_with_its_reset_time() {
+        let value = json!({
+            "type": "rate_limit_event",
+            "session_id": "claude-session-7",
+            "rate_limit_info": {
+                "status": "rejected",
+                "resetsAt": 1_790_000_000,
+                "rateLimitType": "five_hour"
+            }
+        });
+        let event = decode_event(&value, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, LIMIT_EVENT);
+        assert_eq!(
+            event.limit,
+            Some(UsageLimit {
+                resets_at: Some(1_790_000_000),
+                window: Some("five_hour".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn an_allowed_rate_limit_event_is_not_a_limit() {
+        let value = json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": { "status": "allowed_warning", "resetsAt": 1_790_000_000 }
+        });
+        let event = decode_event(&value, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, "rate_limit_event");
+        assert_eq!(event.limit, None);
+    }
+
+    #[test]
+    fn a_usage_limit_result_carries_the_reset_time_after_the_pipe() {
+        for (reset, expected) in [
+            ("1790000000", 1_790_000_000),
+            ("1790000000000", 1_790_000_000),
+        ] {
+            let value = json!({
+                "type": "result",
+                "is_error": true,
+                "result": format!("Claude AI usage limit reached|{reset}")
+            });
+            let event = decode_event(&value, b"{}".to_vec()).unwrap();
+            assert_eq!(
+                event.kind, LIMIT_EVENT,
+                "not completed: the Session did not finish"
+            );
+            assert_eq!(event.limit.unwrap().resets_at, Some(expected));
+            assert!(event.text.unwrap().contains("usage limit reached"));
+        }
+    }
+
+    #[test]
+    fn a_limit_without_a_parsable_reset_time_still_parks_the_session() {
+        let value = json!({
+            "type": "result",
+            "is_error": true,
+            "result": "5-hour limit reached \u{2219} resets 3pm"
+        });
+        let limit = decode_event(&value, b"{}".to_vec()).unwrap().limit.unwrap();
+        assert_eq!(limit.resets_at, None);
+        assert_eq!(limit.window.as_deref(), Some("five_hour"));
+    }
+
+    #[test]
+    fn an_ordinary_error_result_is_not_mistaken_for_a_limit() {
+        let value = json!({
+            "type": "result",
+            "is_error": true,
+            "result": "Tool call failed"
+        });
+        let event = decode_event(&value, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, "completed");
+        assert_eq!(event.limit, None);
     }
 
     #[test]
