@@ -19,6 +19,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   variable names only, never values).
 - Live terminals: read-only by default; **Request input lease** takes a write lease.
   Closing a view never stops the provider Session.
+- Mission actions: each Mission card's menu cancels, retries (optionally for another
+  Agent), resumes (optionally with a message) or interrupts, offering only what the
+  Mission's current state allows and saying why the rest are unavailable; it needs
+  `mission.control`, and the outcome the Station reports shows on the card.
 - Administration: Operation-scoped Agent roles (purpose and policy) and Station capacity.
 - Audit log for operators with `audit.read`; operator menu with identity, effective
   permissions per Operation, theme and sign-out.

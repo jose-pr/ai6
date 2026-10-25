@@ -31,9 +31,35 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
 
 Session listings end with an `EXPOSURE` column: the untrusted input the Session read,
 comma separated, or `-`. A Session state is free text from the board and includes
-`parked` and `quarantined`.
+`queued`, `parked`, `quarantined` and `abandoned`.
 
 Mission lists include only Missions with a provider Session registered at the gateway.
+
+### Controls
+
+Each control needs `mission.control` on the Mission's Operation. It posts
+`POST /v1/user/operations/{operation}/missions/{mission}/actions`, then polls the
+control's status route every 500 ms until the Station reports or `--wait` runs out.
+
+- `ai6ctl mission cancel <MISSION_ID>` stops the live Session, if any, and abandons the
+  Mission.
+- `ai6ctl mission retry <MISSION_ID> [--agent <CODENAME>]` queues a stalled or finished
+  Mission again as a new attempt, for `--agent` when given.
+- `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
+  stalled Mission now, sending `--message` to the Agent.
+- `ai6ctl session interrupt <SESSION_ID>` stops the Session's current turn; it finds the
+  Session's Operation and Mission on the board and names the Session, so the request is
+  refused (HTTP 409) if the Mission has moved on to another one.
+
+Shared options: `--operation <ID>` (Mission commands only; found from the board when
+omitted, and required for a Mission with no registered Session), `--idempotency-key
+<KEY>` (default: unique per invocation; repeating a key returns the first request's
+control) and `--wait <SECONDS>` (default `10`; `0` returns once queued).
+
+Output: a header `CONTROL\tACTION\tMISSION\tSTATION\tSTATUS\tSTATE\tREASON` and one row;
+`STATUS` is `queued`, `delivered`, `applied`, `rejected` or `expired`, `STATE` the
+Mission state the Station reported and `REASON` why it rejected; `-` for empty values.
+Exit `1` when the control was rejected or expired, or the request was refused.
 
 ## Environment variables
 
@@ -44,12 +70,17 @@ Mission lists include only Missions with a provider Session registered at the ga
 
 ## Exit status
 
-`0` on success, `1` for connection/API errors or a missing item, `2` for invalid
-arguments.
+`0` on success, `1` for connection/API errors, a missing item or a rejected or expired
+control, `2` for invalid arguments.
 
 ## Gotchas
 
-- Read-only by design: there is no command that writes, and no flag accepts the Station channel bearer
-  or a terminal-attachment token.
+- The only writes are the controls above; no flag accepts the Station channel bearer or a
+  terminal-attachment token.
+- `mission <ID>` and `session <ID>` still show; a Mission or Session literally named
+  `cancel`, `retry`, `resume` or `interrupt` is shown with `ai6ctl missions` or
+  `ai6ctl sessions` instead.
+- A control that times out under `--wait` exits `0` with its open status; the Station may
+  still apply it.
 - The access token is read only from the environment, never from an argument, so it
   does not appear in shell history or process listings.

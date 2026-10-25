@@ -118,18 +118,19 @@ grant if its Operation or Mission differs from the registered Session.
 
 ```rust
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardSession {
     pub operation_id: String,
     pub mission_id: String,
     pub session_id: String,
     pub state: Option<String>,
     pub sequence: u64,
+    pub updated_at: Option<f64>, // Unix seconds of the latest lifecycle event
     pub exposure: Vec<String>,   // untrusted input the Session read, from its Registry record
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardMission {
     pub operation_id: String,
     pub mission_id: String,
@@ -203,8 +204,10 @@ pub struct LaunchManifest {
 }
 ```
 
-`BoardSession` has no `state` and sequence `0` until the Session's first
-lifecycle event. `exposure` lists where the Session read untrusted input (`brief:source`,
+`BoardSession` has no `state`, sequence `0` and no `updated_at` until the Session's first
+lifecycle event. `state` is the Mission's state as that Session last reported it; an
+earlier attempt keeps the state it last reported (often `queued` after a retry), so the
+Mission's current state is the one of its Session with the latest `updated_at`. `exposure` lists where the Session read untrusted input (`brief:source`,
 `cable:SENDER`, `tool:NAME`, `review`) and is empty for a clean Session. `BoardMission` groups registered Sessions by Station and
 Mission ID; queued Missions without a registered provider Session are not present.
 `brief` is present when AI6 published the exact Mission prompt and sanitized launch
@@ -230,6 +233,46 @@ Operation would run, and why the other places would not (see `ai6::place`). It r
 policy comes from the Headquarters Station's check-in when it publishes one, otherwise from
 the first Station that does (`policy_station`); `404` when none does. Rejections name every
 Station in the Registry, not only those hosting the Operation.
+
+## Operator controls
+
+```rust
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ControlStatus {
+    pub control_id: String,
+    pub operation_id: String,
+    pub mission_id: String,
+    pub session_id: Option<String>,  // provider Session expected to be current
+    pub action: String,              // "cancel" | "retry" | "resume" | "interrupt"
+    pub agent: Option<String>,       // a retry's Agent
+    pub station_id: String,          // the Station asked to act
+    pub status: String,              // "queued" | "delivered" | "applied" | "rejected" | "expired"
+    pub state: Option<String>,       // Mission state the Station reported
+    pub reason: Option<String>,      // why it was rejected, AI6's wording
+    pub requested_by: String,        // person ID
+    pub requested_at: f64,
+    pub finished_at: Option<f64>,
+}
+```
+
+Returned by the control routes below. A resume's `message` is never in a status or an
+audit record; it travels only in the control frame to the Station.
+
+Routing: the Station holding the Mission's latest Session record (highest attempt), else
+the Station holding a brief lease whose `mission_id` matches, else the Headquarters Station;
+Stations whose check-in is older than 45 seconds are passed over, and with none the request
+is refused `503` with `Retry-After: 15`. When the request names `session_id` and the
+Registry knows another provider Session as current, it is refused `409`; otherwise the
+current one is attached. A Mission the board knows only under another Operation is `404`.
+
+Bounds (in memory, per gateway): 1,024 controls kept, oldest finished dropped first, `409`
+when all are open; 64 queued per Station, `409` beyond; a control queued or delivered for
+more than 120 seconds becomes `expired`. The idempotency key is scoped to the person,
+Operation and Mission (1-128 bytes, no control characters); the same key with the same
+action, Agent, message and Session returns the first status with `200`, with anything else
+`409`. Every accepted request is audited as `mission.cancel`, `mission.retry`,
+`mission.resume` or `session.interrupt` with the Mission ID as target.
 
 ## Gateway state
 
@@ -343,8 +386,9 @@ too, and their configured capacity counts toward the aggregate budget.
 `publish_lifecycle` and `publish_terminal_output` are the higher-level M path:
 they construct guatiao values with the shared protocol crate, announce each
 channel schema on first use, then submit the value through the same validation
-and fanout path. Lifecycle state accepts `working`, `blocked`, `stalled`, `parked` (a provider usage limit),
-`quarantined` (the Agent is quarantined), `done` and `failed`. The HTTP routes use JSON for lifecycle metadata and raw
+and fanout path. Lifecycle state accepts `queued` (another attempt is coming), `working`,
+`blocked`, `stalled`, `parked` (a provider usage limit), `quarantined` (the Agent is
+quarantined), `done`, `failed` and `abandoned`. The HTTP routes use JSON for lifecycle metadata and raw
 bytes for terminal output; both remain bearer-authenticated as M.
 
 `submit_input` accepts a guatiao terminal input or resize value for the same provider
@@ -403,6 +447,8 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/stations/{station_id}/settings` | Requires `station.read`; returns the live concurrent Mission limit, whether it has an explicit Registry override, and whether the Station has the execution role. |
 | `PUT /v1/user/stations/{station_id}/settings` | Requires `station.configure`; execution Stations only; validates a 1–1,024 concurrent Mission limit, persists it in the shared Registry, and records a Station-scoped metadata-only audit event. |
 | `POST /v1/user/attach-grants` | Requires a user bearer; checks `session.read` or `session.input` at the registered Operation before issuing an attach token. |
+| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Requires `mission.control` (`session.input` is not enough). Body `{"action", "agent"?, "message"?, "session_id"?, "idempotency_key"}`, unknown fields refused; `agent` only with `retry`, `message` (1 byte to 16 KiB, not blank) only with `resume`. Audits, queues the control (see Operator controls) and returns `202` with a `ControlStatus`; a repeated key returns `200`. |
+| `GET /v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}` | Requires `mission.read`; returns the control's `ControlStatus`, `404` for an unknown control or one of another Mission. |
 | `POST /v1/user/operations/{operation_id}/missions` | Requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared Registry; returns the queued Mission ID. The body may carry `stations` to limit the Mission to those Stations (it can only narrow the Operation's list). |
 | `GET /v1/auth/session` | Validates a user bearer and reports its token ID, person ID and expiry. |
 | `POST /v1/station/sessions` | Bearer-authenticated registration request with `operation_id`, `mission_id`, `session_id`, and optional sanitized Mission brief metadata. |
@@ -410,7 +456,9 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/station/sessions/{session_id}/terminal/{sequence}` | Bearer-authenticated raw terminal output bytes. |
 | `POST /v1/station/sessions/{session_id}/events/{sequence}` | Bearer-authenticated binary guatiao frame. |
 | `POST /v1/station/attach-grants` | Bearer-authenticated grant request; returns token in JSON response body. |
-| `GET /v1/station/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with Station and Mission identity headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
+| `GET /v1/station/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with `x-ai6-operation-id`, `x-ai6-mission-id` and `x-ai6-session-id` headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
+| `GET /v1/station/controls/next?station=<id>&wait_ms=<n>` | Bearer-authenticated long poll for that Station's next control (`wait_ms` default 1000, capped at 25000); `200` with one `application/vnd.ai6.guatiao` control value frame on channel 4 (the receiver builds the schema from any control) and the control becomes `delivered`, or `204`. Stations share one credential, so `station` is the caller's own word. |
+| `POST /v1/station/controls/{control_id}/result` | Bearer-authenticated outcome `{"station","outcome":"applied"\|"rejected","state"?,"reason"?}`; `state` is a Mission state name, `reason` is cut to 512 characters without control characters. `204`; `404` unknown, `403` another Station's control, `409` already finished. |
 | `POST /v1/attach` | Requires exact `Origin` and trusted HTTPS proxy marker; exchanges token from JSON body for a scoped cookie. |
 | `GET /v1/socket/{session_id}?after={sequence}` | Requires the cookie, exact `Origin` and trusted HTTPS marker. Streams binary guatiao messages. |
 
@@ -481,7 +529,7 @@ The library reads no environment variables. The commands read:
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
 | `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None (the connection's address) |
 | `AI6_EXPORTS_URL` | API origin for `ai6ctl`; overridden by `--server`. | `http://127.0.0.1:7082` |
-| `AI6_ACCESS_TOKEN` | User bearer required by `ai6ctl missions`, `mission`, `sessions` and `session`. | None |
+| `AI6_ACCESS_TOKEN` | User bearer required by every `ai6ctl` command except `health`. | None |
 
 `--help` lists the flag-backed variables and names `AI6_EXPORTS_STATION_TOKEN` in its help text.
 The command does not log the credential.

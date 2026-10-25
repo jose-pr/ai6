@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Operator controls. With the new `mission.control` permission an operator cancels,
+  retries, resumes or interrupts a Mission through
+  `POST /v1/user/operations/{operation_id}/missions/{mission_id}/actions` (idempotent by
+  key, audited as `mission.cancel`, `mission.retry`, `mission.resume`,
+  `session.interrupt`). Universal Exports queues a typed DipTel control
+  (`ai6_diptel::MissionControl`) for the Station holding the Mission, which takes it from
+  `/v1/station/controls/next`, checks the Mission, its Operation and its fenced Session
+  lease, applies it and reports the outcome, read back from the control's status route.
+  A retry queues the Mission as a new attempt, optionally for another qualified Agent
+  (`MissionStore::retry`). `ai6ctl mission cancel|retry|resume` and `ai6ctl session
+  interrupt` wait for the outcome; Moneypenny offers the controls in each Mission card's
+  menu with the reason any is unavailable. DipTel gains the `queued` and `abandoned`
+  states, and board Sessions carry `updated_at`, so a client finds a Mission's current
+  Session.
+
 - A Station's identity defaults to `<host>-<random>`, created on first start and kept in
   `station-id` in the AI6 state directory, so a restarted daemon stays the same Station;
   `--station` or `AI6_STATION_ID` override it.
@@ -224,5 +239,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `ai6-access-proxy`; the `coqui-access` plugin libraries replace them.
 - The Python packages `coagent-00`, `coagent-i` and `coagent-m`, their commands and their
   `COAGENT_*` environment variables, and the `q/` placeholder.
+
+### Fixed
+
+- Terminal input queued at Universal Exports reaches the Session again: the gateway named
+  the input's Operation in `x-ai6-station-id` while Stations read `x-ai6-operation-id`, so
+  every input was dropped.
 
 [Unreleased]: https://github.com/jose-pr/ai6/commits/main

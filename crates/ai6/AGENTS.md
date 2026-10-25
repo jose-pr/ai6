@@ -47,9 +47,9 @@ What AI6 adds:
 
 ```rust
 pub const SCOPE_KINDS: [&str; 3] = ["station", "operation", "theater"];
-pub const ACTIONS: &[&str];   // agent.configure, agent.read, audit.read, mission.create,
-                              // mission.read, session.input, session.read,
-                              // station.configure, station.read
+pub const ACTIONS: &[&str];   // agent.configure, agent.read, audit.read, mission.control,
+                              // mission.create, mission.read, session.input,
+                              // session.read, station.configure, station.read
 pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
 pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError>;
 pub fn load_role_authorizer(path: impl AsRef<Path>) -> Result<RoleAuthorizer, AccessPolicyError>;
@@ -1222,7 +1222,11 @@ paused the work: `Mission.parked_until` (Unix seconds, default `None` in older r
 when it resumes. `MissionStore::park(id, until)` parks a `Working`, `Blocked`, `Stalled` or
 already parked Mission (parking again moves the time; `transition` refuses `Parked` because
 it needs a time); `due_parked(now)` lists parked Missions at or past their time;
-`requeue_for(id, agent_id)` queues an interrupted Mission again for another Agent. A
+`requeue_for(id, agent_id)` queues an interrupted Mission again for another Agent.
+`retry(id, agent_id: Option<String>)` queues a `Stalled`, `Done`, `Failed`, `Blown` or
+`Abandoned` Mission again as a new attempt, for `agent_id` when given and otherwise its
+Agent; it keeps `session_ids` and the safe house report, and refuses every other state
+with `InvalidTransition`. A
 parked Mission leaves `Parked` through `Working`, `Failed`, `Abandoned` or `requeue_for`,
 and any transition clears `parked_until`.
 `quarantined` means Medical or an operator stopped the work because its Agent is
@@ -1393,6 +1397,23 @@ A queue overflow or outbound gateway error disables publication and is reported 
 pre-registration output buffer are each bounded to 1 MiB. Output read before the provider
 Session ID is observed is queued until registration; overflowing that buffer disables
 publication.
+
+With a publisher, the Station also takes operator controls (cancel, retry, resume,
+interrupt) queued for it: a third thread long-polls
+`/v1/station/controls/next?station=<id>`, hands each DipTel control to the daemon one at a
+time and posts the outcome to `/v1/station/controls/{id}/result`. The daemon applies it
+only to a Mission in its own book under the control's Operation, while it holds that
+Mission's Session lease with its current fencing token, and, when the control names a
+provider Session, while that Session is still the Mission's latest; otherwise it rejects
+with a reason. It acts through the loopback paths: `cancel` is the `abandoned` transition
+(interrupts and closes the live Session, finishes the safe house keeping the work),
+`retry` closes a live stalled Session, ends its Session record and calls
+`MissionStore::retry` (an Agent must be configured for the Operation, qualified for the
+Mission's role and not quarantined), `resume` is `/resume` with the message, and
+`interrupt` is `/interrupt` on a working Session. When no live Session reported the new
+state, the daemon publishes it as a lifecycle event on the Mission's latest provider
+Session (`queued` after a retry, `abandoned` after a cancel). A provider's refusal is
+reported as "the provider refused the request", never in the provider's words.
 
 ## Safe houses (`ai6::directorates::q::safehouse`, `ai6::station::safehouse`)
 

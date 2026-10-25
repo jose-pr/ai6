@@ -195,7 +195,7 @@ stream so an attached viewer's emulator does not answer a second time.
 | `crates/ai6/` | Rust | The Station daemon and AI6 contracts: directorates and `station` modules, `ai6` command |
 | `crates/universal-exports/` | Rust | The authenticated public API gateway and its command |
 | `crates/ai6-diptel/` | Rust | The DipTel wire contract, native and WebAssembly |
-| `crates/ai6ctl/` | Rust | The read-only operator command |
+| `crates/ai6ctl/` | Rust | The operator command |
 | `crates/providers/agents/` | Rust | Claude and Codex AgentHandler providers |
 | `crates/providers/terminals/pty/` | Rust | The `pty` terminal provider (openpty / ConPTY) |
 | `crates/providers/transports/` | Rust | The `local`, `ssh`, `adb`, `container` and `qemu` transport providers: how a Station reaches a Theater |

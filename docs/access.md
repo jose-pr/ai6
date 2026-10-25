@@ -33,8 +33,10 @@ With no `source` they live in memory and are gone at exit.
 `access.toml` binds people to roles at a scope. A scope is `*` or `station:<id>`,
 `operation:<id>` or `theater:<id>`; the first rule that matches decides, and no match denies.
 The actions Universal Exports checks are `agent.configure`, `agent.read`, `audit.read`,
-`mission.create`, `mission.read`, `session.input`, `session.read`, `station.configure` and
-`station.read`.
+`mission.control`, `mission.create`, `mission.read`, `session.input`, `session.read`,
+`station.configure` and `station.read`. `mission.control` (cancel, retry, resume and
+interrupt a Mission) is separate from `session.input`: typing into a Session does not grant
+stopping it.
 
 ```toml
 [role.viewer]

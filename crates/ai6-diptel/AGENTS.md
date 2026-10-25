@@ -30,6 +30,7 @@ The crate forbids unsafe code with `#![forbid(unsafe_code)]`.
 pub struct OperationId(String);
 pub struct MissionId(String);
 pub struct SessionId(String);
+pub struct ControlId(String);
 ```
 
 Each `new(value: impl Into<String>) -> Result<Self, InvalidIdentity>` rejects
@@ -37,12 +38,19 @@ empty values, control characters and identifiers longer than `MAX_ID_BYTES`
 (256 UTF-8 bytes). `as_str(&self) -> &str` borrows the validated spelling.
 `Display` returns that spelling. Fields are private so callers cannot bypass
 validation. An Operation identifies a project; a Mission ID groups one unit of
-work; a provider Session ID identifies one resumable agent operation.
+work; a provider Session ID identifies one resumable agent operation; a control ID
+identifies one operator control request.
 
 ## Board events
 
 ```rust
-pub enum SessionState { Working, Blocked, Stalled, Parked, Quarantined, Done, Failed }
+pub enum SessionState {
+    Queued, Working, Blocked, Stalled, Parked, Quarantined, Done, Failed, Abandoned,
+}
+impl SessionState {
+    pub const fn as_str(self) -> &'static str;   // "queued", "working", ...
+    pub fn parse(state: &str) -> Option<Self>;   // None for an unknown spelling
+}
 pub struct SessionSnapshot {
     pub operation_id: OperationId,
     pub mission_id: MissionId,
@@ -59,9 +67,48 @@ pub struct LifecycleEvent {
 }
 ```
 
-All fields above are public. `SessionState` is non-exhaustive. `sequence` is a
-monotonic cursor for events in one provider Session. A Mission may have multiple
-Sessions; these types do not derive one identity from another.
+All fields above are public. `SessionState` is non-exhaustive and carries the state
+of the Mission the Session serves: `Queued` means the Mission waits for another
+attempt (this Session will not run again) and `Abandoned` that an operator or AI6
+withdrew it. `sequence` is a monotonic cursor for events in one provider Session. A
+Mission may have multiple Sessions; these types do not derive one identity from
+another.
+
+## Operator controls
+
+```rust
+pub enum ControlAction { Cancel, Retry, Resume, Interrupt }
+impl ControlAction {
+    pub const ALL: [Self; 4];
+    pub const fn as_str(self) -> &'static str;   // "cancel", "retry", "resume", "interrupt"
+    pub fn parse(action: &str) -> Option<Self>;
+}
+
+pub struct MissionControl { /* fields are private */ }
+impl MissionControl {
+    pub fn new(control_id: ControlId, operation_id: OperationId, mission_id: MissionId,
+               action: ControlAction) -> Self;
+    pub fn with_session(self, session_id: SessionId) -> Self;
+    pub fn with_agent(self, agent: impl Into<String>) -> Result<Self, InvalidControl>;
+    pub fn with_message(self, message: impl Into<String>) -> Result<Self, InvalidControl>;
+    pub fn control_id(&self) -> &ControlId;
+    pub fn operation_id(&self) -> &OperationId;
+    pub fn mission_id(&self) -> &MissionId;
+    pub fn session_id(&self) -> Option<&SessionId>;
+    pub const fn action(&self) -> ControlAction;
+    pub fn agent(&self) -> Option<&str>;
+    pub fn message(&self) -> Option<&str>;
+}
+```
+
+A control is what Universal Exports hands the Station holding a Mission. `Cancel` stops
+the live Session and abandons the Mission, `Retry` queues a stalled or finished Mission
+as a new attempt (optionally for `agent`), `Resume` resumes a parked, blocked or stalled
+Mission (optionally with `message`) and `Interrupt` stops the current turn. `session_id`
+names the provider Session the requester expects to be current. `with_agent` refuses a
+blank codename, one over `MAX_ID_BYTES` or one with control characters; `with_message`
+refuses a blank message or one over `MAX_CONTROL_MESSAGE_BYTES` (16 KiB). `Debug`
+redacts the message to its length. `ControlAction` is non-exhaustive.
 
 ## Terminal data
 
@@ -115,9 +162,14 @@ pub fn resize_frames(
     event: &TerminalResize,
 ) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError>;
 
+pub fn control_frames(
+    control: &MissionControl,
+) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError>;
+
 pub struct FrameReceiver;
 pub enum IncomingFrame {
-    Lifecycle(LifecycleEvent), Terminal(TerminalData), Resize(TerminalResize), Closed(u64)
+    Lifecycle(LifecycleEvent), Terminal(TerminalData), Resize(TerminalResize),
+    Control(MissionControl), Closed(u64)
 }
 impl FrameReceiver {
     pub fn new() -> Self;
@@ -128,7 +180,9 @@ impl FrameReceiver {
 Each function returns a schema announcement followed by a schema-checked value
 frame on a stable channel. A transport supplies message boundaries; WebSocket
 uses one guatiao frame per binary message. Channel IDs are `1` for lifecycle
-events, `2` for terminal data and `3` for terminal resize. Terminal data includes
+events, `2` for terminal data, `3` for terminal resize and `4` for operator
+controls; a control's schema does not depend on its values, so a receiver may build
+it from any control. Terminal data includes
 raw bytes and an `input` or `output` direction; resize values carry bounded,
 non-zero columns and rows.
 
@@ -141,13 +195,14 @@ return `Ok(None)`; unknown channels, malformed values and invalid identities fai
 ```rust
 pub const MAX_ID_BYTES: usize = 256;
 pub const MAX_TERMINAL_BYTES: usize = 1_048_576;
+pub const MAX_CONTROL_MESSAGE_BYTES: usize = 16_384;
 ```
 
 These limits apply to the constructors documented above.
 
 ## Errors
 
-`InvalidIdentity`, `FrameTooLarge`, `InvalidSize` and `FrameDecodeError` are
+`InvalidIdentity`, `InvalidControl`, `FrameTooLarge`, `InvalidSize` and `FrameDecodeError` are
 non-exhaustive error types implementing `core::error::Error`. They do not include
 rejected payload bytes. Frame construction may also return guatiao's `ValueError`.
 
@@ -155,5 +210,6 @@ rejected payload bytes. Frame construction may also return guatiao's `ValueError
 
 - A2A Task IDs are external data and are not Mission IDs or provider Session IDs.
 - `TerminalData::Debug` redacts its contents. Do not add terminal bytes to logs.
+- `MissionControl::Debug` redacts a resume's message; it is operator text for the Agent.
 - Schema and value frames are separate. Announce a channel schema before sending
   its values to `guatiao::value::wire::channel::Receiver`.

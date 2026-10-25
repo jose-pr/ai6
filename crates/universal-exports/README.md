@@ -59,7 +59,7 @@ argument.
 
 ## Command line
 
-`universal-exports` runs the gateway; the read-only operator client is the separate
+`universal-exports` runs the gateway; the operator command-line client is the separate
 `ai6ctl` crate.
 
 ```console
@@ -108,6 +108,7 @@ configured access policy.
 | `AttachGrant`, `AttachMode` | Station/Mission/Session-scoped read or write authorization. |
 | `Attachment`, `AgentInput` | Bounded viewer replay/live stream and queued terminal input or resize. |
 | `GatewayError` | Refusals for auth, scope, bounds, malformed frames and backpressure. |
+| `ControlStatus` | One operator control (cancel, retry, resume, interrupt) and what the Station did with it. |
 | `Gateway::router` | Axum routes for the Station channel, attach token exchange and WebSocket sessions. |
 | `Gateway::serve_loopback(port, shutdown)` | Loopback listener with caller-owned graceful shutdown. |
 
@@ -133,7 +134,9 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/station/attach-grants` | Issue a read or write token within M's Station grant. |
 | `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token. |
 | `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the Registry. |
-| `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `session.read`, `session.input`, `audit.read`, `agent.read` and `agent.configure` actions by authorized Operation. |
+| `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `mission.control`, `session.read`, `session.input`, `audit.read`, `agent.read` and `agent.configure` actions by authorized Operation. |
+| `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Require `mission.control`; audit and queue a cancel, retry, resume or interrupt for the Station holding the Mission. Body: `{"action":"retry","agent":"008","idempotency_key":"…"}` (`agent` only with `retry`, `message` only with `resume`, optional `session_id`). Returns `202` and a `ControlStatus`, or `200` and the first one for a repeated key. |
+| `GET` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}` | Require `mission.read`; return the control's status: `queued`, `delivered`, `applied`, `rejected` or `expired`, with the Mission state and reason the Station reported. |
 | `GET` | `/v1/user/audit?operation_id=<id>&limit=<n>` | Return up to 500 newest metadata-only audit records authorized by `audit.read` for each Operation. |
 | `GET` | `/v1/user/operations/{operation_id}/agent-roles` | Require `agent.read`; return the Headquarters Station role catalog merged with this Operation's validated overrides. Each role has `operation_override` to identify whether it replaces the Station definition. |
 | `PUT` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; validate and store a role purpose and policy in the shared Registry. |
@@ -145,6 +148,8 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/reject` | Require `mission.create`; record the rejecting operator and file the proposal outside runnable intake. |
 | `GET` | `/v1/auth/session` | Validate a user bearer token and return its token ID, person ID and expiry. |
 | `GET` | `/v1/station/inputs/next` | Wait for one bounded binary terminal input or resize frame for M. |
+| `GET` | `/v1/station/controls/next?station=<id>&wait_ms=<n>` | Wait up to `wait_ms` (default 1000, at most 25000) for the next control queued for that Station; `200` with one DipTel control value frame (channel 4) or `204`. |
+| `POST` | `/v1/station/controls/{control_id}/result` | Report a taken control's outcome: `{"station":"…","outcome":"applied"\|"rejected","state":"…","reason":"…"}`; `403` from another Station, `409` once finished. |
 | `POST` | `/v1/attach` | Exchange a token in the request body for a one-connection cookie. |
 | `GET` | `/v1/socket/{session_id}?after={sequence}` | Replay and stream events for one provider Session. |
 
@@ -177,6 +182,14 @@ blocking pool. `Gateway::with_registry` enables M-issued access tokens but leave
 user login and authorization endpoints unavailable. The `universal-exports` command accepts
 provider IDs and an access-policy path to enable user access; it uses the file Registry
 selected by `AI6_REGISTRY` (Rust Universal Exports does not yet support the SQL Registry URL).
+
+A control goes to the Station holding the Mission's latest Session record, else the one
+holding its brief's lease, else the Headquarters Station, passing over Stations gone dark;
+with none, the request is refused with `503` and `Retry-After`. The Station decides
+whether the Mission can take it. Controls live in gateway memory: at most 1,024 are kept
+(the oldest finished go first), 64 may wait per Station, and one no Station finishes
+within two minutes is `expired`. A resume's message reaches only the Station; it is not in
+the status or the audit record.
 
 The gateway refuses request bodies and websocket frames above the configured
 limit. Its configured history, fanout, input queue and per-viewer socket buffers

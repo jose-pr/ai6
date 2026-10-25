@@ -8,18 +8,18 @@
 
 DipTels: the native and WebAssembly wire contract between a Station, Universal Exports
 and the Moneypenny app. **One identity contract and one guatiao frame format** carry
-Session lifecycle events, terminal bytes and terminal geometry. See the
+Session lifecycle events, terminal bytes, terminal geometry and operator controls. See the
 [crate API header](https://github.com/jose-pr/ai6/blob/main/crates/ai6-diptel/AGENTS.md).
 
 ## Features
 
 - Distinct validated Operation ID, Mission ID and provider Session ID types.
-- Schema-checked guatiao lifecycle, binary terminal and resize frames.
+- Schema-checked guatiao lifecycle, binary terminal, resize and operator control frames.
 - Native and `wasm32-unknown-unknown` support with no unsafe code.
 - No process-global state or custom wire codec.
 
 `FrameReceiver` validates gateway frames against their channel schemas and yields
-decoded lifecycle events, terminal bytes, resize events, or channel closure. Schema announcements
+decoded lifecycle events, terminal bytes, resize events, operator controls or channel closure. Schema announcements
 are consumed internally and return `None`.
 
 ## Installation
@@ -60,12 +60,13 @@ the same when that operation resumes. An A2A Task ID is external protocol data.
 
 | Item | Purpose |
 | --- | --- |
-| `OperationId`, `MissionId`, `SessionId` | Validated identities for project, work unit and provider operation. |
+| `OperationId`, `MissionId`, `SessionId`, `ControlId` | Validated identities for project, work unit, provider operation and operator control. |
 | `SessionSnapshot`, `LifecycleEvent`, `SessionState` | Board state keyed by Operation, Mission and Session. |
 | `TerminalData`, `TerminalDirection`, `TerminalResize` | Bounded binary input/output and terminal geometry. |
-| `lifecycle_frames`, `terminal_frames`, `resize_frames` | guatiao schema announcement and schema-checked value frames. |
+| `ControlAction`, `MissionControl` | An operator control (cancel, retry, resume, interrupt) for the Station holding a Mission. |
+| `lifecycle_frames`, `terminal_frames`, `resize_frames`, `control_frames` | guatiao schema announcement and schema-checked value frames. |
 | `FrameReceiver`, `IncomingFrame` | Schema-checked gateway frame decoding. |
-| `MAX_ID_BYTES`, `MAX_TERMINAL_BYTES` | Protocol bounds applied by constructors. |
+| `MAX_ID_BYTES`, `MAX_TERMINAL_BYTES`, `MAX_CONTROL_MESSAGE_BYTES` | Protocol bounds applied by constructors. |
 
 ## Development
 

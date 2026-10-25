@@ -42,6 +42,43 @@ The Moneypenny app's Operations view offers the same action. The AI6 daemon clai
 from the shared file-backed Registry, then resolves the Agent role, Operation
 cover, Station capacity and provider handler before it starts a Session.
 
+## Cancel, retry, resume and interrupt
+
+An operator with `mission.control` on the Operation can act on a Mission without reaching
+its Station:
+
+| Action | Accepted when the Mission is | Effect |
+| --- | --- | --- |
+| `cancel` | queued, working, blocked, stalled, parked or quarantined | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. |
+| `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined); it continues in the same safe house. |
+| `resume` | parked, blocked or stalled | The Mission resumes now on its provider Session, with `message` sent to the Agent when given. |
+| `interrupt` | working | The Session's current turn stops; the Mission waits, `blocked`, until it is resumed. |
+
+There is no pause: providers have none. A quarantined Mission is released by an operator
+(`ai6 quarantine release`), not retried.
+
+```bash
+curl -f -X POST "$AI6_EXPORTS_URL/v1/user/operations/G/missions/mission-007/actions" \
+  -H "authorization: Bearer $AI6_ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"action":"resume","message":"The review is unblocked; carry on.","idempotency_key":"resume-1"}'
+```
+
+Universal Exports audits the request (`mission.cancel`, `mission.retry`, `mission.resume`,
+`session.interrupt`) and queues the control for the Station holding the Mission's latest
+Session record; failing that, the Station holding its brief's lease; failing that, the
+Headquarters Station. A Station that has gone dark is passed over. That Station is the
+authority: it checks that the Mission is in its book under that Operation, that it still
+holds the Session's lease with its fencing token and, when the request named a
+`session_id`, that the Session is still the Mission's current one, then applies the
+control and reports `applied` or `rejected` with the Mission's state and a reason. Follow
+the control with `GET .../actions/{control_id}`; one no Station acts on within two minutes
+is `expired`. Repeating a request with the same `idempotency_key` returns the first one.
+
+`ai6ctl mission cancel|retry|resume` and `ai6ctl session interrupt` do the same and wait for
+the outcome; Moneypenny offers them in each Mission card's menu, with the reason any action
+is unavailable. Closing a Session view never sends a control.
+
 ## File-backed intake
 
 The Registry defaults to the platform AI6 state directory and can be overridden

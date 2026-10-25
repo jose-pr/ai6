@@ -88,8 +88,10 @@ ai6ctl station STATION_ID
 ai6ctl agent-roles --operation OPERATION
 ai6ctl missions [--operation OPERATION]
 ai6ctl mission MISSION_ID [--operation OPERATION]
+ai6ctl mission cancel|retry|resume MISSION_ID [--operation OPERATION]
 ai6ctl sessions [--operation OPERATION] [--mission MISSION_ID] [--state STATE]
 ai6ctl session SESSION_ID
+ai6ctl session interrupt SESSION_ID
 ```
 
 `ai6ctl` reads `AI6_EXPORTS_URL` for the Universal Exports origin and a user bearer from
