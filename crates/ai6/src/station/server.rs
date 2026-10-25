@@ -5478,4 +5478,105 @@ station_labels = { gpu = \"yes\" }\n",
             .unwrap();
         assert!(audit.base.is_empty());
     }
+
+    #[test]
+    fn finishing_a_mission_without_history_records_cover_as_not_checkable() {
+        let session_id = SessionId::try_new("session-plain").unwrap();
+        let mission_id = MissionId::try_new("mission-plain").unwrap();
+        let mut missions = MissionStore::default();
+        missions
+            .create(
+                mission_id.clone(),
+                None,
+                "work in a copy".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        missions
+            .transition(mission_id.as_str(), MissionState::Working)
+            .unwrap();
+        let session = Arc::new(Mutex::new(
+            MockSession {
+                session_id: session_id.clone(),
+                events: Mutex::new(VecDeque::new()),
+            }
+            .into_object(),
+        ));
+        let state = DaemonState {
+            plugins: Arc::new(test_plugins()),
+            roster: Arc::new(Roster::default()),
+            intake: Arc::new(FileRegistry::open(
+                std::env::temp_dir().join("ai6-empty-registry"),
+            )),
+            missions: Arc::new(Mutex::new(missions)),
+            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            cables: no_op_cables(),
+            station_id: "test".to_owned(),
+            station: StationConfig::default().with_terminal("mock-terminal"),
+            #[cfg(feature = "publisher")]
+            publisher: None,
+            starting: Arc::new(Mutex::new(BTreeSet::new())),
+            max_concurrent_missions: DEFAULT_MAX_CONCURRENT_MISSIONS,
+            watchdog: WatchdogConfig::default(),
+            retry_after: Arc::new(Mutex::new(BTreeMap::new())),
+            startup_recovery: Arc::new(Mutex::new(BTreeSet::new())),
+            events: Arc::new(Mutex::new(BTreeMap::new())),
+            event_ready: Arc::new(Notify::new()),
+            stopping: Arc::new(AtomicBool::new(false)),
+            event_pumps: Arc::new(Mutex::new(Vec::new())),
+        };
+        let spec = SafeHouseSpec {
+            operation_id: "G".to_owned(),
+            mission_id: mission_id.to_string(),
+            title: "work in a copy".to_owned(),
+            source: ".".to_owned(),
+            base: "HEAD".to_owned(),
+            branch: "{id}".to_owned(),
+            isolate: false,
+            state_root: ".".to_owned(),
+            reopen: None,
+        };
+        let house = SafeHouse::open(&MockPlainProvider, &spec).unwrap();
+        state.sessions.lock().unwrap().insert(
+            mission_id.to_string(),
+            AgentOperation {
+                handler_provider: "mock-agent".to_owned(),
+                terminal_provider: "mock-terminal".to_owned(),
+                working_directory: ".".to_owned(),
+                environment: BTreeMap::new(),
+                model: None,
+                effort: None,
+                cover: Some(CoverAudit {
+                    policy: "covert".to_owned(),
+                    base: String::new(),
+                    identity: None,
+                    fail_on_blow: true,
+                }),
+                safe_house: Some(house),
+                session: session.clone(),
+                watchdog: Watchdog::default(),
+                session_id: Some(session_id),
+                #[cfg(feature = "cables-mcp")]
+                _cables_mcp: None,
+                #[cfg(feature = "publisher")]
+                telemetry: None,
+            },
+        );
+
+        let outcome = finish_operation(&state, mission_id.as_str(), &session).unwrap();
+
+        assert!(outcome.failure.is_none() && !outcome.cover_blown);
+        let report = state
+            .missions
+            .lock()
+            .unwrap()
+            .get(mission_id.as_str())
+            .unwrap()
+            .cover
+            .clone()
+            .expect("a cover report is recorded");
+        assert!(!report.checkable, "no history is not a pass");
+        assert!(!report.blown && report.commits == 0 && report.violations.is_empty());
+    }
 }
