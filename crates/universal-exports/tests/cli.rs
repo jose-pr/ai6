@@ -18,6 +18,9 @@ fn help_documents_the_credential_environment_variable() {
     assert!(help.contains("AI6_EXPORTS_DIRECTORY_CONFIG"));
     assert!(help.contains("AI6_EXPORTS_ACCESS_POLICY"));
     assert!(help.contains("AI6_EXPORTS_AUTHORIZER_CONFIG"));
+    assert!(help.contains("AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS"));
+    assert!(help.contains("AI6_EXPORTS_LOGIN_TRIES_PER_NAME"));
+    assert!(help.contains("AI6_EXPORTS_CLIENT_ADDRESS_HEADER"));
 }
 
 #[test]

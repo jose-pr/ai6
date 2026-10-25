@@ -29,6 +29,7 @@ ai6 = { path = "../ai6" }
 axum = { workspace = true, features = ["form", "matched-path", "original-uri", "tower-log", "ws"] }
 clap = { workspace = true, optional = true, features = ["env", "error-context", "suggestions"] }
 futures-util = { workspace = true }
+governor = { workspace = true }
 guatiao = { workspace = true }
 ai6-diptel = { path = "../ai6-diptel" }
 serde = { workspace = true, features = ["std"] }

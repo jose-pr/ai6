@@ -40,6 +40,8 @@ toml = "0.9"
 tokio = { version = "1", default-features = false, features = ["macros", "net", "rt-multi-thread"] }
 rmcp = { version = "3.7", default-features = false, features = ["macros", "server", "transport-streamable-http-server"] }
 subtle = "2.6"
+# Keyed rate limits on the Universal Exports login route.
+governor = { version = "0.10", default-features = false, features = ["std", "dashmap"] }
 uuid = { version = "1", default-features = false, features = ["v4"] }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 # Blocking HTTP for the bounded AI6-to-Moneypenny publisher thread.

@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::File;
 use std::io::Read;
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use ai6::{Authenticator, Authorizer, Directory, FileRegistry, RoleAuthorizer};
 use clap::Parser;
 use guatiao::value::Number;
 use serde_json::Value as JsonValue;
-use universal_exports::{AccessProviders, Gateway, GatewayConfig, GatewayLimits};
+use universal_exports::{AccessProviders, Gateway, GatewayConfig, GatewayLimits, LoginLimits};
 
 const DEFAULT_PORT: u16 = 7082;
 const STATION_TOKEN_ENV: &str = "AI6_EXPORTS_STATION_TOKEN";
@@ -61,6 +62,26 @@ struct Cli {
     /// Built-in RoleAuthorizer policy TOML; defaults to deny-all when omitted.
     #[arg(long, env = "AI6_EXPORTS_ACCESS_POLICY")]
     access_policy: Option<PathBuf>,
+    /// Password or key tries a minute allowed from one client address at the login route.
+    #[arg(
+        long,
+        env = "AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS",
+        value_name = "TRIES",
+        default_value_t = LoginLimits::default().per_address
+    )]
+    login_tries_per_address: NonZeroU32,
+    /// Password or key tries in ten minutes allowed for one account name, from anywhere.
+    #[arg(
+        long,
+        env = "AI6_EXPORTS_LOGIN_TRIES_PER_NAME",
+        value_name = "TRIES",
+        default_value_t = LoginLimits::default().per_name
+    )]
+    login_tries_per_name: NonZeroU32,
+    /// Header the trusted reverse proxy sets to the client address, such as x-forwarded-for
+    /// (the last entry counts) or x-real-ip. Without it every login counts as the proxy.
+    #[arg(long, env = "AI6_EXPORTS_CLIENT_ADDRESS_HEADER", value_name = "HEADER")]
+    client_address_header: Option<String>,
     /// Optional custom Guatiao Authorizer provider ID; conflicts with access-policy.
     #[arg(long, env = "AI6_EXPORTS_AUTHORIZER")]
     authorizer: Option<String>,
@@ -81,6 +102,13 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let login_limits = match login_limits(&cli) {
+        Ok(limits) => limits,
+        Err(error) => {
+            eprintln!("universal-exports: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let config = match GatewayConfig::new(
         cli.public_origin.clone(),
         station_token,
@@ -88,7 +116,7 @@ async fn main() -> ExitCode {
         Duration::from_secs(300),
         Duration::from_secs(30),
     ) {
-        Ok(config) => config,
+        Ok(config) => config.with_login_limits(login_limits),
         Err(error) => {
             eprintln!("universal-exports: gateway configuration failed: {error}");
             return ExitCode::FAILURE;
@@ -119,6 +147,23 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn login_limits(cli: &Cli) -> Result<LoginLimits, String> {
+    let address_header = cli
+        .client_address_header
+        .as_deref()
+        .map(|header| {
+            axum::http::HeaderName::from_bytes(header.as_bytes()).map_err(|_| {
+                "AI6_EXPORTS_CLIENT_ADDRESS_HEADER is not a valid HTTP header name".to_owned()
+            })
+        })
+        .transpose()?;
+    Ok(LoginLimits {
+        per_address: cli.login_tries_per_address,
+        per_name: cli.login_tries_per_name,
+        address_header,
+    })
 }
 
 fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {

@@ -3,9 +3,12 @@
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+mod login_limit;
+
 use core::future::Future;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt::{self, Write as _};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -19,10 +22,11 @@ use ai6_diptel::{
     TerminalData, TerminalDirection, TerminalResize, lifecycle_frames, resize_frames,
     terminal_frames,
 };
+use axum::Extension;
 use axum::body::{Body, Bytes};
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
-use axum::http::header::{AUTHORIZATION, COOKIE, ORIGIN, SET_COOKIE};
+use axum::extract::{ConnectInfo, Path, Query, State};
+use axum::http::header::{AUTHORIZATION, COOKIE, ORIGIN, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -33,6 +37,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use uuid::Uuid;
+
+use login_limit::LoginGuard;
+pub use login_limit::LoginLimits;
 
 const MAX_BUFFER_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const MAX_CLIENT_SLOTS: usize = 100_000;
@@ -47,6 +54,7 @@ pub struct GatewayConfig {
     limits: GatewayLimits,
     attach_token_ttl: Duration,
     write_lease_ttl: Duration,
+    login: LoginLimits,
 }
 
 /// Finite state, payload, fanout and input limits for one gateway.
@@ -214,7 +222,15 @@ impl GatewayConfig {
             limits,
             attach_token_ttl,
             write_lease_ttl,
+            login: LoginLimits::default(),
         })
+    }
+
+    /// Replaces the default limits on password and key tries at the login route.
+    #[must_use]
+    pub fn with_login_limits(mut self, login: LoginLimits) -> Self {
+        self.login = login;
+        self
     }
 
     /// The origin browser requests must match exactly.
@@ -231,6 +247,7 @@ impl fmt::Debug for GatewayConfig {
             .field("limits", &self.limits)
             .field("attach_token_ttl", &self.attach_token_ttl)
             .field("write_lease_ttl", &self.write_lease_ttl)
+            .field("login", &self.login)
             .finish()
     }
 }
@@ -362,6 +379,7 @@ pub struct Gateway {
     input_rx: std::sync::Arc<Mutex<mpsc::Receiver<AgentInput>>>,
     registry: Option<FileRegistry>,
     access: Option<AccessProviders>,
+    login_guard: std::sync::Arc<LoginGuard>,
 }
 
 impl fmt::Debug for Gateway {
@@ -418,6 +436,7 @@ impl Gateway {
     /// Creates the bounded gateway state and the one authenticated Station input queue.
     pub fn new(config: GatewayConfig) -> Self {
         let (input_tx, input_rx) = mpsc::channel(config.limits.input_queue_capacity);
+        let login_guard = std::sync::Arc::new(LoginGuard::new(&config.login));
         Self {
             config: std::sync::Arc::new(config),
             inner: std::sync::Arc::new(Mutex::new(Inner::default())),
@@ -425,6 +444,7 @@ impl Gateway {
             input_rx: std::sync::Arc::new(Mutex::new(input_rx)),
             registry: None,
             access: None,
+            login_guard,
         }
     }
 
@@ -1014,9 +1034,13 @@ impl Gateway {
         F: Future<Output = ()> + Send + 'static,
     {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-        axum::serve(listener, self.router())
-            .with_graceful_shutdown(shutdown)
-            .await
+        axum::serve(
+            listener,
+            self.router()
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown)
+        .await
     }
 }
 
@@ -1710,6 +1734,7 @@ async fn issue_access_token(
 
 async fn login(
     State(gateway): State<Gateway>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> Result<(StatusCode, Json<IssuedAccessToken>), ApiError> {
@@ -1740,10 +1765,10 @@ async fn login(
                 .map_err(|_| ApiError::internal())?
                 .ok_or_else(ApiError::unauthorized)?
         } else {
-            authenticate_password(&providers, request).await?
+            authenticate_password(&gateway, &providers, &headers, connection, request).await?
         }
     } else {
-        authenticate_password(&providers, request).await?
+        authenticate_password(&gateway, &providers, &headers, connection, request).await?
     };
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let issued = issue_access_token_record(registry, person.id, ttl_seconds).await?;
@@ -1751,20 +1776,29 @@ async fn login(
 }
 
 async fn authenticate_password(
+    gateway: &Gateway,
     providers: &AccessProviders,
+    headers: &HeaderMap,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     request: LoginRequest,
 ) -> Result<Person, ApiError> {
     let authenticator = providers
         .authenticator
         .clone()
         .ok_or_else(ApiError::unauthorized)?;
+    let source = gateway.login_guard.source(
+        headers,
+        connection.map(|Extension(ConnectInfo(address))| address),
+    );
+    if let Some(wait) = gateway.login_guard.tried(source, &request.name) {
+        return Err(ApiError::too_many_attempts(wait));
+    }
     let attempt = Attempt {
         name: Some(request.name),
         secret: Some(request.secret),
-        headers: Vec::new(),
-        peer: None,
+        peer: Some(source.to_string()),
         secure: Some(true),
-        certificate: None,
+        ..Attempt::default()
     };
     let verdict = tokio::task::spawn_blocking(move || authenticator.authenticate(attempt))
         .await
@@ -3049,6 +3083,7 @@ fn attach_cookie(cookie: &str) -> Option<&str> {
 struct ApiError {
     status: StatusCode,
     message: &'static str,
+    retry_after_seconds: Option<u64>,
 }
 
 impl ApiError {
@@ -3056,6 +3091,7 @@ impl ApiError {
         Self {
             status: StatusCode::NOT_FOUND,
             message: "resource is not available",
+            retry_after_seconds: None,
         }
     }
 
@@ -3063,6 +3099,7 @@ impl ApiError {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: "request is invalid",
+            retry_after_seconds: None,
         }
     }
 
@@ -3070,6 +3107,7 @@ impl ApiError {
         Self {
             status: StatusCode::UNAUTHORIZED,
             message: "authentication is required",
+            retry_after_seconds: None,
         }
     }
 
@@ -3077,6 +3115,7 @@ impl ApiError {
         Self {
             status: StatusCode::FORBIDDEN,
             message: "request is not authorized",
+            retry_after_seconds: None,
         }
     }
 
@@ -3084,6 +3123,7 @@ impl ApiError {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: "gateway operation failed",
+            retry_after_seconds: None,
         }
     }
 
@@ -3091,6 +3131,15 @@ impl ApiError {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
             message: "user access providers are unavailable",
+            retry_after_seconds: None,
+        }
+    }
+
+    fn too_many_attempts(wait: Duration) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: "too many login attempts; try again later",
+            retry_after_seconds: Some(wait.as_secs().max(1)),
         }
     }
 }
@@ -3112,13 +3161,20 @@ impl From<GatewayError> for ApiError {
         Self {
             status,
             message: "gateway request was refused",
+            retry_after_seconds: None,
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.status, self.message).into_response()
+        let mut response = (self.status, self.message).into_response();
+        if let Some(seconds) = self.retry_after_seconds {
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from(seconds));
+        }
+        response
     }
 }
 
@@ -3891,6 +3947,151 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        server.abort();
+    }
+
+    struct OneAccount;
+
+    impl Authenticator for OneAccount {
+        fn authenticate(&self, attempt: Attempt) -> Result<Verdict, ProviderError> {
+            Ok(
+                if attempt.name.as_deref() == Some("alice")
+                    && attempt.secret.as_deref() == Some("right")
+                {
+                    Verdict::Valid(Lookup {
+                        by: "name".to_owned(),
+                        value: "alice".to_owned(),
+                    })
+                } else {
+                    Verdict::Invalid
+                },
+            )
+        }
+    }
+
+    impl Directory for OneAccount {
+        fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
+            Ok((lookup.value == "alice").then(|| Person {
+                id: "alice-id".to_owned(),
+                name: "alice".to_owned(),
+                ..Person::default()
+            }))
+        }
+    }
+
+    async fn login_gateway(
+        limits: LoginLimits,
+    ) -> (String, tokio::task::JoinHandle<()>, tempfile::TempDir) {
+        let config = GatewayConfig::new(
+            "https://localhost",
+            "m-token-that-is-long-enough-for-testing",
+            test_limits(),
+            Duration::from_secs(30),
+            Duration::from_secs(30),
+        )
+        .unwrap()
+        .with_login_limits(limits);
+        let directory = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(directory.path());
+        let gateway = Gateway::with_access(
+            config,
+            registry,
+            AccessProviders::new(
+                Arc::new(OneAccount),
+                Arc::new(OneAccount),
+                Arc::new(RoleAuthorizer::default()),
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                gateway
+                    .router()
+                    .into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await;
+        });
+        (base, server, directory)
+    }
+
+    async fn try_login(
+        client: &reqwest::Client,
+        base: &str,
+        name: &str,
+        secret: &str,
+        client_address: Option<&str>,
+    ) -> reqwest::Response {
+        let mut request = client
+            .post(format!("{base}/v1/auth/login"))
+            .json(&serde_json::json!({"name": name, "secret": secret}));
+        if let Some(address) = client_address {
+            request = request.header("x-forwarded-for", address);
+        }
+        request.send().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn login_is_refused_without_being_judged_past_the_tries_of_an_address() {
+        let (base, server, _directory) = login_gateway(LoginLimits {
+            per_address: std::num::NonZeroU32::new(3).unwrap(),
+            per_name: std::num::NonZeroU32::new(100).unwrap(),
+            address_header: None,
+        })
+        .await;
+        let client = reqwest::Client::new();
+        for _ in 0..3 {
+            let wrong = try_login(&client, &base, "alice", "wrong", None).await;
+            assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+        }
+        // The right secret is refused too: past the count nothing is judged.
+        let limited = try_login(&client, &base, "alice", "right", None).await;
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        let wait: u64 = limited
+            .headers()
+            .get(RETRY_AFTER)
+            .expect("a refused try says how long to wait")
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!((1..=60).contains(&wait));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn login_counts_a_name_across_addresses_and_addresses_the_proxy_names() {
+        let (base, server, _directory) = login_gateway(LoginLimits {
+            per_address: std::num::NonZeroU32::new(100).unwrap(),
+            per_name: std::num::NonZeroU32::new(2).unwrap(),
+            address_header: Some(HeaderName::from_static("x-forwarded-for")),
+        })
+        .await;
+        let client = reqwest::Client::new();
+        for address in ["198.51.100.1", "198.51.100.2"] {
+            let wrong = try_login(&client, &base, "alice", "wrong", Some(address)).await;
+            assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+        }
+        let by_name = try_login(&client, &base, "ALICE", "right", Some("198.51.100.3")).await;
+        assert_eq!(by_name.status(), StatusCode::TOO_MANY_REQUESTS);
+        // Another account from a fresh address is unaffected, and a right secret still works.
+        let other = try_login(&client, &base, "bob", "wrong", Some("198.51.100.4")).await;
+        assert_eq!(other.status(), StatusCode::UNAUTHORIZED);
+        server.abort();
+
+        let (base, server, _directory) = login_gateway(LoginLimits {
+            per_address: std::num::NonZeroU32::new(1).unwrap(),
+            per_name: std::num::NonZeroU32::new(100).unwrap(),
+            address_header: Some(HeaderName::from_static("x-forwarded-for")),
+        })
+        .await;
+        let first = try_login(&client, &base, "alice", "right", Some("198.51.100.1")).await;
+        assert_eq!(first.status(), StatusCode::CREATED);
+        let same = try_login(&client, &base, "alice", "right", Some("198.51.100.1")).await;
+        assert_eq!(same.status(), StatusCode::TOO_MANY_REQUESTS);
+        let elsewhere = try_login(&client, &base, "alice", "right", Some("198.51.100.9")).await;
+        assert_eq!(elsewhere.status(), StatusCode::CREATED);
         server.abort();
     }
 
