@@ -19,12 +19,7 @@ $packages = @(
     'ai6-safehouse-git',
     'ai6-safehouse-copy',
     'ai6-source-github',
-    'ai6-source-jira',
-    'ai6-access-key',
-    'ai6-access-ldap',
-    'ai6-access-local',
-    'ai6-access-peer',
-    'ai6-access-proxy'
+    'ai6-source-jira'
 )
 
 if ($Mode -eq 'update') {

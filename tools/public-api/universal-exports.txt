@@ -17,8 +17,8 @@ impl core::fmt::Display for universal_exports::GatewayError
 pub fn universal_exports::GatewayError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::AccessProviders
 impl universal_exports::AccessProviders
-pub fn universal_exports::AccessProviders::from_reverse_proxy(alloc::sync::Arc<dyn ai6::directorates::m::access::Directory>, alloc::sync::Arc<dyn ai6::directorates::m::access::Authorizer>, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn universal_exports::AccessProviders::new(alloc::sync::Arc<dyn ai6::directorates::m::access::Authenticator>, alloc::sync::Arc<dyn ai6::directorates::m::access::Directory>, alloc::sync::Arc<dyn ai6::directorates::m::access::Authorizer>) -> Self
+pub fn universal_exports::AccessProviders::from_reverse_proxy(alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn universal_exports::AccessProviders::new(alloc::sync::Arc<dyn coqui_access::kind::Authenticator>, alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>) -> Self
 pub fn universal_exports::AccessProviders::with_proxy_identity(self, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
 impl core::fmt::Debug for universal_exports::AccessProviders
 pub fn universal_exports::AccessProviders::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -95,6 +95,7 @@ pub struct universal_exports::GatewayConfig
 impl universal_exports::GatewayConfig
 pub fn universal_exports::GatewayConfig::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, universal_exports::GatewayLimits, core::time::Duration, core::time::Duration) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::GatewayConfig::public_origin(&self) -> &str
+pub fn universal_exports::GatewayConfig::with_login_limits(self, universal_exports::LoginLimits) -> Self
 impl core::fmt::Debug for universal_exports::GatewayConfig
 pub fn universal_exports::GatewayConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::GatewayLimits
@@ -119,6 +120,12 @@ pub universal_exports::LaunchManifest::station_id: core::option::Option<alloc::s
 pub universal_exports::LaunchManifest::terminal_provider: alloc::string::String
 pub universal_exports::LaunchManifest::theater_id: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::working_directory: alloc::string::String
+pub struct universal_exports::LoginLimits
+pub universal_exports::LoginLimits::address_header: core::option::Option<http::header::name::HeaderName>
+pub universal_exports::LoginLimits::per_address: core::num::nonzero::NonZeroU32
+pub universal_exports::LoginLimits::per_name: core::num::nonzero::NonZeroU32
+impl core::default::Default for universal_exports::LoginLimits
+pub fn universal_exports::LoginLimits::default() -> Self
 #[non_exhaustive] pub struct universal_exports::PlacementPreview
 pub universal_exports::PlacementPreview::choices: alloc::vec::Vec<ai6::directorates::m::placement::PlacementChoice>
 pub universal_exports::PlacementPreview::operation_id: alloc::string::String
