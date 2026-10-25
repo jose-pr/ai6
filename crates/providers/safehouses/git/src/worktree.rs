@@ -854,6 +854,8 @@ mod tests {
             &["clone", "--quiet", remote.to_str().unwrap(), "other"],
         );
         let other = temp.0.join("other");
+        // A Windows runner's global autocrlf would rewrite the file on checkout.
+        temp.git(&other, &["config", "core.autocrlf", "false"]);
         let mut spec = temp.spec(&other, "mission-9", "{id}");
         spec.state_root = temp.0.join("other-state").to_string_lossy().into_owned();
         spec.checkpoint = Some(saved.clone());
