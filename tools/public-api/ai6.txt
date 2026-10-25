@@ -426,6 +426,16 @@ pub ai6::directorates::m::theaters::TheaterKind::Ssh
 pub ai6::directorates::m::theaters::TheaterKind::Transport
 impl ai6::directorates::m::theaters::TheaterKind
 pub fn ai6::directorates::m::theaters::TheaterKind::as_str(self) -> &'static str
+#[non_exhaustive] pub struct ai6::directorates::m::theaters::RunnerSettings
+pub ai6::directorates::m::theaters::RunnerSettings::command: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::RunnerSettings::plugin_paths: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::theaters::RunnerSettings::state_dir: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::RunnerSettings::terminal: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::theaters::RunnerSettings
+pub fn ai6::directorates::m::theaters::RunnerSettings::with_command(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::RunnerSettings::with_plugin_path(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::RunnerSettings::with_state_dir(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::RunnerSettings::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::SshAccess
 pub ai6::directorates::m::theaters::SshAccess::connect_timeout_secs: core::option::Option<u64>
 pub ai6::directorates::m::theaters::SshAccess::host: alloc::string::String
@@ -449,6 +459,7 @@ pub ai6::directorates::m::theaters::Theater::egress: ai6::directorates::m::theat
 pub ai6::directorates::m::theaters::Theater::harnesses: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::theaters::Theater::id: alloc::string::String
 pub ai6::directorates::m::theaters::Theater::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::theaters::Theater::runner: core::option::Option<ai6::directorates::m::theaters::RunnerSettings>
 pub ai6::directorates::m::theaters::Theater::workdir: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::Theater
 pub fn ai6::directorates::m::theaters::Theater::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::theaters::TheaterAccess) -> Self
@@ -458,6 +469,7 @@ pub fn ai6::directorates::m::theaters::Theater::with_agents(self, ai6::directora
 pub fn ai6::directorates::m::theaters::Theater::with_egress(self, ai6::directorates::m::theaters::Egress) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_harness(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_runner(self, ai6::directorates::m::theaters::RunnerSettings) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_workdir(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::directorates::m::theaters::TheaterError(_)
 impl core::error::Error for ai6::directorates::m::theaters::TheaterError
@@ -473,6 +485,7 @@ pub ai6::directorates::m::theaters::TheaterSummary::host: core::option::Option<a
 pub ai6::directorates::m::theaters::TheaterSummary::id: alloc::string::String
 pub ai6::directorates::m::theaters::TheaterSummary::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::m::theaters::TheaterSummary::provider: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::TheaterSummary::runner: bool
 pub ai6::directorates::m::theaters::TheaterSummary::unavailable: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::theaters::TheaterSummary::weakened: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::theaters::TheaterSummary::workdir: core::option::Option<alloc::string::String>
@@ -1794,6 +1807,24 @@ impl ai6::station::publisher::Config
 pub fn ai6::station::publisher::Config::try_new(&str, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::station::publisher::PublisherError>
 impl core::fmt::Debug for ai6::station::publisher::Config
 pub fn ai6::station::publisher::Config::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod ai6::station::runner
+#[non_exhaustive] pub struct ai6::station::runner::RunnerConfig
+impl ai6::station::runner::RunnerConfig
+pub fn ai6::station::runner::RunnerConfig::new(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::station::runner::RunnerConfig::with_listen(self, core::net::socket_addr::SocketAddr) -> Self
+pub fn ai6::station::runner::RunnerConfig::with_plugin_paths(self, impl core::iter::traits::collect::IntoIterator<Item = std::path::PathBuf>) -> Self
+pub fn ai6::station::runner::RunnerConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::station::runner::RunnerInfo
+pub ai6::station::runner::RunnerInfo::pid: u32
+pub ai6::station::runner::RunnerInfo::url: alloc::string::String
+pub ai6::station::runner::RunnerInfo::version: alloc::string::String
+impl ai6::station::runner::RunnerInfo
+pub fn ai6::station::runner::RunnerInfo::read(&std::path::Path) -> core::io::error::Result<Self>
+pub const ai6::station::runner::CALL_NOT_RUNNING: u8
+pub fn ai6::station::runner::call(&std::path::Path, &str, &str, core::option::Option<&serde_json::value::Value>) -> core::result::Result<(u16, serde_json::value::Value), alloc::string::String>
+pub fn ai6::station::runner::default_state_dir() -> core::io::error::Result<std::path::PathBuf>
+pub async fn ai6::station::runner::serve<F>(ai6::station::runner::RunnerConfig, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub fn ai6::station::runner::spawn_detached(&std::path::Path, &[std::ffi::os_str::OsString], &std::path::Path) -> core::io::error::Result<ai6::station::runner::RunnerInfo>
 pub mod ai6::station::safehouse
 pub struct ai6::station::safehouse::SafeHouse
 impl ai6::station::safehouse::SafeHouse
@@ -2759,6 +2790,16 @@ pub ai6::RunSpec::stdin: core::option::Option<guatiao::value::convert::Bytes>
 pub ai6::RunSpec::timeout_ms: u64
 impl core::default::Default for ai6::directorates::q::transport::RunSpec
 pub fn ai6::directorates::q::transport::RunSpec::default() -> Self
+#[non_exhaustive] pub struct ai6::RunnerSettings
+pub ai6::RunnerSettings::command: core::option::Option<alloc::string::String>
+pub ai6::RunnerSettings::plugin_paths: alloc::vec::Vec<alloc::string::String>
+pub ai6::RunnerSettings::state_dir: core::option::Option<alloc::string::String>
+pub ai6::RunnerSettings::terminal: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::theaters::RunnerSettings
+pub fn ai6::directorates::m::theaters::RunnerSettings::with_command(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::RunnerSettings::with_plugin_path(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::RunnerSettings::with_state_dir(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::RunnerSettings::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::SafeHouseInfo
 pub ai6::SafeHouseInfo::base: core::option::Option<alloc::string::String>
 pub ai6::SafeHouseInfo::branch: core::option::Option<alloc::string::String>
@@ -2994,6 +3035,7 @@ pub ai6::Theater::egress: ai6::directorates::m::theaters::Egress
 pub ai6::Theater::harnesses: alloc::vec::Vec<alloc::string::String>
 pub ai6::Theater::id: alloc::string::String
 pub ai6::Theater::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::Theater::runner: core::option::Option<ai6::directorates::m::theaters::RunnerSettings>
 pub ai6::Theater::workdir: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::Theater
 pub fn ai6::directorates::m::theaters::Theater::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::theaters::TheaterAccess) -> Self
@@ -3003,6 +3045,7 @@ pub fn ai6::directorates::m::theaters::Theater::with_agents(self, ai6::directora
 pub fn ai6::directorates::m::theaters::Theater::with_egress(self, ai6::directorates::m::theaters::Egress) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_harness(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_runner(self, ai6::directorates::m::theaters::RunnerSettings) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_workdir(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::TheaterError(_)
 impl core::error::Error for ai6::directorates::m::theaters::TheaterError
@@ -3018,6 +3061,7 @@ pub ai6::TheaterSummary::host: core::option::Option<alloc::string::String>
 pub ai6::TheaterSummary::id: alloc::string::String
 pub ai6::TheaterSummary::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::TheaterSummary::provider: core::option::Option<alloc::string::String>
+pub ai6::TheaterSummary::runner: bool
 pub ai6::TheaterSummary::unavailable: core::option::Option<alloc::string::String>
 pub ai6::TheaterSummary::weakened: alloc::vec::Vec<alloc::string::String>
 pub ai6::TheaterSummary::workdir: core::option::Option<alloc::string::String>
