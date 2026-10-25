@@ -82,6 +82,22 @@ pub(crate) struct LaunchManifest {
     /// The Theater the harness runs in; absent in records written before placement.
     #[serde(default)]
     pub(crate) theater_id: Option<String>,
+    /// The Registry Session record this Station holds for the Mission; absent in records
+    /// written before Session records were shared.
+    #[serde(default)]
+    pub(crate) session: Option<SessionHold>,
+}
+
+/// What a Station needs to act on its Session record: the record's ID and the fencing token
+/// its lease was granted with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SessionHold {
+    /// AI6's identifier for the Session, the key of the Registry record.
+    pub(crate) id: String,
+    /// Which try at the Mission this Session is.
+    pub(crate) attempt: u32,
+    /// The fencing token presented with every write.
+    pub(crate) fence: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -202,6 +218,21 @@ impl MissionStore {
         }
         let mut operations = self.operations.clone();
         operations.insert(mission_id.to_owned(), operation);
+        self.commit_with(self.missions.clone(), operations)
+    }
+
+    /// Records the Registry Session lease this Station holds for the Mission.
+    #[cfg(feature = "daemon")]
+    pub(crate) fn set_hold(
+        &mut self,
+        mission_id: &str,
+        hold: SessionHold,
+    ) -> Result<(), MissionError> {
+        let mut operations = self.operations.clone();
+        operations
+            .get_mut(mission_id)
+            .ok_or(MissionError::InvalidOperation)?
+            .session = Some(hold);
         self.commit_with(self.missions.clone(), operations)
     }
 
@@ -548,6 +579,7 @@ mod tests {
                     cover: None,
                     station_id: Some("hq".to_owned()),
                     theater_id: Some("local".to_owned()),
+                    session: None,
                 },
             )
             .unwrap();
@@ -600,6 +632,7 @@ mod tests {
                     cover: None,
                     station_id: Some("hq".to_owned()),
                     theater_id: Some("local".to_owned()),
+                    session: None,
                 },
             )
             .unwrap();
@@ -609,11 +642,57 @@ mod tests {
         let manifest = snapshot["operations"]["old-1"].as_object_mut().unwrap();
         manifest.remove("station_id").unwrap();
         manifest.remove("theater_id").unwrap();
+        manifest.remove("session").unwrap();
         fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
 
         let reopened = MissionStore::open(&path).unwrap();
         let manifest = reopened.operation("old-1").unwrap();
         assert_eq!(manifest.station_id, None);
         assert_eq!(manifest.theater_id, None);
+        assert_eq!(manifest.session, None);
+    }
+
+    #[test]
+    fn a_session_hold_survives_a_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missions.json");
+        {
+            let mut book = MissionStore::open(&path).unwrap();
+            book.create(
+                MissionId::try_new("held-1").unwrap(),
+                None,
+                "inspect".to_owned(),
+                None,
+                None,
+            )
+            .unwrap();
+            book.set_operation(
+                "held-1",
+                LaunchManifest {
+                    handler_provider: "claude".to_owned(),
+                    terminal_provider: "pty".to_owned(),
+                    working_directory: directory.path().to_string_lossy().into_owned(),
+                    model: None,
+                    effort: None,
+                    cover: None,
+                    station_id: Some("hq".to_owned()),
+                    theater_id: Some("local".to_owned()),
+                    session: None,
+                },
+            )
+            .unwrap();
+            book.set_hold(
+                "held-1",
+                SessionHold {
+                    id: "s-1".to_owned(),
+                    attempt: 2,
+                    fence: 7,
+                },
+            )
+            .unwrap();
+        }
+        let reopened = MissionStore::open(&path).unwrap();
+        let hold = reopened.operation("held-1").unwrap().session.unwrap();
+        assert_eq!((hold.id.as_str(), hold.attempt, hold.fence), ("s-1", 2, 7));
     }
 }

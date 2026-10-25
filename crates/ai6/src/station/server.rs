@@ -22,7 +22,7 @@ use tokio::time::Instant;
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::identity::MAX_ID_BYTES;
 use crate::directorates::m::mission::{
-    LaunchManifest, Mission, MissionError, MissionState, MissionStore,
+    LaunchManifest, Mission, MissionError, MissionState, MissionStore, SessionHold,
 };
 use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::roster;
@@ -35,6 +35,9 @@ use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::registry::cables::{
     CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
     CableRelayError, CableRelease, CableSendRequest, CableTarget,
+};
+use crate::directorates::registry::sessions::{
+    NewSession, SessionError, SessionStatus, SessionUpdate,
 };
 use crate::directorates::registry::store::{
     Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, Lease,
@@ -963,6 +966,7 @@ async fn scheduler_loop(state: DaemonState) {
         if Instant::now() >= next_station_check_in {
             publish_station_check_in(&state);
             next_station_check_in = Instant::now() + STATION_CHECK_IN_INTERVAL;
+            renew_session_leases(&state);
         }
         schedule_recovered_once(&state).await;
         schedule_queued_once(&state).await;
@@ -1144,6 +1148,172 @@ async fn schedule_recovered_once(state: &DaemonState) {
                     retries.insert(mission_id, Instant::now() + SCHEDULER_RETRY_DELAY);
                 }
             }
+        }
+    }
+}
+
+/// The Registry lease this Station holds on a Mission's Session, if any.
+fn session_hold(state: &DaemonState, mission_id: &str) -> Option<SessionHold> {
+    state
+        .missions
+        .lock()
+        .ok()?
+        .operation(mission_id)
+        .and_then(|manifest| manifest.session)
+}
+
+/// Mirrors a Mission's state into its shared Session record, fenced by this Station's token.
+///
+/// A refused token means another Station took the Session, so this Station stops acting on it.
+fn sync_session_record(state: &DaemonState, mission_id: &str) {
+    let Some(hold) = session_hold(state, mission_id) else {
+        return;
+    };
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+    else {
+        return;
+    };
+    let mut update = SessionUpdate::default();
+    if let Some(provider) = mission.session_ids.last() {
+        update = update.provider_session(provider.as_str());
+    }
+    update = match mission.state {
+        MissionState::Queued => return,
+        state if is_terminal_state(state) => update.status(SessionStatus::Ended),
+        _ => update.status(SessionStatus::Active),
+    };
+    match state
+        .intake
+        .update_session(&hold.id, &state.station_id, hold.fence, update)
+    {
+        Ok(_) | Err(SessionError::Ended) => {}
+        Err(SessionError::Stale | SessionError::HeldBy(_)) => fence_out(state, mission_id),
+        Err(error) => eprintln!("ai6: Session record {:?} not updated: {error}", hold.id),
+    }
+}
+
+/// Takes (or renews) this Station's lease on the Session a Mission is about to resume.
+///
+/// Another Station's live lease refuses the resume. A Mission whose record predates shared
+/// Session records, or whose record is gone, gets a new one.
+fn acquire_session_hold(
+    state: &DaemonState,
+    mission: &Mission,
+    provider_session: &SessionId,
+) -> Result<SessionHold, ApiErrorResponse> {
+    let mission_id = mission.mission_id.as_str();
+    let existing = session_hold(state, mission_id);
+    let taken = match &existing {
+        Some(hold) => state
+            .intake
+            .take_session(&hold.id, &state.station_id, DEFAULT_LEASE),
+        None => Err(SessionError::NotFound),
+    };
+    let record = match taken {
+        Ok(record) => record,
+        Err(SessionError::NotFound) => {
+            let mut new_session = NewSession::new(
+                uuid::Uuid::new_v4().to_string(),
+                mission_id,
+                state.station_id.as_str(),
+            )
+            .with_provider_session(provider_session.as_str())
+            .with_attempt(existing.as_ref().map_or(1, |hold| hold.attempt), None);
+            if let Ok(theater) = session_theater(state, mission.operation_id.as_deref()) {
+                new_session = new_session.with_theater(theater);
+            }
+            state
+                .intake
+                .open_session(new_session, DEFAULT_LEASE)
+                .map_err(session_error)?
+        }
+        Err(error) => return Err(session_error(error)),
+    };
+    let hold = SessionHold {
+        id: record.session_id,
+        attempt: record.attempt,
+        fence: record.fence,
+    };
+    if existing.as_ref() != Some(&hold) {
+        state
+            .missions
+            .lock()
+            .map_err(|_| internal_error())?
+            .set_hold(mission_id, hold.clone())
+            .map_err(mission_error)?;
+    }
+    Ok(hold)
+}
+
+fn session_error(error: SessionError) -> ApiErrorResponse {
+    match error {
+        SessionError::HeldBy(station) => {
+            conflict(&format!("Station {station:?} holds this Session's lease"))
+        }
+        SessionError::Stale
+        | SessionError::Ended
+        | SessionError::Exists
+        | SessionError::NotFound => {
+            conflict("the Session's Registry lease is no longer available to this Station")
+        }
+        error => runtime_error(error),
+    }
+}
+
+/// Stops acting on a Session whose lease another Station now holds.
+///
+/// The harness is closed but its safe house is left alone: the new holder resumes from it.
+fn fence_out(state: &DaemonState, mission_id: &str) {
+    let operation = state
+        .sessions
+        .lock()
+        .ok()
+        .and_then(|mut sessions| sessions.remove(mission_id));
+    if let Some(operation) = operation
+        && let Ok(session) = operation.session.lock()
+    {
+        let _ = session.interrupt();
+        let _ = session.close();
+    }
+    if let Ok(mut missions) = state.missions.lock()
+        && missions
+            .get(mission_id)
+            .is_some_and(|mission| !is_terminal_state(mission.state))
+    {
+        let _ = missions.transition(mission_id, MissionState::Abandoned);
+    }
+    eprintln!("ai6: Mission {mission_id:?} fenced out: another Station holds its Session");
+}
+
+/// Extends the lease on every Session this Station holds, fencing out any it has lost.
+fn renew_session_leases(state: &DaemonState) {
+    let held = state
+        .missions
+        .lock()
+        .map(|missions| {
+            missions
+                .list()
+                .into_iter()
+                .filter(|mission| !is_terminal_state(mission.state))
+                .filter_map(|mission| {
+                    let hold = missions.operation(mission.mission_id.as_str())?.session?;
+                    Some((mission.mission_id.to_string(), hold))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for (mission_id, hold) in held {
+        match state
+            .intake
+            .renew_session(&hold.id, &state.station_id, hold.fence, DEFAULT_LEASE)
+        {
+            Ok(_) | Err(SessionError::Ended) => {}
+            Err(SessionError::Stale | SessionError::HeldBy(_)) => fence_out(state, &mission_id),
+            Err(error) => eprintln!("ai6: Session lease {:?} not renewed: {error}", hold.id),
         }
     }
 }
@@ -2120,6 +2290,7 @@ async fn transition_mission(
             .transition(&mission_id, request.state)
             .map_err(mission_error)?
     };
+    sync_session_record(&state, &mission_id);
     publish_lifecycle(&state, &mission_id, mission.state);
     if matches!(
         mission.state,
@@ -2293,6 +2464,9 @@ async fn start_mission(
         None
     };
     let working_directory = area.path.clone();
+    // A Mission started again (a later attempt) keeps the lease of the attempt it replaces
+    // until the new Session is recorded.
+    let previous_hold = session_hold(&state, &mission_id);
     let operation = LaunchManifest {
         handler_provider: handler_provider.clone(),
         terminal_provider: terminal_provider.clone(),
@@ -2302,6 +2476,7 @@ async fn start_mission(
         cover: cover_audit.clone(),
         station_id: Some(state.station_id.clone()),
         theater_id: Some(theater_id.clone()),
+        session: previous_hold.clone(),
     };
     let persisted = state
         .missions
@@ -2419,9 +2594,40 @@ async fn start_mission(
         .await);
     }
 
+    let (attempt, predecessor) = previous_hold
+        .as_ref()
+        .map_or((1, None), |hold| (hold.attempt + 1, Some(hold.id.clone())));
+    let mut new_session = NewSession::new(
+        uuid::Uuid::new_v4().to_string(),
+        mission_id.as_str(),
+        state.station_id.as_str(),
+    )
+    .with_theater(theater_id.as_str())
+    .with_attempt(attempt, predecessor);
+    if let Some(provider) = &session_id {
+        new_session = new_session.with_provider_session(provider.as_str());
+    }
+    let hold = match state.intake.open_session(new_session, DEFAULT_LEASE) {
+        Ok(record) => SessionHold {
+            id: record.session_id,
+            attempt: record.attempt,
+            fence: record.fence,
+        },
+        Err(error) => {
+            return Err(start_failure_with_session(
+                &state,
+                &mission_id,
+                format!("Session record could not be written to the Registry: {error}"),
+                session,
+                area.safe_house.clone(),
+            )
+            .await);
+        }
+    };
     let working = {
         let mut missions = state.missions.lock().map_err(|_| internal_error())?;
         (|| {
+            missions.set_hold(&mission_id, hold.clone())?;
             let working = missions.transition(&mission_id, MissionState::Working)?;
             let working = if let Some(session_id) = session_id.clone() {
                 missions.attach_session(&mission_id, session_id)?
@@ -2438,6 +2644,12 @@ async fn start_mission(
     let working = match working {
         Ok(working) => working,
         Err(error) => {
+            let _ = state.intake.update_session(
+                &hold.id,
+                &state.station_id,
+                hold.fence,
+                SessionUpdate::default().status(SessionStatus::Ended),
+            );
             return Err(start_failure_with_session(
                 &state,
                 &mission_id,
@@ -2639,6 +2851,7 @@ async fn resume_mission(
     let session_id = stored_session_id
         .or_else(|| mission.session_ids.last().cloned())
         .ok_or_else(|| conflict("Provider has not issued a Session ID yet"))?;
+    acquire_session_hold(&state, &mission, &session_id)?;
     #[cfg(feature = "publisher")]
     let telemetry = state.publisher.as_ref().and_then(|publisher| {
         mission.operation_id.as_ref().map(|operation_id| {
@@ -2772,6 +2985,7 @@ async fn resume_mission(
         .map_err(|_| internal_error())?
         .transition(&mission_id, MissionState::Working)
         .map_err(mission_error)?;
+    sync_session_record(&state, &mission_id);
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = &telemetry {
         telemetry.publish_lifecycle("working");
@@ -3110,8 +3324,11 @@ fn attach_observed_session(
             Some(())
         })
         .is_some();
-    if should_attach && let Ok(mut missions) = state.missions.lock() {
-        let _ = missions.attach_session(mission_id, session_id.clone());
+    if should_attach {
+        if let Ok(mut missions) = state.missions.lock() {
+            let _ = missions.attach_session(mission_id, session_id.clone());
+        }
+        sync_session_record(state, mission_id);
     }
     #[cfg(feature = "publisher")]
     if should_attach {
@@ -3185,6 +3402,7 @@ fn apply_event_state(
         .map(|mission| mission.state)
         .unwrap_or(target);
     drop(missions);
+    sync_session_record(state, mission_id);
     publish_lifecycle(state, mission_id, published_state);
     Some(target)
 }
@@ -4299,6 +4517,164 @@ mod tests {
         let first_reservation = reserve_mission_start(&state, &first, &agent).unwrap();
         let second_reservation = reserve_mission_start(&state, &second, &agent).unwrap();
         drop((first_reservation, second_reservation));
+    }
+
+    async fn start_first_mission(state: &DaemonState) {
+        start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(state, "mission-1", MissionState::Blocked).await;
+    }
+
+    async fn wait_for_state(state: &DaemonState, mission_id: &str, wanted: MissionState) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state
+                .missions
+                .lock()
+                .unwrap()
+                .get(mission_id)
+                .map(|mission| mission.state)
+                != Some(wanted)
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("Mission {mission_id} never reached {wanted:?}"));
+    }
+
+    #[tokio::test]
+    async fn a_started_session_is_recorded_in_the_shared_registry() {
+        let root = tempfile::tempdir().unwrap();
+        let state = capacity_test_state(root.path(), 2, 2);
+        start_first_mission(&state).await;
+
+        let hold = session_hold(&state, "mission-1").expect("the Station holds the lease");
+        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        assert_eq!(record.mission_id, "mission-1");
+        assert_eq!(record.station, "test");
+        assert_eq!(record.theater.as_deref(), Some(LOCAL_THEATER));
+        assert_eq!(
+            record.provider_session_id.as_deref(),
+            Some("provider-session-007")
+        );
+        assert_eq!((record.attempt, record.predecessor), (1, None));
+        assert_eq!(record.fence, hold.fence);
+
+        // Another Station opening the same Registry sees the same record.
+        let other = FileRegistry::open(state.intake.root());
+        assert_eq!(other.session(&hold.id).unwrap().unwrap().station, "test");
+
+        // Finishing the Mission closes the record.
+        transition_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(TransitionMission {
+                state: MissionState::Failed,
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("transition failed: {:?}", error.1.0.error));
+        assert_eq!(
+            state.intake.session(&hold.id).unwrap().unwrap().status,
+            SessionStatus::Ended
+        );
+    }
+
+    #[tokio::test]
+    async fn a_station_that_lost_the_session_lease_is_fenced_out() {
+        let root = tempfile::tempdir().unwrap();
+        let state = capacity_test_state(root.path(), 2, 2);
+        start_first_mission(&state).await;
+        let hold = session_hold(&state, "mission-1").unwrap();
+
+        // The lease lapsed while this Station was paused and another Station took it.
+        let later = unix_now() + 3_600.0;
+        let taken = state
+            .intake
+            .take_session_at(&hold.id, "other-station", DEFAULT_LEASE, later)
+            .unwrap();
+        assert!(taken.fence > hold.fence);
+
+        // Resuming is refused while the other Station's lease is live.
+        let refused = resume_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(ResumeMission {
+                message: None,
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await;
+        assert!(matches!(
+            refused,
+            Err(ApiErrorResponse(StatusCode::CONFLICT, _))
+        ));
+
+        // Its next write or renewal presents the old token and is refused; it stops acting.
+        renew_session_leases(&state);
+        assert!(state.sessions.lock().unwrap().is_empty());
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .state,
+            MissionState::Abandoned
+        );
+        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        assert_eq!(record.station, "other-station");
+        assert_eq!(record.fence, taken.fence);
+    }
+
+    #[tokio::test]
+    async fn a_mission_started_before_session_records_resumes_with_a_new_record() {
+        let root = tempfile::tempdir().unwrap();
+        let state = capacity_test_state(root.path(), 2, 2);
+        start_first_mission(&state).await;
+        let old = session_hold(&state, "mission-1").unwrap();
+        // Strip the hold, as a record written by an earlier version has none.
+        let mut manifest = state
+            .missions
+            .lock()
+            .unwrap()
+            .operation("mission-1")
+            .unwrap();
+        manifest.session = None;
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .set_operation("mission-1", manifest)
+            .unwrap();
+
+        resume_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(ResumeMission {
+                message: None,
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+        let hold = session_hold(&state, "mission-1").unwrap();
+        assert_ne!(hold.id, old.id);
+        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        assert_eq!(
+            record.provider_session_id.as_deref(),
+            Some("provider-session-007")
+        );
     }
 
     #[tokio::test]
