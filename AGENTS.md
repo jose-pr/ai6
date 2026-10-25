@@ -9,7 +9,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 
 | Path | What |
 | --- | --- |
-| `crates/ai6/` | The Station daemon and AI6 contracts: `ai6::directorates::{m,registry,q,section_00,medical}` decide, `ai6::station` runs; `ai6` command |
+| `crates/ai6/` | The Station daemon, the field runner and AI6 contracts: `ai6::directorates::{m,registry,q,section_00,medical}` decide, `ai6::station` runs; `ai6` command (`ai6 serve`, `ai6 runner`) |
 | `crates/universal-exports/` | Universal Exports: the authenticated public API gateway and `universal-exports` command |
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The operator command: reads, and cancels, retries, resumes and interrupts Missions |
@@ -60,7 +60,9 @@ The Flutter app needs the isolated Flutter `main` SDK described in
   where the code has the thing.
 - Rust 1.89 is the minimum; stable and 1.89 are checked in CI.
 - MPL-2.0. Outside contributors sign `CLA.md`.
-- Remote Theaters and SQL/federated Registry placement are not implemented; do not
+- A harness on a remote Theater runs under the field runner (`ai6 runner`) or the
+  Station's detached wrapper over the transport; remote safe houses, cross-Station adoption
+  of a running Session and SQL/federated Registry placement are not implemented, so do not
   describe them as available.
 
 ## CI and release

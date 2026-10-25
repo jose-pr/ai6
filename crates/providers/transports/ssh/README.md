@@ -18,7 +18,8 @@ system, with no dependency on an installed `ssh` or on `ControlMaster`. See the
   refused. First contact without a pin is refused unless `trust_on_first_use = true`, which is
   reported as a weakening.
 - **Keys never live in configuration**: only the path of a private key file does.
-- Reconnects on its own when the connection drops.
+- Reconnects on its own when the connection drops, and has the host listen again for its
+  open reverse forwards, on the same ports.
 
 ## Installation
 

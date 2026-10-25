@@ -65,7 +65,10 @@ has no SFTP subsystem. `capabilities()` never connects.
   A missing file or directory is `GUATIAO_ERR_NOT_FOUND`.
 - **`forward`**: a reverse forward (`tcpip-forward`): the host listens on
   `remote_host:remote_port` (port `0` lets it choose; the answer is in `info()`), and each
-  connection is carried to the Station's `target`. The server must allow TCP forwarding.
+  connection is carried to the Station's `target`. The server must allow TCP forwarding. A
+  forward outlives the connection: a remade connection asks the host to listen again on the
+  same port, and `close()` cancels it on the current connection. If the host will not give the
+  port back, that forward stays closed and no error is reported.
 - Calls block: the transport owns a two-thread Tokio runtime.
 
 ## Gotchas

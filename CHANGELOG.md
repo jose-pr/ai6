@@ -88,8 +88,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   sandbox that asks nothing) and four Theater tools (`theater_run`, `theater_read`,
   `theater_write`, `theater_list`) on a per-Session authenticated MCP endpoint act on the
   Theater instead. Placement choices, launch records, the published Mission brief and
-  Moneypenny carry the mode. Field mode on a remote Theater still needs a runner there and is
-  not implemented.
+  Moneypenny carry the mode.
+- The field runner, `ai6 runner serve`: the AI6 binary's Theater mode, which supervises
+  harnesses on the Theater so a Session outlives its Station. A Theater declares it with
+  `runner = {}` (or `command`, `state_dir`, `plugin_paths`, `terminal`), and the Station
+  starts it when none answers. Every event a harness emits is spooled to disk with a sequence
+  number before a Station reads it; a Station that is shut down, killed or fenced out leaves
+  the harness running and its Mission Working, and the Station that comes back re-attaches
+  and replays every event it missed from the last one it acknowledged. Each Session gets a
+  Cable relay with its own URL and token that the attached Station repoints. The runner
+  listens on loopback behind a token in its state directory; a Station on another host
+  reaches it with `ai6 runner call` over the Theater's transport. Placement offers field
+  mode on a Theater with a runner, on the Station's own host or another one.
+- The detached wrapper: on a POSIX Theater with a declared harness and no runner (an SSH
+  host where nothing is installed), the Station starts the harness over the transport under
+  `setsid`, with its output spooled to a file, so a dropped link costs only time and the
+  Station reads on from the last byte it took once the transport reconnects. Its Cable
+  endpoint reaches the harness through a reverse forward.
 - Placement is now M's decision (`ai6::directorates::m::placement`, extracted from the
   Station scheduler). It filters by Station role, health, capacity, labels, checkout, Theater
   and available handler, orders by load then Agent priority, and gives a reason for every
@@ -232,6 +247,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Agents and roles in `agents.toml`. A Station is now the node running the daemon.
 
 - The guatiao pin moved to the revision the shared crates use.
+- The `daemon` feature also brings `ureq`, `subtle` and `futures-util` (the runner's client,
+  token checks and Cable relay); `publisher` adds only `url` and `ai6-diptel` on top of it.
+- `AgentStart`, `AgentResume`, `AgentMessage`, `AgentEvent`, `UsageLimit` and `TokenUsage`
+  are serde `Serialize` and `Deserialize`.
+- A provider whose settings all have defaults is built with them when no configuration is
+  given, so the `claude` and `codex` handlers load without one.
+- The `ssh` transport has the host listen again for its open reverse forwards, on the same
+  ports, when it reconnects.
 - Breaking, access kinds. The kinds are `coqui_authenticator`, `coqui_directory`,
   `coqui_authorizer` and `coqui_accounts` (they were `lineupmux_*`), so providers built for
   any host load here. `Attempt::headers` is an ordered `Vec<(String, String)>` instead of a

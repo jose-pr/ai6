@@ -18,6 +18,9 @@ and the [guides](https://jose-pr.github.io/ai6/).
 - AgentHandler, terminal, Source and access contracts as Guatiao kinds, usable without the daemon.
 - A Station daemon: private loopback API, Registry-leased intake, Mission scheduling,
   durable Mission records and automatic provider-Session reattachment after a restart.
+- A field runner (`ai6 runner`) that supervises harnesses on a Theater and spools their
+  events, so a Session outlives its Station and a Station that comes back replays what it
+  missed.
 - Agent selection by role and priority; when an Agent's handler is unavailable, the next
   qualified Agent is posted instead.
 - Isolated Mission workspaces (safe houses, made by providers such as `git`), commit cover audits and Session watchdogs.
@@ -35,7 +38,7 @@ cargo add ai6 --git https://github.com/jose-pr/ai6
 | Feature | Adds | Default |
 | --- | --- | --- |
 | (none) | Contracts: AgentHandler, terminal, access, roster, Mission, Registry, Cables, Q loadouts. | Yes |
-| `daemon` | The Station's private HTTP service, scheduler, Guatiao provider host and watchdogs. | No |
+| `daemon` | The Station's private HTTP service, scheduler, Guatiao provider host and watchdogs, and the field runner. | No |
 | `publisher` | Bounded publication of lifecycle events and raw terminal bytes to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
 | `station-tls` | Persistent Station certificate identities and pinned-peer or CA mutual TLS, on `coqui-peer-tls`. | No |
@@ -57,6 +60,8 @@ and `Tanner`.
 ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
           [--station ID] [--role control|execution]... [--label KEY=VALUE]...
           [--terminal ID] [--max-concurrent-missions N] [watchdog options]
+ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]
+ai6 runner call [--state-dir PATH] METHOD PATH
 ai6 identity
 ai6 peer waiting
 ai6 peer accept FINGERPRINT
@@ -70,6 +75,12 @@ ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
   both roles are on by default. Watchdog defaults are set with `--stall-timeout`,
   `--loop-timeout`, `--loop-min-lines`, `--blocked-after`, `--max-runtime`, `--history`
   and `--normalize-digits` (seconds may be fractional).
+- `ai6 runner serve` runs the field runner on a Theater: it supervises harnesses there for
+  Stations, spooling their events under its state directory (default `runner` in AI6's state
+  directory) and serving them on a token-protected loopback port. `--detach` starts it in
+  the background. `ai6 runner call` relays one request to it (a body on standard input) and
+  prints the status and answer; a Station that reaches the host through a transport talks to
+  the runner this way. It exits `3` when no runner answers.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists certificates a peer-trust listener rejected; `ai6 peer accept`
   pins one of them.
@@ -103,6 +114,7 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::station::server` | `ServeConfig`, `StationConfig` and the `serve*` entry points |
 | `ai6::station::plugins` | Guatiao provider discovery and typed construction |
 | `ai6::station::safehouse` | Opens a Mission's safe house through a provider; state directory |
+| `ai6::station::runner` | The field runner: serve, call and start one; its event spool and Cable relay |
 | `ai6::directorates::q::safehouse` | The safe-house provider contract and its models |
 | `ai6::station::publisher` | The Universal Exports publisher (`publisher` feature) |
 | `ai6::station::identity` | Station certificates, fingerprints and peer trust (`station-tls` feature) |
@@ -116,6 +128,11 @@ the Agent's handler in the Station's terminal provider. Mission records persist 
 in `missions.json` under the state directory; on startup, Missions that were working
 become blocked and the scheduler reattaches them through their provider Session ID.
 Graceful shutdown interrupts active Sessions and keeps their safe houses for recovery.
+On a Theater with a runner the harness runs under the runner instead: the Station reads its
+spooled events, a Station that stops or dies leaves it running, and the next start
+re-attaches to it and replays the events it missed. On a POSIX Theater with no runner the
+Station starts the harness over the transport in a detached wrapper, so it outlives a
+dropped link.
 Each Session also has a record in the shared Registry, held by a lease whose fencing token
 refuses a Station that lost it. When a provider usage limit stops a Session the Mission is
 parked until the quota resets and resumes the same provider Session; an Operation may instead

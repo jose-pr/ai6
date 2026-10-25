@@ -30,11 +30,12 @@ workdir = "/srv/work"
 | `labels` | Labels an Operation's `station_labels` may match, overlaid on the Station's own. |
 | `agents` | Where the harness may run: `"auto"` (default), `"local"` or `"remote-hands"`. See [Two ways to work on a Theater](#two-ways-to-work-on-a-theater). |
 | `egress` | How the Theater reaches the provider's API: `"direct"` (default), `{ proxy = "http://…" }`, `"station"` (a proxy the Station provides over the transport's `forward`) or `"none"` (no internet). |
-| `harnesses` | Harnesses installed on the Theater (`"claude"`, `"codex"`), for the day a runner can supervise one there. |
-| `workdir` | Where a remote-hands Mission works when its Operation names no path on this Theater. |
+| `harnesses` | Harnesses installed on the Theater (`"claude"`, `"codex"`). Another host without a runner needs one here before a harness runs on it, in the [detached wrapper](#the-detached-wrapper). |
+| `workdir` | Where a Mission works on this Theater when its Operation names no path there. |
+| `runner` | The [field runner](#the-field-runner) that supervises harnesses on the Theater: `{}` for every default, or `command`, `state_dir`, `plugin_paths` and `terminal`. |
 
 A Station's own host is always reachable as the Theater `local` without any configuration;
-declaring `[theater.local]` only adds labels or facts to it.
+declaring `[theater.local]` only adds labels, facts or a runner to it.
 
 ### SSH access
 
@@ -95,10 +96,14 @@ placement rules it out.
 
 ## Two ways to work on a Theater
 
-- **Field mode**: the harness runs *on* the Theater, in a terminal there. It needs `terminal`
-  and `files`, the harness installed, and a route to the provider's API (`egress` not
-  `"none"`, and `forward` when it is `"station"`). Until a runner can supervise a harness on a
-  remote host, only the Station's own host qualifies.
+- **Field mode**: the harness runs *on* the Theater, in a terminal there. It needs the
+  harness installed and a route to the provider's API (`egress` not `"none"`, and `forward`
+  when it is `"station"`). A Theater with a [runner](#the-field-runner) qualifies (another
+  host also needs `run`, which is how the Station reaches the runner). Without one, the
+  Station's own host needs `terminal` and `files`, and another host needs `run`, `files`, a
+  POSIX `os` and a declared harness for the [detached wrapper](#the-detached-wrapper). The
+  Mission works in the Operation's path on the Theater when the Operation is bound to it,
+  else in the Theater's `workdir`, which must be absolute.
 - **Remote-hands mode**: the harness runs on the *Station* and acts on the Theater through the
   transport. It needs only `run`. For hosts that cannot run an agent: an Android device,
   an appliance, an air-gapped VM, a host with no internet.
@@ -126,6 +131,85 @@ the Theater's `workdir`. An Operation with a `path` that is not bound to a Theat
 on a remote-hands Theater only if that Theater has a `workdir`. A file tool on a transport
 without `files` answers that it is unavailable and points at `theater_run`.
 
+## The field runner
+
+A harness the Station supervises itself is the Station's child: if the Station stops or
+dies, so does the work. A **runner** keeps it going. It is the same `ai6` binary in its
+Theater mode, `ai6 runner serve`: it loads the same AgentHandler and Terminal providers,
+starts harnesses for Stations, and writes every event a harness emits to disk, numbered,
+before any Station reads it. It has no scheduler, no Registry and no roster.
+
+```toml
+[theater.local]
+access = "local"
+runner = {}
+
+[theater.build-box]
+access = { ssh = { host = "build.example.net", user = "ci", host_key = "sha256:…" } }
+harnesses = ["claude"]
+workdir = "/srv/work"
+runner = { command = "/opt/ai6/bin/ai6", plugin_paths = ["/opt/ai6/lib"] }
+```
+
+| Key | Default |
+| --- | --- |
+| `command` | `ai6` on the Theater's `PATH`; on the Station's own host, the Station's own binary. |
+| `state_dir` | `runner` in AI6's state directory on the Theater. |
+| `plugin_paths` | None: give the directories or libraries that hold the harness's handler and a terminal provider on the Theater. |
+| `terminal` | An available terminal provider on the Theater, preferring `pty`. |
+
+A Station starts the runner when none answers, then starts each Session's harness on it. A
+Station that is shut down, killed or fenced out leaves the harness running, and its Mission
+stays Working. When the Station starts again it re-attaches to the same runner Session and
+receives every event it missed, in order, from the last one it acknowledged (the last
+event it took may come twice). A Station that loses the Session's lease lets go the same
+way; another Station adopting a running Session is not implemented yet. A Mission parked at
+a provider limit resumes in a new harness instead, as before.
+
+The runner listens on a loopback port only, behind a bearer token kept in its state
+directory (`token`, readable only by its user). On the Station's own host the Station talks
+to it directly. On another host it runs `ai6 runner call` there through the Theater's
+transport for each request, and `ai6 runner serve --detach` when no runner answers; a link
+that drops costs only time, since the runner keeps every event until a read gets through.
+The harness's Cable tools go through a relay the runner gives each Session, with its own URL
+and token, which the Station points at its own Cable endpoint (on another host, through a
+reverse forward over the transport) and repoints when it re-attaches or the link returns;
+while no Station is attached the relay answers that none is.
+
+Run one by hand with `ai6 runner serve [--state-dir PATH] [--plugin-path PATH]...` (or
+`--detach` to start it in the background); `ai6 runner call METHOD PATH` sends it one
+request. Stopping the runner stops the harnesses it supervises, and a runner that restarts
+ends the Sessions it lost with a `failed` event saying why. Its events are in
+`sessions/<key>/events.jsonl`; ended Sessions are removed a week after they started, the
+next time a runner starts.
+
+The Station's watchdog sees a runner's harness only through its events: the checks that
+read terminal output (a blocked prompt, repeated output) do not apply to it.
+
+## The detached wrapper
+
+A host where nothing can be installed still runs a harness if it has one: a POSIX Theater
+with `run`, `files` and a declared harness, and no runner (an `ssh` Theater, typically). The
+Station starts the harness over the transport in a session of its own (`setsid`, or `nohup`
+where there is none), so the link that started it can drop without ending it:
+
+- Its files are in `~/.ai6/detached/<mission>-<id>/` on the Theater (the login user's home
+  over SSH; readable only by that user): `env` (the Session's environment, so no value appears
+  on a command line), `in` (a FIFO it reads), `out` (everything it writes), `pid` and, once it
+  ends, `exit`. The directory stays after the Mission for inspection.
+- The Station reads `out` from the last byte it took and writes to `in`. While the link is
+  down a read finds nothing new and the harness keeps running; once the transport
+  reconnects, the Station reads on from where it stopped, so nothing is lost.
+- The harness reaches the Station's Cable endpoint through a reverse forward on a loopback
+  port of the Theater, which the transport re-opens on the same port after a reconnect.
+- The harness gets the host's login environment plus the Session's, and no terminal: it is
+  for harnesses that speak a protocol on standard input and output, as the `claude` and
+  `codex` handlers do.
+
+The Station still supervises the harness: shutting the Station down stops it, and one whose
+Station died is ended by the next start of the same Mission before another starts. Only a
+runner keeps the work going while no Station is attached.
+
 ## Reaching a Theater
 
 A Station publishes the Theaters it reaches at each check-in: ID, access (`local`, `ssh` or
@@ -143,8 +227,6 @@ to ask why.
 
 ## Not yet
 
-- Field mode on a remote Theater: a runner on the Theater that supervises the harness and
-  outlives the Station's connection does not exist yet.
 - Remote safe houses: a remote-hands Mission has no safe house, so no per-Mission isolation,
   history or cover check; it works in the directory it is given.
 - A Station-provided egress proxy (`egress = "station"`) is recorded and requires `forward`,

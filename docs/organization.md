@@ -37,7 +37,8 @@ Infrastructure  Station ──────────────────�
 - **Station**: a node running `ai6 serve`, with the `control` role, the `execution` role
   or both. The elected **Headquarters Station (HQS)** holds M's authority by lease.
 - **Theater**: the host or environment a Session works on, reached through a transport
-  (`local`, `ssh`, ...). The harness runs on the Station's own host, or on the Station while
+  (`local`, `ssh`, ...). The harness runs on the Theater (field mode: under the Station on
+  its own host, or under a runner or the detached wrapper elsewhere), or on the Station while
   acting on a remote Theater through the transport (remote-hands mode).
 - **Safe house**: a Mission's isolated workspace inside its Theater, made by a safe-house provider (`git` cuts a worktree).
 

@@ -7,15 +7,15 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | Feature | Adds | Default |
 | --- | --- | --- |
 | (none) | Public AI6 contracts without daemon dependencies. | Yes |
-| `daemon` | The Station's HTTP service, scheduler and Guatiao provider host. | No |
+| `daemon` | The Station's HTTP service, scheduler and Guatiao provider host, and the field runner. | No |
 | `publisher` | Bounded lifecycle and raw terminal-byte publication to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
 | `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS (`coqui-peer-tls`). | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
 MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, serde, toml, fs2, sha2, lru and zeroize.
-`daemon` adds Axum, Tokio and Guatiao provider loading, `publisher` adds `ureq` and
-`url`, and `station-tls` adds `coqui-peer-tls`, `coqui-peer` and rustls. `cli` adds clap and Tokio signal support. The crate builds as a
+`daemon` adds Axum, Tokio, Guatiao provider loading, `ureq`, `subtle` and `futures-util`,
+`publisher` adds `url`, and `station-tls` adds `coqui-peer-tls`, `coqui-peer` and rustls. `cli` adds clap and Tokio signal support. The crate builds as a
 Rust library and contains no `unsafe` code. `cables-mcp` adds RMCP's Streamable HTTP
 server, JSON Schema support, constant-time bearer checks and per-Session tokens; the
 default feature set remains dependency-light.
@@ -26,9 +26,10 @@ roster and cover; `directorates::registry` owns the Registry (intake) and Cables
 owns loadouts, secret leases, terminal contracts and the safe-house contract; `directorates::section_00` owns the
 AgentHandler contract; `directorates::medical` owns Session monitoring. `station` holds the
 node that runs them: `station::server` (daemon service and `serve*`), `station::plugins`
-(provider host), `station::safehouse` (opens a Mission's safe house through a provider), `station::publisher`
-(`publisher` feature) and `station::identity` (`station-tls` feature). The command
-exposes `ai6 serve`, `ai6 identity` and `ai6 peer waiting|accept`.
+(provider host), `station::safehouse` (opens a Mission's safe house through a provider),
+`station::runner` (the field runner), `station::publisher` (`publisher` feature) and
+`station::identity` (`station-tls` feature). The command exposes `ai6 serve`,
+`ai6 runner serve|call`, `ai6 identity` and `ai6 peer waiting|accept`.
 
 ## Access contracts (`ai6::directorates::m::access`)
 
@@ -313,9 +314,9 @@ resumes.
 
 A Theater is where a Session works; a Station reaches it through a transport. Each Station
 reads its own `theaters.toml` (`[theater.<id>]` with `access`, `labels`, `agents`, `egress`,
-`harnesses` and `workdir`; `docs/theaters.md` has the table). The Station's own host is
-always reachable as the implicit `local` Theater; declaring `[theater.local]` only adds
-labels and facts.
+`harnesses`, `workdir` and `runner`; `docs/theaters.md` has the table). The Station's own
+host is always reachable as the implicit `local` Theater; declaring `[theater.local]` only
+adds labels, facts or a runner.
 
 ```rust
 pub const LOCAL_THEATER: &str; // "local"
@@ -355,9 +356,24 @@ impl Egress { pub fn kind(&self) -> EgressKind; }
 #[non_exhaustive]
 pub enum EgressKind { Direct, Proxy, Station, Isolated }      // the URL-free kind that is published
 #[non_exhaustive]
+#[derive(Default)]                           // `runner = {}` in TOML: every default
+pub struct RunnerSettings {                  // how to reach the `ai6 runner` on the Theater
+    pub command: Option<String>,             // default: `ai6` on PATH; the Station's own binary on `local`
+    pub state_dir: Option<String>,           // default: the runner's (`<AI6 state>/runner`)
+    pub plugin_paths: Vec<String>,           // providers the runner loads, on the Theater
+    pub terminal: Option<String>,            // default: the runner picks, preferring `pty`
+}
+impl RunnerSettings {
+    pub fn with_command(self, command: impl Into<String>) -> Self;
+    pub fn with_state_dir(self, state_dir: impl Into<String>) -> Self;
+    pub fn with_plugin_path(self, path: impl Into<String>) -> Self;
+    pub fn with_terminal(self, terminal: impl Into<String>) -> Self;
+}
+#[non_exhaustive]
 pub struct Theater {
     pub id: String, pub access: TheaterAccess, pub labels: BTreeMap<String, String>,
     pub agents: AgentMode, pub egress: Egress, pub harnesses: Vec<String>, pub workdir: Option<String>,
+    pub runner: Option<RunnerSettings>,
 }
 impl Theater {
     pub fn new(id: impl Into<String>, access: TheaterAccess) -> Self;
@@ -366,6 +382,7 @@ impl Theater {
     pub fn with_egress(self, egress: Egress) -> Self;
     pub fn with_harness(self, harness: impl Into<String>) -> Self;
     pub fn with_workdir(self, workdir: impl Into<String>) -> Self;
+    pub fn with_runner(self, runner: RunnerSettings) -> Self;
     pub fn weakenings(&self) -> Vec<String>;    // settings looser than their defaults
     pub fn summary(&self) -> TheaterSummary;     // no capabilities: the Station adds them
 }
@@ -376,7 +393,9 @@ pub struct TheaterSummary {                  // what a Station publishes; no use
     pub id: String, pub access: TheaterKind, pub host: Option<String>, pub provider: Option<String>,
     pub labels: BTreeMap<String, String>, pub capabilities: Option<Capabilities>,
     pub agents: AgentMode, pub egress: EgressKind, pub harnesses: Vec<String>,
-    pub workdir: Option<String>, pub unavailable: Option<String>, pub weakened: Vec<String>,
+    pub workdir: Option<String>,
+    pub runner: bool,                        // a runner supervises harnesses there; omitted when false
+    pub unavailable: Option<String>, pub weakened: Vec<String>,
 }
 impl TheaterSummary { pub fn local() -> Self; }
 pub fn is_sha256_pin(pin: &str) -> bool;    // "sha256:" and 64 hex digits
@@ -393,9 +412,10 @@ impl Theaters {
 pub struct TheaterError(String);             // Display, Error
 ```
 
-Theater IDs use letters, digits, `.`, `_` and `-`. An SSH host, user, a transport provider
-and a harness must be words that do not start with `-`; a port is 1 through 65535; a
-`host_key` is `sha256:` and 64 hex digits. `ServeConfig` loads `theaters.toml` from the
+Theater IDs use letters, digits, `.`, `_` and `-`. An SSH host, user, a transport provider,
+a harness and a runner `terminal` must be words that do not start with `-`; a port is 1
+through 65535; a `host_key` is `sha256:` and 64 hex digits; runner paths and its command are
+non-empty text, and unknown runner keys are refused. `ServeConfig` loads `theaters.toml` from the
 configuration directory; `StationConfig::with_theater` adds one in code and wins on a shared
 ID. A Session's launch record carries `station_id`, `theater_id` and `mode` separately.
 
@@ -546,12 +566,16 @@ Checks, in order: the Operation's `stations` list, the Mission's `stations`, the
 role, health (a check-in no older than `DEFAULT_LEASE`), capacity, then per Theater: the
 Operation's `theater` binding, reachability and capabilities (`execution_mode`),
 `station_labels` (matched as globs against the Station's labels overlaid by the Theater's)
-and the Operation's checkout (in field mode; in remote-hands mode the Operation must be bound
-to the Theater or the Theater must set a `workdir`).
+and the Operation's checkout (on the Station's own host in field mode; on any other Theater,
+or in remote-hands mode, the Operation must be bound to the Theater or the Theater must set a
+`workdir`).
 
-`execution_mode` is field mode when the Theater is the Station's own host with `terminal` and
-`files` and a route to the provider's API (`egress` not `none`; `forward` for `station`), and
-`agents` is not `remote-hands`; otherwise remote-hands mode when the transport can `run`;
+`execution_mode` is field mode when the harness can run on the Theater and reach the
+provider's API (`egress` not `none`; `forward` for `station`), and `agents` is not
+`remote-hands`. The harness can run there when the Theater has a runner (on another host,
+reached with `run`); without one, on the Station's own host with `terminal` and `files`, or
+on another host for the detached wrapper with `run`, `files`, a reported POSIX `os` and a
+declared harness. Otherwise it is remote-hands mode when the transport can `run`;
 `agents = "local"` or `"remote-hands"` allow only that mode. A Theater that reported no
 capabilities is rejected unless it is the Station's own host. The reason names what is missing.
 A posted Agent is skipped for a missing handler on that Station (a Station that reported no
@@ -1318,7 +1342,9 @@ and records to 2 MiB. SQL Registry storage is not implemented.
 `AgentHandler` Guatiao kind `ai6_agent_handler`, and the `AgentSession` object kind
 `ai6_agent_session`. Handlers own harness launch, initial-context delivery, resume,
 message submission and event decoding. AI6 supplies an `AgentTerminal` object bridge
-over its selected `Terminal` provider.
+over its selected `Terminal` provider. `AgentStart`, `AgentResume`, `AgentMessage`,
+`AgentEvent`, `UsageLimit` and `TokenUsage` are also serde `Serialize` and `Deserialize`
+(field names as declared): a runner's API carries them as JSON.
 
 ```rust
 pub const LIMIT_EVENT: &str = "limit";
@@ -1512,7 +1538,9 @@ the Session ended, then the Mission returns to Working once nothing it asked for
 pending. Requests and deliveries are `green_ink` timeline events; the lifecycle carries the
 reason (`green-ink`, `budget`) to Universal Exports.
 On graceful shutdown, event workers interrupt and close active Sessions and move Working
-Missions to Blocked while preserving their safe houses. Mission records persist across
+Missions to Blocked while preserving their safe houses; a Session on a runner is left
+running and its Mission stays Working, so the next start re-attaches to it (see Field
+runner below). Mission records persist across
 daemon restarts, and a blocked Mission can reattach to its provider Session through its
 handler. A parked Mission resumes through the same path once `parked_until` passes
 (`POST .../resume` also resumes it early). Recovery is described under Session records and
@@ -1529,11 +1557,91 @@ that replaced them.
 A Mission whose Operation is bound to a Theater that only a transport reaches runs on the
 Station in remote-hands mode: the harness starts in `<state>/remote-hands/<mission>` (kept
 when the Mission ends), has no safe house and so no cover check, and acts on the Theater
-through the Theater tools. A `working_directory` is refused there. Field mode on a remote
-Theater is not implemented.
+through the Theater tools. A `working_directory` is refused there. On a Theater with a
+runner the harness runs under the runner (see Field runner below). On another POSIX host
+with no runner, field mode runs the Station's handler with the detached wrapper as its
+terminal (launch record `terminal_provider = "detached"`): the harness starts over the
+transport under `setsid` (or `nohup`) in `~/.ai6/detached/<mission>-<id>/` (`env`, FIFO
+`in`, `out`, `pid`, `exit`), reads resume at the last byte taken after a dropped link, there
+is no pty (resize does nothing) and the host's login environment is kept with the
+Session's added. A new start for the Mission ends a wrapper an earlier one left. A
+Mission on another host works in the bound Operation's path or the Theater's `workdir`
+(absolute; POSIX or Windows paths are accepted on any Station), with no safe house.
+The Cable endpoint reaches a harness on another host through a reverse forward on the
+Theater's loopback, re-opened on the same port when a read had to wait for the link.
 This private listener is for
 daemon health, provider discovery and Universal Exports-to-daemon operations; user-facing
 Station and Mission operations belong to Universal Exports's authenticated API.
+
+## Field runner (`ai6::station::runner`)
+
+`ai6 runner serve` is the binary's Theater mode: it supervises harnesses on the Theater they
+run on, so a Session outlives its Station. It loads AgentHandler and Terminal providers like a
+Station and has no scheduler, Registry or roster.
+
+```rust
+pub const CALL_NOT_RUNNING: u8 = 3;            // exit status of `ai6 runner call` with no runner
+#[non_exhaustive]
+pub struct RunnerInfo { pub url: String, pub pid: u32, pub version: String }   // runner.json
+impl RunnerInfo { pub fn read(state_dir: &Path) -> io::Result<Self>; }       // absent while none serves
+#[non_exhaustive]
+pub struct RunnerConfig { /* state_dir, listen (default 127.0.0.1:0), plugin_paths, terminal */ }
+impl RunnerConfig {
+    pub fn new(state_dir: impl Into<PathBuf>) -> Self;
+    pub fn with_listen(self, address: SocketAddr) -> Self;   // loopback only: serve refuses any other
+    pub fn with_plugin_paths(self, paths: impl IntoIterator<Item = PathBuf>) -> Self;
+    pub fn with_terminal(self, terminal: impl Into<String>) -> Self;
+}
+pub fn default_state_dir() -> io::Result<PathBuf>;           // `<AI6 state>/runner`
+pub async fn serve<F>(config: RunnerConfig, shutdown: F) -> io::Result<()>;  // F: Future<Output = ()> + Send + 'static
+pub fn call(state_dir: &Path, method: &str, path: &str, body: Option<&serde_json::Value>)
+    -> Result<(u16, serde_json::Value), String>;             // Err: no runner answers
+pub fn spawn_detached(program: &Path, arguments: &[OsString], state_dir: &Path) -> io::Result<RunnerInfo>;
+```
+
+`serve` takes `runner.lock` (a second runner on the same directory gets `AddrInUse`), creates
+`token` once (mode `0600` on Unix), writes `runner.json` once it listens and removes it on a
+clean stop. Its API needs `Authorization: Bearer <token>` and speaks JSON: `GET /v1/health`,
+`GET|POST /v1/sessions`, `GET /v1/sessions/{key}` (handler, terminal, `session_id`, `ended`,
+`last`, `cursor`), `GET .../events?after=N&timeout_ms=T` (waits up to 30 s; answers
+`{events: [{seq, event}], session_id, complete}`), `POST .../messages`, `POST .../interrupt`,
+`POST .../close?after=N` and `PUT .../cable` (`{url, token}`). A start names a key (letters,
+digits, `.`, `_`, `-`), the handler, an optional terminal and `{"start": AgentStart}` or
+`{"resume": AgentResume}`.
+
+Every event is appended to `sessions/<key>/events.jsonl` with its sequence number (from 1)
+before any Station can read it. `after` acknowledges everything up to `N` and is stored in
+`cursor`; a read without it starts from the cursor, so a Station that comes back replays what
+it missed (at least once: the last event it took may come again). A `completed`, `failed`
+or `limit` event ends the Session and stops the harness. A runner that restarts ends every
+Session it had running with a `failed` event saying so; ended Sessions older than seven days
+are removed when a runner starts. When the start environment carries `AI6_CABLE_MCP_URL` and
+`_TOKEN`, the runner starts a loopback relay with its own URL and token, gives the harness
+those, and relays to the Station's endpoint, which `PUT .../cable` replaces; with none set it
+answers 503. Stopping the runner stops its harnesses.
+
+`call` reads `runner.json` and `token` and sends one request (`ai6 runner call METHOD PATH`
+prints `{"status": N, "body": …}`, takes a body on standard input and exits
+`CALL_NOT_RUNNING` when no runner answers). `spawn_detached` starts
+`program runner serve <arguments>` in its own process group (Unix) or detached (Windows),
+with output in `runner.log`, and answers once that process serves; on Windows it inherits
+the caller's inheritable handles, such as an output pipe.
+
+A Station uses the runner of the Theater a Session runs on when the Theater declares one
+(`Theater::runner`). On its own host it reads `runner.json` and the token and calls the API
+directly, starting the runner with `spawn_detached` (its own binary unless `command` is set)
+when none answers. On another host it runs `<command> runner call [--state-dir D] METHOD
+PATH` through the Theater's transport for every request (`command` defaults to `ai6`), and
+`<command> runner serve --detach` with the settings' plugin paths and terminal when none
+answers. A read that cannot reach the runner answers "no event yet", so a dropped link costs
+only time; the Station re-opens its Cable forward and repoints the relay once a read gets
+through again. The start records the runner Session's key in the launch record before the
+harness starts. Shutdown and losing the Session lease let go without stopping the harness;
+the Mission stays Working, so a restarted Station re-attaches to the same runner Session (a
+parked Mission is resumed instead) and repoints the Cable relay at its own endpoint.
+Closing the Session acknowledges what the Station took, so nothing is replayed after it.
+Watchdog terminal-output checks (blocked prompt, loops) do not see a harness on a runner;
+its events still count as activity.
 
 ## Universal Exports publication (`ai6::station::publisher`)
 
@@ -1628,7 +1736,9 @@ before mapping them and retains the registry for the daemon process lifetime. `h
 `terminal(provider, config)`, `safehouse(provider, config)`, `source(provider, config)`,
 `authenticator(provider, config)`, `directory(provider, config)` and
 `authorizer(provider, config)` construct typed providers, validating a supplied `Value`
-against the provider's schema. Pass `None` only for a provider with a default instance.
+against the provider's schema. `None` builds a provider's default instance, or the provider
+with every setting at its default (the `claude` and `codex` handlers); a provider with a
+required setting answers `PluginBuildError::ConfigurationRequired`.
 `scan_summary()` reports loaded, skipped, failed and unreadable paths.
 
 ## Command line
@@ -1643,6 +1753,11 @@ against the provider's schema. Pass `None` only for a provider with a default in
   values replace that default. `--label` adds a placement label. Timeout values are
   non-negative seconds and may be fractional. `AI6_CONFIG_DIR` overrides the default
   config directory.
+- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]`:
+  run the field runner on this host until Ctrl-C or SIGTERM; `--detach` starts it in the
+  background and prints its `runner.json`. `ai6 runner call [--state-dir PATH] METHOD PATH`
+  sends one request with a body from standard input and prints `{"status", "body"}`; exit 3
+  means no runner answered.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.
 - `ai6 sleeper [--config-dir PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:

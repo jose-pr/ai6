@@ -52,9 +52,9 @@ combinations that pass these checks:
 | Capacity | its capacity is 0, or it already holds that many leased Missions |
 | Theater binding | the Operation's `theater` names a different Theater |
 | Theater reachable | the Station cannot reach the Theater now (no transport provider, or the last contact failed), or has not reported what its transport can do |
-| Theater capabilities | neither mode below is possible: field mode needs `terminal` and `files`, the harness and a route to the provider's API on the Station's own host; remote-hands mode needs the transport's `run`. `agents = "local"` or `"remote-hands"` allows only that mode, and the reason names the missing capability |
+| Theater capabilities | neither mode below is possible: field mode needs a route to the provider's API and either a runner on the Theater (reached with `run` on another host), `terminal` and `files` on the Station's own host, or, for the detached wrapper on another host, `run`, `files`, a POSIX host and a declared harness; remote-hands mode needs the transport's `run`. `agents = "local"` or `"remote-hands"` allows only that mode, and the reason names the missing capability |
 | Labels | `station_labels` is not satisfied. Patterns are globs matched against the Station's labels overlaid by the Theater's |
-| Checkout | in field mode, the Operation has a local `path` and the Station does not hold it. In remote-hands mode the checkout is on the Theater, so the Operation must be bound to the Theater or the Theater must set a `workdir` |
+| Checkout | in field mode on the Station's own host, the Operation has a local `path` and the Station does not hold it. On another host, and in remote-hands mode, the checkout is on the Theater, so the Operation must be bound to the Theater or the Theater must set a `workdir` |
 | Handler | the Agent's handler is not available on the Station, so the next qualified Agent is the backup. A Station that did not report its handlers is not excluded |
 
 Among what remains, the least-loaded Station comes first (the deciding Station wins a tie,

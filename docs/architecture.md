@@ -91,9 +91,9 @@ same-origin and TLS-only, and operator input counts as watchdog activity.
 
 ## Not implemented yet
 
-- Field mode on a remote Theater (a runner there that supervises the harness), remote safe
-  houses, and a terminal over the container, VM and Android transports. Remote Theaters work
-  in remote-hands mode only.
+- Remote safe houses, and a terminal over the container, VM and Android transports. A
+  remote Theater hosts a harness only through a runner there or the SSH-style detached
+  wrapper; otherwise it works in remote-hands mode.
 - Central placement: Stations sharing a Registry each lease the briefs they can run
   themselves; the Headquarters lease does not yet drive placement. The Registry is
   file-backed only (no SQL backend).
