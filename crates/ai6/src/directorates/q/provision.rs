@@ -415,7 +415,7 @@ pub struct ProbeReport {
     /// an agent socket): a weakening, not an error.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ambient: Vec<String>,
-    /// Why the probe could not finish; the other findings are then empty.
+    /// Why the probe could not finish; the other fields are then empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
