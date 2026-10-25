@@ -1,15 +1,50 @@
 [workspace]
 resolver = "3"
-members = ["m/crates/*"]
+members = [
+    "crates/ai6-diptel",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
 license = "MPL-2.0"
-repository = "https://github.com/jose-pr/coagent"
+repository = "https://github.com/jose-pr/ai6"
 publish = false
 
 [workspace.dependencies]
 # guatiao main, pinned until a release carries what these crates use.
 guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "c68361008a0e58c644fb0a3c4cfe107114cf22e9" }
-coagent-terminal-kind = { path = "m/crates/coagent-terminal-kind" }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+schemars = { version = "1", default-features = false }
+# SHA-256 keeps Cable quota keys compatible with I Branch's shared Registry format.
+sha2 = { version = "0.11.1", default-features = false }
+lru = { version = "0.12.5", default-features = false }
+# Compile Station cover policy patterns with Unicode-aware matching.
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
+toml = "0.9"
+tokio = { version = "1", default-features = false, features = ["macros", "net", "rt-multi-thread"] }
+rmcp = { version = "3.7", default-features = false, features = ["macros", "server", "transport-streamable-http-server"] }
+subtle = "2.6"
+uuid = { version = "1", default-features = false, features = ["v4"] }
+zeroize = { version = "1", default-features = false, features = ["alloc"] }
+# Blocking HTTP for the bounded AI6-to-Moneypenny publisher thread.
+ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
+# Station-to-station TLS with the ring provider; rustls is shared with ureq.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# Self-signed station identities and strict certificate name matching.
+rcgen = "0.14"
+rustls-pemfile = "2"
+x509-parser = "0.18"
+globset = "0.4"
+data-encoding = { version = "2", default-features = false }
+# Validates gateway origins and encodes Session IDs as URL path segments.
+url = { version = "2", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = "0.29"
+tempfile = "3"
