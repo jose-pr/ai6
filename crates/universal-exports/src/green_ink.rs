@@ -308,13 +308,60 @@ pub(crate) async fn revoke(
     )
     .await?;
     let operation_key = operation.to_string();
+    let store = registry.clone();
+    let signer = person.id.clone();
     let approval = tokio::task::spawn_blocking(move || {
-        registry.revoke_approval(&operation_key, &request_id, &person.id, now)
+        store.revoke_approval(&operation_key, &request_id, &signer, now)
     })
     .await
     .map_err(|_| ApiError::internal())?
     .map_err(registry_error)?;
+    if approval.request.scope.kind == CLEARANCE_KIND {
+        take_back_raise(registry, person.id, &operation, &approval, now).await?;
+    }
     Ok(Json(approval))
+}
+
+/// Removes the clearance grant a revoked promotion approval raised, if it is still the
+/// Agent's grant; audited as `agent.clearance.revoked`.
+async fn take_back_raise(
+    registry: Arc<dyn RegistryBackend>,
+    actor: String,
+    operation: &OperationId,
+    approval: &Approval,
+    at: f64,
+) -> Result<(), ApiError> {
+    let (store, operation_key, agent) = (
+        registry.clone(),
+        operation.to_string(),
+        approval.request.agent.clone(),
+    );
+    let current =
+        tokio::task::spawn_blocking(move || store.clearance_grant(&operation_key, &agent))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(registry_error)?;
+    let Some(grant) =
+        current.filter(|grant| grant.approval.as_deref() == Some(approval.request.id.as_str()))
+    else {
+        return Ok(());
+    };
+    audit(
+        registry.clone(),
+        actor,
+        "agent.clearance.revoked",
+        operation,
+        format!("{} {}", grant.agent, grant.clearance),
+        at,
+    )
+    .await?;
+    tokio::task::spawn_blocking(move || {
+        // Removed only while it is still that grant; a newer one stays.
+        registry.remove_clearance_grant_if(&grant).map(|_| ())
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(registry_error)
 }
 
 /// `GET /v1/user/operations/{operation_id}/class-authorizations`: every class authorisation,

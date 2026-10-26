@@ -5,10 +5,12 @@
 //! meets the Operation's promotion step, M files a green ink request of kind `clearance`
 //! (target `AGENT:CLEARANCE@OPERATION`) on the Agent's behalf: Mission `promotion-AGENT`,
 //! Session `m`. Filing again finds the same request, so there is one per step until the
-//! record meets the step's Mission count once more. A request a person approved becomes a
-//! clearance grant; the approval is then spent, so revoking the grant is final. A
-//! quarantine takes away a raised grant: the Agent goes back to its configured clearance and
-//! must earn the step again. Nothing here raises a clearance without a person's signature.
+//! record meets the step's Mission count once more. A request a person approved is spent,
+//! then becomes a clearance grant for the model and configured clearance the Agent has, so
+//! removing the grant is final. A quarantine takes away a raised grant (the Registry removes
+//! it with the quarantine; a round finding one left takes it back): the Agent goes back to its
+//! configured clearance and must earn the step again. Nothing here raises a clearance without
+//! a person's signature.
 
 use super::{DaemonState, agents, medical};
 use crate::directorates::m::approvals::ActionScope;
@@ -82,7 +84,10 @@ fn consider(
     let Some(record) = record else {
         return;
     };
-    let current = agent.effective_clearance(operation, grant.as_ref(), now);
+    let backed = grant
+        .clone()
+        .filter(|grant| agents::is_backed(state, grant));
+    let current = agent.effective_clearance(operation, backed.as_ref(), now);
     // Missions count only for the model that occupies the codename now; incidents of any
     // model, and quarantines of every Operation, keep the quiet period.
     let here = record.in_operation(&operation.id);
@@ -129,6 +134,7 @@ fn consider(
                 &approval.request,
                 &promotion.to,
                 &approval.signer,
+                agent,
                 grant,
             );
         }
@@ -156,50 +162,63 @@ fn promotion_request(
     Ok(request.expiring(state.clock.now() as f64, operation.green_ink.request_ttl()))
 }
 
-/// Writes the grant a signed request earned, then spends the approval so it raises once.
+/// Spends the approval, then writes the grant it earned for the Agent's current occupant, but
+/// only if the Agent's grant is still `current`, the one this round read: a lower an operator
+/// wrote meanwhile stands. Spending first means a grant removed later (revoked, taken back by
+/// a quarantine) is never written again.
 fn raise(
     state: &DaemonState,
     request: &ApprovalRequest,
     clearance: &str,
     signer: &str,
+    agent: &crate::directorates::m::roster::Agent,
     current: Option<ClearanceGrant>,
 ) {
     let now = state.clock.now() as f64;
-    let already = current
-        .as_ref()
-        .is_some_and(|grant| grant.approval.as_deref() == Some(request.id.as_str()));
-    if !already {
-        let grant = ClearanceGrant::raise(
-            request.agent.clone(),
-            request.operation.clone(),
-            clearance,
-            request.id.clone(),
-            signer,
-            now,
-        )
-        .because(request.reason.clone());
-        if let Err(error) = state.intake.put_clearance_grant(&grant) {
-            eprintln!(
-                "ai6: clearance of Agent {:?} not raised: {error}",
-                request.agent
-            );
-            return;
-        }
-        eprintln!(
-            "ai6: Agent {:?} raised to {clearance} in {:?}, signed by {signer}",
-            request.agent, request.operation
-        );
-        record_event(state, request, "raised", signer);
-        audit(state, "agent.clearance.raised", signer, request, now);
-    }
-    if let Err(error) = state
+    match state
         .intake
         .spend_approval(&request.operation, &request.id, now)
     {
-        eprintln!(
-            "ai6: promotion approval {:?} not marked spent: {error}",
-            request.id
-        );
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(error) => {
+            eprintln!(
+                "ai6: promotion approval {:?} not spent: {error}",
+                request.id
+            );
+            return;
+        }
+    }
+    let grant = ClearanceGrant::raise(
+        request.agent.clone(),
+        request.operation.clone(),
+        clearance,
+        request.id.clone(),
+        signer,
+        now,
+    )
+    .for_occupant(agent.model.clone(), agent.clearance.clone())
+    .because(request.reason.clone());
+    match state
+        .intake
+        .replace_clearance_grant(current.as_ref(), &grant)
+    {
+        Ok(true) => {
+            eprintln!(
+                "ai6: Agent {:?} raised to {clearance} in {:?}, signed by {signer}",
+                request.agent, request.operation
+            );
+            record_event(state, request, "raised", signer);
+            audit(state, "agent.clearance.raised", signer, request, now);
+        }
+        Ok(false) => eprintln!(
+            "ai6: Agent {:?} not raised in {:?}: its clearance grant changed meanwhile",
+            request.agent, request.operation
+        ),
+        Err(error) => eprintln!(
+            "ai6: clearance of Agent {:?} not raised: {error}",
+            request.agent
+        ),
     }
 }
 
@@ -359,27 +378,35 @@ mod tests {
         assert!(state.intake.clearance_grant("G", "007").unwrap().is_none());
     }
 
-    #[test]
-    fn a_quarantine_takes_a_raise_back_and_a_lower_grant_holds() {
-        let root = tempfile::tempdir().unwrap();
-        let state = test_state(root.path(), SETTINGS, AGENTS);
+    /// Earns 007 its `field` step in G, signed by alice, and returns the grant it got.
+    fn promoted(state: &DaemonState) -> ClearanceGrant {
+        done(state, 10);
+        super::round(state);
         let now = state.clock.now() as f64;
+        let request = state.intake.pending_approvals("G", now).unwrap().remove(0);
         state
             .intake
-            .put_clearance_grant(&ClearanceGrant::raise(
-                "007",
+            .decide_approval(
                 "G",
-                "00",
-                "green-ink-x",
-                "alice",
-                now,
-            ))
+                &request.id,
+                &Ruling::approve("alice", now, now + 3600.0),
+            )
             .unwrap();
-        assert_eq!(clearance_in(&state, "G"), "00");
+        super::round(state);
+        state.intake.clearance_grant("G", "007").unwrap().unwrap()
+    }
+
+    #[test]
+    fn a_quarantine_takes_a_raise_back_at_once_and_a_lower_grant_holds() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), SETTINGS, AGENTS);
+        promoted(&state);
+        assert_eq!(clearance_in(&state, "G"), "field");
         medical::quarantine_agent(&state, "007", Some("G"), "looping", "operator");
-        super::round(&state);
+        // Gone with the quarantine, before any round and whether or not it is released.
         assert!(state.intake.clearance_grant("G", "007").unwrap().is_none());
         assert!(state.intake.release_quarantine("007", Some("G")).unwrap());
+        super::round(&state);
         assert_eq!(clearance_in(&state, "G"), "desk");
 
         // An operator's lower grant only lowers, and M files no promotion past it.
@@ -389,6 +416,7 @@ mod tests {
             SETTINGS,
             &AGENTS.replace("\"desk\"", "\"field\""),
         );
+        let now = state.clock.now() as f64;
         state
             .intake
             .put_clearance_grant(&ClearanceGrant::lower("007", "L", "desk", "bob", now))
@@ -414,5 +442,89 @@ mod tests {
             ["007:00@G"],
             "without it, the record earns 00"
         );
+    }
+
+    #[test]
+    fn a_raise_belongs_to_its_occupant_and_needs_its_signed_approval() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), SETTINGS, AGENTS);
+        let grant = promoted(&state);
+        assert_eq!(
+            (grant.model.as_deref(), grant.base.as_deref()),
+            (None, Some("desk"))
+        );
+        assert_eq!(clearance_in(&state, "G"), "field");
+
+        // A new model in the slot does not inherit the raise, and starts its count afresh.
+        let state = test_state(
+            root.path(),
+            SETTINGS,
+            &format!("{AGENTS}model = \"next\"\n"),
+        );
+        assert_eq!(clearance_in(&state, "G"), "desk");
+        super::round(&state);
+        assert!(
+            pending(&state).is_empty(),
+            "the next model has done nothing yet"
+        );
+
+        // Another configured clearance takes it away too: the configured one applies.
+        let state = test_state(root.path(), SETTINGS, AGENTS);
+        assert_eq!(clearance_in(&state, "G"), "field");
+        let state = test_state(
+            root.path(),
+            "clearance = \"00\"\n",
+            &AGENTS.replace("\"desk\"", "\"field\""),
+        );
+        assert_eq!(
+            clearance_in(&state, "G"),
+            "field",
+            "configured, not the raise"
+        );
+
+        // A raise its approval does not back counts for nothing.
+        let forged = tempfile::tempdir().unwrap();
+        let state = test_state(forged.path(), SETTINGS, AGENTS);
+        let now = state.clock.now() as f64;
+        state
+            .intake
+            .put_clearance_grant(
+                &ClearanceGrant::raise("007", "G", "00", "green-ink-x", "alice", now)
+                    .for_occupant(None, "desk"),
+            )
+            .unwrap();
+        assert_eq!(clearance_in(&state, "G"), "desk");
+    }
+
+    #[test]
+    fn a_raise_does_not_overwrite_a_lower_written_meanwhile_and_is_applied_once() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), SETTINGS, AGENTS);
+        done(&state, 10);
+        super::round(&state);
+        let now = state.clock.now() as f64;
+        let request = state.intake.pending_approvals("G", now).unwrap().remove(0);
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request.id,
+                &Ruling::approve("alice", now, now + 3600.0),
+            )
+            .unwrap();
+        // The round read no grant; an operator lowers 007 before the raise is written.
+        let lower = ClearanceGrant::lower("007", "G", "desk", "bob", now);
+        state.intake.put_clearance_grant(&lower).unwrap();
+        let agent = state.roster.agent(Some("G"), "007").unwrap();
+        super::raise(&state, &request, "field", "alice", &agent, None);
+        assert_eq!(
+            state.intake.clearance_grant("G", "007").unwrap(),
+            Some(lower)
+        );
+        // Its approval is spent: removing the lower does not bring the raise back.
+        state.intake.remove_clearance_grant("G", "007").unwrap();
+        super::round(&state);
+        assert!(state.intake.clearance_grant("G", "007").unwrap().is_none());
+        assert_eq!(clearance_in(&state, "G"), "desk");
     }
 }

@@ -2,10 +2,13 @@
 //! nor retired, the clearance each works at, and counting each Mission's outcome and each
 //! incident charged to its Agent.
 
+use super::promotion::{PROMOTION_SESSION, promotion_mission, promotion_target};
 use super::{DaemonState, medical};
 use crate::directorates::m::mission::{Mission, MissionState};
+use crate::directorates::m::promotion::CLEARANCE_KIND;
 use crate::directorates::m::roster::{Agent, AgentQuery, Retirement, Roster, RosterError};
 use crate::directorates::registry::agent_records::{AgentOutcome, AgentOutcomeReport};
+use crate::directorates::registry::approvals::{ApprovalStatus, Decision, EXPIRY_SIGNER};
 use crate::directorates::registry::clearance::ClearanceGrant;
 
 /// The highest-priority Agent posted to `operation` for `role` and `tags` whose handler is
@@ -34,8 +37,8 @@ pub(super) fn select(
 
 /// The Agent as it works in `operation` now: configured, with the clearance it holds there.
 ///
-/// A grant that cannot be read counts as one holding the Agent at `desk`: a clearance that
-/// cannot be shown is not assumed.
+/// A grant that cannot be read counts as one holding the Agent at `desk`, and a raise its
+/// approval does not back counts for nothing: a clearance that cannot be shown is not assumed.
 pub(super) fn effective(
     state: &DaemonState,
     operation: Option<&str>,
@@ -45,18 +48,61 @@ pub(super) fn effective(
     if let Some(operation) = operation {
         let operation = state.roster.operation(operation)?;
         let now = state.clock.now();
-        let grant = grant_of(state, &operation.id, &agent.id).unwrap_or_else(|| {
-            Some(ClearanceGrant::lower(
-                agent.id.clone(),
-                operation.id.clone(),
-                "desk",
-                format!("station:{}", state.station_id),
-                now as f64,
-            ))
-        });
+        let grant = working_grant(state, &operation.id, &agent.id);
         agent.clearance = agent.effective_clearance(operation, grant.as_ref(), now);
     }
     Ok(agent)
+}
+
+/// The grant the Station works the Agent under in `operation`: its grant when it can be read
+/// and, for a raise, is backed by its approval ([`is_backed`]); a `desk` lower when it cannot
+/// be read; `None` otherwise.
+fn working_grant(state: &DaemonState, operation: &str, agent: &str) -> Option<ClearanceGrant> {
+    match grant_of(state, operation, agent) {
+        Some(grant) => grant.filter(|grant| is_backed(state, grant)),
+        None => Some(unreadable(state, operation, agent)),
+    }
+}
+
+/// The grant an unreadable one counts as: the Agent held at `desk`.
+fn unreadable(state: &DaemonState, operation: &str, agent: &str) -> ClearanceGrant {
+    ClearanceGrant::lower(
+        agent,
+        operation,
+        "desk",
+        format!("station:{}", state.station_id),
+        state.clock.now() as f64,
+    )
+    .because("grant unreadable")
+}
+
+/// Whether a grant may be applied: a lower always; a raise only when its approval is M's
+/// promotion request for exactly this Agent, clearance and Operation, approved by a person
+/// (not a class authorisation, not an expiry), spent, and not revoked.
+pub(super) fn is_backed(state: &DaemonState, grant: &ClearanceGrant) -> bool {
+    let Some(id) = &grant.approval else {
+        return true;
+    };
+    let now = state.clock.now() as f64;
+    let Ok(Some(ApprovalStatus::Decided(approval))) =
+        state.intake.approval(&grant.operation, id, now)
+    else {
+        return false;
+    };
+    let request = &approval.request;
+    approval.decision == Decision::Approved
+        && approval.revoked.is_none()
+        && approval.spent_at.is_some()
+        && approval.signer != EXPIRY_SIGNER
+        && !approval.signer.starts_with("class:")
+        && request.id == *id
+        && request.agent == grant.agent
+        && request.operation == grant.operation
+        && request.session.as_str() == PROMOTION_SESSION
+        && request.mission.as_str() == promotion_mission(&grant.agent)
+        && request.scope.kind == CLEARANCE_KIND
+        && request.scope.target
+            == promotion_target(&grant.agent, &grant.clearance, &grant.operation)
 }
 
 /// The Agent's grant in `operation`; `None` (logged) when it cannot be read. A codename that
@@ -155,26 +201,30 @@ pub(super) fn retirements(roster: &Roster, now: i64) -> Vec<serde_json::Value> {
 }
 
 /// The clearance each posted Agent works at in each Operation now, beside its configured
-/// one, for the check-in: `{OPERATION: {AGENT: {clearance, configured}}}`.
+/// one, with its aliases, for the check-in: `{OPERATION: {AGENT: {clearance, configured,
+/// aliases, unreadable?}}}`. A grant that cannot be read shows `desk` and `unreadable: true`,
+/// as the Station works the Agent.
 pub(super) fn clearances(state: &DaemonState) -> serde_json::Value {
     let now = state.clock.now();
     let mut operations = serde_json::Map::new();
     for operation in state.roster.operations() {
-        let grants = state
-            .intake
-            .clearance_grants(&operation.id)
-            .unwrap_or_default();
         let posted = state.roster.agents_for_operation(&operation.id);
         let mut agents = serde_json::Map::new();
         for agent in posted.unwrap_or_default() {
-            let grant = grants.iter().find(|grant| grant.agent == agent.id);
-            agents.insert(
-                agent.id.clone(),
-                serde_json::json!({
-                    "clearance": agent.effective_clearance(operation, grant, now),
-                    "configured": agent.clearance,
-                }),
-            );
+            let read = grant_of(state, &operation.id, &agent.id);
+            let grant = match &read {
+                Some(grant) => grant.clone().filter(|grant| is_backed(state, grant)),
+                None => Some(unreadable(state, &operation.id, &agent.id)),
+            };
+            let mut entry = serde_json::json!({
+                "clearance": agent.effective_clearance(operation, grant.as_ref(), now),
+                "configured": agent.clearance,
+                "aliases": agent.aliases,
+            });
+            if read.is_none() {
+                entry["unreadable"] = serde_json::json!(true);
+            }
+            agents.insert(agent.id.clone(), entry);
         }
         operations.insert(operation.id.clone(), serde_json::Value::Object(agents));
     }
@@ -525,6 +575,25 @@ mod tests {
         let record = tally(&state);
         assert_eq!(record.tally.done, 3);
         assert_eq!(record.tally_of_model(Some("sonnet")).done, 1);
+    }
+
+    #[test]
+    fn an_unreadable_grant_is_desk_in_the_check_in_as_at_work() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", AGENTS);
+        let grants = root.path().join("registry/clearance-grants/G");
+        std::fs::create_dir_all(&grants).unwrap();
+        std::fs::write(grants.join("007.json"), b"{ not a grant").unwrap();
+        assert_eq!(
+            super::effective(&state, Some("G"), "007")
+                .unwrap()
+                .clearance,
+            "desk"
+        );
+        let shown = &super::clearances(&state)["G"]["007"];
+        assert_eq!(shown["clearance"], "desk");
+        assert_eq!(shown["configured"], "field");
+        assert_eq!(shown["unreadable"], true);
     }
 
     #[test]

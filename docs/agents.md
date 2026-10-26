@@ -213,8 +213,10 @@ Autonomy is earned per Operation and signed by a person. When an Agent's record 
 Operation meets the next step, M files a [green ink](missions.md#green-ink) request of kind
 `clearance` for it, `007:field@G` for example, under Mission `promotion-007`; nothing is
 raised until a person with `approval.decide` **and** `agent.configure` approves it. The
-approval becomes a clearance grant in that Operation only, never above the Operation's own
-clearance, and is spent: revoking the grant is final. A refused or expired request is asked
+approval is spent and becomes a clearance grant in that Operation only, never above the
+Operation's own clearance, for the model and configured clearance the Agent has: a new model
+in the codename, or another configured clearance, does not inherit it and earns its clearance
+afresh. Removing the grant, or revoking its approval, is final. A refused or expired request is asked
 again once the record has as many Missions more.
 
 ```toml
@@ -233,8 +235,10 @@ quiet_on = ["blown", "stalled", "quarantined", "budget_stop", "green_ink_rejecte
 Lowering trust needs no green ink. A person with `agent.configure` may hold an Agent at a
 lower clearance in an Operation (Moneypenny, `ai6ctl agents lower`), which only ever lowers
 it, and may remove the grant to return it to its configured clearance (`ai6ctl agents
-restore`). A quarantine takes back a raised grant. While a person's lower grant stands, M
-files no promotion for that Agent there.
+restore`). A quarantine takes back a raised grant the moment it is stored. While a person's
+lower grant stands, M files no promotion for that Agent there, and a promotion approved
+meanwhile does not overwrite it. A grant a Station cannot read counts as `desk`, and shows as
+`desk` with a note.
 
 Clearance is enforced at the harness as well as by policy. The Claude handler passes Claude
 Code a `PreToolUse` hook (through `--settings`) that runs `ai6 green-ink gate` before each

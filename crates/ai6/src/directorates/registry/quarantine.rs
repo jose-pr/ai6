@@ -84,8 +84,9 @@ impl FileRegistry {
 
 /// Quarantined Agents and the incidents that lead to quarantine.
 pub trait QuarantineStore {
-    /// Quarantines an Agent. Quarantining again replaces the reason; the first record's
-    /// time is kept.
+    /// Quarantines an Agent and, in the same step, removes the clearance grants that raised it
+    /// in that Operation (every Operation when it has none); lowers stay. Quarantining again
+    /// keeps the first record.
     ///
     /// # Errors
     ///
@@ -138,6 +139,9 @@ impl QuarantineStore for FileRegistry {
         }
         let bytes = serde_json::to_vec(record).map_err(io::Error::other)?;
         write_atomic(&path, &bytes)?;
+        // Under the same lock, so no Station reads the raise once the quarantine is stored.
+        // A grant that cannot be removed stays for Headquarters' next round to take back.
+        let _ = self.remove_raises_locked(&record.agent, record.operation.as_deref());
         // A full or unreadable Agent record never keeps a quarantine from being stored.
         let _ = self.count_outcome_locked(&quarantine_report(record));
         Ok(record.clone())
@@ -258,6 +262,7 @@ mod tests {
     use super::*;
     use crate::directorates::medical::quarantine::IncidentKind;
     use crate::directorates::registry::agent_records::NO_OPERATION;
+    use crate::directorates::registry::clearance::ClearanceGrant;
     use crate::directorates::registry::suite::{Store, backend_tests};
 
     backend_tests!(
@@ -267,6 +272,19 @@ mod tests {
 
     fn a_quarantine_covers_its_operation_or_all_and_release_lifts_it(store: &dyn Store) {
         let registry = store.handle();
+        let raise = |agent: &str, operation: &str| {
+            ClearanceGrant::raise(agent, operation, "field", "green-ink-1", "alice", 5.0)
+                .for_occupant(None, "desk")
+        };
+        for grant in [
+            raise("007", "G"),
+            raise("007", "L"),
+            raise("009", "G"),
+            raise("009", "L"),
+            ClearanceGrant::lower("008", "G", "desk", "ops", 5.0),
+        ] {
+            registry.put_clearance_grant(&grant).unwrap();
+        }
         assert!(!registry.is_quarantined("007", Some("G")).unwrap());
         registry
             .quarantine_agent(&Quarantine::new(
@@ -284,6 +302,21 @@ mod tests {
             .quarantine_agent(&Quarantine::new("009", None, "turned", "ops", 11.0))
             .unwrap();
         assert!(registry.is_quarantined("009", Some("anything")).unwrap());
+        let grants = |operation: &str| {
+            registry
+                .clearance_grants(operation)
+                .unwrap()
+                .into_iter()
+                .map(|grant| grant.agent)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(grants("G"), ["008"], "the raises went with the quarantines");
+        assert_eq!(grants("L"), ["007"], "a quarantine in G leaves L's raise");
+        registry
+            .quarantine_agent(&Quarantine::new("008", Some("G".into()), "x", "ops", 12.0))
+            .unwrap();
+        assert_eq!(grants("G"), ["008"], "a lower stays");
+        assert!(registry.release_quarantine("008", Some("G")).unwrap());
         assert!(registry.is_quarantined("009", None).unwrap());
 
         let again = registry

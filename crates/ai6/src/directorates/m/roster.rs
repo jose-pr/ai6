@@ -161,8 +161,9 @@ impl Agent {
     /// grant's, never above the Operation's, and `desk` once retired.
     ///
     /// A live grant that names its green ink request (a raise) replaces the configured
-    /// clearance; any other live grant only lowers it. A grant for another Agent or Operation
-    /// is ignored.
+    /// clearance while the Agent keeps the model and configured clearance it was signed for
+    /// ([`ClearanceGrant::applies_to`]); any other live grant only lowers it. A grant for
+    /// another Agent or Operation, or a raise for another occupant, is ignored.
     pub fn effective_clearance(
         &self,
         operation: &Operation,
@@ -172,7 +173,10 @@ impl Agent {
         let rank = |clearance: &str| clearance_rank(clearance).unwrap_or(0);
         let mut effective = rank(&self.clearance);
         if let Some(grant) = grant.filter(|grant| {
-            grant.agent == self.id && grant.operation == operation.id && grant.is_live(now as f64)
+            grant.agent == self.id
+                && grant.operation == operation.id
+                && grant.is_live(now as f64)
+                && grant.applies_to(self.model.as_deref(), &self.clearance)
         }) {
             effective = if grant.raises() {
                 rank(&grant.clearance)
@@ -1979,8 +1983,10 @@ sources = {{ jira = \"GUA\" }}\n",
         operation.clearance = "field".to_owned();
         let mut agent = Agent::new("007");
         agent.clearance = "desk".to_owned();
-        let raise =
-            |clearance: &str| ClearanceGrant::raise("007", "G", clearance, "gi-1", "m", 10.0);
+        let raise = |clearance: &str| {
+            ClearanceGrant::raise("007", "G", clearance, "gi-1", "m", 10.0)
+                .for_occupant(None, "desk")
+        };
         assert_eq!(agent.effective_clearance(&operation, None, 20), "desk");
         assert_eq!(
             agent.effective_clearance(&operation, Some(&raise("field")), 20),
@@ -1991,7 +1997,8 @@ sources = {{ jira = \"GUA\" }}\n",
             "field",
             "never above the Operation's clearance"
         );
-        let elsewhere = ClearanceGrant::raise("007", "L", "field", "gi-2", "m", 10.0);
+        let elsewhere = ClearanceGrant::raise("007", "L", "field", "gi-2", "m", 10.0)
+            .for_occupant(None, "desk");
         assert_eq!(
             agent.effective_clearance(&operation, Some(&elsewhere), 20),
             "desk"
@@ -2000,6 +2007,28 @@ sources = {{ jira = \"GUA\" }}\n",
         assert_eq!(
             agent.effective_clearance(&operation, Some(&lapsed), 20),
             "desk"
+        );
+        // A new occupant, or a lower configured clearance, does not inherit the raise.
+        agent.model = Some("next-model".to_owned());
+        assert_eq!(
+            agent.effective_clearance(&operation, Some(&raise("field")), 20),
+            "desk"
+        );
+        agent.model = None;
+        let mut higher = operation.clone();
+        higher.clearance = "00".to_owned();
+        let from_field =
+            ClearanceGrant::raise("007", "G", "00", "gi-3", "m", 10.0).for_occupant(None, "field");
+        agent.clearance = "field".to_owned();
+        assert_eq!(
+            agent.effective_clearance(&higher, Some(&from_field), 20),
+            "00"
+        );
+        agent.clearance = "desk".to_owned();
+        assert_eq!(
+            agent.effective_clearance(&higher, Some(&from_field), 20),
+            "desk",
+            "lowering the configured clearance takes the raise away"
         );
 
         agent.clearance = "field".to_owned();

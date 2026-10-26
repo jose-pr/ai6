@@ -629,7 +629,7 @@ pub(crate) mod tests {
         pub(crate) operator: String,
         pub(crate) viewer: String,
         server: tokio::task::JoinHandle<()>,
-        _directory: tempfile::TempDir,
+        pub(crate) directory: tempfile::TempDir,
     }
 
     impl Drop for Served {
@@ -757,7 +757,7 @@ pub(crate) mod tests {
             operator,
             viewer,
             server,
-            _directory: directory,
+            directory,
         }
     }
 

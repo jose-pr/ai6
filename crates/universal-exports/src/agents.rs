@@ -63,6 +63,8 @@ pub struct AgentView {
     pub grant: Option<ClearanceGrant>,
     /// M's promotion request for it waiting for green ink, if any.
     pub promotion: Option<ApprovalRequest>,
+    /// Its grant could not be read: Stations work it at `desk`, and so does this view.
+    pub grant_unreadable: bool,
 }
 
 /// An Agent whose `retire_on` date is near or has come.
@@ -97,6 +99,7 @@ impl AgentView {
             configured_clearance: None,
             grant: None,
             promotion: None,
+            grant_unreadable: false,
         }
     }
 }
@@ -153,6 +156,17 @@ impl Headquarters {
         (field("clearance"), field("configured"))
     }
 
+    /// Whether the check-in says the Agent's grant in `operation` could not be read.
+    fn unreadable(&self, operation: &str, agent: &str) -> bool {
+        self.0
+            .get("agent_clearances")
+            .and_then(|operations| operations.get(operation))
+            .and_then(|agents| agents.get(agent))
+            .and_then(|entry| entry.get("unreadable"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    }
+
     /// The Agent's retirement notice, if the check-in lists one.
     fn retirement(&self, agent: &str) -> Option<RetirementNotice> {
         self.0
@@ -197,9 +211,6 @@ pub(crate) async fn list(
                 );
             }
         }
-        let grants = registry
-            .clearance_grants(&operation)
-            .map_err(|_| ApiError::internal())?;
         let promotions = registry
             .pending_approvals(&operation, unix_timestamp()?)
             .map_err(|_| ApiError::internal())?
@@ -210,10 +221,18 @@ pub(crate) async fn list(
             view.retirement = headquarters.retirement(&view.agent);
             (view.clearance, view.configured_clearance) =
                 headquarters.clearance(&operation, &view.agent);
-            view.grant = grants
-                .iter()
-                .find(|grant| grant.agent == view.agent)
-                .cloned();
+            match registry.clearance_grant(&operation, &view.agent) {
+                Ok(grant) => view.grant = grant,
+                // A codename that is not a Registry key has no grant.
+                Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {}
+                Err(_) => {
+                    view.grant_unreadable = true;
+                    view.clearance = Some("desk".to_owned());
+                }
+            }
+            if headquarters.unreadable(&operation, &view.agent) {
+                view.grant_unreadable = true;
+            }
             view.promotion = promotions
                 .iter()
                 .find(|request| request.agent == view.agent)
@@ -617,6 +636,49 @@ mod tests {
         )
         .await;
         assert_eq!(signed.status(), StatusCode::OK);
+
+        // M raises 007 with it; revoking the approval takes the raise back, audited.
+        let raise = ai6::ClearanceGrant::raise(
+            "007",
+            "G",
+            "field",
+            request.id.clone(),
+            "operator-007",
+            now,
+        )
+        .for_occupant(None, "desk");
+        served.registry.put_clearance_grant(&raise).unwrap();
+        let revoked = call(
+            reqwest::Method::POST,
+            format!(
+                "{}/v1/user/operations/G/green-ink/{}/revoke",
+                served.base, request.id
+            ),
+            &served.operator,
+            None,
+        )
+        .await;
+        assert_eq!(revoked.status(), StatusCode::OK);
+        assert!(
+            served
+                .registry
+                .clearance_grant("G", "007")
+                .unwrap()
+                .is_none()
+        );
+
+        // An unreadable grant shows as desk, as Stations work it.
+        let grants = served.directory.path().join("clearance-grants").join("G");
+        std::fs::create_dir_all(&grants).unwrap();
+        std::fs::write(grants.join("007.json"), b"{ not a grant").unwrap();
+        let views: serde_json::Value = agents(&served.base, &served.operator)
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(views[0]["grant_unreadable"], true);
+        assert_eq!(views[0]["clearance"], "desk");
+        std::fs::remove_file(grants.join("007.json")).unwrap();
 
         let clearance = format!("{}/v1/user/operations/G/agents/007/clearance", served.base);
         let lower = serde_json::json!({"clearance": "desk", "reason": "rewriting history"});

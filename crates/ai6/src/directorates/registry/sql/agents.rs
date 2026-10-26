@@ -13,6 +13,48 @@ use crate::directorates::registry::clearance::{
 };
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
 
+/// The Agent's grant in `operation`, read within a transaction.
+fn grant_in(tx: &mut Tx<'_>, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>> {
+    tx.query_opt(
+        "SELECT record FROM ai6_clearance_grants WHERE operation = $1 AND agent = $2",
+        &[operation.into(), agent.into()],
+    )?
+    .map(|row| parse_grant(row.text(0)?.as_bytes()))
+    .transpose()
+}
+
+/// Removes `agent`'s raises in `operation` (every Operation when `None`) within a write
+/// transaction; lowers stay. Returns how many were removed.
+pub(super) fn remove_raises_in(
+    tx: &mut Tx<'_>,
+    agent: &str,
+    operation: Option<&str>,
+) -> io::Result<usize> {
+    let rows = match operation {
+        Some(operation) => tx.query(
+            "SELECT operation, record FROM ai6_clearance_grants WHERE agent = $1 AND operation = $2",
+            &[agent.into(), operation.into()],
+        )?,
+        None => tx.query(
+            "SELECT operation, record FROM ai6_clearance_grants WHERE agent = $1",
+            &[agent.into()],
+        )?,
+    };
+    let mut removed = 0;
+    for row in rows {
+        let operation = row.text(0)?;
+        // An unreadable grant is removed too: it could be a raise.
+        if parse_grant(row.text(1)?.as_bytes()).is_ok_and(|grant| !grant.raises()) {
+            continue;
+        }
+        removed += tx.execute(
+            "DELETE FROM ai6_clearance_grants WHERE operation = $1 AND agent = $2",
+            &[operation.as_str().into(), agent.into()],
+        )?;
+    }
+    Ok(removed as usize)
+}
+
 impl ClearanceStore for SqlRegistry {
     fn put_clearance_grant(&self, grant: &ClearanceGrant) -> io::Result<()> {
         grant.validate()?;
@@ -47,6 +89,41 @@ impl ClearanceStore for SqlRegistry {
         })
     }
 
+    fn replace_clearance_grant(
+        &self,
+        expected: Option<&ClearanceGrant>,
+        grant: &ClearanceGrant,
+    ) -> io::Result<bool> {
+        grant.validate()?;
+        let text = String::from_utf8(grant_bytes(grant)?).map_err(io::Error::other)?;
+        self.write(|tx, revision| {
+            let current = grant_in(tx, &grant.operation, &grant.agent)?;
+            if current.as_ref() != expected {
+                return Ok(false);
+            }
+            if current.is_none() {
+                let count = tx
+                    .query_opt("SELECT count(*) FROM ai6_clearance_grants", &[])?
+                    .map_or(Ok(0), |row| row.int(0))?;
+                if count >= MAX_GRANTS as i64 {
+                    return Err(invalid_data("too many clearance grants"));
+                }
+            }
+            tx.execute(
+                "INSERT INTO ai6_clearance_grants (operation, agent, record, revision) \
+                 VALUES ($1, $2, $3, $4) ON CONFLICT (operation, agent) \
+                 DO UPDATE SET record = excluded.record, revision = excluded.revision",
+                &[
+                    grant.operation.as_str().into(),
+                    grant.agent.as_str().into(),
+                    text.into(),
+                    revision.into(),
+                ],
+            )?;
+            Ok(true)
+        })
+    }
+
     fn clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>> {
         validate_registry_key(operation)?;
         validate_registry_key(agent)?;
@@ -76,6 +153,24 @@ impl ClearanceStore for SqlRegistry {
         }
         grants.sort_by(|left, right| left.agent.cmp(&right.agent));
         Ok(grants)
+    }
+
+    fn remove_clearance_grant_if(&self, expected: &ClearanceGrant) -> io::Result<bool> {
+        validate_registry_key(&expected.operation)?;
+        validate_registry_key(&expected.agent)?;
+        self.write(|tx, _| {
+            if grant_in(tx, &expected.operation, &expected.agent)?.as_ref() != Some(expected) {
+                return Ok(false);
+            }
+            tx.execute(
+                "DELETE FROM ai6_clearance_grants WHERE operation = $1 AND agent = $2",
+                &[
+                    expected.operation.as_str().into(),
+                    expected.agent.as_str().into(),
+                ],
+            )?;
+            Ok(true)
+        })
     }
 
     fn remove_clearance_grant(

@@ -1527,6 +1527,7 @@ pub trait QuarantineStore {
     // FileRegistry: quarantine/<agent>--<operation or _all>.json, plus quarantine/incidents/<agent>.json
     fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine>   // an existing record is kept;
                                                                               // a new one counts Quarantined on the Agent's record
+                                                                              // and removes its raised clearance grants there
     fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
     fn quarantines(&self) -> io::Result<Vec<Quarantine>>
     fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
@@ -1548,9 +1549,12 @@ Autonomy is earned per Operation and signed by a person. M (the Headquarters Sta
 check-in round) reads each posted Agent's record; when it meets the next step it files a
 green ink request of kind `clearance`, target `AGENT:CLEARANCE@OPERATION`, Mission
 `promotion-AGENT`, Session `m`, idempotency key `TARGET#ROUND`. A person's approval (never a
-class authorisation or an expiry) becomes a raising `ClearanceGrant`, then the approval is
-spent, so it raises once. A quarantine in the Operation removes a raised grant and revokes
-its approval. A live lower grant (a person's) stops M filing promotions for that Agent.
+class authorisation or an expiry) is spent first, then becomes a raising `ClearanceGrant` for
+the Agent's configured model and clearance, written only if the Agent's grant is unchanged
+since the round read it; so it raises once, and a lower written meanwhile stands. Storing a
+quarantine removes the Agent's raises in that Operation (every Operation for a global one) in
+the same step; the round takes back any left. A live lower grant (a person's) stops M filing
+promotions for that Agent.
 
 ```rust
 pub const CLEARANCE_KIND: &str = "clearance";
@@ -1575,9 +1579,14 @@ pub struct PromotionDefinition;   // [operation.ID.promotion.field] / ["00"]: mi
 #[non_exhaustive] pub struct ClearanceGrant { pub agent: String, pub operation: String,
     pub clearance: String, pub signer: String, pub at: f64, pub expires_at: Option<f64>,
     pub approval: Option<String> /* the green ink request that raised it; None: only lowers */,
+    pub model: Option<String>, pub base: Option<String> /* a raise's occupant: configured model and
+                                                          clearance it was signed for; base required */,
     pub reason: Option<String> }
 impl ClearanceGrant {
     pub fn raise(agent, operation, clearance, approval, signer, at) -> Self;
+    pub fn for_occupant(self, model: Option<String>, base) -> Self;   // required on a raise
+    pub fn applies_to(&self, model: Option<&str>, configured: &str) -> bool; // a lower always; a raise
+                                                                          // only for its occupant
     pub fn lower(agent, operation, clearance, signer, at) -> Self;
     pub fn expiring(self, at: f64) -> Self; pub fn because(self, reason) -> Self;
     pub fn raises(&self) -> bool; pub fn is_live(&self, now: f64) -> bool;
@@ -1586,6 +1595,9 @@ impl ClearanceGrant {
 pub trait ClearanceStore {
     // FileRegistry: clearance-grants/<operation>/<agent>.json; SQL: ai6_clearance_grants
     fn put_clearance_grant(&self, grant: &ClearanceGrant) -> io::Result<()>   // replaces; 10,000 at most
+    fn replace_clearance_grant(&self, expected: Option<&ClearanceGrant>, grant: &ClearanceGrant)
+        -> io::Result<bool>                    // compare-and-set under the lock or in one transaction
+    fn remove_clearance_grant_if(&self, expected: &ClearanceGrant) -> io::Result<bool>
     fn clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>>
     fn clearance_grants(&self, operation: &str) -> io::Result<Vec<ClearanceGrant>>
     fn remove_clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>>
@@ -1593,8 +1605,10 @@ pub trait ClearanceStore {
 ```
 
 The Station works an Agent at its effective clearance (start, resume, green ink, class
-authorisations, Agent records); a grant it cannot read counts as one holding it at `desk`.
-Each check-in carries `agent_clearances`: `{OPERATION: {AGENT: {clearance, configured}}}`.
+authorisations, proposals, Agent records); a grant it cannot read counts as one holding it at
+`desk`, and a raise counts only when its approval is M's request for exactly that Agent,
+clearance and Operation, approved by a person, spent and not revoked. Each check-in carries
+`agent_clearances`: `{OPERATION: {AGENT: {clearance, configured, aliases, unreadable?}}}`.
 
 ## Agent records (`ai6::directorates::registry::agent_records`)
 

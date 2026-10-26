@@ -1,10 +1,12 @@
 //! Clearance grants: an Agent's clearance in one Operation, set apart from its configured one.
 //!
 //! A grant that names the green ink request it came from raises the Agent to its clearance
-//! (never past the Operation's); one without lowers it, and only lowers it: the Agent works at
+//! (never past the Operation's), for as long as the Agent keeps the model and the configured
+//! clearance it was signed for; one without lowers it, and only lowers it: the Agent works at
 //! the lower of its configured clearance and the grant's. One grant per Agent and Operation;
-//! removing it returns the Agent to its configured clearance. Every Station reads the same
-//! records: `clearance-grants/OPERATION/AGENT.json`.
+//! removing it returns the Agent to its configured clearance. A new quarantine of the Agent
+//! removes its raises with it. Every Station reads the same records:
+//! `clearance-grants/OPERATION/AGENT.json`.
 
 use std::fs;
 use std::io;
@@ -43,6 +45,14 @@ pub struct ClearanceGrant {
     /// The green ink request that raised it; `None` for a grant that only lowers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<String>,
+    /// For a raise: the model the codename was configured with when it was signed (`None`: the
+    /// handler's default). The raise applies only while the Agent keeps that model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// For a raise: the Agent's configured clearance when it was signed. The raise applies only
+    /// while that is still its configured clearance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
     /// Why, in the signer's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -50,7 +60,8 @@ pub struct ClearanceGrant {
 
 impl ClearanceGrant {
     /// A grant raising `agent` to `clearance` in `operation`, signed through the green ink
-    /// request `approval`.
+    /// request `approval`. Name the occupant it was earned by with
+    /// [`ClearanceGrant::for_occupant`]; a raise without one is refused when stored.
     pub fn raise(
         agent: impl Into<String>,
         operation: impl Into<String>,
@@ -67,8 +78,19 @@ impl ClearanceGrant {
             at,
             expires_at: None,
             approval: Some(approval.into()),
+            model: None,
+            base: None,
             reason: None,
         }
+    }
+
+    /// Names the occupant a raise was earned by: the configured `model` and the configured
+    /// clearance `base` it raises from.
+    #[must_use]
+    pub fn for_occupant(mut self, model: Option<String>, base: impl Into<String>) -> Self {
+        self.model = model;
+        self.base = Some(base.into());
+        self
     }
 
     /// A grant that holds `agent` at `clearance` or below in `operation`.
@@ -87,6 +109,8 @@ impl ClearanceGrant {
             at,
             expires_at: None,
             approval: None,
+            model: None,
+            base: None,
             reason: None,
         }
     }
@@ -116,13 +140,21 @@ impl ClearanceGrant {
         self.expires_at.is_none_or(|expires| expires > now)
     }
 
+    /// Whether it applies to an Agent configured with `model` and `configured` clearance: a
+    /// lower always does, a raise only for the occupant it was signed for.
+    pub fn applies_to(&self, model: Option<&str>, configured: &str) -> bool {
+        !self.raises()
+            || (self.model.as_deref() == model && self.base.as_deref() == Some(configured))
+    }
+
     /// Checks the grant's bounds.
     ///
     /// # Errors
     ///
     /// `InvalidInput` for an Agent or Operation that is not a Registry key, an unknown
-    /// clearance, an empty or oversized signer, approval or reason, or a time that is not
-    /// finite and positive or an expiry before it.
+    /// clearance, a raise without a known base clearance, an empty or oversized signer,
+    /// approval, model or reason, or a time that is not finite and positive or an expiry
+    /// before it.
     pub fn validate(&self) -> io::Result<()> {
         validate_registry_key(&self.agent)?;
         validate_registry_key(&self.operation)?;
@@ -134,6 +166,12 @@ impl ClearanceGrant {
         if !CLEARANCES.contains(&self.clearance.as_str())
             || !bounded(&self.signer)
             || self.approval.as_deref().is_some_and(|id| !bounded(id))
+            || self.model.as_deref().is_some_and(|model| !bounded(model))
+            || self.raises()
+                && !self
+                    .base
+                    .as_deref()
+                    .is_some_and(|base| CLEARANCES.contains(&base))
             || self
                 .reason
                 .as_deref()
@@ -163,6 +201,18 @@ pub trait ClearanceStore {
     /// past 10,000 grants; I/O errors otherwise.
     fn put_clearance_grant(&self, grant: &ClearanceGrant) -> io::Result<()>;
 
+    /// Stores `grant` only if the Agent's grant in that Operation is still `expected` (`None`:
+    /// it has none), in one step; `false`, storing nothing, when it changed.
+    ///
+    /// # Errors
+    ///
+    /// As [`ClearanceStore::put_clearance_grant`].
+    fn replace_clearance_grant(
+        &self,
+        expected: Option<&ClearanceGrant>,
+        grant: &ClearanceGrant,
+    ) -> io::Result<bool>;
+
     /// The Agent's grant in `operation`, live or lapsed.
     ///
     /// # Errors
@@ -177,6 +227,14 @@ pub trait ClearanceStore {
     ///
     /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
     fn clearance_grants(&self, operation: &str) -> io::Result<Vec<ClearanceGrant>>;
+
+    /// Removes `expected` only if it is still the Agent's grant in its Operation, in one step;
+    /// `false` when the grant changed or is gone.
+    ///
+    /// # Errors
+    ///
+    /// As [`ClearanceStore::clearance_grant`].
+    fn remove_clearance_grant_if(&self, expected: &ClearanceGrant) -> io::Result<bool>;
 
     /// Removes the Agent's grant in `operation` and returns it, or `None` when it had none.
     ///
@@ -214,6 +272,26 @@ impl ClearanceStore for FileRegistry {
         write_atomic(&path, &bytes)
     }
 
+    fn replace_clearance_grant(
+        &self,
+        expected: Option<&ClearanceGrant>,
+        grant: &ClearanceGrant,
+    ) -> io::Result<bool> {
+        grant.validate()?;
+        let bytes = grant_bytes(grant)?;
+        let _lock = registry_lock(&self.root)?;
+        let path = self.grant_path(&grant.operation, &grant.agent);
+        let current = read_grant(&path, &grant.operation, &grant.agent)?;
+        if current.as_ref() != expected {
+            return Ok(false);
+        }
+        if current.is_none() && count_files(&self.grants_root())? >= MAX_GRANTS {
+            return Err(invalid_data("too many clearance grants"));
+        }
+        write_atomic(&path, &bytes)?;
+        Ok(true)
+    }
+
     fn clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>> {
         validate_registry_key(operation)?;
         validate_registry_key(agent)?;
@@ -243,6 +321,18 @@ impl ClearanceStore for FileRegistry {
         Ok(grants)
     }
 
+    fn remove_clearance_grant_if(&self, expected: &ClearanceGrant) -> io::Result<bool> {
+        validate_registry_key(&expected.operation)?;
+        validate_registry_key(&expected.agent)?;
+        let _lock = registry_lock(&self.root)?;
+        let path = self.grant_path(&expected.operation, &expected.agent);
+        if read_grant(&path, &expected.operation, &expected.agent)?.as_ref() != Some(expected) {
+            return Ok(false);
+        }
+        fs::remove_file(&path)?;
+        Ok(true)
+    }
+
     fn remove_clearance_grant(
         &self,
         operation: &str,
@@ -257,6 +347,41 @@ impl ClearanceStore for FileRegistry {
         };
         fs::remove_file(&path)?;
         Ok(Some(grant))
+    }
+}
+
+impl FileRegistry {
+    /// Removes `agent`'s raises in `operation` (every Operation when `None`); the caller holds
+    /// the Registry lock. Lowers stay. Returns how many were removed.
+    pub(super) fn remove_raises_locked(
+        &self,
+        agent: &str,
+        operation: Option<&str>,
+    ) -> io::Result<usize> {
+        let operations = match operation {
+            Some(operation) => vec![operation.to_owned()],
+            None => match fs::read_dir(self.grants_root()) {
+                Ok(entries) => entries
+                    .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+                    .collect(),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+                Err(error) => return Err(error),
+            },
+        };
+        let mut removed = 0;
+        for operation in operations {
+            let path = self.grant_path(&operation, agent);
+            // An unreadable grant is removed too: it could be a raise.
+            let raise = match read_grant(&path, &operation, agent) {
+                Ok(grant) => grant.is_some_and(|grant| grant.raises()),
+                Err(_) => path.is_file(),
+            };
+            if raise {
+                fs::remove_file(&path)?;
+                removed += 1;
+            }
+        }
+        Ok(removed)
     }
 }
 
@@ -321,7 +446,8 @@ mod tests {
     fn a_grant_is_kept_per_agent_and_operation_and_removed(store: &dyn Store) {
         let registry = store.handle();
         assert_eq!(registry.clearance_grant("G", "007").unwrap(), None);
-        let raised = ClearanceGrant::raise("007", "G", "field", "green-ink-1", "m", 10.0);
+        let raised = ClearanceGrant::raise("007", "G", "field", "green-ink-1", "m", 10.0)
+            .for_occupant(Some("opus".into()), "desk");
         registry.put_clearance_grant(&raised).unwrap();
         let lowered = ClearanceGrant::lower("008", "G", "desk", "ops", 11.0)
             .because("review")
@@ -353,7 +479,38 @@ mod tests {
         assert_eq!(registry.remove_clearance_grant("G", "007").unwrap(), None);
         assert_eq!(registry.clearance_grants("L").unwrap().len(), 1);
 
+        // A grant is replaced only if it is still the one the writer saw.
+        let lowered = ClearanceGrant::lower("007", "G", "desk", "ops", 14.0);
+        let raise = ClearanceGrant::raise("007", "G", "field", "green-ink-2", "alice", 15.0)
+            .for_occupant(None, "desk");
+        assert!(registry.replace_clearance_grant(None, &lowered).unwrap());
+        assert!(!registry.replace_clearance_grant(None, &raise).unwrap());
+        assert_eq!(
+            registry.clearance_grant("G", "007").unwrap(),
+            Some(lowered.clone())
+        );
+        assert!(
+            registry
+                .replace_clearance_grant(Some(&lowered), &raise)
+                .unwrap()
+        );
+        assert!(
+            !registry.remove_clearance_grant_if(&lowered).unwrap(),
+            "not that grant now"
+        );
+        assert!(registry.remove_clearance_grant_if(&raise).unwrap());
+        assert!(registry.replace_clearance_grant(None, &raise).unwrap());
+        assert!(raise.applies_to(None, "desk"));
+        assert!(!raise.applies_to(Some("sonnet"), "desk"), "another model");
+        assert!(
+            !raise.applies_to(None, "field"),
+            "another configured clearance"
+        );
+        assert!(lowered.applies_to(Some("sonnet"), "00"));
+        registry.remove_clearance_grant("G", "007").unwrap();
+
         for bad in [
+            ClearanceGrant::raise("007", "G", "field", "green-ink-3", "alice", 1.0),
             ClearanceGrant::lower("007", "G", "cosmic", "ops", 1.0),
             ClearanceGrant::lower("007", "G", "desk", " ", 1.0),
             ClearanceGrant::lower("0/7", "G", "desk", "ops", 1.0),

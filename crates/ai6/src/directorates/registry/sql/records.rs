@@ -600,6 +600,9 @@ impl QuarantineStore for SqlRegistry {
                     revision.into(),
                 ],
             )?;
+            // In the same transaction, so no Station reads the raise once the quarantine is
+            // stored.
+            super::agents::remove_raises_in(tx, &record.agent, record.operation.as_deref())?;
             // A full or unreadable Agent record never keeps a quarantine from being stored.
             let _ = super::agents::count_in(tx, revision, &quarantine_report(record));
             Ok(record.clone())
