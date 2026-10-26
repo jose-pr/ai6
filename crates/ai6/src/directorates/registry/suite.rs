@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use super::backend::RegistryBackend;
 use super::sessions::{NewSession, SessionError, SessionRecord, SessionUpdate};
-use super::store::{Brief, FileRegistry, Lease, unix_time};
+use super::store::{Brief, FileRegistry, Lease};
 
 /// Names the PostgreSQL server the suite runs against: a `postgres://` URL whose user may
 /// create schemas in its database.
@@ -225,8 +225,9 @@ pub(crate) fn brief(id: &str) -> Brief {
     serde_json::from_value(serde_json::json!({"title": "Inspect", "id": id})).expect("a brief")
 }
 
-/// Lets the lease on `key` lapse: its holder renews it for a nanosecond, then the wall clock
-/// passes that.
+/// Lets the lease on `key` lapse: its holder renews it for a nanosecond, then the backend's
+/// own clock passes that. SQL backends judge expiry by the database's clock, which SQLite
+/// keeps in milliseconds, so the test process's clock is not the one to wait on.
 pub(crate) fn lapse(registry: &dyn TestRegistry, key: &str, station: &str) -> Lease {
     assert!(
         registry
@@ -234,8 +235,11 @@ pub(crate) fn lapse(registry: &dyn TestRegistry, key: &str, station: &str) -> Le
             .unwrap()
     );
     until(|| {
-        let lease = registry.lease(key).unwrap().unwrap();
-        (lease.expires() < unix_time().unwrap()).then_some(lease)
+        registry
+            .expired()
+            .unwrap()
+            .into_iter()
+            .find(|lease| lease.key() == key)
     })
 }
 
