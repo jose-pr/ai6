@@ -12,7 +12,7 @@ exclude = [".*", "*.local.*"]
 
 [features]
 default = []
-cli = ["ai6/daemon", "dep:clap", "tokio/signal"]
+cli = ["ai6/daemon", "ai6/sqlite", "ai6/postgres", "dep:clap", "tokio/signal"]
 
 [[bin]]
 name = "universal-exports"

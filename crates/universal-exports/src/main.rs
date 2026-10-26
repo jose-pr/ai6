@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ai6::guatiao::{ToValue, Value};
-use ai6::{Authenticator, Authorizer, Directory, FileRegistry, RoleAuthorizer};
+use ai6::{Authenticator, Authorizer, Directory, RoleAuthorizer};
 use clap::Parser;
 use guatiao::value::Number;
 use serde_json::Value as JsonValue;
@@ -122,7 +122,7 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let registry = match FileRegistry::from_environment() {
+    let registry = match ai6::directorates::registry::backend::from_environment() {
         Ok(registry) => registry,
         Err(error) => {
             eprintln!("universal-exports: shared access-token Registry is unavailable: {error}");
@@ -137,8 +137,8 @@ async fn main() -> ExitCode {
         }
     };
     let gateway = match access {
-        Some(access) => Gateway::with_access(config, Arc::new(registry), access),
-        None => Gateway::with_registry(config, Arc::new(registry)),
+        Some(access) => Gateway::with_access(config, registry, access),
+        None => Gateway::with_registry(config, registry),
     };
     match gateway.serve_loopback(cli.port, shutdown_signal()).await {
         Ok(()) => ExitCode::SUCCESS,

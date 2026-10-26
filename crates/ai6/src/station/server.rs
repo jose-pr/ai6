@@ -59,9 +59,7 @@ use crate::directorates::registry::cables::{
 use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionStatus, SessionUpdate,
 };
-use crate::directorates::registry::store::{
-    Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, Lease,
-};
+use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, GONE_DARK_AFTER, Lease};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
@@ -124,9 +122,20 @@ pub struct StationConfig {
     theaters: Theaters,
     /// Q's loadouts and secret backend, and the credential leases issued to Sessions.
     credentials: credentials::CredentialDesk,
+    headquarters_lease: Duration,
 }
 
 impl StationConfig {
+    /// Sets how long the Headquarters lease this Station holds lasts between renewals
+    /// (default [`DEFAULT_LEASE`]): how long a standby control Station waits before taking
+    /// over from a Headquarters that went dark. It must be positive and should span several
+    /// half-second scheduler ticks.
+    #[must_use]
+    pub fn with_headquarters_lease(mut self, ttl: Duration) -> Self {
+        self.headquarters_lease = ttl;
+        self
+    }
+
     /// Replaces the Station's capabilities.
     #[must_use]
     pub fn with_roles(mut self, roles: impl IntoIterator<Item = StationRole>) -> Self {
@@ -191,6 +200,7 @@ impl Default for StationConfig {
             extra_theaters: Vec::new(),
             theaters: Theaters::default(),
             credentials: credentials::CredentialDesk::default(),
+            headquarters_lease: DEFAULT_LEASE,
         }
     }
 }
@@ -249,8 +259,9 @@ impl ServeConfig {
         self
     }
 
-    /// Sets the shared Registry. Without one, the daemon opens the [`FileRegistry`] that
-    /// `AI6_REGISTRY`, `AI6_HOME` or the platform state directory names.
+    /// Sets the shared Registry. Without one, the daemon opens the Registry `AI6_REGISTRY`
+    /// names (a directory, or a SQL location with the `sqlite` or `postgres` feature), else
+    /// the [`FileRegistry`](crate::FileRegistry) in `AI6_HOME` or the platform state directory.
     #[must_use]
     pub fn with_registry(mut self, registry: Arc<dyn RegistryBackend>) -> Self {
         self.registry = Some(registry);
@@ -422,6 +433,12 @@ where
             "max concurrent Missions must be greater than zero",
         ));
     }
+    if config.station.headquarters_lease.is_zero() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the Headquarters lease must be positive",
+        ));
+    }
     let config_dir = match config.config_dir.take() {
         Some(path) => path,
         None => roster::config_dir().map_err(|error| {
@@ -494,7 +511,7 @@ where
     let mut missions = MissionStore::open(mission_store)?;
     let intake: Arc<dyn RegistryBackend> = match config.registry.take() {
         Some(registry) => registry,
-        None => Arc::new(FileRegistry::from_environment()?),
+        None => crate::directorates::registry::backend::from_environment()?,
     };
     let startup_recovery = recover_startup_missions(&mut missions)?;
     let listener = TcpListener::bind(config.address).await?;
@@ -1109,7 +1126,7 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
     let is_headquarters = state.station.roles.contains(&StationRole::Control)
         && state
             .intake
-            .elect(station, DEFAULT_LEASE)
+            .elect(station, state.station.headquarters_lease)
             .unwrap_or_default();
     if is_headquarters && let Ok(expired) = state.intake.expired() {
         for lease in expired {
@@ -5238,6 +5255,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::directorates::registry::store::FileRegistry;
 
     #[test]
     fn a_failed_cover_policy_marks_the_mission_blown() {

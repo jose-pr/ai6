@@ -4,7 +4,6 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use ai6::station::identity;
-use ai6::{QuarantineStore, SleeperStore};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -196,6 +195,14 @@ struct ServeArgs {
     /// AI6 configuration directory containing operations.toml and agents.toml.
     #[arg(long)]
     config_dir: Option<PathBuf>,
+    /// Where the roster (Operations, Agents, roles, covers) comes from: a configuration
+    /// directory, `sqlite:PATH` or a `postgres://` URL (default: the configuration directory).
+    #[arg(long, value_name = "LOCATION")]
+    config: Option<String>,
+    /// Where the shared Registry is: a directory, `sqlite:PATH` or a `postgres://` URL
+    /// (default: AI6_REGISTRY, else the state directory).
+    #[arg(long, value_name = "LOCATION")]
+    registry: Option<String>,
     /// Maximum number of Agent Sessions this daemon may run at once.
     #[arg(long, default_value_t = ai6::DEFAULT_MAX_CONCURRENT_MISSIONS)]
     max_concurrent_missions: usize,
@@ -232,6 +239,10 @@ struct ServeArgs {
     /// Pin the terminal provider agent harnesses run in (default: an available one, preferring `pty`).
     #[arg(long)]
     terminal: Option<String>,
+    /// Seconds the Headquarters lease lasts between renewals: how long a standby control
+    /// Station waits before taking over from a Headquarters that went dark.
+    #[arg(long, value_parser = parse_duration, default_value = "60")]
+    headquarters_lease: Duration,
 }
 
 #[derive(Debug, Subcommand)]
@@ -310,6 +321,8 @@ async fn main() -> ExitCode {
                 listen,
                 plugin_paths,
                 config_dir,
+                config: roster_location,
+                registry,
                 max_concurrent_missions,
                 stall_timeout,
                 loop_timeout,
@@ -322,6 +335,7 @@ async fn main() -> ExitCode {
                 role,
                 labels,
                 terminal,
+                headquarters_lease,
             } = *args;
             let publisher = match publisher_config() {
                 Ok(config) => config,
@@ -342,6 +356,7 @@ async fn main() -> ExitCode {
             for (key, value) in labels {
                 station_config = station_config.with_label(key, value);
             }
+            station_config = station_config.with_headquarters_lease(headquarters_lease);
             if let Some(terminal) = terminal {
                 station_config = station_config.with_terminal(terminal);
             }
@@ -364,6 +379,24 @@ async fn main() -> ExitCode {
             }
             if let Some(config_dir) = config_dir {
                 config = config.with_config_dir(config_dir);
+            }
+            if let Some(location) = roster_location {
+                match ai6::directorates::m::config::open(&location) {
+                    Ok(source) => config = config.with_config_source(source),
+                    Err(error) => {
+                        eprintln!("ai6: the roster at {location} cannot be opened: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            if let Some(location) = registry {
+                match ai6::directorates::registry::backend::open(&location) {
+                    Ok(registry) => config = config.with_registry(registry),
+                    Err(error) => {
+                        eprintln!("ai6: the Registry at {location} cannot be opened: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
             }
             if let Some(publisher) = publisher {
                 config = config.with_publisher(publisher);
@@ -643,7 +676,8 @@ fn sleeper_command(config_dir: Option<PathBuf>, command: SleeperCommand) -> Resu
         None => ai6::directorates::m::roster::config_dir().map_err(|e| e.to_string())?,
     };
     let roster = ai6::Roster::load(&config_dir).map_err(|e| e.to_string())?;
-    let registry = ai6::FileRegistry::from_environment().map_err(|e| e.to_string())?;
+    let registry =
+        ai6::directorates::registry::backend::from_environment().map_err(|e| e.to_string())?;
     let find = |operation: &str, name: &str| -> Result<(String, ai6::Sleeper), String> {
         let operation = roster.operation(operation).map_err(|e| e.to_string())?;
         let sleeper = operation
@@ -709,7 +743,8 @@ fn sleeper_command(config_dir: Option<PathBuf>, command: SleeperCommand) -> Resu
 }
 
 fn quarantine_command(command: QuarantineCommand) -> Result<String, String> {
-    let registry = ai6::FileRegistry::from_environment().map_err(|e| e.to_string())?;
+    let registry =
+        ai6::directorates::registry::backend::from_environment().map_err(|e| e.to_string())?;
     let scope = |operation: Option<String>, all: bool| -> Result<Option<String>, String> {
         match (operation, all) {
             (Some(operation), false) => Ok(Some(operation)),
