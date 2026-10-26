@@ -152,6 +152,13 @@ impl Desk {
         }
         let status = registry.request_approval(&request).map_err(unavailable)?;
         record_event(state, &request, "requested", &request.agent);
+        audit(
+            state,
+            "green_ink.requested",
+            &format!("agent:{}", request.agent),
+            &request,
+            now,
+        );
         queue_event(
             state,
             &asked.mission,
@@ -491,6 +498,9 @@ fn told(state: &DaemonState, approval: &Approval, now: f64) {
         );
     }
     record_event(state, request, approval.decision.as_str(), &approval.signer);
+    if approval.decision == Decision::Expired {
+        audit(state, "green_ink.expired", &approval.signer, request, now);
+    }
     queue_event(
         state,
         request.mission.as_str(),
@@ -545,19 +555,34 @@ fn decision_text(approval: &Approval, now: f64) -> String {
 /// Audits a class authorisation's use; the actor is the class authorisation itself.
 fn record_class_use(state: &DaemonState, approval: &Approval) {
     let request = &approval.request;
-    let audit = AuditRecord {
-        id: format!("class_authorization.used-{}", uuid::Uuid::new_v4().simple()),
-        actor: approval.signer.clone(),
-        action: "class_authorization.used".to_owned(),
+    audit(
+        state,
+        "class_authorization.used",
+        &approval.signer,
+        request,
+        approval.at,
+    );
+    record_event(state, request, "approved", &approval.signer);
+}
+
+/// Audits `action` on a request: the target names the request and its step, never the
+/// Agent's reason.
+fn audit(state: &DaemonState, action: &str, actor: &str, request: &ApprovalRequest, at: f64) {
+    let record = AuditRecord {
+        id: format!("{action}-{}", uuid::Uuid::new_v4().simple()),
+        actor: actor.to_owned(),
+        action: action.to_owned(),
         operation: request.operation.clone(),
         resource: None,
-        target: request.id.clone(),
-        at: approval.at,
+        target: format!(
+            "{} {} {}",
+            request.id, request.scope.kind, request.scope.target
+        ),
+        at,
     };
-    if let Err(error) = state.intake.record_audit(&audit) {
-        eprintln!("ai6: class authorisation audit record was not written: {error}");
+    if let Err(error) = state.intake.record_audit(&record) {
+        eprintln!("ai6: green ink audit record {action} was not written: {error}");
     }
-    record_event(state, request, "approved", &approval.signer);
 }
 
 fn record_event(state: &DaemonState, request: &ApprovalRequest, action: &str, actor: &str) {
@@ -772,6 +797,22 @@ mod tests {
             ]
         );
 
+        let requested = state
+            .intake
+            .audit_records()
+            .unwrap()
+            .into_iter()
+            .find(|record| {
+                record.action == "green_ink.requested" && record.target.starts_with(&request_id)
+            })
+            .expect("the request is audited");
+        assert_eq!(requested.actor, "agent:007");
+        assert_eq!(
+            requested.target,
+            format!("{request_id} push origin:refs/heads/main"),
+            "the step, never the reason"
+        );
+
         // Asking again with the same key returns the decision.
         let again: serde_json::Value =
             serde_json::from_str(&call_tool(&state, &mission_id, push_main("push-1")).await)
@@ -965,6 +1006,47 @@ mod tests {
                 .await
                 .is_some(),
             "a revoked approval covers nothing"
+        );
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn an_expired_request_is_told_and_audited_without_its_reason() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "expire");
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let request = ApprovalRequest::try_new(
+            "G",
+            MissionId::try_new(&mission_id).unwrap(),
+            SessionId::try_new("provider-session-remote").unwrap(),
+            "007",
+            ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
+            "a reason only the operator reads",
+            "expire-1",
+        )
+        .unwrap()
+        .expiring(now(&state) - 120.0, Duration::from_secs(60));
+        state.intake.request_approval(&request).unwrap();
+
+        deliver_decisions(&state).await;
+        let told = told_about(&request.id);
+        assert!(
+            told.iter()
+                .any(|(_, text)| text.contains("expired without a decision")),
+            "{told:?}"
+        );
+        let expired = state
+            .intake
+            .audit_records()
+            .unwrap()
+            .into_iter()
+            .find(|record| record.action == "green_ink.expired")
+            .expect("the expiry is audited");
+        assert_eq!(expired.actor, crate::EXPIRY_SIGNER);
+        assert_eq!(
+            expired.target,
+            format!("{} push origin:refs/heads/main", request.id)
         );
         state.stopping.store(true, Ordering::Release);
     }
