@@ -370,19 +370,6 @@ impl FileRegistry {
         Ok(read_headquarters(&path)?.map_or(0, |lease| lease.term()))
     }
 
-    /// Records a new Session held by its Station and returns it with its fencing token.
-    ///
-    /// # Errors
-    ///
-    /// `Exists` when the ID is taken; `Io` for an invalid ID, record or Registry failure.
-    pub fn open_session(
-        &self,
-        new: NewSession,
-        ttl: Duration,
-    ) -> Result<SessionRecord, SessionError> {
-        self.open_session_at(new, ttl, unix_time()?)
-    }
-
     pub(crate) fn open_session_at(
         &self,
         new: NewSession,
@@ -424,81 +411,6 @@ impl FileRegistry {
         Ok(record)
     }
 
-    /// Reads one Session record.
-    pub fn session(&self, id: &str) -> io::Result<Option<SessionRecord>> {
-        validate_session_id(id)?;
-        let _lock = registry_lock(&self.root)?;
-        read_session(&self.session_path(id))
-    }
-
-    /// Every way any Session of a Mission was exposed, earliest first, one entry per source.
-    ///
-    /// A later attempt inherits this, so exposure cannot be shed by starting again.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the Session records cannot be read.
-    pub fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
-        let mut merged: Vec<Exposure> = Vec::new();
-        for record in self
-            .sessions()?
-            .into_iter()
-            .filter(|record| record.mission_id == mission_id)
-        {
-            for exposure in record.exposure {
-                match merged
-                    .iter_mut()
-                    .find(|known| known.source == exposure.source)
-                {
-                    Some(known) => known.at = known.at.min(exposure.at),
-                    None => merged.push(exposure),
-                }
-            }
-        }
-        merged.sort_by(|left, right| left.at.total_cmp(&right.at));
-        Ok(merged)
-    }
-
-    /// Lists every Session record in stable ID order.
-    pub fn sessions(&self) -> io::Result<Vec<SessionRecord>> {
-        let _lock = registry_lock(&self.root)?;
-        let mut records = Vec::new();
-        let entries = match fs::read_dir(self.root.join("sessions")) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(records),
-            Err(error) => return Err(error),
-        };
-        for entry in entries {
-            let path = entry?.path();
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-                && let Some(record) = read_session(&path)?
-            {
-                records.push(record);
-            }
-        }
-        records.sort_by(|left, right| left.session_id.cmp(&right.session_id));
-        Ok(records)
-    }
-
-    /// Takes the lease on a Session for `station`, or renews it when `station` already holds it.
-    ///
-    /// A different holder's live lease is respected. A lapsed one is taken over with a fencing
-    /// token above the previous holder's, which makes that holder's writes stale.
-    ///
-    /// # Errors
-    ///
-    /// `NotFound`, `Ended`, `HeldBy` while another Station's lease is live, or `Io`.
-    pub fn take_session(
-        &self,
-        id: &str,
-        station: &str,
-        ttl: Duration,
-    ) -> Result<SessionRecord, SessionError> {
-        self.take_session_at(id, station, ttl, unix_time()?)
-    }
-
     pub(crate) fn take_session_at(
         &self,
         id: &str,
@@ -524,43 +436,6 @@ impl FileRegistry {
         record.lease_expires = now + ttl.as_secs_f64();
         write_session(&path, &record)?;
         Ok(record)
-    }
-
-    /// Extends the lease `station` holds on a Session, if it still holds it with `fence`.
-    ///
-    /// # Errors
-    ///
-    /// `Stale` when another Station took the Session or `fence` is not the current token.
-    pub fn renew_session(
-        &self,
-        id: &str,
-        station: &str,
-        fence: u64,
-        ttl: Duration,
-    ) -> Result<SessionRecord, SessionError> {
-        self.write_fenced(
-            id,
-            station,
-            fence,
-            unix_time()?,
-            Some(ttl),
-            SessionUpdate::default(),
-        )
-    }
-
-    /// Applies `update` to a Session if `station` still holds it with `fence`.
-    ///
-    /// # Errors
-    ///
-    /// `Stale` when another Station took the Session or `fence` is not the current token.
-    pub fn update_session(
-        &self,
-        id: &str,
-        station: &str,
-        fence: u64,
-        update: SessionUpdate,
-    ) -> Result<SessionRecord, SessionError> {
-        self.write_fenced(id, station, fence, unix_time()?, None, update)
     }
 
     pub(crate) fn write_fenced(
@@ -624,17 +499,6 @@ impl FileRegistry {
         Ok(record)
     }
 
-    /// Marks a Session whose holder stopped renewing its lease as lost, giving the reason.
-    ///
-    /// The fencing token moves on, so the holder's writes are refused if it comes back.
-    ///
-    /// # Errors
-    ///
-    /// `NotFound`, `Ended` for a closed Session, `HeldBy` while its lease is live, or `Io`.
-    pub fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError> {
-        self.lose_session_at(id, reason, unix_time()?)
-    }
-
     pub(crate) fn lose_session_at(
         &self,
         id: &str,
@@ -658,13 +522,185 @@ impl FileRegistry {
         write_session(&path, &record)?;
         Ok(record)
     }
+}
+
+/// Agent Session records with their fenced leases.
+pub trait SessionStore {
+    /// Records a new Session held by its Station and returns it with its fencing token.
+    ///
+    /// # Errors
+    ///
+    /// `Exists` when the ID is taken; `Io` for an invalid ID, record or Registry failure.
+    fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>;
+
+    /// Reads one Session record.
+    fn session(&self, id: &str) -> io::Result<Option<SessionRecord>>;
+
+    /// Every way any Session of a Mission was exposed, earliest first, one entry per source.
+    ///
+    /// A later attempt inherits this, so exposure cannot be shed by starting again.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Session records cannot be read.
+    fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>;
+
+    /// Lists every Session record in stable ID order.
+    fn sessions(&self) -> io::Result<Vec<SessionRecord>>;
+
+    /// Takes the lease on a Session for `station`, or renews it when `station` already holds it.
+    ///
+    /// A different holder's live lease is respected. A lapsed one is taken over with a fencing
+    /// token above the previous holder's, which makes that holder's writes stale.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound`, `Ended`, `HeldBy` while another Station's lease is live, or `Io`.
+    fn take_session(
+        &self,
+        id: &str,
+        station: &str,
+        ttl: Duration,
+    ) -> Result<SessionRecord, SessionError>;
+
+    /// Extends the lease `station` holds on a Session, if it still holds it with `fence`.
+    ///
+    /// # Errors
+    ///
+    /// `Stale` when another Station took the Session or `fence` is not the current token.
+    fn renew_session(
+        &self,
+        id: &str,
+        station: &str,
+        fence: u64,
+        ttl: Duration,
+    ) -> Result<SessionRecord, SessionError>;
+
+    /// Applies `update` to a Session if `station` still holds it with `fence`.
+    ///
+    /// # Errors
+    ///
+    /// `Stale` when another Station took the Session or `fence` is not the current token.
+    fn update_session(
+        &self,
+        id: &str,
+        station: &str,
+        fence: u64,
+        update: SessionUpdate,
+    ) -> Result<SessionRecord, SessionError>;
+
+    /// Marks a Session whose holder stopped renewing its lease as lost, giving the reason.
+    ///
+    /// The fencing token moves on, so the holder's writes are refused if it comes back.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound`, `Ended` for a closed Session, `HeldBy` while its lease is live, or `Io`.
+    fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError>;
 
     /// The latest attempt at a Mission: the Session record with the highest attempt number.
     ///
     /// # Errors
     ///
     /// Returns an error when the Session records cannot be read.
-    pub fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>> {
+    fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>;
+}
+
+impl SessionStore for FileRegistry {
+    fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError> {
+        self.open_session_at(new, ttl, unix_time()?)
+    }
+
+    fn session(&self, id: &str) -> io::Result<Option<SessionRecord>> {
+        validate_session_id(id)?;
+        let _lock = registry_lock(&self.root)?;
+        read_session(&self.session_path(id))
+    }
+
+    fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
+        let mut merged: Vec<Exposure> = Vec::new();
+        for record in self
+            .sessions()?
+            .into_iter()
+            .filter(|record| record.mission_id == mission_id)
+        {
+            for exposure in record.exposure {
+                match merged
+                    .iter_mut()
+                    .find(|known| known.source == exposure.source)
+                {
+                    Some(known) => known.at = known.at.min(exposure.at),
+                    None => merged.push(exposure),
+                }
+            }
+        }
+        merged.sort_by(|left, right| left.at.total_cmp(&right.at));
+        Ok(merged)
+    }
+
+    fn sessions(&self) -> io::Result<Vec<SessionRecord>> {
+        let _lock = registry_lock(&self.root)?;
+        let mut records = Vec::new();
+        let entries = match fs::read_dir(self.root.join("sessions")) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(records),
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let path = entry?.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+                && let Some(record) = read_session(&path)?
+            {
+                records.push(record);
+            }
+        }
+        records.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        Ok(records)
+    }
+
+    fn take_session(
+        &self,
+        id: &str,
+        station: &str,
+        ttl: Duration,
+    ) -> Result<SessionRecord, SessionError> {
+        self.take_session_at(id, station, ttl, unix_time()?)
+    }
+
+    fn renew_session(
+        &self,
+        id: &str,
+        station: &str,
+        fence: u64,
+        ttl: Duration,
+    ) -> Result<SessionRecord, SessionError> {
+        self.write_fenced(
+            id,
+            station,
+            fence,
+            unix_time()?,
+            Some(ttl),
+            SessionUpdate::default(),
+        )
+    }
+
+    fn update_session(
+        &self,
+        id: &str,
+        station: &str,
+        fence: u64,
+        update: SessionUpdate,
+    ) -> Result<SessionRecord, SessionError> {
+        self.write_fenced(id, station, fence, unix_time()?, None, update)
+    }
+
+    fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError> {
+        self.lose_session_at(id, reason, unix_time()?)
+    }
+
+    fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>> {
         Ok(self
             .sessions()?
             .into_iter()
@@ -708,6 +744,7 @@ fn write_session(path: &std::path::Path, record: &SessionRecord) -> io::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::registry::backend::*;
     use crate::directorates::registry::store::DEFAULT_LEASE;
 
     const NOW: f64 = 1_800_000_000.0;

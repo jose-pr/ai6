@@ -3,6 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ai6::directorates::registry::backend::*;
 use ai6::{
     AgentRole, Attempt, Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer,
     Directory, FileRegistry, Lookup, Person, Verdict, guatiao::library::ProviderError,

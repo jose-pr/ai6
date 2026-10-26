@@ -22,14 +22,47 @@ impl FileRegistry {
             .join(safe_component(operation.unwrap_or(NO_OPERATION)))
             .join(format!("{}.json", safe_component(mission)))
     }
+}
 
+/// Usage ledgers per Mission and spending per Operation and day.
+pub trait UsageStore {
     /// Adds `delta` to a Session's totals in its Mission's ledger and returns the Mission's
     /// usage afterwards. `now` (Unix seconds) picks the UTC day the cost counts toward.
     ///
     /// # Errors
     ///
     /// Returns an error when the ledger cannot be read or written.
-    pub fn record_usage(
+    fn record_usage(
+        &self,
+        operation: Option<&str>,
+        mission: &str,
+        session: &str,
+        delta: &UsageTotals,
+        now: i64,
+    ) -> io::Result<MissionUsage>;
+
+    /// Returns a Mission's recorded usage, or `None` when nothing was recorded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ledger exists but cannot be read.
+    fn mission_usage(
+        &self,
+        operation: Option<&str>,
+        mission: &str,
+    ) -> io::Result<Option<MissionUsage>>;
+
+    /// Returns what an Operation's Missions spent on the UTC day containing `now`, in
+    /// micro-dollars.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Operation's ledger directory cannot be read.
+    fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64>;
+}
+
+impl UsageStore for FileRegistry {
+    fn record_usage(
         &self,
         operation: Option<&str>,
         mission: &str,
@@ -58,12 +91,7 @@ impl FileRegistry {
         Ok(usage)
     }
 
-    /// Returns a Mission's recorded usage, or `None` when nothing was recorded.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the ledger exists but cannot be read.
-    pub fn mission_usage(
+    fn mission_usage(
         &self,
         operation: Option<&str>,
         mission: &str,
@@ -71,13 +99,7 @@ impl FileRegistry {
         read_ledger(&self.usage_path(operation, mission))
     }
 
-    /// Returns what an Operation's Missions spent on the UTC day containing `now`, in
-    /// micro-dollars.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the Operation's ledger directory cannot be read.
-    pub fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64> {
+    fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64> {
         let directory = self
             .root
             .join("usage")

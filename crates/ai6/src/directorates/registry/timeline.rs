@@ -172,16 +172,14 @@ impl TimelineEvent {
     }
 }
 
-impl FileRegistry {
+/// The activity timeline of each Operation.
+pub trait TimelineStore {
     /// Records one activity event, dropping the oldest past [`MAX_TIMELINE_EVENTS`].
     ///
     /// # Errors
     ///
     /// `InvalidInput` for an event that breaks the bounds above; I/O errors otherwise.
-    pub fn record_event(&self, event: &TimelineEvent) -> io::Result<()> {
-        let _lock = registry_lock(self.root())?;
-        record_event_locked(self.root(), event)
-    }
+    fn record_event(&self, event: &TimelineEvent) -> io::Result<()>;
 
     /// Every recorded event of one Operation, oldest first.
     ///
@@ -189,7 +187,16 @@ impl FileRegistry {
     ///
     /// Returns an error when the timeline directory cannot be read; unreadable or invalid
     /// event files are skipped.
-    pub fn timeline_events(&self, operation: &str) -> io::Result<Vec<TimelineEvent>> {
+    fn timeline_events(&self, operation: &str) -> io::Result<Vec<TimelineEvent>>;
+}
+
+impl TimelineStore for FileRegistry {
+    fn record_event(&self, event: &TimelineEvent) -> io::Result<()> {
+        let _lock = registry_lock(self.root())?;
+        record_event_locked(self.root(), event)
+    }
+
+    fn timeline_events(&self, operation: &str) -> io::Result<Vec<TimelineEvent>> {
         let mut events = Vec::new();
         for path in event_files(self.root())? {
             let Ok(metadata) = fs::metadata(&path) else {

@@ -20,6 +20,7 @@ use super::{
     is_terminal_state, lifecycle_name, medical, resume_mission, session_hold, transition_mission,
 };
 use crate::directorates::m::mission::{Mission, MissionState};
+use crate::directorates::registry::backend::*;
 use crate::directorates::registry::sessions::{SessionStatus, SessionUpdate};
 use crate::station::publisher::{ControlDelivery, ControlOutcome};
 

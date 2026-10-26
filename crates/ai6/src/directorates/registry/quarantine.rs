@@ -78,14 +78,51 @@ impl FileRegistry {
             safe_component(operation.unwrap_or(ALL_OPERATIONS))
         ))
     }
+}
 
+/// Quarantined Agents and the incidents that lead to quarantine.
+pub trait QuarantineStore {
     /// Quarantines an Agent. Quarantining again replaces the reason; the first record's
     /// time is kept.
     ///
     /// # Errors
     ///
     /// Returns an error for an empty Agent or reason, or when the Registry cannot be written.
-    pub fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine> {
+    fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine>;
+
+    /// Lifts a quarantine; `false` when there was none.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be written.
+    fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>;
+
+    /// Lists every quarantine, Agent first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a record cannot be read.
+    fn quarantines(&self) -> io::Result<Vec<Quarantine>>;
+
+    /// Whether `agent` is quarantined for `operation`, by a record for that Operation or one
+    /// for every Operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the records cannot be read; callers that gate work on this treat
+    /// that as quarantined.
+    fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>;
+
+    /// Adds an incident to an Agent's history and returns the history, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the history cannot be read or written.
+    fn record_incident(&self, agent: &str, incident: Incident) -> io::Result<Vec<Incident>>;
+}
+
+impl QuarantineStore for FileRegistry {
+    fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine> {
         if record.agent.trim().is_empty() || record.reason.trim().is_empty() {
             return Err(invalid_data("a quarantine needs an Agent and a reason"));
         }
@@ -104,12 +141,7 @@ impl FileRegistry {
         Ok(record.clone())
     }
 
-    /// Lifts a quarantine; `false` when there was none.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the Registry cannot be written.
-    pub fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool> {
+    fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool> {
         let _lock = registry_lock(&self.root)?;
         match fs::remove_file(self.quarantine_path(agent, operation)) {
             Ok(()) => Ok(true),
@@ -118,12 +150,7 @@ impl FileRegistry {
         }
     }
 
-    /// Lists every quarantine, Agent first.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when a record cannot be read.
-    pub fn quarantines(&self) -> io::Result<Vec<Quarantine>> {
+    fn quarantines(&self) -> io::Result<Vec<Quarantine>> {
         let entries = match fs::read_dir(self.quarantine_dir()) {
             Ok(entries) => entries,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -146,26 +173,14 @@ impl FileRegistry {
         Ok(records)
     }
 
-    /// Whether `agent` is quarantined for `operation`, by a record for that Operation or one
-    /// for every Operation.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the records cannot be read; callers that gate work on this treat
-    /// that as quarantined.
-    pub fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool> {
+    fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool> {
         Ok(self
             .quarantines()?
             .iter()
             .any(|record| record.covers(agent, operation)))
     }
 
-    /// Adds an incident to an Agent's history and returns the history, oldest first.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the history cannot be read or written.
-    pub fn record_incident(&self, agent: &str, incident: Incident) -> io::Result<Vec<Incident>> {
+    fn record_incident(&self, agent: &str, incident: Incident) -> io::Result<Vec<Incident>> {
         let _lock = registry_lock(&self.root)?;
         let path = self
             .quarantine_dir()

@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::directorates::registry::backend::*;
 use crate::directorates::registry::store::FileRegistry;
 
 use super::{

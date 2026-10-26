@@ -19,6 +19,7 @@ use super::store::{
     write_atomic,
 };
 use super::timeline::{TimelineEvent, record_event_locked};
+use crate::directorates::registry::backend::*;
 
 /// The Brief `source` of every brief a sleeper queues.
 pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
@@ -304,13 +305,58 @@ impl FileRegistry {
             safe_component(name)
         ))
     }
+}
 
+/// Sleeper authorizations and the windows they have fired.
+pub trait SleeperStore {
     /// Records an operator's approval of this exact definition.
     ///
     /// # Errors
     ///
     /// Returns an error for an invalid sleeper or when the Registry cannot be written.
-    pub fn authorize_sleeper(
+    fn authorize_sleeper(
+        &self,
+        operation: &str,
+        name: &str,
+        sleeper: &Sleeper,
+        authorized_by: &str,
+        at: i64,
+    ) -> io::Result<()>;
+
+    /// Returns the stored approval, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file exists but cannot be read.
+    fn sleeper_authorization(
+        &self,
+        operation: &str,
+        name: &str,
+    ) -> io::Result<Option<SleeperAuthorization>>;
+
+    /// Withdraws an approval; returns whether one existed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be written.
+    fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool>;
+
+    /// Queues the brief for one window unless it already exists in any Registry state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid brief or Registry I/O failures.
+    fn fire_sleeper(
+        &self,
+        operation: &str,
+        name: &str,
+        sleeper: &Sleeper,
+        window: i64,
+    ) -> io::Result<Fire>;
+}
+
+impl SleeperStore for FileRegistry {
+    fn authorize_sleeper(
         &self,
         operation: &str,
         name: &str,
@@ -335,12 +381,7 @@ impl FileRegistry {
         Ok(())
     }
 
-    /// Returns the stored approval, if any.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the file exists but cannot be read.
-    pub fn sleeper_authorization(
+    fn sleeper_authorization(
         &self,
         operation: &str,
         name: &str,
@@ -354,12 +395,7 @@ impl FileRegistry {
         }
     }
 
-    /// Withdraws an approval; returns whether one existed.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the Registry cannot be written.
-    pub fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool> {
+    fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool> {
         let _lock = registry_lock(&self.root)?;
         match fs::remove_file(self.sleeper_path(operation, name)) {
             Ok(()) => {
@@ -375,12 +411,7 @@ impl FileRegistry {
         }
     }
 
-    /// Queues the brief for one window unless it already exists in any Registry state.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid brief or Registry I/O failures.
-    pub fn fire_sleeper(
+    fn fire_sleeper(
         &self,
         operation: &str,
         name: &str,

@@ -237,12 +237,67 @@ impl FileRegistry {
         ))
     }
 
+    fn report_attempts(&self, state: &str, key: &str) -> io::Result<Option<ReportMark>> {
+        match fs::read(self.root.join(state).join(format!("{key}.reported"))) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes).ok()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// Source cursors, ingested items and the reports owed to Sources.
+pub trait SourceStore {
     /// Returns where the last poll of `provider` for `operation` stopped.
     ///
     /// # Errors
     ///
     /// Returns an error when the cursor file exists but cannot be read.
-    pub fn source_cursor(&self, operation: &str, provider: &str) -> io::Result<Option<String>> {
+    fn source_cursor(&self, operation: &str, provider: &str) -> io::Result<Option<String>>;
+
+    /// Records where a poll stopped so any Station holding the Headquarters lease can resume.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be written.
+    fn set_source_cursor(&self, operation: &str, provider: &str, cursor: &str) -> io::Result<()>;
+
+    /// Queues the item as a brief, updates the queued brief when the item changed, and
+    /// leaves a claimed or finished brief alone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid brief or Registry I/O failures.
+    fn ingest_source_item(
+        &self,
+        operation: &str,
+        provider: &str,
+        item: &SourceItem,
+    ) -> io::Result<Ingest>;
+
+    /// Lists finished source briefs whose outcome has not reached the source yet.
+    ///
+    /// A brief whose report failed `MAX_REPORT_ATTEMPTS` times is no longer listed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a Registry directory cannot be read.
+    fn unreported_source_briefs(&self) -> io::Result<Vec<FinishedSourceBrief>>;
+
+    /// Records one attempt to report a finished brief; `reported` ends further attempts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be written.
+    fn mark_source_reported(
+        &self,
+        finished: &FinishedSourceBrief,
+        reported: bool,
+    ) -> io::Result<()>;
+}
+
+impl SourceStore for FileRegistry {
+    fn source_cursor(&self, operation: &str, provider: &str) -> io::Result<Option<String>> {
         let bytes = match fs::read(self.cursor_path(operation, provider)) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -253,17 +308,7 @@ impl FileRegistry {
         Ok(Some(file.cursor))
     }
 
-    /// Records where a poll stopped so any Station holding the Headquarters lease can resume.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the Registry cannot be written.
-    pub fn set_source_cursor(
-        &self,
-        operation: &str,
-        provider: &str,
-        cursor: &str,
-    ) -> io::Result<()> {
+    fn set_source_cursor(&self, operation: &str, provider: &str, cursor: &str) -> io::Result<()> {
         let _lock = registry_lock(&self.root)?;
         let bytes = serde_json::to_vec(&CursorFile {
             cursor: cursor.to_owned(),
@@ -272,13 +317,7 @@ impl FileRegistry {
         write_atomic(&self.cursor_path(operation, provider), &bytes)
     }
 
-    /// Queues the item as a brief, updates the queued brief when the item changed, and
-    /// leaves a claimed or finished brief alone.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid brief or Registry I/O failures.
-    pub fn ingest_source_item(
+    fn ingest_source_item(
         &self,
         operation: &str,
         provider: &str,
@@ -321,14 +360,7 @@ impl FileRegistry {
         Ok(outcome)
     }
 
-    /// Lists finished source briefs whose outcome has not reached the source yet.
-    ///
-    /// A brief whose report failed `MAX_REPORT_ATTEMPTS` times is no longer listed.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when a Registry directory cannot be read.
-    pub fn unreported_source_briefs(&self) -> io::Result<Vec<FinishedSourceBrief>> {
+    fn unreported_source_briefs(&self) -> io::Result<Vec<FinishedSourceBrief>> {
         let mut finished = Vec::new();
         for (state, ok) in [("done", true), ("failed", false)] {
             let directory = self.root.join(state);
@@ -372,20 +404,7 @@ impl FileRegistry {
         Ok(finished)
     }
 
-    fn report_attempts(&self, state: &str, key: &str) -> io::Result<Option<ReportMark>> {
-        match fs::read(self.root.join(state).join(format!("{key}.reported"))) {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes).ok()),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    /// Records one attempt to report a finished brief; `reported` ends further attempts.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the Registry cannot be written.
-    pub fn mark_source_reported(
+    fn mark_source_reported(
         &self,
         finished: &FinishedSourceBrief,
         reported: bool,
@@ -409,6 +428,7 @@ impl FileRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::registry::backend::*;
 
     fn item(id: &str, body: &str, updated: &str) -> SourceItem {
         SourceItem {

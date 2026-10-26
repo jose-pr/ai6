@@ -485,364 +485,6 @@ impl FileRegistry {
         self.root.join("class-authorizations").join(operation)
     }
 
-    /// Stores a request for green ink. Asking again with the same identity returns the
-    /// record as it stands, pending or decided.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` for a request out of bounds or without times; `InvalidData` when the
-    /// Operation already has 1,000 pending requests or the Mission 64 requests; I/O errors
-    /// otherwise.
-    pub fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus> {
-        request.validate()?;
-        let _lock = registry_lock(&self.root)?;
-        if let Some(status) = self.status_locked(&request.operation, &request.id, 0.0)? {
-            return Ok(status);
-        }
-        let pending = self.approvals_dir("pending", &request.operation);
-        if count_json(&pending)? >= MAX_PENDING {
-            return Err(invalid_data(format!(
-                "the Operation has {MAX_PENDING} requests waiting for green ink"
-            )));
-        }
-        self.index_locked(request)?;
-        write_json(&pending.join(format!("{}.json", request.id)), request)?;
-        Ok(ApprovalStatus::Pending(request.clone()))
-    }
-
-    /// One request and its decision, if any; a pending request past its expiry is recorded
-    /// as expired first.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` for an identity that is not a Registry key; I/O errors otherwise.
-    pub fn approval(
-        &self,
-        operation: &str,
-        id: &str,
-        now: f64,
-    ) -> io::Result<Option<ApprovalStatus>> {
-        validate_registry_key(operation)?;
-        validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
-        self.status_locked(operation, id, now)
-    }
-
-    /// The Operation's requests waiting for a decision, oldest first. Requests past their
-    /// expiry are recorded as expired and left out.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
-    /// Unreadable request files are skipped.
-    pub fn pending_approvals(&self, operation: &str, now: f64) -> io::Result<Vec<ApprovalRequest>> {
-        validate_registry_key(operation)?;
-        let _lock = registry_lock(&self.root)?;
-        let mut waiting = Vec::new();
-        for path in json_files(&self.approvals_dir("pending", operation))? {
-            let Ok(Some(request)) = read_json::<ApprovalRequest>(&path) else {
-                continue;
-            };
-            if request.operation != operation {
-                continue;
-            }
-            if request.expires_at <= now {
-                self.expire_locked(&request)?;
-            } else {
-                waiting.push(request);
-            }
-        }
-        waiting.sort_by(|left, right| {
-            left.requested_at
-                .total_cmp(&right.requested_at)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        Ok(waiting)
-    }
-
-    /// Every request a Mission's Agents made in the Operation, with its decision, in the order
-    /// they were made. Requests past their expiry are recorded as expired first.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` for an identity that is not a Registry key; I/O errors otherwise.
-    pub fn mission_approvals(
-        &self,
-        operation: &str,
-        mission: &str,
-        now: f64,
-    ) -> io::Result<Vec<ApprovalStatus>> {
-        validate_registry_key(operation)?;
-        validate_registry_key(mission)?;
-        let _lock = registry_lock(&self.root)?;
-        let ids =
-            read_json::<Vec<String>>(&self.mission_index(operation, mission))?.unwrap_or_default();
-        let mut statuses = Vec::new();
-        for id in ids {
-            if validate_registry_key(&id).is_ok()
-                && let Some(status) = self.status_locked(operation, &id, now)?
-            {
-                statuses.push(status);
-            }
-        }
-        Ok(statuses)
-    }
-
-    /// The live approval of `scope` for a Mission, if one exists.
-    ///
-    /// # Errors
-    ///
-    /// As [`FileRegistry::mission_approvals`].
-    pub fn live_approval(
-        &self,
-        operation: &str,
-        mission: &str,
-        scope: &ActionScope,
-        now: f64,
-    ) -> io::Result<Option<Approval>> {
-        Ok(self
-            .mission_approvals(operation, mission, now)?
-            .into_iter()
-            .find_map(|status| match status {
-                ApprovalStatus::Decided(approval)
-                    if approval.request.scope == *scope && approval.is_live(now) =>
-                {
-                    Some(approval)
-                }
-                _ => None,
-            }))
-    }
-
-    /// Decides a pending request. Repeating the same decision returns the record.
-    ///
-    /// # Errors
-    ///
-    /// `NotFound` for an unknown request; `AlreadyExists` when it was decided otherwise or
-    /// expired before `ruling.at`; `InvalidInput` for an approval without an expiry after
-    /// `ruling.at`, a ruling that is not approve or reject, or an oversized note or signer.
-    pub fn decide_approval(
-        &self,
-        operation: &str,
-        id: &str,
-        ruling: &Ruling,
-    ) -> io::Result<Approval> {
-        validate_registry_key(operation)?;
-        validate_registry_key(id)?;
-        validate_ruling(ruling)?;
-        let _lock = registry_lock(&self.root)?;
-        match self.status_locked(operation, id, ruling.at)? {
-            None => Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "no such green ink request",
-            )),
-            Some(ApprovalStatus::Decided(approval)) if approval.decision == ruling.decision => {
-                Ok(approval)
-            }
-            Some(ApprovalStatus::Decided(approval)) => Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("the request was already {}", approval.decision.as_str()),
-            )),
-            Some(ApprovalStatus::Pending(request)) => {
-                let approval = Approval {
-                    request,
-                    decision: ruling.decision,
-                    signer: ruling.signer.clone(),
-                    at: ruling.at,
-                    expires_at: ruling.expires_at,
-                    note: ruling.note.clone(),
-                    revoked: None,
-                    notified_at: None,
-                };
-                self.settle_locked(&approval)?;
-                Ok(approval)
-            }
-        }
-    }
-
-    /// Withdraws an approval before it expires. Revoking again returns the record.
-    ///
-    /// # Errors
-    ///
-    /// `NotFound` for an unknown or undecided request; `AlreadyExists` when it was not
-    /// approved; I/O errors otherwise.
-    pub fn revoke_approval(
-        &self,
-        operation: &str,
-        id: &str,
-        by: &str,
-        at: f64,
-    ) -> io::Result<Approval> {
-        validate_registry_key(operation)?;
-        validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
-        let path = self
-            .approvals_dir("decided", operation)
-            .join(format!("{id}.json"));
-        let mut approval = read_json::<Approval>(&path)?.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
-        })?;
-        if approval.decision != Decision::Approved {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "only an approval can be revoked",
-            ));
-        }
-        if approval.revoked.is_none() {
-            approval.revoked = Some(Revocation {
-                by: by.to_owned(),
-                at,
-            });
-            write_json(&path, &approval)?;
-        }
-        Ok(approval)
-    }
-
-    /// Records that the Agent was told of a decision.
-    ///
-    /// # Errors
-    ///
-    /// `NotFound` for a request without a decision; I/O errors otherwise.
-    pub fn mark_approval_notified(&self, operation: &str, id: &str, at: f64) -> io::Result<()> {
-        validate_registry_key(operation)?;
-        validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
-        let path = self
-            .approvals_dir("decided", operation)
-            .join(format!("{id}.json"));
-        let mut approval = read_json::<Approval>(&path)?.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
-        })?;
-        if approval.notified_at.is_none() {
-            approval.notified_at = Some(at);
-            write_json(&path, &approval)?;
-        }
-        Ok(())
-    }
-
-    /// Approves a new request with the first live class authorisation that covers it, counting
-    /// one use. `None` when none covers it, or when the request is already stored.
-    ///
-    /// `role` is the Mission's role and `clearance` the Agent's. The approval lasts as long as
-    /// the class authorisation and counts as already told to the Agent.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` for a request out of bounds; I/O errors otherwise.
-    pub fn approve_by_class(
-        &self,
-        request: &ApprovalRequest,
-        role: Option<&str>,
-        clearance: &str,
-        now: f64,
-    ) -> io::Result<Option<Approval>> {
-        request.validate()?;
-        let _lock = registry_lock(&self.root)?;
-        if self
-            .status_locked(&request.operation, &request.id, 0.0)?
-            .is_some()
-        {
-            return Ok(None);
-        }
-        let Some(mut class) = self
-            .class_authorizations_locked(&request.operation)?
-            .into_iter()
-            .find(|class| {
-                class.is_live(now) && class.covers(&request.agent, role, clearance, &request.scope)
-            })
-        else {
-            return Ok(None);
-        };
-        class.uses += 1;
-        write_json(
-            &self
-                .class_dir(&request.operation)
-                .join(format!("{}.json", class.id)),
-            &class,
-        )?;
-        let approval = Approval {
-            request: request.clone(),
-            decision: Decision::Approved,
-            signer: format!("class:{}", class.id),
-            at: now,
-            expires_at: Some(class.expires_at),
-            note: None,
-            revoked: None,
-            notified_at: Some(now),
-        };
-        self.index_locked(request)?;
-        write_json(
-            &self
-                .approvals_dir("decided", &request.operation)
-                .join(format!("{}.json", request.id)),
-            &approval,
-        )?;
-        Ok(Some(approval))
-    }
-
-    /// Stores a new class authorisation.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` for a record out of bounds; `AlreadyExists` when its identity is taken;
-    /// `InvalidData` when the Operation already holds 1,000; I/O errors otherwise.
-    pub fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()> {
-        record.validate()?;
-        let _lock = registry_lock(&self.root)?;
-        let directory = self.class_dir(&record.operation);
-        let path = directory.join(format!("{}.json", record.id));
-        if path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "the class authorisation identity is taken",
-            ));
-        }
-        if count_json(&directory)? >= MAX_CLASS_AUTHORIZATIONS {
-            return Err(invalid_data(format!(
-                "the Operation holds {MAX_CLASS_AUTHORIZATIONS} class authorisations"
-            )));
-        }
-        write_json(&path, record)
-    }
-
-    /// The Operation's class authorisations, oldest first, revoked and expired ones included.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
-    pub fn class_authorizations(&self, operation: &str) -> io::Result<Vec<ClassAuthorization>> {
-        validate_registry_key(operation)?;
-        self.class_authorizations_locked(operation)
-    }
-
-    /// Withdraws a class authorisation. Revoking again returns the record.
-    ///
-    /// # Errors
-    ///
-    /// `NotFound` for an unknown identity; I/O errors otherwise.
-    pub fn revoke_class_authorization(
-        &self,
-        operation: &str,
-        id: &str,
-        by: &str,
-        at: f64,
-    ) -> io::Result<ClassAuthorization> {
-        validate_registry_key(operation)?;
-        validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
-        let path = self.class_dir(operation).join(format!("{id}.json"));
-        let mut record = read_json::<ClassAuthorization>(&path)?.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "no such class authorisation")
-        })?;
-        if record.revoked.is_none() {
-            record.revoked = Some(Revocation {
-                by: by.to_owned(),
-                at,
-            });
-            write_json(&path, &record)?;
-        }
-        Ok(record)
-    }
-
     fn class_authorizations_locked(&self, operation: &str) -> io::Result<Vec<ClassAuthorization>> {
         let mut records = Vec::new();
         for path in json_files(&self.class_dir(operation))? {
@@ -928,6 +570,407 @@ impl FileRegistry {
         }
         ids.push(request.id.clone());
         write_json(&path, &ids)
+    }
+}
+
+/// Green ink: approval requests, decisions and class authorisations.
+pub trait ApprovalStore {
+    /// Stores a request for green ink. Asking again with the same identity returns the
+    /// record as it stands, pending or decided.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a request out of bounds or without times; `InvalidData` when the
+    /// Operation already has 1,000 pending requests or the Mission 64 requests; I/O errors
+    /// otherwise.
+    fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus>;
+
+    /// One request and its decision, if any; a pending request past its expiry is recorded
+    /// as expired first.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an identity that is not a Registry key; I/O errors otherwise.
+    fn approval(&self, operation: &str, id: &str, now: f64) -> io::Result<Option<ApprovalStatus>>;
+
+    /// The Operation's requests waiting for a decision, oldest first. Requests past their
+    /// expiry are recorded as expired and left out.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
+    /// Unreadable request files are skipped.
+    fn pending_approvals(&self, operation: &str, now: f64) -> io::Result<Vec<ApprovalRequest>>;
+
+    /// Every request a Mission's Agents made in the Operation, with its decision, in the order
+    /// they were made. Requests past their expiry are recorded as expired first.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an identity that is not a Registry key; I/O errors otherwise.
+    fn mission_approvals(
+        &self,
+        operation: &str,
+        mission: &str,
+        now: f64,
+    ) -> io::Result<Vec<ApprovalStatus>>;
+
+    /// The live approval of `scope` for a Mission, if one exists.
+    ///
+    /// # Errors
+    ///
+    /// As [`FileRegistry::mission_approvals`].
+    fn live_approval(
+        &self,
+        operation: &str,
+        mission: &str,
+        scope: &ActionScope,
+        now: f64,
+    ) -> io::Result<Option<Approval>>;
+
+    /// Decides a pending request. Repeating the same decision returns the record.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for an unknown request; `AlreadyExists` when it was decided otherwise or
+    /// expired before `ruling.at`; `InvalidInput` for an approval without an expiry after
+    /// `ruling.at`, a ruling that is not approve or reject, or an oversized note or signer.
+    fn decide_approval(&self, operation: &str, id: &str, ruling: &Ruling) -> io::Result<Approval>;
+
+    /// Withdraws an approval before it expires. Revoking again returns the record.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for an unknown or undecided request; `AlreadyExists` when it was not
+    /// approved; I/O errors otherwise.
+    fn revoke_approval(&self, operation: &str, id: &str, by: &str, at: f64)
+    -> io::Result<Approval>;
+
+    /// Records that the Agent was told of a decision.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for a request without a decision; I/O errors otherwise.
+    fn mark_approval_notified(&self, operation: &str, id: &str, at: f64) -> io::Result<()>;
+
+    /// Approves a new request with the first live class authorisation that covers it, counting
+    /// one use. `None` when none covers it, or when the request is already stored.
+    ///
+    /// `role` is the Mission's role and `clearance` the Agent's. The approval lasts as long as
+    /// the class authorisation and counts as already told to the Agent.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a request out of bounds; I/O errors otherwise.
+    fn approve_by_class(
+        &self,
+        request: &ApprovalRequest,
+        role: Option<&str>,
+        clearance: &str,
+        now: f64,
+    ) -> io::Result<Option<Approval>>;
+
+    /// Stores a new class authorisation.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a record out of bounds; `AlreadyExists` when its identity is taken;
+    /// `InvalidData` when the Operation already holds 1,000; I/O errors otherwise.
+    fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()>;
+
+    /// The Operation's class authorisations, oldest first, revoked and expired ones included.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
+    fn class_authorizations(&self, operation: &str) -> io::Result<Vec<ClassAuthorization>>;
+
+    /// Withdraws a class authorisation. Revoking again returns the record.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for an unknown identity; I/O errors otherwise.
+    fn revoke_class_authorization(
+        &self,
+        operation: &str,
+        id: &str,
+        by: &str,
+        at: f64,
+    ) -> io::Result<ClassAuthorization>;
+}
+
+impl ApprovalStore for FileRegistry {
+    fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus> {
+        request.validate()?;
+        let _lock = registry_lock(&self.root)?;
+        if let Some(status) = self.status_locked(&request.operation, &request.id, 0.0)? {
+            return Ok(status);
+        }
+        let pending = self.approvals_dir("pending", &request.operation);
+        if count_json(&pending)? >= MAX_PENDING {
+            return Err(invalid_data(format!(
+                "the Operation has {MAX_PENDING} requests waiting for green ink"
+            )));
+        }
+        self.index_locked(request)?;
+        write_json(&pending.join(format!("{}.json", request.id)), request)?;
+        Ok(ApprovalStatus::Pending(request.clone()))
+    }
+
+    fn approval(&self, operation: &str, id: &str, now: f64) -> io::Result<Option<ApprovalStatus>> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        let _lock = registry_lock(&self.root)?;
+        self.status_locked(operation, id, now)
+    }
+
+    fn pending_approvals(&self, operation: &str, now: f64) -> io::Result<Vec<ApprovalRequest>> {
+        validate_registry_key(operation)?;
+        let _lock = registry_lock(&self.root)?;
+        let mut waiting = Vec::new();
+        for path in json_files(&self.approvals_dir("pending", operation))? {
+            let Ok(Some(request)) = read_json::<ApprovalRequest>(&path) else {
+                continue;
+            };
+            if request.operation != operation {
+                continue;
+            }
+            if request.expires_at <= now {
+                self.expire_locked(&request)?;
+            } else {
+                waiting.push(request);
+            }
+        }
+        waiting.sort_by(|left, right| {
+            left.requested_at
+                .total_cmp(&right.requested_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(waiting)
+    }
+
+    fn mission_approvals(
+        &self,
+        operation: &str,
+        mission: &str,
+        now: f64,
+    ) -> io::Result<Vec<ApprovalStatus>> {
+        validate_registry_key(operation)?;
+        validate_registry_key(mission)?;
+        let _lock = registry_lock(&self.root)?;
+        let ids =
+            read_json::<Vec<String>>(&self.mission_index(operation, mission))?.unwrap_or_default();
+        let mut statuses = Vec::new();
+        for id in ids {
+            if validate_registry_key(&id).is_ok()
+                && let Some(status) = self.status_locked(operation, &id, now)?
+            {
+                statuses.push(status);
+            }
+        }
+        Ok(statuses)
+    }
+
+    fn live_approval(
+        &self,
+        operation: &str,
+        mission: &str,
+        scope: &ActionScope,
+        now: f64,
+    ) -> io::Result<Option<Approval>> {
+        Ok(self
+            .mission_approvals(operation, mission, now)?
+            .into_iter()
+            .find_map(|status| match status {
+                ApprovalStatus::Decided(approval)
+                    if approval.request.scope == *scope && approval.is_live(now) =>
+                {
+                    Some(approval)
+                }
+                _ => None,
+            }))
+    }
+
+    fn decide_approval(&self, operation: &str, id: &str, ruling: &Ruling) -> io::Result<Approval> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        validate_ruling(ruling)?;
+        let _lock = registry_lock(&self.root)?;
+        match self.status_locked(operation, id, ruling.at)? {
+            None => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "no such green ink request",
+            )),
+            Some(ApprovalStatus::Decided(approval)) if approval.decision == ruling.decision => {
+                Ok(approval)
+            }
+            Some(ApprovalStatus::Decided(approval)) => Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("the request was already {}", approval.decision.as_str()),
+            )),
+            Some(ApprovalStatus::Pending(request)) => {
+                let approval = Approval {
+                    request,
+                    decision: ruling.decision,
+                    signer: ruling.signer.clone(),
+                    at: ruling.at,
+                    expires_at: ruling.expires_at,
+                    note: ruling.note.clone(),
+                    revoked: None,
+                    notified_at: None,
+                };
+                self.settle_locked(&approval)?;
+                Ok(approval)
+            }
+        }
+    }
+
+    fn revoke_approval(
+        &self,
+        operation: &str,
+        id: &str,
+        by: &str,
+        at: f64,
+    ) -> io::Result<Approval> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        let _lock = registry_lock(&self.root)?;
+        let path = self
+            .approvals_dir("decided", operation)
+            .join(format!("{id}.json"));
+        let mut approval = read_json::<Approval>(&path)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
+        })?;
+        if approval.decision != Decision::Approved {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "only an approval can be revoked",
+            ));
+        }
+        if approval.revoked.is_none() {
+            approval.revoked = Some(Revocation {
+                by: by.to_owned(),
+                at,
+            });
+            write_json(&path, &approval)?;
+        }
+        Ok(approval)
+    }
+
+    fn mark_approval_notified(&self, operation: &str, id: &str, at: f64) -> io::Result<()> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        let _lock = registry_lock(&self.root)?;
+        let path = self
+            .approvals_dir("decided", operation)
+            .join(format!("{id}.json"));
+        let mut approval = read_json::<Approval>(&path)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
+        })?;
+        if approval.notified_at.is_none() {
+            approval.notified_at = Some(at);
+            write_json(&path, &approval)?;
+        }
+        Ok(())
+    }
+
+    fn approve_by_class(
+        &self,
+        request: &ApprovalRequest,
+        role: Option<&str>,
+        clearance: &str,
+        now: f64,
+    ) -> io::Result<Option<Approval>> {
+        request.validate()?;
+        let _lock = registry_lock(&self.root)?;
+        if self
+            .status_locked(&request.operation, &request.id, 0.0)?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        let Some(mut class) = self
+            .class_authorizations_locked(&request.operation)?
+            .into_iter()
+            .find(|class| {
+                class.is_live(now) && class.covers(&request.agent, role, clearance, &request.scope)
+            })
+        else {
+            return Ok(None);
+        };
+        class.uses += 1;
+        write_json(
+            &self
+                .class_dir(&request.operation)
+                .join(format!("{}.json", class.id)),
+            &class,
+        )?;
+        let approval = Approval {
+            request: request.clone(),
+            decision: Decision::Approved,
+            signer: format!("class:{}", class.id),
+            at: now,
+            expires_at: Some(class.expires_at),
+            note: None,
+            revoked: None,
+            notified_at: Some(now),
+        };
+        self.index_locked(request)?;
+        write_json(
+            &self
+                .approvals_dir("decided", &request.operation)
+                .join(format!("{}.json", request.id)),
+            &approval,
+        )?;
+        Ok(Some(approval))
+    }
+
+    fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()> {
+        record.validate()?;
+        let _lock = registry_lock(&self.root)?;
+        let directory = self.class_dir(&record.operation);
+        let path = directory.join(format!("{}.json", record.id));
+        if path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "the class authorisation identity is taken",
+            ));
+        }
+        if count_json(&directory)? >= MAX_CLASS_AUTHORIZATIONS {
+            return Err(invalid_data(format!(
+                "the Operation holds {MAX_CLASS_AUTHORIZATIONS} class authorisations"
+            )));
+        }
+        write_json(&path, record)
+    }
+
+    fn class_authorizations(&self, operation: &str) -> io::Result<Vec<ClassAuthorization>> {
+        validate_registry_key(operation)?;
+        self.class_authorizations_locked(operation)
+    }
+
+    fn revoke_class_authorization(
+        &self,
+        operation: &str,
+        id: &str,
+        by: &str,
+        at: f64,
+    ) -> io::Result<ClassAuthorization> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        let _lock = registry_lock(&self.root)?;
+        let path = self.class_dir(operation).join(format!("{id}.json"));
+        let mut record = read_json::<ClassAuthorization>(&path)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "no such class authorisation")
+        })?;
+        if record.revoked.is_none() {
+            record.revoked = Some(Revocation {
+                by: by.to_owned(),
+                at,
+            });
+            write_json(&path, &record)?;
+        }
+        Ok(record)
     }
 }
 

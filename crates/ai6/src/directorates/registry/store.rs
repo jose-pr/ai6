@@ -536,7 +536,12 @@ pub enum LeaseRecovery {
     Failed,
 }
 
-/// Read-only view of the file-backed Registry `new/` queue.
+/// The Registry kept in one directory every Station shares: a
+/// [`RegistryBackend`](super::backend::RegistryBackend).
+///
+/// Records are JSON files written atomically under a directory lock: briefs move through
+/// `new/`, `claimed/`, `done/` and `failed/`, with leases in `leases/`. Stations sharing it
+/// need synchronized clocks, since leases expire on wall-clock time.
 #[derive(Debug, Clone)]
 pub struct FileRegistry {
     pub(super) root: PathBuf,
@@ -565,11 +570,203 @@ impl FileRegistry {
         &self.root
     }
 
-    /// Stores an Agent-authored Mission proposal outside the scheduler's `new/` queue.
+    fn station_settings_path(&self, station: &str) -> PathBuf {
+        let digest = hex_digest(&Sha256::digest(station.as_bytes()));
+        self.root
+            .join("station-settings")
+            .join(format!("{digest}.json"))
+    }
+
+    fn scan_cables(&self) -> io::Result<Vec<Cable>> {
+        let directory = self.root.join("cables");
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut paths = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if entry.file_type()?.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension == "json")
+            {
+                if paths.len() == MAX_CABLE_FILES {
+                    return Err(invalid_data(format!(
+                        "Registry has more than {MAX_CABLE_FILES} Cable records"
+                    )));
+                }
+                paths.push(path);
+            }
+        }
+        paths.sort();
+        let mut cables = Vec::with_capacity(paths.len());
+        for path in paths {
+            match read_cable(&path) {
+                Ok(Some(cable)) => cables.push(cable),
+                Ok(None) => {}
+                Err(error) if error.kind() == io::ErrorKind::InvalidData => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(cables)
+    }
+}
+
+/// The brief queue: Mission proposals, queued briefs, their leases and outcomes.
+pub trait BriefStore {
+    /// Stores an Agent-authored Mission proposal outside the scheduler's queue.
     ///
     /// Repeating an identical proposal is idempotent. Reusing its identity for different
     /// content is rejected, and only an M-controlled authorization path may promote it.
-    pub fn submit_mission_proposal(&self, proposal: &MissionProposal) -> io::Result<PathBuf> {
+    fn submit_mission_proposal(&self, proposal: &MissionProposal) -> io::Result<()>;
+
+    /// Lists pending Mission proposals for one Operation in creation order.
+    fn list_mission_proposals(
+        &self,
+        operation: &str,
+        limit: usize,
+    ) -> io::Result<Vec<MissionProposal>>;
+
+    /// Authorizes one pending Mission proposal and promotes its brief to the runnable queue. Repeating an approval after a partial failure or successful promotion is safe.
+    fn promote_mission_proposal(&self, operation: &str, proposal_id: &str) -> io::Result<Brief>;
+
+    /// Rejects one pending Mission proposal without exposing it to scheduler intake.
+    /// Repeating the rejection is safe; an approved proposal cannot be rejected.
+    fn reject_mission_proposal(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+    ) -> io::Result<MissionProposal>;
+
+    /// Reads valid queued briefs in priority, creation-time and key order.
+    /// Invalid records are skipped; nothing is claimed or moved.
+    fn list_new(&self) -> io::Result<Vec<Brief>>;
+
+    /// Submits one validated brief to the shared queue.
+    ///
+    /// A key already present in any Registry state is never overwritten.
+    fn submit_brief(&self, brief: &Brief) -> io::Result<()>;
+
+    /// Atomically claims one queued brief, or the highest-priority queued brief. Concurrent
+    /// Stations never claim the same brief.
+    fn claim_new(&self, key: Option<&str>) -> io::Result<Option<Brief>>;
+
+    /// Claims the next matching brief and records a renewable lease.
+    ///
+    /// `key` selects one queued brief or uses Registry order when omitted. `station` identifies
+    /// the lease owner; `duration` must be positive. `meta` records assignment details for
+    /// other Registry users.
+    ///
+    /// Returns `None` when no matching brief remains queued.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid lease settings, Registry I/O failures or a corrupted
+    /// attempt count.
+    fn claim_with_lease(
+        &self,
+        key: Option<&str>,
+        station: &str,
+        duration: Duration,
+        meta: BTreeMap<String, serde_json::Value>,
+    ) -> io::Result<Option<Lease>>;
+
+    /// Reads a brief's lease, if the Registry has one.
+    ///
+    /// `key` must contain only the filesystem-safe characters used by [`Brief::key`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid key, unreadable lease record or Registry I/O failure.
+    fn lease(&self, key: &str) -> io::Result<Option<Lease>>;
+
+    /// Reads a currently claimed brief without changing its lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid key, unreadable file or invalid brief record.
+    fn read_claimed(&self, key: &str) -> io::Result<Option<Brief>>;
+
+    /// Returns leases for currently claimed briefs, ordered by brief key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry directory or a lease record cannot be read.
+    fn leases(&self) -> io::Result<Vec<Lease>>;
+
+    /// Extends a station's lease, returning `false` when it no longer owns a claimed brief.
+    ///
+    /// `duration` must be positive. Lease expiration uses wall-clock Unix time, so stations
+    /// sharing a Registry need synchronized clocks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid key or lease duration, or Registry I/O failure.
+    fn renew(&self, key: &str, station: &str, duration: Duration) -> io::Result<bool>;
+
+    /// Returns expired leases in stable key order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry directory or a lease record cannot be read.
+    fn expired(&self) -> io::Result<Vec<Lease>>;
+
+    /// Recovers an unchanged expired lease, requeueing it or filing a lost outcome.
+    ///
+    /// `max_attempts` is the maximum number of claims before the brief is failed. `by` is
+    /// recorded as the recovering station. A changed, renewed or unexpired lease returns `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Registry records cannot be read or written.
+    fn recover(
+        &self,
+        lease: &Lease,
+        max_attempts: u32,
+        by: &str,
+    ) -> io::Result<Option<LeaseRecovery>>;
+
+    /// Gives an unchanged expired lease to another Station, which carries on the same claim:
+    /// the brief stays claimed and the attempt count is unchanged. `meta` entries are added
+    /// to the lease's metadata.
+    ///
+    /// Returns the new lease, or `None` for a changed, renewed or unexpired lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid lease settings or Registry I/O failures.
+    fn hand_over(
+        &self,
+        lease: &Lease,
+        station: &str,
+        duration: Duration,
+        meta: BTreeMap<String, serde_json::Value>,
+    ) -> io::Result<Option<Lease>>;
+
+    /// Files an outcome for a brief, refusing to finish a claim held by another station.
+    ///
+    /// The outcome must be a JSON object. When `station` is provided, a missing or differently
+    /// owned lease returns `false`; otherwise the brief and outcome are filed as done or
+    /// failed, with an optional transcript, and `true` is returned.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a non-object outcome or Registry I/O and serialization failures.
+    fn finish(
+        &self,
+        brief: &Brief,
+        outcome: &serde_json::Value,
+        ok: bool,
+        transcript: Option<&[u8]>,
+        station: Option<&str>,
+    ) -> io::Result<bool>;
+}
+
+impl BriefStore for FileRegistry {
+    fn submit_mission_proposal(&self, proposal: &MissionProposal) -> io::Result<()> {
         proposal.validate()?;
         let _registry_lock = registry_lock(&self.root)?;
         let directory = self
@@ -584,7 +781,7 @@ impl FileRegistry {
             let existing = read_mission_proposal(&path)?;
             stored.created_at = existing.created_at;
             if existing == stored {
-                return Ok(path);
+                return Ok(());
             }
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
@@ -614,11 +811,10 @@ impl FileRegistry {
             return Err(invalid_data("Mission proposal exceeds the size limit"));
         }
         write_atomic(&path, &bytes)?;
-        Ok(path)
+        Ok(())
     }
 
-    /// Lists pending Mission proposals for one Operation in creation order.
-    pub fn list_mission_proposals(
+    fn list_mission_proposals(
         &self,
         operation: &str,
         limit: usize,
@@ -680,13 +876,7 @@ impl FileRegistry {
         Ok(proposals)
     }
 
-    /// Authorizes one pending Mission proposal and promotes its brief to runnable `new/`
-    /// intake. Repeating an approval after a partial failure or successful promotion is safe.
-    pub fn promote_mission_proposal(
-        &self,
-        operation: &str,
-        proposal_id: &str,
-    ) -> io::Result<Brief> {
+    fn promote_mission_proposal(&self, operation: &str, proposal_id: &str) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
         let _registry_lock = registry_lock(&self.root)?;
@@ -768,9 +958,7 @@ impl FileRegistry {
         Ok(brief)
     }
 
-    /// Rejects one pending Mission proposal without exposing it to scheduler intake.
-    /// Repeating the rejection is safe; an approved proposal cannot be rejected.
-    pub fn reject_mission_proposal(
+    fn reject_mission_proposal(
         &self,
         operation: &str,
         proposal_id: &str,
@@ -825,637 +1013,7 @@ impl FileRegistry {
         Ok(proposal)
     }
 
-    /// Records this station's metadata and current check-in time in the shared Registry.
-    ///
-    /// Reserved `station` and `seen` keys in `info` are replaced with the supplied identity
-    /// and current Unix time. Station IDs are bounded to 256 UTF-8 bytes and may not contain
-    /// control characters.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the station ID is invalid, the record exceeds 1 MiB, or the
-    /// Registry cannot be locked or written.
-    pub fn check_in(
-        &self,
-        station: &str,
-        mut info: BTreeMap<String, serde_json::Value>,
-    ) -> io::Result<()> {
-        validate_station_id(station)?;
-        info.remove("station");
-        info.remove("seen");
-        let record = StationRecord {
-            info,
-            station: station.to_owned(),
-            seen: unix_time()?,
-        };
-        let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_STATION_RECORD_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "station record exceeds the size limit",
-            ));
-        }
-        let _registry_lock = registry_lock(&self.root)?;
-        let path = self
-            .root
-            .join("stations")
-            .join(format!("{}.json", registry_station_component(station)));
-        write_atomic(&path, &bytes)
-    }
-
-    /// Returns check-ins no older than `within`, in stable station-file order.
-    ///
-    /// Malformed, oversized and stale records are skipped.
-    pub fn stations(&self, within: Duration) -> io::Result<Vec<StationRecord>> {
-        let directory = self.root.join("stations");
-        let entries = match fs::read_dir(directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let mut paths = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if entry.file_type()?.is_file()
-                && path
-                    .extension()
-                    .is_some_and(|extension| extension == "json")
-            {
-                if paths.len() == MAX_STATIONS {
-                    return Err(invalid_data(format!(
-                        "Registry has more than {MAX_STATIONS} station records"
-                    )));
-                }
-                paths.push(path);
-            }
-        }
-        paths.sort();
-
-        let now = unix_time()?;
-        let window = within.as_secs_f64();
-        let mut stations = Vec::with_capacity(paths.len());
-        for path in paths {
-            let Ok(metadata) = fs::metadata(&path) else {
-                continue;
-            };
-            if metadata.len() > MAX_STATION_RECORD_BYTES {
-                continue;
-            }
-            let Ok(bytes) = fs::read(&path) else {
-                continue;
-            };
-            let Ok(file) = serde_json::from_slice::<StationRecordFile>(&bytes) else {
-                continue;
-            };
-            let Ok(record) = file.into_station_record() else {
-                continue;
-            };
-            if now - record.seen <= window {
-                stations.push(record);
-            }
-        }
-        Ok(stations)
-    }
-
-    /// Returns validated live settings for one Station, when configured.
-    pub fn station_settings(&self, station: &str) -> io::Result<Option<StationSettings>> {
-        validate_station_id(station)?;
-        let path = self.station_settings_path(station);
-        let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        if bytes.len() as u64 > MAX_STATION_SETTINGS_BYTES {
-            return Err(invalid_data("Station settings exceed the size limit"));
-        }
-        let record: StationSettingsFile = serde_json::from_slice(&bytes)
-            .map_err(|_| invalid_data("Station settings are invalid"))?;
-        if record.station != station {
-            return Err(invalid_data("Station settings identity does not match"));
-        }
-        StationSettings::try_new(record.station, record.max_concurrent_missions)
-            .map(Some)
-            .map_err(|_| invalid_data("Station settings are invalid"))
-    }
-
-    /// Persists validated live settings for one Station in the shared Registry.
-    pub fn set_station_settings(
-        &self,
-        station: &str,
-        settings: &StationSettings,
-    ) -> io::Result<()> {
-        validate_station_id(station)?;
-        StationSettings::try_new(settings.station.clone(), settings.max_concurrent_missions)?;
-        if station != settings.station {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Station settings identity does not match",
-            ));
-        }
-        let record = StationSettingsFile {
-            station: settings.station.clone(),
-            max_concurrent_missions: settings.max_concurrent_missions,
-        };
-        let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_STATION_SETTINGS_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Station settings exceed the size limit",
-            ));
-        }
-        let _registry_lock = registry_lock(&self.root)?;
-        let path = self.station_settings_path(station);
-        write_atomic(&path, &bytes)
-    }
-
-    fn station_settings_path(&self, station: &str) -> PathBuf {
-        let digest = hex_digest(&Sha256::digest(station.as_bytes()));
-        self.root
-            .join("station-settings")
-            .join(format!("{digest}.json"))
-    }
-
-    /// Stores revocable access-token metadata under the shared Registry.
-    ///
-    /// Only the SHA-256 digest is retained; the bearer secret is returned to its issuer
-    /// once and is never written to the Registry. Token IDs and digests are unique.
-    pub fn store_access_token(&self, record: &crate::AccessTokenRecord) -> io::Result<()> {
-        let record = validate_access_token_record(record)?;
-        let token_path = self
-            .root
-            .join("access-tokens")
-            .join(format!("{}.json", record.token_id()));
-        let digest_path = self
-            .root
-            .join("access-token-digests")
-            .join(format!("{}.txt", record.digest()));
-        let _registry_lock = registry_lock(&self.root)?;
-        if token_path.exists() || digest_path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "access token ID or digest already exists",
-            ));
-        }
-        let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_ACCESS_TOKEN_RECORD_BYTES {
-            return Err(invalid_data("access token record exceeds the size limit"));
-        }
-        write_atomic(&token_path, &bytes)?;
-        write_atomic(&digest_path, record.token_id().as_bytes())
-    }
-
-    /// Returns an active token record by its lowercase SHA-256 digest.
-    pub fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
-        validate_token_digest(digest)?;
-        let _registry_lock = registry_lock(&self.root)?;
-        let digest_path = self
-            .root
-            .join("access-token-digests")
-            .join(format!("{digest}.txt"));
-        let token_id = match fs::read_to_string(digest_path) {
-            Ok(token_id) => token_id.trim().to_owned(),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let token_path = self
-            .root
-            .join("access-tokens")
-            .join(format!("{}.json", registry_station_component(&token_id)));
-        let bytes = match fs::read(&token_path) {
-            Ok(bytes) if bytes.len() as u64 <= MAX_ACCESS_TOKEN_RECORD_BYTES => bytes,
-            Ok(_) => return Ok(None),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let Ok(record) = serde_json::from_slice::<crate::AccessTokenRecord>(&bytes) else {
-            return Ok(None);
-        };
-        let Ok(record) = validate_access_token_record(&record) else {
-            return Ok(None);
-        };
-        if record.token_id() != token_id || record.digest() != digest {
-            return Ok(None);
-        }
-        Ok(record.active_at(unix_time()?).then_some(record))
-    }
-
-    /// Revokes a token by its public UUID, returning false when unknown or already revoked.
-    pub fn revoke_access_token(&self, token_id: &str) -> io::Result<bool> {
-        let parsed = uuid::Uuid::parse_str(token_id)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid token ID"))?;
-        if parsed.to_string() != token_id {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "token ID must be a canonical lowercase UUID",
-            ));
-        }
-        let token_path = self
-            .root
-            .join("access-tokens")
-            .join(format!("{token_id}.json"));
-        let _registry_lock = registry_lock(&self.root)?;
-        let bytes = match fs::read(&token_path) {
-            Ok(bytes) if bytes.len() as u64 <= MAX_ACCESS_TOKEN_RECORD_BYTES => bytes,
-            Ok(_) => return Ok(false),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
-        };
-        let Ok(record) = serde_json::from_slice::<crate::AccessTokenRecord>(&bytes) else {
-            return Ok(false);
-        };
-        let Ok(record) = validate_access_token_record(&record) else {
-            return Ok(false);
-        };
-        if record.token_id() != token_id || record.revoked_at().is_some() {
-            return Ok(false);
-        }
-        let updated = crate::AccessTokenRecord::try_new(
-            record.token_id(),
-            record.digest(),
-            record.person_id(),
-            record.issued_at(),
-            record.expires_at(),
-            Some(unix_time()?),
-        )
-        .map_err(|_| invalid_data("invalid access token record"))?;
-        let updated = serde_json::to_vec(&updated).map_err(io::Error::other)?;
-        write_atomic(&token_path, &updated)?;
-        Ok(true)
-    }
-
-    /// Holds, renews or takes the shared Headquarters lease for `station`.
-    ///
-    /// At most one station wins an expired lease because the shared Registry lock covers the
-    /// read, expiry move and replacement. `ttl` must be positive. This uses the same
-    /// `headquarters/lease.json` record shared by all AI6 Stations.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid station ID or TTL, malformed Registry state, or an
-    /// underlying filesystem or locking failure.
-    pub fn elect(&self, station: &str, ttl: Duration) -> io::Result<bool> {
-        validate_station_id(station)?;
-        if ttl.is_zero() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Headquarters lease duration must be positive",
-            ));
-        }
-        let _registry_lock = registry_lock(&self.root)?;
-        let directory = self.root.join("headquarters");
-        fs::create_dir_all(&directory)?;
-        let path = directory.join("lease.json");
-        let current = read_headquarters(&path)?;
-        let now = unix_time()?;
-        if let Some(held) = current.as_ref().filter(|lease| lease.station == station) {
-            return write_headquarters(
-                &path,
-                &HeadquartersLease {
-                    station: station.to_owned(),
-                    expires: now + ttl.as_secs_f64(),
-                    term: held.term,
-                },
-            )
-            .map(|()| true);
-        }
-        if current.as_ref().is_some_and(|lease| lease.expires >= now) {
-            return Ok(false);
-        }
-        if current.is_some() {
-            let lapsed = directory.join(format!(
-                "lease.lapsed.{}",
-                registry_station_component(station)
-            ));
-            match fs::rename(&path, lapsed) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-                Err(error) => return Err(error),
-            }
-        }
-        write_headquarters(
-            &path,
-            &HeadquartersLease {
-                station: station.to_owned(),
-                expires: now + ttl.as_secs_f64(),
-                term: current.as_ref().map_or(0, |lease| lease.term) + 1,
-            },
-        )?;
-        Ok(true)
-    }
-
-    /// Reads the Headquarters lease, whether live or expired.
-    pub fn headquarters(&self) -> io::Result<Option<HeadquartersLease>> {
-        let _registry_lock = registry_lock(&self.root)?;
-        read_headquarters(&self.root.join("headquarters").join("lease.json"))
-    }
-
-    /// Stores a Cable and returns the original record on an identical idempotent retry.
-    ///
-    /// The authenticated sender and idempotency key form the unique request key. Reuse
-    /// with different immutable content returns `AlreadyExists`.
-    pub fn submit_cable(&self, cable: &Cable) -> io::Result<Cable> {
-        let _registry_lock = registry_lock(&self.root)?;
-        for existing in self.scan_cables()? {
-            if existing.sender_agent() == cable.sender_agent()
-                && existing.idempotency_key() == cable.idempotency_key()
-            {
-                if existing.same_request(cable) {
-                    return Ok(existing);
-                }
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "Cable idempotency key was reused for different content",
-                ));
-            }
-        }
-
-        let path = self
-            .root
-            .join("cables")
-            .join(format!("{}.json", cable.id()));
-        if path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("Cable {} already exists", cable.id()),
-            ));
-        }
-        let bytes = serde_json::to_vec(cable).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
-        // The timeline gets the Cable's metadata only: never its body or the target name
-        // the sending Agent chose.
-        let mut event = TimelineEvent::new(
-            "cable",
-            "sent",
-            cable.sender_operation(),
-            cable.created_at(),
-        )
-        .station(cable.sender_station())
-        .actor(cable.sender_agent())
-        .detail("cable", cable.id())
-        .detail(
-            "scope",
-            serde_json::to_value(cable.target().scope())
-                .ok()
-                .and_then(|scope| scope.as_str().map(str::to_owned))
-                .unwrap_or_default(),
-        )
-        .detail("recipients", cable.recipients().len().to_string());
-        if let Some(mission) = cable.mission_id() {
-            event = event.mission(mission);
-        }
-        if let Some(session) = cable.session_id() {
-            event = event.session(session);
-        }
-        // The Cable is sent either way; its timeline entry is a record, not a condition.
-        let _ = record_event_locked(&self.root, &event);
-        Ok(cable.clone())
-    }
-
-    /// Finds an accepted Cable by its authenticated sender and idempotency key.
-    pub fn find_cable(
-        &self,
-        sender_agent: &str,
-        idempotency_key: &str,
-    ) -> io::Result<Option<Cable>> {
-        for cable in self.scan_cables()? {
-            if cable.sender_agent() == sender_agent && cable.idempotency_key() == idempotency_key {
-                return Ok(Some(cable));
-            }
-        }
-        Ok(None)
-    }
-
-    /// Reads a Cable by its relay-generated identifier.
-    pub fn get_cable(&self, cable_id: &str) -> io::Result<Option<Cable>> {
-        validate_cable_id(cable_id)?;
-        read_cable(&self.root.join("cables").join(format!("{cable_id}.json")))
-    }
-
-    /// Returns unexpired queued or delivered Cables for an Agent Session.
-    ///
-    /// `limit` must be between 1 and 1,000. A recipient with no provider Session is
-    /// visible to the Agent's current Session.
-    pub fn cable_inbox(
-        &self,
-        agent: &str,
-        session_id: Option<&str>,
-        limit: usize,
-        now: Option<f64>,
-    ) -> io::Result<Vec<Cable>> {
-        if agent.trim().is_empty() || limit == 0 || limit > 1_000 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "agent must be non-empty and limit must be between 1 and 1000",
-            ));
-        }
-        let now = now.map_or_else(unix_time, Ok)?;
-        if !now.is_finite() {
-            return Err(invalid_data("Cable inbox time must be finite"));
-        }
-        let mut cables = self
-            .scan_cables()?
-            .into_iter()
-            .filter(|cable| {
-                cable.expires_at() > now
-                    && cable.recipients().iter().any(|recipient| {
-                        recipient.agent() == agent
-                            && recipient
-                                .session_id()
-                                .is_none_or(|target| Some(target) == session_id)
-                            && matches!(
-                                recipient.state(),
-                                CableState::Queued | CableState::Delivered
-                            )
-                    })
-            })
-            .collect::<Vec<_>>();
-        cables.sort_by(|left, right| {
-            left.created_at()
-                .total_cmp(&right.created_at())
-                .then_with(|| left.id().cmp(right.id()))
-        });
-        cables.truncate(limit);
-        Ok(cables)
-    }
-
-    /// Returns unexpired Cables with at least one held recipient.
-    pub fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>> {
-        if limit == 0 || limit > 1_000 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "held Cable limit must be between 1 and 1000",
-            ));
-        }
-        let now = now.map_or_else(unix_time, Ok)?;
-        if !now.is_finite() {
-            return Err(invalid_data("held Cable time must be finite"));
-        }
-        let mut cables = self
-            .scan_cables()?
-            .into_iter()
-            .filter(|cable| {
-                cable.expires_at() > now
-                    && cable
-                        .recipients()
-                        .iter()
-                        .any(|recipient| recipient.state() == CableState::Held)
-            })
-            .collect::<Vec<_>>();
-        cables.sort_by(|left, right| {
-            left.created_at()
-                .total_cmp(&right.created_at())
-                .then_with(|| left.id().cmp(right.id()))
-        });
-        cables.truncate(limit);
-        Ok(cables)
-    }
-
-    /// Atomically changes one recipient's state and returns the updated Cable.
-    pub fn update_cable_delivery(
-        &self,
-        cable_id: &str,
-        agent: &str,
-        session_id: Option<&str>,
-        state: CableState,
-        now: Option<f64>,
-    ) -> io::Result<Option<Cable>> {
-        validate_cable_id(cable_id)?;
-        let _registry_lock = registry_lock(&self.root)?;
-        let Some(cable) = self.get_cable(cable_id)? else {
-            return Ok(None);
-        };
-        let now = now.map_or_else(unix_time, Ok)?;
-        if !now.is_finite() {
-            return Err(invalid_data("Cable delivery time must be finite"));
-        }
-        let next_state = if cable.expires_at() <= now && state != CableState::Expired {
-            CableState::Expired
-        } else {
-            state
-        };
-        let Some(updated) = cable
-            .with_recipient_state(agent, session_id, next_state)
-            .map_err(cable_error)?
-        else {
-            return Ok(None);
-        };
-        let path = self
-            .root
-            .join("cables")
-            .join(format!("{}.json", updated.id()));
-        let bytes = serde_json::to_vec(&updated).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
-        Ok(Some(updated))
-    }
-
-    /// Atomically consumes one token from every shared Cable quota bucket.
-    ///
-    /// Keys are SHA-256 hashed before being written to `cable-quotas.json`, matching I
-    /// Registry while keeping caller-provided keys out of the file.
-    pub fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
-        if !now.is_finite() || buckets.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Cable quota buckets need a finite time and at least one limit",
-            ));
-        }
-        let mut keys = BTreeSet::new();
-        for (key, rate, capacity) in buckets {
-            if key.is_empty()
-                || !keys.insert(*key)
-                || !rate.is_finite()
-                || *rate <= 0.0
-                || *capacity == 0
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Cable quota needs unique keys, positive rates and positive bursts",
-                ));
-            }
-        }
-
-        let _registry_lock = registry_lock(&self.root)?;
-        let path = self.root.join("cable-quotas.json");
-        let mut saved = fs::read(&path)
-            .ok()
-            .and_then(|bytes| {
-                serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).ok()
-            })
-            .unwrap_or_default();
-        let mut balances = Vec::with_capacity(buckets.len());
-        for (key, rate, capacity) in buckets {
-            let digest = Sha256::digest(key.as_bytes());
-            let key = hex_digest(&digest);
-            let restored = saved.get(&key).and_then(|value| {
-                let values = value.as_array()?;
-                if values.len() != 2 {
-                    return None;
-                }
-                let tokens = values[0].as_f64()?;
-                let updated = values[1].as_f64()?;
-                (tokens.is_finite() && updated.is_finite()).then_some((tokens, updated))
-            });
-            let (tokens, updated) = restored.unwrap_or((*capacity as f64, now));
-            let available = (*capacity as f64).min(tokens + (now - updated).max(0.0) * rate);
-            balances.push((key, available, *capacity as f64));
-        }
-
-        let allowed = balances.iter().all(|(_, available, _)| *available >= 1.0);
-        for (key, available, capacity) in balances {
-            let remaining = if allowed { available - 1.0 } else { available };
-            if remaining >= capacity {
-                saved.remove(&key);
-            } else {
-                saved.insert(key, serde_json::json!([remaining, now]));
-            }
-        }
-        let bytes = serde_json::to_vec(&saved).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
-        Ok(allowed)
-    }
-
-    fn scan_cables(&self) -> io::Result<Vec<Cable>> {
-        let directory = self.root.join("cables");
-        let entries = match fs::read_dir(directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let mut paths = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if entry.file_type()?.is_file()
-                && path
-                    .extension()
-                    .is_some_and(|extension| extension == "json")
-            {
-                if paths.len() == MAX_CABLE_FILES {
-                    return Err(invalid_data(format!(
-                        "Registry has more than {MAX_CABLE_FILES} Cable records"
-                    )));
-                }
-                paths.push(path);
-            }
-        }
-        paths.sort();
-        let mut cables = Vec::with_capacity(paths.len());
-        for path in paths {
-            match read_cable(&path) {
-                Ok(Some(cable)) => cables.push(cable),
-                Ok(None) => {}
-                Err(error) if error.kind() == io::ErrorKind::InvalidData => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(cables)
-    }
-
-    /// Reads valid `new/*.json` briefs in priority, creation-time and key order.
-    /// Invalid files are skipped, matching `Registry.list`; no files are claimed or moved.
-    pub fn list_new(&self) -> io::Result<Vec<Brief>> {
+    fn list_new(&self) -> io::Result<Vec<Brief>> {
         let directory = self.root.join("new");
         let entries = match fs::read_dir(directory) {
             Ok(entries) => entries,
@@ -1510,10 +1068,7 @@ impl FileRegistry {
         Ok(briefs)
     }
 
-    /// Submits one validated brief to the shared `new/` queue.
-    ///
-    /// A key already present in any Registry state is never overwritten.
-    pub fn submit_brief(&self, brief: &Brief) -> io::Result<PathBuf> {
+    fn submit_brief(&self, brief: &Brief) -> io::Result<()> {
         brief.validate()?;
         let key = brief.key();
         let _registry_lock = registry_lock(&self.root)?;
@@ -1531,201 +1086,10 @@ impl FileRegistry {
         }
         let path = self.root.join("new").join(format!("{key}.json"));
         write_atomic(&path, &bytes)?;
-        Ok(path)
+        Ok(())
     }
 
-    /// Stores one metadata-only audit event without retaining request content.
-    pub fn record_audit(&self, entry: &AuditRecord) -> io::Result<PathBuf> {
-        entry.validate()?;
-        let _registry_lock = registry_lock(&self.root)?;
-        let directory = self.root.join("audit");
-        fs::create_dir_all(&directory)?;
-        let path = directory.join(format!("{}.json", entry.id));
-        if path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "audit entry ID already exists",
-            ));
-        }
-        let bytes = serde_json::to_vec_pretty(entry).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_AUDIT_RECORD_BYTES {
-            return Err(invalid_data("audit entry exceeds the size limit"));
-        }
-        write_atomic(&path, &bytes)?;
-        Ok(path)
-    }
-
-    /// Returns the newest audit events, bounded to 500 metadata-only entries.
-    pub fn list_audit(&self, limit: usize) -> io::Result<Vec<AuditRecord>> {
-        if limit == 0 || limit > MAX_AUDIT_RESULTS {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("audit result limit must be between 1 and {MAX_AUDIT_RESULTS}"),
-            ));
-        }
-        let mut records = self.audit_records()?;
-        records.sort_by(|left, right| {
-            right
-                .at
-                .total_cmp(&left.at)
-                .then_with(|| right.id.cmp(&left.id))
-        });
-        records.truncate(limit);
-        Ok(records)
-    }
-
-    /// Returns every stored audit event, in no particular order; at most 10,000 exist.
-    pub fn audit_records(&self) -> io::Result<Vec<AuditRecord>> {
-        let directory = self.root.join("audit");
-        let entries = match fs::read_dir(directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let mut paths = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            if entry.file_type()?.is_file()
-                && entry
-                    .path()
-                    .extension()
-                    .is_some_and(|extension| extension == "json")
-            {
-                if paths.len() >= MAX_AUDIT_ENTRIES {
-                    return Err(invalid_data(format!(
-                        "Registry has more than {MAX_AUDIT_ENTRIES} audit entries"
-                    )));
-                }
-                paths.push(entry.path());
-            }
-        }
-        let mut records = Vec::new();
-        for path in paths {
-            let Ok(metadata) = fs::metadata(&path) else {
-                continue;
-            };
-            if metadata.len() > MAX_AUDIT_RECORD_BYTES {
-                continue;
-            }
-            let Ok(bytes) = fs::read(&path) else {
-                continue;
-            };
-            let Ok(entry) = serde_json::from_slice::<AuditRecord>(&bytes) else {
-                continue;
-            };
-            if entry.validate().is_ok() {
-                records.push(entry);
-            }
-        }
-        Ok(records)
-    }
-
-    /// Stores an Operation-scoped Agent role override in the shared Registry.
-    pub fn put_agent_role(&self, operation: &str, role: &AgentRole) -> io::Result<()> {
-        validate_registry_key(operation)?;
-        validate_registry_key(&role.id)?;
-        role.validate()
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
-        let bytes = serde_json::to_vec_pretty(role).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_AGENT_ROLE_RECORD_BYTES {
-            return Err(invalid_data(
-                "Agent role configuration exceeds the size limit",
-            ));
-        }
-        let _registry_lock = registry_lock(&self.root)?;
-        let directory = self.root.join("agent-roles").join(operation);
-        fs::create_dir_all(&directory)?;
-        let current = fs::read_dir(&directory)?;
-        let mut count = 0;
-        for entry in current {
-            if entry?.file_type()?.is_file() {
-                count += 1;
-            }
-        }
-        let path = directory.join(format!("{}.json", role.id));
-        if !path.exists() && count >= MAX_AGENT_ROLES {
-            return Err(invalid_data(format!(
-                "Operation has reached the {MAX_AGENT_ROLES} Agent role limit"
-            )));
-        }
-        write_atomic(&path, &bytes)
-    }
-
-    /// Loads role overrides for one Operation in stable role-ID order.
-    pub fn list_agent_roles(&self, operation: &str) -> io::Result<Vec<AgentRole>> {
-        validate_registry_key(operation)?;
-        let directory = self.root.join("agent-roles").join(operation);
-        let entries = match fs::read_dir(directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let mut paths = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            if entry.file_type()?.is_file()
-                && entry
-                    .path()
-                    .extension()
-                    .is_some_and(|extension| extension == "json")
-            {
-                if paths.len() >= MAX_AGENT_ROLES {
-                    return Err(invalid_data(format!(
-                        "Operation has more than {MAX_AGENT_ROLES} Agent roles"
-                    )));
-                }
-                paths.push(entry.path());
-            }
-        }
-        let mut roles = Vec::new();
-        for path in paths {
-            let metadata = fs::metadata(&path)?;
-            if metadata.len() > MAX_AGENT_ROLE_RECORD_BYTES {
-                continue;
-            }
-            let bytes = fs::read(&path)?;
-            let Ok(role) = serde_json::from_slice::<AgentRole>(&bytes) else {
-                continue;
-            };
-            if role.validate().is_ok()
-                && path.file_stem().and_then(|stem| stem.to_str()) == Some(role.id.as_str())
-            {
-                roles.push(role);
-            }
-        }
-        roles.sort_by(|left, right| left.id.cmp(&right.id));
-        Ok(roles)
-    }
-
-    /// Finds an Operation role override by canonical or qualified role identifier.
-    pub fn agent_role(&self, operation: &str, key: &str) -> io::Result<Option<AgentRole>> {
-        let roles = self.list_agent_roles(operation)?;
-        Ok(roles
-            .into_iter()
-            .filter(|role| key == role.id || key.starts_with(&format!("{}/", role.id)))
-            .max_by_key(|role| role.id.len()))
-    }
-
-    /// Removes an Operation-scoped role override, returning whether one existed.
-    pub fn remove_agent_role(&self, operation: &str, role_id: &str) -> io::Result<bool> {
-        validate_registry_key(operation)?;
-        validate_registry_key(role_id)?;
-        let _registry_lock = registry_lock(&self.root)?;
-        let path = self
-            .root
-            .join("agent-roles")
-            .join(operation)
-            .join(format!("{role_id}.json"));
-        match fs::remove_file(path) {
-            Ok(()) => Ok(true),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(error),
-        }
-    }
-
-    /// Atomically moves one queued brief, or the highest-priority queued brief, to
-    /// `claimed/`. The shared Registry lock coordinates concurrent readers and writers.
-    pub fn claim_new(&self, key: Option<&str>) -> io::Result<Option<Brief>> {
+    fn claim_new(&self, key: Option<&str>) -> io::Result<Option<Brief>> {
         let _registry_lock = registry_lock(&self.root)?;
         let destination_dir = self.root.join("claimed");
         fs::create_dir_all(&destination_dir)?;
@@ -1750,19 +1114,7 @@ impl FileRegistry {
         Ok(None)
     }
 
-    /// Claims the next matching brief and records a renewable lease.
-    ///
-    /// `key` selects one queued brief or uses Registry order when omitted. `station` identifies
-    /// the lease owner; `duration` must be positive. `meta` records assignment details for
-    /// other Registry users.
-    ///
-    /// Returns `None` when no matching brief remains queued.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for invalid lease settings, Registry I/O failures or a corrupted
-    /// attempt count.
-    pub fn claim_with_lease(
+    fn claim_with_lease(
         &self,
         key: Option<&str>,
         station: &str,
@@ -1839,14 +1191,7 @@ impl FileRegistry {
         Ok(None)
     }
 
-    /// Reads a brief's lease, if the Registry has one.
-    ///
-    /// `key` must contain only the filesystem-safe characters used by [`Brief::key`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid key, unreadable lease record or Registry I/O failure.
-    pub fn lease(&self, key: &str) -> io::Result<Option<Lease>> {
+    fn lease(&self, key: &str) -> io::Result<Option<Lease>> {
         validate_registry_key(key)?;
         let path = self.root.join("leases").join(format!("{key}.json"));
         let bytes = match fs::read(path) {
@@ -1858,12 +1203,7 @@ impl FileRegistry {
         record.into_lease(key.to_owned()).map(Some)
     }
 
-    /// Reads a brief currently held in `claimed/` without changing its lease.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid key, unreadable file or invalid brief record.
-    pub fn read_claimed(&self, key: &str) -> io::Result<Option<Brief>> {
+    fn read_claimed(&self, key: &str) -> io::Result<Option<Brief>> {
         validate_registry_key(key)?;
         let path = self.root.join("claimed").join(format!("{key}.json"));
         let bytes = match fs::read(path) {
@@ -1879,12 +1219,7 @@ impl FileRegistry {
         Ok(Some(brief))
     }
 
-    /// Returns leases for briefs currently in `claimed/`, ordered by brief key.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the Registry directory or a lease record cannot be read.
-    pub fn leases(&self) -> io::Result<Vec<Lease>> {
+    fn leases(&self) -> io::Result<Vec<Lease>> {
         let directory = self.root.join("claimed");
         let entries = match fs::read_dir(directory) {
             Ok(entries) => entries,
@@ -1916,15 +1251,7 @@ impl FileRegistry {
         Ok(leases)
     }
 
-    /// Extends a station's lease, returning `false` when it no longer owns a claimed brief.
-    ///
-    /// `duration` must be positive. Lease expiration uses wall-clock Unix time, so stations
-    /// sharing a Registry need synchronized clocks.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid key or lease duration, or Registry I/O failure.
-    pub fn renew(&self, key: &str, station: &str, duration: Duration) -> io::Result<bool> {
+    fn renew(&self, key: &str, station: &str, duration: Duration) -> io::Result<bool> {
         validate_registry_key(key)?;
         if station.trim().is_empty() || duration.is_zero() {
             return Err(io::Error::new(
@@ -1959,12 +1286,7 @@ impl FileRegistry {
         Ok(true)
     }
 
-    /// Returns expired leases in stable key order.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the Registry directory or a lease record cannot be read.
-    pub fn expired(&self) -> io::Result<Vec<Lease>> {
+    fn expired(&self) -> io::Result<Vec<Lease>> {
         let now = unix_time()?;
         Ok(self
             .leases()?
@@ -1973,15 +1295,7 @@ impl FileRegistry {
             .collect())
     }
 
-    /// Recovers an unchanged expired lease, requeueing it or filing a lost outcome.
-    ///
-    /// `max_attempts` is the maximum number of claims before the brief is failed. `by` is
-    /// recorded as the recovering station. A changed, renewed or unexpired lease returns `None`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when Registry records cannot be read or written.
-    pub fn recover(
+    fn recover(
         &self,
         lease: &Lease,
         max_attempts: u32,
@@ -2027,16 +1341,7 @@ impl FileRegistry {
         Ok(Some(LeaseRecovery::Failed))
     }
 
-    /// Gives an unchanged expired lease to another Station, which carries on the same claim:
-    /// the brief stays claimed and the attempt count is unchanged. `meta` entries are added
-    /// to the lease's metadata.
-    ///
-    /// Returns the new lease, or `None` for a changed, renewed or unexpired lease.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for invalid lease settings or Registry I/O failures.
-    pub fn hand_over(
+    fn hand_over(
         &self,
         lease: &Lease,
         station: &str,
@@ -2078,23 +1383,14 @@ impl FileRegistry {
         Ok(Some(handed))
     }
 
-    /// Files an outcome for a brief, refusing to finish a claim held by another station.
-    ///
-    /// The outcome must be a JSON object. When `station` is provided, a missing or differently
-    /// owned lease returns `None`; otherwise the brief and outcome are moved to `done/` or
-    /// `failed/`, with an optional transcript.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for a non-object outcome or Registry I/O and serialization failures.
-    pub fn finish(
+    fn finish(
         &self,
         brief: &Brief,
         outcome: &serde_json::Value,
         ok: bool,
         transcript: Option<&[u8]>,
         station: Option<&str>,
-    ) -> io::Result<Option<PathBuf>> {
+    ) -> io::Result<bool> {
         if !outcome.is_object() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -2115,10 +1411,860 @@ impl FileRegistry {
                 .is_none_or(|lease| lease.station() != station)
                 || !claimed
             {
-                return Ok(None);
+                return Ok(false);
             }
         }
-        finish_locked(&self.root, brief, outcome, ok, transcript).map(Some)
+        finish_locked(&self.root, brief, outcome, ok, transcript)?;
+        Ok(true)
+    }
+}
+
+/// Station check-ins and settings, and the Headquarters lease.
+pub trait StationStore {
+    /// Records this station's metadata and current check-in time in the shared Registry.
+    ///
+    /// Reserved `station` and `seen` keys in `info` are replaced with the supplied identity
+    /// and current Unix time. Station IDs are bounded to 256 UTF-8 bytes and may not contain
+    /// control characters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the station ID is invalid, the record exceeds 1 MiB, or the
+    /// Registry cannot be locked or written.
+    fn check_in(&self, station: &str, info: BTreeMap<String, serde_json::Value>) -> io::Result<()>;
+
+    /// Returns check-ins no older than `within`, in stable station-file order.
+    ///
+    /// Malformed, oversized and stale records are skipped.
+    fn stations(&self, within: Duration) -> io::Result<Vec<StationRecord>>;
+
+    /// Returns validated live settings for one Station, when configured.
+    fn station_settings(&self, station: &str) -> io::Result<Option<StationSettings>>;
+
+    /// Persists validated live settings for one Station in the shared Registry.
+    fn set_station_settings(&self, station: &str, settings: &StationSettings) -> io::Result<()>;
+
+    /// Holds, renews or takes the shared Headquarters lease for `station`.
+    ///
+    /// At most one station wins an expired lease because the shared Registry lock covers the
+    /// read, expiry move and replacement. `ttl` must be positive. This uses the same
+    /// `headquarters/lease.json` record shared by all AI6 Stations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid station ID or TTL, malformed Registry state, or an
+    /// underlying filesystem or locking failure.
+    fn elect(&self, station: &str, ttl: Duration) -> io::Result<bool>;
+
+    /// Reads the Headquarters lease, whether live or expired.
+    fn headquarters(&self) -> io::Result<Option<HeadquartersLease>>;
+}
+
+impl StationStore for FileRegistry {
+    fn check_in(
+        &self,
+        station: &str,
+        mut info: BTreeMap<String, serde_json::Value>,
+    ) -> io::Result<()> {
+        validate_station_id(station)?;
+        info.remove("station");
+        info.remove("seen");
+        let record = StationRecord {
+            info,
+            station: station.to_owned(),
+            seen: unix_time()?,
+        };
+        let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_STATION_RECORD_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "station record exceeds the size limit",
+            ));
+        }
+        let _registry_lock = registry_lock(&self.root)?;
+        let path = self
+            .root
+            .join("stations")
+            .join(format!("{}.json", registry_station_component(station)));
+        write_atomic(&path, &bytes)
+    }
+
+    fn stations(&self, within: Duration) -> io::Result<Vec<StationRecord>> {
+        let directory = self.root.join("stations");
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut paths = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if entry.file_type()?.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension == "json")
+            {
+                if paths.len() == MAX_STATIONS {
+                    return Err(invalid_data(format!(
+                        "Registry has more than {MAX_STATIONS} station records"
+                    )));
+                }
+                paths.push(path);
+            }
+        }
+        paths.sort();
+
+        let now = unix_time()?;
+        let window = within.as_secs_f64();
+        let mut stations = Vec::with_capacity(paths.len());
+        for path in paths {
+            let Ok(metadata) = fs::metadata(&path) else {
+                continue;
+            };
+            if metadata.len() > MAX_STATION_RECORD_BYTES {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&path) else {
+                continue;
+            };
+            let Ok(file) = serde_json::from_slice::<StationRecordFile>(&bytes) else {
+                continue;
+            };
+            let Ok(record) = file.into_station_record() else {
+                continue;
+            };
+            if now - record.seen <= window {
+                stations.push(record);
+            }
+        }
+        Ok(stations)
+    }
+
+    fn station_settings(&self, station: &str) -> io::Result<Option<StationSettings>> {
+        validate_station_id(station)?;
+        let path = self.station_settings_path(station);
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        if bytes.len() as u64 > MAX_STATION_SETTINGS_BYTES {
+            return Err(invalid_data("Station settings exceed the size limit"));
+        }
+        let record: StationSettingsFile = serde_json::from_slice(&bytes)
+            .map_err(|_| invalid_data("Station settings are invalid"))?;
+        if record.station != station {
+            return Err(invalid_data("Station settings identity does not match"));
+        }
+        StationSettings::try_new(record.station, record.max_concurrent_missions)
+            .map(Some)
+            .map_err(|_| invalid_data("Station settings are invalid"))
+    }
+
+    fn set_station_settings(&self, station: &str, settings: &StationSettings) -> io::Result<()> {
+        validate_station_id(station)?;
+        StationSettings::try_new(settings.station.clone(), settings.max_concurrent_missions)?;
+        if station != settings.station {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Station settings identity does not match",
+            ));
+        }
+        let record = StationSettingsFile {
+            station: settings.station.clone(),
+            max_concurrent_missions: settings.max_concurrent_missions,
+        };
+        let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_STATION_SETTINGS_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Station settings exceed the size limit",
+            ));
+        }
+        let _registry_lock = registry_lock(&self.root)?;
+        let path = self.station_settings_path(station);
+        write_atomic(&path, &bytes)
+    }
+
+    fn elect(&self, station: &str, ttl: Duration) -> io::Result<bool> {
+        validate_station_id(station)?;
+        if ttl.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Headquarters lease duration must be positive",
+            ));
+        }
+        let _registry_lock = registry_lock(&self.root)?;
+        let directory = self.root.join("headquarters");
+        fs::create_dir_all(&directory)?;
+        let path = directory.join("lease.json");
+        let current = read_headquarters(&path)?;
+        let now = unix_time()?;
+        if let Some(held) = current.as_ref().filter(|lease| lease.station == station) {
+            return write_headquarters(
+                &path,
+                &HeadquartersLease {
+                    station: station.to_owned(),
+                    expires: now + ttl.as_secs_f64(),
+                    term: held.term,
+                },
+            )
+            .map(|()| true);
+        }
+        if current.as_ref().is_some_and(|lease| lease.expires >= now) {
+            return Ok(false);
+        }
+        if current.is_some() {
+            let lapsed = directory.join(format!(
+                "lease.lapsed.{}",
+                registry_station_component(station)
+            ));
+            match fs::rename(&path, lapsed) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+                Err(error) => return Err(error),
+            }
+        }
+        write_headquarters(
+            &path,
+            &HeadquartersLease {
+                station: station.to_owned(),
+                expires: now + ttl.as_secs_f64(),
+                term: current.as_ref().map_or(0, |lease| lease.term) + 1,
+            },
+        )?;
+        Ok(true)
+    }
+
+    fn headquarters(&self) -> io::Result<Option<HeadquartersLease>> {
+        let _registry_lock = registry_lock(&self.root)?;
+        read_headquarters(&self.root.join("headquarters").join("lease.json"))
+    }
+}
+
+/// Universal Exports user access tokens, stored by digest.
+pub trait AccessTokenStore {
+    /// Stores revocable access-token metadata under the shared Registry.
+    ///
+    /// Only the SHA-256 digest is retained; the bearer secret is returned to its issuer
+    /// once and is never written to the Registry. Token IDs and digests are unique.
+    fn store_access_token(&self, record: &crate::AccessTokenRecord) -> io::Result<()>;
+
+    /// Returns an active token record by its lowercase SHA-256 digest.
+    fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
+
+    /// Revokes a token by its public UUID, returning false when unknown or already revoked.
+    fn revoke_access_token(&self, token_id: &str) -> io::Result<bool>;
+}
+
+impl AccessTokenStore for FileRegistry {
+    fn store_access_token(&self, record: &crate::AccessTokenRecord) -> io::Result<()> {
+        let record = validate_access_token_record(record)?;
+        let token_path = self
+            .root
+            .join("access-tokens")
+            .join(format!("{}.json", record.token_id()));
+        let digest_path = self
+            .root
+            .join("access-token-digests")
+            .join(format!("{}.txt", record.digest()));
+        let _registry_lock = registry_lock(&self.root)?;
+        if token_path.exists() || digest_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "access token ID or digest already exists",
+            ));
+        }
+        let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_ACCESS_TOKEN_RECORD_BYTES {
+            return Err(invalid_data("access token record exceeds the size limit"));
+        }
+        write_atomic(&token_path, &bytes)?;
+        write_atomic(&digest_path, record.token_id().as_bytes())
+    }
+
+    fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
+        validate_token_digest(digest)?;
+        let _registry_lock = registry_lock(&self.root)?;
+        let digest_path = self
+            .root
+            .join("access-token-digests")
+            .join(format!("{digest}.txt"));
+        let token_id = match fs::read_to_string(digest_path) {
+            Ok(token_id) => token_id.trim().to_owned(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let token_path = self
+            .root
+            .join("access-tokens")
+            .join(format!("{}.json", registry_station_component(&token_id)));
+        let bytes = match fs::read(&token_path) {
+            Ok(bytes) if bytes.len() as u64 <= MAX_ACCESS_TOKEN_RECORD_BYTES => bytes,
+            Ok(_) => return Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let Ok(record) = serde_json::from_slice::<crate::AccessTokenRecord>(&bytes) else {
+            return Ok(None);
+        };
+        let Ok(record) = validate_access_token_record(&record) else {
+            return Ok(None);
+        };
+        if record.token_id() != token_id || record.digest() != digest {
+            return Ok(None);
+        }
+        Ok(record.active_at(unix_time()?).then_some(record))
+    }
+
+    fn revoke_access_token(&self, token_id: &str) -> io::Result<bool> {
+        let parsed = uuid::Uuid::parse_str(token_id)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid token ID"))?;
+        if parsed.to_string() != token_id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "token ID must be a canonical lowercase UUID",
+            ));
+        }
+        let token_path = self
+            .root
+            .join("access-tokens")
+            .join(format!("{token_id}.json"));
+        let _registry_lock = registry_lock(&self.root)?;
+        let bytes = match fs::read(&token_path) {
+            Ok(bytes) if bytes.len() as u64 <= MAX_ACCESS_TOKEN_RECORD_BYTES => bytes,
+            Ok(_) => return Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let Ok(record) = serde_json::from_slice::<crate::AccessTokenRecord>(&bytes) else {
+            return Ok(false);
+        };
+        let Ok(record) = validate_access_token_record(&record) else {
+            return Ok(false);
+        };
+        if record.token_id() != token_id || record.revoked_at().is_some() {
+            return Ok(false);
+        }
+        let updated = crate::AccessTokenRecord::try_new(
+            record.token_id(),
+            record.digest(),
+            record.person_id(),
+            record.issued_at(),
+            record.expires_at(),
+            Some(unix_time()?),
+        )
+        .map_err(|_| invalid_data("invalid access token record"))?;
+        let updated = serde_json::to_vec(&updated).map_err(io::Error::other)?;
+        write_atomic(&token_path, &updated)?;
+        Ok(true)
+    }
+}
+
+/// Cables between Agents, their delivery state and send quotas.
+pub trait CableStore {
+    /// Stores a Cable and returns the original record on an identical idempotent retry.
+    ///
+    /// The authenticated sender and idempotency key form the unique request key. Reuse
+    /// with different immutable content returns `AlreadyExists`.
+    fn submit_cable(&self, cable: &Cable) -> io::Result<Cable>;
+
+    /// Finds an accepted Cable by its authenticated sender and idempotency key.
+    fn find_cable(&self, sender_agent: &str, idempotency_key: &str) -> io::Result<Option<Cable>>;
+
+    /// Reads a Cable by its relay-generated identifier.
+    fn get_cable(&self, cable_id: &str) -> io::Result<Option<Cable>>;
+
+    /// Returns unexpired queued or delivered Cables for an Agent Session.
+    ///
+    /// `limit` must be between 1 and 1,000. A recipient with no provider Session is
+    /// visible to the Agent's current Session.
+    fn cable_inbox(
+        &self,
+        agent: &str,
+        session_id: Option<&str>,
+        limit: usize,
+        now: Option<f64>,
+    ) -> io::Result<Vec<Cable>>;
+
+    /// Returns unexpired Cables with at least one held recipient.
+    fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>>;
+
+    /// Atomically changes one recipient's state and returns the updated Cable.
+    fn update_cable_delivery(
+        &self,
+        cable_id: &str,
+        agent: &str,
+        session_id: Option<&str>,
+        state: CableState,
+        now: Option<f64>,
+    ) -> io::Result<Option<Cable>>;
+
+    /// Atomically consumes one token from every shared Cable quota bucket.
+    ///
+    /// Keys are SHA-256 hashed before being written to `cable-quotas.json`, matching I
+    /// Registry while keeping caller-provided keys out of the file.
+    fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool>;
+}
+
+impl CableStore for FileRegistry {
+    fn submit_cable(&self, cable: &Cable) -> io::Result<Cable> {
+        let _registry_lock = registry_lock(&self.root)?;
+        for existing in self.scan_cables()? {
+            if existing.sender_agent() == cable.sender_agent()
+                && existing.idempotency_key() == cable.idempotency_key()
+            {
+                if existing.same_request(cable) {
+                    return Ok(existing);
+                }
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Cable idempotency key was reused for different content",
+                ));
+            }
+        }
+
+        let path = self
+            .root
+            .join("cables")
+            .join(format!("{}.json", cable.id()));
+        if path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("Cable {} already exists", cable.id()),
+            ));
+        }
+        let bytes = serde_json::to_vec(cable).map_err(io::Error::other)?;
+        write_atomic(&path, &bytes)?;
+        // The timeline gets the Cable's metadata only: never its body or the target name
+        // the sending Agent chose.
+        let mut event = TimelineEvent::new(
+            "cable",
+            "sent",
+            cable.sender_operation(),
+            cable.created_at(),
+        )
+        .station(cable.sender_station())
+        .actor(cable.sender_agent())
+        .detail("cable", cable.id())
+        .detail(
+            "scope",
+            serde_json::to_value(cable.target().scope())
+                .ok()
+                .and_then(|scope| scope.as_str().map(str::to_owned))
+                .unwrap_or_default(),
+        )
+        .detail("recipients", cable.recipients().len().to_string());
+        if let Some(mission) = cable.mission_id() {
+            event = event.mission(mission);
+        }
+        if let Some(session) = cable.session_id() {
+            event = event.session(session);
+        }
+        // The Cable is sent either way; its timeline entry is a record, not a condition.
+        let _ = record_event_locked(&self.root, &event);
+        Ok(cable.clone())
+    }
+
+    fn find_cable(&self, sender_agent: &str, idempotency_key: &str) -> io::Result<Option<Cable>> {
+        for cable in self.scan_cables()? {
+            if cable.sender_agent() == sender_agent && cable.idempotency_key() == idempotency_key {
+                return Ok(Some(cable));
+            }
+        }
+        Ok(None)
+    }
+
+    fn get_cable(&self, cable_id: &str) -> io::Result<Option<Cable>> {
+        validate_cable_id(cable_id)?;
+        read_cable(&self.root.join("cables").join(format!("{cable_id}.json")))
+    }
+
+    fn cable_inbox(
+        &self,
+        agent: &str,
+        session_id: Option<&str>,
+        limit: usize,
+        now: Option<f64>,
+    ) -> io::Result<Vec<Cable>> {
+        if agent.trim().is_empty() || limit == 0 || limit > 1_000 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "agent must be non-empty and limit must be between 1 and 1000",
+            ));
+        }
+        let now = now.map_or_else(unix_time, Ok)?;
+        if !now.is_finite() {
+            return Err(invalid_data("Cable inbox time must be finite"));
+        }
+        let mut cables = self
+            .scan_cables()?
+            .into_iter()
+            .filter(|cable| {
+                cable.expires_at() > now
+                    && cable.recipients().iter().any(|recipient| {
+                        recipient.agent() == agent
+                            && recipient
+                                .session_id()
+                                .is_none_or(|target| Some(target) == session_id)
+                            && matches!(
+                                recipient.state(),
+                                CableState::Queued | CableState::Delivered
+                            )
+                    })
+            })
+            .collect::<Vec<_>>();
+        cables.sort_by(|left, right| {
+            left.created_at()
+                .total_cmp(&right.created_at())
+                .then_with(|| left.id().cmp(right.id()))
+        });
+        cables.truncate(limit);
+        Ok(cables)
+    }
+
+    fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>> {
+        if limit == 0 || limit > 1_000 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "held Cable limit must be between 1 and 1000",
+            ));
+        }
+        let now = now.map_or_else(unix_time, Ok)?;
+        if !now.is_finite() {
+            return Err(invalid_data("held Cable time must be finite"));
+        }
+        let mut cables = self
+            .scan_cables()?
+            .into_iter()
+            .filter(|cable| {
+                cable.expires_at() > now
+                    && cable
+                        .recipients()
+                        .iter()
+                        .any(|recipient| recipient.state() == CableState::Held)
+            })
+            .collect::<Vec<_>>();
+        cables.sort_by(|left, right| {
+            left.created_at()
+                .total_cmp(&right.created_at())
+                .then_with(|| left.id().cmp(right.id()))
+        });
+        cables.truncate(limit);
+        Ok(cables)
+    }
+
+    fn update_cable_delivery(
+        &self,
+        cable_id: &str,
+        agent: &str,
+        session_id: Option<&str>,
+        state: CableState,
+        now: Option<f64>,
+    ) -> io::Result<Option<Cable>> {
+        validate_cable_id(cable_id)?;
+        let _registry_lock = registry_lock(&self.root)?;
+        let Some(cable) = self.get_cable(cable_id)? else {
+            return Ok(None);
+        };
+        let now = now.map_or_else(unix_time, Ok)?;
+        if !now.is_finite() {
+            return Err(invalid_data("Cable delivery time must be finite"));
+        }
+        let next_state = if cable.expires_at() <= now && state != CableState::Expired {
+            CableState::Expired
+        } else {
+            state
+        };
+        let Some(updated) = cable
+            .with_recipient_state(agent, session_id, next_state)
+            .map_err(cable_error)?
+        else {
+            return Ok(None);
+        };
+        let path = self
+            .root
+            .join("cables")
+            .join(format!("{}.json", updated.id()));
+        let bytes = serde_json::to_vec(&updated).map_err(io::Error::other)?;
+        write_atomic(&path, &bytes)?;
+        Ok(Some(updated))
+    }
+
+    fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
+        if !now.is_finite() || buckets.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Cable quota buckets need a finite time and at least one limit",
+            ));
+        }
+        let mut keys = BTreeSet::new();
+        for (key, rate, capacity) in buckets {
+            if key.is_empty()
+                || !keys.insert(*key)
+                || !rate.is_finite()
+                || *rate <= 0.0
+                || *capacity == 0
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Cable quota needs unique keys, positive rates and positive bursts",
+                ));
+            }
+        }
+
+        let _registry_lock = registry_lock(&self.root)?;
+        let path = self.root.join("cable-quotas.json");
+        let mut saved = fs::read(&path)
+            .ok()
+            .and_then(|bytes| {
+                serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).ok()
+            })
+            .unwrap_or_default();
+        let mut balances = Vec::with_capacity(buckets.len());
+        for (key, rate, capacity) in buckets {
+            let digest = Sha256::digest(key.as_bytes());
+            let key = hex_digest(&digest);
+            let restored = saved.get(&key).and_then(|value| {
+                let values = value.as_array()?;
+                if values.len() != 2 {
+                    return None;
+                }
+                let tokens = values[0].as_f64()?;
+                let updated = values[1].as_f64()?;
+                (tokens.is_finite() && updated.is_finite()).then_some((tokens, updated))
+            });
+            let (tokens, updated) = restored.unwrap_or((*capacity as f64, now));
+            let available = (*capacity as f64).min(tokens + (now - updated).max(0.0) * rate);
+            balances.push((key, available, *capacity as f64));
+        }
+
+        let allowed = balances.iter().all(|(_, available, _)| *available >= 1.0);
+        for (key, available, capacity) in balances {
+            let remaining = if allowed { available - 1.0 } else { available };
+            if remaining >= capacity {
+                saved.remove(&key);
+            } else {
+                saved.insert(key, serde_json::json!([remaining, now]));
+            }
+        }
+        let bytes = serde_json::to_vec(&saved).map_err(io::Error::other)?;
+        write_atomic(&path, &bytes)?;
+        Ok(allowed)
+    }
+}
+
+/// Metadata-only audit records.
+pub trait AuditStore {
+    /// Stores one metadata-only audit event without retaining request content.
+    fn record_audit(&self, entry: &AuditRecord) -> io::Result<()>;
+
+    /// Returns the newest audit events, bounded to 500 metadata-only entries.
+    fn list_audit(&self, limit: usize) -> io::Result<Vec<AuditRecord>>;
+
+    /// Returns every stored audit event, in no particular order; at most 10,000 exist.
+    fn audit_records(&self) -> io::Result<Vec<AuditRecord>>;
+}
+
+impl AuditStore for FileRegistry {
+    fn record_audit(&self, entry: &AuditRecord) -> io::Result<()> {
+        entry.validate()?;
+        let _registry_lock = registry_lock(&self.root)?;
+        let directory = self.root.join("audit");
+        fs::create_dir_all(&directory)?;
+        let path = directory.join(format!("{}.json", entry.id));
+        if path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "audit entry ID already exists",
+            ));
+        }
+        let bytes = serde_json::to_vec_pretty(entry).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_AUDIT_RECORD_BYTES {
+            return Err(invalid_data("audit entry exceeds the size limit"));
+        }
+        write_atomic(&path, &bytes)?;
+        Ok(())
+    }
+
+    fn list_audit(&self, limit: usize) -> io::Result<Vec<AuditRecord>> {
+        if limit == 0 || limit > MAX_AUDIT_RESULTS {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("audit result limit must be between 1 and {MAX_AUDIT_RESULTS}"),
+            ));
+        }
+        let mut records = self.audit_records()?;
+        records.sort_by(|left, right| {
+            right
+                .at
+                .total_cmp(&left.at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        records.truncate(limit);
+        Ok(records)
+    }
+
+    fn audit_records(&self) -> io::Result<Vec<AuditRecord>> {
+        let directory = self.root.join("audit");
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut paths = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            if entry.file_type()?.is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "json")
+            {
+                if paths.len() >= MAX_AUDIT_ENTRIES {
+                    return Err(invalid_data(format!(
+                        "Registry has more than {MAX_AUDIT_ENTRIES} audit entries"
+                    )));
+                }
+                paths.push(entry.path());
+            }
+        }
+        let mut records = Vec::new();
+        for path in paths {
+            let Ok(metadata) = fs::metadata(&path) else {
+                continue;
+            };
+            if metadata.len() > MAX_AUDIT_RECORD_BYTES {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&path) else {
+                continue;
+            };
+            let Ok(entry) = serde_json::from_slice::<AuditRecord>(&bytes) else {
+                continue;
+            };
+            if entry.validate().is_ok() {
+                records.push(entry);
+            }
+        }
+        Ok(records)
+    }
+}
+
+/// The Agent-role overlay an operator edits per Operation.
+pub trait AgentRoleStore {
+    /// Stores an Operation-scoped Agent role override in the shared Registry.
+    fn put_agent_role(&self, operation: &str, role: &AgentRole) -> io::Result<()>;
+
+    /// Loads role overrides for one Operation in stable role-ID order.
+    fn list_agent_roles(&self, operation: &str) -> io::Result<Vec<AgentRole>>;
+
+    /// Finds an Operation role override by canonical or qualified role identifier.
+    fn agent_role(&self, operation: &str, key: &str) -> io::Result<Option<AgentRole>>;
+
+    /// Removes an Operation-scoped role override, returning whether one existed.
+    fn remove_agent_role(&self, operation: &str, role_id: &str) -> io::Result<bool>;
+}
+
+impl AgentRoleStore for FileRegistry {
+    fn put_agent_role(&self, operation: &str, role: &AgentRole) -> io::Result<()> {
+        validate_registry_key(operation)?;
+        validate_registry_key(&role.id)?;
+        role.validate()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+        let bytes = serde_json::to_vec_pretty(role).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_AGENT_ROLE_RECORD_BYTES {
+            return Err(invalid_data(
+                "Agent role configuration exceeds the size limit",
+            ));
+        }
+        let _registry_lock = registry_lock(&self.root)?;
+        let directory = self.root.join("agent-roles").join(operation);
+        fs::create_dir_all(&directory)?;
+        let current = fs::read_dir(&directory)?;
+        let mut count = 0;
+        for entry in current {
+            if entry?.file_type()?.is_file() {
+                count += 1;
+            }
+        }
+        let path = directory.join(format!("{}.json", role.id));
+        if !path.exists() && count >= MAX_AGENT_ROLES {
+            return Err(invalid_data(format!(
+                "Operation has reached the {MAX_AGENT_ROLES} Agent role limit"
+            )));
+        }
+        write_atomic(&path, &bytes)
+    }
+
+    fn list_agent_roles(&self, operation: &str) -> io::Result<Vec<AgentRole>> {
+        validate_registry_key(operation)?;
+        let directory = self.root.join("agent-roles").join(operation);
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut paths = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            if entry.file_type()?.is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "json")
+            {
+                if paths.len() >= MAX_AGENT_ROLES {
+                    return Err(invalid_data(format!(
+                        "Operation has more than {MAX_AGENT_ROLES} Agent roles"
+                    )));
+                }
+                paths.push(entry.path());
+            }
+        }
+        let mut roles = Vec::new();
+        for path in paths {
+            let metadata = fs::metadata(&path)?;
+            if metadata.len() > MAX_AGENT_ROLE_RECORD_BYTES {
+                continue;
+            }
+            let bytes = fs::read(&path)?;
+            let Ok(role) = serde_json::from_slice::<AgentRole>(&bytes) else {
+                continue;
+            };
+            if role.validate().is_ok()
+                && path.file_stem().and_then(|stem| stem.to_str()) == Some(role.id.as_str())
+            {
+                roles.push(role);
+            }
+        }
+        roles.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(roles)
+    }
+
+    fn agent_role(&self, operation: &str, key: &str) -> io::Result<Option<AgentRole>> {
+        let roles = self.list_agent_roles(operation)?;
+        Ok(roles
+            .into_iter()
+            .filter(|role| key == role.id || key.starts_with(&format!("{}/", role.id)))
+            .max_by_key(|role| role.id.len()))
+    }
+
+    fn remove_agent_role(&self, operation: &str, role_id: &str) -> io::Result<bool> {
+        validate_registry_key(operation)?;
+        validate_registry_key(role_id)?;
+        let _registry_lock = registry_lock(&self.root)?;
+        let path = self
+            .root
+            .join("agent-roles")
+            .join(operation)
+            .join(format!("{role_id}.json"));
+        match fs::remove_file(path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -2235,7 +2381,7 @@ fn finish_locked(
     outcome: &serde_json::Value,
     ok: bool,
     transcript: Option<&[u8]>,
-) -> io::Result<PathBuf> {
+) -> io::Result<()> {
     let state = if ok { "done" } else { "failed" };
     let key = brief.key();
     let target = root.join(state).join(format!("{key}.json"));
@@ -2256,8 +2402,7 @@ fn finish_locked(
             &serde_json::to_vec_pretty(brief).map_err(io::Error::other)?,
         )?;
     }
-    remove_lease(root, &key)?;
-    Ok(target)
+    remove_lease(root, &key)
 }
 
 fn remove_lease(root: &Path, key: &str) -> io::Result<()> {
@@ -2468,6 +2613,7 @@ pub(super) fn invalid_data(message: impl Into<String>) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::registry::backend::*;
     use crate::directorates::registry::cables::{
         CableDraft, CableRecipient, CableScope, CableTarget,
     };
@@ -2777,10 +2923,10 @@ mod tests {
         )
         .unwrap();
 
-        let first_path = registry.submit_mission_proposal(&proposal).unwrap();
-        let retry_path = registry.submit_mission_proposal(&proposal).unwrap();
+        registry.submit_mission_proposal(&proposal).unwrap();
+        // A repeat of the same proposal is accepted and stores nothing new.
+        registry.submit_mission_proposal(&proposal).unwrap();
 
-        assert_eq!(first_path, retry_path);
         assert_eq!(registry.list_new().unwrap(), []);
         let proposals = registry.list_mission_proposals("operation-a", 10).unwrap();
         assert_eq!(proposals.len(), 1);
@@ -2934,10 +3080,11 @@ mod tests {
             version: 1,
         };
 
-        let path = registry.submit_brief(&brief).unwrap();
-        assert_eq!(
-            path,
-            root.path().join("new/universal-exports--mission-123.json")
+        registry.submit_brief(&brief).unwrap();
+        assert!(
+            root.path()
+                .join("new/universal-exports--mission-123.json")
+                .is_file()
         );
         let queued = registry.list_new().unwrap();
         assert_eq!(queued.len(), 1);
@@ -3105,7 +3252,7 @@ mod tests {
 
         let outcome = serde_json::json!({"state": "done", "mission_id": "mission-1"});
         assert!(
-            registry
+            !registry
                 .finish(
                     &brief,
                     &outcome,
@@ -3114,19 +3261,20 @@ mod tests {
                     Some("operation-02")
                 )
                 .unwrap()
-                .is_none()
         );
-        let target = registry
-            .finish(
-                &brief,
-                &outcome,
-                true,
-                Some(b"output"),
-                Some("operation-01"),
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(target, root.path().join("done/manual--brief-1.json"));
+        assert!(
+            registry
+                .finish(
+                    &brief,
+                    &outcome,
+                    true,
+                    Some(b"output"),
+                    Some("operation-01"),
+                )
+                .unwrap()
+        );
+        let target = root.path().join("done/manual--brief-1.json");
+        assert!(target.is_file());
         assert_eq!(fs::read(target.with_extension("log")).unwrap(), b"output");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(

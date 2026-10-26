@@ -50,6 +50,7 @@ use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
 use crate::directorates::q::safehouse::{SafeHouseCheckpoint, SafeHouseReport, SafeHouseSpec};
 use crate::directorates::q::terminal::{Terminal, TerminalBridge};
 use crate::directorates::q::transport::TransportClient;
+use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{
     CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
     CableRelayError, CableRelease, CableSendRequest, CableTarget,
@@ -2391,8 +2392,8 @@ fn finish_intake_claim(
     state
         .intake
         .finish(&brief, outcome, ok, None, Some(lease.station()))
-        .ok()??;
-    Some(())
+        .ok()?
+        .then_some(())
 }
 
 async fn schedule_queued_once(state: &DaemonState) {

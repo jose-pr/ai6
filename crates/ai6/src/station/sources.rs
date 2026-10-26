@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use crate::directorates::m::cover::Disclosure;
 use crate::directorates::m::roster::{Operation, Roster};
+use crate::directorates::registry::backend::*;
 use crate::directorates::registry::sleepers::Fire;
 use crate::directorates::registry::sources::{
     CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll,

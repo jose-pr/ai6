@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 
+use ai6::directorates::registry::backend::*;
 use ai6::{
     Approval, ApprovalRequest, AuditRecord, ClassAuthorization, DEFAULT_APPROVAL_TTL, Ruling,
 };
@@ -329,6 +330,7 @@ pub(crate) async fn revoke_class(
 
 #[cfg(test)]
 mod tests {
+    use ai6::directorates::registry::backend::*;
     use ai6::{ActionScope, MissionId, SessionId};
 
     use crate::controls::tests::{Served, served_with};

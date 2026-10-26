@@ -27,6 +27,7 @@ use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, ExposureGate, Restriction, cable_source,
 };
+use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{
     CableEndpoint, CablePrincipal, CableRelay, CableScope, CableSendRequest, CableTarget,
 };

@@ -17,6 +17,7 @@ use crate::directorates::m::placement::{OperationPolicy, PlacementRequest, Stati
 use crate::directorates::m::recovery::adopter;
 use crate::directorates::m::roster::OnLost;
 use crate::directorates::q::safehouse::{CheckpointSpec, SafeHouseCheckpoint};
+use crate::directorates::registry::backend::*;
 use crate::directorates::registry::sessions::{
     MAX_RECENT_EVENT_CHARS, MAX_RECENT_EVENTS, SessionError, SessionLaunch, SessionRecord,
     SessionStatus, SessionUpdate,

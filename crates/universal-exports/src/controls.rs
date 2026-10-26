@@ -7,6 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
+use ai6::directorates::registry::backend::*;
 use ai6::{AuditRecord, FileRegistry, GONE_DARK_AFTER, StationSettings};
 use ai6_diptel::{
     ControlAction, ControlId, MissionControl, MissionId, OperationId, SessionId, control_frames,

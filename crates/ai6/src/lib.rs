@@ -84,6 +84,11 @@ pub use directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,
     Revocation, Ruling,
 };
+pub use directorates::registry::backend::{
+    AccessTokenStore, AgentRoleStore, ApprovalStore, AuditStore, BriefStore, CableStore,
+    QuarantineStore, RegistryBackend, SessionStore, SleeperStore, SourceStore, StationStore,
+    TimelineStore, UsageStore,
+};
 pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,
     CableError, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy,

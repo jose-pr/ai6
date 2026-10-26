@@ -91,6 +91,7 @@ mod tests {
     use super::*;
     use crate::directorates::m::placement::AgentFacts;
     use crate::directorates::m::theaters::{Theater, TheaterAccess, TheaterSummary};
+    use crate::directorates::registry::backend::*;
     use crate::directorates::registry::sessions::{NewSession, SessionLaunch};
     use crate::directorates::registry::store::FileRegistry;
     use crate::{Capabilities, TransportAccess};
