@@ -1081,6 +1081,7 @@ async fn scheduler_loop(state: DaemonState) {
         medical::enforce_quarantines(&state);
         #[cfg(feature = "cables-mcp")]
         green_ink::deliver_decisions(&state).await;
+        credentials::revoke_lapsed(&state);
         schedule_recovered_once(&state).await;
         schedule_parked_once(&state).await;
         schedule_queued_once(&state).await;
@@ -9014,6 +9015,126 @@ mod tests {
         assert!(state.station.credentials.issued_for(&mission_id).is_empty());
         for place in [root.path(), theater_root.path()] {
             assert!(files_holding(place, "fake-release-token").is_empty());
+        }
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_green_ink_credential_is_revoked_once_its_approval_is_revoked_or_expires() {
+        let root = tempfile::tempdir().unwrap();
+        let theater_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(theater_root.path().join("work")).unwrap();
+        let (mut state, _) = remote_hands_state(root.path(), theater_root.path(), phone());
+        let mission_id = format!("credential-lapse-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "release the build".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let secrets = FakeSecrets::default();
+        state.station = state
+            .station
+            .clone()
+            .with_loadouts(credential_loadouts())
+            .with_secret_backend(secrets.clone());
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+
+        let now = state.clock.now();
+        for (round, lapse) in ["revoked", "expired"].into_iter().enumerate() {
+            let request = crate::directorates::registry::approvals::ApprovalRequest::try_new(
+                "G",
+                MissionId::try_new(&mission_id).unwrap(),
+                SessionId::try_new("provider-session-remote").unwrap(),
+                "007",
+                crate::ActionScope::try_new("release", format!("tag v1.{round}.0")).unwrap(),
+                "ship it",
+                lapse,
+            )
+            .unwrap()
+            .expiring(now as f64, Duration::from_secs(600));
+            state.intake.request_approval(&request).unwrap();
+            state
+                .intake
+                .decide_approval(
+                    "G",
+                    &request.id,
+                    &crate::Ruling::approve("operator", now as f64, now as f64 + 600.0),
+                )
+                .unwrap();
+            let _ = resume_mission(
+                State(state.clone()),
+                axum::extract::Path(mission_id.clone()),
+                Json(ResumeMission {
+                    message: Some("release it".to_owned()),
+                    environment: BTreeMap::new(),
+                }),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+            wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+            let issued = |state: &DaemonState| state.station.credentials.issued_for(&mission_id);
+            assert!(
+                issued(&state).contains(&"release-token".to_owned()),
+                "{lapse}"
+            );
+
+            let before = secrets.revoked.lock().unwrap().len();
+            credentials::revoke_lapsed(&state);
+            assert_eq!(
+                secrets.revoked.lock().unwrap().len(),
+                before,
+                "a live approval keeps its credential"
+            );
+            if lapse == "revoked" {
+                state
+                    .intake
+                    .revoke_approval("G", &request.id, "operator", now as f64 + 1.0)
+                    .unwrap();
+            } else {
+                let later = now + 601;
+                state.clock = Clock(Arc::new(move || later));
+            }
+            credentials::revoke_lapsed(&state);
+            assert_eq!(
+                secrets.revoked.lock().unwrap().len(),
+                before + 1,
+                "the {lapse} approval's lease is revoked at the backend"
+            );
+            assert_eq!(
+                issued(&state),
+                ["forge-token"],
+                "only the green ink credential goes"
+            );
+            assert!(
+                state
+                    .intake
+                    .timeline_events("G")
+                    .unwrap()
+                    .iter()
+                    .any(|event| event.kind == "credential"
+                        && event.action == "revoked"
+                        && event.detail.get("approval") == Some(&request.id)),
+                "{lapse}"
+            );
         }
         state.stopping.store(true, Ordering::Release);
     }

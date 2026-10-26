@@ -3,8 +3,9 @@
 //!
 //! Nothing is written anywhere: a value lives in the Station's memory and the harness's
 //! environment. Leases are revoked when the Session's Mission ends or its Session stops on
-//! this Station. A `green_ink` secret is leased only while the Mission holds a live green ink
-//! approval of a kind it names, once per approval, for no longer than the approval lasts.
+//! this Station, and when their time is up. A `green_ink` secret is leased only while the
+//! Mission holds a live green ink approval of a kind it names, once per approval, and its lease
+//! is revoked as soon as that approval expires or is revoked.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -17,6 +18,7 @@ use crate::directorates::q::{
     SecretLease, SecretLeaseRequest, StationSecrets,
 };
 use crate::directorates::registry::approvals::{Approval, ApprovalStatus};
+use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::timeline::TimelineEvent;
 
 use super::DaemonState;
@@ -33,7 +35,7 @@ pub(crate) struct CredentialDesk {
     backend: Option<Arc<dyn SecretBackend>>,
     /// Where the Station's own backend finds relative secret files.
     config_dir: Option<std::path::PathBuf>,
-    issued: Arc<Mutex<BTreeMap<String, Vec<SecretLease>>>>,
+    issued: Arc<Mutex<BTreeMap<String, Vec<Issued>>>>,
     spent: Arc<Mutex<BTreeSet<String>>>,
 }
 
@@ -103,7 +105,7 @@ impl CredentialDesk {
             .get(mission_id)
             .into_iter()
             .flatten()
-            .flat_map(SecretLease::names)
+            .flat_map(|issued| issued.lease.names())
             .collect()
     }
 
@@ -198,7 +200,7 @@ pub(super) fn issue(
             .map_err(|error| {
                 format!("Agent {agent:?}'s credentials could not be leased: {error}")
             })?;
-        leases.hand_over(lease, &ordinary, environment)?;
+        leases.hand_over(lease, None, &ordinary, environment)?;
         leased.extend(names);
     }
 
@@ -236,7 +238,12 @@ pub(super) fn issue(
                     continue;
                 }
             };
-            leases.hand_over(lease, std::slice::from_ref(definition), environment)?;
+            leases.hand_over(
+                lease,
+                Some(approval.request.id.clone()),
+                std::slice::from_ref(definition),
+                environment,
+            )?;
             spent.insert(approval.request.id.clone());
             approvals.push(approval.request.id.clone());
             leased.push(definition.name().to_owned());
@@ -256,9 +263,15 @@ pub(super) fn issue(
     Ok(())
 }
 
+/// A lease the Station issued, with the green ink approval that unlocked it, if any.
+struct Issued {
+    lease: SecretLease,
+    approval: Option<String>,
+}
+
 /// Leases revoked when dropped.
 #[derive(Default)]
-struct Leases(Vec<SecretLease>);
+struct Leases(Vec<Issued>);
 
 impl Leases {
     /// Keeps `lease` and puts each of `definitions`' values in `environment` under its
@@ -266,11 +279,12 @@ impl Leases {
     fn hand_over(
         &mut self,
         lease: SecretLease,
+        approval: Option<String>,
         definitions: &[SecretDefinition],
         environment: &mut BTreeMap<String, String>,
     ) -> Result<(), String> {
-        self.0.push(lease);
-        let lease = self.0.last().ok_or("no lease to hand over")?;
+        self.0.push(Issued { lease, approval });
+        let lease = &self.0.last().ok_or("no lease to hand over")?.lease;
         for definition in definitions {
             lease
                 .with_secret(definition.name(), |value| {
@@ -284,7 +298,7 @@ impl Leases {
 
 impl Drop for Leases {
     fn drop(&mut self) {
-        for lease in self.0.drain(..) {
+        for Issued { lease, .. } in self.0.drain(..) {
             if let Err(error) = lease.revoke() {
                 eprintln!("ai6: a credential lease was not revoked: {error}");
             }
@@ -302,9 +316,98 @@ pub(super) fn release(state: &DaemonState, mission_id: &str) {
         .lock()
         .ok()
         .and_then(|mut issued| issued.remove(mission_id));
-    for lease in leases.into_iter().flatten() {
+    for Issued { lease, .. } in leases.into_iter().flatten() {
         if let Err(error) = lease.revoke() {
             eprintln!("ai6: a credential lease of Mission {mission_id:?} was not revoked: {error}");
+        }
+    }
+}
+
+/// Revokes the leases whose time is up, and each green ink lease whose approval expired or was
+/// revoked, so a protected credential lasts no longer than the approval that unlocked it. A
+/// value already in a harness environment stays there; a backend that issues credentials of its
+/// own stops honouring them. An approval the Registry cannot read keeps its lease until the
+/// next pass.
+pub(super) fn revoke_lapsed(state: &DaemonState) {
+    let issued = &state.station.credentials.issued;
+    let protected: Vec<(String, String)> = match issued.lock() {
+        Ok(issued) => issued
+            .iter()
+            .flat_map(|(mission, leases)| {
+                leases
+                    .iter()
+                    .filter_map(|issued| Some((mission.clone(), issued.approval.clone()?)))
+            })
+            .collect(),
+        Err(_) => return,
+    };
+    let now = state.clock.now() as f64;
+    let mut lapsed = BTreeSet::new();
+    for (mission, approval) in protected {
+        let operation = state
+            .missions
+            .lock()
+            .ok()
+            .and_then(|missions| missions.get(&mission).and_then(|m| m.operation_id.clone()));
+        if operation.is_some_and(|operation| {
+            !approval_live(state.intake.as_ref(), &operation, &approval, now)
+        }) {
+            lapsed.insert(approval);
+        }
+    }
+    let mut revoked = Vec::new();
+    if let Ok(mut issued) = issued.lock() {
+        for (mission, leases) in issued.iter_mut() {
+            let (keep, gone): (Vec<_>, Vec<_>) =
+                std::mem::take(leases).into_iter().partition(|issued| {
+                    issued.lease.is_active()
+                        && issued
+                            .approval
+                            .as_ref()
+                            .is_none_or(|approval| !lapsed.contains(approval))
+                });
+            *leases = keep;
+            revoked.extend(gone.into_iter().map(|issued| (mission.clone(), issued)));
+        }
+        issued.retain(|_, leases| !leases.is_empty());
+    }
+    for (mission, issued) in revoked {
+        let names = issued.lease.names();
+        if let Err(error) = issued.lease.revoke() {
+            eprintln!("ai6: a credential lease of Mission {mission:?} was not revoked: {error}");
+        }
+        if let Some(approval) = &issued.approval
+            && let Some(operation) =
+                state.missions.lock().ok().and_then(|missions| {
+                    missions.get(&mission).and_then(|m| m.operation_id.clone())
+                })
+        {
+            let event = TimelineEvent::new(
+                TIMELINE_KIND,
+                "revoked",
+                operation,
+                state.clock.now() as f64,
+            )
+            .station(state.station_id.clone())
+            .mission(mission.clone())
+            .detail("secrets", names.join(","))
+            .detail("approval", approval.clone());
+            if let Err(error) = state.intake.record_event(&event) {
+                eprintln!("ai6: credential revocation was not recorded on the timeline: {error}");
+            }
+        }
+    }
+}
+
+/// Whether approval `id` of `operation` is decided, approved and live at `now`. An unreadable
+/// record counts as live.
+fn approval_live(registry: &dyn RegistryBackend, operation: &str, id: &str, now: f64) -> bool {
+    match registry.approval(operation, id, now) {
+        Ok(Some(ApprovalStatus::Decided(approval))) => approval.is_live(now),
+        Ok(_) => false,
+        Err(error) => {
+            eprintln!("ai6: green ink approval {id:?} unreadable: {error}");
+            true
         }
     }
 }
