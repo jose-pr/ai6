@@ -716,24 +716,48 @@ fn app_server_argv(
     argv
 }
 
+/// The settings that leave an answer-only or assistant thread no built-in tool that reads,
+/// runs or reaches anything: no command execution (`features.shell_tool`, and its resumable
+/// form `features.unified_exec`), no local image attachment (`tools.view_image`), no web
+/// search, no sub-agents and no app connectors. Names and meanings from the Codex
+/// configuration reference (learn.chatgpt.com/docs/config-file/config-reference, read
+/// 2026-10-26). The read-only sandbox and approval policy `never` stay as a second line.
+const NO_BUILT_IN_TOOLS: [&str; 6] = [
+    "features.shell_tool=false",
+    "features.unified_exec=false",
+    "tools.view_image=false",
+    "web_search=\"disabled\"",
+    "features.multi_agent=false",
+    "features.apps=false",
+];
+
+/// `-c` overrides for [`NO_BUILT_IN_TOOLS`].
+fn no_built_in_tools() -> Vec<String> {
+    NO_BUILT_IN_TOOLS
+        .iter()
+        .flat_map(|setting| ["-c".to_owned(), (*setting).to_owned()])
+        .collect()
+}
+
 /// The app server of an answer-only thread: the user's MCP servers replaced by none for this
-/// process, and AI6's left out.
+/// process, AI6's left out, and no built-in tool ([`NO_BUILT_IN_TOOLS`]).
 fn answer_only_argv(executable: &str) -> Vec<String> {
-    vec![
+    let mut argv = vec![
         executable.to_owned(),
         "app-server".to_owned(),
         "-c".to_owned(),
         "mcp_servers={}".to_owned(),
-    ]
+    ];
+    argv.extend(no_built_in_tools());
+    argv
 }
 
 /// The app server of an assistant thread, built from its mode's parts: `mcp_servers` set to
 /// one inline table holding exactly the mode's servers, which replaces the user's servers for
-/// this process, each with its URL and the name of the variable holding its bearer token. The
-/// thread itself runs as an answer-only one ([`restrict_to_answer_only`]): Codex's shell
-/// cannot be switched off, so the read-only sandbox, which Codex gives no network, and web
-/// search off are what keep it to its servers. Interpreters, skills and any network beyond
-/// the servers are refused until this handler can confine them.
+/// this process, each with its URL and the name of the variable holding its bearer token, and
+/// no built-in tool ([`NO_BUILT_IN_TOOLS`]): no shell, no file or image reading, no web. The
+/// thread itself runs as an answer-only one ([`restrict_to_answer_only`]). Interpreters,
+/// skills and any network beyond the servers are refused until this handler can confine them.
 fn assistant_argv(
     executable: &str,
     environment: &std::collections::BTreeMap<String, String>,
@@ -776,12 +800,14 @@ fn assistant_argv(
             server.name
         ));
     }
-    Ok(vec![
+    let mut argv = vec![
         executable.to_owned(),
         "app-server".to_owned(),
         "-c".to_owned(),
         format!("mcp_servers={{{}}}", servers.join(",")),
-    ])
+    ];
+    argv.extend(no_built_in_tools());
+    Ok(argv)
 }
 
 /// Marks the working directory an untrusted project for this process, so Codex skips its
@@ -810,9 +836,9 @@ fn restrict_to_remote_hands(params: &mut Value) {
     params["approvalPolicy"] = json!("never");
 }
 
-/// A thread that only reads its prompt and answers: Codex's shell cannot be switched off, so
-/// it runs in the read-only sandbox (no writes; Codex gives that sandbox no network), never
-/// asks, and has web search off (`web_search = "disabled"`).
+/// A thread that only reads its prompt and answers: its app server has no built-in tool
+/// ([`NO_BUILT_IN_TOOLS`]), and the thread also runs in the read-only sandbox (no writes;
+/// Codex gives that sandbox no network), never asks, and has web search off.
 fn restrict_to_answer_only(params: &mut Value) {
     restrict_to_remote_hands(params);
     params["config"] = json!({ "web_search": "disabled" });
@@ -1902,9 +1928,12 @@ mod tests {
                  bearer_token_env_var=\"AI6_MONEYPENNY_MCP_TOKEN\"}}"
                     .to_owned(),
             ],
+            no_built_in_tools(),
             untrusted_project(&cwd).to_vec(),
         ]
         .concat();
+        assert_no_built_in_tools(&specs[0].argv);
+        assert_no_built_in_tools(&specs[1].argv);
         assert_eq!(
             specs[0].argv, expected,
             "only Moneypenny's server, no Cables"
@@ -1950,10 +1979,41 @@ mod tests {
     #[test]
     fn an_answer_only_app_server_has_no_mcp_server_at_all() {
         let argv = answer_only_argv("codex");
-        assert_eq!(argv, ["codex", "app-server", "-c", "mcp_servers={}"]);
+        assert_eq!(argv[..4], ["codex", "app-server", "-c", "mcp_servers={}"]);
         let (key, value) = argv[3].split_once('=').unwrap();
         let parsed: toml::Table = toml::from_str(&format!("{key} = {value}")).unwrap();
         assert!(parsed["mcp_servers"].as_table().unwrap().is_empty());
+        assert_no_built_in_tools(&argv);
+    }
+
+    /// Asserts the `-c` overrides that leave Codex no shell, no exec, no image reading, no web
+    /// search, no sub-agents and no app connectors, each parsed as Codex parses a `-c` value.
+    fn assert_no_built_in_tools(argv: &[String]) {
+        let mut settings = toml::Table::new();
+        for pair in argv.windows(2).filter(|pair| pair[0] == "-c") {
+            let parsed: toml::Table = toml::from_str(&pair[1]).unwrap();
+            for (key, value) in parsed {
+                match (settings.get_mut(&key), value) {
+                    (Some(toml::Value::Table(merged)), toml::Value::Table(more)) => {
+                        merged.extend(more);
+                    }
+                    (_, value) => {
+                        settings.insert(key, value);
+                    }
+                }
+            }
+        }
+        let off = |table: &str, key: &str| settings[table][key].as_bool();
+        assert_eq!(off("features", "shell_tool"), Some(false), "{argv:?}");
+        assert_eq!(off("features", "unified_exec"), Some(false), "{argv:?}");
+        assert_eq!(off("tools", "view_image"), Some(false), "{argv:?}");
+        assert_eq!(off("features", "multi_agent"), Some(false), "{argv:?}");
+        assert_eq!(off("features", "apps"), Some(false), "{argv:?}");
+        assert_eq!(
+            settings["web_search"].as_str(),
+            Some("disabled"),
+            "{argv:?}"
+        );
     }
 
     #[test]
