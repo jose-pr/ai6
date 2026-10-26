@@ -1381,6 +1381,7 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         }
         leases.push(lease);
     }
+    vetting.proposals();
     true
 }
 

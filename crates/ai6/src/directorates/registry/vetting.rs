@@ -426,7 +426,47 @@ mod tests {
         a_refused_brief_is_filed_as_failed_with_its_reason,
         clearances_accumulate_and_need_a_queued_brief,
         held_briefs_are_listed_per_operation_and_block_resubmission,
+        a_pending_proposal_keeps_its_vetting_across_a_repeated_submission,
     );
+
+    fn a_pending_proposal_keeps_its_vetting_across_a_repeated_submission(store: &dyn Store) {
+        use crate::directorates::m::identity::{MissionId, SessionId};
+        use crate::directorates::registry::store::MissionProposal;
+
+        let registry = store.handle();
+        let proposal = MissionProposal::try_new(
+            "G",
+            MissionId::try_new("parent").unwrap(),
+            "coordinator",
+            SessionId::try_new("session-1").unwrap(),
+            "retry-1",
+            brief("child"),
+        )
+        .unwrap();
+        registry.submit_mission_proposal(&proposal).unwrap();
+        let updated = registry
+            .set_proposal_vetting("G", &proposal.id, &duplicate())
+            .unwrap();
+        assert_eq!(updated.vetting, Some(duplicate()));
+        registry.submit_mission_proposal(&proposal).unwrap();
+        let listed = registry.list_mission_proposals("G", 10).unwrap();
+        assert_eq!(
+            listed[0].vetting,
+            Some(duplicate()),
+            "a retry keeps the vetting"
+        );
+        registry
+            .promote_mission_proposal("G", &proposal.id, "hq")
+            .unwrap();
+        assert_eq!(
+            registry
+                .set_proposal_vetting("G", &proposal.id, &Vetting::pass())
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound,
+            "only a pending proposal is vetted"
+        );
+    }
 
     fn duplicate() -> Vetting {
         Vetting::from_findings(vec![

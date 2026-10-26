@@ -626,6 +626,7 @@ pub fn review_brief(
         data,
         created: reviewed.created.clone(),
         version: 1,
+        provenance: None,
     }
 }
 

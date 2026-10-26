@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::m::roster::AgentRole;
+use crate::directorates::m::vetting::Vetting;
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::cables::{Cable, CableError, CableState};
 use crate::directorates::registry::timeline::{TimelineEvent, record_event_locked};
@@ -167,6 +168,9 @@ pub struct MissionProposal {
     pub brief: Brief,
     /// Unix timestamp when the proposal was first stored.
     pub created_at: f64,
+    /// What M's vetting found, once it has looked; `None` until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vetting: Option<Vetting>,
 }
 
 impl MissionProposal {
@@ -230,6 +234,7 @@ impl MissionProposal {
             proposer_session_id,
             brief,
             created_at: 0.0,
+            vetting: None,
         })
     }
 
@@ -757,6 +762,19 @@ pub trait BriefStore {
         proposal_id: &str,
     ) -> io::Result<MissionProposal>;
 
+    /// Records what M's vetting found in a pending Mission proposal, replacing any earlier
+    /// result, and returns the proposal.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the proposal is not pending; `InvalidInput` for a bad identity.
+    fn set_proposal_vetting(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+        vetting: &Vetting,
+    ) -> io::Result<MissionProposal>;
+
     /// Reads valid queued briefs in priority, creation-time and key order.
     /// Invalid records are skipped; nothing is claimed or moved.
     fn list_new(&self) -> io::Result<Vec<Brief>>;
@@ -894,9 +912,11 @@ impl BriefStore for FileRegistry {
         fs::create_dir_all(&directory)?;
         let path = directory.join(format!("{}.json", proposal.id));
         let mut stored = proposal.clone();
+        stored.vetting = None;
         if path.exists() {
             let existing = read_mission_proposal(&path)?;
             stored.created_at = existing.created_at;
+            stored.vetting.clone_from(&existing.vetting);
             if existing == stored {
                 return Ok(());
             }
@@ -1132,6 +1152,47 @@ impl BriefStore for FileRegistry {
             .ok_or_else(|| invalid_data("Mission proposal path has no parent"))?;
         fs::create_dir_all(rejected_parent)?;
         fs::rename(&pending, &rejected)?;
+        Ok(proposal)
+    }
+
+    fn set_proposal_vetting(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+        vetting: &Vetting,
+    ) -> io::Result<MissionProposal> {
+        validate_registry_key(operation)?;
+        validate_registry_key(proposal_id)?;
+        let _registry_lock = registry_lock(&self.root)?;
+        let pending = self
+            .root
+            .join("proposals")
+            .join("pending")
+            .join(operation)
+            .join(format!("{proposal_id}.json"));
+        let mut proposal = match read_mission_proposal(&pending) {
+            Ok(proposal) if proposal.operation_id == operation && proposal.id == proposal_id => {
+                proposal
+            }
+            Ok(_) => {
+                return Err(invalid_data(
+                    "Mission proposal path does not match its identity",
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Mission proposal is not pending",
+                ));
+            }
+            Err(error) => return Err(error),
+        };
+        proposal.vetting = Some(vetting.clone());
+        let bytes = serde_json::to_vec_pretty(&proposal).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_MISSION_PROPOSAL_BYTES {
+            return Err(invalid_data("Mission proposal exceeds the size limit"));
+        }
+        write_atomic(&pending, &bytes)?;
         Ok(proposal)
     }
 

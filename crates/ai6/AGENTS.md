@@ -1185,11 +1185,13 @@ pub struct MissionProposal {
     pub proposer_session_id: SessionId,
     pub brief: Brief,
     pub created_at: f64,
+    pub vetting: Option<Vetting>,   // serde default, skipped when None: set by Headquarters
 }
-BriefStore::submit_mission_proposal(&MissionProposal) -> io::Result<()>
+BriefStore::submit_mission_proposal(&MissionProposal) -> io::Result<()>   // a retry keeps the stored vetting
 BriefStore::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
 BriefStore::promote_mission_proposal(operation: &str, proposal_id: &str, received_by: &str) -> io::Result<Brief>
 BriefStore::reject_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<MissionProposal>
+BriefStore::set_proposal_vetting(operation: &str, proposal_id: &str, vetting: &Vetting) -> io::Result<MissionProposal>  // NotFound unless pending
 ```
 
 `FileRegistry::open(root)` opens the file-backed Registry without creating or changing
@@ -1228,8 +1230,14 @@ refuses a key already present in `new/`, `claimed/`, `done/` or `failed/`. Its
 Agent-authored Mission proposals are separately stored under `proposals/pending/<operation>/`
 and never appear in `list_new()`. `promote_mission_proposal` moves an authorized proposal into
 `new/` and is safe to retry; `reject_mission_proposal` files it under `proposals/rejected/`.
-Only Universal Exports's authenticated, Operation-authorized review endpoints call these decision
-methods. Provider Session identity is bound by AI6, never supplied in the proposed brief.
+Universal Exports's authenticated, Operation-authorized review endpoints call these decision
+methods, and Headquarters promotes a proposal itself only when its vetting passed, its
+proposer Session was not exposed (no `exposure` in the brief's `data`) and a live class
+authorisation of kind `proposal` covers it: proposer Agent (or the role the proposal asks for)
+at that Agent's clearance, and the proposal's title against `target_pattern`. That approval
+is a green ink request on the parent Mission (`ApprovalStore::approve_by_class`, one use),
+audited as `mission.proposal.approved` with actor `class:ID`; the promoted brief is cleared of
+`review`. Provider Session identity is bound by AI6, never supplied in the proposed brief.
 
 `record_audit` stores a validated metadata-only `AuditRecord` under `audit/` and rejects
 duplicate IDs. Each entry is bounded to 16 KiB and the listing scans at most 10,000

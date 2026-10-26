@@ -276,8 +276,10 @@ impl BriefStore for SqlRegistry {
         proposal.validate()?;
         self.write(|tx, revision| {
             let mut stored = proposal.clone();
+            stored.vetting = None;
             if let Some((_, existing)) = self::proposal(tx, &proposal.operation_id, &proposal.id)? {
                 stored.created_at = existing.created_at;
+                stored.vetting.clone_from(&existing.vetting);
                 if existing == stored {
                     return Ok(());
                 }
@@ -436,6 +438,40 @@ impl BriefStore for SqlRegistry {
                     Ok(proposal)
                 }
             }
+        })
+    }
+
+    fn set_proposal_vetting(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+        vetting: &Vetting,
+    ) -> io::Result<MissionProposal> {
+        validate_registry_key(operation)?;
+        validate_registry_key(proposal_id)?;
+        self.write(|tx, revision| {
+            let mut proposal = match proposal(tx, operation, proposal_id)? {
+                Some((state, proposal)) if state == "pending" => proposal,
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "Mission proposal is not pending",
+                    ));
+                }
+            };
+            proposal.vetting = Some(vetting.clone());
+            let text = bounded_json(&proposal, MAX_MISSION_PROPOSAL_BYTES, "Mission proposal")?;
+            tx.execute(
+                "UPDATE ai6_mission_proposals SET proposal = $3, revision = $4 \
+                 WHERE operation = $1 AND id = $2",
+                &[
+                    operation.into(),
+                    proposal_id.into(),
+                    text.into(),
+                    revision.into(),
+                ],
+            )?;
+            Ok(proposal)
         })
     }
 
