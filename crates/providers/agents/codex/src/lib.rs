@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{
-    AgentTerminal, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine, TerminalSession,
+    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine,
+    TerminalSession,
 };
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
@@ -271,7 +272,24 @@ struct CodexSession {
     tripped: AtomicBool,
     /// The command of each command execution item the thread started, by item id.
     started: Mutex<std::collections::HashMap<String, String>>,
+    /// Set once the app server's output has ended.
+    ended: AtomicBool,
+    /// Set once that end was reported as a `failed` event.
+    ended_reported: AtomicBool,
+    ended_reason: Mutex<Option<String>>,
+    /// The last lines the app server wrote that were not JSON: its own diagnostics, which say
+    /// why it exited when it exits.
+    tail: Mutex<VecDeque<String>>,
 }
+
+/// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
+const TAIL_LINES: usize = 8;
+const TAIL_LINE_BYTES: usize = 512;
+/// How long `close` waits for the app server to have exited, for a terminal whose `kill` does
+/// not.
+const CLOSE_WAIT_MS: i64 = 2_000;
+/// How long the end of the output waits for the app server's exit status.
+const EXIT_WAIT_MS: i64 = 1_000;
 
 impl CodexSession {
     fn new(terminal: Object<dyn TerminalSession>, effort: Option<String>) -> Self {
@@ -287,6 +305,63 @@ impl CodexSession {
             restricted: None,
             tripped: AtomicBool::new(false),
             started: Mutex::default(),
+            ended: AtomicBool::new(false),
+            ended_reported: AtomicBool::new(false),
+            ended_reason: Mutex::new(None),
+            tail: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// How the app server ended, once its terminal says it has; `None` while it runs or when
+    /// the terminal cannot tell.
+    fn exited(&self, timeout_ms: i64) -> Option<ExitInfo> {
+        let status = self.terminal.exit_status(timeout_ms).ok()?;
+        ExitInfo::from_value(&status)
+            .ok()
+            .filter(|exit| !exit.running)
+    }
+
+    /// Why the app server's output ended: its exit status and the last lines it wrote outside
+    /// the protocol. Worked out once.
+    fn exit_reason(&self) -> String {
+        if let Ok(mut reason) = self.ended_reason.lock() {
+            return reason.get_or_insert_with(|| self.describe_exit()).clone();
+        }
+        self.describe_exit()
+    }
+
+    fn describe_exit(&self) -> String {
+        let how = match self.exited(EXIT_WAIT_MS) {
+            Some(ExitInfo {
+                code: Some(code), ..
+            }) => format!("exited with code {code}"),
+            Some(ExitInfo {
+                signal: Some(signal),
+                ..
+            }) => format!("was ended by signal {signal}"),
+            Some(_) => "exited".to_owned(),
+            None => "closed its terminal".to_owned(),
+        };
+        let mut reason = format!("Codex app-server {how} before completing the Session");
+        if let Ok(tail) = self.tail.lock()
+            && !tail.is_empty()
+        {
+            reason.push_str("; its last output:\n");
+            reason.push_str(&tail.iter().cloned().collect::<Vec<_>>().join("\n"));
+        }
+        reason
+    }
+
+    fn remember_output(&self, line: &str) {
+        if let Ok(mut tail) = self.tail.lock() {
+            if tail.len() == TAIL_LINES {
+                tail.pop_front();
+            }
+            let mut end = line.len().min(TAIL_LINE_BYTES);
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            tail.push_back(line[..end].to_owned());
         }
     }
 
@@ -399,12 +474,28 @@ impl CodexSession {
         self.terminal.write(&line)
     }
 
-    /// The next line the app server wrote, `None` when `timeout` passes first.
+    /// The next line the app server wrote, `None` when `timeout` passes first. Once its output
+    /// has ended (the terminal closed, or the app server exited while the terminal kept it
+    /// open) and every line is read, an error saying how it ended.
     fn read_line(&self, timeout: Duration) -> Result<Option<StreamLine>, ProviderError> {
+        let line = self.next_line(timeout)?;
+        if let Some(StreamLine::Text(text)) = &line {
+            self.remember_output(text);
+        }
+        Ok(line)
+    }
+
+    fn next_line(&self, timeout: Duration) -> Result<Option<StreamLine>, ProviderError> {
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(line) = lock(&self.output)?.next_line() {
                 return Ok(Some(line));
+            }
+            if self.ended.load(Ordering::Acquire) {
+                if let Some(line) = lock(&self.output)?.finish() {
+                    return Ok(Some(line));
+                }
+                return Err(refuse(Status::GUATIAO_ERR_INTERNAL, self.exit_reason()));
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -416,16 +507,16 @@ impl CodexSession {
                 remaining.as_millis().min(i64::MAX as u128) as i64,
             )?;
             if count == READ_TIMED_OUT {
+                // A terminal may keep its output open after the app server exits.
+                if self.exited(0).is_some() {
+                    self.ended.store(true, Ordering::Release);
+                    continue;
+                }
                 return Ok(None);
             }
             if count == 0 {
-                if let Some(line) = lock(&self.output)?.finish() {
-                    return Ok(Some(line));
-                }
-                return Err(refuse(
-                    Status::GUATIAO_ERR_INTERNAL,
-                    "Codex app-server closed its terminal",
-                ));
+                self.ended.store(true, Ordering::Release);
+                continue;
             }
             if count < 0 {
                 return Err(refuse(
@@ -827,22 +918,42 @@ impl AgentSession for CodexSession {
         if let Some(event) = lock(&self.events)?.pop_front() {
             return Ok(Some(event));
         }
-        let (message, rebuilt) =
-            match self.read_line(Duration::from_millis(timeout_ms.max(0) as u64))? {
-                None => return Ok(None),
-                Some(StreamLine::Json { value, rebuilt, .. }) => (value, rebuilt),
-                Some(StreamLine::Text(text)) => {
-                    return Ok(Some(AgentEvent {
-                        kind: "output".to_owned(),
-                        text: Some(text),
-                        data: None,
-                        limit: None,
-                        usage: None,
-                        tools: Vec::new(),
-                        quota: Vec::new(),
-                    }));
+        let read = self.read_line(Duration::from_millis(timeout_ms.max(0) as u64));
+        // The app server's exit ends the Session once, with the reason.
+        let read = match read {
+            Err(_) if self.ended.load(Ordering::Acquire) => {
+                if self.ended_reported.swap(true, Ordering::AcqRel) {
+                    return Ok(None);
                 }
-            };
+                let reason = self.exit_reason();
+                eprintln!("ai6: {reason}");
+                return Ok(Some(AgentEvent {
+                    kind: "failed".to_owned(),
+                    text: Some(reason),
+                    data: None,
+                    limit: None,
+                    usage: None,
+                    tools: Vec::new(),
+                    quota: Vec::new(),
+                }));
+            }
+            read => read?,
+        };
+        let (message, rebuilt) = match read {
+            None => return Ok(None),
+            Some(StreamLine::Json { value, rebuilt, .. }) => (value, rebuilt),
+            Some(StreamLine::Text(text)) => {
+                return Ok(Some(AgentEvent {
+                    kind: "output".to_owned(),
+                    text: Some(text),
+                    data: None,
+                    limit: None,
+                    usage: None,
+                    tools: Vec::new(),
+                    quota: Vec::new(),
+                }));
+            }
+        };
         if message.get("method").is_none() {
             return Ok(None);
         }
@@ -863,7 +974,11 @@ impl AgentSession for CodexSession {
     }
 
     fn close(&self) -> Result<(), ProviderError> {
-        self.terminal.kill()
+        self.terminal.kill()?;
+        // The caller may remove the working directory next, which the app server holds until
+        // it has exited; a terminal that cannot tell is not waited for.
+        let _ = self.terminal.exit_status(CLOSE_WAIT_MS);
+        Ok(())
     }
 }
 
@@ -2272,6 +2387,74 @@ mod tests {
             .to_string();
 
         assert!(error.contains("closed its terminal"));
+    }
+
+    /// An app server that exited, behind a terminal that keeps its output open (ConPTY).
+    struct ExitedTerminalSession {
+        output: Mutex<Vec<u8>>,
+    }
+
+    impl TerminalSession for ExitedTerminalSession {
+        fn pid(&self) -> i64 {
+            1
+        }
+
+        fn read(&self, dst: &mut [u8], _timeout_ms: i64) -> Result<i64, ProviderError> {
+            let mut output = self.output.lock().unwrap();
+            if output.is_empty() {
+                return Ok(READ_TIMED_OUT);
+            }
+            let count = dst.len().min(output.len());
+            dst[..count].copy_from_slice(&output[..count]);
+            output.drain(..count);
+            Ok(count as i64)
+        }
+
+        fn write(&self, _data: &[u8]) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn resize(&self, _rows: i64, _cols: i64) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn kill(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn exit_status(&self, _timeout_ms: i64) -> Result<ai6::guatiao::Value, ProviderError> {
+            ExitInfo {
+                running: false,
+                code: Some(2),
+                signal: None,
+            }
+            .to_value()
+            .map_err(internal)
+        }
+    }
+
+    #[test]
+    fn an_app_server_that_exits_fails_the_session_with_its_status_and_last_output() {
+        let session = CodexSession::new(
+            ExitedTerminalSession {
+                output: Mutex::new(b"error: unknown model \"nope\"\r\n".to_vec()),
+            }
+            .into_object(),
+            None,
+        );
+        let output = session.next_event(100).unwrap().unwrap();
+        assert_eq!(output.kind, "output");
+        let failed = session.next_event(100).unwrap().unwrap();
+        assert_eq!(failed.kind, "failed");
+        let reason = failed.text.unwrap();
+        assert!(reason.contains("exited with code 2"), "{reason}");
+        assert!(reason.contains("unknown model"), "{reason}");
+        assert_eq!(session.next_event(100).unwrap(), None, "reported once");
+        let error = session
+            .request("thread/start", json!({}), Duration::from_millis(100))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("exited with code 2"), "{error}");
     }
 
     #[test]

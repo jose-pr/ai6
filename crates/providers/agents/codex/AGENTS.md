@@ -37,8 +37,14 @@ is not used): `inputTokens` minus `cachedInputTokens` as input, the cached ones 
 0 and Codex Sessions are limited by tokens only. An `item/started` notification for a web
 search (`WebSearch`) or an MCP or dynamic tool call (the tool's name) sets
 `AgentEvent::tools`. These shapes follow the app-server protocol schema, not a live account.
-Terminal end-of-file is reported as a provider error so AI6 can fail and finalize the
-Mission instead of polling an exited process indefinitely.
+The end of the app server's output is the terminal's end-of-file, or its exit while the
+terminal keeps the output open (a read that times out asks the terminal's `exit_status`).
+After every line written before it, `next_event` then returns one `failed` event whose text
+names the exit (`exited with code N`, `was ended by signal N`, or `closed its terminal` when
+the terminal cannot tell) and quotes the last eight lines it wrote that were not JSON (512
+bytes each), and `None` after that; a pending request (`initialize`, `thread/start`,
+`thread/resume`) fails with the same text. `close` kills the terminal and waits up to 2 s for
+its exit status, so the working directory is free when it returns.
 When AI6 supplies `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, app-server receives
 per-process config overrides for the Cable endpoint and token environment-variable name.
 The bearer token itself is not placed in process arguments.

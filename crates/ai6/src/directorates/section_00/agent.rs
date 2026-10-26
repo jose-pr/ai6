@@ -284,13 +284,18 @@ pub trait AgentSession: Send + Sync {
 
     /// Reads one event, or returns `None` when `timeout_ms` expires.
     ///
-    /// A handler must report terminal process exit as a `completed` or `failed` event;
-    /// returning `None` permanently after end-of-file leaves the daemon waiting forever.
+    /// A handler must report terminal process exit as a `completed` or `failed` event, the
+    /// `failed` text saying how the harness ended and what it wrote last; returning `None`
+    /// permanently after end-of-file leaves the daemon waiting forever. A terminal may keep its
+    /// output open after the harness exits, so a handler asks the terminal's `exit_status` when
+    /// a read times out.
     fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError>;
 
     /// Requests that the provider interrupt the operation.
     fn interrupt(&self) -> Result<(), ProviderError>;
 
-    /// Closes the operation and releases provider resources.
+    /// Closes the operation and releases provider resources. It returns once the harness has
+    /// exited, or after a short wait when the terminal cannot tell, since the caller may remove
+    /// the harness's working directory next.
     fn close(&self) -> Result<(), ProviderError>;
 }

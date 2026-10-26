@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   harness that exits is noticed although ConPTY keeps the output open after its program has
   exited. `kill` returns once the program, and on Windows its whole Job Object, has exited
   (at most 2 s).
+- The Claude Code and Codex handlers notice a harness that exits while its terminal keeps the
+  output open (a timed-out read asks the terminal's exit status) and end the Session with one
+  `failed` event naming the exit code or signal and quoting the last eight lines the harness
+  wrote outside its JSON stream, so a dead harness no longer holds a Mission until the stall
+  watchdog or an assistant slot for good. `close` waits up to 2 s for the harness to exit.
 - The `pty` terminal on Linux and macOS starts its program in non-canonical mode with no
   echo, so a handler's input line of any length (a large stream-json message or JSON-RPC
   request) reaches the harness whole and what is written does not come back as output.

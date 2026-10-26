@@ -26,8 +26,14 @@ event naming the tools, and nothing read after that becomes an event. `--resume 
 it (Claude Code 2.1.310: from another one it answers "No conversation found with session
 ID"), so resume must be given that working directory. Resume waits for Claude's stream
 initialization, verifies the reported ID, and only then returns the resumed operation or
-sends its optional follow-up message. End-of-file before a completion event emits one
-`failed` event, after every line written before it; a read timeout returns `None`.
+sends its optional follow-up message. The end of Claude's output is the terminal's
+end-of-file, or Claude's exit while the terminal keeps the output open (a read that times
+out asks the terminal's `exit_status`). After every line written before it, that emits one
+`failed` event whose text names the exit (`exited with code N`, `was ended by signal N`, or
+`closed its terminal` when the terminal cannot tell) and quotes the last eight lines Claude
+wrote that were not JSON (512 bytes each); a read timeout otherwise returns `None`. `close`
+kills the terminal and waits up to 2 s for its exit status, so the working directory is free
+when it returns.
 
 The terminal is opened at `STREAM_COLS` (32767) columns and read with
 `ai6::directorates::q::terminal::JsonLines`, so the controls ConPTY writes on Windows and a

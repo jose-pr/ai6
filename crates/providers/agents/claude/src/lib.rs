@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{
-    AgentTerminal, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine, TerminalSession,
+    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine,
+    TerminalSession,
 };
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
@@ -461,7 +462,18 @@ struct ClaudeSession {
     /// Set once a restricted Session called a tool it may not, and was ended: nothing it
     /// wrote after that is read.
     tripped: AtomicBool,
+    /// The last lines Claude wrote that were not JSON: its own diagnostics, which say why it
+    /// exited when it exits.
+    tail: Mutex<VecDeque<String>>,
 }
+
+/// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
+const TAIL_LINES: usize = 8;
+const TAIL_LINE_BYTES: usize = 512;
+/// How long `close` waits for the harness to have exited, for a terminal whose `kill` does not.
+const CLOSE_WAIT_MS: i64 = 2_000;
+/// How long the end of the output waits for the harness's exit status.
+const EXIT_WAIT_MS: i64 = 1_000;
 
 impl ClaudeSession {
     fn new(terminal: Object<dyn TerminalSession>, expected_session_id: Option<SessionId>) -> Self {
@@ -475,6 +487,53 @@ impl ClaudeSession {
             eof_reported: AtomicBool::new(false),
             restricted: None,
             tripped: AtomicBool::new(false),
+            tail: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// How the harness ended, once its terminal says it has; `None` while it runs or when the
+    /// terminal cannot tell.
+    fn exited(&self, timeout_ms: i64) -> Option<ExitInfo> {
+        let status = self.terminal.exit_status(timeout_ms).ok()?;
+        ExitInfo::from_value(&status)
+            .ok()
+            .filter(|exit| !exit.running)
+    }
+
+    /// Why the Session ended without completing: the exit status and the last lines Claude
+    /// wrote outside its stream.
+    fn exit_reason(&self) -> String {
+        let how = match self.exited(EXIT_WAIT_MS) {
+            Some(ExitInfo {
+                code: Some(code), ..
+            }) => format!("exited with code {code}"),
+            Some(ExitInfo {
+                signal: Some(signal),
+                ..
+            }) => format!("was ended by signal {signal}"),
+            Some(_) => "exited".to_owned(),
+            None => "closed its terminal".to_owned(),
+        };
+        let mut reason = format!("Claude Code {how} before completing the Session");
+        if let Ok(tail) = self.tail.lock()
+            && !tail.is_empty()
+        {
+            reason.push_str("; its last output:\n");
+            reason.push_str(&tail.iter().cloned().collect::<Vec<_>>().join("\n"));
+        }
+        reason
+    }
+
+    fn remember_output(&self, line: &str) {
+        if let Ok(mut tail) = self.tail.lock() {
+            if tail.len() == TAIL_LINES {
+                tail.pop_front();
+            }
+            let mut end = line.len().min(TAIL_LINE_BYTES);
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            tail.push_back(line[..end].to_owned());
         }
     }
 
@@ -570,12 +629,12 @@ impl ClaudeSession {
                 break line;
             }
             if ended {
-                return Ok((!self.eof_reported.swap(true, Ordering::AcqRel)).then(|| {
-                    event(
-                        "failed",
-                        Some("Claude process exited before completing the Session".to_owned()),
-                    )
-                }));
+                if self.eof_reported.swap(true, Ordering::AcqRel) {
+                    return Ok(None);
+                }
+                let reason = self.exit_reason();
+                eprintln!("ai6: {reason}");
+                return Ok(Some(event("failed", Some(reason))));
             }
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
@@ -587,6 +646,11 @@ impl ClaudeSession {
                 remaining.as_millis().min(i64::MAX as u128) as i64,
             )?;
             if count == READ_TIMED_OUT {
+                // A terminal may keep its output open after the harness exits.
+                if self.exited(0).is_some() {
+                    self.eof.store(true, Ordering::Release);
+                    continue;
+                }
                 return Ok(None);
             }
             if count == 0 {
@@ -603,7 +667,10 @@ impl ClaudeSession {
         };
         let (value, line) = match line {
             StreamLine::Json { value, text, .. } => (value, text),
-            StreamLine::Text(text) => return Ok(Some(event("output", Some(text)))),
+            StreamLine::Text(text) => {
+                self.remember_output(&text);
+                return Ok(Some(event("output", Some(text))));
+            }
         };
         if let Some(id) = value.get("session_id").and_then(Value::as_str) {
             let session_id = SessionId::try_from(id.to_string())
@@ -655,7 +722,11 @@ impl ai6::directorates::section_00::agent::AgentSession for ClaudeSession {
     }
 
     fn close(&self) -> Result<(), ProviderError> {
-        self.terminal.kill()
+        self.terminal.kill()?;
+        // The caller may remove the working directory next, which the harness holds until it
+        // has exited; a terminal that cannot tell is not waited for.
+        let _ = self.terminal.exit_status(CLOSE_WAIT_MS);
+        Ok(())
     }
 }
 
@@ -902,15 +973,29 @@ mod tests {
     #[derive(Clone)]
     struct ProcessTerminal {
         specs: Arc<Mutex<Vec<Spec>>>,
+        /// Keeps the output open after the child exits, as ConPTY does.
+        keep_open: bool,
     }
 
     impl ProcessTerminal {
         fn new() -> Self {
             Self {
                 specs: Arc::new(Mutex::new(Vec::new())),
+                keep_open: false,
+            }
+        }
+
+        fn kept_open() -> Self {
+            Self {
+                keep_open: true,
+                ..Self::new()
             }
         }
     }
+
+    /// A line the fake child writes that the fixture hands over although it is not JSON: the
+    /// harness's own diagnostics.
+    const FAKE_TEXT: &str = "fake-claude: ";
 
     impl AgentTerminal for ProcessTerminal {
         fn spawn(
@@ -942,6 +1027,7 @@ mod tests {
                 )
             })?;
             let (sender, receiver) = mpsc::channel();
+            let held_open = self.keep_open.then(|| sender.clone());
             thread::spawn(move || forward_json_lines(stdout, sender));
 
             Ok(ProcessTerminalSession {
@@ -949,6 +1035,7 @@ mod tests {
                 stdin: Mutex::new(stdin),
                 receiver: Mutex::new(receiver),
                 pending: Mutex::new(VecDeque::new()),
+                _held_open: held_open,
             }
             .into_object())
         }
@@ -961,7 +1048,10 @@ mod tests {
             line.clear();
             match reader.read_until(b'\n', &mut line) {
                 Ok(0) | Err(_) => return,
-                Ok(_) if serde_json::from_slice::<Value>(&line).is_ok() => {
+                Ok(_)
+                    if serde_json::from_slice::<Value>(&line).is_ok()
+                        || line.starts_with(FAKE_TEXT.as_bytes()) =>
+                {
                     if sender.send(line.clone()).is_err() {
                         return;
                     }
@@ -976,6 +1066,7 @@ mod tests {
         stdin: Mutex<ChildStdin>,
         receiver: Mutex<Receiver<Vec<u8>>>,
         pending: Mutex<VecDeque<u8>>,
+        _held_open: Option<mpsc::Sender<Vec<u8>>>,
     }
 
     impl TerminalSession for ProcessTerminalSession {
@@ -1023,11 +1114,28 @@ mod tests {
             }
         }
 
-        fn exit_status(&self, _timeout_ms: i64) -> Result<ai6::guatiao::Value, ProviderError> {
-            Err(refuse(
-                Status::GUATIAO_ERR_INTERNAL,
-                "process fixture does not expose exit metadata",
-            ))
+        fn exit_status(&self, timeout_ms: i64) -> Result<ai6::guatiao::Value, ProviderError> {
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+            loop {
+                if let Some(status) = self.child.lock().unwrap().try_wait().map_err(internal)? {
+                    return ExitInfo {
+                        running: false,
+                        code: status.code().map(i64::from),
+                        signal: None,
+                    }
+                    .to_value()
+                    .map_err(internal);
+                }
+                if Instant::now() >= deadline {
+                    return ExitInfo {
+                        running: true,
+                        ..ExitInfo::default()
+                    }
+                    .to_value()
+                    .map_err(internal);
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 
@@ -1036,9 +1144,18 @@ mod tests {
         if std::env::var_os("AI6_FAKE_CLAUDE_CHILD").is_none() {
             return;
         }
-        let session_id = std::env::var("CLAUDE_FIXTURE_SESSION_ID").unwrap();
         let stdout = std::io::stdout();
         let mut stdout = stdout.lock();
+        // Claude Code reads its first input before it writes anything (stream-json input); one
+        // that cannot go on then says why and exits.
+        if let Ok(code) = std::env::var("CLAUDE_FIXTURE_EXIT") {
+            let mut first = String::new();
+            std::io::stdin().lock().read_line(&mut first).unwrap();
+            writeln!(stdout, "{FAKE_TEXT}Error: the stored login has expired").unwrap();
+            stdout.flush().unwrap();
+            std::process::exit(code.parse().unwrap());
+        }
+        let session_id = std::env::var("CLAUDE_FIXTURE_SESSION_ID").unwrap();
         writeln!(
             stdout,
             "{}",
@@ -1682,6 +1799,61 @@ mod tests {
         let event = decode_event(&value, b"{}".to_vec()).unwrap();
         assert_eq!(event.kind, "completed");
         assert_eq!(event.limit, None);
+    }
+
+    /// A harness that exits while its terminal keeps the output open (ConPTY) ends the Session
+    /// with one `failed` event naming its exit code and quoting what it wrote last.
+    #[test]
+    fn a_harness_that_exits_early_fails_the_session_with_its_status_and_last_output() {
+        let terminal = ProcessTerminal::kept_open();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-exit-fixture".to_owned(),
+        })
+        .unwrap();
+        let session = handler
+            .start(
+                AgentStart {
+                    mission_id: "mission-exit".parse().unwrap(),
+                    agent_id: "007".to_owned(),
+                    prompt: "hello".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: std::env::current_dir()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    clearance: "field".to_owned(),
+                    environment: BTreeMap::from([(
+                        "CLAUDE_FIXTURE_EXIT".to_owned(),
+                        "3".to_owned(),
+                    )]),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let failed = loop {
+            assert!(Instant::now() < deadline, "the exit was never noticed");
+            if let Some(event) = session.next_event(100).unwrap()
+                && event.kind == "failed"
+            {
+                break event;
+            }
+        };
+        let reason = failed.text.unwrap();
+        assert!(reason.contains("exited with code 3"), "{reason}");
+        assert!(
+            reason.contains("Error: the stored login has expired"),
+            "{reason}"
+        );
+        assert_eq!(session.next_event(100).unwrap(), None, "reported once");
+        session.close().unwrap();
     }
 
     #[test]
