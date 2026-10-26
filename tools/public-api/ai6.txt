@@ -1313,6 +1313,7 @@ pub mod ai6::directorates::q::terminal
 pub use ai6::directorates::q::terminal::guatiao
 pub enum ai6::directorates::q::terminal::StreamLine
 pub ai6::directorates::q::terminal::StreamLine::Json
+pub ai6::directorates::q::terminal::StreamLine::Json::rebuilt: bool
 pub ai6::directorates::q::terminal::StreamLine::Json::text: alloc::vec::Vec<u8>
 pub ai6::directorates::q::terminal::StreamLine::Json::value: serde_json::value::Value
 pub ai6::directorates::q::terminal::StreamLine::Text(alloc::string::String)
@@ -3770,6 +3771,7 @@ pub ai6::directorates::section_00::assistant::AssistantJob::conversation_id: all
 pub ai6::directorates::section_00::assistant::AssistantJob::job_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::mcp_token: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::message: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::recap: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::token_expires_at: f64
 impl ai6::directorates::section_00::assistant::AssistantJob
@@ -4687,6 +4689,7 @@ pub ai6::AssistantJob::conversation_id: alloc::string::String
 pub ai6::AssistantJob::job_id: alloc::string::String
 pub ai6::AssistantJob::mcp_token: alloc::string::String
 pub ai6::AssistantJob::message: alloc::string::String
+pub ai6::AssistantJob::recap: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::session_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::token_expires_at: f64
 impl ai6::directorates::section_00::assistant::AssistantJob
