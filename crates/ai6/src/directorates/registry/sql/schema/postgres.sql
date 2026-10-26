@@ -53,6 +53,9 @@ CREATE TABLE ai6_stations (
 CREATE TABLE ai6_station_settings (
     station TEXT PRIMARY KEY,
     max_concurrent_missions BIGINT NOT NULL,
+    -- NULL reads as the default limit.
+    min_free_memory_mb BIGINT,
+    max_cpu_percent BIGINT,
     revision BIGINT NOT NULL
 );
 

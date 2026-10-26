@@ -3003,7 +3003,7 @@ mod tests {
         assert!(StationSettings::try_new("station/a", MAX_STATION_MISSION_CAPACITY + 1).is_err());
         assert!(registry.set_station_settings("station?a", &first).is_err());
 
-        // Resource limits default, persist, and read as defaults from an older record.
+        // Resource limits default and persist.
         assert_eq!(first.resource_limits(), ResourceLimits::default());
         let loose = first
             .clone()
@@ -3023,6 +3023,19 @@ mod tests {
                 .with_resource_limits(ResourceLimits::new(0, 101))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn station_settings_written_before_resource_limits_read_the_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(directory.path());
+        fs::create_dir_all(
+            registry
+                .station_settings_path("station/b")
+                .parent()
+                .unwrap(),
+        )
+        .unwrap();
         fs::write(
             registry.station_settings_path("station/b"),
             br#"{"station":"station/b","max_concurrent_missions":3}"#,

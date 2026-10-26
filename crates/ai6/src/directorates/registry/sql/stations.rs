@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use super::SqlRegistry;
 use super::db::Tx;
+use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::registry::store::{
     HeadquartersLease, MAX_STATION_RECORD_BYTES, MAX_STATIONS, StationRecord, StationRecordFile,
     StationSettings, StationStore, check_election, check_in_record, check_settings, elected,
@@ -85,35 +86,58 @@ impl StationStore for SqlRegistry {
 
     fn station_settings(&self, station: &str) -> io::Result<Option<StationSettings>> {
         validate_station_id(station)?;
-        let capacity = self.read(|tx| {
+        let row = self.read(|tx| {
             tx.query_opt(
-                "SELECT max_concurrent_missions FROM ai6_station_settings WHERE station = $1",
+                "SELECT max_concurrent_missions, min_free_memory_mb, max_cpu_percent \
+                 FROM ai6_station_settings WHERE station = $1",
                 &[station.into()],
-            )?
-            .map(|row| row.int(0))
-            .transpose()
+            )
         })?;
-        capacity
-            .map(|capacity| {
-                usize::try_from(capacity)
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let defaults = ResourceLimits::default();
+        let memory = match row.opt_int(1)? {
+            Some(value) => u64::try_from(value).ok(),
+            None => Some(defaults.min_free_memory_mb),
+        };
+        let cpu = match row.opt_int(2)? {
+            Some(value) => u32::try_from(value).ok(),
+            None => Some(defaults.max_cpu_percent),
+        };
+        usize::try_from(row.int(0)?)
+            .ok()
+            .zip(memory.zip(cpu))
+            .and_then(|(capacity, (memory, cpu))| {
+                StationSettings::try_new(station, capacity)
+                    .and_then(|settings| {
+                        settings.with_resource_limits(ResourceLimits::new(memory, cpu))
+                    })
                     .ok()
-                    .and_then(|capacity| StationSettings::try_new(station, capacity).ok())
-                    .ok_or_else(|| invalid_data("Station settings are invalid"))
             })
-            .transpose()
+            .map(Some)
+            .ok_or_else(|| invalid_data("Station settings are invalid"))
     }
 
     fn set_station_settings(&self, station: &str, settings: &StationSettings) -> io::Result<()> {
         check_settings(station, settings)?;
+        let limits = settings.resource_limits();
         self.write(|tx, revision| {
             tx.execute(
-                "INSERT INTO ai6_station_settings (station, max_concurrent_missions, revision) \
-                 VALUES ($1, $2, $3) ON CONFLICT (station) DO UPDATE SET \
+                "INSERT INTO ai6_station_settings \
+                 (station, max_concurrent_missions, min_free_memory_mb, max_cpu_percent, revision) \
+                 VALUES ($1, $2, $3, $4, $5) ON CONFLICT (station) DO UPDATE SET \
                  max_concurrent_missions = excluded.max_concurrent_missions, \
+                 min_free_memory_mb = excluded.min_free_memory_mb, \
+                 max_cpu_percent = excluded.max_cpu_percent, \
                  revision = excluded.revision",
                 &[
                     station.into(),
                     settings.max_concurrent_missions().into(),
+                    i64::try_from(limits.min_free_memory_mb)
+                        .map_err(|_| invalid_data("minimum free memory is too large"))?
+                        .into(),
+                    limits.max_cpu_percent.into(),
                     revision.into(),
                 ],
             )?;
