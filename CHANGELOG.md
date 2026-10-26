@@ -19,8 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   invalid, and its revision says what changed. Tables are created on first use and
   versioned. `ai6 serve --registry LOCATION` and `--config LOCATION` take a directory,
   `sqlite:PATH` or a `postgres://` URL, as does `AI6_REGISTRY` for the `ai6` command and
-  Universal Exports (`registry::backend::{open, from_environment}`, `config::open`).
-  PostgreSQL connections are made without TLS.
+  Universal Exports (`registry::backend::{open, open_with, from_environment}`,
+  `config::{open, open_with}`). PostgreSQL connections use TLS and verify the server by
+  default (`sslrootcert=` for a private CA; `sslmode=require` or `disable` are accepted
+  and printed as weakenings), take the password from `password_file=`,
+  `AI6_REGISTRY_PASSWORD` or `AI6_CONFIG_PASSWORD`, and get statement, lock, idle and
+  connection timeouts derived from the Headquarters lease (`SqlOptions`), so a Station
+  that stalls inside a write cannot hold off a takeover. Leases use the database's clock;
+  writes run `READ COMMITTED` and reads `REPEATABLE READ READ ONLY`; a Station that a newer
+  `ai6` migrated past stops writing.
 - `ai6 serve --headquarters-lease SECS` (`StationConfig::with_headquarters_lease`) sets how
   long the Headquarters lease lasts between renewals, and so how long a standby control
   Station waits before taking over (default 60 seconds).
@@ -352,6 +359,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The Station's scheduler makes its Registry calls (check-in, lease renewals, election,
+  intake) on Tokio's blocking pool, so a slow Registry no longer stalls the async workers.
 - The Registry's operations are traits, one per record family (`BriefStore`,
   `StationStore`, `AccessTokenStore`, `CableStore`, `AuditStore`, `AgentRoleStore`,
   `ApprovalStore`, `QuarantineStore`, `SessionStore`, `SleeperStore`, `SourceStore`,

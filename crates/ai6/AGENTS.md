@@ -20,7 +20,7 @@ MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, se
 `daemon` adds Axum, Tokio, Guatiao provider loading, `ureq`, `subtle` and `futures-util`,
 `publisher` adds `url`, and `station-tls` adds `coqui-peer-tls`, `coqui-peer` and rustls.
 `sqlite` adds `rusqlite` with SQLite compiled in (a C compiler at build time); `postgres`
-adds the synchronous `postgres` client and Tokio. `cli` adds clap and Tokio signal support. The crate builds as a
+adds `tokio-postgres`, Tokio, `tokio-rustls`, rustls (ring) and `rustls-native-certs`. `cli` adds clap and Tokio signal support. The crate builds as a
 Rust library and contains no `unsafe` code. `cables-mcp` adds RMCP's Streamable HTTP
 server, JSON Schema support, constant-time bearer checks and per-Session tokens; the
 default feature set remains dependency-light.
@@ -376,11 +376,14 @@ pub struct MemoryConfigSource;   // ConfigSource; new(roster), replace(&self, ro
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` → SqlConfigSource; anything else →
 /// TomlConfigDir. Unsupported for a SQL location without its feature.
 pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>>;
+/// As `open`, a SQL roster connected with `options` (features `sqlite` or `postgres`).
+pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn ConfigSource>>;
 
 // Features `sqlite` or `postgres`; also at the crate root.
 pub struct SqlConfigSource;   // ConfigSource + Debug
 impl SqlConfigSource {
     pub fn open(location: &str) -> io::Result<Self>;   // as SqlRegistry::open
+    pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Self>;
     pub fn put(&self, record: ConfigRecord, key: &str, definition: &serde_json::Value)
         -> Result<ConfigRevision, RosterError>;
     pub fn remove(&self, record: ConfigRecord, key: &str)
@@ -855,7 +858,10 @@ impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` / `postgresql://…` → SqlRegistry;
 /// anything else → FileRegistry (a directory, not touched until used).
 pub fn open(location: &str) -> io::Result<Arc<dyn RegistryBackend>>;
-/// `open(AI6_REGISTRY)`, else the directory `AI6_HOME/registry` or the platform state dir.
+/// As `open`, a SQL Registry connected with `options` (features `sqlite` or `postgres`).
+pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn RegistryBackend>>;
+/// `open(AI6_REGISTRY)`, else the directory `AI6_HOME/registry` or the platform state dir;
+/// a PostgreSQL location without a password takes `AI6_REGISTRY_PASSWORD`.
 pub fn from_environment() -> io::Result<Arc<dyn RegistryBackend>>;
 ```
 
@@ -878,15 +884,55 @@ through `Gateway::with_registry` (its command uses `from_environment()`), and
 pub struct SqlRegistry;   // every Registry family; also at the crate root
 impl SqlRegistry {
     /// `sqlite:PATH` or `sqlite://PATH` (a SQLite file), or a `postgres://` /
-    /// `postgresql://` URL whose parameters pass to the server, such as
-    /// `options=-c%20search_path%3Dai6` for a schema. Creates or upgrades the tables.
-    pub fn open(location: &str) -> io::Result<Self>;
+    /// `postgresql://` URL whose parameters pass to the server (such as
+    /// `options=-c%20search_path%3Dai6` for a schema), besides `sslmode`, `sslrootcert`
+    /// and `password_file`, read here. Creates or upgrades the tables.
+    pub fn open(location: &str) -> io::Result<Self>;   // open_with(location, &SqlOptions::default())
+    pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Self>;
 }
+
+#[derive(Clone, Debug /* password shown as *** */)]
+pub struct SqlOptions;   // also at the crate root; Default = for_lease(DEFAULT_LEASE)
+impl SqlOptions {
+    pub fn for_lease(lease: Duration) -> Self;   // timeouts derived from the HQS lease
+    pub fn with_password(self, password: impl Into<String>) -> Self;
+}
+
+/// The location with its password (userinfo or `password=`) replaced by `***`.
+pub fn redact(location: &str) -> String;
+/// What a location gives up, for a log line: sslmode=disable, sslmode=require, a password
+/// in the location. Empty at the defaults and for directories and SQLite.
+pub fn weakenings(location: &str) -> Vec<String>;
 ```
 
-`open` fails `InvalidInput` for another location, `Unsupported` without the feature or for
-a schema newer than this build (the version is in `ai6_schema`), and with the database's
-error when it cannot be reached; a PostgreSQL location connects at once. Each record family
+`open` fails `InvalidInput` for another location or an `sslmode` other than `verify-full`,
+`require` or `disable`, `Unsupported` without the feature or for a schema newer than this
+build (the version is in `ai6_schema`), and with the database's error (its cause included,
+such as which certificate check failed) when it cannot be reached; a PostgreSQL location
+connects at once. Writes also refuse, `Unsupported`, once a newer `ai6` has migrated the
+database, so an old Station stops writing while it can still read.
+
+TLS: `sslmode=verify-full` is the default: TLS (rustls, ring), with the server's certificate
+checked against the platform's roots (`rustls-native-certs`), or, as libpq does, only
+against `sslrootcert=PATH` (PEM) when given (`sslrootcert=system` keeps the platform's),
+and its name or IP address checked. `sslmode=require` encrypts but accepts any certificate;
+`sslmode=disable` sends everything in clear. Both are accepted and named by `weakenings`;
+`ai6 serve` and `universal-exports` print them at start. A password comes from the location,
+from `password_file=PATH` (its first line), or from `SqlOptions::with_password` when the
+location has none (`ai6 serve` reads `AI6_REGISTRY_PASSWORD` and `AI6_CONFIG_PASSWORD`;
+`backend::from_environment` reads `AI6_REGISTRY_PASSWORD`); a password in the location is
+visible in the process list. Messages from the command show locations through `redact`.
+
+Timeouts (`SqlOptions::for_lease(L)`, at least 1 s each): each session runs
+`statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` of `L/4`, so a
+Station that stalls inside a transaction (a paused VM, a half-open connection) loses its
+session, and the clock row it held, well before a standby must take over; the connection
+uses `connect_timeout` and `keepalives_idle` of `L/6` and `tcp_user_timeout` of `L/4`. A
+location that sets one itself (the parameter, or `-c name=…` in `options`) keeps its own.
+`ai6 serve` derives them from its `--headquarters-lease`. A lock or statement timeout maps
+to `TimedOut`.
+
+Each record family
 has its own table (`ai6_briefs`, `ai6_brief_leases`, `ai6_headquarters`, `ai6_sessions`,
 `ai6_approvals` and so on), holding the record as JSON text in the file Registry's shape
 beside the columns a lookup needs, and a `revision` column. Every write transaction first
@@ -894,13 +940,17 @@ advances its row of `ai6_clock` (`registry`): that row lock serializes writers a
 Stations as the directory lock does, so claims, brief leases, the Headquarters election and
 term, and Session fencing keep the file Registry's guarantees, and its new value is the
 revision stamped on each row written. SQLite runs writes as `BEGIN IMMEDIATE` with a 30 s
-busy timeout and WAL; PostgreSQL runs `READ COMMITTED` and serializes concurrent schema
-migrations with an advisory lock. Leases expire on each Station's wall clock, as in the
-file Registry. A unique violation maps to `AlreadyExists`, a lost PostgreSQL connection to
-`ConnectionAborted`; the next call reconnects. PostgreSQL connections are made without TLS
-(`sslmode=require` fails). The synchronous client cannot run on a thread driving async
-tasks, so from such a thread a call runs on a scoped thread instead: calling from an async
-handler is safe, if blocking. One connection per handle; calls on one handle are serialized.
+busy timeout and WAL. PostgreSQL runs writes `READ COMMITTED` and reads `REPEATABLE READ
+READ ONLY`, whatever the server's default, and serializes concurrent migrations of one
+schema with an advisory lock. Brief, Headquarters and Session leases and check-in times
+are taken from the database's clock (`clock_timestamp()`, SQLite `unixepoch('subsec')`)
+inside the transaction that writes them, so a Station whose clock is off cannot take a live
+lease early; the clock-explicit test hooks keep their given time. A unique violation maps
+to `AlreadyExists`, a lost PostgreSQL connection to `ConnectionAborted`; the next call
+reconnects. Each handle drives its PostgreSQL connection on a runtime thread of its own and
+waits on it with a parking executor, so calls work on any thread, an async worker included
+(they block it, as file I/O does), and dropping a handle never blocks; one connection per
+handle, one transaction at a time.
 
 Where the stores differ: keys are stored as given rather than as file-safe names, so two
 quarantine or usage keys that differ only in characters a file name cannot hold stay
@@ -1047,10 +1097,11 @@ global role catalog for authorized Universal Exports readers.
 `None` when no brief matches. Renew returns `false` if the Station no longer owns the
 claimed brief. `recover` returns `Requeued`, `Failed`, or `None` when another Station
 changed the lease. `finish` returns `true` once the outcome is filed and `false` when the
-caller's lease was lost. Lease expiration uses wall-clock Unix seconds; shared Stations need synchronized
-clocks. SQL Registry URLs remain unsupported. Station liveness and Headquarters election
-use the same versioned file layout and `.ai6-registry.lock`; the scheduler does not yet
-use election for distributed placement.
+caller's lease was lost. In the file Registry lease expiration uses each Station's wall-clock
+Unix seconds, so shared Stations need synchronized clocks; `SqlRegistry` uses the database's
+clock instead. Station liveness and Headquarters election use the same versioned file
+layout and `.ai6-registry.lock` (in a SQL Registry, its tables and clock row); the
+scheduler does not yet use election for distributed placement.
 
 ```rust
 pub fn check_in(&self, station: &str, info: BTreeMap<String, serde_json::Value>) -> io::Result<()>
@@ -1816,7 +1867,8 @@ for the scoped relay to authorize.
 `take_cable_quotas(buckets, now)` atomically consumes sender and scope token buckets from
 `cable-quotas.json`; each bucket is `(key, rate_per_second, burst_capacity)`, and its key
 is SHA-256 hashed before it is stored. The file backend bounds scans to 10,000 Cable files
-and records to 2 MiB. SQL Registry storage is not implemented.
+and records to 2 MiB; `SqlRegistry` keeps Cables in `ai6_cables` and the buckets, keyed the
+same way, in `ai6_cable_quotas`, with the same bounds.
 
 `ai6::directorates::section_00::agent` defines `AgentStart`, `AgentResume`, `AgentMessage`, `AgentEvent`, the
 `AgentHandler` Guatiao kind `ai6_agent_handler`, and the `AgentSession` object kind
@@ -1974,8 +2026,9 @@ briefs, resolving their Operation and Agent before creating durable Mission reco
 Global, Station and Agent concurrency limits apply to Session starts; transient failures
 retry after five seconds. Active leases renew every 30 seconds. Expired leases from other
 Stations are recovered after three attempts, and invalid assignments or terminal Missions
-are filed under `failed/` or `done/` with an outcome record. SQL Registry URLs are not
-supported by this Rust intake implementation.
+are filed under `failed/` or `done/` with an outcome record (in a SQL Registry, as the
+`failed` or `done` state of their `ai6_briefs` row). The scheduler's Registry calls run on
+Tokio's blocking pool, so a slow Registry does not stall the async workers.
 
 `pub async fn serve<F: Future<Output = ()> + Send + 'static>(address: SocketAddr,
 shutdown: F) -> std::io::Result<()>` binds the local service without agent plugins.

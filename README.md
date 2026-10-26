@@ -130,8 +130,8 @@ node running `ai6 serve`; a **Theater** is the host a Session works on, reached 
 transport (`local`, `ssh`). The directorates (M, the Registry, Q Branch, 00 Section, Medical) decide; the
 Station runs their decisions; Universal Exports is the only public door. See
 [Architecture](https://jose-pr.github.io/ai6/architecture/) and
-[Organization](https://jose-pr.github.io/ai6/organization/). Field mode on a remote Theater and
-TLS to a PostgreSQL Registry are not implemented yet.
+[Organization](https://jose-pr.github.io/ai6/organization/). Field mode on a remote Theater is
+not implemented yet.
 
 ```toml
 [operation.G]

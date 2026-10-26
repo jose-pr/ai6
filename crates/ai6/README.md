@@ -79,8 +79,12 @@ ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
   `--loop-timeout`, `--loop-min-lines`, `--blocked-after`, `--max-runtime`, `--history`
   and `--normalize-digits` (seconds may be fractional). `--registry` and `--config` take
   a directory, `sqlite:PATH` or a `postgres://` URL: Stations sharing a PostgreSQL
-  Registry and roster need no shared filesystem. `--headquarters-lease` (default 60
-  seconds) is how long a standby control Station waits before taking over.
+  Registry and roster need no shared filesystem. PostgreSQL is reached over TLS with the
+  server verified (`sslrootcert=PATH` for a private CA); `sslmode=require` or `disable`
+  is printed as a warning. Passwords come from `password_file=PATH`,
+  `AI6_REGISTRY_PASSWORD` or `AI6_CONFIG_PASSWORD`. `--headquarters-lease` (default 60
+  seconds) is how long a standby control Station waits before taking over; the
+  database timeouts are derived from it.
 - `ai6 runner serve` runs the field runner on a Theater: it supervises harnesses there for
   Stations, spooling their events under its state directory (default `runner` in AI6's state
   directory) and serving them on a token-protected loopback port. `--detach` starts it in

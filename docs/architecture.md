@@ -97,7 +97,6 @@ same-origin and TLS-only, and operator input counts as watchdog activity.
   wrapper; otherwise it works in remote-hands mode.
 - Central placement: Stations sharing a Registry each lease the briefs they can run
   themselves; the Headquarters lease does not yet drive placement.
-- TLS to a PostgreSQL Registry or roster.
 - Of a loadout, only its secrets are applied when a Session starts; its sandbox profile
   and MCP servers are parsed and validated but not yet applied.
 - External A2A interoperability (see below).

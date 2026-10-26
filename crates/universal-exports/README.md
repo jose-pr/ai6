@@ -247,7 +247,8 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
 | `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None |
-| `AI6_REGISTRY` | Shared Registry used for issued access-token records: a directory, `sqlite:PATH` or a `postgres://` URL. | AI6 state Registry |
+| `AI6_REGISTRY` | Shared Registry used for issued access-token records: a directory, `sqlite:PATH` or a `postgres://` URL (TLS-verified by default; a weaker `sslmode` is printed as a warning). | AI6 state Registry |
+| `AI6_REGISTRY_PASSWORD` | Password for a PostgreSQL `AI6_REGISTRY` that names none. | None |
 
 ## Exit status
 

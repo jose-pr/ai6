@@ -36,11 +36,13 @@ The Flutter app needs the isolated Flutter `main` SDK described in
 `clients/moneypenny/README.md`, because native desktop windowing is not in stable Flutter.
 
 The Registry test suite runs every case on the file Registry and SQLite. With
-`AI6_TEST_POSTGRES_URL` set to a `postgres://` server whose user may create schemas, it
-also runs them on PostgreSQL (one schema per case, dropped afterwards), as do the SQL
-roster tests and `crates/ai6/tests/ha.rs` (two `ai6 serve` Stations failing over); unset,
-they pass without running and `cargo test -- --nocapture` prints how many were skipped.
-Building the `sqlite` feature compiles SQLite, so it needs a C compiler.
+`AI6_TEST_POSTGRES_URL` set to a `postgres://…?sslmode=disable` server whose user may
+create schemas, it also runs them on PostgreSQL (one schema per case, dropped afterwards),
+as do the SQL roster and connection tests and `crates/ai6/tests/ha.rs` (two `ai6 serve`
+Stations failing over); `AI6_TEST_POSTGRES_TLS_URL` names a TLS-only server, with
+`sslrootcert=` pointing at its CA, for the TLS test. Unset, they pass without running and
+`cargo test -- --nocapture` prints how many were skipped. CI's Linux legs start both
+servers in Docker. Building the `sqlite` feature compiles SQLite, so it needs a C compiler.
 
 ## Rules
 

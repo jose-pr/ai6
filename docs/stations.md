@@ -89,22 +89,37 @@ names it: a directory, `sqlite:PATH` or a `postgres://` URL; without it the Stat
 the state directory.
 
 ```console
-ai6 serve --registry "postgres://ai6@db.internal/ai6" --config "postgres://ai6@db.internal/ai6"
+AI6_REGISTRY_PASSWORD=… AI6_CONFIG_PASSWORD=… ai6 serve \
+  --registry "postgres://ai6@db.internal/ai6?sslrootcert=/etc/ai6/db-ca.pem" \
+  --config "postgres://ai6@db.internal/ai6?sslrootcert=/etc/ai6/db-ca.pem"
 ```
 
-Lease expiry uses wall-clock time, so Stations need synchronized clocks. Check-ins expire
-after 45 seconds; a Station whose check-ins lapse has *gone dark* and its leased briefs are
+In a directory Registry lease expiry uses each Station's clock, so Stations need
+synchronized clocks; a SQL Registry uses the database's clock. Check-ins expire after 45
+seconds; a Station whose check-ins lapse has *gone dark* and its leased briefs are
 recovered by the Headquarters Station: a Session a runner still supervises is adopted by
 another Station, any other is lost and tried again ([Recovery](missions.md#recovery)). The
 Headquarters lease lasts 60 seconds between renewals; `--headquarters-lease SECS` sets how
 long a standby control Station waits before taking over from one that went dark.
 
 In a SQL Registry each kind of record has its own table, created on first use; a database
-written by a newer `ai6` is refused. Every write first takes the Registry's row in
-`ai6_clock`, so writers queue as they do on the directory's lock, and leases, the
-Headquarters term and Session fencing behave the same on every backend. PostgreSQL
-connections are made without TLS: keep the database on a trusted network. No secret is
-stored there: access tokens are kept by digest, and credentials stay with Q.
+written by a newer `ai6` is refused, and a Station that a newer `ai6` has since migrated
+past stops writing. Every write first takes the Registry's row in `ai6_clock`, so writers
+queue as they do on the directory's lock, and leases, the Headquarters term and Session
+fencing behave the same on every backend. A Station that stalls inside a write (a paused
+VM, a half-open connection) loses its session after a quarter of the Headquarters lease,
+so it cannot hold the others back from taking over: the statement, lock and idle
+timeouts, and the connection's own, are derived from `--headquarters-lease`, and a
+location that sets one itself keeps it. No secret is stored there: access tokens are kept
+by digest, and credentials stay with Q.
+
+PostgreSQL connections use TLS and verify the server: against the platform's trusted
+roots, or only against `sslrootcert=PATH` when the location names a CA file. A location
+may weaken that with `sslmode=require` (encrypted, server not verified) or
+`sslmode=disable` (no TLS); `ai6 serve` and Universal Exports then print a warning at
+start. Keep the password out of the location, where a process listing shows it:
+`password_file=PATH`, or `AI6_REGISTRY_PASSWORD` and `AI6_CONFIG_PASSWORD`. Messages print
+locations with the password hidden.
 
 Stations and Universal Exports reach the Registry only through the `RegistryBackend`
 traits (one per kind of record: briefs, Stations, Sessions, Cables, approvals and so on),
