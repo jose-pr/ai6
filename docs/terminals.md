@@ -39,11 +39,25 @@ Windows.
 
 ## Cursor handshake
 
-A shell under a pty can ask for the cursor position (`ESC[6n`) and wait for an emulator.
-Without an attached viewer, AI6's terminal bridge answers the query itself and removes it
-from the output, so an attached terminal does not answer a second time.
+A program under a pty can ask for the cursor position (`ESC[6n`) and wait for an emulator,
+and ConPTY on Windows always asks once before its program's first output and holds that
+output until it is answered (`portable-pty` creates every pseudo-console with
+`PSEUDOCONSOLE_INHERIT_CURSOR`). The `pty` provider answers every such query itself (row 1,
+column 1) and removes it from the output, so a harness starts with nobody attached and an
+attached viewer does not answer a second time.
 
 A transport that reaches another host and can open a terminal there (`ssh`) does so through
 the same contract. A harness on another host runs under the runner there, in the runner's
 terminal provider, or, on a POSIX host without one, in the detached wrapper the Station
 starts over the transport (no pty; a resize does nothing). See [Theaters](theaters.md).
+
+## Reading a harness through ConPTY
+
+ConPTY renders the console it hosts rather than passing bytes through. Its output starts
+with mode and title sequences (`ESC[?9001h ESC[?1004h ESC[m`, `ESC]0;title BEL`,
+`ESC[?25h`); it may move the cursor where the program wrote blank lines; input a program
+reads a line at a time comes back as an echo; and a line longer than the terminal is wide
+is broken with CRLF and a cursor move. The Claude Code and Codex handlers therefore start
+harnesses on the widest terminal ConPTY takes (32767 columns, `STREAM_COLS`) and read them
+with `JsonLines`, which removes the controls and rejoins a broken JSON line
+([`ai6::directorates::q::terminal`](https://jose-pr.github.io/ai6/rust/ai6/directorates/q/terminal/)).

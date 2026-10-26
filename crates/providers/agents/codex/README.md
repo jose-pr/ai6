@@ -28,6 +28,10 @@ initialization, thread start/resume, turn submission and event decoding.
   checkout's `.codex/` config, hooks and rules do not load.
 - Starts an answer-only thread (`AgentStart::answer_only`, for a Chief of Staff review) in the
   read-only sandbox, never asking, with web search off and no MCP servers.
+- Before an answer-only or assistant thread starts, switches off every Codex feature but
+  four, renders what the model would be offered (`codex debug prompt-input`) and refuses to
+  start unless that is exactly the thread's MCP tools; `AI6_CODEX_TOOL_CHECK=warn` starts it
+  anyway and reports a weakening.
 
 ## Installation
 

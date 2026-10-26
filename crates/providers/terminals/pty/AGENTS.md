@@ -18,12 +18,20 @@ pinned with `ai6 serve --terminal`; Agents and handlers do not choose one.
 ## Session behaviour
 
 - **Start**: `argv[0]` with the rest as separate arguments, on a new pseudo-terminal of
-  `rows` × `cols`. `TERM` is set to `xterm-256color` when the environment lacks it. An
-  empty `argv` or a malformed spec is `GUATIAO_ERR_BAD_VALUE`.
+  `rows` × `cols`, each capped at 32767 (ConPTY takes them as `i16`). `TERM` is set to
+  `xterm-256color` when the environment lacks it. An empty `argv` or a malformed spec is
+  `GUATIAO_ERR_BAD_VALUE`. `resize` takes 1 to 32767.
 - **Output** is read on a thread into a channel, so `read` honours its timeout; a chunk
   larger than the caller's buffer is kept for the next `read`.
-- **Terminal queries** such as `ESC[6n` pass through as output bytes; the caller must
-  answer them.
+- **Cursor position queries** (`ESC[6n`, also split across reads) are answered by the
+  provider with `ESC[1;1R` and removed from the output. ConPTY sends one before its program's
+  first output and holds that output until it is answered, because `portable-pty` 0.9 creates
+  every pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR` and offers no way not to. Other
+  terminal queries pass through as output bytes.
+- **ConPTY output is a rendering**, not the program's bytes: mode and title sequences come
+  first, blank lines may become cursor moves, line-mode input is echoed, and a line longer
+  than `cols` is broken with CRLF and a cursor move. Read JSON-line harnesses with
+  `ai6::directorates::q::terminal::JsonLines` and spawn them with `cols: STREAM_COLS`.
 - **Exit** is asked of the child, never inferred from EOF: a pseudo-console can stay
   readable after its program exits. A signal is reported by number when `portable-pty`
   names it, else `-1`.

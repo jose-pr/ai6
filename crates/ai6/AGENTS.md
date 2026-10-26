@@ -2621,13 +2621,19 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // only reads and answers. Claude Code: `--restricted --tools= --disallowedTools <all of its own,
 // web, sub-agent and mcp__*> --setting-sources user --strict-mcp-config --mcp-config
 // {"mcpServers":{}}`, and no AI6 servers or gate. Codex: `-c mcp_servers={}` plus `-c` for
-// `features.shell_tool=false`, `features.unified_exec=false`, `tools.view_image=false`,
-// `web_search="disabled"`, `features.multi_agent=false`, `features.apps=false` (no command
-// execution, image reading, web, sub-agents or connectors), the project marked untrusted,
-// thread `sandbox: "read-only"`, `approvalPolicy: "never"`, `config: {"web_search":
-// "disabled"}`, and no gate.
+// `features.shell_tool=false`, `tools.view_image=false`, `web_search="disabled"`,
+// `features.multi_agent=false`, `agents.enabled=false`, `features.apps=false`,
+// `skills.max_context_tokens=1`, every other enabled feature switched off and a tool check
+// before start (see `ai6-agent-codex`), the project marked untrusted, thread
+// `sandbox: "read-only"`, `approvalPolicy: "never"`, `config: {"web_search": "disabled"}`, and
+// no gate.
 // And `assistant: Option<AssistantMode>` (serde default None), set for Moneypenny: wins over
 // `answer_only` and is built from the mode's parts below.
+// AgentResume also carries `initial_context: Vec<String>` (serde default empty): the standing
+// part of the start-up context (the Agent's context, its role's purpose and policy; for
+// Moneypenny her instructions), which Claude Code is given again as `--append-system-prompt`
+// because its recorded Session does not keep it; Codex keeps a thread's instructions and
+// ignores it.
 pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
                            pub interpreters: Vec<String> /* serde default */,
                            pub skills: Vec<String> /* serde default */,
@@ -2702,6 +2708,31 @@ The daemon also queues `budget` (warning or limit), `exposed` (text: the source)
 Guatiao terminal contracts. `Terminal` is a provider kind discovered by AI6;
 `AgentTerminal` is the object bridge AI6 wraps around that provider for a handler.
 The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in tests.
+
+A handler whose harness writes one JSON value per line reads it with `JsonLines`, because a
+pseudo-terminal is not a pipe: ConPTY on Windows renders a console, so its output carries
+mode and title sequences, may move the cursor instead of writing a line break, and breaks a
+line longer than the terminal is wide (CRLF, then a cursor move).
+
+```rust
+pub const STREAM_COLS: u16 = 32767;          // widest terminal every provider accepts (ConPTY: i16)
+pub const MAX_JSON_LINE: usize = 64 << 20;   // a held, unfinished value past this is handed over as text
+pub fn strip_controls(bytes: &[u8]) -> Vec<u8>; // drops CSI, OSC and two-byte escapes; keeps line breaks
+pub enum StreamLine { Json { value: serde_json::Value, text: Vec<u8> }, Text(String) }
+pub struct JsonLines; // Default
+impl JsonLines {
+    pub fn new() -> Self;
+    pub fn push(&mut self, bytes: &[u8]);               // output as read
+    pub fn next_line(&mut self) -> Option<StreamLine>;   // a whole line, if one has arrived
+    pub fn finish(&mut self) -> Option<StreamLine>;      // after end of output: what is held; call until None
+}
+```
+
+Lines are cut at line breaks and at cursor moves to another row (CUP, HVP, CNL, CPL, VPA,
+IND, NEL, RI), controls and CR removed. A line starting with `{` or `[` that does not parse
+yet is joined, untrimmed, with the lines after it until it does; a line that is a whole value
+of its own ends the held one as text. Anything else is `Text`, trimmed, never empty. Handlers
+spawn with `cols: STREAM_COLS` so that few lines wrap at all.
 
 ## Mission lifecycle (`ai6::directorates::m::mission`)
 
@@ -3143,13 +3174,18 @@ three tries). For each job the desk answers `accepted` or `rejected` (invalid jo
 the roster or quarantined, handler not loaded here, four harnesses already running). It keeps
 one harness per conversation, started with the roster Agent `job.agent_id` (handler, model,
 effort; environment reduced to what reaches the model, as a Chief of Staff review's),
-`AssistantMode::moneypenny()`, clearance `desk`, no project settings, in a new empty directory
-`<temp>/ai6-assistant-<random>` removed when the harness closes, and the MCP URL
-`<gateway origin>/v1/moneypenny/mcp` plus the job's token in its environment. A later job goes
-to the running harness as a message, unless its token expires within two minutes, when the
-harness is closed and resumed with the new token. A harness idle for ten minutes is closed;
-the next job resumes its provider Session (the job's `session_id`, else the one the desk
-remembers), or starts afresh with the job's context when that fails. Handler events `text`,
+`AssistantMode::moneypenny()`, clearance `desk`, no project settings, in the conversation's
+directory `<temp>/ai6-assistant-<random>/<conversation digest>` (the parent made once per
+desk, readable by the Station's user only; the same path on every start of that conversation,
+because Claude Code resumes a Session only from the directory that recorded it; removed when
+the harness closes), and the MCP URL `<gateway origin>/v1/moneypenny/mcp` plus the job's token
+in its environment. A later job goes to the running harness as a message, unless its token
+expires within two minutes, when the harness is closed and resumed with the new token; a job
+for a conversation whose harness is still closing waits up to ten seconds for it, then is
+rejected. A harness idle for ten minutes is closed; the next job resumes its provider Session
+(the job's `session_id`, else the one the desk remembers) with the Agent's context and the
+job's context again as `AgentResume::initial_context`, or starts afresh with them when that
+fails. Handler events `text`,
 `tool`, `completed`, `failed` and `limit` are reported; a closed harness reports `closed` with
 the reason (`idle`, `the Station is stopping`, …). When Universal Exports refuses a job's
 `accepted` report with 403, 404 or 409 (the job moved to another Station or was given up), the

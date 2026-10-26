@@ -28,8 +28,11 @@ one harness per conversation, so a follow-up reaches it at once; after ten idle 
 closes, and the next message resumes the same provider Session.
 
 An assistant Session is not a Mission: it has no Operation, safe house or Cable endpoint,
-never appears on the board, and works in a new empty directory that is removed when the
-harness closes. Of its Agent's environment it keeps only what reaches the model, as a
+and never appears on the board. It works in a directory of its own, the same one each time
+its conversation's harness starts on that Station, because Claude Code resumes a Session only
+from the directory that recorded it; the directory is removed when the harness closes. A
+resumed harness is given her instructions again, since Claude Code does not keep them in the
+Session. Of its Agent's environment it keeps only what reaches the model, as a
 [Chief of Staff review](agents.md#chief-of-staff) does.
 
 ## What she may touch
@@ -39,12 +42,15 @@ files, no web), only the user's own harness settings, and exactly one MCP server
 Exports' Moneypenny endpoint. Claude Code gets `--restricted`, `--tools=`, its own tools
 denied by name, `--setting-sources user`, and `--strict-mcp-config` with only that server,
 whose tools it may call without asking. Codex gets its command execution switched off
-(`features.shell_tool = false`, `features.unified_exec = false`), local image attachment off
-(`tools.view_image = false`), web search, sub-agents and app connectors off, its MCP servers
-replaced by that one server, and, as a second line, the read-only sandbox (no writes, no
-network) with approvals off. These are the names the Codex configuration reference gives;
-run a Codex release that knows them, since a release that ignored them would leave its shell
-on, reading whatever the Station's user can read.
+(`features.shell_tool = false`), local image attachment off (`tools.view_image = false`), web
+search, sub-agents and app connectors off, an empty skills catalog, every other feature it
+enables switched off but four that only store its login and reach its service, its MCP
+servers replaced by that one server, and, as a further line, the read-only sandbox (no
+writes, no network) with approvals off. Then the [tool check](agents.md#codex-tool-check)
+renders what Codex would offer the model and starts her only if that is exactly her server's
+tools. Codex 0.164 offers its models MCP tools only through its code-mode JavaScript tool
+(`functions.exec`), which this check refuses, so with that release she does not start on
+Codex; run her on Claude Code.
 
 The mode is built from parts (MCP servers, interpreters, skills, network policy) so later
 releases can widen it; today a handler refuses to start an assistant that asks for an

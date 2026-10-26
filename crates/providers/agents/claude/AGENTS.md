@@ -14,12 +14,21 @@ It exposes `ClaudeHandler` and `ClaudeConfig` from the root. The crate contains 
 `ClaudeHandler` and `ClaudeConfig` implement the `ai6::directorates::section_00::agent::AgentHandler` Guatiao
 kind. `ClaudeConfig` selects the executable; `ClaudeHandler` launches Claude Code through
 the terminal instance supplied by AI6. Initial context becomes appended system
-instructions before the task prompt is written to the stream. Claude's provider Session
-ID is returned from `session_id()` after the provider emits it and is supplied unchanged
-to `resume`. Resume waits for Claude's stream initialization, verifies the reported ID,
-and only then returns the resumed operation or sends its optional follow-up message.
-End-of-file before a completion event emits one `failed` event; a read timeout returns
-`None`.
+instructions (`--append-system-prompt`) before the task prompt is written to the stream.
+Claude's provider Session ID is returned from `session_id()` after the provider emits it
+and is supplied unchanged to `resume`. Claude Code does not keep `--append-system-prompt`
+in the Session it records, so resume passes `AgentResume::initial_context` the same way
+when it is not empty. `--resume <id>` finds a Session only from the directory that recorded
+it (Claude Code 2.1.310: from another one it answers "No conversation found with session
+ID"), so resume must be given that working directory. Resume waits for Claude's stream
+initialization, verifies the reported ID, and only then returns the resumed operation or
+sends its optional follow-up message. End-of-file before a completion event emits one
+`failed` event, after every line written before it; a read timeout returns `None`.
+
+The terminal is opened at `STREAM_COLS` (32767) columns and read with
+`ai6::directorates::q::terminal::JsonLines`, so the controls ConPTY writes on Windows and a
+line it breaks are read as the stream Claude wrote; a line that is not JSON becomes an event
+of kind `output` with the line as text.
 
 A usage or rate limit is emitted as an event of kind `limit` (`ai6::LIMIT_EVENT`) with
 `AgentEvent::limit` set, never as `completed`. Two stream shapes are recognised: a

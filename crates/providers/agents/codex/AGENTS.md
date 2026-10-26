@@ -6,8 +6,8 @@ the package and is self-contained. Development documentation lives with the sour
 <https://github.com/jose-pr/ai6>.
 
 No features. MSRV: Rust 1.89. The crate depends on `ai6` (feature `gate`) and `serde_json`. It
-re-exports `CodexHandler` and `CodexConfig` from the root. The crate contains no
-`unsafe` code.
+re-exports `CodexHandler` and `CodexConfig` from the root, beside the tool check's
+`TOOL_CHECK_ENV` and `KEPT_FEATURES`. The crate contains no `unsafe` code.
 
 ## `CodexHandler`
 
@@ -72,10 +72,48 @@ replaced table: it gets Codex's default for an unlisted project, never a trust t
 granted it. That the default is untrusted for an app-server session is not confirmed from
 the Codex documentation. Not exercised against a live Codex.
 When `AgentStart::answer_only` (or `AgentResume::answer_only`) is `true`, which AI6 sets for
-a Chief of Staff review, app-server receives `-c mcp_servers={}` and the untrusted-project
-override and none of AI6's servers, the Session has no gate, and `thread/start` and
-`thread/resume` carry `sandbox = "read-only"`, `approvalPolicy = "never"` and `config =
-{"web_search": "disabled"}`. Checked against the app-server protocol source
+a Chief of Staff review, app-server receives `-c mcp_servers={}`, `-c` for
+`features.shell_tool=false`, `tools.view_image=false`, `web_search="disabled"`,
+`features.multi_agent=false`, `agents.enabled=false`, `features.apps=false` and
+`skills.max_context_tokens=1`, and the untrusted-project override and none of AI6's servers;
+the Session has no gate, and `thread/start` and `thread/resume` carry `sandbox =
+"read-only"`, `approvalPolicy = "never"` and `config = {"web_search": "disabled"}`. An
+assistant (`AgentStart::assistant`) gets the same, with `mcp_servers` holding exactly its
+servers.
+
+Both are restricted threads, which start or resume only after the tool check:
+
+```rust
+pub const TOOL_CHECK_ENV: &str = "AI6_CODEX_TOOL_CHECK"; // strict (default, also unset) | warn; other values refuse
+pub const KEPT_FEATURES: [&str; 4] = ["secret_auth_storage", "enable_request_compression",
+                                      "system_proxy_fallback", "unbounded_connection_retries"];
+```
+
+Through the terminal AI6 supplies, with the app server's `-c` settings, environment and
+working directory, the handler runs `codex --version`, then `codex features list` and adds
+`-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES`, then `codex
+debug prompt-input` with all of those and `-c model="<model>"` when the request names one
+(what Codex offers depends on the model). It reads the offered tools from the
+`additional_tools` items (`namespace.tool` inside a namespace); an item of any other type
+than `message` and `additional_tools`, or output that is not that JSON, is unreadable. The
+thread passes when every offered tool is `mcp__<server>.<tool>` for one of its servers and
+each server offers at least one (answer-only: no tool). On a failure `strict` refuses with
+`GUATIAO_ERR_UNSUPPORTED` naming what was found, before any app server starts; `warn`
+starts it, prints `ai6: weakening: …` on standard error and queues an event of kind
+`weakened` with that text first. The feature switches apply in both. A pass is cached in
+the process for 15 minutes by executable, `--version` output, settings (without the
+working directory's `projects` entry), model, servers and mode; a refusal is not cached.
+With Codex 0.164.0 an answer-only thread passes with no tool; an assistant does not, because
+that release offers its models MCP tools only inside code mode's `functions.exec` (fixtures
+in `tests/fixtures/codex-0.164.0/`). `codex debug prompt-input` is trusted to render what a
+thread is sent; with every feature off `codex exec` (0.164.0) was seen to send
+`functions.exec`, `functions.wait` and `functions.request_user_input` where it renders
+none, and the app server's case is not established.
+
+The terminal is opened at `STREAM_COLS` (32767) columns and read with
+`ai6::directorates::q::terminal::JsonLines`: ConPTY's controls, its echo of the requests
+written and lines it breaks are read as the stream Codex wrote. A line that is not JSON is
+skipped while waiting for a reply, and is an event of kind `output` otherwise. Checked against the app-server protocol source
 (`ThreadStartParams`: `sandbox`, `approvalPolicy`, `config`; the `web_search` key and its
 `disabled` value): those for `thread/start`. Inferred: that `thread/resume` takes `config`
 as well, that the read-only sandbox has no network, and that the `mcp_servers` override

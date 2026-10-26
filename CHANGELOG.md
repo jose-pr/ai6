@@ -664,6 +664,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Harnesses start on a Windows Station: the `pty` provider answers the cursor position query
+  ConPTY sends before a program's first output (and holds it until answered), and removes it
+  from the output. The Claude Code and Codex handlers open their terminal 32767 columns wide
+  and read it with the new `ai6::directorates::q::terminal::JsonLines`, which removes the
+  mode and title sequences ConPTY writes and rejoins a line it broke at the terminal's width.
+- Codex answer-only and assistant threads start only after a tool check: every enabled Codex
+  feature but four (`ai6_agent_codex::KEPT_FEATURES`) is switched off, as are agents
+  (`agents.enabled`) and the skills catalog, and `codex debug prompt-input` must show exactly
+  the thread's MCP tools, else the thread is refused; `AI6_CODEX_TOOL_CHECK=warn` in the
+  Agent's environment starts it with a `weakened` event and a weakening on the Station's log.
+  Codex 0.164 offered such threads `functions.exec` (a JavaScript runtime with
+  `apply_patch` and `view_image`), computer-use and collaboration tools,
+  `request_user_input` and `clock.sleep`, and ignores `features.unified_exec = false`. On
+  Codex 0.164 Moneypenny is refused: it offers MCP tools only inside `functions.exec`.
+- A resumed Claude Code Session keeps its instructions: `AgentResume` carries
+  `initial_context` (the Agent's context, its role's purpose and policy, Moneypenny's
+  instructions), passed again as `--append-system-prompt`. Moneypenny's harness works in the
+  same directory each time her conversation resumes on a Station, since Claude Code finds a
+  Session only from the directory that recorded it; she was started afresh before.
 - Codex answer-only (Chief of Staff) and assistant threads also run with command execution,
   local image attachment, web search, sub-agents and app connectors switched off
   (`features.shell_tool`, `features.unified_exec`, `tools.view_image`, `web_search`,
