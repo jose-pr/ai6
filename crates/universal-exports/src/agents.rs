@@ -156,6 +156,27 @@ impl Headquarters {
         (field("clearance"), field("configured"))
     }
 
+    /// The codename `name` stands for in `operation`: a posted Agent's codename, or the one
+    /// whose aliases include it alone.
+    fn codename(&self, operation: &str, name: &str) -> Option<String> {
+        let agents = self
+            .0
+            .get("agent_clearances")
+            .and_then(|operations| operations.get(operation))
+            .and_then(serde_json::Value::as_object)?;
+        if agents.contains_key(name) {
+            return Some(name.to_owned());
+        }
+        let mut matches = agents.iter().filter(|(_, entry)| {
+            entry
+                .get("aliases")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|aliases| aliases.iter().any(|alias| alias.as_str() == Some(name)))
+        });
+        let (codename, _) = matches.next()?;
+        matches.next().is_none().then(|| codename.clone())
+    }
+
     /// Whether the check-in says the Agent's grant in `operation` could not be read.
     fn unreadable(&self, operation: &str, agent: &str) -> bool {
         self.0
@@ -215,7 +236,7 @@ pub(crate) async fn list(
             .pending_approvals(&operation, unix_timestamp()?)
             .map_err(|_| ApiError::internal())?
             .into_iter()
-            .filter(|request| request.scope.kind == CLEARANCE_KIND)
+            .filter(is_promotion)
             .collect::<Vec<_>>();
         for view in views.values_mut() {
             view.retirement = headquarters.retirement(&view.agent);
@@ -243,6 +264,20 @@ pub(crate) async fn list(
     .await
     .map_err(|_| ApiError::internal())??;
     Ok(Json(views))
+}
+
+/// Whether a waiting request is M's promotion request: kind `clearance`, filed under Session
+/// `m` and Mission `promotion-AGENT` for that Agent. A `clearance` request an Agent filed itself
+/// is not one, and is never shown as one.
+fn is_promotion(request: &ApprovalRequest) -> bool {
+    request.scope.kind == CLEARANCE_KIND
+        && request.session.as_str() == "m"
+        && request.mission.as_str() == format!("promotion-{}", request.agent)
+        && request
+            .scope
+            .target
+            .strip_prefix(&request.agent)
+            .is_some_and(|rest| rest.starts_with(':'))
 }
 
 /// The body of `PUT .../agents/{agent}/clearance`.
@@ -292,6 +327,20 @@ async fn audit(
         .map_err(|_| ApiError::internal())
 }
 
+/// The codename `name` stands for in the Operation, from the Headquarters Station's check-in.
+async fn resolve(
+    registry: &std::sync::Arc<dyn RegistryBackend>,
+    operation: &OperationId,
+    name: &str,
+) -> Result<Option<String>, ApiError> {
+    let (registry, operation, name) = (registry.clone(), operation.to_string(), name.to_owned());
+    tokio::task::spawn_blocking(move || {
+        Ok(Headquarters::read(registry.as_ref())?.codename(&operation, &name))
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+}
+
 /// Withdraws the approval a replaced or removed grant was raised by, while it is live.
 fn withdraw_raise(
     registry: &dyn RegistryBackend,
@@ -332,6 +381,10 @@ pub(crate) async fn lower(
     authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.configure").await?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     ensure_operation_registered(&registry, &operation_id).await?;
+    // A grant is kept under the codename Stations read; an unknown name is refused.
+    let agent = resolve(&registry, &operation_id, &agent)
+        .await?
+        .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
     let now = unix_timestamp()?;
     let mut grant = ClearanceGrant::lower(
         agent.clone(),
@@ -380,6 +433,10 @@ pub(crate) async fn restore(
     authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.configure").await?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     ensure_operation_registered(&registry, &operation_id).await?;
+    // An Agent no longer posted keeps its codename: its grant can still be removed by it.
+    let agent = resolve(&registry, &operation_id, &agent)
+        .await?
+        .unwrap_or(agent);
     let now = unix_timestamp()?;
     let store = registry.clone();
     let (operation, name) = (operation_id.to_string(), agent.clone());
@@ -585,7 +642,9 @@ mod tests {
                     ),
                     (
                         "agent_clearances".to_owned(),
-                        serde_json::json!({"G": {"007": {"clearance": "desk", "configured": "desk"}}}),
+                        serde_json::json!({"G": {"007": {
+                            "clearance": "desk", "configured": "desk", "aliases": ["JamesBond"]
+                        }}}),
                     ),
                 ]),
             )
@@ -603,6 +662,19 @@ mod tests {
         .unwrap()
         .expiring(now, std::time::Duration::from_secs(3600));
         served.registry.request_approval(&request).unwrap();
+        // 007 files a clearance request of its own; it is not M's promotion.
+        let own = ai6::ApprovalRequest::try_new(
+            "G",
+            ai6::MissionId::try_new("mission-g").unwrap(),
+            ai6::SessionId::try_new("session-g").unwrap(),
+            "007",
+            ai6::ActionScope::try_new("clearance", "007:00@G").unwrap(),
+            "let me",
+            "self",
+        )
+        .unwrap()
+        .expiring(now - 1.0, std::time::Duration::from_secs(3600));
+        served.registry.request_approval(&own).unwrap();
 
         let views: serde_json::Value = agents(&served.base, &served.operator)
             .await
@@ -698,14 +770,28 @@ mod tests {
         )
         .await;
         assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+        let unknown = call(
+            reqwest::Method::PUT,
+            format!(
+                "{}/v1/user/operations/G/agents/nobody/clearance",
+                served.base
+            ),
+            &served.operator,
+            Some(lower.clone()),
+        )
+        .await;
+        assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
         let lowered = call(
             reqwest::Method::PUT,
-            clearance.clone(),
+            format!(
+                "{}/v1/user/operations/G/agents/JamesBond/clearance",
+                served.base
+            ),
             &served.operator,
             Some(lower),
         )
         .await;
-        assert_eq!(lowered.status(), StatusCode::OK);
+        assert_eq!(lowered.status(), StatusCode::OK, "by alias");
         let grant = served
             .registry
             .clearance_grant("G", "007")
