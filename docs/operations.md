@@ -249,6 +249,40 @@ Code reloads a changed settings file). A SHA-1 `pin` is accepted and reported as
 weakening. AI6's own settings, the green ink hook (`--settings`) and the Station's MCP
 servers (`--mcp-config`), apply in every mode.
 
+## Vetting
+
+`vetting` sets the checks M runs on each brief before it is placed
+([Vetting](missions.md#vetting-and-held-briefs)). Every check is on by default; each key
+overrides one, and `vetting = "off"` turns them all off.
+
+```toml
+[operation.G.vetting]
+max_brief_bytes = 65536
+max_per_hour = 20             # 0 is no limit
+max_per_source_per_hour = 10  # 0 is no limit
+duplicates = true
+budget = true
+screening = "untrusted"       # or "all", "off"
+phrases = ["deploy to production now"]
+review = "untrusted"          # or "all", "off"
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_brief_bytes` | `65536` | Largest brief text: a Source brief's quoted item, otherwise title and body. A larger brief is refused |
+| `max_per_hour` | `20` | Untrusted briefs passed per rolling hour; the next is held |
+| `max_per_source_per_hour` | `10` | The same, per Source |
+| `duplicates` | `true` | Hold a brief with the same URL or title as queued, held or running work |
+| `budget` | `true` | Hold briefs while the Operation's day spend is at `operation_cost_usd_per_day` |
+| `screening` | `untrusted` | Which briefs are screened for invisible Unicode, forged fence lines and manipulation phrases |
+| `phrases` | none | Phrases screened for beside the built-in patterns, matched ignoring case, punctuation and spacing |
+| `review` | `untrusted` | Which briefs a qualified `chief-of-staff` Agent reviews before they are placed |
+
+Untrusted briefs are a Source's items and Agents' Mission proposals; an operator's or a
+Sleeper's brief is trusted. An invalid value fails the load with an error naming the key. A
+Station prints each setting looser than the default when it starts and when the
+configuration changes.
+
 ## Sleepers
 
 `sleepers` holds standing orders that queue a brief on a cron schedule, once an operator

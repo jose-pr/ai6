@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Vetting: before M places a brief, the Headquarters holder runs deterministic checks under
+  the Operation's `[operation.ID.vetting]` settings (`vetting = "off"` turns them off, a
+  reported weakening). A malformed brief (no visible title, text past `max_brief_bytes`,
+  default 64 KiB) is refused with outcome state `refused`; a duplicate of queued, held or
+  running work (same URL or title), untrusted briefs past `max_per_hour` (20) or
+  `max_per_source_per_hour` (10), the day's spend at `operation_cost_usd_per_day`, or
+  untrusted text carrying Unicode tag characters, bidirectional controls, zero-width runs,
+  forged fence lines or a manipulation phrase (`phrases` extends the list) is held. Held
+  briefs leave the queue (`VettingStore`: `hold_brief`, `held_briefs`, `release_held`,
+  `refuse_held`, `clearance`, `clear_brief`, on the file and SQL Registries); a release
+  clears the kinds it was held for. The timeline records `intake` events. `ai6::vet` and
+  `VettingPolicy` are the library form.
 - Live configuration: a Station checks its roster source and `loadouts.toml` every 5 seconds
   (`ai6 serve --config-poll`, `StationConfig::with_config_poll`, 0 off) and applies a change
   without a restart; running Sessions keep what they started with. A revision that fails

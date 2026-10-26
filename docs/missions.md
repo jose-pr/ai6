@@ -435,6 +435,32 @@ Sessions, quota used, limit and tokens today (`pool.read`).
   to the queue with the next qualified Agent. `quarantined` is a Session state in the board,
   `ai6ctl` and Moneypenny.
 
+## Vetting and held briefs
+
+Before M places a brief, the Station holding the Headquarters lease vets it under the
+Operation's [`vetting` settings](operations.md#vetting). The checks are deterministic and
+cost no tokens:
+
+| Check | Applies to | Finding |
+| --- | --- | --- |
+| Size and visible text | every brief | `malformed`: the brief is **refused** |
+| Same URL or title as queued, held or running work | every brief | `duplicate`, naming that work |
+| Untrusted briefs passed in the last hour, per Operation and per Source | untrusted briefs | `rate` |
+| The Operation's spend today at `operation_cost_usd_per_day` | every brief | `budget` |
+| Unicode tag characters, bidirectional controls, runs of zero-width characters, lines that imitate the markers around quoted text, manipulation phrases | untrusted briefs | `screening` |
+
+**Untrusted** briefs are a Source's items and Agents' Mission proposals: their text was
+written outside AI6's operators. An operator's or a Sleeper's brief is trusted and is not
+screened or rate limited.
+
+A brief with no finding passes and is placed as usual. A refused brief is filed as failed with
+outcome state `refused` (a Source still gets its CX report). Any other finding **holds** the
+brief: it leaves the queue for the Operation's held briefs, where no Station claims it, until
+an operator acts. Holding rather than refusing is deliberate: a real issue trips a check
+often enough that a person should decide. The Operation's timeline records each decision as
+an `intake` event (`passed`, `held`, `refused`, `released`) with the finding kinds, never
+the brief's text.
+
 ## Sources
 
 A **Source** is a Guatiao provider that polls a tracker or CI system for work and posts the
