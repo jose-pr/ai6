@@ -69,7 +69,9 @@ pub ai6::directorates::m::approvals::Requirement::Refused
 pub ai6::directorates::m::approvals::ActionScope::kind: alloc::string::String
 pub ai6::directorates::m::approvals::ActionScope::target: alloc::string::String
 impl ai6::directorates::m::approvals::ActionScope
+pub fn ai6::directorates::m::approvals::ActionScope::covers(&self, &ai6::directorates::m::approvals::ActionScope) -> bool
 pub fn ai6::directorates::m::approvals::ActionScope::pushed_ref(&self) -> alloc::string::String
+pub fn ai6::directorates::m::approvals::ActionScope::remote(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::m::approvals::ActionScope::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::io::error::Result<Self>
 pub fn ai6::directorates::m::approvals::ActionScope::validate(&self) -> core::io::error::Result<()>
 pub struct ai6::directorates::m::approvals::GreenInkDefinition
@@ -94,6 +96,7 @@ pub const ai6::directorates::m::approvals::DEFAULT_APPROVAL_TTL: core::time::Dur
 pub const ai6::directorates::m::approvals::DEFAULT_PROTECTED: [&str; 4]
 pub const ai6::directorates::m::approvals::DEFAULT_REQUEST_TTL: core::time::Duration
 pub const ai6::directorates::m::approvals::GREEN_INK_REASON: &str
+pub fn ai6::directorates::m::approvals::classify(&str, &dyn core::ops::function::Fn(&str) -> core::option::Option<alloc::string::String>) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::directorates::m::approvals::clearance_at_least(&str, &str) -> bool
 pub mod ai6::directorates::m::config
 pub struct ai6::directorates::m::config::ConfigRevision(_)
@@ -2369,6 +2372,23 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+pub mod ai6::directorates::section_00::gate
+pub enum ai6::directorates::section_00::gate::GateVerdict
+pub ai6::directorates::section_00::gate::GateVerdict::Allow
+pub ai6::directorates::section_00::gate::GateVerdict::Hold(alloc::string::String)
+pub struct ai6::directorates::section_00::gate::GateClient
+impl ai6::directorates::section_00::gate::GateClient
+pub fn ai6::directorates::section_00::gate::GateClient::check(&self, &[ai6::directorates::m::approvals::ActionScope]) -> core::result::Result<alloc::vec::Vec<(alloc::string::String, core::option::Option<alloc::string::String>)>, alloc::string::String>
+pub fn ai6::directorates::section_00::gate::GateClient::from_environment(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::option::Option<Self>
+pub fn ai6::directorates::section_00::gate::GateClient::from_process_environment() -> core::option::Option<Self>
+impl core::fmt::Debug for ai6::directorates::section_00::gate::GateClient
+pub fn ai6::directorates::section_00::gate::GateClient::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const ai6::directorates::section_00::gate::CABLE_TOKEN_ENV: &str
+pub const ai6::directorates::section_00::gate::CABLE_URL_ENV: &str
+pub const ai6::directorates::section_00::gate::GATE_PROGRAM_ENV: &str
+pub fn ai6::directorates::section_00::gate::gate(&str, core::option::Option<&std::path::Path>, core::option::Option<&ai6::directorates::section_00::gate::GateClient>) -> ai6::directorates::section_00::gate::GateVerdict
+pub fn ai6::directorates::section_00::gate::git_resolver(core::option::Option<std::path::PathBuf>) -> impl core::ops::function::Fn(&str) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::section_00::gate::pre_tool_use(&str, core::option::Option<&ai6::directorates::section_00::gate::GateClient>) -> core::option::Option<alloc::string::String>
 pub mod ai6::station
 pub mod ai6::station::identity
 pub use ai6::station::identity::Built
@@ -2759,7 +2779,9 @@ pub fn ai6::directorates::m::identity::AccessTokenRecord::fmt(&self, &mut core::
 pub ai6::ActionScope::kind: alloc::string::String
 pub ai6::ActionScope::target: alloc::string::String
 impl ai6::directorates::m::approvals::ActionScope
+pub fn ai6::directorates::m::approvals::ActionScope::covers(&self, &ai6::directorates::m::approvals::ActionScope) -> bool
 pub fn ai6::directorates::m::approvals::ActionScope::pushed_ref(&self) -> alloc::string::String
+pub fn ai6::directorates::m::approvals::ActionScope::remote(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::m::approvals::ActionScope::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::io::error::Result<Self>
 pub fn ai6::directorates::m::approvals::ActionScope::validate(&self) -> core::io::error::Result<()>
 #[non_exhaustive] pub struct ai6::Agent
@@ -4545,6 +4567,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_usage(&self, co
 pub fn ai6::directorates::registry::store::FileRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::directorates::registry::store::FileRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
 pub fn ai6::cable_source(&str) -> alloc::string::String
+pub fn ai6::classify(&str, &dyn core::ops::function::Fn(&str) -> core::option::Option<alloc::string::String>) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub fn ai6::clearance_at_least(&str, &str) -> bool
 pub fn ai6::describe(&guatiao::library::kind::ProviderError) -> alloc::string::String
