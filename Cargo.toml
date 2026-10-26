@@ -26,8 +26,8 @@ publish = false
 guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "1738fa73a2871df2f355c631026a8c6dbb94fa92" }
 # Shared access kinds, models, role authorizer and the five access providers, pinned to the
 # same guatiao revision as above so kinds and plugins agree.
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "668cd761a92ba8259aab8a027e482da70fe39369" }
-coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "668cd761a92ba8259aab8a027e482da70fe39369" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d5146346951ec011a7332f04fff9e4863635152d" }
+coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d5146346951ec011a7332f04fff9e4863635152d" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
@@ -50,8 +50,8 @@ zeroize = { version = "1", default-features = false, features = ["alloc"] }
 ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
 # Station-to-station mutual TLS: identity, fingerprints, a trust store with per-source caps
 # and policy profiles. Each is pinned to a revision of its repository's main.
-coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "ed5a5c401bc2da942c5c1f0de42c38e90927a8a9" }
-coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = "fa409d770baf5086619480d68fadfc9dc7cfa6dd", features = ["generate", "ca", "tokio", "tls12"] }
+coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "d01b6907859029fad23e5d97398146a03c313ffe" }
+coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = "d940fac026a7e93db153ff4584aee130f2a6b882", features = ["generate", "ca", "tokio", "tls12"] }
 # The configuration types coqui-peer-tls returns; shared with ureq, on the ring provider.
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 # Self-signed and CA-issued certificates for the Station TLS tests.
