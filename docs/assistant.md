@@ -46,7 +46,9 @@ She is started in the handlers' **assistant mode**: no built-in tool at all (no 
 files, no web), only the user's own harness settings, and exactly one MCP server, Universal
 Exports' Moneypenny endpoint. Claude Code gets `--restricted`, `--tools=`, its own tools
 denied by name, `--setting-sources user`, and `--strict-mcp-config` with only that server,
-whose tools it may call without asking. Codex gets its command execution switched off
+whose tools it may call without asking, and runs with `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1`:
+Claude Code otherwise attaches its server-side advisor tool, which none of those flags
+removes. Codex gets its command execution switched off
 (`features.shell_tool = false`), local image attachment off (`tools.view_image = false`), web
 search, sub-agents and app connectors off, an empty skills catalog, every other feature it
 enables switched off but four that only store its login and reach its service, its MCP

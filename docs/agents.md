@@ -184,8 +184,10 @@ launch, which carries it as `--append-system-prompt`. Codex keeps a thread's ins
 
 A restricted Session (answer-only, or Moneypenny's assistant mode) that uses a tool outside
 its MCP servers anyway is killed and ends with a `failed` event naming the tool, and nothing
-it wrote afterwards is read: for Claude Code a `tool_use` not named `mcp__<server>__<tool>`;
-for Codex any request from the app server but token refresh and attestation, or a thread item
+it wrote afterwards is read: for Claude Code a `tool_use` not named `mcp__<server>__<tool>`,
+or any tool the model's API runs itself (a `server_tool_use` or `mcp_tool_use` block, such as
+the advisor), which a restricted Claude Code Session also runs without
+(`CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1`); for Codex any request from the app server but token refresh and attestation, or a thread item
 other than messages, reasoning, a plan, compaction and review-mode markers, or an MCP call to
 another server. This backs up the flags and the tool check below, which decide what the
 harness is offered.

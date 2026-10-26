@@ -22,7 +22,18 @@ Session is compacted; after that it builds the prompt from the resuming launch, 
 passes `AgentResume::initial_context` as `--append-system-prompt` too when it is not empty.
 A restricted Session (`answer_only`, or `assistant`) whose `assistant` message calls a tool
 not named `mcp__<server>__<tool>` for one of its servers is killed, ends with a `failed`
-event naming the tools, and nothing read after that becomes an event. `--resume <id>` finds a Session only from the directory that recorded
+event naming the tools, and nothing read after that becomes an event. A call is any
+`tool_use` content block (named by its `name`) and any other block whose type ends in
+`_tool_use` (named `TYPE:NAME`, such as `server_tool_use:advisor` or `mcp_tool_use:echo`):
+those the Messages API runs itself, outside every MCP server, so a restricted Session never
+may. Whether Claude Code's stream carries such blocks is not documented; the block types
+are the Messages API's. A restricted Session also runs with
+`CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` in its environment, overriding the Agent's: Claude Code
+2.1.310 otherwise attaches its server-side `advisor` tool to model requests (seen with
+`claude-opus-5-5`), and neither `--restricted`, `--tools=` nor a deny rule removes it. That
+variable is the only documented switch (code.claude.com/docs/en/advisor and
+`/docs/en/env-vars`); no setting, flag or permission rule turns server-side tools off as a
+class. `--resume <id>` finds a Session only from the directory that recorded
 it (Claude Code 2.1.310: from another one it answers "No conversation found with session
 ID"), so resume must be given that working directory. With `--input-format stream-json`
 Claude Code writes nothing, not even its stream's initialization, until it has read a
@@ -66,8 +77,8 @@ A `result` event also carries `AgentEvent::usage`: its `usage` block (`input_tok
 `output_tokens`, `cache_creation_input_tokens` as cache writes, `cache_read_input_tokens`) and
 `total_cost_usd` in micro-dollars, marked `cumulative`. Whether `usage` is per turn or per
 process is not confirmed from a live account, so the daemon counts a decrease as a new
-counter. An `assistant` message with `tool_use` blocks becomes kind `tool` with
-`AgentEvent::tools` set to the block names. `AgentStart::max_cost_micro_usd` and
+counter. An `assistant` message with tool-call blocks (above) becomes kind `tool` with
+`AgentEvent::tools` set to their names. `AgentStart::max_cost_micro_usd` and
 `AgentResume::max_cost_micro_usd` are passed as `--max-budget-usd`.
 
 When AI6 supplies both `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, the handler adds
@@ -79,7 +90,7 @@ When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session 
 remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
 The handler then registers that server as `ai6-theater` (same placeholder scheme), allows
 its tools (`--allowedTools mcp__ai6-theater`) and denies Claude's own shell and file tools
-(`--disallowedTools Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,Grep,LS`) so
+(`--disallowedTools Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep`) so
 nothing it does lands on the Station. Both flags are variadic, so each is followed by another
 flag. This applies to resume as well.
 
@@ -114,8 +125,11 @@ Code.
 When `AgentStart::answer_only` (or `AgentResume::answer_only`) is `true`, which AI6 sets for
 a Chief of Staff review, start and resume add, in place of the project settings, MCP and gate
 flags: `--restricted`, `--tools=`, `--disallowedTools
-Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,Grep,LS,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*`,
-`--setting-sources user`, `--strict-mcp-config` and `--mcp-config {"mcpServers":{}}`. Taken
+Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*`,
+`--setting-sources user`, `--strict-mcp-config` and `--mcp-config {"mcpServers":{}}`. An
+assistant Session's list is the same with `Skill` in place of `mcp__*`. `MultiEdit` and `LS`
+are not denied: Claude Code 2.1.310 warns that such a rule matches no known tool. `Task` is
+the former name of `Agent`, which Claude Code still accepts. Taken
 from `claude --help` (2.1.310) and the CLI reference: `--tools ""` turns every built-in tool
 off but not MCP tools, hence the `mcp__*` denial and the empty strict MCP config;
 `--restricted` (2.1.248 or later) removes the command and code tools and WebFetch and loads

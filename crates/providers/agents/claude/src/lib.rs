@@ -105,7 +105,10 @@ impl AgentHandler for ClaudeHandler {
             terminal,
             argv,
             &request.working_directory,
-            &request.environment,
+            &harness_environment(
+                &request.environment,
+                request.answer_only || request.assistant.is_some(),
+            ),
         )?;
         let operation = ClaudeSession::new(session, None)
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
@@ -162,7 +165,10 @@ impl AgentHandler for ClaudeHandler {
             terminal,
             argv,
             &request.working_directory,
-            &request.environment,
+            &harness_environment(
+                &request.environment,
+                request.answer_only || request.assistant.is_some(),
+            ),
         )?;
         let operation = ClaudeSession::new(session, Some(expected_session_id))
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
@@ -181,12 +187,30 @@ impl AgentHandler for ClaudeHandler {
 
 /// Claude's own shell and file tools, turned off in remote-hands mode so that nothing the
 /// harness does lands on the Station.
-const OWN_TOOLS: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,Grep,LS";
+const OWN_TOOLS: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep";
 
 /// Every tool an answer-only Session is denied by name, besides `--tools=` turning the
 /// built-in ones off: Claude's own tools, its web and sub-agent tools, and any MCP tool.
-const ANSWER_ONLY_DENIED: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,\
-                                  Grep,LS,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*";
+const ANSWER_ONLY_DENIED: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,\
+                                  WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*";
+
+/// Turns off Claude Code's server-side advisor tool, which the API runs outside any MCP
+/// server and which neither `--restricted`, `--tools=` nor a deny rule removes
+/// (code.claude.com/docs/en/advisor; read by Claude Code 2.1.310 from its environment).
+const DISABLE_ADVISOR_ENV: &str = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL";
+
+/// The harness's environment: `environment`, with the advisor turned off for a restricted
+/// (answer-only or assistant) Session.
+fn harness_environment(
+    environment: &BTreeMap<String, String>,
+    restricted: bool,
+) -> BTreeMap<String, String> {
+    let mut environment = environment.clone();
+    if restricted {
+        environment.insert(DISABLE_ADVISOR_ENV.to_owned(), "1".to_owned());
+    }
+    environment
+}
 
 /// The MCP servers a restricted (answer-only or assistant) Session may call, `None` for a
 /// Session that is not restricted.
@@ -213,8 +237,8 @@ struct Mode {
 /// Every built-in tool an assistant Session is denied by name, besides `--tools=` turning the
 /// built-in ones off. Unlike [`ANSWER_ONLY_DENIED`] it leaves MCP tools alone: the assistant's
 /// servers are how it works.
-const ASSISTANT_DENIED: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,\
-                                Grep,LS,WebFetch,WebSearch,Task,Agent,TodoWrite,Skill";
+const ASSISTANT_DENIED: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,\
+                                WebFetch,WebSearch,Task,Agent,TodoWrite,Skill";
 
 /// Adds the settings flags: assistant ([`add_assistant`]), answer-only ([`add_answer_only`]),
 /// or the project settings AI6 allowed, the Station's MCP servers and the green ink gate.
@@ -897,7 +921,10 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
     })
 }
 
-/// The tools an `assistant` message calls: the `name` of each `tool_use` content block.
+/// The tools an `assistant` message calls, one per tool-call content block: a `tool_use`
+/// block (a tool Claude Code runs) by its `name`; any other `*_tool_use` block, which the
+/// Messages API runs itself (`server_tool_use` for the advisor, web search or code execution,
+/// `mcp_tool_use` for its MCP connector), as `TYPE:NAME`, which no `mcp__` rule matches.
 fn decode_tools(value: &Value) -> Vec<String> {
     if value.get("type").and_then(Value::as_str) != Some("assistant") {
         return Vec::new();
@@ -907,9 +934,15 @@ fn decode_tools(value: &Value) -> Vec<String> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
-        .filter_map(|block| block.get("name").and_then(Value::as_str))
-        .map(str::to_owned)
+        .filter_map(|block| {
+            let kind = block.get("type").and_then(Value::as_str)?;
+            let name = block.get("name").and_then(Value::as_str).unwrap_or("");
+            match kind {
+                "tool_use" => Some(name.to_owned()),
+                kind if kind.ends_with("_tool_use") => Some(format!("{kind}:{name}")),
+                _ => None,
+            }
+        })
         .collect()
 }
 
@@ -2199,6 +2232,34 @@ mod tests {
             "settings without .mcp.json keep only AI6's servers: {pinned:?}"
         );
         assert!(shut_out(resumed), "{resumed:?}");
+        let advisor = |index: usize| {
+            specs[index]
+                .env
+                .as_ref()
+                .unwrap()
+                .get(DISABLE_ADVISOR_ENV)
+                .cloned()
+        };
+        assert_eq!(
+            advisor(3).as_deref(),
+            Some("1"),
+            "answer-only has no advisor"
+        );
+        assert_eq!(advisor(0), None, "an Operation's Session keeps its own");
+    }
+
+    /// Claude Code 2.1.310 warns that a deny rule naming `MultiEdit` or `LS` matches no known
+    /// tool.
+    #[test]
+    fn deny_lists_name_only_tools_claude_code_knows() {
+        for list in [OWN_TOOLS, ANSWER_ONLY_DENIED, ASSISTANT_DENIED] {
+            for gone in ["MultiEdit", "LS"] {
+                assert!(
+                    !list.split(',').any(|name| name == gone),
+                    "{gone} in {list}"
+                );
+            }
+        }
     }
 
     fn assistant_environment() -> BTreeMap<String, String> {
@@ -2297,6 +2358,15 @@ mod tests {
             assert_eq!(after("--setting-sources"), "user");
             assert_eq!(after("--disallowedTools"), ASSISTANT_DENIED);
             assert!(!ASSISTANT_DENIED.contains("mcp__"));
+            assert_eq!(
+                spec.env
+                    .as_ref()
+                    .unwrap()
+                    .get(DISABLE_ADVISOR_ENV)
+                    .map(String::as_str),
+                Some("1"),
+                "no server-side advisor"
+            );
             assert_eq!(after("--allowedTools"), "mcp__moneypenny");
             let servers: Value = serde_json::from_str(&after("--mcp-config")).unwrap();
             assert_eq!(
@@ -2433,6 +2503,53 @@ mod tests {
         let plain = json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": "hi" }] } });
         let event = decode_event(&plain, b"{}".to_vec()).unwrap();
         assert_eq!((event.kind.as_str(), event.tools.len()), ("text", 0));
+        // Blocks the Messages API runs itself (platform.claude.com/docs, advisor tool and MCP
+        // connector): `server_tool_use`, `mcp_tool_use`. Their results are not calls.
+        let server = json!({
+            "type": "assistant",
+            "message": { "content": [
+                { "type": "server_tool_use", "id": "srvtoolu_1", "name": "advisor", "input": {} },
+                { "type": "advisor_tool_result", "tool_use_id": "srvtoolu_1", "content": {} },
+                { "type": "mcp_tool_use", "id": "mcptoolu_1", "name": "echo", "server_name": "x" }
+            ] }
+        });
+        let event = decode_event(&server, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, "tool");
+        assert_eq!(
+            event.tools,
+            ["server_tool_use:advisor", "mcp_tool_use:echo"]
+        );
+    }
+
+    #[test]
+    fn a_server_side_tool_call_ends_a_restricted_session() {
+        for block in [
+            r#"{"type":"server_tool_use","id":"srvtoolu_1","name":"advisor","input":{}}"#,
+            r#"{"type":"mcp_tool_use","id":"mcptoolu_1","name":"board","server_name":"moneypenny"}"#,
+        ] {
+            let mut input =
+                b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-1\"}\n".to_vec();
+            input.extend_from_slice(
+                format!("{{\"type\":\"assistant\",\"message\":{{\"content\":[{block}]}}}}\n")
+                    .as_bytes(),
+            );
+            input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
+            let session = ClaudeSession::new(
+                ResumeTerminalSession {
+                    input: Mutex::new(input),
+                    writes: Arc::new(Mutex::new(Vec::new())),
+                }
+                .into_object(),
+                None,
+            )
+            .restricted_to(restriction(false, Some(&AssistantMode::moneypenny())));
+            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+                .map(|event| (event.kind, event.text.unwrap_or_default()))
+                .collect::<Vec<_>>();
+            assert_eq!(kinds.len(), 2, "{block}: {kinds:?}");
+            assert_eq!(kinds[1].0, "failed");
+            assert!(kinds[1].1.contains("_tool_use:"), "{}", kinds[1].1);
+        }
     }
 
     #[test]

@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The Claude Code handler's resume sends its message right after starting Claude Code and
   returns without waiting for output, since with stream-json input Claude writes nothing
   until it has read a message; the resumed Session's ID is checked as events are read.
+- A restricted (answer-only or assistant) Claude Code Session runs with
+  `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1`, so Claude Code attaches no server-side advisor tool,
+  and its tool tripwire also ends the Session on any tool the model's API runs itself (a
+  `server_tool_use` or `mcp_tool_use` block, reported as `TYPE:NAME` in
+  `AgentEvent::tools`). The handler's deny lists name only tools Claude Code 2.1.310 knows,
+  without `MultiEdit` and `LS`.
 - A Station's assistant desk closes a harness that fails or exits at once, reporting the
   handler's reason to the conversation and freeing its slot; one that writes nothing for ten
   minutes while answering is closed the same way. A resume that fails, when asked or before
