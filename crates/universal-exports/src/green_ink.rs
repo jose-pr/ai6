@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use ai6::directorates::registry::backend::*;
 use ai6::{
-    Approval, ApprovalRequest, AuditRecord, ClassAuthorization, DEFAULT_APPROVAL_TTL, Ruling,
+    Approval, ApprovalRequest, ApprovalStatus, AuditRecord, ClassAuthorization,
+    DEFAULT_APPROVAL_TTL, Decision, Ruling,
 };
 use ai6_diptel::OperationId;
 use axum::Json;
@@ -267,23 +268,38 @@ pub(crate) async fn revoke(
     let now = unix_timestamp()?;
     let store = registry.clone();
     let operation_key = operation.to_string();
-    let by = person.id.clone();
+    let id = request_id.clone();
+    let status = tokio::task::spawn_blocking(move || store.approval(&operation_key, &id, now))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(registry_error)?;
+    let approval = match status {
+        Some(ApprovalStatus::Decided(approval)) if approval.decision == Decision::Approved => {
+            approval
+        }
+        Some(ApprovalStatus::Decided(_)) => return Err(ApiError::from(GatewayError::Conflict)),
+        _ => return Err(ApiError::not_found()),
+    };
+    if approval.revoked.is_some() {
+        return Ok(Json(approval));
+    }
+    // Audited first: a revocation that cannot be recorded is not made.
+    audit(
+        registry.clone(),
+        person.id.clone(),
+        "green_ink.revoked",
+        &operation,
+        step_target(&approval.request),
+        now,
+    )
+    .await?;
+    let operation_key = operation.to_string();
     let approval = tokio::task::spawn_blocking(move || {
-        store.revoke_approval(&operation_key, &request_id, &by, now)
+        registry.revoke_approval(&operation_key, &request_id, &person.id, now)
     })
     .await
     .map_err(|_| ApiError::internal())?
     .map_err(registry_error)?;
-    let target = step_target(&approval.request);
-    audit(
-        registry,
-        person.id,
-        "green_ink.revoked",
-        &operation,
-        target,
-        now,
-    )
-    .await?;
     Ok(Json(approval))
 }
 
@@ -385,7 +401,7 @@ pub(crate) async fn revoke_class(
 #[cfg(test)]
 mod tests {
     use ai6::directorates::registry::backend::*;
-    use ai6::{ActionScope, MissionId, SessionId};
+    use ai6::{ActionScope, ApprovalStatus, MissionId, SessionId};
 
     use crate::controls::tests::{Served, served_with};
 
@@ -561,6 +577,45 @@ mod tests {
             undecided.status(),
             404,
             "only a decided request can be revoked"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_revocation_that_cannot_be_audited_is_not_made() {
+        let served = served_with(ROLES).await;
+        let request = asked(&served, "push-5", 3600);
+        let approved = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/approve", request.id),
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(approved.status(), 200);
+        // The audit directory becomes a file, so no audit record can be written.
+        let audit = served.registry.root().join("audit");
+        std::fs::remove_dir_all(&audit).unwrap();
+        std::fs::write(&audit, b"not a directory").unwrap();
+        let revoked = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/revoke", request.id),
+            None,
+        )
+        .await;
+        assert_eq!(revoked.status(), 500);
+        let Some(ApprovalStatus::Decided(approval)) = served
+            .registry
+            .approval("G", &request.id, request.requested_at)
+            .unwrap()
+        else {
+            panic!("the request is decided");
+        };
+        assert!(
+            approval.revoked.is_none(),
+            "nothing was revoked without its record"
         );
     }
 
