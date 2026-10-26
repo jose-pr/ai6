@@ -21,7 +21,7 @@ use subtle::ConstantTimeEq;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use super::green_ink::{Asked, Desk};
+use super::green_ink::{Asked, Checked, Desk};
 use super::unix_now;
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::medical::exposure::{
@@ -286,6 +286,7 @@ mod tests {
             tools,
             [
                 "acknowledge_cable",
+                "check_approval",
                 "discover_agents",
                 "list_held_cables",
                 "propose_mission",
@@ -940,8 +941,60 @@ struct RequestApprovalArgs {
     idempotency_key: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct StepArgs {
+    /// The kind of step, as request_approval takes it.
+    kind: String,
+    /// What the step acts on, as request_approval takes it.
+    target: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CheckApprovalArgs {
+    /// The steps a command would take.
+    steps: Vec<StepArgs>,
+}
+
+/// The most steps one check answers; a command naming more is refused by the gate.
+const MAX_CHECKED_STEPS: usize = 64;
+
 #[tool_router]
 impl CableTools {
+    /// Whether steps may be taken now, without asking.
+    #[tool(
+        description = "Check, without asking anyone, whether steps may be taken now. The harness gate calls this before a shell command that pushes, merges or releases. Each step comes back approved (a live approval covers it), not_required, needs_approval (call request_approval first) or refused."
+    )]
+    async fn check_approval(&self, Parameters(args): Parameters<CheckApprovalArgs>) -> String {
+        let Some(desk) = self.green_ink.get().cloned() else {
+            return "Green ink is unavailable to this Session".to_owned();
+        };
+        let Ok(principal) = self.principal() else {
+            return "Green ink identity is unavailable".to_owned();
+        };
+        let Some(mission) = principal.mission_id() else {
+            return "Green ink requires a bound provider Session".to_owned();
+        };
+        if args.steps.len() > MAX_CHECKED_STEPS {
+            return format!("Green ink checks at most {MAX_CHECKED_STEPS} steps at once");
+        }
+        let checked = Checked {
+            operation: principal.operation().to_owned(),
+            mission: mission.to_owned(),
+            agent: principal.agent().to_owned(),
+            steps: args
+                .steps
+                .into_iter()
+                .map(|step| (step.kind, step.target))
+                .collect(),
+        };
+        match tokio::task::spawn_blocking(move || desk.check(checked)).await {
+            Ok(Ok(answers)) => serde_json::to_string(&answers)
+                .unwrap_or_else(|_| "Green ink answer could not be encoded".to_owned()),
+            Ok(Err(reason)) => format!("Green ink check failed: {reason}"),
+            Err(_) => "Green ink check failed".to_owned(),
+        }
+    }
+
     /// Ask a person for green ink before an irreversible step.
     #[tool(
         description = "Ask for green ink (a person's approval) before an irreversible step: a push to a protected branch or tag, a merge, a release, a deletion or a change of clearance. Returns at once with request_id and status: approved (take exactly that step before expires_at), pending (wait; the decision arrives as a message), rejected, expired, or not_required (the Operation lets you take it)."

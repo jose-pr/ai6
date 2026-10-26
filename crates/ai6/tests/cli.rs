@@ -291,3 +291,54 @@ fn a_detached_runner_answers_calls_until_it_stops() {
     }
     assert_eq!(code, Some(3), "a call with no runner to answer exits 3");
 }
+
+/// Runs `ai6 green-ink gate` as Claude Code runs a `PreToolUse` hook: the hook's JSON on
+/// standard input, no Cable endpoint in the environment.
+fn gate(command: &str) -> std::process::Output {
+    use std::io::Write;
+    let mut child = ai6()
+        .args(["green-ink", "gate"])
+        .env_remove("AI6_CABLE_MCP_URL")
+        .env_remove("AI6_CABLE_MCP_TOKEN")
+        .current_dir(std::env::temp_dir())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("the AI6 command should start");
+    let input = serde_json::json!({
+        "session_id": "abc123",
+        "cwd": std::env::temp_dir(),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": command, "description": "run it" },
+    });
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.to_string().as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn the_green_ink_hook_denies_a_governed_step_and_stays_silent_otherwise() {
+    let held = gate("gh release create v1.2.0");
+    assert!(held.status.success(), "a hook decision exits 0");
+    let decision: serde_json::Value = serde_json::from_slice(&held.stdout).unwrap();
+    let output = &decision["hookSpecificOutput"];
+    assert_eq!(output["hookEventName"], "PreToolUse");
+    assert_eq!(output["permissionDecision"], "deny");
+    let reason = output["permissionDecisionReason"].as_str().unwrap();
+    assert!(
+        reason.contains("release tag v1.2.0") && reason.contains("no Station"),
+        "{reason}"
+    );
+
+    let quiet = gate("cargo test --workspace");
+    assert!(quiet.status.success());
+    assert!(
+        quiet.stdout.is_empty(),
+        "nothing printed lets the call go on"
+    );
+}

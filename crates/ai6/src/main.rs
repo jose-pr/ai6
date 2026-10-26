@@ -53,6 +53,21 @@ enum Command {
         #[command(subcommand)]
         command: TheaterCommand,
     },
+    /// Green ink on the harness side.
+    GreenInk {
+        #[command(subcommand)]
+        command: GreenInkCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GreenInkCommand {
+    /// Claude Code's PreToolUse hook for shell commands. Reads the hook's JSON on standard
+    /// input; for a command that pushes to a protected ref, deletes a ref, merges a pull
+    /// request or creates a release without a live approval, prints a decision that denies it
+    /// and tells the Agent to call request_approval. Prints nothing otherwise. Asks the Station
+    /// through AI6_CABLE_MCP_URL and AI6_CABLE_MCP_TOKEN; always exits 0.
+    Gate,
 }
 
 #[derive(Debug, Subcommand)]
@@ -273,6 +288,9 @@ async fn main() -> ExitCode {
             }
         },
         Command::Runner { command } => runner_command(command).await,
+        Command::GreenInk {
+            command: GreenInkCommand::Gate,
+        } => green_ink_gate().await,
         Command::Theater { command } => {
             match tokio::task::spawn_blocking(move || theater_command(command)).await {
                 Ok(code) => code,
@@ -354,6 +372,24 @@ async fn main() -> ExitCode {
             }
         }
     }
+}
+
+/// Reads the hook input, asks the gate, and prints a denial when it holds the command.
+async fn green_ink_gate() -> ExitCode {
+    use std::io::Read;
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return ExitCode::SUCCESS;
+    }
+    let decision = tokio::task::spawn_blocking(move || {
+        let client = ai6::directorates::section_00::gate::GateClient::from_process_environment();
+        ai6::directorates::section_00::gate::pre_tool_use(&input, client.as_ref())
+    })
+    .await;
+    if let Ok(Some(decision)) = decision {
+        println!("{decision}");
+    }
+    ExitCode::SUCCESS
 }
 
 async fn runner_command(command: RunnerCommand) -> ExitCode {

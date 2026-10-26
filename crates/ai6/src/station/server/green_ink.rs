@@ -172,6 +172,81 @@ impl Desk {
     }
 }
 
+/// What a harness gate asks before a command runs: may this Agent take these steps now?
+pub(super) struct Checked {
+    pub(super) operation: String,
+    pub(super) mission: String,
+    pub(super) agent: String,
+    pub(super) steps: Vec<(String, String)>,
+}
+
+/// The gate's answer for one step.
+#[derive(Debug, Serialize)]
+pub(super) struct StepAnswer {
+    kind: String,
+    target: String,
+    /// `approved` (a live approval covers it), `not_required`, `needs_approval` or `refused`.
+    pub(super) status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+impl Desk {
+    /// Answers, for each step, whether the Agent may take it now. Nothing is recorded: the
+    /// gate refuses what is not covered and tells the Agent to ask with `request_approval`.
+    ///
+    /// # Errors
+    ///
+    /// A message the gate passes on: the Operation, Mission or Agent is unknown here, or the
+    /// Registry could not be read.
+    pub(super) fn check(&self, checked: Checked) -> Result<Vec<StepAnswer>, String> {
+        let state = &self.state;
+        let now = state.clock.now() as f64;
+        let operation = state
+            .roster
+            .operation(&checked.operation)
+            .map_err(|_| "the Operation is not configured on this Station".to_owned())?;
+        let clearance = state
+            .roster
+            .agent(Some(&checked.operation), &checked.agent)
+            .map_err(|_| "the Agent is not configured for this Operation".to_owned())?
+            .clearance;
+        let policy = &operation.green_ink;
+        let mut answers = Vec::new();
+        for (kind, target) in checked.steps {
+            let scope = ActionScope::try_new(&kind, &target).map_err(|e| e.to_string())?;
+            let (status, request_id, message) = match policy.requirement(&clearance, &scope) {
+                Requirement::NotRequired => ("not_required", None, None),
+                Requirement::GreenInk => match state
+                    .intake
+                    .live_approval(&checked.operation, &checked.mission, &scope, now)
+                    .map_err(|error| format!("green ink could not be checked: {error}"))?
+                {
+                    Some(approval) => ("approved", Some(approval.request.id), None),
+                    None => ("needs_approval", None, None),
+                },
+                _ => (
+                    "refused",
+                    None,
+                    Some(format!(
+                        "a {clearance} Agent may not {kind} under this Operation's policy"
+                    )),
+                ),
+            };
+            answers.push(StepAnswer {
+                kind,
+                target,
+                status,
+                request_id,
+                message,
+            });
+        }
+        Ok(answers)
+    }
+}
+
 fn answer(status: &ApprovalStatus) -> Answer {
     let request = status.request();
     match status {
@@ -756,6 +831,140 @@ mod tests {
             message.contains(&request_id)
                 && message.contains("rejected by operator-q: not before the audit"),
             "{message}"
+        );
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    /// What Claude Code's `PreToolUse` hook gets for a Bash call, answered as `ai6 green-ink
+    /// gate` answers it, through the Session's own Cable endpoint.
+    async fn hook(
+        environment: &std::collections::BTreeMap<String, String>,
+        cwd: &FsPath,
+        command: &str,
+    ) -> Option<serde_json::Value> {
+        use crate::directorates::section_00::gate::{GateClient, pre_tool_use};
+        let input = serde_json::json!({
+            "session_id": "claude-session",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": cwd,
+            "permission_mode": "default",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": { "command": command, "description": "run it", "timeout": 120000 },
+            "tool_use_id": "toolu_01"
+        })
+        .to_string();
+        let client = GateClient::from_environment(environment);
+        tokio::task::spawn_blocking(move || pre_tool_use(&input, client.as_ref()))
+            .await
+            .unwrap()
+            .map(|output| serde_json::from_str(&output).unwrap())
+    }
+
+    #[tokio::test]
+    async fn the_gate_holds_a_protected_push_until_green_ink_covers_it() {
+        let root = tempfile::tempdir().unwrap();
+        // A quiet Session must not stall while a loaded runner makes the gate's calls.
+        let agents = "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
+                      [agent.007.limits]\nstall_timeout = 300\n";
+        let state = test_state(root.path(), "", agents);
+        let mission_id = format!("green-ink-gate-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "push the release".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let environment = state.sessions.lock().unwrap()[&mission_id]
+            .environment
+            .clone();
+        let cwd = root.path();
+
+        let held = hook(&environment, cwd, "git push origin main")
+            .await
+            .expect("a protected push is held");
+        let output = &held["hookSpecificOutput"];
+        assert_eq!(output["hookEventName"], "PreToolUse");
+        assert_eq!(output["permissionDecision"], "deny");
+        let reason = output["permissionDecisionReason"].as_str().unwrap();
+        assert!(
+            reason.contains("request_approval") && reason.contains("origin:refs/heads/main"),
+            "{reason}"
+        );
+        assert!(
+            hook(&environment, cwd, "git push origin ai6/work")
+                .await
+                .is_none(),
+            "a Mission branch needs no green ink"
+        );
+        assert!(hook(&environment, cwd, "cargo test").await.is_none());
+        assert!(
+            state
+                .intake
+                .pending_approvals("G", now(&state))
+                .unwrap()
+                .is_empty(),
+            "the gate asks nobody; the Agent does"
+        );
+
+        let answer: serde_json::Value = serde_json::from_str(
+            &call_tool(
+                &state,
+                &mission_id,
+                serde_json::json!({
+                    "kind": "push",
+                    "target": "origin:main",
+                    "reason": "release 2.0 is tagged",
+                    "idempotency_key": "gate-push",
+                }),
+            )
+            .await,
+        )
+        .unwrap();
+        let request_id = answer["request_id"].as_str().unwrap().to_owned();
+        assert!(
+            hook(&environment, cwd, "git push origin main")
+                .await
+                .is_some(),
+            "a pending request does not cover the step"
+        );
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request_id,
+                &Ruling::approve("operator-m", now(&state), now(&state) + 600.0),
+            )
+            .unwrap();
+        assert_eq!(
+            hook(&environment, cwd, "git push --force-with-lease origin main").await,
+            None,
+            "the approval covers the push"
+        );
+        assert!(
+            hook(&environment, cwd, "git push origin refs/tags/v2.0")
+                .await
+                .is_some(),
+            "and nothing else"
+        );
+
+        state
+            .intake
+            .revoke_approval("G", &request_id, "operator-m", now(&state))
+            .unwrap();
+        assert!(
+            hook(&environment, cwd, "git push origin main")
+                .await
+                .is_some(),
+            "a revoked approval covers nothing"
         );
         state.stopping.store(true, Ordering::Release);
     }
