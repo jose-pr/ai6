@@ -15,6 +15,7 @@ import 'package:guatiao/guatiao.dart' as guatiao;
 
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
+import 'held/held_briefs_page.dart';
 import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
 import 'pools/pools_page.dart';
@@ -537,6 +538,72 @@ class MissionBoard extends ChangeNotifier {
       throw StateError('The gateway refused the Mission proposal decision.');
     }
     await refresh();
+  }
+
+  /// The briefs vetting holds in an Operation, oldest first.
+  Future<List<HeldBriefSummary>> loadHeldBriefs(String operationId) async {
+    if (demo) {
+      return [
+        HeldBriefSummary(
+          key: 'source_github--org_repo_7',
+          operationId: operationId,
+          title: 'Resolve github item org/repo#7',
+          body: 'Title: Crash on save\n\nThe app crashes when saving.',
+          source: 'source:github',
+          url: 'https://github.com/org/repo/issues/7',
+          findings: const [
+            VettingFinding(
+              kind: 'duplicate',
+              detail: 'the same URL as other work',
+              related: 'mission-007',
+            ),
+          ],
+          heldAt: 1_798_000_000,
+        ),
+      ];
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/held-briefs',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the held briefs.');
+    }
+    return [
+      for (final held in jsonDecode(response.body) as List<dynamic>)
+        HeldBriefSummary.fromJson(held as Map<String, dynamic>),
+    ];
+  }
+
+  /// Releases a held brief to the queue, or refuses it with an optional reason.
+  Future<void> decideHeldBrief({
+    required String operationId,
+    required String key,
+    required bool release,
+    String? reason,
+  }) async {
+    if (demo) {
+      throw StateError('Held brief decisions are unavailable in preview.');
+    }
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/held-briefs/${Uri.encodeComponent(key)}/'
+          '${release ? 'release' : 'refuse'}',
+      body: release ? null : {'reason': ?reason},
+    );
+    switch (response.statusCode) {
+      case 200:
+        await refresh();
+      case 403:
+        throw StateError(
+          'Your account lacks mission.create in this Operation.',
+        );
+      case 404:
+        throw StateError('The brief is no longer held.');
+      default:
+        throw StateError('The gateway refused the held brief decision.');
+    }
   }
 
   /// Operations whose activity timeline this account may read (`audit.read`).
@@ -2457,6 +2524,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
             ) ==
             true ||
         board.greenInkOperations.isNotEmpty ||
+        board.proposalOperations.isNotEmpty ||
         board.canReadRoster ||
         board.classAuthorizationOperations.isNotEmpty)
       _ControlSection.administration,
@@ -2752,6 +2820,7 @@ class AdministrationPage extends StatelessWidget {
       if (canReadStationSettings) StationSettingsPage(board: board),
       if (canReadRoster) RosterPage(board: board),
       if (canReviewProposals) MissionProposalsPage(board: board),
+      if (canReviewProposals) HeldBriefsPage(board: board),
       if (canSign) GreenInkPage(board: board),
       if (canManageClasses) ClassAuthorizationsPage(board: board),
     ];
@@ -2760,6 +2829,7 @@ class AdministrationPage extends StatelessWidget {
       if (canReadStationSettings) 'Station settings',
       if (canReadRoster) 'Roster',
       if (canReviewProposals) 'Mission proposals',
+      if (canReviewProposals) 'Held briefs',
       if (canSign) 'Green ink',
       if (canManageClasses) 'Class authorisations',
     ];
