@@ -4,7 +4,8 @@
 //! Decisions are written to the shared Registry; the Station holding the Mission reads them
 //! and tells the Agent. The signer is always the authenticated person, never request text.
 //! Deciding needs `approval.decide` on the Operation; class authorisations need
-//! `approval.class`. Neither is implied by `mission.create` or `mission.control`.
+//! `approval.class`. Neither is implied by `mission.create` or `mission.control`. Each change
+//! is audited with the step it concerns, never the Agent's reason.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -115,6 +116,24 @@ async fn authorized(
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     ensure_operation_registered(&registry, &operation).await?;
     Ok((person, operation, registry))
+}
+
+/// An audit target naming a request and its step: `ID KIND TARGET`.
+pub(crate) fn step_target(request: &ApprovalRequest) -> String {
+    format!(
+        "{} {} {}",
+        request.id, request.scope.kind, request.scope.target
+    )
+}
+
+/// An audit target naming a class authorisation and what it covers: `ID KINDS PATTERN`.
+fn class_target(record: &ClassAuthorization) -> String {
+    format!(
+        "{} {} {}",
+        record.id,
+        record.kinds.join(","),
+        record.target_pattern
+    )
 }
 
 async fn audit(
@@ -230,7 +249,41 @@ async fn decide(
             .await
             .map_err(|_| ApiError::internal())?
             .map_err(registry_error)?;
-    audit(registry, person.id, action, &operation, request_id, at).await?;
+    let target = step_target(&approval.request);
+    audit(registry, person.id, action, &operation, target, at).await?;
+    Ok(Json(approval))
+}
+
+/// `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/revoke`: withdraws an
+/// approval before it expires. The Station revokes a credential leased against it.
+pub(crate) async fn revoke(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, request_id)): Path<(String, String)>,
+) -> Result<Json<Approval>, ApiError> {
+    valid_id(&request_id)?;
+    let (person, operation, registry) =
+        authorized(&gateway, &headers, operation_id, "approval.decide").await?;
+    let now = unix_timestamp()?;
+    let store = registry.clone();
+    let operation_key = operation.to_string();
+    let by = person.id.clone();
+    let approval = tokio::task::spawn_blocking(move || {
+        store.revoke_approval(&operation_key, &request_id, &by, now)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(registry_error)?;
+    let target = step_target(&approval.request);
+    audit(
+        registry,
+        person.id,
+        "green_ink.revoked",
+        &operation,
+        target,
+        now,
+    )
+    .await?;
     Ok(Json(approval))
 }
 
@@ -290,7 +343,7 @@ pub(crate) async fn create_class(
         person.id,
         "class_authorization.created",
         &operation,
-        record.id.clone(),
+        class_target(&record),
         now,
     )
     .await?;
@@ -322,7 +375,7 @@ pub(crate) async fn revoke_class(
         person.id,
         "class_authorization.revoked",
         &operation,
-        id,
+        class_target(&record),
         now,
     )
     .await?;
@@ -449,12 +502,65 @@ mod tests {
         .await;
         assert_eq!(rejected.status(), 409, "a decided request stays decided");
         let audit = served.registry.audit_records().unwrap();
+        let approved_audit = audit
+            .iter()
+            .find(|record| record.action == "green_ink.approved")
+            .unwrap();
+        assert_eq!(approved_audit.actor, "operator-007");
+        assert_eq!(
+            approved_audit.target,
+            format!("{} push origin:refs/heads/main", request.id),
+            "the step, never the reason"
+        );
+        assert!(!approved_audit.target.contains("release is green"));
+
+        let revoked = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/revoke", request.id),
+            None,
+        )
+        .await;
+        assert_eq!(revoked.status(), 200);
+        let revoked: serde_json::Value = revoked.json().await.unwrap();
+        assert_eq!(revoked["revoked"]["by"], "operator-007");
         assert!(
-            audit
+            served
+                .registry
+                .live_approval(
+                    "G",
+                    "mission-g",
+                    &request.scope,
+                    approved["at"].as_f64().unwrap()
+                )
+                .unwrap()
+                .is_none(),
+            "a revoked approval covers nothing"
+        );
+        assert!(
+            served
+                .registry
+                .audit_records()
+                .unwrap()
                 .iter()
-                .any(|record| record.action == "green_ink.approved"
+                .any(|record| record.action == "green_ink.revoked"
                     && record.actor == "operator-007"
-                    && record.target == request.id)
+                    && record.target.starts_with(&request.id))
+        );
+        let other = asked(&served, "push-4", 3600);
+        let undecided = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/revoke", other.id),
+            None,
+        )
+        .await;
+        assert_eq!(
+            undecided.status(),
+            404,
+            "only a decided request can be revoked"
         );
     }
 
@@ -473,6 +579,11 @@ mod tests {
                 reqwest::Method::POST,
                 format!("G/green-ink/{}/reject", request.id),
                 Some(serde_json::json!({})),
+            ),
+            (
+                reqwest::Method::POST,
+                format!("G/green-ink/{}/revoke", request.id),
+                None,
             ),
             (
                 reqwest::Method::GET,
@@ -607,9 +718,9 @@ mod tests {
         let audit = served.registry.audit_records().unwrap();
         for action in ["class_authorization.created", "class_authorization.revoked"] {
             assert!(
-                audit
-                    .iter()
-                    .any(|record| record.action == action && record.target == id)
+                audit.iter().any(|record| record.action == action
+                    && record.target == format!("{id} push origin:refs/heads/ai6/*")),
+                "{action}"
             );
         }
     }

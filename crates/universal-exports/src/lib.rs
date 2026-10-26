@@ -1121,6 +1121,10 @@ impl Gateway {
                 post(green_ink::reject),
             )
             .route(
+                "/v1/user/operations/{operation_id}/green-ink/{request_id}/revoke",
+                post(green_ink::revoke),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/class-authorizations",
                 get(green_ink::list_classes).post(green_ink::create_class),
             )
