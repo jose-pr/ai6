@@ -495,3 +495,201 @@ async fn mission_and_session_controls_reach_the_station_and_report_its_outcome()
     station.await.unwrap();
     let _ = shutdown.send(());
 }
+
+/// A green ink request from Agent 007 in operation-01, waiting for an hour.
+fn asked(registry: &FileRegistry, target: &str, key: &str) -> ai6::ApprovalRequest {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    let request = ai6::ApprovalRequest::try_new(
+        "operation-01",
+        ai6::MissionId::try_new("mission-007").unwrap(),
+        ai6::SessionId::try_new("provider-session-007").unwrap(),
+        "007",
+        ai6::ActionScope::try_new("push", target).unwrap(),
+        "the release branch is green",
+        key,
+    )
+    .unwrap()
+    .expiring(now, Duration::from_secs(3600));
+    registry.request_approval(&request).unwrap();
+    request
+}
+
+/// The lines a successful ai6ctl run printed.
+fn lines(output: &std::process::Output) -> Vec<String> {
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout.clone())
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[tokio::test]
+async fn green_ink_is_listed_signed_refused_and_revoked_and_class_authorisations_revoked() {
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    let main = asked(&registry, "origin:refs/heads/main", "push-main");
+    let tag = asked(&registry, "origin:refs/tags/v1.0.0", "push-tag");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    let class = ai6::ClassAuthorization::new(
+        "operation-01",
+        vec!["push".to_owned()],
+        "origin:refs/heads/ai6/*",
+        "operator-m",
+        now,
+        now + 3600.0,
+    )
+    .for_agents(vec!["007".to_owned()])
+    .with_max_uses(3);
+    registry.put_class_authorization(&class).unwrap();
+    let run = |args: Vec<String>| {
+        let (server, token) = (server.clone(), token.clone());
+        async move {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            ai6ctl(server, Some(token), &args).await
+        }
+    };
+    let words = |text: &str| text.split(' ').map(str::to_owned).collect::<Vec<_>>();
+    let decide = |action: &str, id: &str, extra: &[&str]| {
+        let mut args = words(&format!("green-ink {action} {id} --operation operation-01"));
+        args.extend(extra.iter().map(|arg| (*arg).to_owned()));
+        args
+    };
+
+    let waiting = lines(&run(words("green-ink list --operation operation-01")).await);
+    assert_eq!(
+        waiting[0],
+        "REQUEST\tMISSION\tAGENT\tSTEP\tTARGET\tEXPIRES_UNIX\tREASON"
+    );
+    assert_eq!(waiting.len(), 3, "{waiting:?}");
+    let main_row = waiting
+        .iter()
+        .find(|row| row.starts_with(&main.id))
+        .unwrap();
+    assert!(
+        main_row.starts_with(&format!(
+            "{}\tmission-007\t007\tpush\torigin:refs/heads/main\t",
+            main.id
+        )) && main_row.ends_with("\tthe release branch is green"),
+        "{main_row}"
+    );
+
+    let approved = lines(
+        &run(decide(
+            "approve",
+            &main.id,
+            &["--expires-in", "600", "--note", "main only"],
+        ))
+        .await,
+    );
+    assert_eq!(
+        approved[0],
+        "REQUEST\tSTEP\tTARGET\tDECISION\tSIGNER\tEXPIRES_UNIX\tREVOKED_BY"
+    );
+    let fields: Vec<&str> = approved[1].split('\t').collect();
+    assert_eq!(
+        (
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[6]
+        ),
+        (
+            main.id.as_str(),
+            "push",
+            "origin:refs/heads/main",
+            "approved",
+            "viewer-007",
+            "-"
+        )
+    );
+    let lasts = fields[5].parse::<f64>().unwrap() - now;
+    assert!((590.0..=700.0).contains(&lasts), "{lasts}");
+
+    let rejected = lines(&run(decide("reject", &tag.id, &["--reason", "not yet"])).await);
+    assert!(
+        rejected[1].ends_with("\trejected\tviewer-007\t-\t-"),
+        "{rejected:?}"
+    );
+
+    let again = run(decide("reject", &main.id, &[])).await;
+    assert_eq!(again.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains("409"),
+        "a decided request stays decided"
+    );
+
+    let empty = lines(&run(words("green-ink list --operation operation-01")).await);
+    assert_eq!(empty.len(), 1, "nothing waits: {empty:?}");
+
+    let revoked = lines(&run(decide("revoke", &main.id, &[])).await);
+    assert!(revoked[1].ends_with("\tviewer-007"), "{revoked:?}");
+    assert!(
+        registry
+            .live_approval("operation-01", "mission-007", &main.scope, now + 1.0)
+            .unwrap()
+            .is_none()
+    );
+
+    let classes = lines(&run(words("class-authorizations list --operation operation-01")).await);
+    assert_eq!(
+        classes[0],
+        "CLASS\tKINDS\tTARGET\tAGENTS\tROLES\tCLEARANCE\tUSES\tEXPIRES_UNIX\tSTATE"
+    );
+    assert!(
+        classes[1].starts_with(&format!(
+            "{}\tpush\torigin:refs/heads/ai6/*\t007\t-\tfield\t0/3\t",
+            class.id
+        )) && classes[1].ends_with("\tlive"),
+        "{classes:?}"
+    );
+    let revoked_class = lines(
+        &run(words(&format!(
+            "class-authorizations revoke {} --operation operation-01",
+            class.id
+        )))
+        .await,
+    );
+    assert!(revoked_class[1].ends_with("\trevoked"), "{revoked_class:?}");
+
+    let audit = registry.audit_records().unwrap();
+    for (action, target) in [
+        (
+            "green_ink.approved",
+            format!("{} push origin:refs/heads/main", main.id),
+        ),
+        (
+            "green_ink.rejected",
+            format!("{} push origin:refs/tags/v1.0.0", tag.id),
+        ),
+        (
+            "green_ink.revoked",
+            format!("{} push origin:refs/heads/main", main.id),
+        ),
+        (
+            "class_authorization.revoked",
+            format!("{} push origin:refs/heads/ai6/*", class.id),
+        ),
+    ] {
+        assert!(
+            audit.iter().any(|record| record.action == action
+                && record.actor == "viewer-007"
+                && record.target == target),
+            "{action}: {audit:?}"
+        );
+    }
+    assert!(
+        audit
+            .iter()
+            .all(|record| !record.target.contains("release branch is green")),
+        "the Agent's reason is never audited"
+    );
+    let _ = shutdown.send(());
+}

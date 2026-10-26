@@ -5,8 +5,9 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, Parser, Subcommand};
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{Client, Method, StatusCode, Url};
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 const DEFAULT_SERVER: &str = "http://127.0.0.1:7082";
 const SERVER_ENV: &str = "AI6_EXPORTS_URL";
@@ -17,7 +18,7 @@ const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(500);
 #[derive(Debug, Parser)]
 #[command(
     name = "ai6ctl",
-    about = "Inspect and control AI6 Stations, Agent roles, Missions and Sessions through the Universal Exports API",
+    about = "Inspect and control AI6 Stations, Agent roles, Missions and Sessions, and sign green ink, through the Universal Exports API",
     after_help = "Commands other than health require a user bearer token in AI6_ACCESS_TOKEN. Never use M or terminal-attachment credentials."
 )]
 struct Cli {
@@ -83,6 +84,81 @@ enum Command {
         session_id: Option<String>,
         #[command(subcommand)]
         control: Option<SessionCommand>,
+    },
+    /// List the steps Agents wait to take, and approve, reject or revoke them (needs
+    /// approval.decide on the Operation).
+    GreenInk {
+        #[command(subcommand)]
+        command: GreenInkCommand,
+    },
+    /// List or revoke class authorisations, standing approvals of a kind of step (needs
+    /// approval.class on the Operation).
+    ClassAuthorizations {
+        #[command(subcommand)]
+        command: ClassCommand,
+    },
+}
+
+/// Green ink: a person's approval of one irreversible step an Agent asked to take.
+#[derive(Debug, Subcommand)]
+enum GreenInkCommand {
+    /// List the steps waiting for a decision, oldest first.
+    List {
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+    },
+    /// Approve a waiting step, signed by you.
+    Approve {
+        /// Green ink request ID.
+        request_id: String,
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+        /// Seconds the approval lasts; one hour when omitted.
+        #[arg(long)]
+        expires_in: Option<u64>,
+        /// What to tell the Agent.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Refuse a waiting step.
+    Reject {
+        /// Green ink request ID.
+        request_id: String,
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+        /// Why, for the Agent.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Withdraw an approval before it expires.
+    Revoke {
+        /// Green ink request ID.
+        request_id: String,
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+    },
+}
+
+/// Class authorisations of one Operation.
+#[derive(Debug, Subcommand)]
+enum ClassCommand {
+    /// List every class authorisation, oldest first, revoked and expired ones included.
+    List {
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+    },
+    /// Revoke a class authorisation.
+    Revoke {
+        /// Class authorisation ID.
+        id: String,
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
     },
 }
 
@@ -195,6 +271,50 @@ struct BoardStation {
     headquarters: bool,
     seen: f64,
     operations: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Scope {
+    kind: String,
+    target: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct WaitingStep {
+    id: String,
+    mission: String,
+    agent: String,
+    scope: Scope,
+    reason: String,
+    expires_at: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct Revocation {
+    by: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Decided {
+    request: WaitingStep,
+    decision: String,
+    signer: String,
+    expires_at: Option<f64>,
+    revoked: Option<Revocation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClassAuthorization {
+    id: String,
+    kinds: Vec<String>,
+    target_pattern: String,
+    agents: Vec<String>,
+    roles: Vec<String>,
+    clearance_min: String,
+    max_uses: Option<u32>,
+    uses: u32,
+    expires_at: f64,
+    revoked: Option<Revocation>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -395,6 +515,14 @@ async fn run() -> Result<(), String> {
             });
             print_sessions(selected);
         }
+        Command::GreenInk { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            green_ink(&client, &server, &token, command).await?;
+        }
+        Command::ClassAuthorizations { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            class_authorizations(&client, &server, &token, command).await?;
+        }
         Command::Session {
             session_id,
             control: None,
@@ -531,6 +659,228 @@ async fn agent_roles(
         .json()
         .await
         .map_err(|_| "Universal Exports returned an invalid Agent role list".to_owned())
+}
+
+async fn green_ink(
+    client: &Client,
+    server: &Url,
+    token: &str,
+    command: GreenInkCommand,
+) -> Result<(), String> {
+    const PERMISSION: &str = "approval.decide";
+    let (operation, request_id, action, body) = match command {
+        GreenInkCommand::List { operation } => {
+            let request = operation_request(
+                client,
+                server,
+                token,
+                Method::GET,
+                &[&operation, "green-ink"],
+            )?;
+            let steps: Vec<WaitingStep> = send(request, PERMISSION, "green ink list").await?;
+            print_waiting(&steps);
+            return Ok(());
+        }
+        GreenInkCommand::Approve {
+            request_id,
+            operation,
+            expires_in,
+            note,
+        } => {
+            let mut body = serde_json::json!({});
+            if let Some(seconds) = expires_in {
+                body["expires_in_secs"] = seconds.into();
+            }
+            if let Some(note) = note {
+                body["note"] = note.into();
+            }
+            (operation, request_id, "approve", body)
+        }
+        GreenInkCommand::Reject {
+            request_id,
+            operation,
+            reason,
+        } => {
+            let mut body = serde_json::json!({});
+            if let Some(reason) = reason {
+                body["reason"] = reason.into();
+            }
+            (operation, request_id, "reject", body)
+        }
+        GreenInkCommand::Revoke {
+            request_id,
+            operation,
+        } => (operation, request_id, "revoke", serde_json::json!({})),
+    };
+    let request = operation_request(
+        client,
+        server,
+        token,
+        Method::POST,
+        &[&operation, "green-ink", &request_id, action],
+    )?
+    .json(&body);
+    let decided: Decided = send(request, PERMISSION, "green ink decision").await?;
+    print_decided(&decided);
+    Ok(())
+}
+
+async fn class_authorizations(
+    client: &Client,
+    server: &Url,
+    token: &str,
+    command: ClassCommand,
+) -> Result<(), String> {
+    const PERMISSION: &str = "approval.class";
+    let records = match command {
+        ClassCommand::List { operation } => {
+            let request = operation_request(
+                client,
+                server,
+                token,
+                Method::GET,
+                &[&operation, "class-authorizations"],
+            )?;
+            send(request, PERMISSION, "class authorisation list").await?
+        }
+        ClassCommand::Revoke { id, operation } => {
+            let request = operation_request(
+                client,
+                server,
+                token,
+                Method::DELETE,
+                &[&operation, "class-authorizations", &id],
+            )?;
+            vec![send(request, PERMISSION, "class authorisation").await?]
+        }
+    };
+    print_classes(&records, unix_now());
+    Ok(())
+}
+
+/// A request under `/v1/user/operations/`, each of `segments` encoded as one path segment.
+fn operation_request(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    method: Method,
+    segments: &[&str],
+) -> Result<reqwest::RequestBuilder, String> {
+    let mut url = server.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+        .extend(["v1", "user", "operations"])
+        .extend(segments);
+    Ok(client.request(method, url).bearer_auth(access_token))
+}
+
+/// Sends `request` and reads its JSON answer, naming what the refusals usually mean.
+async fn send<T: DeserializeOwned>(
+    request: reqwest::RequestBuilder,
+    permission: &str,
+    what: &str,
+) -> Result<T, String> {
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+    let status = response.status();
+    if !status.is_success() {
+        let detail = match status {
+            StatusCode::FORBIDDEN => format!(" ({permission} on the Operation is required)"),
+            StatusCode::NOT_FOUND => " (no such request or class authorisation)".to_owned(),
+            StatusCode::CONFLICT => {
+                " (it was already decided another way, expired, or is not an approval)".to_owned()
+            }
+            StatusCode::BAD_REQUEST => " (a value is out of bounds)".to_owned(),
+            StatusCode::SERVICE_UNAVAILABLE => " (the gateway has no Registry)".to_owned(),
+            _ => String::new(),
+        };
+        return Err(format!("Universal Exports returned HTTP {status}{detail}"));
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| format!("Universal Exports returned an invalid {what}"))
+}
+
+fn unix_now() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64())
+}
+
+fn print_waiting(steps: &[WaitingStep]) {
+    println!("REQUEST\tMISSION\tAGENT\tSTEP\tTARGET\tEXPIRES_UNIX\tREASON");
+    for step in steps {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{:.0}\t{}",
+            plain(&step.id),
+            plain(&step.mission),
+            plain(&step.agent),
+            plain(&step.scope.kind),
+            plain(&step.scope.target),
+            step.expires_at,
+            plain(&step.reason),
+        );
+    }
+}
+
+fn print_decided(decided: &Decided) {
+    println!("REQUEST\tSTEP\tTARGET\tDECISION\tSIGNER\tEXPIRES_UNIX\tREVOKED_BY");
+    println!(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        plain(&decided.request.id),
+        plain(&decided.request.scope.kind),
+        plain(&decided.request.scope.target),
+        plain(&decided.decision),
+        plain(&decided.signer),
+        decided
+            .expires_at
+            .map_or_else(|| "-".to_owned(), |at| format!("{at:.0}")),
+        decided
+            .revoked
+            .as_ref()
+            .map_or_else(|| "-".to_owned(), |revoked| plain(&revoked.by)),
+    );
+}
+
+fn print_classes(records: &[ClassAuthorization], now: f64) {
+    println!("CLASS\tKINDS\tTARGET\tAGENTS\tROLES\tCLEARANCE\tUSES\tEXPIRES_UNIX\tSTATE");
+    for record in records {
+        let uses = match record.max_uses {
+            Some(max) => format!("{}/{max}", record.uses),
+            None => record.uses.to_string(),
+        };
+        let state = if record.revoked.is_some() {
+            "revoked"
+        } else if record.expires_at <= now {
+            "expired"
+        } else if record.max_uses.is_some_and(|max| record.uses >= max) {
+            "used up"
+        } else {
+            "live"
+        };
+        let list = |values: &[String]| {
+            if values.is_empty() {
+                "-".to_owned()
+            } else {
+                plain(&values.join(","))
+            }
+        };
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.0}\t{}",
+            plain(&record.id),
+            list(&record.kinds),
+            plain(&record.target_pattern),
+            list(&record.agents),
+            list(&record.roles),
+            plain(&record.clearance_min),
+            uses,
+            record.expires_at,
+            state,
+        );
+    }
 }
 
 /// The Operation of a Mission on the visible board.
@@ -1003,6 +1353,65 @@ mod tests {
             }
         ));
         assert!(Cli::try_parse_from(["ai6ctl", "mission"]).is_err());
+    }
+
+    #[test]
+    fn green_ink_requests_encode_each_segment_and_use_a_user_bearer() {
+        let server = server_url("https://exports.example").unwrap();
+        let request = operation_request(
+            &Client::new(),
+            &server,
+            "user-token",
+            Method::POST,
+            &["op/alpha", "green-ink", "green-ink-1 2", "approve"],
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(request.method(), Method::POST);
+        assert_eq!(
+            request.url().path(),
+            "/v1/user/operations/op%2Falpha/green-ink/green-ink-1%202/approve"
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .unwrap(),
+            "Bearer user-token"
+        );
+        let approve = Cli::try_parse_from([
+            "ai6ctl",
+            "green-ink",
+            "approve",
+            "green-ink-1",
+            "--operation",
+            "G",
+            "--expires-in",
+            "600",
+        ])
+        .unwrap();
+        assert!(matches!(
+            approve.command,
+            Command::GreenInk {
+                command: GreenInkCommand::Approve {
+                    expires_in: Some(600),
+                    ..
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["ai6ctl", "green-ink", "list"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "ai6ctl",
+                "class-authorizations",
+                "revoke",
+                "class-1",
+                "--operation",
+                "G"
+            ])
+            .is_ok()
+        );
     }
 
     #[test]
