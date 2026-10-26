@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use super::{DaemonState, WorkingArea, configured_agent_role, finish_intake_claim, medical};
 use crate::directorates::m::approvals::ActionScope;
 use crate::directorates::m::mission::Mission;
-use crate::directorates::m::roster::{Operation, Roster};
+use crate::directorates::m::roster::{Agent, Operation, Roster};
 use crate::directorates::m::vetting::{
     CHIEF_OF_STAFF_ROLE, Finding, FindingKind, KnownWork, REVIEW_SOURCE, ReviewTarget, Vetting,
     VettingContext, VettingVerdict, content_digest, is_review, is_untrusted, read_review,
@@ -907,6 +907,57 @@ pub(super) fn review_environment(
         .collect()
 }
 
+/// Whether a review takes the variable `name` only from the global roster: what decides which
+/// harness runs and what it may do (`PATH`, `CODEX_HOME`, `AI6_CODEX_TOOL_CHECK`) and where
+/// its model is (`*_BASE_URL`). Compared without case, as Windows does.
+fn global_only(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "PATH" | "CODEX_HOME" | "AI6_CODEX_TOOL_CHECK"
+    ) || upper.ends_with("_BASE_URL")
+}
+
+/// Refuses `agent` as a reviewer when its environment, as an Operation's own
+/// `.ai6/agents.toml` refines it, sets one of the [`global_only`] variables differently from
+/// the global roster: a checkout's file must not choose a review's harness, model endpoint
+/// or tool check.
+///
+/// # Errors
+///
+/// The reason, naming the Agent and the variables.
+pub(super) fn check_reviewer(state: &DaemonState, agent: &Agent) -> Result<(), String> {
+    let global = state
+        .roster
+        .agent(None, &agent.id)
+        .map(|global| global.env)
+        .unwrap_or_default();
+    let named = |env: &BTreeMap<String, String>, name: &str| {
+        env.iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    };
+    let changed = agent
+        .env
+        .keys()
+        .chain(global.keys())
+        .filter(|name| global_only(name))
+        .map(|name| name.to_ascii_uppercase())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|name| named(&agent.env, name) != named(&global, name))
+        .collect::<Vec<_>>();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "Agent {:?} cannot review: the Operation's own agents.toml sets {}, which a review \
+         takes only from the global roster",
+        agent.id,
+        changed.join(", ")
+    ))
+}
+
 /// Removes a review's working directory: only one [`review_area`] made.
 fn remove_review_area(path: &Path) {
     let made_here = path.parent() == Some(std::env::temp_dir().as_path())
@@ -1319,6 +1370,59 @@ mod tests {
     use super::*;
     use crate::directorates::m::mission::MissionStore;
     use crate::directorates::registry::sources::SourceItem;
+
+    #[test]
+    fn an_operations_own_agents_file_cannot_choose_a_reviews_harness_or_check() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.m]\nhandler = \"mock-agent\"\n\
+             env = { PATH = \"/usr/bin\", OPENAI_API_KEY = \"key\" }\n",
+        );
+        let reviewer = |state: &DaemonState| {
+            let agent = state.roster.agent(Some("G"), "m").unwrap();
+            check_reviewer(state, &agent)
+        };
+        assert_eq!(reviewer(&state), Ok(()), "the global roster's own settings");
+
+        let local = root.path().join("checkout/.ai6");
+        fs::create_dir_all(&local).unwrap();
+        fs::write(
+            local.join("agents.toml"),
+            "[agent.m]\nhandler = \"mock-agent\"\nmodel = \"local-model\"\n\
+             env = { PATH = \"/usr/bin\", OPENAI_API_KEY = \"key\" }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            reviewer(&state),
+            Ok(()),
+            "a local model alone is no weakening"
+        );
+
+        fs::write(
+            local.join("agents.toml"),
+            "[agent.m]\nhandler = \"mock-agent\"\nenv = { Path = \"C:\\\\planted\", \
+             OPENAI_API_KEY = \"key\", CODEX_HOME = \"planted\", \
+             OPENAI_BASE_URL = \"http://planted\", AI6_CODEX_TOOL_CHECK = \"warn\" }\n",
+        )
+        .unwrap();
+        let refused = reviewer(&state).unwrap_err();
+        assert!(
+            refused.contains("AI6_CODEX_TOOL_CHECK, CODEX_HOME, OPENAI_BASE_URL, PATH"),
+            "{refused}"
+        );
+
+        fs::write(
+            local.join("agents.toml"),
+            "[agent.m]\nhandler = \"mock-agent\"\nenv = { OPENAI_API_KEY = \"key\" }\n",
+        )
+        .unwrap();
+        assert!(
+            reviewer(&state).unwrap_err().contains("PATH"),
+            "dropping a global setting is a change too"
+        );
+    }
 
     /// Headquarters for Operation G with `settings`, placing on worker-b.
     fn headquarters(root: &Path, settings: &str) -> DaemonState {

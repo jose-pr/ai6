@@ -3429,6 +3429,9 @@ async fn start_mission(
     // A review reads one brief and answers: on this Station's own host only, in a directory
     // of its own, with no safe house, Cables, proposals, credentials or project settings.
     let review = vetting::is_review_mission(&mission);
+    if review {
+        vetting::check_reviewer(&state, &agent).map_err(configuration_error)?;
+    }
     let made = if review {
         None
     } else {
@@ -4207,6 +4210,9 @@ async fn resume_mission(
     // A review resumes as it started: answer-only, on this Station's own host, with nothing
     // beyond what its harness needs to authenticate.
     let review = vetting::is_review_mission(&mission);
+    if review {
+        vetting::check_reviewer(&state, &resume_agent).map_err(configuration_error)?;
+    }
     let mut environment = if review {
         vetting::review_environment(&environment)
     } else {
