@@ -73,6 +73,42 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # Provider crates build ai6 without its features; keep that build warning-free too.
       - run: cargo clippy -p ai6 --no-default-features -- -D warnings
+      # PostgreSQL for the SQL Registry tests: a plaintext server for the suite, and a
+      # TLS-only one whose certificate a throwaway CA signs. Linux runners only (a job-level
+      # service would also start on the Windows and macOS legs, which cannot run one); the
+      # other legs skip those tests and print how many.
+      - name: Start PostgreSQL
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tls="$RUNNER_TEMP/postgres-tls"
+          mkdir -p "$tls"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=ai6 CI CA" \
+            -keyout "$tls/ca.key" -out "$tls/ca.pem" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign"
+          openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost" \
+            -keyout "$tls/server.key" -out "$tls/server.csr"
+          printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' > "$tls/ext.cnf"
+          openssl x509 -req -in "$tls/server.csr" -CA "$tls/ca.pem" -CAkey "$tls/ca.key" \
+            -CAcreateserial -days 1 -out "$tls/server.pem" -extfile "$tls/ext.cnf"
+          printf 'local all all trust\nhostssl all all 0.0.0.0/0 scram-sha-256\nhostssl all all ::/0 scram-sha-256\n' > "$tls/pg_hba.conf"
+          sudo chown 999:999 "$tls/server.key" "$tls/server.pem" "$tls/pg_hba.conf"
+          sudo chmod 600 "$tls/server.key"
+          docker run -d --name postgres -e POSTGRES_PASSWORD=ci -p 5432:5432 postgres:17
+          docker run -d --name postgres-tls -e POSTGRES_PASSWORD=ci -p 5433:5432 \
+            -v "$tls:/tls" postgres:17 -c ssl=on -c ssl_cert_file=/tls/server.pem \
+            -c ssl_key_file=/tls/server.key -c hba_file=/tls/pg_hba.conf
+          for container in postgres postgres-tls; do
+            for _ in $(seq 1 90); do
+              docker exec "$container" pg_isready -U postgres -h 127.0.0.1 && break
+              sleep 1
+            done
+            docker exec "$container" pg_isready -U postgres -h 127.0.0.1
+          done
+          echo "AI6_TEST_POSTGRES_URL=postgres://postgres:ci@localhost:5432/postgres?sslmode=disable" >> "$GITHUB_ENV"
+          echo "AI6_TEST_POSTGRES_TLS_URL=postgres://postgres:ci@localhost:5433/postgres?sslrootcert=$tls/ca.pem" >> "$GITHUB_ENV"
       - run: cargo test --workspace --all-features
       - run: cargo doc --workspace --no-deps --all-features
         env:
