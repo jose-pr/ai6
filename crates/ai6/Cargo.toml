@@ -77,6 +77,11 @@ ai6-diptel = { path = "../ai6-diptel", optional = true }
 uuid.workspace = true
 zeroize.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# O_NOFOLLOW and O_NONBLOCK, to read a checkout's harness configuration without following
+# a link or waiting on a pipe.
+libc = "0.2.170"
+
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 tokio.workspace = true

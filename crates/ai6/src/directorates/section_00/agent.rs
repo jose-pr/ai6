@@ -38,6 +38,10 @@ pub struct AgentStart {
     /// keeps only the user's own settings and those AI6 passes itself.
     #[serde(default)]
     pub project_settings: bool,
+    /// Whether it may also connect the MCP servers the working directory's `.mcp.json`
+    /// names; `false` keeps only the servers AI6 passes.
+    #[serde(default)]
+    pub project_mcp: bool,
 }
 
 /// How AI6 resumes a provider-issued Session.
@@ -65,6 +69,10 @@ pub struct AgentResume {
     /// again on every resume.
     #[serde(default)]
     pub project_settings: bool,
+    /// Whether it may also connect the MCP servers the working directory's `.mcp.json`
+    /// names, decided again on every resume.
+    #[serde(default)]
+    pub project_mcp: bool,
 }
 
 /// A message AI6 sends to an already running Agent Session.

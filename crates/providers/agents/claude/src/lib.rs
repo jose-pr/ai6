@@ -87,7 +87,7 @@ impl AgentHandler for ClaudeHandler {
             argv.extend(["--effort".to_string(), effort.clone()]);
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
-        add_project_settings(&mut argv, request.project_settings);
+        add_project_settings(&mut argv, request.project_settings, request.project_mcp);
         add_mcp(&mut argv, &request.environment);
         add_gate(&mut argv, &request.environment);
         let session = spawn(
@@ -126,7 +126,7 @@ impl AgentHandler for ClaudeHandler {
             argv.extend(["--effort".to_string(), effort]);
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
-        add_project_settings(&mut argv, request.project_settings);
+        add_project_settings(&mut argv, request.project_settings, request.project_mcp);
         add_mcp(&mut argv, &request.environment);
         add_gate(&mut argv, &request.environment);
         let session = spawn(
@@ -244,13 +244,12 @@ fn add_gate(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
 /// only the user's settings file loads (`--setting-sources user`, so no project or local
 /// hooks), and only the MCP servers AI6 passes (`--strict-mcp-config`, so no `.mcp.json`).
 /// AI6's `--settings` and `--mcp-config` apply either way.
-fn add_project_settings(argv: &mut Vec<String>, allowed: bool) {
+fn add_project_settings(argv: &mut Vec<String>, allowed: bool, mcp: bool) {
     if !allowed {
-        argv.extend([
-            "--setting-sources".to_owned(),
-            "user".to_owned(),
-            "--strict-mcp-config".to_owned(),
-        ]);
+        argv.extend(["--setting-sources".to_owned(), "user".to_owned()]);
+    }
+    if !(allowed && mcp) {
+        argv.push("--strict-mcp-config".to_owned());
     }
 }
 
@@ -921,6 +920,7 @@ mod tests {
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -947,6 +947,7 @@ mod tests {
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1092,6 +1093,7 @@ mod tests {
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.into_object(),
             )
@@ -1157,6 +1159,7 @@ mod tests {
                 effort: None,
                 max_cost_micro_usd: None,
                 project_settings: false,
+                project_mcp: false,
             },
             terminal.into_object(),
         ) {
@@ -1489,6 +1492,7 @@ mod tests {
                     effort: None,
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1507,6 +1511,7 @@ mod tests {
                     effort: None,
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1542,7 +1547,7 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        let start = |project_settings| AgentStart {
+        let start = |(project_settings, project_mcp)| AgentStart {
             mission_id: "mission-settings".parse().unwrap(),
             agent_id: "007".to_owned(),
             prompt: "work".to_owned(),
@@ -1554,10 +1559,11 @@ mod tests {
             effort: None,
             max_cost_micro_usd: None,
             project_settings,
+            project_mcp,
         };
-        for project_settings in [false, true] {
+        for mode in [(false, false), (true, true), (true, false)] {
             let started = handler
-                .start(start(project_settings), terminal.clone().into_object())
+                .start(start(mode), terminal.clone().into_object())
                 .unwrap();
             read_to_completion(&started);
             started.close().unwrap();
@@ -1574,6 +1580,7 @@ mod tests {
                     effort: None,
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1589,13 +1596,22 @@ mod tests {
                     .any(|argument| argument == "--strict-mcp-config")
         };
         let has = |argv: &[String], flag: &str| argv.iter().any(|argument| argument == flag);
-        let (ignored, loaded, resumed) = (&specs[0].argv, &specs[1].argv, &specs[2].argv);
+        let (ignored, loaded, pinned, resumed) = (
+            &specs[0].argv,
+            &specs[1].argv,
+            &specs[2].argv,
+            &specs[3].argv,
+        );
         assert!(shut_out(ignored), "{ignored:?}");
         assert!(has(ignored, "--settings") && has(ignored, "--mcp-config"));
         assert!(!has(loaded, "--setting-sources") && !has(loaded, "--strict-mcp-config"));
         assert!(
             has(loaded, "--settings"),
             "the gate does not depend on the mode"
+        );
+        assert!(
+            !has(pinned, "--setting-sources") && has(pinned, "--strict-mcp-config"),
+            "settings without .mcp.json keep only AI6's servers: {pinned:?}"
         );
         assert!(shut_out(resumed), "{resumed:?}");
     }

@@ -1036,6 +1036,7 @@ mod tests {
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1063,6 +1064,7 @@ mod tests {
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1175,6 +1177,7 @@ mod tests {
                     effort: None,
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 ProcessTerminal::new().into_object(),
                 approvals_gate(approved.clone()),
@@ -1381,6 +1384,7 @@ mod tests {
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
                     project_settings: false,
+                    project_mcp: false,
                 },
                 terminal.into_object(),
             )
@@ -1452,6 +1456,7 @@ mod tests {
                 effort: None,
                 max_cost_micro_usd: None,
                 project_settings: false,
+                project_mcp: false,
             },
             terminal.into_object(),
         );

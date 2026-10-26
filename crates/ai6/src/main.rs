@@ -62,6 +62,21 @@ enum Command {
         #[command(subcommand)]
         command: PluginsCommand,
     },
+    /// A checkout's harness configuration (`[operation.ID.harness]`).
+    Harness {
+        #[command(subcommand)]
+        command: HarnessCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HarnessCommand {
+    /// Print the files of a working directory's harness configuration, each with its SHA-256,
+    /// and the `pin` that loads it under `project_settings = "pinned"`.
+    Pin {
+        /// The working directory (a checkout).
+        dir: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -374,6 +389,21 @@ async fn main() -> ExitCode {
                 }
             }
         }
+        Command::Harness {
+            command: HarnessCommand::Pin { dir },
+        } => match ai6::ProjectManifest::read(&dir) {
+            Ok(manifest) => {
+                for (path, digest) in &manifest.files {
+                    println!("# {digest}  {path}");
+                }
+                println!("pin = \"{}\"", manifest.digest());
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("ai6: {}: {error}", dir.display());
+                ExitCode::FAILURE
+            }
+        },
         Command::Theater { command } => {
             match tokio::task::spawn_blocking(move || theater_command(command)).await {
                 Ok(code) => code,

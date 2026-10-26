@@ -31,7 +31,10 @@ pub use directorates::m::config::{
     MemoryConfigSource, TomlConfigDir,
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
-pub use directorates::m::harness::{HarnessPolicy, PROJECT_SETTINGS_FILES, ProjectSettings};
+pub use directorates::m::harness::{
+    HarnessPolicy, MAX_MANIFEST_BYTES, MAX_MANIFEST_FILE_BYTES, MAX_MANIFEST_FILES,
+    PROJECT_DIRECTORIES, PROJECT_FILES, ProjectDecision, ProjectManifest, ProjectSettings,
+};
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
 pub use directorates::m::placement::{
     AgentFacts, DEFAULT_MAX_CPU_PERCENT, DEFAULT_MIN_FREE_MEMORY_MB, ExecutionMode,

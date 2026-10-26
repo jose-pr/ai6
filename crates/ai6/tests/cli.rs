@@ -86,6 +86,25 @@ fn a_named_pin_set_that_does_not_exist_stops_the_station_and_the_runner() {
 }
 
 #[test]
+fn harness_pin_prints_the_manifest_and_its_pin() {
+    let checkout = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(checkout.path().join(".claude")).unwrap();
+    std::fs::write(checkout.path().join(".claude/settings.json"), "{}").unwrap();
+    let output = ai6()
+        .args(["harness", "pin"])
+        .arg(checkout.path())
+        .output()
+        .expect("the AI6 command should start");
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains(".claude/settings.json"), "{text}");
+    assert!(
+        text.lines().last().unwrap().starts_with("pin = \"sha256:"),
+        "{text}"
+    );
+}
+
+#[test]
 fn negative_watchdog_timeout_is_an_invalid_invocation() {
     let output = ai6()
         .args(["serve", "--stall-timeout", "-1"])
