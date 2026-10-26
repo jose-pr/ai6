@@ -8,6 +8,7 @@
 //! feature a SQL database (`sql::SqlRegistry`).
 
 pub mod accounts;
+pub mod agent_records;
 pub mod approvals;
 pub mod backend;
 pub mod bona_fides;

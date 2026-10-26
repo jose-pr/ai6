@@ -606,6 +606,46 @@ async fn pools_lists_an_operations_accounts_and_their_quota() {
     let _ = shutdown.send(());
 }
 
+#[tokio::test]
+async fn agents_lists_each_agents_record_in_the_operation() {
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    for (key, outcome) in [
+        ("m-1#3", ai6::AgentOutcome::Done),
+        ("m-2#3", ai6::AgentOutcome::Done),
+        ("m-3#2", ai6::AgentOutcome::Stalled),
+    ] {
+        registry
+            .record_agent_outcome(
+                &ai6::AgentOutcomeReport::new(
+                    "007",
+                    Some("operation-01".to_owned()),
+                    outcome,
+                    key,
+                    1_000.0,
+                )
+                .with_model(Some("opus".to_owned())),
+            )
+            .unwrap();
+    }
+    let printed = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &["agents", "--operation", "operation-01"],
+        )
+        .await,
+    );
+    assert_eq!(
+        printed,
+        [
+            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL",
+            "007\tfalse\t2\t0\t0\t0\t1\t0\t0\t0\t1000\topus",
+        ]
+    );
+    let _ = shutdown.send(());
+}
+
 /// The lines a successful ai6ctl run printed.
 fn lines(output: &std::process::Output) -> Vec<String> {
     assert!(

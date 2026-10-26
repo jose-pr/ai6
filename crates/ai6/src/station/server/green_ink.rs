@@ -19,6 +19,7 @@ use super::{
 use crate::directorates::m::approvals::{ActionScope, GREEN_INK_REASON, Requirement};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::roster::Roster;
+use crate::directorates::registry::agent_records::AgentOutcome;
 use crate::directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, Decision,
 };
@@ -532,6 +533,15 @@ fn told(state: &DaemonState, approval: &Approval, now: f64) {
     record_event(state, request, approval.decision.as_str(), &approval.signer);
     if approval.decision == Decision::Expired {
         audit(state, "green_ink.expired", &approval.signer, request, now);
+    }
+    if approval.decision == Decision::Rejected {
+        super::agents::count(
+            state,
+            &request.agent,
+            Some(&request.operation),
+            AgentOutcome::GreenInkRejected,
+            format!("green-ink#{}", request.id),
+        );
     }
     queue_event(
         state,

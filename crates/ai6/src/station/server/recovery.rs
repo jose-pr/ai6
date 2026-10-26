@@ -216,6 +216,7 @@ pub(super) fn give_up(
     {
         eprintln!("ai6: Mission {mission_id:?} could not be marked {to:?}: {error:?}");
     }
+    super::agents::count_mission(state, mission_id);
     queue_event(
         state,
         mission_id,

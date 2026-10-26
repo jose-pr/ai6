@@ -19,6 +19,7 @@ use std::sync::Arc;
 use super::store::{FileRegistry, default_registry_dir};
 
 pub use super::accounts::AccountStore;
+pub use super::agent_records::AgentRecordStore;
 pub use super::approvals::ApprovalStore;
 pub use super::quarantine::QuarantineStore;
 pub use super::sessions::SessionStore;
@@ -34,6 +35,7 @@ pub use super::vetting::VettingStore;
 /// Every Registry record family. Implemented for each type that implements them all.
 pub trait RegistryBackend:
     AccountStore
+    + AgentRecordStore
     + BriefStore
     + StationStore
     + AccessTokenStore
@@ -128,6 +130,7 @@ pub fn from_environment() -> io::Result<Arc<dyn RegistryBackend>> {
 
 impl<T> RegistryBackend for T where
     T: AccountStore
+        + AgentRecordStore
         + BriefStore
         + StationStore
         + AccessTokenStore

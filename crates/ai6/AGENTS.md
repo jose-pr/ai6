@@ -994,6 +994,7 @@ pub trait AccessTokenStore;  // Universal Exports access tokens (store.rs)
 pub trait CableStore;        // Cables, their delivery state and send quotas (store.rs)
 pub trait AuditStore;        // audit records (store.rs)
 pub trait AgentRoleStore;    // the per-Operation Agent-role overlay (store.rs)
+pub trait AgentRecordStore;  // Agent track records (agent_records.rs)
 pub trait ApprovalStore;     // green ink and class authorisations (approvals.rs)
 pub trait QuarantineStore;   // quarantines and incidents (quarantine.rs)
 pub trait SessionStore;      // Session records and fenced leases (sessions.rs)
@@ -1003,7 +1004,7 @@ pub trait TimelineStore;     // the activity timeline (timeline.rs)
 pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
 pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
 pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
-pub trait RegistryBackend: AccountStore + BriefStore + StationStore + AccessTokenStore + CableStore
+pub trait RegistryBackend: AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + QuarantineStore + SessionStore
     + SleeperStore + SourceStore + TimelineStore + UsageStore + VettingStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
@@ -1500,7 +1501,8 @@ pub trait UsageStore {
 }
 pub trait QuarantineStore {
     // FileRegistry: quarantine/<agent>--<operation or _all>.json, plus quarantine/incidents/<agent>.json
-    fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine>   // an existing record is kept
+    fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine>   // an existing record is kept;
+                                                                              // a new one counts Quarantined on the Agent's record
     fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
     fn quarantines(&self) -> io::Result<Vec<Quarantine>>
     fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
@@ -1515,6 +1517,52 @@ impl Quarantine { pub fn new(agent, operation, reason, by, at) -> Self;
 A quarantined sender's Cables are accepted but held (`CableState::Held`) until an
 authorized release, whatever the receiver's inbound mode. `Roster::select_agent_excluding`
 is `select_agent` that also skips the named Agents; the Station passes the quarantined ones.
+
+## Agent records (`ai6::directorates::registry::agent_records`)
+
+Each Agent's track record: counts per Operation and per clearance, the latest time of each
+kind, and the models that occupied the codename. Counts only; Missions and audit stay the
+detail.
+
+```rust
+pub const NO_OPERATION: &str = "";   // tally key: outside any Operation, and quarantines in every Operation
+#[non_exhaustive] pub enum AgentOutcome { Done, Failed, Blown, Abandoned, Stalled, Quarantined,
+                                          BudgetStop, GreenInkRejected }   // snake_case; as_str(), from_name()
+impl AgentOutcome { pub const ALL: [Self; 8];
+                    pub fn is_incident(self) -> bool       // not Done, Failed or Abandoned
+                    pub fn is_mission_state(self) -> bool  // Done, Failed, Blown, Abandoned, Stalled }
+#[non_exhaustive] #[derive(Default)] pub struct AgentTally { pub done, failed, blown, abandoned, stalled,
+    quarantined, budget_stops, green_ink_rejected: u64, pub last: BTreeMap<AgentOutcome, f64 /* unix */> }
+impl AgentTally { pub fn count(&self, o) -> u64; pub fn last(&self, o) -> Option<f64>;
+                  pub fn latest(&self, outcomes: &[AgentOutcome]) -> Option<f64>;
+                  pub fn failure_rate(&self) -> Option<f64> /* (failed+blown)/(done+failed+blown) */ }
+#[non_exhaustive] pub struct ModelTenure { pub model: Option<String> /* None: handler default */,
+                                           pub from: f64, pub to: Option<f64> /* None: current */ }
+#[non_exhaustive] #[derive(Default)] pub struct AgentRecord {
+    pub agent: String, pub by_operation: BTreeMap<String, AgentTally>,
+    pub by_clearance: BTreeMap<String, AgentTally>, pub last_mission_at: Option<f64>,
+    pub model_history: Vec<ModelTenure> /* 64 kept */, pub counted: Vec<String> /* last 256 keys */ }
+impl AgentRecord { pub fn new(agent) -> Self; pub fn in_operation(&self, op: &str) -> AgentTally;
+                   pub fn current_model(&self) -> Option<&ModelTenure>;
+                   pub fn count(&mut self, report: &AgentOutcomeReport) -> io::Result<bool> /* false: key seen */ }
+#[non_exhaustive] pub struct AgentOutcomeReport { pub agent: String, pub operation: Option<String>,
+    pub outcome: AgentOutcome, pub key: String /* names the event, e.g. MISSION#REVISION */,
+    pub clearance: Option<String>, pub model: Option<String>, pub at: f64 }
+impl AgentOutcomeReport { pub fn new(agent, operation, outcome, key, at) -> Self;
+                          pub fn at_clearance(self, c) -> Self; pub fn with_model(self, m: Option<String>) -> Self }
+pub trait AgentRecordStore {
+    // FileRegistry: agent-records/<agent>.json under the Registry lock; SQL: ai6_agent_records
+    fn record_agent_outcome(&self, report: &AgentOutcomeReport) -> io::Result<AgentRecord>  // a seen key counts nothing
+    fn agent_record(&self, agent: &str) -> io::Result<Option<AgentRecord>>
+    fn agent_records(&self) -> io::Result<Vec<AgentRecord>>   // by codename; unreadable ones skipped
+}
+```
+
+A Mission outcome or `Stalled` opens a new `ModelTenure` when the reported model differs
+from the current one; incidents do not. A record past 512 Operations or clearances, or
+256 KiB, is refused (`InvalidData`). The Station counts each finished or stalled Mission
+(key `MISSION#REVISION`), budget stops (`budget#MISSION#REVISION`) and refused green ink
+told to an Agent (`green-ink#REQUEST`); the Registry counts each new quarantine.
 
 ## Pool accounts (`ai6::directorates::registry::accounts`)
 

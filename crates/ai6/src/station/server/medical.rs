@@ -12,6 +12,7 @@ use crate::directorates::medical::quarantine::{Incident, IncidentKind};
 use crate::directorates::medical::usage::{
     Budget, BudgetBreach, BudgetLevel, BudgetScope, MissionUsage, UsageTotals, UsageTracker,
 };
+use crate::directorates::registry::agent_records::AgentOutcome;
 use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::sessions::SessionUpdate;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
@@ -408,6 +409,16 @@ pub(super) fn report_incident(state: &DaemonState, mission_id: &str, kind: Incid
         .and_then(|id| state.roster.operation(id).ok())
         .map(|operation| operation.quarantine)
         .unwrap_or_default();
+    // Stalls, loops and blown covers are counted from the Mission's state.
+    if kind == IncidentKind::Budget {
+        super::agents::count(
+            state,
+            &agent,
+            mission.operation_id.as_deref(),
+            AgentOutcome::BudgetStop,
+            format!("budget#{mission_id}#{}", mission.revision),
+        );
+    }
     let now = state.clock.now() as f64;
     let incident = Incident {
         kind,

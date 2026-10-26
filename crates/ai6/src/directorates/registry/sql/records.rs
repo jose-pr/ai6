@@ -11,7 +11,7 @@ use crate::directorates::medical::usage::{MissionUsage, UsageTotals};
 use crate::directorates::registry::cables::{Cable, CableState};
 use crate::directorates::registry::quarantine::{
     MAX_QUARANTINES, MAX_RECORD_BYTES as MAX_QUARANTINE_BYTES, Quarantine, QuarantineStore,
-    add_incident, validate_quarantine,
+    add_incident, quarantine_report, validate_quarantine,
 };
 use crate::directorates::registry::sleepers::{
     Fire, Sleeper, SleeperAuthorization, SleeperStore, fired_brief,
@@ -600,6 +600,8 @@ impl QuarantineStore for SqlRegistry {
                     revision.into(),
                 ],
             )?;
+            // A full or unreadable Agent record never keeps a quarantine from being stored.
+            let _ = super::agents::count_in(tx, revision, &quarantine_report(record));
             Ok(record.clone())
         })
     }

@@ -40,6 +40,14 @@ enum Command {
         /// AI6 Station ID.
         station_id: String,
     },
+    /// List the Agents of one Operation and their records there: Missions done, failed,
+    /// blown, abandoned and stalled, incidents, and the model that occupies each codename
+    /// (needs agent.read on the Operation).
+    Agents {
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+    },
     /// List Agent roles available to one Operation.
     AgentRoles {
         /// AI6 Operation ID.
@@ -482,6 +490,18 @@ async fn run() -> Result<(), String> {
                 "{}",
                 station_row(station, board.headquarters_station.as_deref())
             );
+        }
+        Command::Agents { operation } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let request = operation_request(
+                &client,
+                &server,
+                &token,
+                Method::GET,
+                &[&operation, "agents"],
+            )?;
+            let agents: Vec<AgentView> = send(request, "agent.read", "Agent list").await?;
+            print_agents(&agents);
         }
         Command::AgentRoles { operation } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -1117,6 +1137,64 @@ struct PoolAccount {
 struct PoolWindow {
     name: String,
     used_permille: Option<u16>,
+}
+
+/// One Agent of an Operation and its record there, as Universal Exports serves it.
+#[derive(Debug, Deserialize)]
+struct AgentView {
+    agent: String,
+    posted: bool,
+    operation: AgentTally,
+    #[serde(default)]
+    every_operation: AgentTally,
+    last_mission_at: Option<f64>,
+    #[serde(default)]
+    model_history: Vec<ModelTenure>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct AgentTally {
+    done: u64,
+    failed: u64,
+    blown: u64,
+    abandoned: u64,
+    stalled: u64,
+    quarantined: u64,
+    budget_stops: u64,
+    green_ink_rejected: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelTenure {
+    model: Option<String>,
+}
+
+fn print_agents(agents: &[AgentView]) {
+    println!(
+        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL"
+    );
+    for view in agents {
+        let tally = &view.operation;
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            plain(&view.agent),
+            view.posted,
+            tally.done,
+            tally.failed,
+            tally.blown,
+            tally.abandoned,
+            tally.stalled,
+            tally.quarantined + view.every_operation.quarantined,
+            tally.budget_stops,
+            tally.green_ink_rejected,
+            view.last_mission_at
+                .map_or_else(|| "-".to_owned(), |at| format!("{at:.0}")),
+            view.model_history.last().map_or("-".to_owned(), |tenure| {
+                tenure.model.as_deref().map_or("default".to_owned(), plain)
+            }),
+        );
+    }
 }
 
 fn print_pools(board: &PoolBoard, now: f64) {

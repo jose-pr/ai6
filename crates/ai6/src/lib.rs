@@ -109,14 +109,17 @@ pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,
     QuotaWindow, UNKNOWN_USE_PERMILLE, choose_account,
 };
+pub use directorates::registry::agent_records::{
+    AgentOutcome, AgentOutcomeReport, AgentRecord, AgentTally, ModelTenure, NO_OPERATION,
+};
 pub use directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,
     Revocation, Ruling,
 };
 pub use directorates::registry::backend::{
-    AccessTokenStore, AccountStore, AgentRoleStore, ApprovalStore, AuditStore, BriefStore,
-    CableStore, QuarantineStore, RegistryBackend, SessionStore, SleeperStore, SourceStore,
-    StationStore, TimelineStore, UsageStore, VettingStore,
+    AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore, AuditStore,
+    BriefStore, CableStore, QuarantineStore, RegistryBackend, SessionStore, SleeperStore,
+    SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
     LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey, Require,

@@ -154,6 +154,12 @@ CREATE TABLE ai6_incidents (
     revision INTEGER NOT NULL
 );
 
+CREATE TABLE ai6_agent_records (
+    agent TEXT PRIMARY KEY,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+
 CREATE TABLE ai6_sessions (
     session_id TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL,

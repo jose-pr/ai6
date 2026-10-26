@@ -22,6 +22,7 @@
 //! a location gives up; [`redact`] hides its password for messages.
 
 mod accounts;
+mod agents;
 mod approvals;
 mod briefs;
 pub(crate) mod db;

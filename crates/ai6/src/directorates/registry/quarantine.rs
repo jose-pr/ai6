@@ -2,7 +2,8 @@
 //!
 //! A record names an Agent and the Operation it applies to (or every Operation). Every
 //! Station reads the same records, so a quarantine raised on one Station stops the Agent on
-//! the others. The incidents that justify a quarantine are kept per Agent for a few days.
+//! the others. The incidents that justify a quarantine are kept per Agent for a few days, and
+//! each new quarantine is counted on the Agent's record ([`super::agent_records`]).
 
 use std::fs;
 use std::io;
@@ -10,6 +11,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::agent_records::{AgentOutcome, AgentOutcomeReport};
 use super::store::{FileRegistry, invalid_data, registry_lock, safe_component, write_atomic};
 use crate::directorates::medical::quarantine::Incident;
 
@@ -136,6 +138,8 @@ impl QuarantineStore for FileRegistry {
         }
         let bytes = serde_json::to_vec(record).map_err(io::Error::other)?;
         write_atomic(&path, &bytes)?;
+        // A full or unreadable Agent record never keeps a quarantine from being stored.
+        let _ = self.count_outcome_locked(&quarantine_report(record));
         Ok(record.clone())
     }
 
@@ -211,6 +215,22 @@ pub(super) fn add_incident(history: &mut Vec<Incident>, incident: Incident) {
     }
 }
 
+/// The outcome a new quarantine counts on its Agent's record: in its Operation, or under
+/// [`NO_OPERATION`](super::agent_records::NO_OPERATION) when it applies to every Operation.
+pub(super) fn quarantine_report(record: &Quarantine) -> AgentOutcomeReport {
+    AgentOutcomeReport::new(
+        record.agent.clone(),
+        record.operation.clone(),
+        AgentOutcome::Quarantined,
+        format!(
+            "quarantine#{}#{}",
+            record.operation.as_deref().unwrap_or(ALL_OPERATIONS),
+            record.at
+        ),
+        record.at,
+    )
+}
+
 /// Checks a quarantine before it is stored.
 pub(super) fn validate_quarantine(record: &Quarantine) -> io::Result<()> {
     if record.agent.trim().is_empty() || record.reason.trim().is_empty() {
@@ -237,6 +257,7 @@ fn read_record(path: &std::path::Path) -> io::Result<Option<Quarantine>> {
 mod tests {
     use super::*;
     use crate::directorates::medical::quarantine::IncidentKind;
+    use crate::directorates::registry::agent_records::NO_OPERATION;
     use crate::directorates::registry::suite::{Store, backend_tests};
 
     backend_tests!(
@@ -276,6 +297,14 @@ mod tests {
             .unwrap();
         assert_eq!((again.reason.as_str(), again.at), ("looping", 10.0));
         assert_eq!(registry.quarantines().unwrap().len(), 2);
+        let counted = |agent: &str, operation: &str| {
+            registry
+                .agent_record(agent)
+                .unwrap()
+                .map_or(0, |record| record.in_operation(operation).quarantined)
+        };
+        assert_eq!(counted("007", "G"), 1, "quarantining again counts nothing");
+        assert_eq!(counted("009", NO_OPERATION), 1);
         assert!(registry.release_quarantine("007", Some("G")).unwrap());
         assert!(!registry.release_quarantine("007", Some("G")).unwrap());
         assert!(!registry.is_quarantined("007", Some("G")).unwrap());

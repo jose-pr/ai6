@@ -1,6 +1,7 @@
 //! Local daemon HTTP service.
 
 mod accounts;
+mod agents;
 mod bona_fides;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
@@ -1466,10 +1467,12 @@ fn session_hold(state: &DaemonState, mission_id: &str) -> Option<SessionHold> {
         .and_then(|manifest| manifest.session)
 }
 
-/// Mirrors a Mission's state into its shared Session record, fenced by this Station's token.
+/// Mirrors a Mission's state into its shared Session record, fenced by this Station's token,
+/// and counts a finished or stalled state on its Agent's record.
 ///
 /// A refused token means another Station took the Session, so this Station stops acting on it.
 fn sync_session_record(state: &DaemonState, mission_id: &str) {
+    agents::count_mission(state, mission_id);
     let Some(hold) = session_hold(state, mission_id) else {
         return;
     };

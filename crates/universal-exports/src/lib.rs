@@ -3,6 +3,7 @@
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+mod agents;
 mod controls;
 mod green_ink;
 mod held;
@@ -48,6 +49,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use uuid::Uuid;
 
+pub use agents::AgentView;
 use controls::ControlBook;
 pub use controls::ControlStatus;
 pub use held::{HeldBriefDecision, HeldBriefEntry};
@@ -1111,6 +1113,10 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/agent-roles/{role_id}",
                 axum::routing::put(put_user_agent_role).delete(delete_user_agent_role),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/agents",
+                get(agents::list),
             )
             .route(
                 "/v1/user/operations/{operation_id}/quarantine",
