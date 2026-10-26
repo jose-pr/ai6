@@ -226,6 +226,7 @@ pub struct LaunchManifest {
     pub station_id: Option<String>,  // Station that supervises the Session (absent in older registrations)
     pub theater_id: Option<String>,  // Theater the harness works on
     pub mode: Option<String>,        // "field" | "remote-hands"; absent in older registrations
+    pub provenance: Option<ai6::Provenance>, // where the brief came from (origin, principal, received_by, ...); absent for a Mission started on a Station
 }
 ```
 

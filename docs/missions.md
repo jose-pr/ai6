@@ -225,6 +225,31 @@ the same states are rows of `ai6_briefs`. The stable brief identity combines its
 and external record ID. User-supplied integrations can write validated brief JSON into a
 directory Registry's `new/` or call the Universal Exports API.
 
+### Provenance
+
+Every Mission records where its brief came from, its **provenance** (bona fides): AI6 sets
+it where the brief enters, from what it authenticated there, and keeps it apart from the
+brief record (in a directory Registry, `provenance/KEY.json`; in a database, a column), so a
+`provenance` field written into a brief file or row is never read.
+
+| `origin` | Who asked (`principal`) | `reference` | Set by |
+| --- | --- | --- | --- |
+| `operator` | the person, from the gateway's Directory | | Universal Exports (`POST .../missions`) |
+| `source` | the Source provider (`github`) | the item; `item_url` its link | the Headquarters Station's poll |
+| `sleeper` | the sleeper's name | its definition's fingerprint | the Headquarters Station |
+| `proposal` | the proposing Agent | its provider Session | the approval (`universal-exports`) |
+| `registry_drop` | nobody | | the Station that took the brief |
+
+Each also carries `received_by`, `received_at` (Unix seconds) and `digest`, the
+`sha256:HEX` of the brief's title and body; a recorded provenance whose digest no longer
+matches the brief is dropped. A brief found in the queue with none, written there by hand or
+by an integration that did not go through AI6, is accepted as `registry_drop`: its Sessions
+start exposed (`brief:registry_drop`, see [Medical](medical.md#exposure)), and a finished
+brief named `source:PROVIDER` is reported to that Source only when it has a `source`
+provenance for it. The Mission record, the gateway's Mission detail (`brief.provenance`) and
+Moneypenny's Mission brief page show the origin. Anything that can write the Registry's own
+records can still forge them: the queue is the integration point this separates.
+
 Distributed Registry placement is not implemented. A Session runs on its Station's host,
 or, for a Theater reached only through a transport, on the Station in remote-hands mode
 (see [Theaters](theaters.md)).

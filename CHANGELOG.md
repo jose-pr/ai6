@@ -26,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `roster.remove` or `roster.refused`), and Moneypenny's Administration has a Roster tab.
 - Moneypenny's Station settings set the minimum free memory and maximum CPU percent past
   which a Station takes no new Missions.
+- Brief provenance (bona fides): every brief carries where it came from (`Provenance`:
+  `origin` `operator`, `source`, `sleeper`, `proposal` or `registry_drop`, the
+  authenticated `principal` and `reference`, `received_by`, `received_at` and a
+  `sha256:` digest of its title and body), set where it enters and kept by the Registry
+  apart from the record, so a brief file or row cannot claim one. A brief found in the
+  queue with none is a `registry_drop`: accepted, its Sessions exposed
+  (`brief:registry_drop`), and never reported to a Source. The Mission record, the
+  gateway's Mission detail and Moneypenny show the origin. `submit_brief` stores it,
+  `ingest_source_item`, `fire_sleeper` and `promote_mission_proposal` take the receiving
+  Station or gateway.
+
 - Account pools: provider accounts shared by every Station and balanced by the quota they
   have left. `loadouts.toml` declares `[pool.<id>]` (handler, `operations` globs, strategy
   `headroom`, `round_robin` or `priority`) and its accounts (kind `claude-oauth-token`,

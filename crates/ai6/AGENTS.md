@@ -184,7 +184,7 @@ pub struct BudgetDefinition;  // the TOML table; .resolve() -> Result<Budget, St
 pub fn micro_usd(dollars: f64) -> u64;  pub fn utc_day(unix_seconds: i64) -> String;
 
 // exposure — which Sessions read untrusted input
-pub struct Exposure { pub source: String /* brief:source | cable:X | tool:X | review */, pub at: f64 }
+pub struct Exposure { pub source: String /* brief:source | brief:registry_drop | cable:X | tool:X | review */, pub at: f64 }
 pub enum Restriction { Proposals, Approvals, Cables, Secrets }
 pub struct ExposurePolicy;   // default() = strict; ::preset(Strict | Observe); .restricts(r); .exposed_by_tool(name)
 pub struct ExposureDefinition;   // [operation.ID.exposure]: preset, restrict = [..], tools = [..]
@@ -1070,6 +1070,41 @@ repeat rather than queued again; a lapsed Headquarters lease is replaced in plac
 Bearer secrets are never stored: access tokens are kept by digest, credentials stay in Q's
 secret backends.
 
+## Bona fides (`ai6::directorates::registry::bona_fides`)
+
+```rust
+#[non_exhaustive] pub enum Origin { Operator, Source, Sleeper, Proposal, RegistryDrop } // snake_case; as_str()
+#[non_exhaustive] pub struct Provenance {
+    pub origin: Origin,
+    pub principal: Option<String>,   // person ID | Source provider | sleeper name | proposing Agent; None for a drop
+    pub reference: Option<String>,   // Source item | sleeper fingerprint | proposing provider Session
+    pub item_url: Option<String>,
+    pub received_at: i64,            // Unix seconds
+    pub received_by: String,         // Station ID, or "universal-exports"
+    pub digest: String,              // brief_digest(title, body)
+}
+impl Provenance {
+    pub fn new(origin: Origin, brief: &Brief, received_by: impl Into<String>, received_at: i64) -> Self;
+    pub fn with_principal(self, impl Into<String>) -> Self;  pub fn with_reference(self, impl Into<String>) -> Self;
+    pub fn with_item_url(self, Option<String>) -> Self;
+    pub fn registry_drop(brief: &Brief, station: impl Into<String>, at: i64) -> Self;
+    pub fn matches(&self, brief: &Brief) -> bool;   // digest still equals the brief's title and body
+}
+pub fn brief_digest(title: &str, body: &str) -> String;  // "sha256:HEX" over length-framed title and body
+// Brief gains `pub provenance: Option<Provenance>` (serde default, omitted when None).
+```
+
+Every Registry keeps a brief's provenance apart from the record: the file Registry under
+`provenance/<key>.json`, the SQL Registry in the `provenance` column of `ai6_briefs`. Reads
+(`list_new`, `claim_new`, `read_claimed`, `promote_mission_proposal`,
+`unreported_source_briefs`) set `Brief::provenance` from there and never from the record, and
+drop a kept one whose digest no longer matches. `None` means the brief was put in the queue
+without one (by hand, or `submit_brief` with none). The Station then records it on the
+Mission as `Origin::RegistryDrop` with its own ID, and the Mission's Sessions start exposed
+by `brief:registry_drop` (`BRIEF_REGISTRY_DROP`). A finished `source:` brief is reported to
+its Source only when `reportable` holds. Anything with write access to the Registry's own
+records can still forge them.
+
 ## Registry store (`ai6::directorates::registry::store`)
 
 ```rust
@@ -1104,7 +1139,7 @@ pub struct MissionProposal {
 }
 BriefStore::submit_mission_proposal(&MissionProposal) -> io::Result<()>
 BriefStore::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
-BriefStore::promote_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<Brief>
+BriefStore::promote_mission_proposal(operation: &str, proposal_id: &str, received_by: &str) -> io::Result<Brief>
 BriefStore::reject_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<MissionProposal>
 ```
 
@@ -1139,7 +1174,8 @@ finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<
 ```
 
 `submit_brief` validates and atomically writes a unique Mission brief to `new/`; it
-refuses a key already present in `new/`, `claimed/`, `done/` or `failed/`.
+refuses a key already present in `new/`, `claimed/`, `done/` or `failed/`. Its
+`Brief::provenance` is stored apart from the record (see Bona fides below).
 Agent-authored Mission proposals are separately stored under `proposals/pending/<operation>/`
 and never appear in `list_new()`. `promote_mission_proposal` moves an authorized proposal into
 `new/` and is safe to retry; `reject_mission_proposal` files it under `proposals/rejected/`.
@@ -1717,11 +1753,12 @@ pub const SOURCE_BRIEF_PREFIX: &str = "source:";
 pub const MAX_ITEM_TEXT_BYTES: usize; // 64 KiB of item text kept per brief
 pub enum Ingest { Queued, Updated, Unchanged, InFlight, Finished }
 pub struct FinishedSourceBrief { pub brief: Brief, pub outcome: serde_json::Value, pub ok: bool }
-pub fn source_brief(operation: &str, provider: &str, item: &SourceItem) -> Brief;
+pub fn source_brief(operation: &str, provider: &str, item: &SourceItem) -> Brief;  // no provenance
+pub fn reportable(brief: &Brief, provider: &str) -> bool;  // a `source` provenance naming provider and item
 
 SourceStore::source_cursor(operation: &str, provider: &str) -> io::Result<Option<String>>
 SourceStore::set_source_cursor(operation: &str, provider: &str, cursor: &str) -> io::Result<()>
-SourceStore::ingest_source_item(operation: &str, provider: &str, item: &SourceItem) -> io::Result<Ingest>
+SourceStore::ingest_source_item(operation: &str, provider: &str, item: &SourceItem, received_by: &str) -> io::Result<Ingest>
 SourceStore::unreported_source_briefs() -> io::Result<Vec<FinishedSourceBrief>>
 SourceStore::mark_source_reported(finished: &FinishedSourceBrief, reported: bool) -> io::Result<()>
 ```
@@ -1781,7 +1818,7 @@ pub fn window_label(window: i64) -> String; // "20261025T0300Z"
 SleeperStore::authorize_sleeper(operation: &str, name: &str, sleeper: &Sleeper, authorized_by: &str, at: i64) -> io::Result<()>
 SleeperStore::sleeper_authorization(operation: &str, name: &str) -> io::Result<Option<SleeperAuthorization>>
 SleeperStore::revoke_sleeper(operation: &str, name: &str) -> io::Result<bool>
-SleeperStore::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, window: i64) -> io::Result<Fire>
+SleeperStore::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, window: i64, received_by: &str) -> io::Result<Fire>
 ```
 
 Cron fields take `*`, numbers, `a-b`, `,` lists and `/step`; day-of-week is 0-7 (0 and 7 are
@@ -2207,7 +2244,9 @@ quarantined: `MissionStore::quarantine(id)` moves a `Working`, `Blocked`, `Stall
 (back to `Queued`, for the next Agent) or `Abandoned`, and `reassign(id, agent)` gives a
 queued Mission another Agent. `block_for(id, reason)` blocks an active Mission and records
 `Mission.blocked_reason` (`"budget"`; cleared by the next state change); `expose(id, sources)`
-records `Mission.exposure`, the untrusted input the Mission itself came from.
+records `Mission.exposure`, the untrusted input the Mission itself came from;
+`record_provenance(id, provenance)` records `Mission.provenance` (`Option<Provenance>`, the
+first record stands; `None` for a Mission started on the Station rather than from the queue).
 `MissionStore::set_cover_report(mission_id, report)` persists the cover audit. A Mission
 returns this value as its optional `cover` field beside `safe_house`. `Mission.role_id`
 stores the canonical configured Agent role independently of `agent_id` and provider

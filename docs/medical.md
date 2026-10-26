@@ -71,6 +71,7 @@ A Session is **exposed** once it has read input someone else could have written:
 | Source | When |
 | --- | --- |
 | `brief:source` | The Mission came from a [Source](missions.md#sources) item |
+| `brief:registry_drop` | Its brief was found in the queue with no [provenance](missions.md#provenance) |
 | `tool:NAME` | It called a tool the Operation lists (default `WebFetch` and `WebSearch`) |
 | `cable:SENDER` | It read a Cable from another Operation or from an exposed Session |
 | `review` | It read review text written by someone else |
