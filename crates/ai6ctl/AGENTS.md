@@ -61,6 +61,27 @@ Output: a header `CONTROL\tACTION\tMISSION\tSTATION\tSTATUS\tSTATE\tREASON` and 
 Mission state the Station reported and `REASON` why it rejected; `-` for empty values.
 Exit `1` when the control was rejected or expired, or the request was refused.
 
+### Green ink and class authorisations
+
+`--operation <ID>` is required; IDs are encoded as single path segments. Every decision is
+signed by the token's person and audited with the step, never the Agent's reason.
+
+- `ai6ctl green-ink list --operation <ID>` (`approval.decide`): the steps waiting for a
+  decision, oldest first, from `GET .../green-ink`. Header
+  `REQUEST\tMISSION\tAGENT\tSTEP\tTARGET\tEXPIRES_UNIX\tREASON`; the reason is the Agent's
+  untrusted text.
+- `ai6ctl green-ink approve <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note
+  <TEXT>]` (default one hour, at most a year), `ai6ctl green-ink reject <REQUEST_ID>
+  --operation <ID> [--reason <TEXT>]` and `ai6ctl green-ink revoke <REQUEST_ID> --operation
+  <ID>` (withdraws an approval; the Station then revokes a credential leased against it)
+  print `REQUEST\tSTEP\tTARGET\tDECISION\tSIGNER\tEXPIRES_UNIX\tREVOKED_BY`. A request
+  already decided another way, or expired, is HTTP 409; revoking an undecided one is 404.
+- `ai6ctl class-authorizations list --operation <ID>` (`approval.class`) and
+  `ai6ctl class-authorizations revoke <ID> --operation <ID>` print
+  `CLASS\tKINDS\tTARGET\tAGENTS\tROLES\tCLEARANCE\tUSES\tEXPIRES_UNIX\tSTATE`; `USES` is
+  `uses/max` or `uses`, `STATE` `live`, `used up`, `expired` or `revoked`. Granting one is
+  API only (`POST .../class-authorizations`).
+
 ## Environment variables
 
 | Variable | Effect | Default |
@@ -70,13 +91,13 @@ Exit `1` when the control was rejected or expired, or the request was refused.
 
 ## Exit status
 
-`0` on success, `1` for connection/API errors, a missing item or a rejected or expired
-control, `2` for invalid arguments.
+`0` on success, `1` for connection/API errors (the message names the permission a `403`
+needs), a missing item or a rejected or expired control, `2` for invalid arguments.
 
 ## Gotchas
 
-- The only writes are the controls above; no flag accepts the Station channel bearer or a
-  terminal-attachment token.
+- The only writes are the controls and green ink decisions above; no flag accepts the
+  Station channel bearer or a terminal-attachment token.
 - `mission <ID>` and `session <ID>` still show; a Mission or Session literally named
   `cancel`, `retry`, `resume` or `interrupt` is shown with `ai6ctl missions` or
   `ai6ctl sessions` instead.

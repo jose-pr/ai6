@@ -1897,6 +1897,10 @@ an `AgentMessage` to a live Session, or a resume whose message carries the decis
 the Session ended, then the Mission returns to Working once nothing it asked for is
 pending. Requests and deliveries are `green_ink` timeline events; the lifecycle carries the
 reason (`green-ink`, `budget`) to Universal Exports.
+The Station audits `green_ink.requested` (actor `agent:CODENAME`) for each new pending
+request, `green_ink.expired` (actor `expiry`) when it tells the Agent a request expired, and
+`class_authorization.used` (actor `class:ID`); each target is `REQUEST_ID KIND TARGET`, never
+the reason.
 `check_approval {steps: [{kind, target}, ..]}` (at most 64) answers the harness gate without
 recording anything: a JSON array of `{kind, target, status, request_id?, message?}` with
 `status` `not_required`, `approved` (a live approval of the Mission covers the step,

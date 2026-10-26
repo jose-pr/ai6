@@ -121,9 +121,30 @@ restriction, see [Exposure](medical.md#exposure)). Operators with `approval.clas
 list and revoke them from `/v1/user/operations/{operation_id}/class-authorizations` or
 Moneypenny's Class authorisations tab.
 
-Decisions and class authorisations are audited (`green_ink.approved`,
-`green_ink.rejected`, `class_authorization.created`, `class_authorization.revoked`); the
-reason text is not.
+An approval can be withdrawn before it expires (`POST
+.../green-ink/{request_id}/revoke`, or `ai6ctl green-ink revoke`); it then covers nothing,
+and a credential leased against it is revoked. Without the app, `ai6ctl` signs the same
+way:
+
+```bash
+ai6ctl green-ink list --operation G
+ai6ctl green-ink approve "$REQUEST_ID" --operation G --expires-in 1800 --note "main only"
+ai6ctl green-ink reject "$REQUEST_ID" --operation G --reason "not before the audit"
+ai6ctl class-authorizations list --operation G
+ai6ctl class-authorizations revoke "$CLASS_ID" --operation G
+```
+
+Every change is audited with the step it concerns (`REQUEST_ID KIND TARGET`, or a class
+authorisation's `ID KINDS PATTERN`), never the Agent's reason:
+
+| Action | Actor | When |
+| --- | --- | --- |
+| `green_ink.requested` | `agent:<codename>` | An Agent's request is recorded and waits for a person |
+| `green_ink.approved`, `green_ink.rejected` | the signer | A person decides |
+| `green_ink.revoked` | the person | An approval is withdrawn |
+| `green_ink.expired` | `expiry` | The Station tells the Agent a request expired undecided |
+| `class_authorization.created`, `class_authorization.revoked` | the person | A class authorisation is granted or withdrawn |
+| `class_authorization.used` | `class:<id>` | A class authorisation approves a request |
 
 ### What holds a step
 

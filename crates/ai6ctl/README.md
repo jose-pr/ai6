@@ -16,6 +16,8 @@ Station directly. See the [command header](AGENTS.md).
   Missions and provider Sessions.
 - Cancels, retries and resumes Missions and interrupts Sessions; the Station holding the
   Mission decides and reports, and `ai6ctl` waits for its outcome.
+- Signs green ink: lists the steps Agents wait to take, approves, rejects or revokes them,
+  and lists or revokes class authorisations.
 - Uses only a user bearer token; it never accepts M's credential or a
   terminal-attachment token.
 - HTTPS everywhere except loopback HTTP.
@@ -45,6 +47,10 @@ ai6ctl session interrupt provider-session-007
 ai6ctl mission resume mission-007 --message "The review is unblocked; carry on."
 ai6ctl mission cancel mission-007
 ai6ctl mission retry mission-007 --agent 008
+ai6ctl green-ink list --operation G
+ai6ctl green-ink approve green-ink-5c1e... --operation G --expires-in 1800 --note "main only"
+ai6ctl green-ink reject green-ink-9a02... --operation G --reason "not before the audit"
+ai6ctl class-authorizations list --operation G
 ```
 
 ## Command line
@@ -62,6 +68,11 @@ ai6ctl mission retry mission-007 --agent 008
 | `mission retry <MISSION_ID> [--agent <CODENAME>]` | Queues a stalled or finished Mission again as a new attempt |
 | `mission resume <MISSION_ID> [--message <TEXT>]` | Resumes a parked, blocked or stalled Mission now |
 | `session interrupt <SESSION_ID>` | Stops the Session's current turn; its Mission waits, blocked |
+| `green-ink list --operation <ID>` | The steps Agents wait to take with green ink (`approval.decide`) |
+| `green-ink approve <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Signs a waiting step as you, for an hour unless chosen |
+| `green-ink reject <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Refuses a waiting step; the Agent is told the reason |
+| `green-ink revoke <REQUEST_ID> --operation <ID>` | Withdraws an approval before it expires |
+| `class-authorizations list\|revoke [<ID>] --operation <ID>` | Standing approvals of a kind of step (`approval.class`) |
 
 Every command accepts `--server <ORIGIN>`. The control commands need `mission.control`
 on the Mission's Operation, take `--operation <ID>` (found from the board when omitted),
@@ -87,8 +98,9 @@ cargo test -p ai6ctl
 cargo clippy -p ai6ctl --all-targets -- -D warnings
 ```
 
-The integration test starts a loopback Universal Exports gateway in-process, plays a
-Station that takes and answers controls, and runs the built binary against both.
+The integration tests start a loopback Universal Exports gateway in-process, play a
+Station that takes and answers controls, seed green ink requests and a class authorisation
+in its Registry, and run the built binary against them.
 
 ## License
 

@@ -93,6 +93,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   client. `ActionScope::covers` matches an approval to a step however its ref was written,
   and `ApprovalStore::live_approval` uses it. A push of every branch, tag or ref
   (`refs/heads/*`) counts as protected when it can reach a protected ref.
+- `ai6ctl green-ink list|approve|reject|revoke` and `ai6ctl class-authorizations
+  list|revoke`, and `POST /v1/user/operations/{id}/green-ink/{request}/revoke`, which
+  withdraws an approval (`approval.decide`). Green ink is audited end to end:
+  `green_ink.requested` and `green_ink.expired` by the Station, `green_ink.revoked` by the
+  gateway, beside the existing decisions and class authorisation records; every target
+  names the request and its step (`REQUEST_ID KIND TARGET`), never the Agent's reason.
 - A `green_ink` credential's lease is revoked at the secret backend as soon as its approval
   expires or is revoked, and any lease past its lifetime is revoked at the next scheduler
   pass (`credential` / `revoked` timeline event).
