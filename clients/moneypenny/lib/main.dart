@@ -14,6 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guatiao/guatiao.dart' as guatiao;
 
 import 'agents/agents_page.dart';
+import 'assistant/assistant_controller.dart';
+import 'assistant/assistant_panel.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
@@ -2675,6 +2677,40 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   String? _selectedState;
   SessionSummary? _selectedWebSession;
   _ControlSection _section = _ControlSection.operations;
+  AssistantController? _assistantController;
+
+  /// The conversation with Moneypenny, kept while this page lives; none in the demo or
+  /// before sign-in.
+  AssistantController? get _assistant {
+    final token = widget.board.accessToken;
+    if (widget.board.demo || token == null) return null;
+    final current = _assistantController;
+    if (current != null && current.token == token) return current;
+    current?.dispose();
+    return _assistantController = AssistantController(
+      token: token,
+      connect: () => connectAssistant(widget.board.apiOrigin),
+    );
+  }
+
+  @override
+  void dispose() {
+    _assistantController?.dispose();
+    super.dispose();
+  }
+
+  /// Opens the app page a view links to: a Mission or Theater on the Operations or Stations
+  /// page. Anything else is ignored.
+  void _openLink(BuildContext context, String link) {
+    final section = link.startsWith('app:/missions/')
+        ? _ControlSection.operations
+        : link.startsWith('app:/stations/') || link.startsWith('app:/theaters/')
+        ? _ControlSection.stations
+        : null;
+    if (section == null) return;
+    Navigator.of(context).maybePop();
+    setState(() => _section = section);
+  }
 
   List<_ControlSection> _sections(MissionBoard board) => [
     _ControlSection.stations,
@@ -2846,7 +2882,30 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     final selectedIndex = sections.indexOf(activeSection);
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final operatorInitial = _operatorInitial(widget.board.userSession);
+    final assistant = _assistant;
+    final selectedSession = _selectedWebSession;
     return Scaffold(
+      endDrawer: assistant == null
+          ? null
+          : Drawer(
+              width: 460,
+              child: SafeArea(
+                child: Builder(
+                  builder: (context) => AssistantPanel(
+                    controller: assistant,
+                    page: {
+                      'view': activeSection.name,
+                      if (selectedSession != null) ...{
+                        'operation_id': selectedSession.operationId,
+                        'mission_id': selectedSession.missionId,
+                        'session_id': selectedSession.sessionId,
+                      },
+                    },
+                    onOpen: (link) => _openLink(context, link),
+                  ),
+                ),
+              ),
+            ),
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
@@ -2872,6 +2931,14 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
             onPressed: widget.board.refresh,
             icon: const Icon(Icons.refresh),
           ),
+          if (assistant != null)
+            Builder(
+              builder: (context) => IconButton(
+                tooltip: 'Ask Moneypenny',
+                onPressed: () => Scaffold.of(context).openEndDrawer(),
+                icon: const Icon(Icons.support_agent),
+              ),
+            ),
           const SizedBox(width: 12),
         ],
       ),
