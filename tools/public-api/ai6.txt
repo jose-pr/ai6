@@ -109,6 +109,11 @@ pub fn ai6::directorates::section_00::gate::GitRepository<F>::full_name(&self, &
 pub fn ai6::directorates::m::approvals::classify(&str, &dyn ai6::directorates::m::approvals::Repository) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::directorates::m::approvals::clearance_at_least(&str, &str) -> bool
 pub mod ai6::directorates::m::config
+#[non_exhaustive] pub enum ai6::directorates::m::config::ConfigRecord
+pub ai6::directorates::m::config::ConfigRecord::Agent
+pub ai6::directorates::m::config::ConfigRecord::Cover
+pub ai6::directorates::m::config::ConfigRecord::Operation
+pub ai6::directorates::m::config::ConfigRecord::Role
 pub struct ai6::directorates::m::config::ConfigRevision(_)
 impl ai6::directorates::m::config::ConfigRevision
 pub const fn ai6::directorates::m::config::ConfigRevision::get(self) -> u64
@@ -127,6 +132,16 @@ pub fn ai6::directorates::m::config::MemoryConfigSource::changes_since(&self, ai
 pub fn ai6::directorates::m::config::MemoryConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::directorates::m::config::MemoryConfigSource
 pub fn ai6::directorates::m::config::MemoryConfigSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::m::config::SqlConfigSource
+impl ai6::SqlConfigSource
+pub fn ai6::SqlConfigSource::open(&str) -> core::io::error::Result<Self>
+pub fn ai6::SqlConfigSource::put(&self, ai6::ConfigRecord, &str, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlConfigSource::remove(&self, ai6::ConfigRecord, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+impl ai6::directorates::m::config::ConfigSource for ai6::SqlConfigSource
+pub fn ai6::SqlConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
+impl core::fmt::Debug for ai6::SqlConfigSource
+pub fn ai6::SqlConfigSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::m::config::TomlConfigDir
 impl ai6::directorates::m::config::TomlConfigDir
 pub fn ai6::directorates::m::config::TomlConfigDir::new(impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -137,12 +152,16 @@ pub fn ai6::directorates::m::config::TomlConfigDir::load(&self) -> core::result:
 pub trait ai6::directorates::m::config::ConfigSource: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
+impl ai6::directorates::m::config::ConfigSource for ai6::SqlConfigSource
+pub fn ai6::SqlConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigSource for ai6::directorates::m::config::MemoryConfigSource
 pub fn ai6::directorates::m::config::MemoryConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigSource for ai6::directorates::m::config::TomlConfigDir
 pub fn ai6::directorates::m::config::TomlConfigDir::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::TomlConfigDir::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::config::open(&str) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigSource>>
 pub mod ai6::directorates::m::cover
 #[non_exhaustive] pub enum ai6::directorates::m::cover::Disclosure
 pub ai6::directorates::m::cover::Disclosure::Assisted
@@ -1424,6 +1443,20 @@ pub fn ai6::directorates::registry::approvals::ApprovalStore::request_approval(&
 pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
+pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
@@ -1443,6 +1476,10 @@ pub trait ai6::directorates::registry::backend::AccessTokenStore
 pub fn ai6::directorates::registry::backend::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
@@ -1452,6 +1489,11 @@ pub fn ai6::directorates::registry::backend::AgentRoleStore::agent_role(&self, &
 pub fn ai6::directorates::registry::backend::AgentRoleStore::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
 pub fn ai6::directorates::registry::backend::AgentRoleStore::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::AgentRoleStore::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
 pub fn ai6::directorates::registry::store::FileRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
@@ -1471,6 +1513,20 @@ pub fn ai6::directorates::registry::backend::ApprovalStore::request_approval(&se
 pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::backend::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
+pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
@@ -1489,6 +1545,10 @@ pub trait ai6::directorates::registry::backend::AuditStore
 pub fn ai6::directorates::registry::backend::AuditStore::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::backend::AuditStore::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::backend::AuditStore::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::AuditStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AuditStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
@@ -1510,6 +1570,23 @@ pub fn ai6::directorates::registry::backend::BriefStore::reject_mission_proposal
 pub fn ai6::directorates::registry::backend::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::BriefStore::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::BriefStore::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::leases(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_mission_proposals(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::MissionProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_new(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -1535,6 +1612,14 @@ pub fn ai6::directorates::registry::backend::CableStore::held_cables(&self, usiz
 pub fn ai6::directorates::registry::backend::CableStore::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::backend::CableStore::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
@@ -1549,6 +1634,12 @@ pub fn ai6::directorates::registry::backend::QuarantineStore::quarantine_agent(&
 pub fn ai6::directorates::registry::backend::QuarantineStore::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::backend::QuarantineStore::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::backend::QuarantineStore::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -1567,6 +1658,16 @@ pub fn ai6::directorates::registry::backend::SessionStore::session(&self, &str) 
 pub fn ai6::directorates::registry::backend::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -1582,6 +1683,11 @@ pub fn ai6::directorates::registry::backend::SleeperStore::authorize_sleeper(&se
 pub fn ai6::directorates::registry::backend::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::backend::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
+impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
@@ -1593,6 +1699,12 @@ pub fn ai6::directorates::registry::backend::SourceStore::mark_source_reported(&
 pub fn ai6::directorates::registry::backend::SourceStore::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::SourceStore::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::backend::SourceStore::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
+impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
@@ -1606,6 +1718,13 @@ pub fn ai6::directorates::registry::backend::StationStore::headquarters(&self) -
 pub fn ai6::directorates::registry::backend::StationStore::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::StationStore::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
 pub fn ai6::directorates::registry::backend::StationStore::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
+impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::HeadquartersLease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
 impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -1616,6 +1735,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::stations(&self, core::t
 pub trait ai6::directorates::registry::backend::TimelineStore
 pub fn ai6::directorates::registry::backend::TimelineStore::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::TimelineStore::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
+impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
 impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
@@ -1623,10 +1745,16 @@ pub trait ai6::directorates::registry::backend::UsageStore
 pub fn ai6::directorates::registry::backend::UsageStore::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::backend::UsageStore::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::directorates::registry::backend::UsageStore::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
+impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
 impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::store::FileRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::directorates::registry::store::FileRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
+pub fn ai6::directorates::registry::backend::from_environment() -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
+pub fn ai6::directorates::registry::backend::open(&str) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
 pub mod ai6::directorates::registry::cables
 #[non_exhaustive] pub enum ai6::directorates::registry::cables::CableAction
 pub ai6::directorates::registry::cables::CableAction::Discover
@@ -1839,6 +1967,12 @@ pub fn ai6::directorates::registry::quarantine::QuarantineStore::quarantine_agen
 pub fn ai6::directorates::registry::quarantine::QuarantineStore::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::quarantine::QuarantineStore::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::quarantine::QuarantineStore::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -1928,6 +2062,16 @@ pub fn ai6::directorates::registry::sessions::SessionStore::session(&self, &str)
 pub fn ai6::directorates::registry::sessions::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sessions::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -1972,6 +2116,11 @@ pub fn ai6::directorates::registry::sleepers::SleeperStore::authorize_sleeper(&s
 pub fn ai6::directorates::registry::sleepers::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sleepers::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sleepers::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
+impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
@@ -2028,6 +2177,12 @@ pub fn ai6::directorates::registry::sources::SourceStore::mark_source_reported(&
 pub fn ai6::directorates::registry::sources::SourceStore::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sources::SourceStore::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sources::SourceStore::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
+impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
@@ -2035,6 +2190,103 @@ pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 pub fn ai6::directorates::registry::sources::source_brief(&str, &str, &ai6::directorates::registry::sources::SourceItem) -> ai6::directorates::registry::store::Brief
+pub mod ai6::directorates::registry::sql
+pub struct ai6::directorates::registry::sql::SqlRegistry
+impl ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::open(&str) -> core::io::error::Result<Self>
+impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
+pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
+impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
+impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::store::AuditStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::leases(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_mission_proposals(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::MissionProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_new(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::HeadquartersLease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
+impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
+impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
 pub mod ai6::directorates::registry::store
 #[non_exhaustive] pub enum ai6::directorates::registry::store::LeaseRecovery
 pub ai6::directorates::registry::store::LeaseRecovery::Failed
@@ -2204,6 +2456,10 @@ pub trait ai6::directorates::registry::store::AccessTokenStore
 pub fn ai6::directorates::registry::store::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
@@ -2213,6 +2469,11 @@ pub fn ai6::directorates::registry::store::AgentRoleStore::agent_role(&self, &st
 pub fn ai6::directorates::registry::store::AgentRoleStore::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
 pub fn ai6::directorates::registry::store::AgentRoleStore::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::AgentRoleStore::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
 pub fn ai6::directorates::registry::store::FileRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
@@ -2222,6 +2483,10 @@ pub trait ai6::directorates::registry::store::AuditStore
 pub fn ai6::directorates::registry::store::AuditStore::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::AuditStore::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::AuditStore::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::AuditStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AuditStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
@@ -2243,6 +2508,23 @@ pub fn ai6::directorates::registry::store::BriefStore::reject_mission_proposal(&
 pub fn ai6::directorates::registry::store::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::BriefStore::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::BriefStore::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::leases(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_mission_proposals(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::MissionProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_new(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -2268,6 +2550,14 @@ pub fn ai6::directorates::registry::store::CableStore::held_cables(&self, usize,
 pub fn ai6::directorates::registry::store::CableStore::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::store::CableStore::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
@@ -2283,6 +2573,13 @@ pub fn ai6::directorates::registry::store::StationStore::headquarters(&self) -> 
 pub fn ai6::directorates::registry::store::StationStore::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::StationStore::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
 pub fn ai6::directorates::registry::store::StationStore::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
+impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::HeadquartersLease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
 impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -2314,6 +2611,9 @@ pub const ai6::directorates::registry::timeline::MAX_TIMELINE_EVENTS: usize
 pub trait ai6::directorates::registry::timeline::TimelineStore
 pub fn ai6::directorates::registry::timeline::TimelineStore::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::timeline::TimelineStore::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
+impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
 impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
@@ -2322,6 +2622,10 @@ pub trait ai6::directorates::registry::usage::UsageStore
 pub fn ai6::directorates::registry::usage::UsageStore::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::usage::UsageStore::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::directorates::registry::usage::UsageStore::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
+impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
 impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::store::FileRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
@@ -2575,6 +2879,7 @@ pub fn ai6::station::server::ServeConfig::with_station_id(self, impl core::conve
 pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
 #[non_exhaustive] pub struct ai6::station::server::StationConfig
 impl ai6::station::server::StationConfig
+pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_loadouts(self, ai6::directorates::q::LoadoutCatalog) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
@@ -2648,6 +2953,11 @@ pub ai6::CableState::Failed
 pub ai6::CableState::Held
 pub ai6::CableState::Queued
 pub ai6::CableState::Refused
+#[non_exhaustive] pub enum ai6::ConfigRecord
+pub ai6::ConfigRecord::Agent
+pub ai6::ConfigRecord::Cover
+pub ai6::ConfigRecord::Operation
+pub ai6::ConfigRecord::Role
 #[non_exhaustive] pub enum ai6::Decision
 pub ai6::Decision::Approved
 pub ai6::Decision::Expired
@@ -3925,6 +4235,112 @@ pub ai6::Spec::cols: u16
 pub ai6::Spec::cwd: core::option::Option<alloc::string::String>
 pub ai6::Spec::env: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
 pub ai6::Spec::rows: u16
+pub struct ai6::SqlConfigSource
+impl ai6::SqlConfigSource
+pub fn ai6::SqlConfigSource::open(&str) -> core::io::error::Result<Self>
+pub fn ai6::SqlConfigSource::put(&self, ai6::ConfigRecord, &str, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlConfigSource::remove(&self, ai6::ConfigRecord, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+impl ai6::directorates::m::config::ConfigSource for ai6::SqlConfigSource
+pub fn ai6::SqlConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
+impl core::fmt::Debug for ai6::SqlConfigSource
+pub fn ai6::SqlConfigSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SqlRegistry
+impl ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::open(&str) -> core::io::error::Result<Self>
+impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
+pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
+impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
+impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::store::AuditStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::leases(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_mission_proposals(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::MissionProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_new(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::HeadquartersLease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
+impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
+impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
 #[non_exhaustive] pub struct ai6::SshAccess
 pub ai6::SshAccess::connect_timeout_secs: core::option::Option<u64>
 pub ai6::SshAccess::host: alloc::string::String
@@ -3943,6 +4359,7 @@ pub fn ai6::directorates::m::theaters::SshAccess::with_port(self, u16) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_user(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::StationConfig
 impl ai6::station::server::StationConfig
+pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_loadouts(self, ai6::directorates::q::LoadoutCatalog) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
@@ -4236,6 +4653,10 @@ pub trait ai6::AccessTokenStore
 pub fn ai6::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
@@ -4254,6 +4675,11 @@ pub fn ai6::AgentRoleStore::agent_role(&self, &str, &str) -> core::io::error::Re
 pub fn ai6::AgentRoleStore::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
 pub fn ai6::AgentRoleStore::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
 pub fn ai6::AgentRoleStore::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_agent_role(&self, &str, &ai6::directorates::m::roster::AgentRole) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_agent_role(&self, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
 pub fn ai6::directorates::registry::store::FileRegistry::list_agent_roles(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::m::roster::AgentRole>>
@@ -4296,6 +4722,20 @@ pub fn ai6::ApprovalStore::request_approval(&self, &ai6::directorates::registry:
 pub fn ai6::ApprovalStore::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
+pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
@@ -4314,6 +4754,10 @@ pub trait ai6::AuditStore
 pub fn ai6::AuditStore::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::AuditStore::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::AuditStore::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::AuditStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AuditStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
@@ -4335,6 +4779,23 @@ pub fn ai6::BriefStore::reject_mission_proposal(&self, &str, &str) -> core::io::
 pub fn ai6::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
 pub fn ai6::BriefStore::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::BriefStore::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
+impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::leases(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_mission_proposals(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::MissionProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::list_new(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -4360,6 +4821,14 @@ pub fn ai6::CableStore::held_cables(&self, usize, core::option::Option<f64>) -> 
 pub fn ai6::CableStore::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::CableStore::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
 pub fn ai6::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_cable_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
@@ -4371,6 +4840,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&
 pub trait ai6::ConfigSource: core::marker::Send + core::marker::Sync
 pub fn ai6::ConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::ConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
+impl ai6::directorates::m::config::ConfigSource for ai6::SqlConfigSource
+pub fn ai6::SqlConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigSource for ai6::directorates::m::config::MemoryConfigSource
 pub fn ai6::directorates::m::config::MemoryConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
@@ -4383,6 +4855,12 @@ pub fn ai6::QuarantineStore::quarantine_agent(&self, &ai6::directorates::registr
 pub fn ai6::QuarantineStore::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::QuarantineStore::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::QuarantineStore::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
+pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -4433,6 +4911,16 @@ pub fn ai6::SessionStore::session(&self, &str) -> core::io::error::Result<core::
 pub fn ai6::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -4448,6 +4936,11 @@ pub fn ai6::SleeperStore::authorize_sleeper(&self, &str, &str, &ai6::directorate
 pub fn ai6::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
+impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
@@ -4468,6 +4961,12 @@ pub fn ai6::SourceStore::mark_source_reported(&self, &ai6::directorates::registr
 pub fn ai6::SourceStore::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::SourceStore::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::SourceStore::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
+impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
@@ -4481,6 +4980,13 @@ pub fn ai6::StationStore::headquarters(&self) -> core::io::error::Result<core::o
 pub fn ai6::StationStore::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
 pub fn ai6::StationStore::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
 pub fn ai6::StationStore::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
+impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::headquarters(&self) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::HeadquartersLease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
 impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -4539,6 +5045,9 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral
 pub trait ai6::TimelineStore
 pub fn ai6::TimelineStore::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
 pub fn ai6::TimelineStore::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
+impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
 impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
@@ -4598,6 +5107,10 @@ pub trait ai6::UsageStore
 pub fn ai6::UsageStore::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::UsageStore::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::UsageStore::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
+impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
 impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::store::FileRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
