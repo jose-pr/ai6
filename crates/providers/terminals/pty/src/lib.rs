@@ -12,10 +12,11 @@
 //! is asked of the child itself, never inferred from EOF, because a pseudo-console
 //! can stay readable after its program has exited.
 //!
-//! The reading thread also answers cursor position queries (`ESC[6n`) and removes them from
-//! the output. ConPTY sends one before its program's first output and holds that output until
-//! it is answered (`portable-pty` creates every pseudo-console with
-//! `PSEUDOCONSOLE_INHERIT_CURSOR`), and nothing else is there to answer it.
+//! On Windows the reading thread also removes cursor position queries (`ESC[6n`) from the
+//! output, and another thread answers them, so the reader never waits on the writer. ConPTY
+//! sends one before its program's first output and holds that output until it is answered
+//! (`portable-pty` creates every pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`), and
+//! nothing else is there to answer it. On Unix queries pass through, for whoever reads.
 
 #![doc = include_str!("../README.md")]
 
@@ -46,8 +47,10 @@ const EXIT_POLL: Duration = Duration::from_millis(10);
 /// ConPTY takes rows and columns as signed 16-bit numbers.
 const MAX_DIMENSION: u16 = i16::MAX as u16;
 /// A cursor position query (DSR 6).
+#[cfg(any(windows, test))]
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 /// The answer to [`CURSOR_QUERY`]: row 1, column 1, where a fresh terminal's cursor is.
+#[cfg(windows)]
 const CURSOR_REPORT: &[u8] = b"\x1b[1;1R";
 
 #[derive(Default, ai6::guatiao::Provider)]
@@ -118,27 +121,52 @@ impl PtySession {
 
         let mut reader = pair.master.try_clone_reader().map_err(internal)?;
         let writer = Arc::new(Mutex::new(pair.master.take_writer().map_err(internal)?));
-        let answers = writer.clone();
+        #[cfg(windows)]
+        let asks = {
+            // A write can block while ConPTY is not reading, holding the writer: the reader
+            // only asks, so the program's output keeps draining meanwhile.
+            let (asks, asked) = channel::<()>();
+            let answers = writer.clone();
+            std::thread::Builder::new()
+                .name(format!("pty-{pid}-answers"))
+                .spawn(move || {
+                    for () in asked {
+                        answer(&answers);
+                    }
+                })
+                .map_err(internal)?;
+            asks
+        };
         let (tx, rx) = channel();
         std::thread::Builder::new()
             .name(format!("pty-{pid}"))
             .spawn(move || {
                 let mut buf = vec![0u8; READ_CHUNK];
+                #[cfg(windows)]
                 let mut queries = CursorQueries::default();
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => {
-                            let held = queries.finish();
-                            if !held.is_empty() {
-                                let _ = tx.send(held);
+                            #[cfg(windows)]
+                            {
+                                let held = queries.finish();
+                                if !held.is_empty() {
+                                    let _ = tx.send(held);
+                                }
                             }
                             break;
                         }
                         Ok(n) => {
-                            let (output, asked) = queries.filter(&buf[..n]);
-                            for _ in 0..asked {
-                                answer(&answers);
-                            }
+                            #[cfg(windows)]
+                            let output = {
+                                let (output, asked) = queries.filter(&buf[..n]);
+                                for _ in 0..asked {
+                                    let _ = asks.send(());
+                                }
+                                output
+                            };
+                            #[cfg(not(windows))]
+                            let output = buf[..n].to_vec();
                             if !output.is_empty() && tx.send(output).is_err() {
                                 break;
                             }
@@ -251,6 +279,7 @@ impl Drop for PtySession {
 }
 
 /// Writes [`CURSOR_REPORT`] as the terminal's answer. A failed write means the program is gone.
+#[cfg(windows)]
 fn answer(writer: &Mutex<Box<dyn Write + Send>>) {
     if let Ok(mut writer) = writer.lock() {
         let _ = writer
@@ -261,11 +290,13 @@ fn answer(writer: &Mutex<Box<dyn Write + Send>>) {
 
 /// Removes [`CURSOR_QUERY`] from a stream read in chunks, holding back the end of a chunk that
 /// may be the start of one.
+#[cfg(any(windows, test))]
 #[derive(Default)]
 struct CursorQueries {
     held: Vec<u8>,
 }
 
+#[cfg(any(windows, test))]
 impl CursorQueries {
     /// The chunk with every whole query removed, and how many there were.
     fn filter(&mut self, chunk: &[u8]) -> (Vec<u8>, usize) {
