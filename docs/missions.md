@@ -151,14 +151,26 @@ authorisation's `ID KINDS PATTERN`), never the Agent's reason:
 Two things hold a step an Agent takes without green ink.
 
 The **harness gate** turns an attempt into a request. Before Claude Code runs a shell
-command (a `PreToolUse` hook running `ai6 green-ink gate`) and whenever Codex asks to run
-one, AI6 names the governed steps in it: each ref a `git push` updates (`--force` and
-`+ref` included; `--all`, `--tags` and `--mirror` as `refs/heads/*`, `refs/tags/*` and
-`refs/*`), each ref `git push --delete` or `:ref` removes, `gh pr merge NUMBER` and
-`gh release create TAG`, also inside `sh -c`, `bash -c`, `pwsh -Command` and `cmd /c`. It
-asks the Station whether the Operation's policy and a live approval of the Mission cover
-each one. If not, the command is refused and the Agent is told the exact `kind` and `target`
-to pass to `request_approval`:
+command (a `PreToolUse` hook running `ai6 green-ink gate`), whenever Codex asks to run one
+(a gated Codex thread asks before every command it does not consider a safe read), and before
+the Station's own `theater_run` runs a command on a remote-hands Theater, AI6 names the
+governed steps in it and asks the repository the command acts on what its refs and push
+settings mean:
+
+- each ref a `git push` updates, with the remote it goes to: refspecs as written (`--force`,
+  `+ref`, `heads/main`, `tag v1` included), `--all`, `--tags`, `--follow-tags` and
+  `--mirror` as `refs/heads/*`, `refs/tags/*` and `refs/*`, and for a plain `git push`
+  whatever `remote.NAME.push`, `push.default` and the branch's push remote say, `-c` on the
+  command included;
+- each ref `git push --delete` or `:ref` removes;
+- `gh pr merge NUMBER` (with its `-R OWNER/REPO`), `gh release create TAG`, and `gh api`
+  calls that merge a pull request.
+
+It reads through shell keywords (`if`, `do`, `{`, `!`), wrappers (`sudo`, `env`, `timeout`,
+`nice`, `nohup`, …), `sh -c`, `pwsh -Command`, `cmd /c`, `eval` and git aliases, and follows
+`cd`, `git -C` and `GIT_DIR` to the right repository. It then asks the Station whether the
+Operation's policy and a live approval of the Mission cover each step. If not, the command is
+refused and the Agent is told the exact `kind` and `target` to pass to `request_approval`:
 
 ```text
 Green ink: it would push origin:refs/heads/main, which needs green ink: call
@@ -166,15 +178,20 @@ request_approval with kind "push" and target "origin:refs/heads/main", wait unti
 approved, then run the command again.
 ```
 
-A push to a ref the Operation does not protect goes ahead. An approval covers the same ref
-however it was written (`origin:main` covers `git push origin refs/heads/main`), for as long
-as it lasts. The gate is best effort: a command that builds its arguments at run time, or a
-step taken through another tool, is not seen.
+A push to a ref the Operation does not protect goes ahead; a destination with a pattern
+character (`refs/heads/*ain`) is always protected. An approval covers the same ref on the same
+remote however it was written (`origin:main` covers `git push origin refs/heads/main`), for as
+long as it lasts; an approval without a remote covers every remote. The gate holds what it
+cannot read rather than guess: a ref the repository cannot name, a directory it cannot follow
+(`cd $DIR`), arguments from `xargs`, `gh api` calls that move refs or releases, and any other
+command that runs `git push` or `gh` (`find -exec`, `Start-Process`). It is still best effort:
+arguments built at run time, `gh` aliases and other programs that push are not seen. An
+approval is not tied to one commit.
 
 The **credential** is the guarantee. A loadout secret marked `green_ink` (say, the token
 that can push to `main`) reaches a Session only while the Mission holds a live approval of a
-kind it names, once per approval, and its lease is revoked as soon as the approval expires
-or is revoked (see [Credentials](agents.md#credentials)). Credentials already on the
+kind and target it names, once per approval on any Station, and its lease is revoked as soon
+as the approval expires or is revoked (see [Credentials](agents.md#credentials)). Credentials already on the
 Theater are outside that, which is why the Station reports them as weakenings.
 
 ## Activity timeline

@@ -50,12 +50,12 @@ The handler answers every `item/commandExecution/requestApproval` server request
 (`ai6::directorates::section_00::gate::gate`, asking the Station through the Cable endpoint):
 `{"decision": "accept"}` unless the gate holds the command, then `{"decision": "decline"}`
 followed by `turn/steer {threadId, expectedTurnId: turnId, input: [{type: "text", text:
-REASON}]}` so the Agent learns what to ask for. A `writeStdin` approval or one without a
-command is accepted, and so is every command of a Session without a Cable endpoint, which
-cannot ask for green ink (no gate, as with the Claude handler). Whether
-Codex asks before a command depends on its own approval policy and sandbox, which the handler
-leaves alone outside remote-hands mode; a push that needs network from the default sandbox
-asks. These shapes follow the app-server protocol schema, not a live Codex.
+REASON}]}` so the Agent learns what to ask for. A `writeStdin` approval and one without a
+command are declined the same way: the gate cannot see what they run. A Session without a
+Cable endpoint cannot ask for green ink, so it has no gate and everything is accepted, as with
+the Claude handler. With a gate, `thread/start` and `thread/resume` carry
+`approvalPolicy = "untrusted"`, so Codex asks before every command outside its own list of
+safe reads; in remote-hands mode it stays `never`, and the Station gates `theater_run`. These shapes follow the app-server protocol schema, not a live Codex.
 
 ## Gotchas
 

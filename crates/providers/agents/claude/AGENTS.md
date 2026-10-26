@@ -54,10 +54,13 @@ flag. This applies to resume as well.
 
 With the Cable endpoint present, start and resume also pass `--settings` with the green ink
 gate: `{"disableAllHooks": false, "hooks": {"PreToolUse": [{"matcher": "Bash|PowerShell",
-"hooks": [{"type": "command", "command": PROGRAM, "args": ["green-ink", "gate"], "timeout":
-60, "onFailure": "block"}]}]}}`. `PROGRAM` is `AI6_GREEN_INK_GATE` from the Session
-environment when set and not blank, else the executable hosting the handler (`ai6` on a
-Station or field runner). The hook asks the Station whether a live green ink approval covers
+"hooks": [{"type": "command", "command": PROGRAM, "args": ["green-ink", "gate",
+"--cable-url", URL], "timeout": 60, "onFailure": "block"}]}]}}`. `URL` is the Session's
+`AI6_CABLE_MCP_URL`, pinned in the hook so a project's settings (`env`) cannot point the gate
+elsewhere; the token stays in the environment, out of every command line (a redirected token
+only makes the gate hold). `PROGRAM` is `AI6_GREEN_INK_GATE` from the Session environment
+(which only the Agent's roster can set) when not blank, else the executable hosting the
+handler (`ai6` on a Station or field runner). The hook asks the Station whether a live green ink approval covers
 each governed step of a shell command and denies the call otherwise
 (`ai6::directorates::section_00::gate`). `onFailure` needs Claude Code 2.1.295 or later; a
 hook that cannot start or times out then blocks the call. The settings follow the Claude

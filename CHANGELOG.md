@@ -99,6 +99,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `green_ink.requested` and `green_ink.expired` by the Station, `green_ink.revoked` by the
   gateway, beside the existing decisions and class authorisation records; every target
   names the request and its step (`REQUEST_ID KIND TARGET`), never the Agent's reason.
+- The green ink gate reads more of the shell and holds what it cannot read: shell keywords
+  (`if`, `do`, `{`, `!`), wrappers with their options (`timeout`, `nice`, `ionice`, `stdbuf`,
+  `env -C`/`-S`, `sudo -u`/`-D`, `setsid`, `xargs`), `cd` and `git -C`/`--git-dir`/`GIT_DIR`
+  (refs are resolved in the repository the command acts on), git aliases, `heads/`/`tags/`
+  destinations, the repository's push configuration (`remote.NAME.push`, `push.default`,
+  `push.followTags`, the branch's push remote, `-c` overrides), `--tags` beside refspecs,
+  `--no-dry-run`, and `gh api` merges (`ai6::classify` now takes an
+  `ai6::directorates::m::approvals::Repository`). Pushes always name their remote, merges
+  name `-R OWNER/REPO`, and any destination with a pattern character is protected. A `git`
+  or `gh` it cannot place, an unknown ref, `xargs` arguments and `gh api` calls that move refs
+  or releases are held. The Station gates every remote-hands `theater_run` command itself; a
+  gated Codex thread runs with `approvalPolicy = "untrusted"` and input to a running command
+  is declined; the Claude hook carries the Cable URL in its own arguments; `ai6 green-ink
+  gate` denies input it cannot read; a start or resume request can no longer set
+  `AI6_GREEN_INK_GATE`, and a roster value is logged as a weakening.
+- Green ink secrets take `targets` (globs on the approval's target), and an approval unlocks
+  one lease on any Station, ever (`Approval::spent_at`, `ApprovalStore::spend_approval`). A
+  green ink secret without `targets`, or served from the Station's own files or environment,
+  is logged as a weakening. Revoking an approval is audited before it is applied.
 - A `green_ink` credential's lease is revoked at the secret backend as soon as its approval
   expires or is revoked, and any lease past its lifetime is revoked at the next scheduler
   pass (`credential` / `revoked` timeline event).

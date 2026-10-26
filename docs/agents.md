@@ -124,10 +124,14 @@ Code a `PreToolUse` hook (through `--settings`) that runs `ai6 green-ink gate` b
 `Bash` or `PowerShell` call, and the Codex handler answers Codex's command approval requests
 the same way: a command that pushes to a protected ref, deletes a ref, merges a pull request
 or creates a release without a live approval is refused, and the Agent is told what to ask
-for ([What holds a step](missions.md#what-holds-a-step)). The hook is the `ai6` program
-hosting the handler unless the Agent's environment names another in
-`AI6_GREEN_INK_GATE`. It needs Claude Code 2.1.295 or later, which blocks the call when the
-hook cannot run.
+for ([What holds a step](missions.md#what-holds-a-step)). A gated Codex thread runs with
+`approvalPolicy = "untrusted"`, so it asks before every command that is not a safe read, and
+input to a running command is declined. In remote-hands mode the Station checks every
+`theater_run` command itself. The hook is the `ai6` program hosting the handler unless the
+Agent's roster environment names another in `AI6_GREEN_INK_GATE` (reported as a weakening; a
+start or resume request cannot set it), and it is given the Session's Cable URL in its own
+arguments. It needs Claude Code 2.1.295 or later, which blocks the call when the hook cannot
+run.
 
 ## Credentials
 
@@ -151,6 +155,7 @@ from = { file = "/etc/ai6/secrets/forge" }   # or { env = "VAR" }: weaker, see b
 env = "RELEASE_TOKEN"
 green_ink = true
 kinds = ["release", "push"]                  # approvals that unlock it; default: any
+targets = ["tag v*", "origin:refs/tags/*"]   # globs on the approval's target; default: any
 ```
 
 - When a Session starts or resumes, the Station leases the Agent's secrets from its secret
@@ -174,8 +179,11 @@ kinds = ["release", "push"]                  # approvals that unlock it; default
   harnesses: give them to Missions on other Theaters, or use a backend the harness cannot
   query.
 - A `green_ink` secret is leased only while the Mission holds a live [green
-  ink](missions.md#green-ink) approval of one of its `kinds`: once per approval, for no
-  longer than the approval lasts. The Agent asks with `request_approval`, and the
+  ink](missions.md#green-ink) approval of one of its `kinds` whose target matches one of its
+  `targets`: once per approval, ever (the Registry records the use, so another Station or a
+  restart does not lease it again), for no longer than the approval lasts. A green ink secret
+  without `targets`, and one served from the Station's own files or environment (whose value a
+  revocation cannot take back), is logged as a weakening at start. The Agent asks with `request_approval`, and the
   credential is in its environment from the next Session start or resume after the
   operator signs. When the approval expires or is revoked, the Station revokes the lease at
   its backend within a scheduler pass (`credential` / `revoked` on the timeline); a backend

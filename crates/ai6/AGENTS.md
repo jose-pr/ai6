@@ -684,6 +684,11 @@ When a Mission is placed in remote-hands mode, the Station starts a per-Session 
 `theater_write` and `theater_list`, and puts `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN`
 in the handler's environment. A handler that sees both is in remote-hands mode: it must switch
 off its own shell and file tools and register that server (the Claude and Codex handlers do).
+`theater_run` passes every command (`command`, or `argv` quoted into one line) through the
+green ink gate before running it (`decide` over `classify`, the Theater's repository read with
+`git` over the same transport, the Station's `check_approval` answers): a held command returns
+`{"error": "Green ink: …"}` naming the `kind` and `target` for `request_approval`, and nothing
+runs.
 
 ## Placement (`ai6::directorates::m::placement`)
 
@@ -1151,8 +1156,8 @@ pub struct GreenInkPolicy;   // Default = Strict
 impl GreenInkPolicy {
     pub fn preset(preset: GreenInkPreset) -> Self;
     pub fn requirement(&self, clearance: &str, scope: &ActionScope) -> Requirement;
-    pub fn is_protected(&self, reference: &str) -> bool;   // full ref, glob match; "PREFIX*" is
-                                                         // protected when a protected pattern starts with PREFIX
+    pub fn is_protected(&self, reference: &str) -> bool;   // full ref, glob match; any reference
+                                                         // with `*`, `?` or `[` is protected
     pub fn kinds(&self) / requesters(&self) -> impl Iterator<Item = &str>;
     pub fn protected(&self) -> &[String];
     pub fn request_ttl(&self) -> Duration;
@@ -1160,21 +1165,47 @@ impl GreenInkPolicy {
 }
 pub struct GreenInkDefinition;   // [operation.ID.green_ink]; resolve() -> Result<GreenInkPolicy, String>
 pub fn clearance_at_least(have: &str, min: &str) -> bool;   // desk < field < 00; unknown is false
-pub fn classify(command: &str, resolve: &dyn Fn(&str) -> Option<String>)
+#[non_exhaustive] #[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub struct GitContext { pub dirs: Vec<String> /* cd, git -C, env -C, sudo -D, in order */,
+    pub git_dir: Option<String> /* --git-dir, GIT_DIR */, pub work_tree: Option<String> }
+pub trait Repository {   // what classify asks about the repository a command acts on
+    fn full_name(&self, at: &GitContext, name: &str) -> Result<Option<String>, String>;   // rev-parse --symbolic-full-name
+    fn config(&self, at: &GitContext, key: &str) -> Result<Vec<String>, String>;         // config --get-all; [] unset
+}
+pub fn classify(command: &str, repo: &dyn Repository)
     -> Result<Vec<ActionScope>, String>;   // the governed steps a shell command takes
 ```
 
 `classify` reads a command line as a shell splits it (quotes, `;` `&&` `||` `|`, newlines,
-leading `NAME=value`, `sudo`/`env`/`exec`/..., and the command inside `sh -c`, `bash -lc`,
-`pwsh -Command`, `cmd /c`, `eval`) and names, deduplicated in order: each ref a `git push`
-updates (`push`, target `[REMOTE:]refs/...`; `--force`, `+ref` and `-u` change nothing;
-`--all` is `refs/heads/*`, `--tags` `refs/tags/*`, `--mirror` `refs/*`; `tag NAME` is
-`refs/tags/NAME`), each ref it removes (`--delete`, `-d`, `:ref`: kind `delete`),
-`gh pr merge N|#N|URL` (`merge`, `PR N`) and `gh release create TAG` (`release`, `tag TAG`).
-`--dry-run`/`-n` and `gh pr merge --disable-auto` take no step. `resolve` maps a ref as written
-(`HEAD`, `main`, `v1.2.0`) to its full name; an unresolved bare name is a branch. `Err` is a
-sentence for the Agent: `git push` of a current branch `resolve` cannot name, or a merge or
-release naming no pull request or tag. Best effort: arguments built at run time are not seen.
+parentheses, backticks) and, for each simple command, drops shell keywords (`if then elif else
+while until do { !`), assignments (`GIT_DIR`, `GIT_WORK_TREE`, `GH_REPO` are used) and
+wrappers with their own options (`sudo`/`doas` incl. `-D`, `env` incl. `-C` and `-S LINE`,
+`timeout` and its duration, `nice`, `ionice`, `stdbuf`, `xargs`, `command`, `exec`,
+`nohup`, `setsid`, `time`); `command -v` runs nothing. It follows `cd`/`pushd`/`export` for
+later commands and reads `sh -c`, `bash -lc`, `pwsh -Command`, `cmd /c` and `eval`. It names,
+deduplicated in order, always with the remote:
+- each ref a `git push` updates (`push`, `REMOTE:refs/...`; `--force`, `+ref`, `-u` change
+  nothing; `--all`/`--branches` `refs/heads/*`, `--tags` and `--follow-tags`/`push.followTags`
+  `refs/tags/*` beside any refspecs, `--mirror` and `remote.R.mirror` `refs/*`; `tag NAME`,
+  `heads/X`, `tags/X`, `remotes/X` as full refs; a bare destination takes its source's
+  namespace, else the repository's) and each ref it removes (`--delete`, `-d`, `:ref`:
+  `delete`). With no refspec it follows `remote.R.push`, then `push.default` (`simple` and
+  `current` the current branch, `upstream`/`tracking` `branch.B.merge`, `matching`
+  `refs/heads/*`, `nothing` none); with no remote, `branch.B.pushRemote`,
+  `remote.pushDefault`, `branch.B.remote`, then `origin`. `-c KEY=VALUE` on the command wins.
+  The last `--dry-run`/`--no-dry-run` and `-n` decide; a dry run takes no step. A git alias
+  is expanded once (`!` aliases are read as commands).
+- `gh pr merge N|#N|URL` (`merge`, `PR N`, or `PR OWNER/REPO#N` with `-R`/`--repo`,
+  `GH_REPO` or a URL) unless `--disable-auto`; `gh release create TAG` (`release`,
+  `tag TAG`); `gh api` that merges (`PUT|POST …/pulls/N/merge`, `-f` implying POST).
+`Err` is a sentence for the Agent, and the gate holds the command: a ref the repository cannot
+name (an unknown bare name, a detached `HEAD`), a repository it cannot read, a merge or release
+naming no pull request or tag, a changing `gh api` call on releases, refs, tags, merges,
+contents or branches (or a GraphQL mutation, or deleting a repository), arguments from
+`xargs`, `git send-pack`, submodule pushes (`--recurse-submodules=on-demand|only`),
+configuration through `--config-env` or `GIT_CONFIG_*`, and any other command that names
+`git … push` or `gh … merge|release|api` (`find -exec`, `parallel`, `Start-Process`). Not
+seen: arguments built at run time, `gh` aliases, other programs that push.
 
 `strict` asks for every governed kind at every clearance and refuses requests from `desk`;
 `licensed` also lets `00` push and merge unattended. A push needs green ink only to a
@@ -1201,7 +1232,8 @@ impl ApprovalRequest {
 pub struct Revocation { pub by: String, pub at: f64 }
 #[non_exhaustive] pub struct Approval { pub request: ApprovalRequest, pub decision: Decision,
     pub signer: String /* person, "class:ID" or "expiry" */, pub at: f64, pub expires_at: Option<f64>,
-    pub note: Option<String>, pub revoked: Option<Revocation>, pub notified_at: Option<f64> }
+    pub note: Option<String>, pub revoked: Option<Revocation>, pub notified_at: Option<f64>,
+    pub spent_at: Option<f64> /* a green ink credential was leased against it */ }
 impl Approval { pub fn is_live(&self, now: f64) -> bool }   // approved, not revoked, not expired
 #[non_exhaustive] pub struct Ruling { pub decision, pub signer, pub at, pub expires_at, pub note }
 impl Ruling { pub fn approve(signer, at, expires_at) -> Self; pub fn reject(signer, at, note: Option<String>) -> Self;
@@ -1227,6 +1259,7 @@ pub trait ApprovalStore {
     fn decide_approval(&self, operation, id, ruling: &Ruling) -> io::Result<Approval>;
     fn revoke_approval(&self, operation, id, by, at: f64) -> io::Result<Approval>;
     fn mark_approval_notified(&self, operation, id, at: f64) -> io::Result<()>;
+    fn spend_approval(&self, operation, id, at: f64) -> io::Result<bool>;   // true once; false if spent or not live
     fn approve_by_class(&self, request, role: Option<&str>, clearance: &str, now: f64) -> io::Result<Option<Approval>>;
     fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()>;
     fn class_authorizations(&self, operation) -> io::Result<Vec<ClassAuthorization>>;   // oldest first
@@ -1246,35 +1279,49 @@ daemon, Credentials).
 ## Harness gate (`ai6::directorates::section_00::gate`)
 
 ```rust
-pub const GATE_PROGRAM_ENV: &str;   // "AI6_GREEN_INK_GATE": the gate program; unset, a handler uses
-                                    // the ai6 executable hosting it (Station or field runner)
+pub const GATE_PROGRAM_ENV: &str;   // "AI6_GREEN_INK_GATE": the gate program, from the Agent's roster
+                                    // env only (a Station drops it from start/resume requests and
+                                    // logs a roster value as a weakening); unset, the ai6 executable
+                                    // hosting the handler (Station or field runner)
 pub const CABLE_URL_ENV: &str;      // "AI6_CABLE_MCP_URL"
 pub const CABLE_TOKEN_ENV: &str;    // "AI6_CABLE_MCP_TOKEN"
 #[derive(Debug, Clone, PartialEq, Eq)] pub enum GateVerdict { Allow, Hold(String /* for the Agent */) }
+pub type Answers = Vec<(String /* status */, Option<String> /* why, for a refusal */)>;
+pub fn decide(classified: Result<Vec<ActionScope>, String>,
+              check: impl FnOnce(&[ActionScope]) -> Result<Answers, String>) -> GateVerdict;
+pub fn deny(reason: &str) -> String;   // the PreToolUse deny decision
+pub type GitOutput = (bool /* success */, String /* stdout */);
+pub struct GitRepository<F>;   // a Repository read by running git through F (git's arguments)
+impl<F: Fn(&[String]) -> Result<GitOutput, String>> GitRepository<F> { pub fn new(base: Option<String>, run: F) -> Self }
 // feature `gate`:
 pub struct GateClient;   // the Station's check_approval tool over the Session's Cable endpoint
 impl GateClient {
     pub fn from_environment(environment: &BTreeMap<String, String>) -> Option<Self>;
-    pub fn from_process_environment() -> Option<Self>;
-    pub fn check(&self, steps: &[ActionScope]) -> Result<Vec<(String /* status */, Option<String>)>, String>;
+    pub fn from_process_environment(url: Option<String>) -> Option<Self>;   // url, else AI6_CABLE_MCP_URL
+    pub fn check(&self, steps: &[ActionScope]) -> Result<Answers, String>;
 }
 pub fn gate(command: &str, cwd: Option<&Path>, client: Option<&GateClient>) -> GateVerdict;
-pub fn git_resolver(dir: Option<PathBuf>) -> impl Fn(&str) -> Option<String>;   // git rev-parse --symbolic-full-name
+pub fn local_git(args: &[String]) -> Result<GitOutput, String>;   // git in a process here
 pub fn pre_tool_use(input: &str, client: Option<&GateClient>) -> Option<String>;   // Claude Code hook output
 ```
 
-`gate` classifies the command (refs resolved with `git` in `cwd`) and allows it when it takes
-no governed step or the Station answers `approved` or `not_required` for every one. Anything
-else holds it: `needs_approval` (the text names the `kind` and `target` to pass to
-`request_approval`), `refused`, a step `classify` cannot name, no client, or a Station that
-cannot be asked. `GateClient::check` speaks MCP 2025-06-18 over HTTP (initialize,
+`decide` allows a command that takes no governed step, or whose every step the Station answers
+`approved` or `not_required`. Anything else holds it: `needs_approval` (the text names the
+`kind` and `target` to pass to `request_approval`), `refused`, a step `classify` cannot name,
+a check that fails or answers for other steps. `GitRepository` follows a `GitContext` from
+`base` (`git -C DIR`, `--git-dir=`, `--work-tree=`); a directory with `$`, `` ` ``, `%`, a
+leading `~`, or `-` cannot be followed, so the command is held. A name that is no ref is
+`Ok(None)`, a directory that is no repository an error. `gate` is `decide` over a
+`GitRepository` with `local_git` from `cwd` and `client`; without a client a governed step is
+held. `GateClient::check` speaks MCP 2025-06-18 over HTTP (initialize,
 initialized, `tools/call check_approval`, then `DELETE` of the MCP session), reading JSON or
 server-sent events, 30 s per request. `pre_tool_use` takes the `PreToolUse` hook input
 (`tool_input.command`, `cwd`) and returns
 `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":…}}`
-for a held command, `None` otherwise (print nothing). `ai6 green-ink gate` is that hook: it
-reads standard input, asks through `AI6_CABLE_MCP_URL`/`AI6_CABLE_MCP_TOKEN`, prints the
-decision and always exits 0.
+for a held command and for input it cannot read or that names no command, `None` otherwise
+(print nothing). `ai6 green-ink gate [--cable-url URL]` is that hook: it reads standard input,
+asks the endpoint at `--cable-url` (else `AI6_CABLE_MCP_URL`) with `AI6_CABLE_MCP_TOKEN`,
+prints the decision (a deny when stdin cannot be read or deciding fails) and always exits 0.
 
 ## Sources (`ai6::directorates::registry::sources`)
 
@@ -1486,6 +1533,9 @@ impl SecretDefinition {
     pub fn new(name: impl Into<String>) -> Self;  // env = NAME upper, -/. as _; source File("secrets/<name>")
     pub fn name(&self) -> &str; pub fn env(&self) -> &str;
     pub fn green_ink(&self) -> bool; pub fn kinds(&self) -> &[String];   // empty: any approval kind
+    pub fn targets(&self) -> &[String];                   // globs on the approval's target; empty: any
+    pub fn unlocked_by(&self, kind: &str, target: &str) -> bool;
+    pub fn green_ink_weakening(&self) -> Option<String>;  // Some for green ink without targets
     pub fn source(&self) -> &SecretSource;
 }
 #[non_exhaustive] pub enum SecretSource { Env(String), File(PathBuf) }   // a relative file: relative to the config dir
@@ -1493,7 +1543,7 @@ impl SecretSource { pub fn weakening(&self) -> Option<String>; }          // Som
 ```
 
 Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]` and
-`[secret.<name>]` (`env`, `green_ink`, `kinds` (only with `green_ink`), `from = { env = "…" }
+`[secret.<name>]` (`env`, `green_ink`, `kinds` and `targets` (globs, only with `green_ink`), `from = { env = "…" }
 | { file = "…" }`; never a value) TOML tables. Parsing is bounded to one MiB, denies unknown
 fields and invalid or duplicate names, and validates references before returning a catalog.
 Errors distinguish I/O, size, encoding, TOML syntax and schema failures; diagnostics expose
@@ -1915,9 +1965,13 @@ resume request's `environment` under its `env`, after removing the loadout's var
 earlier Session held. A resume that re-attaches to a runner's live harness issues nothing.
 A backend refusal of an ordinary secret fails the start, and leases acquired by a failed
 issue are revoked. A `green_ink` secret is leased only while the Mission holds a live
-approval (`ApprovalStore::mission_approvals`) of one of its `kinds`, once per approval (kept
-in memory), with the approval's remaining time, at most an hour, as the TTL; otherwise its
-variable is absent. Each scheduler pass revokes, at the backend, every lease past its TTL
+approval (`ApprovalStore::mission_approvals`) of one of its `kinds` whose target matches one of
+its `targets`, once per approval ever (`ApprovalStore::spend_approval`, so another Station or a
+restart does not lease it again; a Station that loses the race revokes its lease), with the
+approval's remaining time, at most an hour, as the TTL; otherwise its variable is absent. At
+start the Station logs as weakenings a green ink secret without `targets` and one served by
+its own backend (`StationSecrets`), whose values a revocation cannot take back. A start or
+resume request's `environment` cannot set `AI6_GREEN_INK_GATE`. Each scheduler pass revokes, at the backend, every lease past its TTL
 and each green ink lease whose approval has expired or been revoked (a
 `credential`/`revoked` timeline event naming the secrets and the approval); an approval the
 Registry cannot read keeps its lease until the next pass. An exposed Session under the `secrets` restriction gets none. Leases are
