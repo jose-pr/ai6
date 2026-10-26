@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Safe-house providers may say what of a safe house's work exists only there and remove one
+  whatever it holds: two optional `SafeHouseSession` slots, `exports` (`SafeHouseExports`:
+  `unexported` change summaries and `dirty`; unsupported reads as all of it) and `discard`,
+  wrapped by `SafeHouse::exports` and `SafeHouse::discard`. The `git` provider lists commits
+  since the base that no remote-tracking ref holds and removes the worktree and its branch;
+  the `copy` provider removes its copy and cannot tell what is exported. Neither ever removes
+  work in place.
 - Head of Station rounds: a Sleeper may set `stations` (narrowing its briefs, like a brief's
   `stations`) and `each_station = true`, which queues one brief per window for each Station
   whose last check-in placement accepts for the Operation and the sleeper's Agent or role,

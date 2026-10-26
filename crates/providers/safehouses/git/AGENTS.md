@@ -48,6 +48,13 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   nothing uncommitted the commit is `HEAD` itself. The worktree, its index and `HEAD` are
   untouched. Answers the remote, branch, commit and base. An in-place session has no branch
   and is refused.
+- `exports()`: `unexported` lists `"<short id> <subject>"` for each commit in
+  `<base>..HEAD` that no remote-tracking ref holds (`git log ... --not --remotes`, as last
+  fetched, so a stale ref reads as unexported); `dirty` is a non-empty `git status
+  --porcelain`. A path that has disappeared exports nothing.
+- `discard()`: `git worktree remove --force --force` and `git branch -D` of the Mission's
+  branch, whatever they hold; what is already gone is skipped. An in-place session is
+  refused.
 
 ## Gotchas
 

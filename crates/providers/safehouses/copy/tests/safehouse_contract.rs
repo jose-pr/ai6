@@ -110,3 +110,32 @@ fn a_state_root_inside_the_source_is_refused() {
     let inside = spec(&source, &source.join("state"));
     assert!(Copier.open(&inside.to_value().unwrap()).is_err());
 }
+
+#[test]
+fn discard_removes_a_copy_and_never_the_source() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("notes");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("a.txt"), "a\n").unwrap();
+    let state = root.path().join("state");
+
+    let session = Copier
+        .open(&spec(&source, &state).to_value().unwrap())
+        .unwrap();
+    let copy = describe(&session).path;
+    assert!(
+        session.exports().is_err(),
+        "a copy cannot tell what is exported"
+    );
+    session.discard().unwrap();
+    assert!(!Path::new(&copy).exists());
+    session.discard().unwrap();
+
+    let in_place = SafeHouseSpec {
+        isolate: false,
+        ..spec(&source, &state)
+    };
+    let session = Copier.open(&in_place.to_value().unwrap()).unwrap();
+    assert!(session.discard().is_err());
+    assert!(source.join("a.txt").exists());
+}

@@ -77,6 +77,20 @@ impl SafeHouseSession for GitSafeHouse {
             .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
         value(&saved)
     }
+
+    fn exports(&self) -> Result<Value, ProviderError> {
+        let exports = self
+            .0
+            .exports()
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
+        value(&exports)
+    }
+
+    fn discard(&self) -> Result<(), ProviderError> {
+        self.0
+            .discard()
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))
+    }
 }
 
 fn value(model: &impl ToValue) -> Result<Value, ProviderError> {

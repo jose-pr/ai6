@@ -65,6 +65,23 @@ impl SafeHouseSession for CopySafeHouse {
             changes: Vec::new(),
         })
     }
+
+    fn discard(&self) -> Result<(), ProviderError> {
+        if !self.0.isolated {
+            return Err(refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "a safe house in the source itself is never removed",
+            ));
+        }
+        match std::fs::remove_dir_all(&self.0.path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(refuse(
+                Status::GUATIAO_ERR_INTERNAL,
+                format!("{}: {error}", self.0.path.display()),
+            )),
+        }
+    }
 }
 
 fn value(model: &impl ToValue) -> Result<Value, ProviderError> {

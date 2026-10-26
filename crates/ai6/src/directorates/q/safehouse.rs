@@ -133,6 +133,24 @@ pub struct SafeHouseReport {
     pub changes: Vec<String>,
 }
 
+/// What of a safe house's work exists nowhere else.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Default)]
+#[map(crate = ::guatiao)]
+pub struct SafeHouseExports {
+    /// One-line summaries of the changes made since the base that no remote holds, newest
+    /// first: for a version-control provider, commits on no remote-tracking ref.
+    pub unexported: Vec<String>,
+    /// Whether the working directory holds changes that were never recorded as a change.
+    pub dirty: bool,
+}
+
+impl SafeHouseExports {
+    /// Whether everything in the safe house also exists elsewhere.
+    pub fn is_exported(&self) -> bool {
+        self.unexported.is_empty() && !self.dirty
+    }
+}
+
 /// Makes safe houses for Missions.
 #[guatiao::kind(name = "ai6_safehouse")]
 pub trait SafeHouseProvider: Send + Sync {
@@ -159,6 +177,24 @@ pub trait SafeHouseSession: Send + Sync {
         Err(ProviderError::new(
             guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
             "this safe-house provider does not save checkpoints",
+        ))
+    }
+    /// Answers a [`SafeHouseExports`] as a value: what of the work exists only here.
+    /// Unsupported unless the provider can tell; a caller then treats all of it as
+    /// unexported.
+    fn exports(&self) -> Result<Value, ProviderError> {
+        Err(ProviderError::new(
+            guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+            "this safe-house provider cannot tell what of its work exists elsewhere",
+        ))
+    }
+    /// Removes an isolated safe house whatever it holds: its working directory and, for a
+    /// version-control provider, the Mission's branch. A safe house in place is refused.
+    /// Unsupported unless the provider has it.
+    fn discard(&self) -> Result<(), ProviderError> {
+        Err(ProviderError::new(
+            guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+            "this safe-house provider cannot remove a safe house that holds work",
         ))
     }
 }

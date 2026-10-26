@@ -11,8 +11,8 @@ use guatiao::library::Object;
 use guatiao::{FromValue, ToValue};
 
 use crate::directorates::q::safehouse::{
-    Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseInfo, SafeHouseProvider,
-    SafeHouseReport, SafeHouseSession, SafeHouseSpec,
+    Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseExports, SafeHouseInfo,
+    SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
 };
 
 /// The state-directory environment variable used by AI6.
@@ -106,6 +106,23 @@ impl SafeHouse {
         let spec = spec.to_value().map_err(fail)?;
         let saved = self.session.checkpoint(&spec).map_err(fail)?;
         SafeHouseCheckpoint::from_value(&saved).map_err(fail)
+    }
+
+    /// What of the work exists only here; `None` when the provider cannot tell, which a
+    /// caller reads as all of it.
+    pub fn exports(&self) -> Result<Option<SafeHouseExports>, SafeHouseError> {
+        match self.session.exports() {
+            Ok(exports) => SafeHouseExports::from_value(&exports)
+                .map(Some)
+                .map_err(fail),
+            Err(error) if error.status == guatiao::Status::GUATIAO_ERR_UNSUPPORTED => Ok(None),
+            Err(error) => Err(fail(error)),
+        }
+    }
+
+    /// Removes an isolated safe house whatever it holds, through its provider.
+    pub fn discard(&self) -> Result<(), SafeHouseError> {
+        self.session.discard().map_err(fail)
     }
 
     /// Describes the safe house while it is still in use.
@@ -233,6 +250,20 @@ mod tests {
         assert!(!house.finish().unwrap().kept);
         let active = house.active_report();
         assert!(active.kept && active.path == "/work");
+    }
+
+    #[test]
+    fn a_provider_that_cannot_tell_what_is_exported_says_so_and_discards_nothing() {
+        let house = SafeHouse::open(&Stub { history: true }, &spec(true)).unwrap();
+        assert_eq!(house.exports().unwrap(), None);
+        assert!(house.discard().is_err());
+        let exported = SafeHouseExports::default();
+        assert!(exported.is_exported());
+        let dirty = SafeHouseExports {
+            dirty: true,
+            ..SafeHouseExports::default()
+        };
+        assert!(!dirty.is_exported());
     }
 
     #[test]

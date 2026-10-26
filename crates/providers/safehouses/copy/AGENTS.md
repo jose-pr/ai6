@@ -28,10 +28,16 @@ Guatiao `cdylib` a Station loads. Provider ID: `copy`. No unsafe code, no extern
   as `checkable = false`, never as a pass.
 - `finish()`: the copy is always kept, because without history an untouched copy cannot be
   told from a changed one (`kept = true` while the path exists); the report has no changes.
+- `exports()`: unsupported (`GUATIAO_ERR_UNSUPPORTED`): a copy cannot tell what of its work
+  exists elsewhere, so AI6 treats all of it as unexported.
+- `discard()`: removes the copy (a copy already gone is fine); in place it is refused with
+  `GUATIAO_ERR_BAD_VALUE` and the source is untouched.
 
 ## Gotchas
 
 - A malformed spec is `GUATIAO_ERR_BAD_VALUE`; a filesystem failure is `GUATIAO_ERR_INTERNAL`.
-- Copies are not removed by AI6; delete finished ones under `<state>/safe-houses/`.
+- AI6 removes a copy only through `discard()`, which for a copy always needs green ink (its
+  work cannot be shown to exist elsewhere); otherwise delete finished ones under
+  `<state>/safe-houses/`.
 - After renaming or removing a provider library, clean the plugin directory: a Station
   loads every provider library it finds.

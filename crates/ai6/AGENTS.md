@@ -3027,7 +3027,18 @@ pub trait SafeHouseSession: Send + Sync {
     /// Optional (default GUATIAO_ERR_UNSUPPORTED): CheckpointSpec in, SafeHouseCheckpoint out.
     /// Saves the work so far where another Station can fetch it, leaving the worktree alone.
     fn checkpoint(&self, spec: &Value) -> Result<Value, ProviderError>;
+    /// Optional (default GUATIAO_ERR_UNSUPPORTED): SafeHouseExports out, what of the work
+    /// exists only here. Unsupported reads as "all of it".
+    fn exports(&self) -> Result<Value, ProviderError>;
+    /// Optional (default GUATIAO_ERR_UNSUPPORTED): removes an isolated safe house whatever it
+    /// holds (directory, and the Mission's branch); in place it is refused.
+    fn discard(&self) -> Result<(), ProviderError>;
 }
+pub struct SafeHouseExports {
+    pub unexported: Vec<String>, // "<short id> <subject>" of changes since the base no remote holds
+    pub dirty: bool,             // uncommitted changes in the working directory
+}
+impl SafeHouseExports { pub fn is_exported(&self) -> bool; } // nothing unexported and clean
 pub struct SafeHouseSpec {
     pub operation_id: String, pub mission_id: String, pub title: String,
     pub source: String,    // a local path today
@@ -3060,7 +3071,8 @@ grows by optional fields only. Providers: `git` (`ai6-safehouse-git`) and `copy`
 
 `station::safehouse::SafeHouse::open(&dyn SafeHouseProvider, &SafeHouseSpec)` wraps a
 session: `path()`, `branch()`, `base()`, `supports_history()`, `is_isolated()`,
-`changes()`, `finish()`, `checkpoint(&CheckpointSpec)` and `active_report()`. The Station
+`changes()`, `finish()`, `checkpoint(&CheckpointSpec)`, `exports() -> Result<Option<SafeHouseExports>, _>`
+(`None` when the provider cannot tell), `discard()` and `active_report()`. The Station
 offers a lost attempt's checkpoint only when it opens a new isolated safe house. Only isolated safe houses are recorded on
 the Mission and finished by the daemon. `state_dir()` resolves `AI6_STATE`, then
 `AI6_HOME/state`, then `%LOCALAPPDATA%/AI6` on Windows, then `XDG_STATE_HOME/AI6` or

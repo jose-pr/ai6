@@ -13,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ai6::directorates::q::safehouse::{
-    Change, CheckpointSpec, SafeHouseCheckpoint, SafeHouseReport, SafeHouseSpec,
+    Change, CheckpointSpec, SafeHouseCheckpoint, SafeHouseExports, SafeHouseReport, SafeHouseSpec,
 };
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -257,6 +257,60 @@ impl Worktree {
             let _ = git(&self.repository, &["branch", "-D", branch]);
         }
         Ok(self.report(false, Vec::new()))
+    }
+
+    /// The commits since the base that no remote-tracking ref holds, and whether anything is
+    /// uncommitted. Remote-tracking refs are as last fetched, so a stale one makes work read
+    /// as unexported, never the other way round.
+    pub(crate) fn exports(&self) -> Result<SafeHouseExports, Failure> {
+        if !self.path.exists() {
+            return Ok(SafeHouseExports::default());
+        }
+        let unexported = git(
+            &self.path,
+            &[
+                "log",
+                "--format=%h %s",
+                &format!("{}..HEAD", self.base),
+                "--not",
+                "--remotes",
+            ],
+        )?
+        .lines()
+        .map(str::to_owned)
+        .collect();
+        let dirty = !git(&self.path, &["status", "--porcelain"])?
+            .trim()
+            .is_empty();
+        Ok(SafeHouseExports { unexported, dirty })
+    }
+
+    /// Removes the worktree and its branch whatever they hold. Working in place is never
+    /// removed.
+    pub(crate) fn discard(&self) -> Result<(), Failure> {
+        if !self.isolated {
+            return Err("a safe house in the Operation's own checkout is never removed".to_owned());
+        }
+        if self.path.exists() {
+            git(
+                &self.repository,
+                &[
+                    "worktree",
+                    "remove",
+                    "--force",
+                    "--force",
+                    self.path.to_string_lossy().as_ref(),
+                ],
+            )?;
+        }
+        if let Some(branch) = &self.branch
+            && !git(&self.repository, &["branch", "--list", branch])?
+                .trim()
+                .is_empty()
+        {
+            git(&self.repository, &["branch", "-D", branch])?;
+        }
+        Ok(())
     }
 
     /// One-line summaries of the commits made since the base, newest first.
@@ -671,6 +725,49 @@ mod tests {
         assert_eq!(report.changes.len(), 1);
         assert!(report.changes[0].ends_with(" add work"));
         assert!(house.path.exists());
+    }
+
+    #[test]
+    fn exports_name_the_commits_no_remote_holds_and_discard_removes_them_all() {
+        let temp = Temp::new();
+        let repo = temp.repo();
+        let remote = temp.0.join("remote.git");
+        temp.git(&temp.0, &["init", "--quiet", "--bare", "remote.git"]);
+        temp.git(
+            &repo,
+            &["remote", "add", "origin", remote.to_string_lossy().as_ref()],
+        );
+        let house = Worktree::open(&temp.spec(&repo, "mission-export", "{id}-{slug}")).unwrap();
+        assert_eq!(house.exports().unwrap(), SafeHouseExports::default());
+
+        fs::write(house.path.join("work.txt"), "work\n").unwrap();
+        temp.git(&house.path, &["add", "work.txt"]);
+        temp.git(&house.path, &["commit", "--quiet", "-m", "add work"]);
+        let exports = house.exports().unwrap();
+        assert_eq!(exports.unexported.len(), 1, "{exports:?}");
+        assert!(exports.unexported[0].ends_with(" add work"));
+        assert!(!exports.dirty);
+
+        let branch = house.branch.clone().unwrap();
+        temp.git(&house.path, &["push", "--quiet", "origin", &branch]);
+        assert!(house.exports().unwrap().is_exported());
+        fs::write(house.path.join("loose.txt"), "loose\n").unwrap();
+        assert!(house.exports().unwrap().dirty);
+
+        house.discard().unwrap();
+        assert!(!house.path.exists());
+        assert!(
+            git(&repo, &["branch", "--list", &branch])
+                .unwrap()
+                .trim()
+                .is_empty()
+        );
+        // Discarding what is already gone is a no-op; work in place is never discarded.
+        house.discard().unwrap();
+        let mut in_place = temp.spec(&repo, "mission-export-2", "{id}");
+        in_place.isolate = false;
+        assert!(Worktree::open(&in_place).unwrap().discard().is_err());
+        assert!(repo.join("seed.txt").exists());
     }
 
     #[test]
