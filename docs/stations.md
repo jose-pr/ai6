@@ -241,7 +241,13 @@ Station enforces in its own code, whatever the prompt or the Operation's policy 
 | `caches`: remove the cache directories (`target`, `node_modules`, `.dart_tool`; `ai6 serve --safe-house-cache NAME` replaces the list) | unattended, for a Mission that is over whose safe house has been left alone for 7 days (`--safe-house-cache-age SECS`) |
 | `remove` a safe house whose work all exists elsewhere (every commit on a remote, nothing uncommitted) | unattended, for a Mission that is over |
 | `remove` a safe house holding work that exists nowhere else, or whose provider cannot tell (the `copy` provider) | green ink, kind `delete`: the round waits for a person, then calls again; the approval is spent on that one removal |
+| `provision_theater` with `apply`: the steps a Theater's declaration calls for | unattended; anything outside the declaration is a finding |
 | Change configuration, the roster or policy; read a secret; act on another Station; touch the safe house of a Mission that is not over | never: the tools cannot, or refuse |
+
+`provision_theater { theater, apply }` checks a Theater this Station reaches against its
+declaration, or with `apply` runs exactly the declared steps (see
+[Provisioning](theaters.md#fitting-a-theater-out)); that is unattended because the operator
+declared them, and a run that changed something is audited (`head_of_station.provisioned`).
 
 A green ink request for a removal is made even when the Operation's green ink policy would let
 the Agent delete unattended. Every removal is audited (`head_of_station.caches_removed`,

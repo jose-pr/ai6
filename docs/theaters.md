@@ -113,6 +113,13 @@ Theater's transport provider and `--config-dir` for another configuration direct
 default directory, the login user's home over SSH). Provisioning carries no secret: harness
 and forge credentials reach a Session as leases, never as files on the Theater.
 
+**On a round.** A [Head of Station](stations.md#head-of-station) round runs the same steps
+through its `provision_theater { theater, apply }` tool: `apply = false` is `--check`, and
+`apply = true` fits the Theater out unattended, because the operator declared every step it
+can take. What the declaration does not cover is reported, never changed. A run that changed
+something is audited (`head_of_station.provisioned`), and the probe report placement reads
+is refreshed at once. A Theater made for one Mission and an ephemeral template are refused.
+
 ### SSH access
 
 ```toml
@@ -367,5 +374,5 @@ to ask why.
 - Ephemeral virtual machines: only containers have a Theater provider. Destroying a kept
   Theater early is not yet a step an operator approves in green ink; the sweep's bounds
   remove it.
-- The Station does not refit a Theater on its own rounds: `ai6 theater provision` is run by
-  command, and an ephemeral Theater is fitted out when it is made.
+- A Theater is refitted on a Head of Station round only when the round asks; nothing
+  refits it on a schedule of its own.
