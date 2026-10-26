@@ -114,6 +114,47 @@ impl PluginPolicy {
         }
     }
 
+    /// The policy for the pin set a command was given: `pins` when it names one, which must
+    /// exist, else `default_pins`, which may be absent (no pin set: `report`). `profile`
+    /// overrides the pin set's own; verified copies go to `verified_dir`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `pins` names a file that does not exist, or either file cannot
+    /// be read or is not a valid pin set; the message names the file.
+    pub fn load(
+        pins: Option<&Path>,
+        default_pins: Option<&Path>,
+        profile: Option<PluginProfile>,
+        verified_dir: impl Into<PathBuf>,
+    ) -> std::io::Result<Self> {
+        let named = |path: &Path, error: std::io::Error| {
+            std::io::Error::new(error.kind(), format!("{}: {error}", path.display()))
+        };
+        let set = match (pins, default_pins) {
+            (Some(path), _) => match PinSet::load(path) {
+                Ok(Some(set)) => Some(set),
+                Ok(None) => {
+                    return Err(named(
+                        path,
+                        std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "the named pin set does not exist",
+                        ),
+                    ));
+                }
+                Err(error) => return Err(named(path, error)),
+            },
+            (None, Some(path)) => PinSet::load(path).map_err(|error| named(path, error))?,
+            (None, None) => None,
+        };
+        let policy = Self::new(set, verified_dir);
+        Ok(match profile {
+            Some(profile) => policy.with_profile(profile),
+            None => policy,
+        })
+    }
+
     /// Uses `profile` whatever the pin set asks for.
     #[must_use]
     pub fn with_profile(mut self, profile: PluginProfile) -> Self {
@@ -1212,6 +1253,24 @@ mod tests {
             "{:?}",
             plugins.scan_summary()
         );
+    }
+
+    #[test]
+    fn a_named_pin_set_must_exist_and_only_the_default_may_be_missing() {
+        let directory = scratch();
+        let missing = directory.path().join("plugins.toml");
+        let verified = directory.path().join("verified");
+        let error = PluginPolicy::load(Some(&missing), None, None, &verified).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(error.to_string().contains("plugins.toml"), "{error}");
+        let policy = PluginPolicy::load(None, Some(&missing), None, &verified).unwrap();
+        assert_eq!(policy.profile(), PluginProfile::Report);
+
+        std::fs::write(&missing, "").unwrap();
+        let policy = PluginPolicy::load(Some(&missing), None, None, &verified).unwrap();
+        assert_eq!(policy.profile(), PluginProfile::Strict);
+        std::fs::write(&missing, "[[library]]\nfile = \"a.so\"\n").unwrap();
+        assert!(PluginPolicy::load(None, Some(&missing), None, &verified).is_err());
     }
 
     #[test]

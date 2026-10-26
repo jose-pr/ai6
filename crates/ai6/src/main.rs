@@ -107,7 +107,23 @@ enum TheaterCommand {
         /// A directory or library path to scan for the Theater's transport provider.
         #[arg(long = "plugin-path")]
         plugin_paths: Vec<PathBuf>,
+        #[command(flatten)]
+        pins: PinArgs,
     },
+}
+
+/// How provider libraries are checked before they load.
+#[derive(Debug, Args)]
+struct PinArgs {
+    /// The provider library pin set (default: plugins.toml in the configuration directory);
+    /// a file named here must exist.
+    #[arg(long, value_name = "PATH")]
+    plugin_pins: Option<PathBuf>,
+    /// How provider libraries are checked: strict (only pinned or signed ones load, from a
+    /// verified copy), report (all load; unpinned ones are reported) or off (default: the
+    /// pin set's profile, else strict with a pin set and report without).
+    #[arg(long, value_name = "PROFILE")]
+    plugin_profile: Option<ai6::PluginProfile>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -144,6 +160,8 @@ struct RunnerServeArgs {
     /// Pin the terminal provider harnesses run in (default: an available one, preferring `pty`).
     #[arg(long)]
     terminal: Option<String>,
+    #[command(flatten)]
+    pins: PinArgs,
     /// Start in the background, detached from this terminal, and print where it listens.
     #[arg(long)]
     detach: bool,
@@ -207,14 +225,8 @@ struct ServeArgs {
     /// A directory or library path to scan for Guatiao AgentHandler providers.
     #[arg(long = "plugin-path")]
     plugin_paths: Vec<PathBuf>,
-    /// The provider library pin set (default: plugins.toml in the configuration directory).
-    #[arg(long, value_name = "PATH")]
-    plugin_pins: Option<PathBuf>,
-    /// How provider libraries are checked: strict (only pinned or signed ones load, from a
-    /// verified copy), report (all load; unpinned ones are reported) or off (default: the
-    /// pin set's profile, else strict with a pin set and report without).
-    #[arg(long, value_name = "PROFILE")]
-    plugin_profile: Option<ai6::PluginProfile>,
+    #[command(flatten)]
+    pins: PinArgs,
     /// AI6 configuration directory containing operations.toml and agents.toml.
     #[arg(long)]
     config_dir: Option<PathBuf>,
@@ -375,8 +387,7 @@ async fn main() -> ExitCode {
             let ServeArgs {
                 listen,
                 plugin_paths,
-                plugin_pins,
-                plugin_profile,
+                pins,
                 config_dir,
                 config: roster_location,
                 registry,
@@ -421,14 +432,13 @@ async fn main() -> ExitCode {
             if let Some(terminal) = terminal {
                 station_config = station_config.with_terminal(terminal);
             }
-            let plugin_policy =
-                match plugin_policy(plugin_pins, plugin_profile, config_dir.as_deref()) {
-                    Ok(policy) => policy,
-                    Err(error) => {
-                        eprintln!("ai6: provider library pins: {error}");
-                        return ExitCode::FAILURE;
-                    }
-                };
+            let plugin_policy = match plugin_policy(&pins, config_dir.as_deref(), None) {
+                Ok(policy) => policy,
+                Err(error) => {
+                    eprintln!("ai6: provider library pins: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
             let mut config = ai6::ServeConfig::new(listen)
                 .with_plugin_paths(plugin_paths)
                 .with_plugin_policy(plugin_policy)
@@ -504,33 +514,32 @@ async fn main() -> ExitCode {
     }
 }
 
-/// The provider library policy: the pin set at `pins` (else `plugins.toml` in the
-/// configuration directory), verified copies under the state directory's `plugins/verified`.
+/// The provider library policy: the pin set `--plugin-pins` names (which must exist), else
+/// `plugins.toml` in the configuration directory; verified copies under `state_dir` (default:
+/// the state directory)'s `plugins/verified`.
 fn plugin_policy(
-    pins: Option<PathBuf>,
-    profile: Option<ai6::PluginProfile>,
+    args: &PinArgs,
     config_dir: Option<&std::path::Path>,
+    state_dir: Option<&std::path::Path>,
 ) -> Result<ai6::station::plugins::PluginPolicy, String> {
-    let path = match (pins, config_dir) {
-        (Some(path), _) => Some(path),
-        (None, Some(dir)) => Some(dir.join("plugins.toml")),
-        (None, None) => ai6::directorates::m::roster::config_dir()
+    let (pins, profile) = (args.plugin_pins.clone(), args.plugin_profile);
+    let default_pins = match config_dir {
+        Some(dir) => Some(dir.join("plugins.toml")),
+        None => ai6::directorates::m::roster::config_dir()
             .ok()
             .map(|dir| dir.join("plugins.toml")),
     };
-    let pins = match &path {
-        Some(path) => {
-            ai6::PinSet::load(path).map_err(|error| format!("{}: {error}", path.display()))?
-        }
-        None => None,
+    let state = match state_dir {
+        Some(dir) => dir.to_path_buf(),
+        None => ai6::station::safehouse::state_dir().map_err(|error| error.to_string())?,
     };
-    let state = ai6::station::safehouse::state_dir().map_err(|error| error.to_string())?;
-    let policy =
-        ai6::station::plugins::PluginPolicy::new(pins, state.join("plugins").join("verified"));
-    Ok(match profile {
-        Some(profile) => policy.with_profile(profile),
-        None => policy,
-    })
+    ai6::station::plugins::PluginPolicy::load(
+        pins.as_deref(),
+        default_pins.as_deref(),
+        profile,
+        state.join("plugins").join("verified"),
+    )
+    .map_err(|error| error.to_string())
 }
 
 /// Reads the hook input, asks the gate, and prints a denial when it holds the command; a
@@ -588,6 +597,12 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                 if let Some(terminal) = &args.terminal {
                     arguments.extend(["--terminal".into(), terminal.into()]);
                 }
+                if let Some(pins) = &args.pins.plugin_pins {
+                    arguments.extend(["--plugin-pins".into(), pins.into()]);
+                }
+                if let Some(profile) = args.pins.plugin_profile {
+                    arguments.extend(["--plugin-profile".into(), profile.as_str().into()]);
+                }
                 let started = std::env::current_exe().and_then(|program| {
                     ai6::station::runner::spawn_detached(&program, &arguments, &state_dir)
                 });
@@ -605,8 +620,16 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                     }
                 };
             }
+            let policy = match plugin_policy(&args.pins, None, Some(&state_dir)) {
+                Ok(policy) => policy,
+                Err(error) => {
+                    eprintln!("ai6: provider library pins: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
             let mut config = ai6::station::runner::RunnerConfig::new(&state_dir)
-                .with_plugin_paths(args.plugin_paths);
+                .with_plugin_paths(args.plugin_paths)
+                .with_plugin_policy(policy);
             if let Some(listen) = args.listen {
                 config = config.with_listen(listen);
             }
@@ -669,6 +692,7 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
         check,
         config_dir,
         plugin_paths,
+        pins,
     } = command;
     let config_dir = match config_dir {
         Some(path) => path,
@@ -694,7 +718,15 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let plugins = ai6::station::plugins::Plugins::scan(&plugin_paths);
+    let policy = match plugin_policy(&pins, Some(&config_dir), None) {
+        Ok(policy) => policy,
+        Err(error) => {
+            eprintln!("ai6: provider library pins: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let plugins = ai6::station::plugins::Plugins::scan_with(&plugin_paths, &policy);
+    ai6::station::plugins::log_scan(plugins.scan_summary());
     let client = match plugins.theater_transport(&declared.access) {
         Ok(client) => client,
         Err(error) => {

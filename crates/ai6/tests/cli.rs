@@ -60,6 +60,32 @@ fn plugins_pin_prints_an_entry_for_a_provider_library_and_refuses_anything_else(
 }
 
 #[test]
+fn a_named_pin_set_that_does_not_exist_stops_the_station_and_the_runner() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("absent-plugins.toml");
+    for arguments in [
+        vec!["serve", "--listen", "127.0.0.1:0"],
+        vec!["runner", "serve"],
+    ] {
+        let output = ai6()
+            .args(&arguments)
+            .arg("--plugin-pins")
+            .arg(&missing)
+            .env("AI6_STATE", directory.path())
+            .env("AI6_CONFIG_DIR", directory.path())
+            .env("AI6_REGISTRY", directory.path().join("registry"))
+            .output()
+            .expect("the AI6 command should start");
+        assert!(!output.status.success(), "{arguments:?}");
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            error.contains("absent-plugins.toml") && error.contains("does not exist"),
+            "{arguments:?}: {error}"
+        );
+    }
+}
+
+#[test]
 fn negative_watchdog_timeout_is_an_invalid_invocation() {
     let output = ai6()
         .args(["serve", "--stall-timeout", "-1"])

@@ -104,6 +104,7 @@ pub struct RunnerConfig {
     state_dir: PathBuf,
     listen: SocketAddr,
     plugin_paths: Vec<PathBuf>,
+    plugin_policy: crate::station::plugins::PluginPolicy,
     terminal: Option<String>,
 }
 
@@ -114,6 +115,7 @@ impl RunnerConfig {
             state_dir: state_dir.into(),
             listen: SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), 0),
             plugin_paths: Vec::new(),
+            plugin_policy: crate::station::plugins::PluginPolicy::default(),
             terminal: None,
         }
     }
@@ -129,6 +131,14 @@ impl RunnerConfig {
     #[must_use]
     pub fn with_plugin_paths(mut self, paths: impl IntoIterator<Item = PathBuf>) -> Self {
         self.plugin_paths = paths.into_iter().collect();
+        self
+    }
+
+    /// Sets how provider libraries are checked before they load (default: `report`, no
+    /// pins), as the Station's own policy does.
+    #[must_use]
+    pub fn with_plugin_policy(mut self, policy: crate::station::plugins::PluginPolicy) -> Self {
+        self.plugin_policy = policy;
         self
     }
 
@@ -152,7 +162,11 @@ pub async fn serve<F>(config: RunnerConfig, shutdown: F) -> io::Result<()>
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    let plugins = Arc::new(Plugins::scan(&config.plugin_paths));
+    let plugins = Arc::new(Plugins::scan_with(
+        &config.plugin_paths,
+        &config.plugin_policy,
+    ));
+    crate::station::plugins::log_scan(plugins.scan_summary());
     serve_with_plugins(config, plugins, shutdown).await
 }
 

@@ -37,6 +37,14 @@ struct Cli {
     /// A directory or library containing Guatiao providers; may be repeated.
     #[arg(long = "plugin-path", value_name = "PATH")]
     plugin_paths: Vec<PathBuf>,
+    /// The provider library pin set, as a Station's (default: plugins.toml in the AI6
+    /// configuration directory); a file named here must exist.
+    #[arg(long, env = "AI6_EXPORTS_PLUGIN_PINS", value_name = "PATH")]
+    plugin_pins: Option<PathBuf>,
+    /// How provider libraries are checked: strict, report or off (default: the pin set's
+    /// profile, else strict with a pin set and report without).
+    #[arg(long, env = "AI6_EXPORTS_PLUGIN_PROFILE", value_name = "PROFILE")]
+    plugin_profile: Option<ai6::PluginProfile>,
     /// Guatiao Authenticator provider ID for user login.
     #[arg(long, env = "AI6_EXPORTS_AUTHENTICATOR")]
     authenticator: Option<String>,
@@ -202,6 +210,23 @@ fn login_limits(cli: &Cli) -> Result<LoginLimits, String> {
     })
 }
 
+/// The provider library policy, chosen as a Station chooses its own: the pin set
+/// `--plugin-pins` names, else `plugins.toml` in the AI6 configuration directory; verified
+/// copies under the state directory's `plugins/verified`.
+fn plugin_policy(cli: &Cli) -> Result<ai6::station::plugins::PluginPolicy, String> {
+    let default_pins = ai6::directorates::m::roster::config_dir()
+        .ok()
+        .map(|dir| dir.join("plugins.toml"));
+    let state = ai6::station::safehouse::state_dir().map_err(|error| error.to_string())?;
+    ai6::station::plugins::PluginPolicy::load(
+        cli.plugin_pins.as_deref(),
+        default_pins.as_deref(),
+        cli.plugin_profile,
+        state.join("plugins").join("verified"),
+    )
+    .map_err(|error| format!("provider library pins: {error}"))
+}
+
 fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {
     let needs_directory = cli.authenticator.is_some()
         || cli.proxy_user_header.is_some()
@@ -220,7 +245,9 @@ fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {
         );
     }
 
-    let plugins = ai6::station::plugins::Plugins::scan(&cli.plugin_paths);
+    let plugins =
+        ai6::station::plugins::Plugins::scan_with(&cli.plugin_paths, &plugin_policy(cli)?);
+    ai6::station::plugins::log_scan(plugins.scan_summary());
     let authenticator_config = cli
         .authenticator_config
         .as_deref()
@@ -390,6 +417,39 @@ mod tests {
     #[test]
     fn command_definition_is_well_formed() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn the_gateway_checks_its_access_plugins_with_a_pin_set_like_a_station() {
+        let directory = tempfile::tempdir().unwrap();
+        let cli = |pins: &std::path::Path, profile: Option<&str>| {
+            let mut arguments = vec![
+                "universal-exports".to_owned(),
+                "--public-origin".to_owned(),
+                "https://localhost".to_owned(),
+                "--plugin-pins".to_owned(),
+                pins.display().to_string(),
+            ];
+            if let Some(profile) = profile {
+                arguments.extend(["--plugin-profile".to_owned(), profile.to_owned()]);
+            }
+            Cli::try_parse_from(arguments).unwrap()
+        };
+        let missing = directory.path().join("plugins.toml");
+        let error = plugin_policy(&cli(&missing, None)).unwrap_err();
+        assert!(error.contains("does not exist"), "{error}");
+
+        std::fs::write(&missing, "").unwrap();
+        assert_eq!(
+            plugin_policy(&cli(&missing, None)).unwrap().profile(),
+            ai6::PluginProfile::Strict
+        );
+        assert_eq!(
+            plugin_policy(&cli(&missing, Some("report")))
+                .unwrap()
+                .profile(),
+            ai6::PluginProfile::Report
+        );
     }
 
     #[test]
