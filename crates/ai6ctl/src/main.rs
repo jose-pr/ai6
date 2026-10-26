@@ -97,6 +97,12 @@ enum Command {
         #[command(subcommand)]
         command: ClassCommand,
     },
+    /// List the briefs vetting held, and release or refuse them (needs mission.create on the
+    /// Operation).
+    HeldBriefs {
+        #[command(subcommand)]
+        command: HeldCommand,
+    },
     /// List the pool accounts an Operation may draw from: Sessions using each, quota used,
     /// until when it is limited and tokens today (needs pool.read on the Operation).
     Pools {
@@ -182,6 +188,68 @@ enum ClassCommand {
         #[arg(long)]
         operation: String,
     },
+}
+
+/// Briefs vetting held for an operator.
+#[derive(Debug, Subcommand)]
+enum HeldCommand {
+    /// List the held briefs, oldest first, with what vetting found; never their text.
+    List {
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+    },
+    /// Return a held brief to the queue; vetting does not hold it again for the same findings.
+    Release {
+        /// The brief's Registry key.
+        key: String,
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+    },
+    /// File a held brief as failed without running it.
+    Refuse {
+        /// The brief's Registry key.
+        key: String,
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+        /// Why, for the record; never sent to the Source.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct HeldBrief {
+    key: String,
+    brief: HeldBriefText,
+    vetting: HeldVetting,
+    held_at: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct HeldBriefText {
+    source: String,
+    title: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct HeldVetting {
+    findings: Vec<HeldFinding>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HeldFinding {
+    kind: String,
+    detail: String,
+    related: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HeldDecision {
+    key: String,
+    state: String,
 }
 
 /// Mission lifecycle controls; the Station holding the Mission decides whether they apply.
@@ -607,6 +675,10 @@ async fn run() -> Result<(), String> {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             class_authorizations(&client, &server, &token, command).await?;
         }
+        Command::HeldBriefs { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            held_briefs(&client, &server, &token, command).await?;
+        }
         Command::Session {
             session_id,
             control: None,
@@ -840,6 +912,78 @@ async fn class_authorizations(
     };
     print_classes(&records, unix_now());
     Ok(())
+}
+
+async fn held_briefs(
+    client: &Client,
+    server: &Url,
+    token: &str,
+    command: HeldCommand,
+) -> Result<(), String> {
+    const PERMISSION: &str = "mission.create";
+    let (operation, key, action, body) = match command {
+        HeldCommand::List { operation } => {
+            let request = operation_request(
+                client,
+                server,
+                token,
+                Method::GET,
+                &[&operation, "held-briefs"],
+            )?;
+            let held: Vec<HeldBrief> = send(request, PERMISSION, "held brief list").await?;
+            print_held(&held);
+            return Ok(());
+        }
+        HeldCommand::Release { key, operation } => {
+            (operation, key, "release", serde_json::json!({}))
+        }
+        HeldCommand::Refuse {
+            key,
+            operation,
+            reason,
+        } => {
+            let mut body = serde_json::json!({});
+            if let Some(reason) = reason {
+                body["reason"] = reason.into();
+            }
+            (operation, key, "refuse", body)
+        }
+    };
+    let request = operation_request(
+        client,
+        server,
+        token,
+        Method::POST,
+        &[&operation, "held-briefs", &key, action],
+    )?
+    .json(&body);
+    let decided: HeldDecision = send(request, PERMISSION, "held brief decision").await?;
+    println!("{}\t{}", plain(&decided.key), plain(&decided.state));
+    Ok(())
+}
+
+fn print_held(held: &[HeldBrief]) {
+    println!("KEY\tSOURCE\tTITLE\tHELD_UNIX\tFINDINGS");
+    for entry in held {
+        let findings = entry
+            .vetting
+            .findings
+            .iter()
+            .map(|finding| match &finding.related {
+                Some(related) => format!("{}: {} ({related})", finding.kind, finding.detail),
+                None => format!("{}: {}", finding.kind, finding.detail),
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        println!(
+            "{}\t{}\t{}\t{:.0}\t{}",
+            plain(&entry.key),
+            plain(&entry.brief.source),
+            plain(&entry.brief.title),
+            entry.held_at,
+            plain(&findings),
+        );
+    }
 }
 
 /// A request under `/v1/user/operations/`, each of `segments` encoded as one path segment.
@@ -1598,6 +1742,56 @@ mod tests {
             ])
             .is_ok()
         );
+    }
+
+    #[test]
+    fn held_brief_commands_name_the_operation_and_print_no_brief_text() {
+        let refuse = Cli::try_parse_from([
+            "ai6ctl",
+            "held-briefs",
+            "refuse",
+            "source_github--org_repo_7",
+            "--operation",
+            "G",
+            "--reason",
+            "a mirror",
+        ])
+        .unwrap();
+        assert!(matches!(
+            refuse.command,
+            Command::HeldBriefs {
+                command: HeldCommand::Refuse {
+                    reason: Some(_),
+                    ..
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["ai6ctl", "held-briefs", "list"]).is_err());
+        let request = operation_request(
+            &Client::new(),
+            &server_url("https://exports.example").unwrap(),
+            "user-token",
+            Method::POST,
+            &["G", "held-briefs", "source_github--org_repo_7", "release"],
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(
+            request.url().path(),
+            "/v1/user/operations/G/held-briefs/source_github--org_repo_7/release"
+        );
+        let held: Vec<HeldBrief> = serde_json::from_value(serde_json::json!([{
+            "key": "source_github--org_repo_7",
+            "operation": "G",
+            "brief": {"title": "Crash", "body": "secret words", "source": "source:github"},
+            "vetting": {"verdict": "hold", "findings": [
+                {"kind": "duplicate", "detail": "the same URL as other work", "related": "m-1"}
+            ]},
+            "held_at": 10.0
+        }]))
+        .unwrap();
+        assert_eq!(held[0].vetting.findings[0].related.as_deref(), Some("m-1"));
     }
 
     #[test]

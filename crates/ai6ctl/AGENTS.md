@@ -94,6 +94,15 @@ signed by the token's person and audited with the step, never the Agent's reason
   `uses/max` or `uses`, `STATE` `live`, `used up`, `expired` or `revoked`. Granting one is
   API only (`POST .../class-authorizations`).
 
+### Held briefs
+
+- `ai6ctl held-briefs list --operation <ID>` (`mission.create`): the briefs vetting held,
+  oldest first, from `GET .../held-briefs`. Header `KEY\tSOURCE\tTITLE\tHELD_UNIX\tFINDINGS`;
+  findings are `kind: detail (related)` joined by `; `. The brief's body is never printed.
+- `ai6ctl held-briefs release <KEY> --operation <ID>` and `ai6ctl held-briefs refuse <KEY>
+  --operation <ID> [--reason <TEXT>]` print `KEY\tSTATE` (`queued` or `refused`); a key the
+  Operation no longer holds is HTTP 404.
+
 ## Environment variables
 
 | Variable | Effect | Default |

@@ -51,6 +51,8 @@ ai6ctl green-ink list --operation G
 ai6ctl green-ink approve green-ink-5c1e... --operation G --expires-in 1800 --note "main only"
 ai6ctl green-ink reject green-ink-9a02... --operation G --reason "not before the audit"
 ai6ctl class-authorizations list --operation G
+ai6ctl held-briefs list --operation G
+ai6ctl held-briefs release source_jira--OPS-12 --operation G
 ```
 
 ## Command line
@@ -75,6 +77,7 @@ ai6ctl class-authorizations list --operation G
 | `green-ink reject <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Refuses a waiting step; the Agent is told the reason |
 | `green-ink revoke <REQUEST_ID> --operation <ID>` | Withdraws an approval before it expires |
 | `class-authorizations list\|revoke [<ID>] --operation <ID>` | Standing approvals of a kind of step (`approval.class`) |
+| `held-briefs list\|release\|refuse [<KEY>] --operation <ID> [--reason <TEXT>]` | Briefs vetting held, with what it found; release one to the queue or refuse it (`mission.create`) |
 
 Every command accepts `--server <ORIGIN>`. The control commands need `mission.control`
 on the Mission's Operation, take `--operation <ID>` (found from the board when omitted),
