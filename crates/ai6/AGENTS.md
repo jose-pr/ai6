@@ -374,28 +374,43 @@ resumes.
 ### Harness project settings (`ai6::directorates::m::harness`)
 
 ```rust
-pub const PROJECT_SETTINGS_FILES: [&str; 5]; // .claude/settings.json, .claude/settings.local.json,
-                                             // .mcp.json, .codex/config.toml, .codex/hooks.json
+pub const PROJECT_DIRECTORIES: [&str; 2];      // ".claude", ".codex": every regular file, any depth
+pub const PROJECT_FILES: [&str; 1];            // ".mcp.json"
+pub const MAX_MANIFEST_FILE_BYTES: u64;        // 1 MiB
+pub const MAX_MANIFEST_BYTES: u64;             // 16 MiB
+pub const MAX_MANIFEST_FILES: usize;           // 4096
 #[non_exhaustive] pub enum ProjectSettings { Ignore /* default */, Pinned, Load } // lowercase
 #[non_exhaustive] pub struct HarnessPolicy {
     pub project_settings: ProjectSettings,
-    pub pins: BTreeMap<String, coqui_peer::PeerId>,  // path relative to the working directory -> sha256:HEX
+    pub pin: Option<coqui_peer::PeerId>,        // the manifest digest `pinned` needs
 }
 impl HarnessPolicy {
-    pub fn pinned(pins: impl IntoIterator<Item = (String, PeerId)>) -> Self;
-    pub fn with(project_settings: ProjectSettings) -> Self;
-    pub fn validate(&self) -> Result<(), String>;    // pin paths stay inside the working directory
-    pub fn weakening(&self) -> Option<String>;       // Some for Load
-    pub fn check(&self, root: &Path) -> Result<(), String>; // Ok: may load; Err names each file off its pin
+    pub fn pinned(pin: PeerId) -> Self;  pub fn with(project_settings: ProjectSettings) -> Self;
+    pub fn validate(&self) -> Result<(), String>;    // pinned needs a pin
+    pub fn weakenings(&self) -> Vec<String>;         // load; a SHA-1 pin
+    pub fn decide(&self, root: &Path) -> ProjectDecision; // reads the manifest under pinned (blocking)
+}
+#[non_exhaustive] pub struct ProjectDecision { pub load: bool, pub mcp: bool,
+    pub manifest: Option<PeerId>, pub refused: Option<String> }
+#[non_exhaustive] pub struct ProjectManifest { pub files: BTreeMap<String, PeerId> } // path -> sha256
+impl ProjectManifest {
+    pub fn read(root: &Path) -> Result<Self, String>;
+    pub fn digest(&self) -> PeerId;  pub fn digest_with(&self, algorithm: coqui_peer::Digest) -> PeerId;
 }
 ```
 
-Under `pinned` every file of `PROJECT_SETTINGS_FILES` and every pinned path is read: a
-pinned one must exist with that digest, an unpinned one must be absent. The Station decides
-at each start and resume (`AgentStart::project_settings`); a `pinned` Operation whose
-harness runs on another host than the Station is ignored. A refusal is printed and recorded
-on the Operation's timeline as kind `harness`, action `project-settings-ignored`, detail
-`reason`. A `load` Operation is printed as a weakening at start.
+The manifest is every regular file under `PROJECT_DIRECTORIES`, each of `PROJECT_FILES`, and
+every file inside the working directory that a `command` or `args` value names (JSON and
+TOML settings anywhere in it, `command:` lines of Markdown front matter;
+`$CLAUDE_PROJECT_DIR` is the working directory). Its digest hashes `PATH NUL DIGEST LF`
+lines in path order. It is read without following links (`O_NOFOLLOW | O_NONBLOCK` on unix,
+`FILE_FLAG_OPEN_REPARSE_POINT` on Windows): a link, device, pipe or file past the limits is
+an error, and the harness starts as `ignore`. The Station decides at each start and resume on
+the blocking pool (`AgentStart::project_settings`, `project_mcp`), records the manifest
+digest on the Operation's timeline (kind `harness`, `project-settings-pinned` or
+`project-settings-ignored` with `reason`), and treats a harness on another host as `ignore`.
+`decision.mcp` under `pinned` is whether the manifest holds `.mcp.json`. `ai6 harness pin DIR`
+prints the manifest and its pin. Weakenings are printed at start.
 
 ## Configuration sources (`ai6::directorates::m::config`)
 
@@ -1108,16 +1123,16 @@ secret backends.
     pub item_url: Option<String>,
     pub received_at: i64,            // Unix seconds
     pub received_by: String,         // Station ID, or "universal-exports"
-    pub digest: String,              // brief_digest(title, body)
+    pub digest: String,              // record_digest(brief), taken again when the Registry seals it
 }
 impl Provenance {
     pub fn new(origin: Origin, brief: &Brief, received_by: impl Into<String>, received_at: i64) -> Self;
     pub fn with_principal(self, impl Into<String>) -> Self;  pub fn with_reference(self, impl Into<String>) -> Self;
     pub fn with_item_url(self, Option<String>) -> Self;
     pub fn registry_drop(brief: &Brief, station: impl Into<String>, at: i64) -> Self;
-    pub fn matches(&self, brief: &Brief) -> bool;   // digest still equals the brief's title and body
+    pub fn matches(&self, brief: &Brief) -> bool;   // digest still equals the record's
 }
-pub fn brief_digest(title: &str, body: &str) -> String;  // "sha256:HEX" over length-framed title and body
+pub fn record_digest(brief: &Brief) -> String;  // "sha256:HEX" of the canonical JSON record without provenance
 // Brief gains `pub provenance: Option<Provenance>` (serde default, omitted when None).
 ```
 
@@ -1125,11 +1140,16 @@ Every Registry keeps a brief's provenance apart from the record: the file Regist
 `provenance/<key>.json`, the SQL Registry in the `provenance` column of `ai6_briefs`. Reads
 (`list_new`, `claim_new`, `read_claimed`, `promote_mission_proposal`,
 `unreported_source_briefs`) set `Brief::provenance` from there and never from the record, and
-drop a kept one whose digest no longer matches. `None` means the brief was put in the queue
-without one (by hand, or `submit_brief` with none). The Station then records it on the
+drop a kept one whose digest no longer matches the record: any edit after sealing (its
+Operation, assignment, Stations, link, data or text) leaves it without one. Finishing a brief
+spends its provenance (file: moved to `STATE/<key>.provenance`; SQL: moved to
+`finished_provenance`), where only `unreported_source_briefs` reads it, so the same record
+queued again has none. `None` means the brief was put in the queue without one (by hand, or
+`submit_brief` with none). The Station then records it on the
 Mission as `Origin::RegistryDrop` with its own ID, and the Mission's Sessions start exposed
 by `brief:registry_drop` (`BRIEF_REGISTRY_DROP`). A finished `source:` brief is reported to
-its Source only when `reportable` holds. Anything with write access to the Registry's own
+its Source only when `reportable` holds: a `source` provenance for this record naming the
+provider and item, and the brief's Operation equal to its Source data's. Anything with write access to the Registry's own
 records can still forge them.
 
 ## Registry store (`ai6::directorates::registry::store`)
@@ -2223,10 +2243,12 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
                         pub quota: Vec<QuotaReport> /* serde default: empty */ }
 // AgentStart and AgentResume carry `max_cost_micro_usd: Option<u64>`: a spend ceiling a
 // harness may enforce itself (Claude Code gets `--max-budget-usd`); AI6 enforces budgets anyway.
-// They also carry `project_settings: bool`: whether the harness may load the settings its
-// working directory carries, decided by the Station from the Operation's harness policy on
-// every start and resume. `false` means Claude Code runs with `--setting-sources user
-// --strict-mcp-config` and Codex with the working directory marked an untrusted project.
+// They also carry `project_settings: bool` and `project_mcp: bool` (serde default false):
+// whether the harness may load its working directory's configuration, and its `.mcp.json`
+// servers, decided by the Station from the Operation's harness policy on every start and
+// resume. `project_settings: false` means Claude Code runs with `--setting-sources user` and
+// Codex with the working directory marked an untrusted project; Claude Code keeps
+// `--strict-mcp-config` unless both are true.
 ```
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
@@ -2699,6 +2721,8 @@ impl Plugins { pub fn scan_with(paths: &[PathBuf], policy: &PluginPolicy) -> Plu
 pub struct PluginPolicy;   // Default: report, no pins
 impl PluginPolicy {
     pub fn new(pins: Option<PinSet>, verified_dir: impl Into<PathBuf>) -> Self; // profile: pin set's, else strict with pins, report without
+    pub fn load(pins: Option<&Path>, default_pins: Option<&Path>, profile: Option<PluginProfile>,
+                verified_dir: impl Into<PathBuf>) -> io::Result<Self>; // a named pin set must exist
     pub fn with_profile(self, profile: PluginProfile) -> Self;
     pub fn profile(&self) -> PluginProfile;  pub fn pins(&self) -> &PinSet;
 }
@@ -2722,8 +2746,11 @@ impl PinSet {
     pub fn load(path: &Path) -> io::Result<Option<Self>>;   // None when the file is absent
     pub fn validate(&self) -> Result<(), String>;  pub fn weakenings(&self) -> Vec<String>; // SHA-1 pins
     pub fn check(&self, file: &str, bytes: &[u8], signature: Option<&[u8]>,
-                 verify: &dyn Fn(&PublisherKey, &[u8], &[u8]) -> bool) -> PinCheck;
+                 verify: &SignatureCheck<'_>) -> PinCheck;
 }
+pub type SignatureCheck<'a> = dyn Fn(&PublisherKey, &[u8], &[u8]) -> bool + 'a; // (key, message, signature)
+pub const PUBLISHER_MESSAGE_TAG: &[u8];                  // b"ai6-provider-library-v1\0"
+pub fn publisher_message(file: &str, digest: &[u8; 32]) -> Vec<u8>; // tag || file || NUL || sha256
 pub enum PinCheck { Accepted(String), Unpinned, Refused(String) }
 pub fn library_pin(bytes: &[u8]) -> coqui_peer::PeerId;  // sha256:HEX
 ```
@@ -2731,8 +2758,11 @@ pub fn library_pin(bytes: &[u8]) -> coqui_peer::PeerId;  // sha256:HEX
 Only files that declare an AI6 provider kind are checked. Under `strict` each is read once,
 checked against the pin set by its file name, and handed to Guatiao as a copy
 `verified_dir/sha256-HEX.EXT`; anything else is skipped without reaching the loader. A
-publisher entry needs `FILE.sig` beside the library: the 64-byte Ed25519 signature of the
-library's 32-byte SHA-256. Under `report` libraries load from where they were found and each
+publisher entry needs `FILE.sig` beside the library: the 64-byte Ed25519 signature of
+`publisher_message(FILE, sha256)`, so a signature is valid only under the file name it was
+made for. A pin covers the library file only: a non-system library it imports is found by
+the operating system's loader (on Windows also beside the executable, in the current
+directory and on `PATH`). Under `report` libraries load from where they were found and each
 unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-in carries
 `plugins_weakened` when the list is not empty.
 
@@ -2754,15 +2784,20 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
   `loadouts.toml` (`0` off; `StationConfig::with_config_poll`, `DEFAULT_CONFIG_POLL`). Timeout values are
   non-negative seconds and may be fractional. `AI6_CONFIG_DIR` overrides the default
   config directory.
-- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]`:
-  run the field runner on this host until Ctrl-C or SIGTERM; `--detach` starts it in the
+- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--plugin-pins PATH] [--plugin-profile P] [--terminal ID] [--detach]`:
+  run the field runner on this host until Ctrl-C or SIGTERM (provider libraries checked as
+  the Station's, verified copies under its state directory); `--detach` starts it in the
   background and prints its `runner.json`. `ai6 runner call [--state-dir PATH] METHOD PATH`
   sends one request with a body from standard input and prints `{"status", "body"}`; exit 3
   means no runner answered.
 - `ai6 green-ink gate`: Claude Code's `PreToolUse` hook for shell commands (see Harness
   gate); the Claude handler passes it through `--settings`. Always exits 0.
 - `ai6 plugins pin PATH...` prints the `plugins.toml` entries that pin AI6 provider
-  libraries by SHA-256; anything else is refused with a non-zero exit.
+  libraries by SHA-256; anything else is refused with a non-zero exit. `--plugin-pins PATH`
+  on any command must name an existing file; only the default `plugins.toml` may be absent.
+- `ai6 harness pin DIR` prints a working directory's harness manifest (`# sha256:..  PATH`
+  per file) and the `pin = "sha256:..."` line for `[operation.ID.harness]`.
+- `ai6 theater provision` also takes `--plugin-pins` and `--plugin-profile`.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.
 - `ai6 sleeper [--config-dir PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:

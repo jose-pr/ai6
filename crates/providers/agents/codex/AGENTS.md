@@ -65,8 +65,12 @@ default, app-server also receives `-c projects={"<working directory>"={trust_lev
 an untrusted project skips its `.codex/` layer (project config, hooks and rules), while the
 user and system layers still load (Codex configuration reference). The table is one inline
 value because a path holds dots; it replaces the user's `projects` table for that process
-only. `true` leaves trust to the user's own configuration. Not exercised against a live
-Codex.
+only. `true` leaves trust to the user's own configuration. The key is the working
+directory as AI6 passes it as `cwd`; should Codex key the project by another spelling of the
+path (its repository root, a canonical form), that project has no entry at all in the
+replaced table: it gets Codex's default for an unlisted project, never a trust the user
+granted it. That the default is untrusted for an app-server session is not confirmed from
+the Codex documentation. Not exercised against a live Codex.
 
 ## Gotchas
 

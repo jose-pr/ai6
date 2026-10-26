@@ -592,7 +592,11 @@ The optional `cli` feature builds the service command:
   nested values, and is schema-validated by Guatiao. The same file can configure a
   provider used for both authentication and directory lookup. `AI6_EXPORTS_ACCESS_POLICY`
   loads the built-in role policy; `AI6_EXPORTS_AUTHORIZER` selects a custom provider
-  instead. Repeat `--plugin-path` for each provider directory or library. Provider IDs
+  instead. Repeat `--plugin-path` for each provider directory or library. The libraries are
+  checked as a Station checks its own: `--plugin-pins PATH` (`AI6_EXPORTS_PLUGIN_PINS`; must
+  exist when named, default `plugins.toml` in the AI6 configuration directory) and
+  `--plugin-profile strict|report|off` (`AI6_EXPORTS_PLUGIN_PROFILE`; default strict with a
+  pin set, report without); refusals and weakenings are printed at start. Provider IDs
   are those of the `coqui-access` plugin libraries (`coqui_access_local`, `coqui_access_key`,
   `coqui_access_ldap`, `coqui_access_proxy`, `coqui_access_peer`, `coqui_roles`).
   `--login-tries-per-address`, `--login-tries-per-name` and `--client-address-header` set

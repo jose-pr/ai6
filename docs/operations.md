@@ -207,29 +207,47 @@ looser than `strict` when it starts.
 
 ## Harness project settings
 
-`harness` says whether an Agent's harness may load the settings its working directory
-carries: Claude Code's `.claude/settings.json`, `.claude/settings.local.json` and `.mcp.json`,
-and Codex's `.codex/` layer (config, hooks, rules). A checkout can add hooks and MCP servers
-that run with the Agent's environment, and in an issue-driven Mission whoever wrote the
-branch could have written them ([Hooks](hooks.md)).
+`harness` says whether an Agent's harness may load the configuration its working directory
+carries. Claude Code reads settings, hooks, permissions, skills, subagents, commands and
+project `CLAUDE.md` through its `project` and `local` setting sources (`.claude/`, `CLAUDE.md`)
+and MCP servers from `.mcp.json`; Codex reads its `.codex/` layer (config, hooks, rules). Hooks
+and MCP servers run commands, often scripts kept elsewhere in the checkout, with the
+Agent's environment, and in an issue-driven Mission whoever wrote the branch could have
+written all of it ([Hooks](hooks.md)).
 
 ```toml
 [operation.G.harness]
 project_settings = "pinned"       # ignore (default) | pinned | load
-pins = { ".claude/settings.json" = "sha256:...", ".mcp.json" = "sha256:..." }
+pin = "sha256:..."                # what `ai6 harness pin DIR` prints
 ```
 
 | `project_settings` | The harness loads |
 | --- | --- |
-| `ignore` (default) | only the user's settings and AI6's own: Claude Code runs with `--setting-sources user --strict-mcp-config`, Codex with the working directory marked an untrusted project |
-| `pinned` | the project's settings when each of the files above matches its pin and every one present has a pin; otherwise it starts as `ignore` and the reason (expected and found digests) is on the Operation's timeline (`harness`, `project-settings-ignored`) |
+| `ignore` (default) | only the user's configuration and AI6's own: Claude Code runs with `--setting-sources user --strict-mcp-config`, so no project settings, hooks, skills, subagents, commands, project `CLAUDE.md` or `.mcp.json` servers; Codex runs with the working directory marked an untrusted project |
+| `pinned` | the project's configuration while its manifest (below) has the digest `pin`; otherwise it starts as `ignore` |
 | `load` | whatever is there; a Station prints it as a weakening when it starts |
 
-`pins` keys are paths relative to the working directory; a value is `sha256:` and the hex
-digest of the file (`sha256sum`). The check runs at every start and resume. A `pinned`
+The **manifest** of a working directory is every regular file under `.claude/` and `.codex/`
+(at any depth), `.mcp.json`, and every file inside the working directory that a `command` or
+`args` entry of a hook or MCP server names: in JSON and TOML settings, and on a `command:`
+line of a skill's or subagent's front matter; `$CLAUDE_PROJECT_DIR` stands for the working
+directory. `pin` is the digest of the manifest's lines, `PATH NUL sha256:HEX LF` in path
+order. A symbolic link, a device, a pipe, a file over 1 MiB, more than 16 MiB or more than
+4096 files in all make the manifest unreadable, and the harness starts as `ignore`. Under
+`pinned`, Claude Code keeps `--strict-mcp-config` unless the manifest holds `.mcp.json`.
+
+Each `pinned` start and resume reads the manifest on the Station and records its digest on
+the Operation's timeline (`harness`): `project-settings-pinned` when it matches,
+`project-settings-ignored` with the reason when it does not or cannot be read. A `pinned`
 Operation whose harness runs on another host than its Station starts as `ignore`, since the
-Station cannot read the files there. AI6's own settings, the green ink hook (`--settings`)
-and the Station's MCP servers (`--mcp-config`), apply in every mode.
+Station cannot read the files there.
+
+What `pinned` does not cover: a command that names no path inside the working directory
+(a program found on `PATH`, a script fetched at run time), anything a pinned script itself
+reads, and changes made after the check, including by the Agent during the Session (Claude
+Code reloads a changed settings file). A SHA-1 `pin` is accepted and reported as a
+weakening. AI6's own settings, the green ink hook (`--settings`) and the Station's MCP
+servers (`--mcp-config`), apply in every mode.
 
 ## Sleepers
 

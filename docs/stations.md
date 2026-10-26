@@ -176,7 +176,7 @@ earlier version are read as they are. The mechanism is the shared
 
 A Station runs every provider library it loads with its own privileges, so it checks them
 first (bona fides). A **pin set**, `plugins.toml` in the configuration directory (or
-`ai6 serve --plugin-pins PATH`), names the libraries it accepts:
+`ai6 serve --plugin-pins PATH`, which must exist), names the libraries it accepts:
 
 ```toml
 # profile = "strict"   # optional; see below
@@ -191,12 +191,15 @@ publisher = "ed25519:..."        # or: whoever holds this key signed it
 ```
 
 `ai6 plugins pin PATH...` prints the entry that pins each AI6 provider library it is given.
-A publisher signs the library's 32-byte SHA-256 with Ed25519 and ships the 64-byte signature
-beside it as `FILE.sig`; with OpenSSL:
+A publisher signs, with Ed25519, the tag `ai6-provider-library-v1`, a NUL, the library's
+file name, a NUL and the library's 32-byte SHA-256, and ships the 64-byte signature beside
+it as `FILE.sig`. The name is part of what is signed, so a library signed for one slot does
+not load in another. With OpenSSL and a POSIX shell:
 
 ```console
-openssl dgst -sha256 -binary ai6_agent_codex.dll > digest.bin
-openssl pkeyutl -sign -rawin -inkey publisher.pem -in digest.bin -out ai6_agent_codex.dll.sig
+{ printf 'ai6-provider-library-v1\0%s\0' ai6_agent_codex.dll
+  openssl dgst -sha256 -binary ai6_agent_codex.dll; } > message.bin
+openssl pkeyutl -sign -rawin -inkey publisher.pem -in message.bin -out ai6_agent_codex.dll.sig
 openssl pkey -in publisher.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n'
 ```
 
@@ -215,5 +218,16 @@ The **profile** (`--plugin-profile`, else the pin set's `profile`) decides what 
 
 Every weakening is printed when the Station starts, listed by `GET /internal/plugins` with
 each library's digest and verdict, and published in the Station's check-in
-(`plugins_weakened`). Only the libraries that declare an AI6 provider kind are checked;
-the field runner (`ai6 runner serve`) and `ai6 theater provision` scan under `report`.
+(`plugins_weakened`). Only the libraries that declare an AI6 provider kind are checked.
+
+Every command that loads providers checks them the same way and takes the same
+`--plugin-pins` and `--plugin-profile`, with the same defaults: the field runner
+(`ai6 runner serve`, whose verified copies go under its own state directory),
+`ai6 theater provision`, and Universal Exports for its access providers
+(`AI6_EXPORTS_PLUGIN_PINS`, `AI6_EXPORTS_PLUGIN_PROFILE`). Each prints what it refused and
+every weakening when it starts.
+
+What a pin covers is the library file. A library that imports another non-system library
+gets it from wherever the operating system's loader finds it; on Windows that includes
+the directory of the executable, the current directory and `PATH`, which no pin covers.
+AI6's own providers import only system libraries.

@@ -29,32 +29,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Brief provenance (bona fides): every brief carries where it came from (`Provenance`:
   `origin` `operator`, `source`, `sleeper`, `proposal` or `registry_drop`, the
   authenticated `principal` and `reference`, `received_by`, `received_at` and a
-  `sha256:` digest of its title and body), set where it enters and kept by the Registry
-  apart from the record, so a brief file or row cannot claim one. A brief found in the
-  queue with none is a `registry_drop`: accepted, its Sessions exposed
-  (`brief:registry_drop`), and never reported to a Source. The Mission record, the
+  `sha256:` digest of the whole record, `record_digest`), set where it enters and kept by
+  the Registry apart from the record, so a brief file or row cannot claim one, a brief
+  edited afterwards loses it, and a finished brief's provenance is spent so the same record
+  queued again has none. A brief found in the queue with none is a `registry_drop`:
+  accepted, its Sessions exposed (`brief:registry_drop`), and never reported to a Source; a
+  Source is reported to only for its own item in its own Operation. The Mission record, the
   gateway's Mission detail and Moneypenny show the origin. `submit_brief` stores it,
   `ingest_source_item`, `fire_sleeper` and `promote_mission_proposal` take the receiving
   Station or gateway.
 - Provider library pins and publishers (bona fides): a `plugins.toml` pin set
   (`PinSet`, `ai6 serve --plugin-pins`) accepts each provider library by its `sha256:` digest
   (`ai6 plugins pin PATH` prints the entry), by an Ed25519 publisher key whose signature of
-  the library's SHA-256 ships beside it as `FILE.sig`, or by both. Under the `strict`
+  `ai6-provider-library-v1`, the file name and the library's SHA-256 ships beside it as
+  `FILE.sig` (`publisher_message`), or by both. Under the `strict`
   profile, the default with a pin set, only accepted libraries load, each from a verified
   copy under the state directory, and a refusal names the expected and found digests or
   the publisher; `report`, the default without one, loads everything and lists each
   unaccepted library as a weakening; `off` checks nothing (`--plugin-profile`). Weakenings
-  are printed at start, served by `/internal/plugins` and published in the check-in.
-- Harness project settings: a harness no longer loads the hooks, permissions and MCP
-  servers its working directory carries unless the Operation allows it
+  are printed at start, served by `/internal/plugins` and published in the check-in. A
+  pin set named with `--plugin-pins` must exist. The field runner, `ai6 theater provision`
+  and Universal Exports (`AI6_EXPORTS_PLUGIN_PINS`, `AI6_EXPORTS_PLUGIN_PROFILE`) check
+  their provider libraries the same way.
+- Harness project settings: a harness no longer loads the configuration its working
+  directory carries (settings, hooks, skills, subagents, commands, project `CLAUDE.md`, MCP
+  servers, Codex's `.codex/` layer) unless the Operation allows it
   (`[operation.ID.harness] project_settings = "ignore" | "pinned" | "load"`, default
   `ignore`). Claude Code runs with `--setting-sources user --strict-mcp-config` and Codex
   with the working directory marked an untrusted project; AI6's own green ink hook and MCP
-  servers apply either way. `pinned` loads them only while `.claude/settings.json`,
-  `.claude/settings.local.json`, `.mcp.json` and the `.codex/` files match the Operation's
-  `pins`, and otherwise starts as `ignore` with the reason on the timeline; `load` is a
-  reported weakening. `AgentStart` and `AgentResume` carry the decision
-  (`project_settings`).
+  servers apply either way. `pinned` loads it only while its manifest (every file under
+  `.claude/` and `.codex/`, `.mcp.json`, and the scripts their hooks and MCP servers name,
+  read without following links) has the Operation's `pin` (`ai6 harness pin DIR`), and
+  otherwise starts as `ignore`; the manifest digest is recorded on the timeline either
+  way. `load` and a SHA-1 pin are reported weakenings. `AgentStart` and `AgentResume`
+  carry the decision (`project_settings`, `project_mcp`).
 
 - Account pools: provider accounts shared by every Station and balanced by the quota they
   have left. `loadouts.toml` declares `[pool.<id>]` (handler, `operations` globs, strategy

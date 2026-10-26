@@ -241,12 +241,16 @@ brief record (in a directory Registry, `provenance/KEY.json`; in a database, a c
 | `registry_drop` | nobody | | the Station that took the brief |
 
 Each also carries `received_by`, `received_at` (Unix seconds) and `digest`, the
-`sha256:HEX` of the brief's title and body; a recorded provenance whose digest no longer
-matches the brief is dropped. A brief found in the queue with none, written there by hand or
+`sha256:HEX` of the whole brief record as stored (canonical JSON without the provenance): a
+brief changed in any way after it was accepted, its Operation, assignment, Stations, link,
+data or text, loses its provenance. When a brief finishes, its provenance is spent: it moves
+beside the outcome (`STATE/KEY.provenance`, or the `finished_provenance` column), where only
+the CX report reads it, so the same record queued again is a `registry_drop`. A brief found in the queue with none, written there by hand or
 by an integration that did not go through AI6, is accepted as `registry_drop`: its Sessions
 start exposed (`brief:registry_drop`, see [Medical](medical.md#exposure)), and a finished
 brief named `source:PROVIDER` is reported to that Source only when it has a `source`
-provenance for it. The Mission record, the gateway's Mission detail (`brief.provenance`) and
+provenance for it naming that provider and item, and its Operation is the one its Source
+data names. The Mission record, the gateway's Mission detail (`brief.provenance`) and
 Moneypenny's Mission brief page show the origin. Anything that can write the Registry's own
 records can still forge them: the queue is the integration point this separates.
 

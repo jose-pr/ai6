@@ -71,7 +71,8 @@ User access requires a Directory and an authorization policy. Login can use a
 Guatiao Authenticator or an identity asserted by the trusted reverse proxy.
 Providers are the loadable libraries of
 [`coqui-access`](https://github.com/Boriken-Dev/coqui-access) (`--plugin-path` names the
-directory they are in). Provider config is read from a JSON object file and validated
+directory they are in), checked against a pin set as a Station checks its own
+(`--plugin-pins`, `--plugin-profile`). Provider config is read from a JSON object file and validated
 against each provider's Guatiao schema. For example, local accounts use the same config
 for both provider kinds. Pass its path with `--authenticator-config` and
 `--directory-config`; select the provider IDs (`coqui_access_local`) with `--authenticator`
