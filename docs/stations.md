@@ -229,6 +229,24 @@ heads-of-station = ["007", "008"]
 Every call checks again that its Mission is still a live round of this Station; a Session of
 any other role, or a round that is over, is refused.
 
+### Safe-house hygiene: fixed limits
+
+Kept safe houses (the working directories of Missions that held work when they ended) grow
+with their build caches. `tidy_safe_house { mission, action }` tidies them within limits the
+Station enforces in its own code, whatever the prompt or the Operation's policy says:
+
+| What | When |
+| --- | --- |
+| Read anything `station_report` shows | always |
+| `caches`: remove the cache directories (`target`, `node_modules`, `.dart_tool`; `ai6 serve --safe-house-cache NAME` replaces the list) | unattended, for a Mission that is over whose safe house has been left alone for 7 days (`--safe-house-cache-age SECS`) |
+| `remove` a safe house whose work all exists elsewhere (every commit on a remote, nothing uncommitted) | unattended, for a Mission that is over |
+| `remove` a safe house holding work that exists nowhere else, or whose provider cannot tell (the `copy` provider) | green ink, kind `delete`: the round waits for a person, then calls again; the approval is spent on that one removal |
+| Change configuration, the roster or policy; read a secret; act on another Station; touch the safe house of a Mission that is not over | never: the tools cannot, or refuse |
+
+A green ink request for a removal is made even when the Operation's green ink policy would let
+the Agent delete unattended. Every removal is audited (`head_of_station.caches_removed`,
+`head_of_station.removed`) with the Station as its resource.
+
 ## Station identity
 
 With the `station-tls` feature, each Station has a persistent certificate:
