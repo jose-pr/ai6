@@ -1311,10 +1311,21 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
 pub mod ai6::directorates::q::terminal
 pub use ai6::directorates::q::terminal::guatiao
+pub enum ai6::directorates::q::terminal::StreamLine
+pub ai6::directorates::q::terminal::StreamLine::Json
+pub ai6::directorates::q::terminal::StreamLine::Json::text: alloc::vec::Vec<u8>
+pub ai6::directorates::q::terminal::StreamLine::Json::value: serde_json::value::Value
+pub ai6::directorates::q::terminal::StreamLine::Text(alloc::string::String)
 pub struct ai6::directorates::q::terminal::ExitInfo
 pub ai6::directorates::q::terminal::ExitInfo::code: core::option::Option<i64>
 pub ai6::directorates::q::terminal::ExitInfo::running: bool
 pub ai6::directorates::q::terminal::ExitInfo::signal: core::option::Option<i64>
+pub struct ai6::directorates::q::terminal::JsonLines
+impl ai6::directorates::q::terminal::JsonLines
+pub fn ai6::directorates::q::terminal::JsonLines::finish(&mut self) -> core::option::Option<ai6::directorates::q::terminal::StreamLine>
+pub fn ai6::directorates::q::terminal::JsonLines::new() -> Self
+pub fn ai6::directorates::q::terminal::JsonLines::next_line(&mut self) -> core::option::Option<ai6::directorates::q::terminal::StreamLine>
+pub fn ai6::directorates::q::terminal::JsonLines::push(&mut self, &[u8])
 pub struct ai6::directorates::q::terminal::Spec
 pub ai6::directorates::q::terminal::Spec::argv: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::q::terminal::Spec::cols: u16
@@ -1327,7 +1338,9 @@ pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::box
 impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub const ai6::directorates::q::terminal::MAX_JSON_LINE: usize
 pub const ai6::directorates::q::terminal::READ_TIMED_OUT: i64
+pub const ai6::directorates::q::terminal::STREAM_COLS: u16
 pub trait ai6::directorates::q::terminal::AgentTerminal: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::terminal::AgentTerminal::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::AgentTerminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
@@ -1361,6 +1374,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal:
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::read(&self, &mut [u8], i64) -> core::result::Result<i64, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::strip_controls(&[u8]) -> alloc::vec::Vec<u8>
 pub mod ai6::directorates::q::transport
 pub mod ai6::directorates::q::transport::contract
 pub struct ai6::directorates::q::transport::contract::Host<'a>
@@ -3660,6 +3674,7 @@ pub ai6::directorates::section_00::agent::AgentResume::answer_only: bool
 pub ai6::directorates::section_00::agent::AgentResume::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
 pub ai6::directorates::section_00::agent::AgentResume::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentResume::initial_context: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::directorates::section_00::agent::AgentResume::message: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::mission_id: ai6::directorates::m::identity::MissionId
@@ -4584,6 +4599,7 @@ pub ai6::AgentResume::answer_only: bool
 pub ai6::AgentResume::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
 pub ai6::AgentResume::effort: core::option::Option<alloc::string::String>
 pub ai6::AgentResume::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::AgentResume::initial_context: alloc::vec::Vec<alloc::string::String>
 pub ai6::AgentResume::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::AgentResume::message: core::option::Option<alloc::string::String>
 pub ai6::AgentResume::mission_id: ai6::directorates::m::identity::MissionId
