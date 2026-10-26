@@ -389,6 +389,7 @@ pub ai6::directorates::m::mission::Mission::role_id: core::option::Option<alloc:
 pub ai6::directorates::m::mission::Mission::safe_house: core::option::Option<ai6::directorates::q::safehouse::SafeHouseReport>
 pub ai6::directorates::m::mission::Mission::session_ids: alloc::vec::Vec<ai6::directorates::m::identity::SessionId>
 pub ai6::directorates::m::mission::Mission::state: ai6::directorates::m::mission::MissionState
+pub ai6::directorates::m::mission::Mission::waiting: core::option::Option<alloc::string::String>
 pub struct ai6::directorates::m::mission::MissionStore
 impl ai6::directorates::m::mission::MissionStore
 pub fn ai6::directorates::m::mission::MissionStore::attach_session(&mut self, &str, ai6::directorates::m::identity::SessionId) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -407,6 +408,7 @@ pub fn ai6::directorates::m::mission::MissionStore::requeue_for(&mut self, &str,
 pub fn ai6::directorates::m::mission::MissionStore::retry(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::directorates::q::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::set_waiting(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<bool, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::transition(&mut self, &str, ai6::directorates::m::mission::MissionState) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub mod ai6::directorates::m::placement
 #[non_exhaustive] pub enum ai6::directorates::m::placement::ExecutionMode
@@ -518,7 +520,7 @@ pub fn ai6::directorates::m::promotion::PromotionDefinition::resolve(&self) -> c
 pub ai6::directorates::m::promotion::PromotionPolicy::double_o: ai6::directorates::m::promotion::PromotionStep
 pub ai6::directorates::m::promotion::PromotionPolicy::field: ai6::directorates::m::promotion::PromotionStep
 impl ai6::directorates::m::promotion::PromotionPolicy
-pub fn ai6::directorates::m::promotion::PromotionPolicy::due(&self, &str, &str, &ai6::directorates::registry::agent_records::AgentTally, &ai6::directorates::registry::agent_records::AgentTally, f64) -> core::option::Option<ai6::directorates::m::promotion::Promotion>
+pub fn ai6::directorates::m::promotion::PromotionPolicy::due(&self, &str, &str, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<ai6::directorates::m::promotion::Promotion>
 impl core::default::Default for ai6::directorates::m::promotion::PromotionPolicy
 pub fn ai6::directorates::m::promotion::PromotionPolicy::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::promotion::PromotionStep
@@ -528,7 +530,7 @@ pub ai6::directorates::m::promotion::PromotionStep::quiet_days: u64
 pub ai6::directorates::m::promotion::PromotionStep::quiet_on: alloc::vec::Vec<ai6::directorates::registry::agent_records::AgentOutcome>
 impl ai6::directorates::m::promotion::PromotionStep
 pub fn ai6::directorates::m::promotion::PromotionStep::after(u64) -> Self
-pub fn ai6::directorates::m::promotion::PromotionStep::shortfall(&self, &ai6::directorates::registry::agent_records::AgentTally, &ai6::directorates::registry::agent_records::AgentTally, f64) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::promotion::PromotionStep::shortfall(&self, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<alloc::string::String>
 pub const ai6::directorates::m::promotion::CLEARANCE_KIND: &str
 pub const ai6::directorates::m::promotion::DEFAULT_00_MAX_FAILURE_RATE: f64
 pub const ai6::directorates::m::promotion::DEFAULT_00_MISSIONS: u64
@@ -1838,14 +1840,15 @@ pub ai6::directorates::registry::agent_records::AgentOutcome::BudgetStop
 pub ai6::directorates::registry::agent_records::AgentOutcome::Done
 pub ai6::directorates::registry::agent_records::AgentOutcome::Failed
 pub ai6::directorates::registry::agent_records::AgentOutcome::GreenInkRejected
+pub ai6::directorates::registry::agent_records::AgentOutcome::Lost
 pub ai6::directorates::registry::agent_records::AgentOutcome::Quarantined
 pub ai6::directorates::registry::agent_records::AgentOutcome::Stalled
 impl ai6::directorates::registry::agent_records::AgentOutcome
-pub const ai6::directorates::registry::agent_records::AgentOutcome::ALL: [Self; 8]
+pub const ai6::directorates::registry::agent_records::AgentOutcome::ALL: [Self; 9]
 pub fn ai6::directorates::registry::agent_records::AgentOutcome::as_str(self) -> &'static str
 pub fn ai6::directorates::registry::agent_records::AgentOutcome::from_name(&str) -> core::option::Option<Self>
 pub fn ai6::directorates::registry::agent_records::AgentOutcome::is_incident(self) -> bool
-pub fn ai6::directorates::registry::agent_records::AgentOutcome::is_mission_state(self) -> bool
+pub fn ai6::directorates::registry::agent_records::AgentOutcome::is_session_outcome(self) -> bool
 #[non_exhaustive] pub struct ai6::directorates::registry::agent_records::AgentOutcomeReport
 pub ai6::directorates::registry::agent_records::AgentOutcomeReport::agent: alloc::string::String
 pub ai6::directorates::registry::agent_records::AgentOutcomeReport::at: f64
@@ -1860,15 +1863,11 @@ pub fn ai6::directorates::registry::agent_records::AgentOutcomeReport::new(impl 
 pub fn ai6::directorates::registry::agent_records::AgentOutcomeReport::with_model(self, core::option::Option<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::agent_records::AgentRecord
 pub ai6::directorates::registry::agent_records::AgentRecord::agent: alloc::string::String
-pub ai6::directorates::registry::agent_records::AgentRecord::by_clearance: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::AgentTally>
-pub ai6::directorates::registry::agent_records::AgentRecord::by_operation: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::AgentTally>
+pub ai6::directorates::registry::agent_records::AgentRecord::by_operation: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::OperationRecord>
 pub ai6::directorates::registry::agent_records::AgentRecord::counted: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::registry::agent_records::AgentRecord::last_mission_at: core::option::Option<f64>
-pub ai6::directorates::registry::agent_records::AgentRecord::model_history: alloc::vec::Vec<ai6::directorates::registry::agent_records::ModelTenure>
 impl ai6::directorates::registry::agent_records::AgentRecord
 pub fn ai6::directorates::registry::agent_records::AgentRecord::count(&mut self, &ai6::directorates::registry::agent_records::AgentOutcomeReport) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::agent_records::AgentRecord::current_model(&self) -> core::option::Option<&ai6::directorates::registry::agent_records::ModelTenure>
-pub fn ai6::directorates::registry::agent_records::AgentRecord::in_operation(&self, &str) -> ai6::directorates::registry::agent_records::AgentTally
+pub fn ai6::directorates::registry::agent_records::AgentRecord::in_operation(&self, &str) -> ai6::directorates::registry::agent_records::OperationRecord
 pub fn ai6::directorates::registry::agent_records::AgentRecord::new(impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::agent_records::AgentTally
 pub ai6::directorates::registry::agent_records::AgentTally::abandoned: u64
@@ -1878,6 +1877,7 @@ pub ai6::directorates::registry::agent_records::AgentTally::done: u64
 pub ai6::directorates::registry::agent_records::AgentTally::failed: u64
 pub ai6::directorates::registry::agent_records::AgentTally::green_ink_rejected: u64
 pub ai6::directorates::registry::agent_records::AgentTally::last: alloc::collections::btree::map::BTreeMap<ai6::directorates::registry::agent_records::AgentOutcome, f64>
+pub ai6::directorates::registry::agent_records::AgentTally::lost: u64
 pub ai6::directorates::registry::agent_records::AgentTally::quarantined: u64
 pub ai6::directorates::registry::agent_records::AgentTally::stalled: u64
 impl ai6::directorates::registry::agent_records::AgentTally
@@ -1888,7 +1888,15 @@ pub fn ai6::directorates::registry::agent_records::AgentTally::latest(&self, &[a
 #[non_exhaustive] pub struct ai6::directorates::registry::agent_records::ModelTenure
 pub ai6::directorates::registry::agent_records::ModelTenure::from: f64
 pub ai6::directorates::registry::agent_records::ModelTenure::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::agent_records::ModelTenure::tally: ai6::directorates::registry::agent_records::AgentTally
 pub ai6::directorates::registry::agent_records::ModelTenure::to: core::option::Option<f64>
+#[non_exhaustive] pub struct ai6::directorates::registry::agent_records::OperationRecord
+pub ai6::directorates::registry::agent_records::OperationRecord::by_clearance: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::AgentTally>
+pub ai6::directorates::registry::agent_records::OperationRecord::last_mission_at: core::option::Option<f64>
+pub ai6::directorates::registry::agent_records::OperationRecord::model_history: alloc::vec::Vec<ai6::directorates::registry::agent_records::ModelTenure>
+pub ai6::directorates::registry::agent_records::OperationRecord::tally: ai6::directorates::registry::agent_records::AgentTally
+impl ai6::directorates::registry::agent_records::OperationRecord
+pub fn ai6::directorates::registry::agent_records::OperationRecord::tally_of_model(&self, core::option::Option<&str>) -> ai6::directorates::registry::agent_records::AgentTally
 pub const ai6::directorates::registry::agent_records::NO_OPERATION: &str
 pub trait ai6::directorates::registry::agent_records::AgentRecordStore
 pub fn ai6::directorates::registry::agent_records::AgentRecordStore::agent_record(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::agent_records::AgentRecord>>
@@ -2234,16 +2242,22 @@ pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grant(&se
 pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::backend::ClearanceStore::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::ClearanceStore::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::backend::ClearanceStore::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::ClearanceStore::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub trait ai6::directorates::registry::backend::QuarantineStore
 pub fn ai6::directorates::registry::backend::QuarantineStore::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::QuarantineStore::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -2687,14 +2701,18 @@ pub mod ai6::directorates::registry::clearance
 pub ai6::directorates::registry::clearance::ClearanceGrant::agent: alloc::string::String
 pub ai6::directorates::registry::clearance::ClearanceGrant::approval: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::clearance::ClearanceGrant::at: f64
+pub ai6::directorates::registry::clearance::ClearanceGrant::base: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::clearance::ClearanceGrant::clearance: alloc::string::String
 pub ai6::directorates::registry::clearance::ClearanceGrant::expires_at: core::option::Option<f64>
+pub ai6::directorates::registry::clearance::ClearanceGrant::model: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::clearance::ClearanceGrant::operation: alloc::string::String
 pub ai6::directorates::registry::clearance::ClearanceGrant::reason: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::clearance::ClearanceGrant::signer: alloc::string::String
 impl ai6::directorates::registry::clearance::ClearanceGrant
+pub fn ai6::directorates::registry::clearance::ClearanceGrant::applies_to(&self, core::option::Option<&str>, &str) -> bool
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::because(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::expiring(self, f64) -> Self
+pub fn ai6::directorates::registry::clearance::ClearanceGrant::for_occupant(self, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::is_live(&self, f64) -> bool
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::lower(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::raise(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
@@ -2705,16 +2723,22 @@ pub fn ai6::directorates::registry::clearance::ClearanceStore::clearance_grant(&
 pub fn ai6::directorates::registry::clearance::ClearanceStore::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::clearance::ClearanceStore::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::clearance::ClearanceStore::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::clearance::ClearanceStore::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::clearance::ClearanceStore::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub mod ai6::directorates::registry::quarantine
 #[non_exhaustive] pub struct ai6::directorates::registry::quarantine::Quarantine
 pub ai6::directorates::registry::quarantine::Quarantine::agent: alloc::string::String
@@ -3005,6 +3029,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &st
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -3166,6 +3192,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, 
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -3862,14 +3890,15 @@ pub ai6::AgentOutcome::BudgetStop
 pub ai6::AgentOutcome::Done
 pub ai6::AgentOutcome::Failed
 pub ai6::AgentOutcome::GreenInkRejected
+pub ai6::AgentOutcome::Lost
 pub ai6::AgentOutcome::Quarantined
 pub ai6::AgentOutcome::Stalled
 impl ai6::directorates::registry::agent_records::AgentOutcome
-pub const ai6::directorates::registry::agent_records::AgentOutcome::ALL: [Self; 8]
+pub const ai6::directorates::registry::agent_records::AgentOutcome::ALL: [Self; 9]
 pub fn ai6::directorates::registry::agent_records::AgentOutcome::as_str(self) -> &'static str
 pub fn ai6::directorates::registry::agent_records::AgentOutcome::from_name(&str) -> core::option::Option<Self>
 pub fn ai6::directorates::registry::agent_records::AgentOutcome::is_incident(self) -> bool
-pub fn ai6::directorates::registry::agent_records::AgentOutcome::is_mission_state(self) -> bool
+pub fn ai6::directorates::registry::agent_records::AgentOutcome::is_session_outcome(self) -> bool
 pub enum ai6::ApprovalStatus
 pub ai6::ApprovalStatus::Decided(ai6::directorates::registry::approvals::Approval)
 pub ai6::ApprovalStatus::Pending(ai6::directorates::registry::approvals::ApprovalRequest)
@@ -4349,15 +4378,11 @@ pub fn ai6::directorates::m::roster::AgentQuery<'a>::role(self, core::option::Op
 pub fn ai6::directorates::m::roster::AgentQuery<'a>::tags(self, &'a [alloc::string::String]) -> Self
 #[non_exhaustive] pub struct ai6::AgentRecord
 pub ai6::AgentRecord::agent: alloc::string::String
-pub ai6::AgentRecord::by_clearance: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::AgentTally>
-pub ai6::AgentRecord::by_operation: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::AgentTally>
+pub ai6::AgentRecord::by_operation: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::OperationRecord>
 pub ai6::AgentRecord::counted: alloc::vec::Vec<alloc::string::String>
-pub ai6::AgentRecord::last_mission_at: core::option::Option<f64>
-pub ai6::AgentRecord::model_history: alloc::vec::Vec<ai6::directorates::registry::agent_records::ModelTenure>
 impl ai6::directorates::registry::agent_records::AgentRecord
 pub fn ai6::directorates::registry::agent_records::AgentRecord::count(&mut self, &ai6::directorates::registry::agent_records::AgentOutcomeReport) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::agent_records::AgentRecord::current_model(&self) -> core::option::Option<&ai6::directorates::registry::agent_records::ModelTenure>
-pub fn ai6::directorates::registry::agent_records::AgentRecord::in_operation(&self, &str) -> ai6::directorates::registry::agent_records::AgentTally
+pub fn ai6::directorates::registry::agent_records::AgentRecord::in_operation(&self, &str) -> ai6::directorates::registry::agent_records::OperationRecord
 pub fn ai6::directorates::registry::agent_records::AgentRecord::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::AgentResume
 pub ai6::AgentResume::answer_only: bool
@@ -4400,6 +4425,7 @@ pub ai6::AgentTally::done: u64
 pub ai6::AgentTally::failed: u64
 pub ai6::AgentTally::green_ink_rejected: u64
 pub ai6::AgentTally::last: alloc::collections::btree::map::BTreeMap<ai6::directorates::registry::agent_records::AgentOutcome, f64>
+pub ai6::AgentTally::lost: u64
 pub ai6::AgentTally::quarantined: u64
 pub ai6::AgentTally::stalled: u64
 impl ai6::directorates::registry::agent_records::AgentTally
@@ -4700,14 +4726,18 @@ pub fn ai6::directorates::registry::vetting::Clearance::kinds_for(&self, &ai6::d
 pub ai6::ClearanceGrant::agent: alloc::string::String
 pub ai6::ClearanceGrant::approval: core::option::Option<alloc::string::String>
 pub ai6::ClearanceGrant::at: f64
+pub ai6::ClearanceGrant::base: core::option::Option<alloc::string::String>
 pub ai6::ClearanceGrant::clearance: alloc::string::String
 pub ai6::ClearanceGrant::expires_at: core::option::Option<f64>
+pub ai6::ClearanceGrant::model: core::option::Option<alloc::string::String>
 pub ai6::ClearanceGrant::operation: alloc::string::String
 pub ai6::ClearanceGrant::reason: core::option::Option<alloc::string::String>
 pub ai6::ClearanceGrant::signer: alloc::string::String
 impl ai6::directorates::registry::clearance::ClearanceGrant
+pub fn ai6::directorates::registry::clearance::ClearanceGrant::applies_to(&self, core::option::Option<&str>, &str) -> bool
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::because(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::expiring(self, f64) -> Self
+pub fn ai6::directorates::registry::clearance::ClearanceGrant::for_occupant(self, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::is_live(&self, f64) -> bool
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::lower(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::raise(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
@@ -4868,6 +4898,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, 
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -5146,6 +5178,7 @@ pub ai6::MissionUsage::total: ai6::directorates::medical::usage::UsageTotals
 #[non_exhaustive] pub struct ai6::ModelTenure
 pub ai6::ModelTenure::from: f64
 pub ai6::ModelTenure::model: core::option::Option<alloc::string::String>
+pub ai6::ModelTenure::tally: ai6::directorates::registry::agent_records::AgentTally
 pub ai6::ModelTenure::to: core::option::Option<f64>
 pub struct ai6::NewSession
 impl ai6::directorates::registry::sessions::NewSession
@@ -5203,6 +5236,13 @@ pub ai6::OperationPolicy::theater: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::placement::OperationPolicy
 pub fn ai6::directorates::m::placement::OperationPolicy::from_roster(&ai6::directorates::m::roster::Roster, &str) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::placement::OperationPolicy::new(impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::OperationRecord
+pub ai6::OperationRecord::by_clearance: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::AgentTally>
+pub ai6::OperationRecord::last_mission_at: core::option::Option<f64>
+pub ai6::OperationRecord::model_history: alloc::vec::Vec<ai6::directorates::registry::agent_records::ModelTenure>
+pub ai6::OperationRecord::tally: ai6::directorates::registry::agent_records::AgentTally
+impl ai6::directorates::registry::agent_records::OperationRecord
+pub fn ai6::directorates::registry::agent_records::OperationRecord::tally_of_model(&self, core::option::Option<&str>) -> ai6::directorates::registry::agent_records::AgentTally
 pub struct ai6::Output
 pub ai6::Output::code: core::option::Option<i64>
 pub ai6::Output::signal: core::option::Option<i64>
@@ -5281,7 +5321,7 @@ pub fn ai6::directorates::m::promotion::PromotionDefinition::resolve(&self) -> c
 pub ai6::PromotionPolicy::double_o: ai6::directorates::m::promotion::PromotionStep
 pub ai6::PromotionPolicy::field: ai6::directorates::m::promotion::PromotionStep
 impl ai6::directorates::m::promotion::PromotionPolicy
-pub fn ai6::directorates::m::promotion::PromotionPolicy::due(&self, &str, &str, &ai6::directorates::registry::agent_records::AgentTally, &ai6::directorates::registry::agent_records::AgentTally, f64) -> core::option::Option<ai6::directorates::m::promotion::Promotion>
+pub fn ai6::directorates::m::promotion::PromotionPolicy::due(&self, &str, &str, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<ai6::directorates::m::promotion::Promotion>
 impl core::default::Default for ai6::directorates::m::promotion::PromotionPolicy
 pub fn ai6::directorates::m::promotion::PromotionPolicy::default() -> Self
 #[non_exhaustive] pub struct ai6::PromotionStep
@@ -5291,7 +5331,7 @@ pub ai6::PromotionStep::quiet_days: u64
 pub ai6::PromotionStep::quiet_on: alloc::vec::Vec<ai6::directorates::registry::agent_records::AgentOutcome>
 impl ai6::directorates::m::promotion::PromotionStep
 pub fn ai6::directorates::m::promotion::PromotionStep::after(u64) -> Self
-pub fn ai6::directorates::m::promotion::PromotionStep::shortfall(&self, &ai6::directorates::registry::agent_records::AgentTally, &ai6::directorates::registry::agent_records::AgentTally, f64) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::promotion::PromotionStep::shortfall(&self, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::Provenance
 pub ai6::Provenance::digest: alloc::string::String
 pub ai6::Provenance::item_url: core::option::Option<alloc::string::String>
@@ -5774,6 +5814,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &st
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -6501,16 +6543,22 @@ pub fn ai6::ClearanceStore::clearance_grant(&self, &str, &str) -> core::io::erro
 pub fn ai6::ClearanceStore::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::ClearanceStore::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::ClearanceStore::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::ClearanceStore::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::ClearanceStore::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub trait ai6::ConfigSource: core::marker::Send + core::marker::Sync
 pub fn ai6::ConfigSource::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::ConfigSource::definitions(&self, ai6::directorates::m::config::ConfigRecord) -> core::result::Result<ai6::directorates::m::config::ConfigDefinitions, ai6::directorates::m::roster::RosterError>
