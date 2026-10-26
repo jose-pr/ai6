@@ -3200,9 +3200,15 @@ for a conversation whose harness is still closing waits up to ten seconds for it
 rejected. A harness idle for ten minutes is closed; the next job resumes its provider Session
 (the job's `session_id`, else the one the desk remembers) with the Agent's context and the
 job's `context` again as `AgentResume::initial_context`, or starts afresh with them and the
-job's `recap` when that fails. Handler events `text`,
-`tool`, `completed`, `failed` and `limit` are reported; a closed harness reports `closed` with
-the reason (`idle`, `the Station is stopping`, …). When Universal Exports refuses a job's
+job's `recap` when that fails: when `resume` errs, or when the resumed harness fails (a
+`failed` event or a read error) before its `session_id()` is known. Either failure is logged
+(`ai6: assistant conversation <digest>: resuming provider Session <id> failed, …`) and not
+reported to the conversation. Handler events `text`, `tool`, `completed`, `failed` and
+`limit` are reported; `failed` and `limit` close the harness at once, freeing its slot, and
+a harness busy answering that reports nothing for ten minutes is closed after a `failed`
+event saying so. A closed harness reports `closed` with the reason (`idle`, `the harness
+stopped`, `the Station is stopping`, …). Its directory is removed after `close`, tried again
+for up to 2 s while Windows still holds it. When Universal Exports refuses a job's
 `accepted` report with 403, 404 or 409 (the job moved to another Station or was given up), the
 desk closes the harness it started for that conversation. An assistant Session is not a Mission: no
 Operation, safe house, Cable endpoint, board entry or usage ledger record.

@@ -6,7 +6,11 @@
 //! carries) in [`AssistantMode`]: no built-in tool and exactly one MCP server, Universal
 //! Exports' endpoint, reached with the job's token. A running harness takes the next message
 //! as it is; one idle for [`IDLE`] is closed, and the next message resumes its provider
-//! Session. What the harness says is reported back as [`AssistantReport`]s.
+//! Session. What the harness says is reported back as [`AssistantReport`]s. A harness that
+//! fails or exits is reported `failed`, with its handler's reason, and closed at once, which
+//! frees its slot; so is one that writes nothing for [`IDLE`] while answering. A resume that
+//! fails, when asked or before the resumed harness confirms its Session, goes to the
+//! Station's log and the conversation starts afresh with its recap.
 //!
 //! An assistant Session is not a Mission: it has no Operation, no safe house and no Cable
 //! endpoint, and is never on the board. It works in a directory of its own, named for its
@@ -57,6 +61,8 @@ const REPORT_QUEUE: usize = 256;
 const STOP_CHECK: Duration = Duration::from_millis(250);
 /// Conversations whose provider Session the desk remembers for a resume.
 const MAX_KNOWN: usize = 1_024;
+/// How long removing a closed harness's working directory is tried again.
+const REMOVE_RETRY: Duration = Duration::from_secs(2);
 
 /// A harness, shared by the desk (to send it messages) and its pump (to read it).
 type SharedSession = Arc<Mutex<Object<dyn AgentSession>>>;
@@ -325,18 +331,40 @@ impl Desk {
                 initial_context,
             });
         let harness = self.harness.clone();
+        let conversation = job.conversation_id.clone();
         let started = tokio::task::spawn_blocking(move || {
-            // A provider Session that cannot be resumed (its transcript gone) starts afresh.
-            match resume.map(|resume| harness.resume(&handler, resume)) {
-                Some(Ok(session)) => Ok(session),
-                _ => harness.start(&handler, start),
+            let Some(resume) = resume else {
+                return harness
+                    .start(&handler, start)
+                    .map(|session| (session, None));
+            };
+            let resumed = resume.session_id.as_str().to_owned();
+            match harness.resume(&handler, resume) {
+                // A resumed harness can still fail before it confirms the Session (Claude Code
+                // reads the message first): the pump then starts afresh with `start`.
+                Ok(session) => Ok((
+                    session,
+                    Some(Fallback {
+                        harness,
+                        handler,
+                        start,
+                        resumed,
+                    }),
+                )),
+                // A provider Session that cannot be resumed (its transcript gone) starts afresh.
+                Err(error) => {
+                    report_resume_failure(&conversation, &resumed, &error);
+                    harness
+                        .start(&handler, start)
+                        .map(|session| (session, None))
+                }
             }
         })
         .await
         .map_err(|error| error.to_string())
         .and_then(|started| started);
-        let session = match started {
-            Ok(session) => session,
+        let (session, fallback) = match started {
+            Ok(started) => started,
             Err(error) => {
                 remove_area(&area);
                 return Err(format!("the assistant harness did not start: {error}"));
@@ -371,6 +399,7 @@ impl Desk {
             live: self.live.clone(),
             known: self.known.clone(),
             stopping: state.stopping.clone(),
+            fallback,
         };
         std::thread::Builder::new()
             .name("ai6-assistant".to_owned())
@@ -454,11 +483,24 @@ struct Pump {
     live: Arc<Mutex<BTreeMap<String, Live>>>,
     known: Arc<Mutex<BTreeMap<String, String>>>,
     stopping: Arc<AtomicBool>,
+    /// For a resumed harness, how to start afresh should it fail before confirming the
+    /// provider Session.
+    fallback: Option<Fallback>,
+}
+
+/// A fresh start for a conversation whose harness was resumed.
+struct Fallback {
+    harness: Arc<dyn Harness>,
+    handler: String,
+    start: AgentStart,
+    /// The provider Session the harness was asked to resume.
+    resumed: String,
 }
 
 impl Pump {
-    fn run(self) {
+    fn run(mut self) {
         let mut session_id = None;
+        let mut heard = Instant::now();
         let reason = loop {
             if self.flags.stop.load(Ordering::Acquire) {
                 break None;
@@ -478,8 +520,32 @@ impl Pump {
                 }
                 Err(_) => break Some("assistant Session lock failed".to_owned()),
             };
+            // A resumed harness that fails before confirming its Session never had it.
+            let failure = match &read {
+                Ok(Some(event)) if event.kind == "failed" => {
+                    Some(event.text.clone().unwrap_or_default())
+                }
+                Err(error) => Some(error.to_string()),
+                _ => None,
+            };
+            if let Some(failure) = failure
+                && session_id.is_none()
+                && let Some(fallback) = self.fallback.take()
+            {
+                match self.start_afresh(fallback, &failure) {
+                    Ok(()) => {
+                        heard = Instant::now();
+                        continue;
+                    }
+                    Err(error) => {
+                        self.send(None, vec![AssistantEvent::new(EVENT_FAILED, Some(error))]);
+                        break Some("the harness failed".to_owned());
+                    }
+                }
+            }
             match read {
                 Ok(Some(event)) => {
+                    heard = Instant::now();
                     let ended = matches!(event.kind.as_str(), "failed" | LIMIT_EVENT);
                     if event.kind == "completed" {
                         self.flags.busy.store(false, Ordering::Release);
@@ -495,13 +561,27 @@ impl Pump {
                     }
                 }
                 Ok(None) => {
-                    let idle = self
+                    let quiet = self
                         .flags
                         .last_active
                         .lock()
                         .is_ok_and(|last| last.elapsed() >= self.idle);
-                    if idle && !self.flags.busy.load(Ordering::Acquire) {
-                        break Some("idle".to_owned());
+                    if !self.flags.busy.load(Ordering::Acquire) {
+                        if quiet {
+                            break Some("idle".to_owned());
+                        }
+                    } else if quiet && heard.elapsed() >= self.idle {
+                        // A harness that hangs while answering would hold its slot for good.
+                        let reason = format!(
+                            "the assistant harness wrote nothing for {} seconds while \
+                             answering; it was closed",
+                            self.idle.as_secs()
+                        );
+                        self.send(
+                            session_id.as_ref(),
+                            vec![AssistantEvent::new(EVENT_FAILED, Some(reason))],
+                        );
+                        break Some("the harness stopped answering".to_owned());
                     }
                 }
                 Err(error) => {
@@ -529,6 +609,28 @@ impl Pump {
             session_id.as_ref(),
             vec![AssistantEvent::new(EVENT_CLOSED, reason)],
         );
+    }
+
+    /// Replaces a resumed harness that failed with `failure` by one started afresh (with the
+    /// conversation's recap), after closing it. The failure goes to the Station's log; `Err`
+    /// says why neither runs, for the conversation.
+    fn start_afresh(&mut self, fallback: Fallback, failure: &str) -> Result<(), String> {
+        report_resume_failure(&self.conversation_id, &fallback.resumed, failure);
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| "assistant Session lock failed".to_owned())?;
+        let _ = session.close();
+        match fallback.harness.start(&fallback.handler, fallback.start) {
+            Ok(started) => {
+                *session = started;
+                Ok(())
+            }
+            Err(error) => Err(format!(
+                "resuming the conversation's Session failed ({failure}), and starting afresh \
+                 failed too: {error}"
+            )),
+        }
     }
 
     fn remember(&self, session_id: &str) {
@@ -572,6 +674,16 @@ fn translate(event: &AgentEvent) -> Option<AssistantEvent> {
     let mut translated = AssistantEvent::new(kind, text);
     translated.tools = event.tools.clone();
     Some(translated)
+}
+
+/// Logs that the conversation's provider Session `resumed` could not be resumed and that its
+/// harness starts afresh with the conversation's recap.
+fn report_resume_failure(conversation: &str, resumed: &str, error: &str) {
+    eprintln!(
+        "ai6: assistant conversation {}: resuming provider Session {resumed} failed, so it \
+         starts afresh with its recap: {error}",
+        conversation_digest(conversation)
+    );
 }
 
 /// A file-safe name for a conversation, the same on every Station.
@@ -619,11 +731,29 @@ fn remove_area(path: &str) {
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.len() == 32 && name.bytes().all(|b| b.is_ascii_hexdigit()));
-    if made_here && let Err(error) = std::fs::remove_dir_all(path) {
-        eprintln!(
-            "ai6: assistant working directory {} not removed: {error}",
-            path.display()
-        );
+    if !made_here {
+        return;
+    }
+    // Windows refuses to remove a directory a process still has open (os error 32), which a
+    // harness's processes do for a moment after they have exited, so it is tried again.
+    let deadline = Instant::now() + REMOVE_RETRY;
+    let mut delay = Duration::from_millis(5);
+    loop {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) if Instant::now() < deadline => {
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_millis(100));
+            }
+            Err(error) => {
+                eprintln!(
+                    "ai6: assistant working directory {} not removed: {error}",
+                    path.display()
+                );
+                return;
+            }
+        }
     }
 }
 
@@ -794,17 +924,36 @@ mod tests {
         messages: Vec<String>,
     }
 
-    /// A harness that answers every message with `answer: <message>` and completes.
+    /// What a scripted harness does with a message.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Script {
+        /// Answers `answer: <message>` and completes.
+        Answers,
+        /// Exits, as its handler reports it.
+        Dies,
+        /// Never writes anything.
+        Hangs,
+    }
+
+    /// A harness that does what `script` says with every message; a resumed one does what
+    /// `resumed` says, and one that dies when resumed never confirms its Session.
     struct Scripted {
         asked: Arc<Mutex<Asked>>,
         resumable: bool,
+        script: Script,
+        resumed: Script,
     }
 
     struct ScriptedSession {
-        session_id: SessionId,
+        session_id: Option<SessionId>,
         events: Mutex<VecDeque<AgentEvent>>,
         asked: Arc<Mutex<Asked>>,
+        script: Script,
     }
+
+    /// The `failed` text a dying scripted harness reports.
+    const DIED: &str = "Claude Code exited with code 1 before completing the Session; its last \
+                        output:\nError: the stored login has expired";
 
     fn event(kind: &str, text: Option<&str>) -> AgentEvent {
         AgentEvent {
@@ -821,15 +970,24 @@ mod tests {
     impl ScriptedSession {
         fn answer(&self, message: &str) {
             let mut events = self.events.lock().unwrap();
-            events.push_back(event("system", Some("init")));
-            events.push_back(event(EVENT_TEXT, Some(&format!("answer: {message}"))));
-            events.push_back(event("completed", Some(&format!("answer: {message}"))));
+            match self.script {
+                Script::Answers => {
+                    events.push_back(event("system", Some("init")));
+                    events.push_back(event(EVENT_TEXT, Some(&format!("answer: {message}"))));
+                    events.push_back(event("completed", Some(&format!("answer: {message}"))));
+                }
+                Script::Dies => {
+                    events.push_back(event("output", Some("Error: the stored login has expired")));
+                    events.push_back(event("failed", Some(DIED)));
+                }
+                Script::Hangs => {}
+            }
         }
     }
 
     impl AgentSession for ScriptedSession {
         fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-            Ok(Some(self.session_id.clone()))
+            Ok(self.session_id.clone())
         }
 
         fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -872,9 +1030,10 @@ mod tests {
             let message = request.prompt.clone();
             self.asked.lock().unwrap().starts.push(request);
             let session = ScriptedSession {
-                session_id: SessionId::try_new("provider-assistant-1").unwrap(),
+                session_id: Some(SessionId::try_new("provider-assistant-1").unwrap()),
                 events: Mutex::default(),
                 asked: self.asked.clone(),
+                script: self.script,
             };
             session.answer(&message);
             Ok(session.into_object())
@@ -892,9 +1051,10 @@ mod tests {
             let session_id = request.session_id.clone();
             self.asked.lock().unwrap().resumes.push(request);
             let session = ScriptedSession {
-                session_id,
+                session_id: (self.resumed != Script::Dies).then_some(session_id),
                 events: Mutex::default(),
                 asked: self.asked.clone(),
+                script: self.resumed,
             };
             session.answer(&message);
             Ok(session.into_object())
@@ -923,6 +1083,10 @@ mod tests {
     }
 
     fn fixture(resumable: bool, idle: Duration) -> Fixture {
+        scripted(resumable, idle, Script::Answers, Script::Answers)
+    }
+
+    fn scripted(resumable: bool, idle: Duration, script: Script, resumed: Script) -> Fixture {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);
         let asked = Arc::new(Mutex::new(Asked::default()));
@@ -933,6 +1097,8 @@ mod tests {
             Arc::new(Scripted {
                 asked: asked.clone(),
                 resumable,
+                script,
+                resumed,
             }),
             Arc::new(move |report| sink.lock().unwrap().push(report)),
             "https://exports.example/v1/moneypenny/mcp".to_owned(),
@@ -1250,5 +1416,109 @@ mod tests {
         assert!(asked.messages.is_empty(), "not sent to the old harness");
         drop(asked);
         fixture.desk.close_all();
+    }
+
+    /// The text of the conversation's first event of `kind`.
+    fn text_of(fixture: &Fixture, conversation: &str, kind: &str) -> Option<String> {
+        fixture
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|report| report.conversation_id == conversation)
+            .flat_map(|report| report.events.iter())
+            .find(|event| event.kind == kind)
+            .and_then(|event| event.text.clone())
+    }
+
+    /// `failed` comes before `closed`, and nothing else but `accepted` is reported.
+    fn failed_then_closed(fixture: &Fixture, conversation: &str) {
+        let mut kinds = kinds(fixture, conversation);
+        kinds.retain(|kind| kind != EVENT_ACCEPTED);
+        assert_eq!(kinds, [EVENT_FAILED, EVENT_CLOSED]);
+    }
+
+    #[tokio::test]
+    async fn a_harness_that_dies_is_reported_with_its_reason_and_frees_its_slot() {
+        let fixture = scripted(true, IDLE, Script::Dies, Script::Answers);
+        fixture.desk.handle(job("c-dead", "hello")).await;
+        until(|| kinds(&fixture, "c-dead").contains(&EVENT_CLOSED.to_owned())).await;
+        failed_then_closed(&fixture, "c-dead");
+        let reason = text_of(&fixture, "c-dead", EVENT_FAILED).unwrap();
+        assert!(reason.contains("the stored login has expired"), "{reason}");
+        assert!(
+            fixture.desk.live.lock().unwrap().is_empty(),
+            "its slot is free"
+        );
+        let area = fixture.asked.lock().unwrap().starts[0]
+            .working_directory
+            .clone();
+        until(|| !Path::new(&area).exists()).await;
+    }
+
+    #[tokio::test]
+    async fn a_busy_harness_that_writes_nothing_is_closed_and_the_conversation_told() {
+        let fixture = scripted(
+            true,
+            Duration::from_millis(50),
+            Script::Hangs,
+            Script::Answers,
+        );
+        fixture.desk.handle(job("c-hung", "hello")).await;
+        until(|| kinds(&fixture, "c-hung").contains(&EVENT_CLOSED.to_owned())).await;
+        failed_then_closed(&fixture, "c-hung");
+        let reason = text_of(&fixture, "c-hung", EVENT_FAILED).unwrap();
+        assert!(reason.contains("wrote nothing"), "{reason}");
+        assert!(fixture.desk.live.lock().unwrap().is_empty());
+    }
+
+    /// Claude Code reads the message before it says whether the Session it was asked to
+    /// resume exists, so a resume can fail after the harness started.
+    #[tokio::test]
+    async fn a_resumed_harness_that_fails_before_confirming_its_session_starts_afresh() {
+        let fixture = scripted(true, IDLE, Script::Answers, Script::Dies);
+        let mut resumed = job("c-gone", "hello again");
+        resumed.session_id = Some("gone".to_owned());
+        fixture.desk.handle(resumed).await;
+        until(|| kinds(&fixture, "c-gone").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert!(
+            !kinds(&fixture, "c-gone").contains(&EVENT_FAILED.to_owned()),
+            "the failed resume is the Station's to report, not the conversation's"
+        );
+        let asked = fixture.asked.lock().unwrap();
+        assert_eq!((asked.resumes.len(), asked.starts.len()), (1, 1));
+        assert_eq!(asked.starts[0].prompt, "hello again");
+        assert!(
+            asked.starts[0]
+                .initial_context
+                .contains(&"Earlier in this conversation: hello.".to_owned()),
+            "started afresh with the recap"
+        );
+        drop(asked);
+        fixture.desk.close_all();
+    }
+
+    #[test]
+    fn a_working_directory_still_in_use_for_a_moment_is_removed_once_free() {
+        let root = new_root().unwrap();
+        let area = root.join("0123456789abcdef0123456789abcdef");
+        std::fs::create_dir_all(&area).unwrap();
+        #[cfg(windows)]
+        let mut holder = std::process::Command::new("ping")
+            .args(["-n", "2", "127.0.0.1"])
+            .current_dir(&area)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        #[cfg(unix)]
+        let mut holder = std::process::Command::new("sleep")
+            .arg("1")
+            .current_dir(&area)
+            .spawn()
+            .unwrap();
+        remove_area(&area.to_string_lossy());
+        assert!(!area.exists());
+        holder.wait().unwrap();
+        std::fs::remove_dir(root).unwrap();
     }
 }

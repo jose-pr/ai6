@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The Claude Code handler's resume sends its message right after starting Claude Code and
   returns without waiting for output, since with stream-json input Claude writes nothing
   until it has read a message; the resumed Session's ID is checked as events are read.
+- A Station's assistant desk closes a harness that fails or exits at once, reporting the
+  handler's reason to the conversation and freeing its slot; one that writes nothing for ten
+  minutes while answering is closed the same way. A resume that fails, when asked or before
+  the resumed harness confirms its Session, is logged on the Station and the conversation
+  starts afresh with its recap. A closed harness's directory is removed with retries for up to
+  2 s while Windows still holds it.
 - The `pty` terminal on Linux and macOS starts its program in non-canonical mode with no
   echo, so a handler's input line of any length (a large stream-json message or JSON-RPC
   request) reaches the harness whole and what is written does not come back as output.

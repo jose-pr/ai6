@@ -25,7 +25,11 @@ Station: the one already running the conversation, else the Headquarters Station
 healthy Station. A Station that has no such Agent, no such handler, a quarantine on it, or
 four assistant Sessions running already refuses, and the next one is asked. The Station keeps
 one harness per conversation, so a follow-up reaches it at once; after ten idle minutes it
-closes, and the next message resumes the same provider Session.
+closes, and the next message resumes the same provider Session. A harness that exits or
+fails is closed at once and the conversation shows why, with the harness's exit status and
+its last words; so is one that writes nothing for ten minutes while answering. A Session that
+cannot be resumed is noted in the Station's log, and the conversation starts afresh with a
+recap.
 
 An assistant Session is not a Mission: it has no Operation, safe house or Cable endpoint,
 and never appears on the board. It works in a directory of its own, the same one each time
