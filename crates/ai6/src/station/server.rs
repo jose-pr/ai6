@@ -2277,9 +2277,8 @@ fn place_brief(
 ) -> Option<PlacementChoice> {
     let mut policy = OperationPolicy::from_roster(&state.roster, operation_id).ok()?;
     let quarantined = medical::quarantined_agents(state, Some(operation_id));
-    policy
-        .agents
-        .retain(|candidate| !quarantined.contains(&candidate.id));
+    let agents = &mut policy.agents;
+    agents.retain(|agent| !quarantined.contains(&agent.id));
     let records = state.intake.stations(Duration::MAX).ok()?;
     let now = unix_now();
     let stations: Vec<StationFacts> = records
