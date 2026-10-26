@@ -975,15 +975,76 @@ fn print_held(held: &[HeldBrief]) {
             })
             .collect::<Vec<_>>()
             .join("; ");
-        println!(
-            "{}\t{}\t{}\t{:.0}\t{}",
-            plain(&entry.key),
-            plain(&entry.brief.source),
-            plain(&entry.brief.title),
-            entry.held_at,
-            plain(&findings),
-        );
+        println!("{}", held_line(entry, &findings));
     }
+}
+
+/// One held brief's line. Its title and source are shown with invisible characters made
+/// visible, since hidden text is what vetting most often holds a brief for.
+fn held_line(entry: &HeldBrief, findings: &str) -> String {
+    format!(
+        "{}\t{}\t{}\t{:.0}\t{}",
+        plain(&entry.key),
+        plain(&reveal(&entry.brief.source)),
+        plain(&reveal(&entry.brief.title)),
+        entry.held_at,
+        plain(findings),
+    )
+}
+
+/// `text` with the characters AI6's vetting reports as hidden made visible: each as
+/// `<U+XXXX>`, and a run of tag characters as the text it spells, `<tags: ...>` (tags U+E0020
+/// to U+E007E stand for printable ASCII).
+fn reveal(text: &str) -> String {
+    let mut shown = String::with_capacity(text.len());
+    let mut tags = String::new();
+    for character in text.chars() {
+        if ('\u{E0000}'..='\u{E007F}').contains(&character) {
+            let code = u32::from(character) - 0xE0000;
+            tags.push(
+                char::from_u32(code)
+                    .filter(|_| (0x20..=0x7E).contains(&code))
+                    .unwrap_or('?'),
+            );
+            continue;
+        }
+        if !tags.is_empty() {
+            shown.push_str(&format!("<tags: {}>", std::mem::take(&mut tags)));
+        }
+        if is_invisible(character) {
+            shown.push_str(&format!("<U+{:04X}>", u32::from(character)));
+        } else {
+            shown.push(character);
+        }
+    }
+    if !tags.is_empty() {
+        shown.push_str(&format!("<tags: {tags}>"));
+    }
+    shown
+}
+
+/// Characters that render as nothing: direction controls and marks, zero-width characters,
+/// variation selectors, fillers, invisible operators and the soft hyphen.
+fn is_invisible(character: char) -> bool {
+    matches!(
+        character,
+        '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{200E}'
+            | '\u{200F}'
+            | '\u{061C}'
+            | '\u{200B}'..='\u{200D}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{FEFF}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{E0100}'..='\u{E01EF}'
+            | '\u{180E}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{3164}'
+            | '\u{FFA0}'
+            | '\u{00AD}'
+    )
 }
 
 /// A request under `/v1/user/operations/`, each of `segments` encoded as one path segment.
@@ -1792,6 +1853,21 @@ mod tests {
         }]))
         .unwrap();
         assert_eq!(held[0].vetting.findings[0].related.as_deref(), Some("m-1"));
+
+        // A title hiding characters shows them by code; tag characters spell their text.
+        let mut hidden: Vec<HeldBrief> = serde_json::from_value(serde_json::json!([{
+            "key": "source_github--org_repo_8",
+            "brief": {"title": "Fix\u{200B}it\u{E006F}\u{E006B}", "source": "source:github"},
+            "vetting": {"findings": []},
+            "held_at": 11.0
+        }]))
+        .unwrap();
+        let line = held_line(&hidden.remove(0), "");
+        assert!(line.contains("Fix<U+200B>it<tags: ok>"), "{line}");
+        assert_eq!(
+            reveal("caf\u{E9} \u{202E}x\u{00AD}\u{E006F}"),
+            "caf\u{E9} <U+202E>x<U+00AD><tags: o>"
+        );
     }
 
     #[test]
