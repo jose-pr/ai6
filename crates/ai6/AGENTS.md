@@ -1368,11 +1368,15 @@ settings, else the defaults), each Theater's running `sessions`,
 local Operation paths, available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
 placement policy (`operation_policies`, omitted with a log line when over 512 KiB), the
 Agents whose retirement is near or due (`retirements`: `{agent, retire_on, on_retire,
-status}`, also logged at start and on a roster reload) and the configuration it runs (`config`, a `ConfigStatus`) with each Station check-in every 15
+status}`, also logged at start and on a roster reload), the configuration it runs (`config`, a
+`ConfigStatus`) and the latest report in its logbook (`head_of_station`, a `StationReport`,
+once one is filed) with each Station check-in every 15
 seconds and right after it applies a reload, alongside host and
 platform metadata. `StationConfig` defaults to both `Control` and `Execution`, no
 pinned terminal and only the `local` Theater; `with_roles` replaces the role set, `with_label`
 adds a placement label, `with_theater` declares a Theater in code,
+`with_safe_house_hygiene(SafeHouseHygiene)` sets which directories of a kept safe house are
+rebuildable caches and how long a terminal Mission's safe house is left alone first,
 `with_loadouts(LoadoutCatalog)` replaces `loadouts.toml`,
 `with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets`,
 `with_account_login(impl AccountLogin + 'static)` replaces `CommandLogin` for Codex pool
@@ -2819,6 +2823,25 @@ The Station audits `green_ink.requested` (actor `agent:CODENAME`) for each new p
 request, `green_ink.expired` (actor `expiry`) when it tells the Agent a request expired, and
 `class_authorization.used` (actor `class:ID`); each target is `REQUEST_ID KIND TARGET`, never
 the reason.
+Head of Station tools: a Session whose Mission has role `head-of-station` and whose brief, as
+this Station leased it, names this Station alone (a round) also lists `station_report` and
+`file_report` on its endpoint; any other Session's endpoint has no such tools, so a call is an
+MCP error. Every call checks again that the Mission is not over and still such a round.
+`station_report` answers JSON: `station`, `at`, `capacity`, `missions` not over (`mission`,
+`operation`, `agent`, `role`, `state`, `session`), `disk` (`path`, `free_mb`, `total_mb` of the
+state directory), `resources`, `theaters` (each published `TheaterSummary` plus `unfit`, why
+placement would not run a Session there), `safe_houses` (each kept safe house still on disk:
+`mission`, `operation`, `state`, `live`, `path`, `branch`, `size_bytes`, `size_complete` (false
+past 500,000 entries), `age_secs` (since it or anything at its top level changed), `caches`
+(`path` relative, `size_bytes`; outermost directories named in the hygiene list, never `.git`,
+links never followed), `exported`, `unexported` (at most 20), `dirty`, `note` when the provider
+cannot tell), `plugins_weakened` and `limits` (the cache list and age and the unattended,
+green ink and never lists the Station enforces); no environment value, token, loadout or brief
+text. `file_report {summary, findings: [{kind, severity, text}]}` files a `StationReport` (filed
+by the Mission and its Agent) in the logbook, records a `head_of_station`/`reported` timeline
+event, and sends it as a Cable to channel `heads-of-station` (`HEAD_OF_STATION_CHANNEL`) when
+the Cable policy allows; it answers `{filed, at, cable}` where `cable` says `sent to N
+recipients` or why not (an exposed Session sends none).
 `check_approval {steps: [{kind, target}, ..]}` (at most 64) answers the harness gate without
 recording anything: a JSON array of `{kind, target, status, request_id?, message?}` with
 `status` `not_required`, `approved` (a live approval of the Mission covers the step,
@@ -3072,7 +3095,11 @@ grows by optional fields only. Providers: `git` (`ai6-safehouse-git`) and `copy`
 `station::safehouse::SafeHouse::open(&dyn SafeHouseProvider, &SafeHouseSpec)` wraps a
 session: `path()`, `branch()`, `base()`, `supports_history()`, `is_isolated()`,
 `changes()`, `finish()`, `checkpoint(&CheckpointSpec)`, `exports() -> Result<Option<SafeHouseExports>, _>`
-(`None` when the provider cannot tell), `discard()` and `active_report()`. The Station
+(`None` when the provider cannot tell), `discard()` and `active_report()`.
+`SafeHouseHygiene` (`Default`: `DEFAULT_CACHE_DIRS` = `target`, `node_modules`, `.dart_tool`
+after `DEFAULT_CACHE_AGE`, 7 days) has `with_caches(names) -> Result<Self, SafeHouseError>`
+(plain directory names only: not empty, `.`, `..`, `.git`, nor holding `/`, `\` or `:`),
+`with_cache_age(Duration)`, `caches()`, `cache_age()` and `is_cache(name)`. The Station
 offers a lost attempt's checkpoint only when it opens a new isolated safe house. Only isolated safe houses are recorded on
 the Mission and finished by the daemon. `state_dir()` resolves `AI6_STATE`, then
 `AI6_HOME/state`, then `%LOCALAPPDATA%/AI6` on Windows, then `XDG_STATE_HOME/AI6` or

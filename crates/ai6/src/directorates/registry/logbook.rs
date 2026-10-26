@@ -23,6 +23,8 @@ use super::store::{
 /// The role of the Agent that keeps a Station: a Mission for this role narrowed to one Station
 /// is that Station's round, given its logbook and the Station's own tools.
 pub const HEAD_OF_STATION_ROLE: &str = "head-of-station";
+/// The Cable channel a filed report is sent to, when `cables.toml` configures it.
+pub const HEAD_OF_STATION_CHANNEL: &str = "heads-of-station";
 /// How many reports a Station's logbook keeps; filing another drops the oldest.
 pub const LOGBOOK_LENGTH: usize = 20;
 /// The longest summary a report may carry, in bytes.

@@ -1,5 +1,5 @@
 //! Per-Session authenticated MCP tools for the AI6 Cable relay, Mission proposals and green
-//! ink requests.
+//! ink requests, and for a Head of Station round its Station's own tools.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -22,6 +22,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use super::green_ink::{Asked, Checked, Desk};
+use super::head_of_station;
 use super::unix_now;
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::medical::exposure::{
@@ -47,6 +48,7 @@ pub(super) struct Endpoint {
     registered: Option<CableEndpoint>,
     green_ink: Arc<OnceLock<Desk>>,
     mission_role: Arc<OnceLock<String>>,
+    station: Arc<OnceLock<head_of_station::Desk>>,
 }
 
 impl Endpoint {
@@ -77,6 +79,7 @@ impl Endpoint {
         let principal = Arc::new(RwLock::new(None));
         let green_ink = Arc::new(OnceLock::new());
         let mission_role = Arc::new(OnceLock::new());
+        let station = Arc::new(OnceLock::new());
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
@@ -88,6 +91,7 @@ impl Endpoint {
                 let exposure = exposure.clone();
                 let green_ink = green_ink.clone();
                 let mission_role = mission_role.clone();
+                let station = station.clone();
                 move || {
                     Ok(CableTools::new(
                         relay.clone(),
@@ -97,6 +101,7 @@ impl Endpoint {
                         exposure.clone(),
                         green_ink.clone(),
                         mission_role.clone(),
+                        station.clone(),
                     ))
                 }
             },
@@ -120,7 +125,14 @@ impl Endpoint {
             registered: None,
             green_ink,
             mission_role,
+            station,
         })
+    }
+
+    /// Gives a Head of Station round its Station's own tools. A harness that connects
+    /// afterwards lists and may call them; without this they do not exist for the Session.
+    pub(super) fn open_station_tools(&self, desk: head_of_station::Desk) {
+        let _ = self.station.set(desk);
     }
 
     /// Lets the Session ask its Station for green ink; without it `request_approval` says
@@ -912,10 +924,12 @@ struct CableTools {
     exposure: ExposureGate,
     green_ink: Arc<OnceLock<Desk>>,
     mission_role: Arc<OnceLock<String>>,
+    station: Arc<OnceLock<head_of_station::Desk>>,
     tool_router: ToolRouter<Self>,
 }
 
 impl CableTools {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         relay: Arc<CableRelay>,
         principal: Arc<RwLock<Option<CablePrincipal>>>,
@@ -924,7 +938,14 @@ impl CableTools {
         exposure: ExposureGate,
         green_ink: Arc<OnceLock<Desk>>,
         mission_role: Arc<OnceLock<String>>,
+        station: Arc<OnceLock<head_of_station::Desk>>,
     ) -> Self {
+        // The Station's own tools exist only for a Head of Station round.
+        let tool_router = if station.get().is_some() {
+            Self::tool_router() + Self::station_router()
+        } else {
+            Self::tool_router()
+        };
         Self {
             relay,
             principal,
@@ -933,7 +954,8 @@ impl CableTools {
             exposure,
             green_ink,
             mission_role,
-            tool_router: Self::tool_router(),
+            station,
+            tool_router,
         }
     }
 
@@ -1038,6 +1060,136 @@ struct CheckApprovalArgs {
 
 /// The most steps one check answers; a command naming more is refused by the gate.
 const MAX_CHECKED_STEPS: usize = 64;
+
+#[derive(Deserialize, JsonSchema)]
+struct FindingArgs {
+    /// What it is about: disk, theater, safe-house, provider or other.
+    kind: String,
+    /// How much it matters: info, warning or critical.
+    severity: String,
+    /// What was found, in a sentence an operator can act on.
+    text: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct FileReportArgs {
+    /// What this round saw and did, in a few lines.
+    summary: String,
+    /// What needs an operator's eye.
+    #[serde(default)]
+    findings: Vec<FindingArgs>,
+}
+
+#[tool_router(router = station_router)]
+impl CableTools {
+    /// This Station's state, for its Head of Station.
+    #[tool(
+        description = "Read this Station's state: capacity and the Missions not over, free disk space under its state directory, resources, each Theater it reaches and whether a Session could run there, every safe house it keeps with its Mission's state, age, size, cache directories and whether its work exists elsewhere, provider libraries loaded without a pin, and the limits on what you may do here unattended. No secrets."
+    )]
+    async fn station_report(&self) -> String {
+        let Some(desk) = self.station.get().cloned() else {
+            return "The Station's tools are for a Head of Station round only".to_owned();
+        };
+        match tokio::task::spawn_blocking(move || desk.report()).await {
+            Ok(Ok(state)) => serde_json::to_string(&state)
+                .unwrap_or_else(|_| "The Station's state could not be encoded".to_owned()),
+            Ok(Err(reason)) => format!("Station report refused: {reason}"),
+            Err(_) => "Station report failed".to_owned(),
+        }
+    }
+
+    /// File this round's report in the Station's logbook.
+    #[tool(
+        description = "File this round's report: a short summary and typed findings (kind disk, theater, safe-house, provider or other; severity info, warning or critical). It goes into the Station's logbook, which the next round reads, is published with the Station's check-in for the operator, and is sent as a Cable to the heads-of-station channel when that channel exists."
+    )]
+    async fn file_report(&self, Parameters(args): Parameters<FileReportArgs>) -> String {
+        let Some(desk) = self.station.get().cloned() else {
+            return "The Station's tools are for a Head of Station round only".to_owned();
+        };
+        let mut findings = Vec::new();
+        for finding in args.findings {
+            let kind = match finding.kind.parse() {
+                Ok(kind) => kind,
+                Err(reason) => return format!("Report refused: {reason}"),
+            };
+            let severity = match finding.severity.parse() {
+                Ok(severity) => severity,
+                Err(reason) => return format!("Report refused: {reason}"),
+            };
+            findings.push(crate::directorates::registry::logbook::StationFinding::new(
+                kind,
+                severity,
+                finding.text,
+            ));
+        }
+        let summary = args.summary;
+        let filing = desk.clone();
+        let report = match tokio::task::spawn_blocking(move || filing.file(summary, findings)).await
+        {
+            Ok(Ok(report)) => report,
+            Ok(Err(reason)) => return format!("Report refused: {reason}"),
+            Err(_) => return "Report failed".to_owned(),
+        };
+        let cable = self.announce(desk.station(), &report).await;
+        serde_json::json!({ "filed": true, "at": report.at, "cable": cable }).to_string()
+    }
+}
+
+impl CableTools {
+    /// Sends a filed report to the Heads of Station channel; says what became of it.
+    async fn announce(
+        &self,
+        station: &str,
+        report: &crate::directorates::registry::logbook::StationReport,
+    ) -> String {
+        use crate::directorates::registry::logbook::HEAD_OF_STATION_CHANNEL;
+        if self.exposure.restricts(Restriction::Cables) {
+            return "not sent: this Session is exposed to untrusted input".to_owned();
+        }
+        let Ok(principal) = self.principal() else {
+            return "not sent: Cable identity is unavailable".to_owned();
+        };
+        let Ok(target) = CableTarget::try_new(
+            CableScope::Channel,
+            Some(HEAD_OF_STATION_CHANNEL.to_owned()),
+        ) else {
+            return "not sent: the channel name is invalid".to_owned();
+        };
+        let mut body = format!("Station {station}: {}", report.summary.trim());
+        for finding in &report.findings {
+            body.push_str(&format!(
+                "\n- {} {}: {}",
+                finding.severity,
+                finding.kind,
+                finding.text.trim()
+            ));
+        }
+        let limit = crate::directorates::registry::cables::MAX_CABLE_BODY_BYTES;
+        if body.len() > limit {
+            let mut end = limit;
+            while !body.is_char_boundary(end) {
+                end -= 1;
+            }
+            body.truncate(end);
+        }
+        let request = CableSendRequest::new(
+            target,
+            body,
+            format!(
+                "head-of-station-{}-{}",
+                report.mission.as_deref().unwrap_or_default(),
+                report.at
+            ),
+        );
+        let relay = self.relay.clone();
+        match tokio::task::spawn_blocking(move || relay.send(&principal, request)).await {
+            Ok(Ok(cable)) => format!("sent to {} recipients", cable.recipients().len()),
+            Ok(Err(_)) | Err(_) => format!(
+                "not sent: the {HEAD_OF_STATION_CHANNEL} channel is not configured or this Agent may not send to it"
+            ),
+        }
+    }
+}
 
 #[tool_router]
 impl CableTools {

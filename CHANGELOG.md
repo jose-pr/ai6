@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Head of Station tools: a round (a Mission of role `head-of-station` whose leased brief names
+  its Station alone) gets `station_report` and `file_report` on its Cable endpoint; no other
+  Session lists them, and each call checks again that the round is live. `station_report`
+  reads the Station's capacity, Missions not over, free space under the state directory,
+  resources, Theaters with why placement would not use them, every kept safe house (Mission
+  state, age, size, cache directories, whether its work exists elsewhere), provider libraries
+  loaded without a pin and the enforced limits; nothing secret. `file_report` files a
+  `StationReport` with typed findings in the logbook, records a timeline event and sends it to
+  the `heads-of-station` Cable channel when configured. Each check-in carries the latest
+  report (`head_of_station`); Universal Exports adds it to `BoardStation` and Moneypenny shows
+  it on the Station card. `StationConfig::with_safe_house_hygiene(SafeHouseHygiene)` names the
+  cache directories (default `target`, `node_modules`, `.dart_tool`) and their age (7 days).
 - Safe-house providers may say what of a safe house's work exists only there and remove one
   whatever it holds: two optional `SafeHouseSession` slots, `exports` (`SafeHouseExports`:
   `unexported` change summaries and `dirty`; unsupported reads as all of it) and `discard`,

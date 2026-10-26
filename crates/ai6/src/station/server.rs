@@ -142,9 +142,22 @@ pub struct StationConfig {
     headquarters_lease: Duration,
     resources_every: Duration,
     config_poll: Duration,
+    hygiene: crate::station::safehouse::SafeHouseHygiene,
 }
 
 impl StationConfig {
+    /// Sets which directories in a kept safe house are rebuildable caches and how long a
+    /// terminal Mission's safe house is left alone before the Head of Station may remove them
+    /// (default [`SafeHouseHygiene::default`](crate::station::safehouse::SafeHouseHygiene)).
+    #[must_use]
+    pub fn with_safe_house_hygiene(
+        mut self,
+        hygiene: crate::station::safehouse::SafeHouseHygiene,
+    ) -> Self {
+        self.hygiene = hygiene;
+        self
+    }
+
     /// Asks the configuration source every `every` instead of [`DEFAULT_CONFIG_POLL`] whether
     /// the roster or `loadouts.toml` changed, and applies a change that passes the
     /// configuration checks without a restart. Zero stops asking: the Station runs what it
@@ -269,6 +282,7 @@ impl Default for StationConfig {
             headquarters_lease: DEFAULT_LEASE,
             resources_every: DEFAULT_RESOURCES_EVERY,
             config_poll: DEFAULT_CONFIG_POLL,
+            hygiene: Default::default(),
         }
     }
 }
@@ -1801,6 +1815,7 @@ fn publish_station_check_in(state: &DaemonState) {
             serde_json::json!(plugins_weakened),
         );
     }
+    head_of_station::check_in(state, &mut info);
     if let Err(error) = state.intake.check_in(&state.station_id, info) {
         eprintln!("ai6: Station check-in failed: {error}");
     }
@@ -3512,12 +3527,14 @@ async fn start_mission(
         initial_context.push(format!("Role policy: {}", role.policy));
     }
     let (worker, worker_mission) = (state.clone(), mission.clone());
-    if let Ok(Some(logbook)) = tokio::task::spawn_blocking(move || {
+    let round = tokio::task::spawn_blocking(move || {
         head_of_station::round_context(&worker, &worker_mission)
     })
     .await
-    {
-        initial_context.push(logbook);
+    .ok()
+    .flatten();
+    if let Some(logbook) = &round {
+        initial_context.push(logbook.clone());
     }
     if session_hold(&state, &mission_id).is_some() {
         initial_context.push(
@@ -3599,6 +3616,12 @@ async fn start_mission(
             endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
             if let Some(role) = mission.role_id.as_deref() {
                 endpoint.set_mission_role(role);
+            }
+            if round.is_some() {
+                endpoint.open_station_tools(head_of_station::Desk::new(
+                    state.clone(),
+                    mission.mission_id.as_str(),
+                ));
             }
             endpoint.add_environment(&mut environment);
             initial_context.push(cables_mcp::INSTRUCTIONS.to_owned());
@@ -6408,9 +6431,13 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((spec.mission_id.clone(), spec.checkpoint.clone()));
-            let path = Path::new(&spec.state_root)
-                .join("safe-houses")
-                .join(&spec.mission_id);
+            // A kept safe house is re-attached where its report says it is.
+            let path = match &spec.reopen {
+                Some(report) => PathBuf::from(&report.path),
+                None => Path::new(&spec.state_root)
+                    .join("safe-houses")
+                    .join(&spec.mission_id),
+            };
             fs::create_dir_all(&path).map_err(|error| test_provider_error(&error.to_string()))?;
             Ok(MockSafeHouse {
                 info: SafeHouseInfo {
@@ -6494,6 +6521,33 @@ mod tests {
             }
             .to_value()
             .map_err(|error| test_provider_error(&error.to_string()))
+        }
+
+        /// Unexported work is what `.mock-unexported` lists, one change a line; `.mock-dirty`
+        /// stands for uncommitted changes.
+        fn exports(&self) -> Result<Value, ProviderError> {
+            let path = Path::new(&self.info.path);
+            crate::directorates::q::safehouse::SafeHouseExports {
+                unexported: fs::read_to_string(path.join(".mock-unexported"))
+                    .unwrap_or_default()
+                    .lines()
+                    .map(str::to_owned)
+                    .collect(),
+                dirty: path.join(".mock-dirty").exists(),
+            }
+            .to_value()
+            .map_err(|error| test_provider_error(&error.to_string()))
+        }
+
+        fn discard(&self) -> Result<(), ProviderError> {
+            if !self.info.isolated {
+                return Err(test_provider_error("work in place is never removed"));
+            }
+            match fs::remove_dir_all(&self.info.path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(test_provider_error(&error.to_string())),
+            }
         }
     }
 

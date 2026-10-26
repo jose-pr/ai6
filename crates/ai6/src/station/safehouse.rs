@@ -137,6 +137,79 @@ impl SafeHouse {
     }
 }
 
+/// The directories a Station treats as rebuildable caches unless told otherwise.
+pub const DEFAULT_CACHE_DIRS: [&str; 3] = ["target", "node_modules", ".dart_tool"];
+/// How long a terminal Mission's safe house is left alone before its caches may go.
+pub const DEFAULT_CACHE_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+
+/// What a Station may tidy in the safe houses it keeps without asking anyone: which
+/// directories are rebuildable caches, and how long a terminal Mission's safe house is left
+/// alone before they may be removed.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SafeHouseHygiene {
+    caches: Vec<String>,
+    cache_age: std::time::Duration,
+}
+
+impl Default for SafeHouseHygiene {
+    /// [`DEFAULT_CACHE_DIRS`] after [`DEFAULT_CACHE_AGE`].
+    fn default() -> Self {
+        Self {
+            caches: DEFAULT_CACHE_DIRS.map(str::to_owned).to_vec(),
+            cache_age: DEFAULT_CACHE_AGE,
+        }
+    }
+}
+
+impl SafeHouseHygiene {
+    /// Replaces the cache directory names; an empty list removes no cache.
+    ///
+    /// # Errors
+    ///
+    /// A name that is not one plain directory name: empty, `.`, `..`, `.git`, or holding a
+    /// path separator or `:`.
+    pub fn with_caches(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, SafeHouseError> {
+        let names: Vec<String> = names.into_iter().map(Into::into).collect();
+        if let Some(name) = names.iter().find(|name| {
+            matches!(name.as_str(), "" | "." | ".." | ".git")
+                || name.contains(['/', '\\', ':'])
+                || name.chars().any(char::is_control)
+        }) {
+            return Err(fail(format!(
+                "{name:?} is not a cache directory name: use one plain directory name such as \"target\""
+            )));
+        }
+        self.caches = names;
+        Ok(self)
+    }
+
+    /// Sets how long a terminal Mission's safe house is left alone before its caches may go.
+    #[must_use]
+    pub fn with_cache_age(mut self, age: std::time::Duration) -> Self {
+        self.cache_age = age;
+        self
+    }
+
+    /// The cache directory names.
+    pub fn caches(&self) -> &[String] {
+        &self.caches
+    }
+
+    /// How long a terminal Mission's safe house is left alone first.
+    pub fn cache_age(&self) -> std::time::Duration {
+        self.cache_age
+    }
+
+    /// Whether a directory of this name is a cache.
+    pub fn is_cache(&self, name: &str) -> bool {
+        self.caches.iter().any(|cache| cache == name)
+    }
+}
+
 /// Resolves AI6's state directory for retained safe houses and Mission reports.
 pub fn state_dir() -> Result<PathBuf, SafeHouseError> {
     if let Some(path) = std::env::var_os(STATE_ENV) {
@@ -264,6 +337,26 @@ mod tests {
             ..SafeHouseExports::default()
         };
         assert!(!dirty.is_exported());
+    }
+
+    #[test]
+    fn hygiene_takes_plain_directory_names_only() {
+        let hygiene = SafeHouseHygiene::default();
+        assert!(hygiene.is_cache("target") && hygiene.is_cache(".dart_tool"));
+        assert!(!hygiene.is_cache("src"));
+        assert_eq!(hygiene.cache_age(), DEFAULT_CACHE_AGE);
+        for bad in ["", ".", "..", ".git", "a/b", "a\\b", "C:"] {
+            assert!(
+                SafeHouseHygiene::default().with_caches([bad]).is_err(),
+                "{bad:?}"
+            );
+        }
+        let custom = SafeHouseHygiene::default()
+            .with_caches(["build", ".venv"])
+            .unwrap()
+            .with_cache_age(std::time::Duration::from_secs(60));
+        assert_eq!(custom.caches(), ["build", ".venv"]);
+        assert!(!custom.is_cache("target"));
     }
 
     #[test]

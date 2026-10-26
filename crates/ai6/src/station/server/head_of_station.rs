@@ -3,11 +3,137 @@
 //! A round is an ordinary Mission: an `each_station` Sleeper queues one per Station per
 //! window, for role [`HEAD_OF_STATION_ROLE`], narrowed to that Station. Continuity between
 //! rounds is the Station's logbook, handed to each round as context.
+//!
+//! A round also gets the Station's own tools on its Cable endpoint (`station_report`,
+//! `file_report`). They act on this Station only, and every call checks again that its
+//! Mission is still a live round here; what they may change unattended is fixed in Station
+//! code, never in the prompt.
+
+#[cfg(feature = "cables-mcp")]
+mod report;
+#[cfg(feature = "cables-mcp")]
+mod safe_houses;
+#[cfg(feature = "cables-mcp")]
+mod survey;
+
+use std::collections::BTreeMap;
 
 use crate::directorates::m::mission::Mission;
+#[cfg(feature = "cables-mcp")]
+use crate::directorates::registry::logbook::StationFinding;
 use crate::directorates::registry::logbook::{HEAD_OF_STATION_ROLE, StationReport};
+#[cfg(feature = "cables-mcp")]
+use crate::directorates::registry::timeline::TimelineEvent;
 
 use super::DaemonState;
+
+#[cfg(feature = "cables-mcp")]
+pub(super) use report::StationState;
+
+/// The check-in key that carries a Station's latest Head of Station report.
+pub(super) const CHECK_IN_KEY: &str = "head_of_station";
+
+/// Adds this Station's latest Head of Station report to its check-in.
+pub(super) fn check_in(state: &DaemonState, info: &mut BTreeMap<String, serde_json::Value>) {
+    match state.intake.logbook(&state.station_id) {
+        Ok(logbook) => {
+            if let Some(latest) = logbook.last() {
+                info.insert(CHECK_IN_KEY.to_owned(), serde_json::json!(latest));
+            }
+        }
+        Err(error) => eprintln!(
+            "ai6: the logbook of Station {:?} is unreadable: {error}",
+            state.station_id
+        ),
+    }
+}
+
+/// A round's access to its Station: what its Cable endpoint's Station tools call.
+#[cfg(feature = "cables-mcp")]
+#[derive(Clone)]
+pub(super) struct Desk {
+    state: DaemonState,
+    mission: String,
+}
+
+#[cfg(feature = "cables-mcp")]
+impl Desk {
+    pub(super) fn new(state: DaemonState, mission: impl Into<String>) -> Self {
+        Self {
+            state,
+            mission: mission.into(),
+        }
+    }
+
+    /// The round's Mission, while it is not over and still a round of this Station.
+    fn admit(&self) -> Result<Mission, String> {
+        let mission = self
+            .state
+            .missions
+            .lock()
+            .ok()
+            .and_then(|missions| missions.get(&self.mission).cloned())
+            .ok_or("this Station has no such Mission")?;
+        if super::is_terminal_state(mission.state) {
+            return Err("this round is over".to_owned());
+        }
+        if !is_round(&self.state, &mission) {
+            return Err("this Mission is not a round of this Station".to_owned());
+        }
+        Ok(mission)
+    }
+
+    /// Everything a round may read about its Station. Blocks; call from `spawn_blocking`.
+    pub(super) fn report(&self) -> Result<StationState, String> {
+        self.admit()?;
+        Ok(report::station_state(&self.state))
+    }
+
+    /// Files a report in the Station's logbook: the next check-in publishes it and the next
+    /// round reads it. Blocks; call from `spawn_blocking`.
+    pub(super) fn file(
+        &self,
+        summary: String,
+        findings: Vec<StationFinding>,
+    ) -> Result<StationReport, String> {
+        let mission = self.admit()?;
+        let state = &self.state;
+        let report = StationReport::new(state.station_id.clone(), summary, state.clock.now())
+            .with_findings(findings)
+            .filed_by(
+                mission.mission_id.to_string(),
+                mission.agent_id.clone().unwrap_or_default(),
+            );
+        state
+            .intake
+            .file_station_report(&report)
+            .map_err(|error| format!("the report was not filed: {error}"))?;
+        let mut event = TimelineEvent::new(
+            "head_of_station",
+            "reported",
+            mission.operation_id.clone().unwrap_or_default(),
+            state.clock.now() as f64,
+        )
+        .station(state.station_id.clone())
+        .mission(mission.mission_id.to_string())
+        .detail("findings", report.findings.len().to_string());
+        if let Some(agent) = &mission.agent_id {
+            event = event.actor(agent.clone());
+        }
+        if let Some(worst) = report.worst() {
+            event = event.detail("worst", worst.as_str());
+        }
+        if let Err(error) = state.intake.record_event(&event) {
+            eprintln!("ai6: Head of Station report event was not recorded: {error}");
+        }
+        Ok(report)
+    }
+
+    /// This Station's ID.
+    pub(super) fn station(&self) -> &str {
+        &self.state.station_id
+    }
+}
 
 /// Whether `mission` is a round of this Station: its role is the Head of Station's and the
 /// brief this Station leased for it names this Station alone. Only such a Mission is given
@@ -114,41 +240,64 @@ fn utc(at: i64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use std::sync::atomic::Ordering;
 
     use super::super::tests::{RECORDED_STARTS, start_mission_by_id, test_state, wait_for_state};
     use super::*;
     use crate::MissionId;
     use crate::directorates::m::mission::MissionState;
+    use crate::directorates::m::roster::Roster;
+    use crate::directorates::q::safehouse::SafeHouseReport;
     use crate::directorates::registry::logbook::{Severity, StationFinding, StationFindingKind};
     use crate::directorates::registry::store::{Brief, DEFAULT_LEASE};
 
-    pub(crate) const AGENTS: &str = "[agent.M]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
-                                     roles = [\"head-of-station\", \"analyst\"]\n\
-                                     [agent.M.limits]\nstall_timeout = 300\n\
-                                     [role.head-of-station]\npurpose = \"Keep the Station fit.\"\n\
-                                     policy = \"Act within the Station's limits.\"\n\
-                                     [role.analyst]\npurpose = \"Analyse.\"\npolicy = \"Report.\"\n";
+    pub(in super::super) const AGENTS: &str = "[agent.M]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
+         roles = [\"head-of-station\", \"analyst\"]\n\
+         [agent.M.limits]\nstall_timeout = 300\n\
+         [role.head-of-station]\npurpose = \"Keep the Station fit.\"\n\
+         policy = \"Act within the Station's limits.\"\n\
+         [role.analyst]\npurpose = \"Analyse.\"\npolicy = \"Report.\"\n";
 
-    /// Leases a brief for `mission_id` to this Station, as Headquarters does when it places a
-    /// brief here, and records the Mission.
-    pub(crate) fn lease_round(
+    /// A Station `test` with Operation `G`, whose Missions get mock safe houses, and
+    /// Operation `H` for housekeeping, which works in its directory.
+    pub(in super::super) fn station(root: &Path) -> DaemonState {
+        let mut state = test_state(root, "", AGENTS);
+        let checkout = root.join("checkout");
+        std::fs::write(
+            root.join("operations.toml"),
+            format!(
+                "[operation.G]\npath = {checkout:?}\nworkspace = {{ provider = \"mock-safehouse\" }}\n\
+                 [operation.H]\npath = {checkout:?}\n",
+                checkout = checkout.to_string_lossy()
+            ),
+        )
+        .unwrap();
+        state.roster = Arc::new(Roster::load(root).unwrap());
+        state
+    }
+
+    /// Leases a brief for `mission_id` of Operation `operation` to this Station, as
+    /// Headquarters does when it places a brief here, and records the Mission.
+    pub(in super::super) fn lease_round(
         state: &DaemonState,
+        operation: &str,
         mission_id: &str,
         role: &str,
         stations: &[&str],
     ) {
         let brief: Brief = serde_json::from_value(serde_json::json!({
-            "title": "Station round", "id": mission_id, "source": "sleeper", "operation": "G",
-            "role": role, "stations": stations,
+            "title": "Station round", "id": mission_id, "source": "sleeper",
+            "operation": operation, "role": role, "stations": stations,
         }))
         .unwrap();
         state.intake.submit_brief(&brief).unwrap();
         let meta = BTreeMap::from([
             ("mission_id".to_owned(), serde_json::json!(mission_id)),
-            ("operation".to_owned(), serde_json::json!("G")),
+            ("operation".to_owned(), serde_json::json!(operation)),
             ("agent".to_owned(), serde_json::json!("M")),
             ("role".to_owned(), serde_json::json!(role)),
         ]);
@@ -163,12 +312,129 @@ mod tests {
             .unwrap()
             .create(
                 MissionId::try_new(mission_id).unwrap(),
-                Some("G".to_owned()),
+                Some(operation.to_owned()),
                 "keep the Station".to_owned(),
                 Some("M".to_owned()),
                 Some(role.to_owned()),
             )
             .unwrap();
+    }
+
+    /// Records a Mission of Operation `G` that ends `ended` (or still works, for
+    /// `Working`) with a kept safe house under `root`, holding `unexported` changes and a
+    /// `target/` cache. Returns the safe house's path.
+    pub(in super::super) fn kept_safe_house(
+        state: &DaemonState,
+        root: &Path,
+        mission_id: &str,
+        ended: MissionState,
+        unexported: &[&str],
+    ) -> PathBuf {
+        let path = root.join("safe-houses").join(mission_id);
+        std::fs::create_dir_all(path.join("target/debug")).unwrap();
+        std::fs::write(path.join("target/debug/app"), [0_u8; 64]).unwrap();
+        std::fs::write(path.join("main.rs"), "fn main() {}\n").unwrap();
+        if !unexported.is_empty() {
+            std::fs::write(path.join(".mock-unexported"), unexported.join("\n")).unwrap();
+        }
+        let mut missions = state.missions.lock().unwrap();
+        missions
+            .create(
+                MissionId::try_new(mission_id).unwrap(),
+                Some("G".to_owned()),
+                format!("work for {mission_id}"),
+                Some("M".to_owned()),
+                None,
+            )
+            .unwrap();
+        missions
+            .transition(mission_id, MissionState::Working)
+            .unwrap();
+        missions
+            .set_safe_house(
+                mission_id,
+                SafeHouseReport {
+                    path: path.to_string_lossy().into_owned(),
+                    branch: Some(format!("ai6/{mission_id}")),
+                    base: Some("base0".to_owned()),
+                    kept: true,
+                    changes: unexported.iter().map(|line| (*line).to_owned()).collect(),
+                },
+            )
+            .unwrap();
+        missions.transition(mission_id, ended).unwrap();
+        path
+    }
+
+    /// Calls a tool on a Mission's Cable endpoint: `Err` when the endpoint refuses the call.
+    pub(in super::super) async fn call(
+        state: &DaemonState,
+        mission_id: &str,
+        tool: &'static str,
+        arguments: serde_json::Value,
+    ) -> Result<String, String> {
+        use rmcp::ServiceExt;
+        use rmcp::model::{CallToolRequestParams, ContentBlock};
+        use rmcp::transport::{
+            StreamableHttpClientTransport,
+            streamable_http_client::StreamableHttpClientTransportConfig,
+        };
+        let environment = state.sessions.lock().unwrap()[mission_id]
+            .environment
+            .clone();
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(environment["AI6_CABLE_MCP_URL"].clone())
+                .auth_header(environment["AI6_CABLE_MCP_TOKEN"].clone()),
+        );
+        let client = ().serve(transport).await.unwrap();
+        let response = client
+            .call_tool(
+                CallToolRequestParams::new(tool)
+                    .with_arguments(serde_json::from_value(arguments).unwrap()),
+            )
+            .await;
+        client.cancel().await.unwrap();
+        let response = response.map_err(|error| error.to_string())?;
+        if response.is_error == Some(true) {
+            return Err(format!("{:?}", response.content));
+        }
+        let [ContentBlock::Text(text)] = response.content.as_slice() else {
+            panic!("a tool answers one text block");
+        };
+        Ok(text.text.clone())
+    }
+
+    /// The tools a Mission's Cable endpoint lists.
+    pub(in super::super) async fn tools(state: &DaemonState, mission_id: &str) -> Vec<String> {
+        use rmcp::ServiceExt;
+        use rmcp::transport::{
+            StreamableHttpClientTransport,
+            streamable_http_client::StreamableHttpClientTransportConfig,
+        };
+        let environment = state.sessions.lock().unwrap()[mission_id]
+            .environment
+            .clone();
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(environment["AI6_CABLE_MCP_URL"].clone())
+                .auth_header(environment["AI6_CABLE_MCP_TOKEN"].clone()),
+        );
+        let client = ().serve(transport).await.unwrap();
+        let mut names = client
+            .list_all_tools()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect::<Vec<_>>();
+        client.cancel().await.unwrap();
+        names.sort();
+        names
+    }
+
+    /// Starts a leased Mission and waits until its mock Session reports itself blocked.
+    pub(in super::super) async fn start(state: &DaemonState, mission_id: &str) {
+        start_mission_by_id(state, mission_id).await;
+        wait_for_state(state, mission_id, MissionState::Blocked).await;
     }
 
     fn started_context(mission_id: &str) -> Vec<String> {
@@ -185,7 +451,7 @@ mod tests {
     #[tokio::test]
     async fn a_round_of_this_station_starts_with_its_logbook_and_no_other_mission_does() {
         let root = tempfile::tempdir().unwrap();
-        let state = test_state(root.path(), "", AGENTS);
+        let state = station(root.path());
         let pid = std::process::id();
         state
             .intake
@@ -208,13 +474,18 @@ mod tests {
         let elsewhere = format!("hos-elsewhere-{pid}");
         let unnarrowed = format!("hos-unnarrowed-{pid}");
         let analyst = format!("hos-analyst-{pid}");
-        lease_round(&state, &round, HEAD_OF_STATION_ROLE, &["test"]);
-        lease_round(&state, &elsewhere, HEAD_OF_STATION_ROLE, &["test", "other"]);
-        lease_round(&state, &unnarrowed, HEAD_OF_STATION_ROLE, &[]);
-        lease_round(&state, &analyst, "analyst", &["test"]);
+        lease_round(&state, "H", &round, HEAD_OF_STATION_ROLE, &["test"]);
+        lease_round(
+            &state,
+            "H",
+            &elsewhere,
+            HEAD_OF_STATION_ROLE,
+            &["test", "other"],
+        );
+        lease_round(&state, "H", &unnarrowed, HEAD_OF_STATION_ROLE, &[]);
+        lease_round(&state, "H", &analyst, "analyst", &["test"]);
         for mission_id in [&round, &elsewhere, &unnarrowed, &analyst] {
-            start_mission_by_id(&state, mission_id).await;
-            wait_for_state(&state, mission_id, MissionState::Blocked).await;
+            start(&state, mission_id).await;
         }
 
         let context = started_context(&round);
@@ -233,6 +504,143 @@ mod tests {
                 "{mission_id} is no round of this Station"
             );
         }
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_round_reads_its_station_and_files_a_report_the_check_in_publishes() {
+        let root = tempfile::tempdir().unwrap();
+        let state = station(root.path());
+        let pid = std::process::id();
+        let kept = format!("hos-kept-{pid}");
+        kept_safe_house(
+            &state,
+            root.path(),
+            &kept,
+            MissionState::Done,
+            &["abc1234 add the parser"],
+        );
+        let round = format!("hos-report-round-{pid}");
+        let analyst = format!("hos-report-analyst-{pid}");
+        lease_round(&state, "H", &round, HEAD_OF_STATION_ROLE, &["test"]);
+        lease_round(&state, "H", &analyst, "analyst", &["test"]);
+        start(&state, &round).await;
+        start(&state, &analyst).await;
+
+        let listed = tools(&state, &round).await;
+        assert!(
+            listed.contains(&"station_report".to_owned())
+                && listed.contains(&"file_report".to_owned()),
+            "{listed:?}"
+        );
+        let report: serde_json::Value = serde_json::from_str(
+            &call(&state, &round, "station_report", serde_json::json!({}))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report["station"], "test");
+        assert_eq!(report["capacity"], 4);
+        let live = report["missions"].as_array().unwrap();
+        assert!(live.iter().any(|m| m["mission"] == round.as_str()));
+        assert!(live.iter().all(|m| m["mission"] != kept.as_str()));
+        let house = &report["safe_houses"][0];
+        assert_eq!(house["mission"], kept.as_str());
+        assert_eq!(house["state"], "done");
+        assert_eq!(house["live"], false);
+        assert_eq!(house["exported"], false);
+        assert_eq!(house["unexported"][0], "abc1234 add the parser");
+        assert_eq!(house["dirty"], false);
+        assert_eq!(house["caches"][0]["path"], "target");
+        assert_eq!(house["caches"][0]["size_bytes"], 64);
+        assert!(house["size_bytes"].as_u64().unwrap() >= 64 + 13);
+        assert_eq!(report["limits"]["cache_dirs"][0], "target");
+        let text = report.to_string();
+        assert!(!text.contains("AI6_CABLE_MCP_TOKEN"), "no secrets: {text}");
+
+        let filed: serde_json::Value = serde_json::from_str(
+            &call(
+                &state,
+                &round,
+                "file_report",
+                serde_json::json!({
+                    "summary": "One safe house holds unexported work.",
+                    "findings": [{
+                        "kind": "safe-house", "severity": "warning",
+                        "text": format!("{kept} holds one unexported commit")
+                    }]
+                }),
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(filed["filed"], true);
+        assert!(
+            filed["cable"].as_str().unwrap().starts_with("not sent"),
+            "no heads-of-station channel is configured: {filed}"
+        );
+        let bad = call(
+            &state,
+            &round,
+            "file_report",
+            serde_json::json!({ "summary": "x", "findings": [{
+                "kind": "weather", "severity": "warning", "text": "rain"
+            }]}),
+        )
+        .await
+        .unwrap();
+        assert!(bad.contains("not a finding kind"), "{bad}");
+
+        super::super::publish_station_check_in(&state);
+        let record = state
+            .intake
+            .stations(std::time::Duration::MAX)
+            .unwrap()
+            .into_iter()
+            .find(|record| record.station() == "test")
+            .unwrap();
+        let published = &record.info()[CHECK_IN_KEY];
+        assert_eq!(
+            published["summary"],
+            "One safe house holds unexported work."
+        );
+        assert_eq!(published["findings"][0]["kind"], "safe-house");
+        assert_eq!(published["mission"], round.as_str());
+        assert_eq!(published["agent"], "M");
+        assert_eq!(state.intake.logbook("test").unwrap().len(), 1);
+
+        // A Session of another role has no Station tools, even narrowed to this Station.
+        let other = tools(&state, &analyst).await;
+        assert!(!other.contains(&"station_report".to_owned()), "{other:?}");
+        assert!(
+            call(&state, &analyst, "station_report", serde_json::json!({}))
+                .await
+                .is_err()
+        );
+        assert!(
+            call(
+                &state,
+                &analyst,
+                "file_report",
+                serde_json::json!({ "summary": "forged" })
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(state.intake.logbook("test").unwrap().len(), 1);
+
+        // Once the round is over its tools refuse, even to a client still connected.
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .transition(&round, MissionState::Failed)
+            .unwrap();
+        let refused = call(&state, &round, "station_report", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert!(refused.contains("this round is over"), "{refused}");
         state.stopping.store(true, Ordering::Release);
     }
 
