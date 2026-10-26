@@ -615,7 +615,8 @@ pub trait ApprovalStore {
         now: f64,
     ) -> io::Result<Vec<ApprovalStatus>>;
 
-    /// The live approval of `scope` for a Mission, if one exists.
+    /// The live approval that covers `scope` for a Mission, if one exists
+    /// ([`ActionScope::covers`]).
     ///
     /// # Errors
     ///
@@ -783,7 +784,7 @@ impl ApprovalStore for FileRegistry {
             .into_iter()
             .find_map(|status| match status {
                 ApprovalStatus::Decided(approval)
-                    if approval.request.scope == *scope && approval.is_live(now) =>
+                    if approval.request.scope.covers(scope) && approval.is_live(now) =>
                 {
                     Some(approval)
                 }

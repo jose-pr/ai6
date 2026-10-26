@@ -21,7 +21,7 @@ pub use directorates::m::access::{
 };
 pub use directorates::m::approvals::{
     ActionScope, BUILTIN_KINDS, DEFAULT_APPROVAL_TTL, DEFAULT_PROTECTED, DEFAULT_REQUEST_TTL,
-    GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement,
+    GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement, classify,
     clearance_at_least,
 };
 pub use directorates::m::config::{

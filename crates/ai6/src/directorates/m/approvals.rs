@@ -6,6 +6,15 @@
 //! [`GreenInkPolicy`] says which steps need that: the `strict` preset (the default) asks for
 //! every built-in kind at every clearance and lets `desk` Agents ask for nothing, `licensed`
 //! lets `00` Agents push and merge unattended, and every part can be chosen individually.
+//!
+//! An approval the Agent could ignore would be a log entry, so two things hold a step: a
+//! harness gate that reads each shell command with [`classify`] and refuses a governed step no
+//! live approval covers, and credentials for protected targets that Q leases only against an
+//! approval.
+
+mod classify;
+
+pub use classify::classify;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -101,6 +110,39 @@ impl ActionScope {
         } else {
             format!("refs/heads/{reference}")
         }
+    }
+
+    /// The remote a `push` or `delete` target names before its ref, if it names one.
+    pub fn remote(&self) -> Option<&str> {
+        self.target
+            .rsplit_once(':')
+            .map(|(remote, _)| remote.trim())
+            .filter(|remote| !remote.is_empty())
+    }
+
+    /// Whether an approval of this scope covers the step `attempted`: the same kind and, for
+    /// `push` and `delete`, the same ref on the same remote (a side that names no remote
+    /// matches any); for other kinds, the same target ignoring case, `#` and spacing.
+    pub fn covers(&self, attempted: &ActionScope) -> bool {
+        if self.kind != attempted.kind {
+            return false;
+        }
+        if matches!(self.kind.as_str(), "push" | "delete") {
+            let remotes = match (self.remote(), attempted.remote()) {
+                (Some(approved), Some(attempted)) => approved == attempted,
+                _ => true,
+            };
+            return remotes && self.pushed_ref() == attempted.pushed_ref();
+        }
+        let plain = |target: &str| {
+            target
+                .to_lowercase()
+                .replace('#', " ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        plain(&self.target) == plain(&attempted.target)
     }
 }
 
@@ -202,8 +244,18 @@ impl GreenInkPolicy {
         Requirement::GreenInk
     }
 
-    /// Whether a push to `reference` (a full ref such as `refs/heads/main`) needs green ink.
+    /// Whether a push to `reference` (a full ref such as `refs/heads/main`) needs green ink. A
+    /// reference ending in `*` (every branch, every tag) needs it when it can reach a
+    /// protected ref.
     pub fn is_protected(&self, reference: &str) -> bool {
+        if let Some(prefix) = reference.strip_suffix('*')
+            && self
+                .protected
+                .iter()
+                .any(|pattern| pattern.starts_with(prefix))
+        {
+            return true;
+        }
         self.matchers
             .iter()
             .any(|matcher| matcher.is_match(reference))
@@ -467,6 +519,23 @@ mod tests {
             let definition: GreenInkDefinition = toml::from_str(bad).unwrap();
             assert!(definition.resolve().is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn an_approval_covers_the_same_ref_however_it_was_written() {
+        let approved = scope("push", "origin:main");
+        assert!(approved.covers(&scope("push", "origin:refs/heads/main")));
+        assert!(
+            approved.covers(&scope("push", "refs/heads/main")),
+            "remote unknown"
+        );
+        assert!(scope("push", "main").covers(&scope("push", "upstream:refs/heads/main")));
+        assert!(!approved.covers(&scope("push", "upstream:refs/heads/main")));
+        assert!(!approved.covers(&scope("push", "origin:refs/tags/main")));
+        assert!(!approved.covers(&scope("delete", "origin:refs/heads/main")));
+        assert!(scope("merge", "pr #42").covers(&scope("merge", "PR 42")));
+        assert!(!scope("merge", "PR 42").covers(&scope("merge", "PR 421")));
+        assert!(scope("release", "tag  v1.2.0").covers(&scope("release", "Tag v1.2.0")));
     }
 
     #[test]
