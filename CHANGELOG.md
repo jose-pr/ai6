@@ -71,6 +71,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `Severity`), and a round (`HEAD_OF_STATION_ROLE`) starts with that logbook as fenced,
   quoted context. The example
   roster defines the role and a commented `housekeeping` Operation.
+- Moneypenny, the operator's assistant: the app chats with her over `GET /v1/user/moneypenny`
+  and her model runs on a Station through the Agent's own handler (Claude Code or Codex,
+  subscription or API key), as the roster Agent `moneypenny` (`--assistant-agent`,
+  `--no-assistant`). Universal Exports relays each message to a Station
+  (`/v1/station/assistant/next`, `/v1/station/assistant/reports`; `ai6::AssistantJob`,
+  `AssistantReport`), which keeps one harness per conversation, warm for ten idle minutes
+  and resumed afterwards. Handlers start her in `AgentStart::assistant` mode
+  (`AssistantMode`: no built-in tool, only the named MCP servers; interpreters, skills and
+  network beyond them are refused for now). Her tools are served on `/v1/moneypenny/mcp` to a
+  token bound to the person and the conversation, and each runs through the gateway's own
+  routes as that person, so a refusal there is a refusal for her; results are wrapped as
+  data. `Gateway::with_assistant` and `AssistantConfig` are the library form.
 - Vetting: before M places a brief, the Headquarters holder runs deterministic checks under
   the Operation's `[operation.ID.vetting]` settings (`vetting = "off"` turns them off, a
   reported weakening). A malformed brief (no visible title, text past `max_brief_bytes`,

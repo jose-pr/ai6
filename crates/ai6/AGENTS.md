@@ -2623,7 +2623,60 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // {"mcpServers":{}}`, and no AI6 servers or gate. Codex: `-c mcp_servers={}`, the project
 // marked untrusted, thread `sandbox: "read-only"`, `approvalPolicy: "never"`, `config:
 // {"web_search": "disabled"}`, and no gate.
+// And `assistant: Option<AssistantMode>` (serde default None), set for Moneypenny: wins over
+// `answer_only` and is built from the mode's parts below.
+pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
+                           pub interpreters: Vec<String> /* serde default */,
+                           pub skills: Vec<String> /* serde default */,
+                           pub network: AssistantNetwork /* serde default */ }
+pub struct McpServerRef { pub name: String /* moneypenny */,
+                          pub env_prefix: String /* AI6_MONEYPENNY_MCP: <prefix>_URL, <prefix>_TOKEN */ }
+pub struct AssistantNetwork { pub policy: String /* limited (default) | denied | open */,
+                              pub allowed_hosts: Vec<String> }
+impl AssistantMode { pub fn moneypenny() -> Self; pub fn validate(&self) -> Result<(), String>; }
+impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool; } // denied, or limited with no host
+// Claude Code: `--restricted --tools= --disallowedTools <its shell, file, web, sub-agent and
+// Skill tools, no mcp__> --allowedTools mcp__<name>,… --setting-sources user
+// --strict-mcp-config --mcp-config {"mcpServers":{<name>:{"type":"http","url":"${P_URL}",
+// "headers":{"Authorization":"Bearer ${P_TOKEN}"}}}}`, no gate. Codex: `-c mcp_servers=
+// {<name>={url="…",bearer_token_env_var="P_TOKEN"}}` (replacing the user's servers), the
+// project untrusted, and the answer-only thread policy. Both refuse to start (UNSUPPORTED) with
+// interpreters, skills or a network reaching more than the servers, and (BAD_VALUE) when the
+// environment lacks a server's URL or token; tokens never reach a command line.
 ```
+
+`ai6::directorates::section_00::assistant` is the contract between Universal Exports and a
+Station for Moneypenny's Sessions (all also re-exported at the crate root):
+
+```rust
+pub const ASSISTANT_MCP_ENV_PREFIX: &str = "AI6_MONEYPENNY_MCP";
+pub const ASSISTANT_MCP_URL_ENV: &str = "AI6_MONEYPENNY_MCP_URL";
+pub const ASSISTANT_MCP_TOKEN_ENV: &str = "AI6_MONEYPENNY_MCP_TOKEN";
+pub const ASSISTANT_MCP_SERVER: &str = "moneypenny";
+pub const ASSISTANT_MCP_PATH: &str = "v1/moneypenny/mcp";      // relative to the gateway origin
+pub const MAX_ASSISTANT_MESSAGE_BYTES: usize = 32 * 1024;
+pub const MAX_ASSISTANT_CONTEXT_BYTES: usize = 24 * 1024;     // all context items together
+pub const MAX_ASSISTANT_EVENT_BYTES: usize = 64 * 1024;       // longer event text is cut
+pub const MAX_ASSISTANT_EVENTS: usize = 64;                   // per report
+pub const EVENT_ACCEPTED, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, EVENT_COMPLETED,
+          EVENT_FAILED, EVENT_LIMIT, EVENT_CLOSED: &str;      // "accepted", "rejected", …
+pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
+    pub message: String, pub context: Vec<String> /* default */, pub mcp_token: String,
+    pub token_expires_at: f64, pub session_id: Option<String> /* default */,
+    pub close: bool /* default */ }                  // Debug redacts the token
+impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
+pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
+    pub job_id: Option<String>, pub session_id: Option<String>, pub events: Vec<AssistantEvent> }
+pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String> }
+impl AssistantEvent { pub fn new(kind: &str, text: Option<String>) -> Self; } // cuts text
+pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control characters
+```
+
+All three are serde types with unknown fields refused. `validate` checks identities, a message
+of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`), the context bound and a
+token of 32-512 bytes without whitespace. A job's answer is one report with its `job_id` and
+one `accepted` or `rejected` event (text: the reason); the harness's own events follow in
+reports without a `job_id`.
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
 `limit` set, in place of the `completed` or `failed` event the same output would
@@ -3078,6 +3131,24 @@ Mission's role and not quarantined), `resume` is `/resume` with the message, and
 state, the daemon publishes it as a lifecycle event on the Mission's latest provider
 Session (`queued` after a retry, `abandoned` after a cancel). A provider's refusal is
 reported as "the provider refused the request", never in the provider's words.
+
+With a publisher, the Station is also an assistant desk for Moneypenny: a fourth thread
+long-polls `/v1/station/assistant/next?station=<id>&wait_ms=1000` for `AssistantJob`s and
+another posts `AssistantReport`s to `/v1/station/assistant/reports` (best effort, 256 queued,
+three tries). For each job the desk answers `accepted` or `rejected` (invalid job, Agent not in
+the roster or quarantined, handler not loaded here, four harnesses already running). It keeps
+one harness per conversation, started with the roster Agent `job.agent_id` (handler, model,
+effort; environment reduced to what reaches the model, as a Chief of Staff review's),
+`AssistantMode::moneypenny()`, clearance `desk`, no project settings, in a new empty directory
+`<temp>/ai6-assistant-<random>` removed when the harness closes, and the MCP URL
+`<gateway origin>/v1/moneypenny/mcp` plus the job's token in its environment. A later job goes
+to the running harness as a message, unless its token expires within two minutes, when the
+harness is closed and resumed with the new token. A harness idle for ten minutes is closed;
+the next job resumes its provider Session (the job's `session_id`, else the one the desk
+remembers), or starts afresh with the job's context when that fails. Handler events `text`,
+`tool`, `completed`, `failed` and `limit` are reported; a closed harness reports `closed` with
+the reason (`idle`, `the Station is stopping`, …). An assistant Session is not a Mission: no
+Operation, safe house, Cable endpoint, board entry or usage ledger record.
 
 ## Safe houses (`ai6::directorates::q::safehouse`, `ai6::station::safehouse`)
 

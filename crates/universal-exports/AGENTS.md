@@ -355,6 +355,55 @@ is not one; the Station comes from the published launch manifest) and a `control
 (`<action>.<status>`, actor the requester, details `control`, `state`, `agent`, `reason`)
 when a Station reports a control. Neither write can fail the publication or report.
 
+## Moneypenny, the assistant
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssistantConfig { /* private */ }
+impl Default for AssistantConfig { /* agent "moneypenny" */ }
+impl AssistantConfig {
+    pub fn new(agent_id: impl Into<String>) -> Result<Self, GatewayError>; // InvalidConfiguration
+    pub fn agent_id(&self) -> &str;
+    pub fn with_conversation_limits(self, per_person: usize, total: usize, max_age: Duration) -> Self;
+    pub fn with_token_ttl(self, ttl: Duration) -> Self;          // at least 60 s
+    pub fn with_answer_timeout(self, timeout: Duration) -> Self;
+    pub fn with_tool_calls_per_minute(self, calls: u32) -> Self;
+}
+impl Gateway { pub fn with_assistant(self, config: AssistantConfig) -> Self; }
+```
+
+Defaults: 20 conversations a person and 2,000 in all (oldest idle one dropped first), each
+kept until untouched for 7 days with its newest 500 entries; tool tokens accepted for one
+hour (8 kept per conversation); a Station has 60 seconds to take up a message; 120 tool calls
+a conversation per minute. Conversations live in the gateway's memory only and are lost when
+it restarts (the provider Session on the Station survives, but the app shows a new
+conversation).
+
+The model runs on a Station, as the roster Agent named here (see `ai6::AssistantJob`), not in
+the gateway. Each message from the app is queued as an `AssistantJob` for the conversation's
+Station, else the Headquarters Station, else any healthy Station (checked in within 45 s) by
+ID; a Station that refuses it (`rejected`) or does not take it up within the answer timeout is
+passed over, and with none left the app gets an error entry naming the last reason. A job
+carries the message (prefixed with `[App page: view=… operation_id=…]` from the page keys
+`view`, `operation_id`, `mission_id`, `station_id`, `session_id`, each a short identifier;
+anything else in the page is dropped), Moneypenny's instructions and the field dictionary
+(`docs/organization.md`) as context, a recap of the conversation's last 8 KiB, the provider
+Session to resume, and a fresh random MCP token bound to the person and the conversation.
+
+Her tools are served on `POST /v1/moneypenny/mcp` (MCP Streamable HTTP, protocol
+`2025-06-18`, `2025-03-26` or `2024-11-05`; one JSON response per request, `202` for
+notifications, no server stream). Only a token a job carried is accepted (`401` otherwise,
+including a person's access token or the Station credential). Each tool is a request to the
+gateway's own routes with the person's current access token, so it is authenticated and
+authorized exactly as the app's request (`403` becomes "Refused: …", `401` "sign in again").
+Inputs are checked against the tool's schema (unknown properties refused) before anything
+runs, and identifiers are percent-encoded into paths. Results are JSON inside
+`<ai6-data tool="NAME">…</ai6-data>` with `<` escaped, cut at 200,000 characters. Tools:
+`agent_roles`, `audit`, `board` (`/v1/stations` and `/v1/board`), `class_authorizations`,
+`field_guide` (the `docs/` pages, compiled in), `green_ink`, `held_briefs`, `mission`,
+`mission_proposals`, `missions`, `placement_preview`, `pools`, `profile`, `quarantines`,
+`roster`, `station_settings`, `timeline`; all read only.
+
 ## Gateway state
 
 ```rust
@@ -567,6 +616,10 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/station/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with `x-ai6-operation-id`, `x-ai6-mission-id` and `x-ai6-session-id` headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
 | `GET /v1/station/controls/next?station=<id>&wait_ms=<n>` | Bearer-authenticated long poll for that Station's next control (`wait_ms` default 1000, capped at 25000); `200` with one `application/vnd.ai6.guatiao` control value frame on channel 4 (the receiver builds the schema from any control) and the control becomes `delivered`, or `204`. Stations share one credential, so `station` is the caller's own word. |
 | `POST /v1/station/controls/{control_id}/result` | Bearer-authenticated outcome `{"station","outcome":"applied"\|"rejected","state"?,"reason"?}`; `state` is a Mission state name, `reason` is cut to 512 characters without control characters. `204`; `404` unknown, `403` another Station's control, `409` already finished. |
+| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"busy"}`; a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"page"?:{…}}` (`error` `busy` while one is answered, `unauthorized` once the token ended) and `{"type":"new"}`; the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error","text","at"}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
+| `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
+| `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most 25,000). |
+| `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `failed`, `limit` and a `closed` while answering become `error` entries. |
 | `POST /v1/attach` | Requires exact `Origin` and trusted HTTPS proxy marker; exchanges token from JSON body for a scoped cookie. |
 | `GET /v1/socket/{session_id}?after={sequence}` | Requires the cookie, exact `Origin` and trusted HTTPS marker. Streams binary guatiao messages. |
 
@@ -613,7 +666,8 @@ The optional `cli` feature builds the service command:
   are those of the `coqui-access` plugin libraries (`coqui_access_local`, `coqui_access_key`,
   `coqui_access_ldap`, `coqui_access_proxy`, `coqui_access_peer`, `coqui_roles`).
   `--login-tries-per-address`, `--login-tries-per-name` and `--client-address-header` set
-  the login limits above.
+  the login limits above. Moneypenny is served by default as the roster Agent
+  `--assistant-agent` (default `moneypenny`); `--no-assistant` turns her off.
 
 `universal-exports` returns `0` after graceful shutdown, `1` when configuration or
 listener startup fails, and `2` for invalid arguments. The operator command-line client is
@@ -641,6 +695,8 @@ The library reads no environment variables. The commands read:
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address at the login route. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
 | `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None (the connection's address) |
+| `AI6_EXPORTS_ASSISTANT_AGENT` | The roster Agent that is Moneypenny; overridden by `--assistant-agent`. | `moneypenny` |
+| `AI6_EXPORTS_NO_ASSISTANT` | Serve no assistant (`--no-assistant`). | Unset (served) |
 | `AI6_EXPORTS_URL` | API origin for `ai6ctl`; overridden by `--server`. | `http://127.0.0.1:7082` |
 | `AI6_ACCESS_TOKEN` | User bearer required by every `ai6ctl` command except `health`. | None |
 

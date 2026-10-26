@@ -10,7 +10,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | Path | What |
 | --- | --- |
 | `crates/ai6/` | The Station daemon, the field runner and AI6 contracts: `ai6::directorates::{m,registry,q,section_00,medical}` decide, `ai6::station` runs; `ai6` command (`ai6 serve`, `ai6 runner`) |
-| `crates/universal-exports/` | Universal Exports: the authenticated public API gateway and `universal-exports` command |
+| `crates/universal-exports/` | Universal Exports: the authenticated public API gateway, Moneypenny's conversations and tools (`src/moneypenny/`), and the `universal-exports` command |
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The operator command: reads, and cancels, retries, resumes and interrupts Missions |
 | `crates/providers/{agents,terminals,transports,theaters,safehouses,sources}/` | Guatiao providers: Claude/Codex handlers, the `pty` terminal, the `local`, `ssh`, `adb`, `container` and `qemu` transports, the `ephemeral-container` Theater provider, the `git` and `copy` safe houses, GitHub and Jira Sources |
