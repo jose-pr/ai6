@@ -3,8 +3,7 @@
 //! A Station's identity, the peers it trusts and the TLS configurations that use them come
 //! from `coqui-peer-tls` and `coqui-peer`; this module fixes where AI6 keeps them and the
 //! protocol it speaks. A peer is named by its [`Fingerprint`], printed `sha256:<hex>` and
-//! read in any spelling `coqui-peer` knows, including the grouped base32 earlier Stations
-//! printed. Every setting that decides what a handshake accepts is a [`Policy`]: callers
+//! read in any spelling `coqui-peer` knows, grouped base32 included. Every setting that decides what a handshake accepts is a [`Policy`]: callers
 //! pass [`Policy::strict`] (TLS 1.3, SHA-2 pins) unless an operator chose otherwise.
 
 use std::fmt;
@@ -68,9 +67,6 @@ impl From<coqui_peer::Error> for StationIdentityError {
 
 /// Opens this Station's identity in `state_dir`, creating a self-signed one on first use.
 ///
-/// An `identity.pem` written by an earlier version is read as it is: the fingerprint of the
-/// certificate does not change.
-///
 /// # Errors
 ///
 /// Returns an error when the file is unreadable, holds more than one certificate or no
@@ -82,9 +78,6 @@ pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError>
 /// Opens the peers this Station has accepted or is asked to accept, under
 /// `<state_dir>/peers`, bounded by `policy`'s waiting limits (per source address, in total,
 /// and how often one peer from one address is written down again).
-///
-/// A store written by an earlier version, with files named by the grouped base32 fingerprint
-/// and holding only the certificate, is read as it is.
 ///
 /// # Errors
 ///
@@ -152,41 +145,8 @@ mod tests {
 
     use super::*;
 
-    /// A peer-store file as the previous version wrote it: named by the grouped base32
-    /// fingerprint, holding one certificate block and nothing else.
-    fn legacy_file(der: &[u8]) -> (String, String) {
-        const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-        let hash = coqui_peer::Digest::Sha256.of(der);
-        let (mut held, mut bits, mut letters) = (0u32, 0u32, String::new());
-        for byte in hash.as_bytes() {
-            held = (held << 8) | u32::from(*byte);
-            bits += 8;
-            while bits >= 5 {
-                bits -= 5;
-                letters.push(char::from(BASE32[((held >> bits) & 31) as usize]));
-            }
-        }
-        if bits > 0 {
-            letters.push(char::from(BASE32[((held << (5 - bits)) & 31) as usize]));
-        }
-        let name = letters
-            .as_bytes()
-            .chunks(4)
-            .map(|chunk| std::str::from_utf8(chunk).unwrap())
-            .collect::<Vec<_>>()
-            .join("-");
-        let encoded = data_encoding::BASE64.encode(der);
-        let mut pem = String::from("-----BEGIN CERTIFICATE-----\n");
-        for chunk in encoded.as_bytes().chunks(64) {
-            pem.push_str(std::str::from_utf8(chunk).unwrap());
-            pem.push('\n');
-        }
-        pem.push_str("-----END CERTIFICATE-----\n");
-        (format!("{name}.pem"), pem)
-    }
-
     #[test]
-    fn identity_is_created_once_and_a_file_of_the_previous_version_keeps_its_fingerprint() {
+    fn identity_is_created_once_and_keeps_its_fingerprint() {
         let directory = tempfile::tempdir().unwrap();
         let identity = open_identity(directory.path()).unwrap();
         let path = directory.path().join(IDENTITY_FILE);
@@ -201,8 +161,7 @@ mod tests {
         assert!(!format!("{identity:?}").contains("PRIVATE KEY"));
         assert!(identity.fingerprint().to_string().starts_with("sha256:"));
 
-        // The previous version wrote the certificate block, then the PKCS#8 key block, with
-        // 64-character lines: exactly what `to_pem` writes.
+        // The certificate block, then the PKCS#8 key block, with 64-character lines.
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.starts_with("-----BEGIN CERTIFICATE-----\n"));
         assert!(text.contains("-----BEGIN PRIVATE KEY-----\n"));
@@ -221,12 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn fingerprints_read_every_spelling_a_station_has_printed() {
+    fn a_fingerprint_reads_in_every_spelling() {
         let identity = Identity::generate().unwrap();
         let fingerprint = identity.fingerprint();
-        let (name, _) = legacy_file(identity.certificate_der());
-        let grouped = name.trim_end_matches(".pem");
-        assert_eq!(grouped, fingerprint.to_base32_grouped());
+        let grouped = fingerprint.to_base32_grouped();
         assert_eq!(grouped.parse::<Fingerprint>().unwrap(), fingerprint);
         assert_eq!(
             grouped.replace('-', "").parse::<Fingerprint>().unwrap(),
@@ -241,44 +198,6 @@ mod tests {
             fingerprint
         );
         assert!("not-a-station-id".parse::<Fingerprint>().is_err());
-    }
-
-    #[test]
-    fn a_peer_store_of_the_previous_version_is_read_without_migration() {
-        let directory = tempfile::tempdir().unwrap();
-        let accepted = Identity::generate().unwrap();
-        let waiting = Identity::generate().unwrap();
-        for (section, identity) in [("accepted", &accepted), ("waiting", &waiting)] {
-            let (name, pem) = legacy_file(identity.certificate_der());
-            let folder = directory.path().join("peers").join(section);
-            fs::create_dir_all(&folder).unwrap();
-            fs::write(folder.join(name), pem).unwrap();
-        }
-
-        let peers = open_peers(directory.path(), &Policy::strict()).unwrap();
-        assert_eq!(peers.accepted().unwrap(), vec![accepted.fingerprint()]);
-        assert!(peers.is_accepted(&accepted.fingerprint()));
-        let entries = peers.waiting().unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].id, waiting.fingerprint());
-        assert_eq!(entries[0].source, None);
-
-        peers.accept(&waiting.fingerprint()).unwrap();
-        assert!(peers.waiting().unwrap().is_empty());
-        let mut both = peers.accepted().unwrap();
-        both.sort();
-        let mut expected = vec![accepted.fingerprint(), waiting.fingerprint()];
-        expected.sort();
-        assert_eq!(both, expected);
-        // The accepted peers authenticate a handshake as before.
-        assert!(
-            server_config(
-                &Identity::generate().unwrap(),
-                &trust_peers(peers),
-                &Policy::strict()
-            )
-            .is_ok()
-        );
     }
 
     #[test]

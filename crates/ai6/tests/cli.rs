@@ -246,8 +246,7 @@ fn identity_and_peers_work_on_a_state_directory_with_the_source_address_shown() 
     );
     assert!(waiting.contains("192.0.2.7:4000"), "{waiting}");
 
-    // Any spelling of the fingerprint is accepted, including the grouped base32 that earlier
-    // versions printed.
+    // Any spelling of the fingerprint is accepted, grouped base32 included.
     let (ok, accepted) = run(&[
         "peer",
         "accept",

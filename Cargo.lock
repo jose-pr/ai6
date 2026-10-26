@@ -65,7 +65,6 @@ dependencies = [
  "coqui-peer-tls",
  "coqui-roles",
  "coqui-roles-plugin",
- "data-encoding",
  "fs2",
  "futures-util",
  "globset",
