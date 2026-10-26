@@ -541,7 +541,7 @@ impl ClaudeSession {
             lock(&self.output)?.push(&bytes[..count as usize]);
         };
         let (value, line) = match line {
-            StreamLine::Json { value, text } => (value, text),
+            StreamLine::Json { value, text, .. } => (value, text),
             StreamLine::Text(text) => return Ok(Some(event("output", Some(text)))),
         };
         if let Some(id) = value.get("session_id").and_then(Value::as_str) {

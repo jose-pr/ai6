@@ -54,13 +54,14 @@ pub const STREAM_COLS: u16 = 32767;
 /// held is handed over as text.
 pub const MAX_JSON_LINE: usize = 64 * 1024 * 1024;
 
-/// `bytes` without terminal control sequences: CSI (`ESC [ ... final`), OSC (`ESC ] ... BEL`
-/// or `ESC ] ... ESC \`) and two-byte escapes. Other bytes, line breaks included, are kept.
+/// `bytes` without terminal control sequences: CSI (`ESC [ ... final`), OSC (`ESC ] ...`,
+/// ended by BEL, `ESC \` or a line break) and two-byte escapes. Other bytes, line breaks
+/// included, are kept.
 pub fn strip_controls(bytes: &[u8]) -> Vec<u8> {
     let mut visible = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
-        match control_len(&bytes[index..]) {
+        match control(&bytes[index..]) {
             Some((len, _)) => index += len,
             None => {
                 visible.push(bytes[index]);
@@ -71,37 +72,71 @@ pub fn strip_controls(bytes: &[u8]) -> Vec<u8> {
     visible
 }
 
-/// The length of the control sequence `bytes` starts with, and whether it moves the cursor to
-/// another row (CUP, HVP, CNL, CPL, VPA, IND, NEL, RI); `None` when it starts with none. An
-/// unfinished sequence runs to the end.
-fn control_len(bytes: &[u8]) -> Option<(usize, bool)> {
+/// The most parameter and intermediate bytes a CSI sequence may have; a longer run is not a
+/// sequence, and only its `ESC [` is dropped.
+const MAX_CSI: usize = 64;
+
+/// What a control sequence does, as far as reading lines goes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Control {
+    /// Select graphic rendition (`ESC [ ... m`): colours, nothing else.
+    Sgr,
+    /// A move to another row (CUP, HVP, CNL, CPL, VPA, IND, NEL, RI).
+    RowMove,
+    Other,
+}
+
+/// The length of the control sequence `bytes` starts with, and what it does; `None` when it
+/// starts with none. A CSI ends at its final byte, or before the first byte no CSI can hold;
+/// an OSC ends at BEL, `ESC \` or before a line break; either runs at most to the end.
+fn control(bytes: &[u8]) -> Option<(usize, Control)> {
     if bytes.first() != Some(&0x1b) {
         return None;
     }
     match bytes.get(1).copied() {
-        None => Some((1, false)),
+        None => Some((1, Control::Other)),
         Some(b'[') => {
-            let end = bytes[2..]
-                .iter()
-                .position(|byte| (0x40..=0x7e).contains(byte))
-                .map_or(bytes.len(), |at| at + 3);
-            let moves = matches!(bytes.get(end - 1), Some(b'H' | b'f' | b'E' | b'F' | b'd'));
-            Some((end, moves))
+            for (at, byte) in bytes.iter().enumerate().skip(2) {
+                if at - 2 > MAX_CSI {
+                    return Some((2, Control::Other));
+                }
+                match byte {
+                    0x40..=0x7e => {
+                        let kind = match byte {
+                            b'm' => Control::Sgr,
+                            b'H' | b'f' | b'E' | b'F' | b'd' => Control::RowMove,
+                            _ => Control::Other,
+                        };
+                        return Some((at + 1, kind));
+                    }
+                    0x20..=0x3f => {}
+                    _ => return Some((at, Control::Other)),
+                }
+            }
+            Some((bytes.len(), Control::Other))
         }
         Some(b']') => {
             let mut index = 2;
             while index < bytes.len() {
-                if bytes[index] == 0x07 {
-                    return Some((index + 1, false));
+                match bytes[index] {
+                    0x07 => return Some((index + 1, Control::Other)),
+                    b'\r' | b'\n' => return Some((index, Control::Other)),
+                    0x1b if bytes.get(index + 1) == Some(&b'\\') => {
+                        return Some((index + 2, Control::Other));
+                    }
+                    _ => index += 1,
                 }
-                if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
-                    return Some((index + 2, false));
-                }
-                index += 1;
             }
-            Some((bytes.len(), false))
+            Some((bytes.len(), Control::Other))
         }
-        Some(byte) => Some((2, matches!(byte, b'D' | b'E' | b'M'))),
+        Some(byte) => Some((
+            2,
+            if matches!(byte, b'D' | b'E' | b'M') {
+                Control::RowMove
+            } else {
+                Control::Other
+            },
+        )),
     }
 }
 
@@ -112,6 +147,10 @@ pub enum StreamLine {
     Json {
         value: serde_json::Value,
         text: Vec<u8>,
+        /// Whether the text was rebuilt rather than read as written: joined from a line the
+        /// terminal broke, or with a control other than SGR removed from inside it. A caller
+        /// that acts on the exact text (an approval) can refuse such a line.
+        rebuilt: bool,
     },
     /// Anything else, trimmed and with terminal controls removed; never empty.
     Text(String),
@@ -126,14 +165,65 @@ pub enum StreamLine {
 /// moves to another row, stripped of controls, and a line that is the start of a JSON value
 /// but not the whole of it is joined with the lines that follow until it parses, up to
 /// [`MAX_JSON_LINE`] bytes. JSON text cannot hold a raw line break or `ESC`, so neither join
-/// nor strip changes a value the harness wrote.
+/// nor strip changes a value the harness wrote; such a line is still marked
+/// [`StreamLine::Json::rebuilt`].
 #[derive(Debug, Default)]
 pub struct JsonLines {
     /// Output not yet ended by a line break.
     buffer: Vec<u8>,
     /// The start of a JSON value whose rest has not arrived.
-    partial: Vec<u8>,
+    held: Option<Held>,
     ready: std::collections::VecDeque<StreamLine>,
+}
+
+/// A JSON value's start, and how far its brackets are open.
+#[derive(Debug, Default)]
+struct Held {
+    text: Vec<u8>,
+    depth: Depth,
+}
+
+/// Bracket depth of JSON text read so far, outside strings.
+#[derive(Debug, Default, Clone, Copy)]
+struct Depth {
+    open: usize,
+    in_string: bool,
+    escaped: bool,
+}
+
+impl Depth {
+    /// Reads `bytes`; whether the outermost bracket closed in them.
+    fn closes(&mut self, bytes: &[u8]) -> bool {
+        let mut closed = false;
+        for &byte in bytes {
+            if self.in_string {
+                match (self.escaped, byte) {
+                    (true, _) => self.escaped = false,
+                    (false, b'\\') => self.escaped = true,
+                    (false, b'"') => self.in_string = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match byte {
+                b'"' => self.in_string = true,
+                b'{' | b'[' => self.open += 1,
+                b'}' | b']' => {
+                    self.open = self.open.saturating_sub(1);
+                    closed |= self.open == 0;
+                }
+                _ => {}
+            }
+        }
+        closed
+    }
+}
+
+/// A piece of a line: its visible bytes, and the offsets in them where a control other than
+/// SGR or a row move was removed.
+struct Piece<'a> {
+    bytes: &'a [u8],
+    removed: &'a [usize],
 }
 
 impl JsonLines {
@@ -165,9 +255,8 @@ impl JsonLines {
             let rest = std::mem::take(&mut self.buffer);
             self.cut(&rest);
         }
-        if !self.partial.is_empty() {
-            let partial = std::mem::take(&mut self.partial);
-            self.push_text(&partial);
+        if let Some(held) = self.held.take() {
+            self.push_text(&held.text);
         }
         self.ready.pop_front()
     }
@@ -175,56 +264,78 @@ impl JsonLines {
     /// Cuts `bytes` at line breaks and row moves and takes each piece.
     fn cut(&mut self, bytes: &[u8]) {
         let mut line = Vec::new();
+        let mut removed = Vec::new();
         let mut index = 0;
         while index < bytes.len() {
-            if let Some((len, moves)) = control_len(&bytes[index..]) {
-                if moves {
-                    self.take(&std::mem::take(&mut line));
+            if let Some((len, kind)) = control(&bytes[index..]) {
+                match kind {
+                    Control::RowMove => self.take_piece(&mut line, &mut removed),
+                    Control::Other => removed.push(line.len()),
+                    Control::Sgr => {}
                 }
                 index += len;
                 continue;
             }
             match bytes[index] {
-                b'\n' => self.take(&std::mem::take(&mut line)),
+                b'\n' => self.take_piece(&mut line, &mut removed),
                 // JSON text holds no raw CR either; ConPTY ends a broken line with CRLF.
                 b'\r' => {}
                 byte => line.push(byte),
             }
             index += 1;
         }
-        self.take(&line);
+        self.take_piece(&mut line, &mut removed);
+    }
+
+    fn take_piece(&mut self, line: &mut Vec<u8>, removed: &mut Vec<usize>) {
+        self.take(Piece {
+            bytes: line,
+            removed,
+        });
+        line.clear();
+        removed.clear();
     }
 
     /// Takes one piece of a line. A piece that continues a held value is joined untrimmed,
-    /// since a break inside a string may fall among its spaces.
-    fn take(&mut self, piece: &[u8]) {
-        if !self.partial.is_empty() {
-            let mut joined = std::mem::take(&mut self.partial);
-            joined.extend_from_slice(piece);
-            match parse(&joined) {
+    /// since a break inside a string may fall among its spaces, and the held value is parsed
+    /// again only when the piece closes its outermost bracket.
+    fn take(&mut self, piece: Piece<'_>) {
+        if let Some(mut held) = self.held.take() {
+            let closes = held.depth.closes(piece.bytes);
+            held.text.extend_from_slice(piece.bytes);
+            let parsed = if closes {
+                parse(&held.text)
+            } else {
+                Parsed::Incomplete
+            };
+            match parsed {
                 Parsed::Value(value) => {
-                    joined.truncate(joined.trim_ascii_end().len());
+                    let mut text = held.text;
+                    text.truncate(text.trim_ascii_end().len());
                     self.ready.push_back(StreamLine::Json {
                         value,
-                        text: joined,
+                        text,
+                        rebuilt: true,
                     });
                     return;
                 }
                 // A whole value of its own means the held start was never finished.
                 Parsed::Incomplete
-                    if joined.len() <= MAX_JSON_LINE && !is_whole_value(piece.trim_ascii()) =>
+                    if held.text.len() <= MAX_JSON_LINE
+                        && !is_whole_value(piece.bytes.trim_ascii()) =>
                 {
-                    self.partial = joined;
+                    self.held = Some(held);
                     return;
                 }
                 _ => {
-                    let held = joined.len() - piece.len();
-                    self.push_text(&joined[..held]);
+                    let start = held.text.len() - piece.bytes.len();
+                    self.push_text(&held.text[..start]);
                 }
             }
         }
         // The end stays: a value broken at the terminal's width may end in spaces of a string.
-        let line = piece.trim_ascii_start();
+        let skipped = piece.bytes.len() - piece.bytes.trim_ascii_start().len();
+        let line = &piece.bytes[skipped..];
         if line.is_empty() {
             return;
         }
@@ -233,11 +344,23 @@ impl JsonLines {
             return;
         }
         match parse(line) {
-            Parsed::Value(value) => self.ready.push_back(StreamLine::Json {
-                value,
-                text: line.trim_ascii_end().to_vec(),
-            }),
-            Parsed::Incomplete => self.partial = line.to_vec(),
+            Parsed::Value(value) => {
+                let end = skipped + line.trim_ascii_end().len();
+                let rebuilt = piece.removed.iter().any(|&at| at > skipped && at < end);
+                self.ready.push_back(StreamLine::Json {
+                    value,
+                    text: line.trim_ascii_end().to_vec(),
+                    rebuilt,
+                });
+            }
+            Parsed::Incomplete => {
+                let mut depth = Depth::default();
+                depth.closes(line);
+                self.held = Some(Held {
+                    text: line.to_vec(),
+                    depth,
+                });
+            }
             Parsed::Invalid => self.push_text(line),
         }
     }
@@ -481,6 +604,15 @@ mod tests {
         StreamLine::Json {
             value: serde_json::from_str(text).unwrap(),
             text: text.as_bytes().to_vec(),
+            rebuilt: false,
+        }
+    }
+
+    fn rebuilt(text: &str) -> StreamLine {
+        StreamLine::Json {
+            value: serde_json::from_str(text).unwrap(),
+            text: text.as_bytes().to_vec(),
+            rebuilt: true,
         }
     }
 
@@ -514,16 +646,72 @@ mod tests {
         let (head, tail) = text.split_at(30);
         let (last, tail) = tail.split_at(1);
         let broken = format!("{head}\r\n\x1b[23;32767H{last}{tail}\r\n");
-        assert_eq!(lines_of(&[broken.as_bytes()]), [json(&text)]);
+        assert_eq!(lines_of(&[broken.as_bytes()]), [rebuilt(&text)]);
 
         let at_spaces = text.find("  ").unwrap() + 1;
         let (head, tail) = text.split_at(at_spaces);
         let broken = format!("{head}\r\n{tail}\r\n");
         assert_eq!(
             lines_of(&[broken.as_bytes()]),
-            [json(&text)],
+            [rebuilt(&text)],
             "spaces at the break are kept"
         );
+    }
+
+    #[test]
+    fn a_control_inside_a_line_marks_it_rebuilt_unless_it_is_only_colour() {
+        assert_eq!(
+            lines_of(&[b"\x1b[?25l{\"a\":\x1b[?25h1}\x1b[?25l\r\n"]),
+            [rebuilt("{\"a\":1}")]
+        );
+        assert_eq!(
+            lines_of(&[b"\x1b[?25l{\"a\":\x1b[31m1\x1b[0m}\x1b[?25h\r\n"]),
+            [json("{\"a\":1}")],
+            "colour, and controls before and after the value, change nothing"
+        );
+    }
+
+    #[test]
+    fn an_unended_osc_or_csi_stops_at_the_line_break() {
+        assert_eq!(
+            lines_of(&[b"\x1b]0;title with no end\r\n{\"a\":1}\r\n"]),
+            [json("{\"a\":1}")]
+        );
+        assert_eq!(
+            lines_of(&[b"\x1b[\r\n{\"a\":1}\r\n"]),
+            [json("{\"a\":1}")],
+            "a CSI cut short does not swallow the next line's brace"
+        );
+        let run = format!("\x1b[{}m", "0;".repeat(40));
+        assert_eq!(
+            strip_controls(run.as_bytes()),
+            format!("{}m", "0;".repeat(40)).as_bytes(),
+            "past {MAX_CSI} bytes it is not a sequence: only its ESC [ goes"
+        );
+    }
+
+    #[test]
+    fn a_held_value_is_parsed_again_only_when_its_brackets_close() {
+        let mut depth = Depth::default();
+        assert!(!depth.closes(br#"{"a":"}]\"{","b":["#));
+        assert!(!depth.closes(b"1,2"));
+        assert!(!depth.closes(b"]"));
+        assert!(
+            depth.closes(b"}"),
+            "strings and escaped quotes do not count"
+        );
+
+        // A long line broken many times still arrives whole, one parse at the end.
+        let text = format!("{{\"t\":\"{}\"}}", "x".repeat(2_000_000));
+        let broken = text
+            .as_bytes()
+            .chunks(32_767)
+            .map(|piece| [piece, b"\r\n".as_slice()].concat())
+            .collect::<Vec<_>>()
+            .concat();
+        let started = std::time::Instant::now();
+        assert_eq!(lines_of(&[&broken]), [rebuilt(&text)]);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]
