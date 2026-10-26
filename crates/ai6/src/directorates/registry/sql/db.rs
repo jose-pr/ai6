@@ -159,21 +159,9 @@ impl Row {
         }
     }
 
-    pub(crate) fn opt_int(&self, index: usize) -> io::Result<Option<i64>> {
-        match self.get(index)? {
-            Value::Null => Ok(None),
-            Value::Int(value) => Ok(Some(*value)),
-            other => Err(invalid(format!(
-                "column {index} is not an integer: {other:?}"
-            ))),
-        }
-    }
-
     pub(crate) fn real(&self, index: usize) -> io::Result<f64> {
         match self.get(index)? {
             Value::Real(value) => Ok(*value),
-            // SQLite hands back a whole REAL stored by an older writer as an integer.
-            Value::Int(value) => Ok(*value as f64),
             other => Err(invalid(format!(
                 "column {index} is not a number: {other:?}"
             ))),

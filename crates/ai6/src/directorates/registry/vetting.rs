@@ -350,7 +350,7 @@ impl VettingStore for FileRegistry {
         if bytes.len() as u64 > MAX_HELD_RECORD_BYTES {
             return Err(invalid_data("held brief exceeds the size limit"));
         }
-        // Written before the queued copy goes, so a crash in between holds it twice, which
+        // Held first and the queued copy removed after, so a crash in between holds it twice, which
         // the next hold or release resolves, and never loses it.
         write_atomic(&self.held_path(key), &bytes)?;
         fs::remove_file(&queued)?;

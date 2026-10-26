@@ -706,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn cable_round_trips_through_its_versioned_wire_shape() {
+    fn cable_round_trips_through_its_wire_shape() {
         let cable = Cable::try_new(draft()).unwrap();
         let value = serde_json::to_value(&cable).unwrap();
         assert_eq!(

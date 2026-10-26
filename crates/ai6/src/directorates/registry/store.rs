@@ -406,11 +406,8 @@ pub struct StationSettings {
 struct StationSettingsFile {
     station: String,
     max_concurrent_missions: usize,
-    /// Absent from settings written before resource limits existed.
-    #[serde(default)]
-    min_free_memory_mb: Option<u64>,
-    #[serde(default)]
-    max_cpu_percent: Option<u32>,
+    min_free_memory_mb: u64,
+    max_cpu_percent: u32,
 }
 
 impl StationSettings {
@@ -514,7 +511,6 @@ pub struct HeadquartersLease {
 struct HeadquartersLeaseFile {
     station: String,
     expires: f64,
-    #[serde(default)]
     term: u64,
 }
 
@@ -534,8 +530,7 @@ impl HeadquartersLeaseFile {
 
 impl HeadquartersLease {
     /// Returns the election term: it grows by one each time a different Station takes the
-    /// lease and never repeats, so it orders Headquarters holders. A lease written before
-    /// terms existed reads as term 0.
+    /// lease and never repeats, so it orders Headquarters holders.
     pub fn term(&self) -> u64 {
         self.term
     }
@@ -1740,13 +1735,7 @@ impl StationStore for FileRegistry {
         if record.station != station {
             return Err(invalid_data("Station settings identity does not match"));
         }
-        let defaults = ResourceLimits::default();
-        let limits = ResourceLimits::new(
-            record
-                .min_free_memory_mb
-                .unwrap_or(defaults.min_free_memory_mb),
-            record.max_cpu_percent.unwrap_or(defaults.max_cpu_percent),
-        );
+        let limits = ResourceLimits::new(record.min_free_memory_mb, record.max_cpu_percent);
         StationSettings::try_new(record.station, record.max_concurrent_missions)
             .and_then(|settings| settings.with_resource_limits(limits))
             .map(Some)
@@ -1758,8 +1747,8 @@ impl StationStore for FileRegistry {
         let record = StationSettingsFile {
             station: settings.station.clone(),
             max_concurrent_missions: settings.max_concurrent_missions,
-            min_free_memory_mb: Some(settings.resource_limits.min_free_memory_mb),
-            max_cpu_percent: Some(settings.resource_limits.max_cpu_percent),
+            min_free_memory_mb: settings.resource_limits.min_free_memory_mb,
+            max_cpu_percent: settings.resource_limits.max_cpu_percent,
         };
         let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
         if bytes.len() as u64 > MAX_STATION_SETTINGS_BYTES {
@@ -3256,27 +3245,6 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), b"new");
     }
 
-    #[test]
-    fn station_settings_written_before_resource_limits_read_the_defaults() {
-        let directory = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(directory.path());
-        fs::create_dir_all(
-            registry
-                .station_settings_path("station/b")
-                .parent()
-                .unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            registry.station_settings_path("station/b"),
-            br#"{"station":"station/b","max_concurrent_missions":3}"#,
-        )
-        .unwrap();
-        let older = registry.station_settings("station/b").unwrap().unwrap();
-        assert_eq!(older.max_concurrent_missions(), 3);
-        assert_eq!(older.resource_limits(), ResourceLimits::default());
-    }
-
     fn queued_briefs_list_by_priority_creation_time_and_key(store: &dyn Store) {
         let registry = store.handle();
         for brief in [
@@ -4000,7 +3968,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         fs::write(
             directory.join("lease.json"),
-            r#"{"station":"old-station","expires":0}"#,
+            r#"{"station":"old-station","expires":0,"term":1}"#,
         )
         .unwrap();
         let registry = FileRegistry::open(root.path());
@@ -4015,22 +3983,6 @@ mod tests {
             registry.headquarters().unwrap().unwrap().station(),
             "new/station"
         );
-    }
-
-    #[test]
-    fn a_headquarters_lease_written_before_terms_reads_as_term_zero() {
-        let root = tempfile::tempdir().unwrap();
-        let directory = root.path().join("headquarters");
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(
-            directory.join("lease.json"),
-            r#"{"station":"old-station","expires":0}"#,
-        )
-        .unwrap();
-        let registry = FileRegistry::open(root.path());
-        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 0);
-        assert!(registry.elect("station-a", DEFAULT_LEASE).unwrap());
-        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 1);
     }
 
     #[test]

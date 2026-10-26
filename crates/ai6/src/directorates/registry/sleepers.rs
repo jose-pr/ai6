@@ -54,18 +54,12 @@ pub struct Sleeper {
     pub priority: i64,
     /// Stations its briefs are limited to; empty adds no limit. Like a brief's `stations`, it
     /// only narrows the Operation's.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub stations: Vec<String>,
     /// Queue one brief per window for each live Station that placement accepts for the
     /// Operation, each narrowed to that Station: a round of every Station.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default)]
     pub each_station: bool,
-}
-
-// Unset fields stay out of the serialized form, so the fingerprint of a definition that does
-// not use them is the one it had before they existed.
-fn is_false(value: &bool) -> bool {
-    !value
 }
 
 impl Sleeper {
@@ -608,12 +602,8 @@ mod tests {
     }
 
     #[test]
-    fn unset_round_fields_leave_the_fingerprint_as_it_was() {
-        // The digest of `nightly()` as written before `stations` and `each_station` existed.
-        let before = hex_digest(&Sha256::digest(
-            br#"{"schedule":"0 3 * * *","title":"Update dependencies","prompt":"Update the lockfile and open a branch.","agent":null,"role":"maintenance","priority":1}"#,
-        ));
-        assert_eq!(nightly().fingerprint(), before);
+    fn round_fields_change_the_fingerprint() {
+        let before = nightly().fingerprint();
         let rounds = Sleeper {
             each_station: true,
             ..nightly()

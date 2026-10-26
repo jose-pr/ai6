@@ -147,11 +147,9 @@ pub struct SessionRecord {
     /// The fencing token of the current lease; it only grows.
     pub fence: u64,
     /// The untrusted input the Session has read; it only grows and a later attempt at the
-    /// Mission inherits it. Empty in records written before exposure was tracked.
-    #[serde(default)]
+    /// Mission inherits it.
     pub exposure: Vec<Exposure>,
-    /// How the harness was launched; absent in records written before Sessions could be
-    /// re-attached by another Station.
+    /// How the harness was launched, which another Station needs to re-attach to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch: Option<SessionLaunch>,
     /// What the holder last saw the Session do, oldest first and bounded: the hand-off a

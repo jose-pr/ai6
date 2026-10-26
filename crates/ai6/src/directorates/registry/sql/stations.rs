@@ -96,15 +96,8 @@ impl StationStore for SqlRegistry {
         let Some(row) = row else {
             return Ok(None);
         };
-        let defaults = ResourceLimits::default();
-        let memory = match row.opt_int(1)? {
-            Some(value) => u64::try_from(value).ok(),
-            None => Some(defaults.min_free_memory_mb),
-        };
-        let cpu = match row.opt_int(2)? {
-            Some(value) => u32::try_from(value).ok(),
-            None => Some(defaults.max_cpu_percent),
-        };
+        let memory = u64::try_from(row.int(1)?).ok();
+        let cpu = u32::try_from(row.int(2)?).ok();
         usize::try_from(row.int(0)?)
             .ok()
             .zip(memory.zip(cpu))
