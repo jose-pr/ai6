@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use guatiao::ToValue;
 
+use crate::directorates::m::placement::Resources;
 use crate::directorates::m::theaters::{Theater, TheaterAccess, TheaterSummary, Theaters};
 use crate::directorates::q::ephemeral::{TheaterMaker, TheaterProviderConfig};
 use crate::directorates::q::provision::{self, ProbeReport};
@@ -26,6 +27,9 @@ const REPORT_EVERY: Duration = Duration::from_secs(300);
 /// from it come and go while the Station runs.
 pub(crate) struct Transports {
     entries: RwLock<BTreeMap<String, Arc<Entry>>>,
+    /// How often a Theater other than the Station's own host is sampled for its resources;
+    /// zero leaves only the full probe's sample.
+    resources_every: Duration,
 }
 
 struct Entry {
@@ -58,6 +62,9 @@ struct Probe {
     report: Option<ProbeReport>,
     reported: Option<Instant>,
     reporting: bool,
+    resources: Option<Resources>,
+    sampled: Option<Instant>,
+    sampling: bool,
 }
 
 impl Transports {
@@ -66,7 +73,16 @@ impl Transports {
     pub(crate) fn none() -> Self {
         Self {
             entries: RwLock::new(BTreeMap::new()),
+            resources_every: crate::station::server::DEFAULT_RESOURCES_EVERY,
         }
+    }
+
+    /// Samples each Theater other than the Station's own host every `every`; zero leaves
+    /// only the full probe's sample.
+    #[must_use]
+    pub(crate) fn with_resources_every(mut self, every: Duration) -> Self {
+        self.resources_every = every;
+        self
     }
 
     /// Builds the transport for every reachable Theater, and the Theater provider for every
@@ -204,14 +220,14 @@ impl Transports {
             .unwrap_or_default();
         entries
             .iter()
-            .map(|entry| entry.summary(terminal_available))
+            .map(|entry| entry.summary(terminal_available, self.resources_every))
             .collect()
     }
 
     /// One Theater as published at check-in.
     pub(crate) fn summary(&self, id: &str, terminal_available: bool) -> Option<TheaterSummary> {
         self.entry(id)
-            .map(|entry| entry.summary(terminal_available))
+            .map(|entry| entry.summary(terminal_available, self.resources_every))
     }
 }
 
@@ -251,7 +267,7 @@ impl Entry {
         summary
     }
 
-    fn summary(&self, terminal_available: bool) -> TheaterSummary {
+    fn summary(&self, terminal_available: bool, resources_every: Duration) -> TheaterSummary {
         if let Some(maker) = &self.maker {
             return self.template_summary(maker);
         }
@@ -311,8 +327,64 @@ impl Entry {
                 }
             }
         }
+        summary.resources = if own_host {
+            crate::station::resources::last()
+        } else {
+            let sampled = match (&self.client, &capabilities) {
+                (Ok(client), Some(capabilities)) if summary.unavailable.is_none() => {
+                    self.known_resources(client, capabilities, resources_every)
+                }
+                _ => None,
+            };
+            let probed = summary.report.as_ref().and_then(|r| r.resources.clone());
+            match (sampled, probed) {
+                (Some(sampled), Some(probed)) if probed.sampled_at > sampled.sampled_at => {
+                    Some(probed)
+                }
+                (sampled, probed) => sampled.or(probed),
+            }
+        };
         summary.capabilities = capabilities;
         summary
+    }
+
+    /// The Theater's last resources sample, taking another in the background every `every`.
+    /// `None` until one succeeds, with `every` zero, and for a Windows host.
+    fn known_resources(
+        &self,
+        client: &Arc<TransportClient>,
+        capabilities: &Capabilities,
+        every: Duration,
+    ) -> Option<Resources> {
+        if every.is_zero() || capabilities.os.as_deref() == Some("windows") {
+            return None;
+        }
+        let mut probe = self.probe.lock().ok()?;
+        let due = probe
+            .sampled
+            .is_none_or(|sampled| sampled.elapsed() >= every);
+        if due && !probe.sampling {
+            probe.sampling = true;
+            let (client, state, capabilities) =
+                (client.clone(), self.probe.clone(), capabilities.clone());
+            let spawned = std::thread::Builder::new()
+                .name("ai6-theater-resources".to_owned())
+                .spawn(move || {
+                    let sampled = provision::probe_resources(&client, &capabilities);
+                    if let Ok(mut probe) = state.lock() {
+                        probe.sampling = false;
+                        probe.sampled = Some(Instant::now());
+                        // A failed sample keeps the last good one; its time says how old it is.
+                        if let Ok(resources) = sampled {
+                            probe.resources = Some(resources);
+                        }
+                    }
+                });
+            if spawned.is_err() {
+                probe.sampling = false;
+            }
+        }
+        probe.resources.clone()
     }
 
     /// The last report on the Theater's requirements and ambient credentials, looking again in
@@ -553,6 +625,41 @@ mod tests {
         assert!(
             summary.harnesses.is_empty(),
             "a missing harness is not published"
+        );
+    }
+
+    #[test]
+    fn a_remote_theater_is_sampled_and_the_own_host_carries_the_stations_sample() {
+        let lines = "nproc\t4\nloadavg\t0.50 0.40 0.30 1/100 7\n\
+                     mem_total_kb\t2097152\nmem_available_kb\t1048576\n";
+        let transports = Transports::none().with_transport(ssh_theater(), Box::new(Answers(lines)));
+        let summary = wait_for(&transports, |s| s.resources.is_some());
+        let resources = summary.resources.unwrap();
+        assert_eq!(
+            (
+                resources.cpus,
+                resources.load_1m,
+                resources.memory_total_mb,
+                resources.memory_available_mb
+            ),
+            (Some(4.0), Some(0.5), Some(2048), Some(1024))
+        );
+
+        // With sampling off, the full probe's sample is what the Theater shows.
+        let off = Transports::none()
+            .with_resources_every(Duration::ZERO)
+            .with_transport(ssh_theater(), Box::new(Answers(lines)));
+        let summary = wait_for(&off, |s| s.report.is_some());
+        assert!(summary.resources.is_some());
+        assert_eq!(summary.resources, summary.report.unwrap().resources);
+
+        let own = Transports::build(&Theaters::default(), &Plugins::scan(&[]));
+        crate::station::resources::sample();
+        let local = own.summary("local", true).unwrap();
+        assert!(
+            local
+                .resources
+                .is_some_and(|resources| resources.memory_total_mb.is_some())
         );
     }
 

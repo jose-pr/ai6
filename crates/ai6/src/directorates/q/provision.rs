@@ -24,6 +24,7 @@ use guatiao::Bytes;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::directorates::m::placement::Resources;
 use crate::directorates::m::theaters::Theater;
 use crate::directorates::q::transport::{
     Capabilities, Output, RunSpec, TransportClient, WriteSpec, describe,
@@ -408,6 +409,9 @@ pub struct ProbeReport {
     /// Free MiB in the working directory, when the Theater reported it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub free_mb: Option<u64>,
+    /// The Theater's CPUs, load and memory, within its container's limits when it is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<Resources>,
     /// Requirements the Theater does not meet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unmet: Vec<Unmet>,
@@ -466,6 +470,27 @@ for ai6_var in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY GH_TOKEN
   eval "ai6_set=\${$ai6_var:+1}"
   [ -n "$ai6_set" ] && ai6_ambient "$ai6_var in the login environment"
 done
+"#;
+
+/// Prints the CPUs, load average and memory, then a cgroup v2 container's own CPU and memory
+/// limits, which a container's `/proc` does not show. macOS has no `/proc`: `sysctl` gives
+/// its load and total memory, and nothing gives its available memory.
+const RESOURCES: &str = r#"ai6_n=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null)
+[ -n "$ai6_n" ] && printf 'nproc\t%s\n' "$ai6_n"
+if [ -r /proc/loadavg ]; then
+  printf 'loadavg\t%s\n' "$(cat /proc/loadavg)"
+else
+  ai6_load=$(sysctl -n vm.loadavg 2>/dev/null) && printf 'loadavg\t%s\n' "$ai6_load"
+fi
+if [ -r /proc/meminfo ]; then
+  awk '$1 == "MemTotal:" { printf "mem_total_kb\t%s\n", $2 }
+       $1 == "MemAvailable:" { printf "mem_available_kb\t%s\n", $2 }' /proc/meminfo
+else
+  ai6_mem=$(sysctl -n hw.memsize 2>/dev/null) && printf 'mem_total_bytes\t%s\n' "$ai6_mem"
+fi
+for ai6_file in cpu.max memory.max memory.current; do
+  [ -r "/sys/fs/cgroup/$ai6_file" ] && printf 'cgroup_%s\t%s\n' "$ai6_file" "$(cat "/sys/fs/cgroup/$ai6_file")"
+done
 exit 0
 "#;
 
@@ -480,7 +505,8 @@ const PLACE: &str = r#"chmod 755 "$1" && mv -f "$1" "$2"
 "#;
 
 /// Looks over the Theater `client` reaches: the operating system, each program `requires`
-/// names with its version, free space in `dir`, and ambient credentials. `capabilities` are
+/// names with its version, free space in `dir`, ambient credentials, and its CPUs, load and
+/// memory as [`probe_resources`] reads them. `capabilities` are
 /// what the transport reported; its `os` wins over `uname`.
 ///
 /// Never fails: a Theater that cannot be probed answers a report with only
@@ -521,7 +547,7 @@ fn probe_programs(
     let mut argv = vec![
         "sh".to_owned(),
         "-c".to_owned(),
-        PROBE.to_owned(),
+        [PROBE, RESOURCES].concat(),
         "sh".to_owned(),
         dir.unwrap_or(".").to_owned(),
     ];
@@ -530,12 +556,14 @@ fn probe_programs(
     if output.code != Some(0) {
         return Err(format!("the probe failed: {}", failure(&output)));
     }
+    let stdout = String::from_utf8_lossy(&output.stdout.0);
     let mut report = ProbeReport {
         checked_at: unix_now(),
         os: capabilities.os.clone(),
+        resources: parse_resources(&stdout),
         ..ProbeReport::default()
     };
-    for line in String::from_utf8_lossy(&output.stdout.0).lines() {
+    for line in stdout.lines() {
         let mut fields = line.splitn(3, '\t');
         match (fields.next(), fields.next(), fields.next()) {
             (Some("os"), Some(uname), _) if report.os.is_none() && !uname.is_empty() => {
@@ -558,6 +586,103 @@ fn probe_programs(
         }
     }
     Ok(report)
+}
+
+/// Samples the CPUs, load average and memory of the Theater `client` reaches, within its
+/// container's limits when it is one. Cheaper than [`probe`], so a Station runs it more often.
+///
+/// # Errors
+///
+/// The transport cannot run commands, the Theater runs Windows (it needs a POSIX shell), or
+/// the command failed or printed nothing it recognised.
+pub fn probe_resources(
+    client: &TransportClient,
+    capabilities: &Capabilities,
+) -> Result<Resources, String> {
+    if !capabilities.run {
+        return Err("its transport cannot run commands".to_owned());
+    }
+    if capabilities.os.as_deref() == Some("windows") {
+        return Err("sampling needs a POSIX shell, and the Theater runs windows".to_owned());
+    }
+    let output = run(client, script(RESOURCES, []), PROBE_TIMEOUT_MS)?;
+    if output.code != Some(0) {
+        return Err(format!("sampling failed: {}", failure(&output)));
+    }
+    parse_resources(&String::from_utf8_lossy(&output.stdout.0))
+        .ok_or_else(|| "the Theater reported no CPU or memory figures".to_owned())
+}
+
+/// Reads what [`RESOURCES`] printed. A container's cgroup limits narrow the host's figures:
+/// fewer CPUs under a CPU quota, less memory under a memory limit. `None` when nothing was
+/// recognised.
+fn parse_resources(stdout: &str) -> Option<Resources> {
+    let mut nproc = None;
+    let mut load_1m = None;
+    let mut total_kb = None;
+    let mut available_kb = None;
+    let mut cpu_quota = None;
+    let mut memory_limit = None;
+    let mut memory_current = None;
+    for line in stdout.lines() {
+        let Some((key, value)) = line.split_once('\t') else {
+            continue;
+        };
+        let value = value.trim();
+        match key {
+            "nproc" => nproc = value.parse::<u32>().ok().filter(|n| *n > 0),
+            "loadavg" => {
+                load_1m = value
+                    .trim_start_matches('{')
+                    .split_whitespace()
+                    .next()
+                    .and_then(|first| first.parse::<f64>().ok())
+                    .filter(|load| load.is_finite() && *load >= 0.0);
+            }
+            "mem_total_kb" => total_kb = value.parse::<u64>().ok(),
+            "mem_available_kb" => available_kb = value.parse::<u64>().ok(),
+            "mem_total_bytes" => total_kb = value.parse::<u64>().ok().map(|bytes| bytes / 1024),
+            // `max 100000` is no quota; `150000 100000` is one and a half CPUs.
+            "cgroup_cpu.max" => {
+                let mut fields = value.split_whitespace();
+                let quota = fields.next().and_then(|quota| quota.parse::<f64>().ok());
+                let period = fields.next().and_then(|period| period.parse::<f64>().ok());
+                cpu_quota = quota
+                    .zip(period)
+                    .filter(|(_, period)| *period > 0.0)
+                    .map(|(quota, period)| quota / period)
+                    .filter(|cpus| cpus.is_finite() && *cpus > 0.0);
+            }
+            "cgroup_memory.max" => memory_limit = value.parse::<u64>().ok(),
+            "cgroup_memory.current" => memory_current = value.parse::<u64>().ok(),
+            _ => {}
+        }
+    }
+    let mut memory_total_mb = total_kb.map(|kb| kb / 1024);
+    let mut memory_available_mb = available_kb.map(|kb| kb / 1024);
+    if let Some(limit) = memory_limit {
+        let limit_mb = limit / (1024 * 1024);
+        memory_total_mb = Some(memory_total_mb.map_or(limit_mb, |total| total.min(limit_mb)));
+        if let Some(current) = memory_current {
+            let left_mb = limit.saturating_sub(current) / (1024 * 1024);
+            memory_available_mb = Some(memory_available_mb.map_or(left_mb, |a| a.min(left_mb)));
+        }
+    }
+    let cpus = match (nproc.map(f64::from), cpu_quota) {
+        (Some(cpus), Some(quota)) => Some(cpus.min(quota)),
+        (cpus, quota) => cpus.or(quota),
+    }
+    .map(|cpus| (cpus * 100.0).round() / 100.0);
+    let resources = Resources {
+        cpus,
+        cpu_percent: None,
+        load_1m,
+        memory_total_mb,
+        memory_available_mb,
+        sampled_at: unix_now(),
+    };
+    (resources.cpus.is_some() || resources.load_1m.is_some() || resources.memory_total_mb.is_some())
+        .then_some(resources)
 }
 
 /// The name transports use for what `uname -s` printed.
@@ -1091,5 +1216,98 @@ mod tests {
             Some(".local/bin/ai6")
         );
         assert_eq!(theater_path("ai6"), None);
+    }
+
+    // Outputs of `RESOURCES` captured on real hosts.
+    const FEDORA: &str = "nproc\t12\nloadavg\t10.02 6.89 8.02 9/1271 2033858\n\
+                          mem_total_kb\t32533308\nmem_available_kb\t27105716\n";
+    // Alpine 3.22 under rootless Podman, `--memory 256m --cpus 1.5`, on the same host.
+    const ALPINE_LIMITED: &str = "nproc\t12\nloadavg\t8.08 6.89 7.97 3/1226 4\n\
+                                  mem_total_kb\t32533308\nmem_available_kb\t29141740\n\
+                                  cgroup_cpu.max\t150000 100000\n\
+                                  cgroup_memory.max\t268435456\n\
+                                  cgroup_memory.current\t2322432\n";
+    const ALPINE_UNLIMITED: &str = "nproc\t12\nloadavg\t7.61 6.83 7.94 4/1219 4\n\
+                                    mem_total_kb\t32533308\nmem_available_kb\t29100368\n\
+                                    cgroup_cpu.max\tmax 100000\ncgroup_memory.max\tmax\n\
+                                    cgroup_memory.current\t1720320\n";
+    // macOS 15 (x86_64): no /proc, so no available memory.
+    const MACOS: &str = "nproc\t16\nloadavg\t{ 3.13 2.97 3.06 }\nmem_total_bytes\t12884901888\n";
+
+    #[test]
+    fn resources_parse_from_a_host_a_limited_container_and_macos() {
+        let fedora = parse_resources(FEDORA).unwrap();
+        assert_eq!(
+            (fedora.cpus, fedora.load_1m, fedora.cpu_percent),
+            (Some(12.0), Some(10.02), None)
+        );
+        assert_eq!(
+            (fedora.memory_total_mb, fedora.memory_available_mb),
+            (Some(31770), Some(26470))
+        );
+
+        let limited = parse_resources(ALPINE_LIMITED).unwrap();
+        assert_eq!(limited.cpus, Some(1.5), "the CPU quota, not the host's 12");
+        assert_eq!(limited.memory_total_mb, Some(256), "the memory limit");
+        assert_eq!(
+            limited.memory_available_mb,
+            Some(253),
+            "the limit less what the container uses"
+        );
+
+        let unlimited = parse_resources(ALPINE_UNLIMITED).unwrap();
+        assert_eq!(unlimited.cpus, Some(12.0));
+        assert_eq!(unlimited.memory_total_mb, Some(31770));
+        assert_eq!(unlimited.memory_available_mb, Some(28418));
+
+        let macos = parse_resources(MACOS).unwrap();
+        assert_eq!(
+            (macos.cpus, macos.load_1m, macos.memory_total_mb),
+            (Some(16.0), Some(3.13), Some(12288))
+        );
+        assert_eq!(macos.memory_available_mb, None, "never guessed");
+
+        assert_eq!(parse_resources(""), None);
+        assert_eq!(parse_resources("nproc\tmany\nloadavg\tnan\n"), None);
+    }
+
+    #[test]
+    fn the_full_probe_carries_resources() {
+        use crate::directorates::q::transport::Transport;
+        use guatiao::library::ProviderError;
+        use guatiao::{Status, ToValue, Value};
+
+        struct Prints(String);
+        impl Transport for Prints {
+            fn capabilities(&self) -> Result<Value, ProviderError> {
+                Err(ProviderError::new(Status::GUATIAO_ERR_INTERNAL, "unused"))
+            }
+            fn run(&self, _spec: &Value) -> Result<Value, ProviderError> {
+                Output {
+                    code: Some(0),
+                    stdout: Bytes(self.0.as_bytes().to_vec()),
+                    ..Output::default()
+                }
+                .to_value()
+                .map_err(|e| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &e.to_string()))
+            }
+        }
+        let client = TransportClient::new(Box::new(Prints(format!("os\tLinux\n{ALPINE_LIMITED}"))));
+        let runs = Capabilities {
+            run: true,
+            ..Capabilities::default()
+        };
+        let report = probe(&client, &runs, None, None);
+        assert_eq!(report.resources.unwrap().memory_total_mb, Some(256));
+        assert_eq!(
+            probe_resources(&client, &runs).unwrap().cpus,
+            Some(1.5),
+            "the resources-only probe reads the same lines"
+        );
+        let windows = Capabilities {
+            os: Some("windows".to_owned()),
+            ..runs
+        };
+        assert!(probe_resources(&client, &windows).is_err());
     }
 }

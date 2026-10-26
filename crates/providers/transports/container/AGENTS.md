@@ -51,6 +51,7 @@ which is how a test stands in for the engine. The configured provider uses the p
 ## Gotchas
 
 - A test against a real engine runs only when `AI6_TEST_CONTAINER` names a running container
-  (`AI6_TEST_ENGINE` the engine).
+  (`AI6_TEST_ENGINE` the engine). `AI6_TEST_CONTAINER_MEMORY_MB`, the container's
+  `--memory` limit in MiB, also checks that its resources report that limit.
 - After renaming or removing a provider library, clean the plugin directory: a Station
   loads every provider library it finds.

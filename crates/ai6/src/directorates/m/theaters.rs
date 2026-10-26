@@ -566,6 +566,7 @@ impl Theater {
             requires: self.requires.clone(),
             report: None,
             made_for: None,
+            resources: None,
         }
     }
 
@@ -791,6 +792,10 @@ pub struct TheaterSummary {
     /// The Mission an ephemeral Theater was made for; placement never chooses it for another.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub made_for: Option<String>,
+    /// The Theater's CPUs, load and memory as last sampled: the Station's own for its host,
+    /// else the Station's probe of it. Absent until a sample succeeds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<crate::directorates::m::placement::Resources>,
 }
 
 impl TheaterSummary {

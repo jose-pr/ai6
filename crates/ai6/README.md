@@ -62,7 +62,8 @@ and `Tanner`.
 ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
           [--registry LOCATION] [--config LOCATION] [--headquarters-lease SECS]
           [--station ID] [--role control|execution]... [--label KEY=VALUE]...
-          [--terminal ID] [--max-concurrent-missions N] [watchdog options]
+          [--terminal ID] [--max-concurrent-missions N] [--resources-every SECS]
+          [watchdog options]
 ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]
 ai6 runner call [--state-dir PATH] METHOD PATH
 ai6 identity
@@ -75,7 +76,8 @@ ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
 
 - `ai6 serve` runs the Station. Harnesses run in an available terminal provider,
   preferring `pty`; `--terminal` pins one. Agents and handlers do not choose it. `--role` and `--label` configure placement;
-  both roles are on by default. Watchdog defaults are set with `--stall-timeout`,
+  both roles are on by default. `--resources-every` (default 60, `0` off) sets how often each
+  remote Theater's CPUs, load and memory are sampled for placement. Watchdog defaults are set with `--stall-timeout`,
   `--loop-timeout`, `--loop-min-lines`, `--blocked-after`, `--max-runtime`, `--history`
   and `--normalize-digits` (seconds may be fractional). `--registry` and `--config` take
   a directory, `sqlite:PATH` or a `postgres://` URL: Stations sharing a PostgreSQL

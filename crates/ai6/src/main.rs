@@ -243,6 +243,10 @@ struct ServeArgs {
     /// Station waits before taking over from a Headquarters that went dark.
     #[arg(long, value_parser = parse_duration, default_value = "60")]
     headquarters_lease: Duration,
+    /// Seconds between samples of each remote Theater's CPUs, load and memory; 0 leaves only
+    /// the 300-second requirements probe.
+    #[arg(long, value_parser = parse_duration, default_value = "60")]
+    resources_every: Duration,
 }
 
 #[derive(Debug, Subcommand)]
@@ -336,6 +340,7 @@ async fn main() -> ExitCode {
                 labels,
                 terminal,
                 headquarters_lease,
+                resources_every,
             } = *args;
             let publisher = match publisher_config() {
                 Ok(config) => config,
@@ -344,7 +349,8 @@ async fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let mut station_config = ai6::StationConfig::default();
+            let mut station_config =
+                ai6::StationConfig::default().with_resources_every(resources_every);
             if !role.is_empty() {
                 station_config =
                     station_config.with_roles(role.iter().filter_map(|role| match role.as_str() {

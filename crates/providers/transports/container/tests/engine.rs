@@ -1,7 +1,9 @@
 //! The `container` transport against a real Docker or Podman engine.
 //!
 //! It runs only when `AI6_TEST_CONTAINER` names a running container (and `AI6_TEST_ENGINE`
-//! the engine, if it is not `docker`): the test never picks a container on its own.
+//! the engine, if it is not `docker`): the test never picks a container on its own. With
+//! `AI6_TEST_CONTAINER_MEMORY_MB` set to the container's memory limit, it also checks that
+//! the container reports that limit as its memory.
 
 use ai6::directorates::q::transport::contract::{self, Host};
 use ai6::guatiao::Bytes;
@@ -28,6 +30,27 @@ fn the_container_transport_works_on_a_real_engine() {
     let client = TransportClient::new(Box::new(first));
     let probed = client.probe().expect("the container is running");
     assert!(probed.os.is_some() && probed.arch.is_some() && probed.files);
+
+    // A container reports its own limits, not the host's, when it has them:
+    // `AI6_TEST_CONTAINER_MEMORY_MB` names the container's `--memory` limit in MiB.
+    let resources = ai6::probe_resources(&client, &probed).expect("the container is sampled");
+    assert!(
+        resources.cpus.is_some_and(|cpus| cpus > 0.0),
+        "{resources:?}"
+    );
+    let total = resources.memory_total_mb.expect("a memory total");
+    assert!(
+        resources
+            .memory_available_mb
+            .is_some_and(|available| available <= total),
+        "{resources:?}"
+    );
+    if let Some(limit) = std::env::var("AI6_TEST_CONTAINER_MEMORY_MB")
+        .ok()
+        .and_then(|limit| limit.parse::<u64>().ok())
+    {
+        assert_eq!(total, limit, "{resources:?}");
+    }
 
     let scratch = format!("/tmp/ai6-container-{}", std::process::id());
     let make = client

@@ -41,7 +41,9 @@ cargo test -p ai6-transport-container
 cargo clippy -p ai6-transport-container --all-targets -- -D warnings
 ```
 
-A test against a real engine runs only when `AI6_TEST_CONTAINER` names a running container.
+A test against a real engine runs only when `AI6_TEST_CONTAINER` names a running container;
+`AI6_TEST_CONTAINER_MEMORY_MB` (its `--memory` limit in MiB) also checks the container
+reports its own memory limit.
 
 ## License
 

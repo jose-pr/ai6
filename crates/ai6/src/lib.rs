@@ -65,7 +65,7 @@ pub use directorates::q::ephemeral::{
 };
 pub use directorates::q::provision::{
     DEFAULT_INSTALL_TIMEOUT_SECS, ProbeReport, ProvisionSpec, ProvisionStep, RequiredProgram,
-    Requirements, StepStatus, Unmet,
+    Requirements, StepStatus, Unmet, probe_resources,
 };
 pub use directorates::q::safehouse::{
     Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseInfo, SafeHouseProvider,
@@ -128,8 +128,8 @@ pub use directorates::section_00::agent::{
 pub use guatiao;
 #[cfg(feature = "daemon")]
 pub use station::server::{
-    DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_TERMINAL, ServeConfig, StationConfig,
-    StationRole, serve, serve_with_capacity, serve_with_config_dir,
+    DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_RESOURCES_EVERY, DEFAULT_TERMINAL,
+    ServeConfig, StationConfig, StationRole, serve, serve_with_capacity, serve_with_config_dir,
     serve_with_config_dir_and_capacity, serve_with_options, serve_with_plugins,
     serve_with_plugins_and_capacity,
 };

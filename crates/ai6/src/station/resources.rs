@@ -14,6 +14,7 @@ struct Sampler {
     system: System,
     /// When CPU usage was last refreshed; usage is meaningful only against an earlier refresh.
     cpu_refreshed: Option<Instant>,
+    last: Option<Resources>,
 }
 
 impl Sampler {
@@ -21,6 +22,7 @@ impl Sampler {
         Self {
             system: System::new(),
             cpu_refreshed: None,
+            last: None,
         }
     }
 
@@ -35,7 +37,7 @@ impl Sampler {
         self.cpu_refreshed = Some(now);
         let cpus = self.system.cpus().len();
         let memory_total_mb = mebibytes(self.system.total_memory());
-        Resources {
+        let resources = Resources {
             cpus: (cpus > 0).then_some(cpus as f64),
             cpu_percent: cpu_percent.and_then(|percent| tenths(percent.clamp(0.0, 100.0))),
             // Windows reports zeros rather than having no load average.
@@ -48,7 +50,9 @@ impl Sampler {
             sampled_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |since| since.as_secs()),
-        }
+        };
+        self.last = Some(resources.clone());
+        resources
     }
 }
 
@@ -64,6 +68,11 @@ pub(crate) fn sample() -> Resources {
         Ok(mut sampler) => sampler.sample(),
         Err(_) => Resources::default(),
     }
+}
+
+/// The last sample taken, for the Station's own host as its `local` Theater.
+pub(crate) fn last() -> Option<Resources> {
+    sampler().lock().ok()?.last.clone()
 }
 
 /// `value` rounded to one decimal, or `None` when it is not a finite number.
@@ -99,5 +108,6 @@ mod tests {
             .cpu_percent
             .expect("a second sample has a CPU percent");
         assert!((0.0..=100.0).contains(&percent), "{second:?}");
+        assert_eq!(sampler.last, Some(second));
     }
 }

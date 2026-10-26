@@ -523,6 +523,8 @@ pub struct TheaterSummary {                  // what a Station publishes; no use
     pub requires: Option<Requirements>,
     pub report: Option<ProbeReport>,         // the Station's last probe; absent until one finishes
     pub made_for: Option<String>,            // the Mission an ephemeral Theater was made for
+    pub resources: Option<Resources>,        // `local`: the Station's sample; else the newer of the
+                                             // resources-only sample and the report's
 }
 impl TheaterSummary { pub fn local() -> Self; }
 pub fn is_sha256_pin(pin: &str) -> bool;    // "sha256:" and 64 hex digits
@@ -620,12 +622,16 @@ impl ProvisionSpec { pub fn with_runner(self, path) -> Self; pub fn with_plugin(
 #[non_exhaustive] pub struct Unmet { pub name: String /* program, "os" or "disk" */, pub requirement: String, pub reason: String } // Display "requirement: reason"
 #[non_exhaustive] #[derive(Default)]
 pub struct ProbeReport { pub checked_at: u64, pub os: Option<String>, pub found: BTreeMap<String, String> /* name -> --version line */,
-    pub free_mb: Option<u64>, pub unmet: Vec<Unmet>, pub ambient: Vec<String>, pub error: Option<String> }
+    pub free_mb: Option<u64>, pub resources: Option<Resources>, pub unmet: Vec<Unmet>, pub ambient: Vec<String>, pub error: Option<String> }
 impl ProbeReport { pub fn failed(error: impl Into<String>) -> Self; pub fn is_fit(&self) -> bool; }
 #[non_exhaustive] pub enum StepStatus { Ok, Changed, WouldChange, Failed }   // as_str(): ok | changed | would-change | failed
 #[non_exhaustive] pub struct ProvisionStep { pub name: String, pub status: StepStatus, pub detail: String }
 /// Never fails: an unprobeable Theater answers a report with only `error` set.
 pub fn probe(client: &TransportClient, capabilities: &Capabilities, requires: Option<&Requirements>, dir: Option<&str>) -> ProbeReport;
+/// CPUs (nproc), 1-minute load, MemTotal/MemAvailable; under cgroup v2 the container's
+/// cpu.max quota and memory.max (less memory.current) narrow them; macOS via sysctl (no
+/// available memory). Never cpu_percent. Err: no `run`, a Windows host, nothing recognised.
+pub fn probe_resources(client: &TransportClient, capabilities: &Capabilities) -> Result<Resources, String>;
 /// Steps in order: os, disk, tools, harnesses, runner, plugins. `check` writes nothing.
 pub fn provision(client: &TransportClient, theater: &Theater, check: bool) -> Vec<ProvisionStep>;
 ```
@@ -2362,7 +2368,9 @@ required setting answers `PluginBuildError::ConfigurationRequired`.
   `--max-concurrent-missions 4`, `--stall-timeout 300`, `--loop-timeout 300`,
   `--loop-min-lines 50`, `--blocked-after 10`, optional `--max-runtime`, `--history 4096`
   and `--normalize-digits`. Station roles default to control and execution; repeated `--role`
-  values replace that default. `--label` adds a placement label. Timeout values are
+  values replace that default. `--label` adds a placement label. `--resources-every 60`
+  sets the seconds between resource samples of each remote Theater (`0` leaves only the
+  300-second probe; `StationConfig::with_resources_every`, `DEFAULT_RESOURCES_EVERY`). Timeout values are
   non-negative seconds and may be fractional. `AI6_CONFIG_DIR` overrides the default
   config directory.
 - `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]`:

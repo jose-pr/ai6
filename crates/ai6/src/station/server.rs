@@ -84,6 +84,10 @@ pub const DEFAULT_LISTEN: SocketAddr =
 pub const DEFAULT_TERMINAL: &str = "pty";
 /// Default number of Agent Sessions this daemon may start concurrently.
 pub const DEFAULT_MAX_CONCURRENT_MISSIONS: usize = 4;
+/// How often a Station samples the resources of each Theater other than its own host, unless
+/// [`StationConfig::with_resources_every`] says otherwise. The full requirements probe, which
+/// samples them too, runs every 300 seconds.
+pub const DEFAULT_RESOURCES_EVERY: Duration = Duration::from_secs(60);
 const EVENT_QUEUE_LIMIT: usize = 256;
 const SCHEDULER_INTERVAL: Duration = Duration::from_millis(500);
 const SCHEDULER_RETRY_DELAY: Duration = Duration::from_secs(5);
@@ -123,6 +127,7 @@ pub struct StationConfig {
     /// Q's loadouts and secret backend, and the credential leases issued to Sessions.
     credentials: credentials::CredentialDesk,
     headquarters_lease: Duration,
+    resources_every: Duration,
 }
 
 impl StationConfig {
@@ -187,6 +192,15 @@ impl StationConfig {
         self.credentials = self.credentials.with_backend(Arc::new(backend));
         self
     }
+
+    /// Samples the CPUs, load and memory of each Theater other than the Station's own host
+    /// every `every` instead of [`DEFAULT_RESOURCES_EVERY`]. Zero stops these samples; the
+    /// full requirements probe still takes one every 300 seconds.
+    #[must_use]
+    pub fn with_resources_every(mut self, every: Duration) -> Self {
+        self.resources_every = every;
+        self
+    }
 }
 
 impl Default for StationConfig {
@@ -201,6 +215,7 @@ impl Default for StationConfig {
             theaters: Theaters::default(),
             credentials: credentials::CredentialDesk::default(),
             headquarters_lease: DEFAULT_LEASE,
+            resources_every: DEFAULT_RESOURCES_EVERY,
         }
     }
 }
@@ -542,7 +557,10 @@ where
     )
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
     let plugins = Arc::new(plugins::Plugins::scan(&config.plugin_paths));
-    let transports = Arc::new(Transports::build(&config.station.theaters, &plugins));
+    let transports = Arc::new(
+        Transports::build(&config.station.theaters, &plugins)
+            .with_resources_every(config.station.resources_every),
+    );
     for theater in config.station.theaters.reachable() {
         for weakened in theater.weakenings() {
             eprintln!("ai6: Theater {:?} is weakened: {weakened}", theater.id);
@@ -6757,8 +6775,18 @@ mod tests {
             "{resources:?}"
         );
         assert_eq!(stations[0].info()["operations"], serde_json::json!(["G"]));
+        let mut theaters = stations[0].info()["theaters"].clone();
+        // Another test's check-in can sample in between, so only the host's total is compared.
         assert_eq!(
-            stations[0].info()["theaters"],
+            theaters[0]
+                .as_object_mut()
+                .and_then(|local| local.remove("resources"))
+                .map(|local| local["memory_total_mb"].clone()),
+            Some(stations[0].info()["resources"]["memory_total_mb"].clone()),
+            "the local Theater carries the Station's own sample"
+        );
+        assert_eq!(
+            theaters,
             serde_json::json!([{
                 "id": "local", "access": "local", "labels": {},
                 "agents": "auto", "egress": "direct",

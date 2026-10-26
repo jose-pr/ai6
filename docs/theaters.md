@@ -74,6 +74,17 @@ the requirements that are unmet and why. Placement uses it:
   installed`). Remote-hands mode runs the harness on the Station and is not affected.
 - A Theater without `requires` is not checked.
 
+**Resources.** The probe also reads the Theater's CPUs (`nproc`), one-minute load average
+(`/proc/loadavg`) and memory (`MemTotal`, `MemAvailable` in `/proc/meminfo`). In a
+container with cgroup v2 limits it reads the container's own (`/sys/fs/cgroup/cpu.max`,
+`memory.max`, `memory.current`), so a container started with `--memory 256m --cpus 1.5`
+reports 256 MiB and 1.5 CPUs, not the host's. macOS has no `/proc`: `sysctl` gives its CPUs,
+load and total memory, and its available memory stays unknown. A figure the Theater does
+not give is left empty, never guessed. Between full probes the Station samples just these
+figures every 60 seconds (`ai6 serve --resources-every SECS`; `0` leaves only the full probe).
+The Station's own host (`local`) carries the Station's own sample instead. Windows Theaters
+are not sampled. Placement uses the figures (see [Stations](stations.md#placement)).
+
 The probe also reports **ambient credentials**: credentials already on the Theater that AI6
 did not lease (a `~/.git-credentials` store, a git credential helper, an SSH agent or
 private key, a GitHub CLI, Claude Code or Codex login, a provider key in the login
