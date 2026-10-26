@@ -117,8 +117,8 @@ pub async fn universal_exports::Gateway::register_session(&self, &str, ai6_dipte
 pub fn universal_exports::Gateway::router(self) -> axum::routing::Router
 pub async fn universal_exports::Gateway::serve_loopback<F>(self, u16, F) -> core::result::Result<(), core::io::error::Error> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn universal_exports::Gateway::submit_input(&self, &ai6_diptel::SessionId, &str, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
-pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, ai6::directorates::registry::store::FileRegistry, universal_exports::AccessProviders) -> Self
-pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, ai6::directorates::registry::store::FileRegistry) -> Self
+pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, universal_exports::AccessProviders) -> Self
+pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
 impl core::fmt::Debug for universal_exports::Gateway
 pub fn universal_exports::Gateway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::GatewayConfig
