@@ -596,9 +596,14 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     std::thread::Builder::new()
         .name("ai6-assistant-jobs".to_owned())
         .spawn(move || poll_link.take_jobs(&running, &jobs))?;
+    let (stale_conversations, mut stale) = mpsc::unbounded_channel::<String>();
     std::thread::Builder::new()
         .name("ai6-assistant-reports".to_owned())
-        .spawn(move || link.send_reports(&queued))?;
+        .spawn(move || {
+            link.send_reports(&queued, &move |conversation| {
+                let _ = stale_conversations.send(conversation);
+            });
+        })?;
     let report: Reporter = Arc::new(move |report| {
         if reports.try_send(report).is_err() {
             eprintln!(
@@ -615,8 +620,13 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     let stopping = state.stopping.clone();
     Ok(Some(tokio::spawn(async move {
         while !stopping.load(Ordering::Acquire) {
-            if let Ok(Some(job)) = tokio::time::timeout(STOP_CHECK, receiver.recv()).await {
-                desk.handle(job).await;
+            tokio::select! {
+                job = receiver.recv() => match job {
+                    Some(job) => desk.handle(job).await,
+                    None => break,
+                },
+                Some(conversation) = stale.recv() => desk.close(&conversation),
+                () = tokio::time::sleep(STOP_CHECK) => {}
             }
         }
         desk.close_all();
@@ -676,7 +686,14 @@ impl Link {
         }
     }
 
-    fn send_reports(&self, queued: &std::sync::mpsc::Receiver<AssistantReport>) {
+    /// Sends reports in order. When Universal Exports refuses a job's `accepted` report (it
+    /// no longer waits for that job here: it moved to another Station or was given up),
+    /// `stale` is told the conversation, so the harness this Station started for it closes.
+    fn send_reports(
+        &self,
+        queued: &std::sync::mpsc::Receiver<AssistantReport>,
+        stale: &(dyn Fn(String) + Send + Sync),
+    ) {
         let Ok(endpoint) = self.origin.join("v1/station/assistant/reports") else {
             return;
         };
@@ -689,6 +706,16 @@ impl Link {
                     .send_json(&report);
                 // A refused report (an unknown conversation) is not retried.
                 match sent {
+                    Err(ureq::Error::StatusCode(403 | 404 | 409))
+                        if report.job_id.is_some()
+                            && report
+                                .events
+                                .first()
+                                .is_some_and(|event| event.kind == EVENT_ACCEPTED) =>
+                    {
+                        stale(report.conversation_id.clone());
+                        break;
+                    }
                     Ok(_) | Err(ureq::Error::StatusCode(_)) => break,
                     Err(_) => std::thread::sleep(Duration::from_millis(200)),
                 }
@@ -1034,6 +1061,76 @@ mod tests {
         assert!(reason("c-8").contains("as many"), "{}", reason("c-8"));
         drop(reports);
         fixture.desk.close_all();
+    }
+
+    /// A gateway that answers every report with `status` and counts them.
+    fn refusing_gateway(status: u16) -> (Url, std::thread::JoinHandle<usize>) {
+        use std::io::{BufRead, BufReader, Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let served = std::thread::spawn(move || {
+            let mut answered = 0;
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream);
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap();
+                    }
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let reason = if status == 409 { "Conflict" } else { "OK" };
+                write!(
+                    reader.get_mut(),
+                    "HTTP/1.1 {status} {reason}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                )
+                .unwrap();
+                answered += 1;
+            }
+            answered
+        });
+        (origin, served)
+    }
+
+    #[test]
+    fn a_harness_whose_accept_the_gateway_refused_is_closed() {
+        for (status, closes) in [(409, vec!["c-late".to_owned()]), (204, Vec::new())] {
+            let (origin, served) = refusing_gateway(status);
+            let link = Link {
+                origin,
+                token: "station-token".to_owned(),
+                station: "hq".to_owned(),
+            };
+            let (reports, queued) = std::sync::mpsc::sync_channel(4);
+            let report = |job: Option<&str>, kind: &str| AssistantReport {
+                station_id: "hq".to_owned(),
+                conversation_id: "c-late".to_owned(),
+                job_id: job.map(str::to_owned),
+                session_id: None,
+                events: vec![AssistantEvent::new(kind, None)],
+            };
+            reports.send(report(Some("job-1"), EVENT_ACCEPTED)).unwrap();
+            reports.send(report(None, EVENT_TEXT)).unwrap();
+            drop(reports);
+            let closed = Mutex::new(Vec::new());
+            link.send_reports(&queued, &|conversation| {
+                closed.lock().unwrap().push(conversation);
+            });
+            assert_eq!(served.join().unwrap(), 2);
+            assert_eq!(
+                closed.into_inner().unwrap(),
+                closes,
+                "only a refused accept closes, at {status}"
+            );
+        }
     }
 
     #[tokio::test]
