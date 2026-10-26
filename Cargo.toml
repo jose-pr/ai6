@@ -66,9 +66,13 @@ tokio-tungstenite = "0.29"
 tempfile = "3"
 # The SQL Registry and roster: SQLite, compiled in, for one Station and for tests.
 rusqlite = { version = "0.41", default-features = false, features = ["bundled", "cache"] }
-# The SQL Registry and roster: PostgreSQL, shared by the Stations of an HA deployment. The
-# synchronous client, since Registry calls are synchronous.
-postgres = { version = "0.19.14", default-features = false }
+# The SQL Registry and roster: PostgreSQL, shared by the Stations of an HA deployment. Its
+# connection runs on a runtime of its own; Registry calls wait on it from any thread.
+tokio-postgres = { version = "0.7.18", default-features = false, features = ["runtime"] }
+# TLS to PostgreSQL over the workspace's rustls, on the ring provider.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# The platform's trusted roots, for verifying a PostgreSQL server's certificate.
+rustls-native-certs = "0.8"
 # SSH transport: one pure-Rust client on every OS, with the ring crypto provider.
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "3"

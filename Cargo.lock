@@ -71,12 +71,12 @@ dependencies = [
  "globset",
  "guatiao",
  "lru",
- "postgres",
  "rcgen",
  "regex",
  "rmcp",
  "rusqlite",
  "rustls",
+ "rustls-native-certs",
  "schemars",
  "serde",
  "serde_json",
@@ -84,6 +84,8 @@ dependencies = [
  "subtle",
  "tempfile",
  "tokio",
+ "tokio-postgres",
+ "tokio-rustls",
  "toml",
  "ureq",
  "url",
@@ -2562,20 +2564,6 @@ dependencies = [
  "shell-words",
  "winapi",
  "winreg",
-]
-
-[[package]]
-name = "postgres"
-version = "0.19.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33ad20e0aa0b24f5a394eab4f78c781d248982b22b25cecc7e3aa46a681605bd"
-dependencies = [
- "bytes",
- "fallible-iterator 0.2.0",
- "futures-util",
- "log",
- "tokio",
- "tokio-postgres",
 ]
 
 [[package]]

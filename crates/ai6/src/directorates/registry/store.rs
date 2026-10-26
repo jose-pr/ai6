@@ -1463,7 +1463,7 @@ pub trait StationStore {
 
 impl StationStore for FileRegistry {
     fn check_in(&self, station: &str, info: BTreeMap<String, serde_json::Value>) -> io::Result<()> {
-        let bytes = check_in_record(station, info)?;
+        let bytes = check_in_record(station, info, unix_time()?)?;
         let _registry_lock = registry_lock(&self.root)?;
         let path = self
             .root
@@ -2217,10 +2217,11 @@ pub(super) fn lost_outcome(lease: &Lease, by: &str) -> serde_json::Value {
 }
 
 /// The stored form of a check-in: `info` without its reserved keys, stamped with the
-/// Station and the current time, as pretty JSON within the size limit.
+/// Station and `seen` (Unix seconds), as pretty JSON within the size limit.
 pub(super) fn check_in_record(
     station: &str,
     mut info: BTreeMap<String, serde_json::Value>,
+    seen: f64,
 ) -> io::Result<Vec<u8>> {
     validate_station_id(station)?;
     info.remove("station");
@@ -2228,7 +2229,7 @@ pub(super) fn check_in_record(
     let record = StationRecord {
         info,
         station: station.to_owned(),
-        seen: unix_time()?,
+        seen,
     };
     let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
     if bytes.len() as u64 > MAX_STATION_RECORD_BYTES {
@@ -2864,7 +2865,8 @@ mod tests {
         assert_eq!(stations[0].station(), "Stätion/one");
         assert_eq!(stations[0].info()["station_count"], 3);
         assert!(!stations[0].info().contains_key("station"));
-        assert!(stations[0].seen() >= before);
+        // A SQL Registry stamps the database's clock, to the millisecond.
+        assert!((stations[0].seen() - before).abs() < 60.0);
         registry.check_in("Stätion/one", BTreeMap::new()).unwrap();
         assert!(
             registry.stations(DEFAULT_LEASE).unwrap()[0]

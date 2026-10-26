@@ -23,7 +23,7 @@ station-tls = ["dep:coqui-peer", "dep:coqui-peer-tls", "dep:rustls"]
 # A Registry and roster kept in a SQLite database file.
 sqlite = ["dep:rusqlite"]
 # A Registry and roster kept in PostgreSQL, shared by every Station of an HA deployment.
-postgres = ["dep:postgres", "dep:tokio"]
+postgres = ["dep:tokio-postgres", "dep:tokio", "tokio/sync", "tokio/time", "dep:tokio-rustls", "dep:rustls", "dep:rustls-native-certs"]
 cli = ["daemon", "publisher", "cables-mcp", "station-tls", "sqlite", "postgres", "dep:clap", "tokio/signal"]
 
 [[bin]]
@@ -59,8 +59,10 @@ coqui-peer-tls = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 globset.workspace = true
 lru.workspace = true
-postgres = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
+rustls-native-certs = { workspace = true, optional = true }
+tokio-postgres = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
 regex.workspace = true
 subtle = { workspace = true, optional = true }
 tempfile.workspace = true

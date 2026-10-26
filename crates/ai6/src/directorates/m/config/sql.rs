@@ -7,6 +7,7 @@ use std::io;
 use super::{ConfigRevision, ConfigSnapshot, ConfigSource};
 use crate::directorates::m::cover::{Covers, cover_from};
 use crate::directorates::m::roster::{RosterError, error, roster_from_definitions};
+use crate::directorates::registry::sql::SqlOptions;
 use crate::directorates::registry::sql::db::{Clock, Database, Location, Tx};
 
 /// The kinds of roster record a [`SqlConfigSource`] keeps, one table each.
@@ -136,13 +137,23 @@ impl fmt::Debug for SqlConfigSource {
 }
 
 impl SqlConfigSource {
-    /// Opens the roster at `location` (`sqlite:PATH` or a `postgres://` URL), creating or
-    /// upgrading its tables.
+    /// Opens the roster at `location` with the default [`SqlOptions`].
     ///
     /// # Errors
     ///
-    /// As [`SqlRegistry::open`](crate::directorates::registry::sql::SqlRegistry::open).
+    /// As [`SqlConfigSource::open_with`].
     pub fn open(location: &str) -> io::Result<Self> {
+        Self::open_with(location, &SqlOptions::default())
+    }
+
+    /// Opens the roster at `location` (`sqlite:PATH` or a `postgres://` URL, read as
+    /// [`SqlRegistry::open_with`](crate::directorates::registry::sql::SqlRegistry::open_with)
+    /// reads it), creating or upgrading its tables.
+    ///
+    /// # Errors
+    ///
+    /// As [`SqlRegistry::open_with`](crate::directorates::registry::sql::SqlRegistry::open_with).
+    pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Self> {
         let location = Location::parse(location).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -150,7 +161,7 @@ impl SqlConfigSource {
             )
         })?;
         Ok(Self {
-            db: Database::open(location)?,
+            db: Database::open(location, options)?,
         })
     }
 

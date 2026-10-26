@@ -6,12 +6,20 @@
 //!
 //! Every write transaction starts by advancing its clock row in `ai6_clock`. That row lock
 //! serializes writers across processes, as the file Registry's directory lock does, and the
-//! new number is the revision the transaction stamps on each row it writes.
+//! new number is the revision the transaction stamps on each row it writes. On PostgreSQL,
+//! writes run `READ COMMITTED` whatever the server's default, so each statement after the
+//! lock sees what the previous holder committed, and reads run `REPEATABLE READ READ ONLY`,
+//! so a read of several tables sees one commit.
 
 use std::io;
+#[cfg(feature = "sqlite")]
 use std::sync::{Mutex, MutexGuard, PoisonError};
 #[cfg(feature = "sqlite")]
 use std::time::Duration;
+
+use super::SqlOptions;
+#[cfg(feature = "postgres")]
+use super::postgres::{self, block_on};
 
 /// The schema version this build writes; a newer database is refused.
 const SCHEMA_VERSION: i64 = 1;
@@ -26,9 +34,9 @@ const POSTGRES_SCHEMA: &str = include_str!("schema/postgres.sql");
 #[cfg(feature = "sqlite")]
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Serializes concurrent schema migrations on one PostgreSQL database.
+/// With the schema's name, serializes concurrent migrations of one PostgreSQL schema.
 #[cfg(feature = "postgres")]
-const MIGRATION_LOCK: i64 = 0x0a16_5c4e_3a00_0001;
+const MIGRATION_LOCK: i64 = 0x0a16_5c4e;
 
 /// Which clock row a write transaction advances.
 #[derive(Debug, Clone, Copy)]
@@ -120,7 +128,7 @@ impl<T: Into<Value>> From<Option<T>> for Value {
 
 /// One result row.
 #[derive(Debug, Clone)]
-pub(crate) struct Row(Vec<Value>);
+pub(crate) struct Row(pub(super) Vec<Value>);
 
 impl Row {
     fn get(&self, index: usize) -> io::Result<&Value> {
@@ -176,10 +184,7 @@ enum Kind {
     #[cfg(feature = "sqlite")]
     Sqlite(Mutex<rusqlite::Connection>),
     #[cfg(feature = "postgres")]
-    Postgres {
-        config: Box<postgres::Config>,
-        client: Mutex<Option<postgres::Client>>,
-    },
+    Postgres(Box<postgres::Connection>),
 }
 
 impl std::fmt::Debug for Database {
@@ -226,10 +231,10 @@ impl<'a> Location<'a> {
 
 impl Database {
     /// Opens the database at `location` and brings its schema up to date.
-    pub(crate) fn open(location: Location<'_>) -> io::Result<Self> {
+    pub(crate) fn open(location: Location<'_>, options: &SqlOptions) -> io::Result<Self> {
         let database = match location {
             Location::Sqlite(path) => Self::open_sqlite(path)?,
-            Location::Postgres(url) => Self::open_postgres(url)?,
+            Location::Postgres(url) => Self::open_postgres(url, options)?,
         };
         database.migrate()?;
         Ok(database)
@@ -265,26 +270,14 @@ impl Database {
     }
 
     #[cfg(feature = "postgres")]
-    fn open_postgres(url: &str) -> io::Result<Self> {
-        let config: postgres::Config = url.parse().map_err(|error: postgres::Error| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("invalid PostgreSQL location: {error}"),
-            )
-        })?;
-        let client = Mutex::new(None);
-        // Connect now, so a wrong location fails when the Station starts.
-        with_postgres(&config, &client, |_| Ok(()))?;
+    fn open_postgres(url: &str, options: &SqlOptions) -> io::Result<Self> {
         Ok(Self {
-            kind: Kind::Postgres {
-                config: Box::new(config),
-                client,
-            },
+            kind: Kind::Postgres(Box::new(postgres::Connection::open(url, options)?)),
         })
     }
 
     #[cfg(not(feature = "postgres"))]
-    fn open_postgres(_url: &str) -> io::Result<Self> {
+    fn open_postgres(_url: &str, _options: &SqlOptions) -> io::Result<Self> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "this build of ai6 has no PostgreSQL support (cargo feature `postgres`)",
@@ -301,40 +294,28 @@ impl Database {
     }
 
     /// Runs `work` in a transaction that writes nothing.
-    pub(crate) fn read<T, E>(
+    pub(crate) fn read<T, E: From<io::Error>>(
         &self,
-        work: impl FnOnce(&mut Tx<'_>) -> Result<T, E> + Send,
-    ) -> Result<T, E>
-    where
-        T: Send,
-        E: From<io::Error> + Send,
-    {
+        work: impl FnOnce(&mut Tx<'_>) -> Result<T, E>,
+    ) -> Result<T, E> {
         self.transaction(Mode::Read, |tx, _| work(tx))
     }
 
     /// Runs `work` in a write transaction holding `clock`, passing the revision to stamp on
     /// written rows. An error from `work` rolls everything back.
-    pub(crate) fn write<T, E>(
+    pub(crate) fn write<T, E: From<io::Error>>(
         &self,
         clock: Clock,
-        work: impl FnOnce(&mut Tx<'_>, i64) -> Result<T, E> + Send,
-    ) -> Result<T, E>
-    where
-        T: Send,
-        E: From<io::Error> + Send,
-    {
+        work: impl FnOnce(&mut Tx<'_>, i64) -> Result<T, E>,
+    ) -> Result<T, E> {
         self.transaction(Mode::Write(clock), work)
     }
 
-    fn transaction<T, E>(
+    fn transaction<T, E: From<io::Error>>(
         &self,
         mode: Mode,
-        work: impl FnOnce(&mut Tx<'_>, i64) -> Result<T, E> + Send,
-    ) -> Result<T, E>
-    where
-        T: Send,
-        E: From<io::Error> + Send,
-    {
+        work: impl FnOnce(&mut Tx<'_>, i64) -> Result<T, E>,
+    ) -> Result<T, E> {
         match &self.kind {
             #[cfg(feature = "sqlite")]
             Kind::Sqlite(connection) => {
@@ -355,19 +336,25 @@ impl Database {
                 finish(tx, result)
             }
             #[cfg(feature = "postgres")]
-            Kind::Postgres { config, client } => {
-                let outcome = with_postgres(config, client, |client| {
-                    let transaction = client.transaction().map_err(postgres_error)?;
-                    let mut tx = Tx {
-                        inner: TxInner::Postgres(transaction),
-                    };
-                    let result = run_in(&mut tx, mode, work);
-                    Ok(finish(tx, result))
-                });
-                match outcome {
-                    Ok(result) => result,
-                    Err(error) => Err(error.into()),
-                }
+            Kind::Postgres(connection) => {
+                use tokio_postgres::IsolationLevel;
+                let mut slot = connection.lock();
+                let client = connection.connected(&mut slot)?;
+                let builder = match mode {
+                    Mode::Read => client
+                        .build_transaction()
+                        .isolation_level(IsolationLevel::RepeatableRead)
+                        .read_only(true),
+                    Mode::Write(_) | Mode::Migrate => client
+                        .build_transaction()
+                        .isolation_level(IsolationLevel::ReadCommitted),
+                };
+                let transaction = block_on(builder.start()).map_err(postgres::error)?;
+                let mut tx = Tx {
+                    inner: TxInner::Postgres(transaction),
+                };
+                let result = run_in(&mut tx, mode, work);
+                finish(tx, result)
             }
         }
     }
@@ -386,23 +373,13 @@ impl Database {
             #[cfg(feature = "postgres")]
             if dialect == Dialect::Postgres {
                 tx.execute(
-                    "SELECT pg_advisory_xact_lock($1)",
+                    "SELECT pg_advisory_xact_lock($1, hashtext(current_schema()))",
                     &[Value::Int(MIGRATION_LOCK)],
                 )?;
             }
             tx.batch("CREATE TABLE IF NOT EXISTS ai6_schema (version BIGINT NOT NULL)")?;
-            let current = match tx.query_opt("SELECT max(version) FROM ai6_schema", &[])? {
-                Some(row) if row.get(0)? != &Value::Null => row.int(0)?,
-                _ => 0,
-            };
-            if current > SCHEMA_VERSION {
-                return Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    format!(
-                        "the database schema is version {current}; this ai6 knows versions up to {SCHEMA_VERSION}"
-                    ),
-                ));
-            }
+            let current = schema_version(tx)?;
+            check_schema(current)?;
             if current < 1 {
                 tx.batch(schema)?;
                 tx.execute(
@@ -428,16 +405,41 @@ fn run_in<T, E: From<io::Error>>(
     work: impl FnOnce(&mut Tx<'_>, i64) -> Result<T, E>,
 ) -> Result<T, E> {
     let revision = match mode {
-        Mode::Write(clock) => tx
-            .query_opt(
-                "UPDATE ai6_clock SET revision = revision + 1 WHERE name = $1 RETURNING revision",
-                &[clock.name().into()],
-            )?
-            .ok_or_else(|| invalid(format!("the {} clock row is missing", clock.name())))?
-            .int(0)?,
+        Mode::Write(clock) => {
+            let revision = tx
+                .query_opt(
+                    "UPDATE ai6_clock SET revision = revision + 1 WHERE name = $1 RETURNING revision",
+                    &[clock.name().into()],
+                )?
+                .ok_or_else(|| invalid(format!("the {} clock row is missing", clock.name())))?
+                .int(0)?;
+            // A newer ai6 may have migrated the database since this handle opened it; this
+            // build must not write records in a shape it no longer knows.
+            check_schema(schema_version(tx)?)?;
+            revision
+        }
         Mode::Read | Mode::Migrate => 0,
     };
     work(tx, revision)
+}
+
+fn schema_version(tx: &mut Tx<'_>) -> io::Result<i64> {
+    match tx.query_opt("SELECT max(version) FROM ai6_schema", &[])? {
+        Some(row) if row.get(0)? != &Value::Null => row.int(0),
+        _ => Ok(0),
+    }
+}
+
+fn check_schema(version: i64) -> io::Result<()> {
+    if version > SCHEMA_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "the database schema is version {version}; this ai6 knows versions up to {SCHEMA_VERSION}"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn finish<T, E: From<io::Error>>(tx: Tx<'_>, result: Result<T, E>) -> Result<T, E> {
@@ -451,39 +453,9 @@ fn finish<T, E: From<io::Error>>(tx: Tx<'_>, result: Result<T, E>) -> Result<T, 
     }
 }
 
+#[cfg(feature = "sqlite")]
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// Runs `work` with a connected client, reconnecting when the last connection closed.
-///
-/// The synchronous client drives its own small runtime, which cannot start on a thread that
-/// is already running async tasks; from such a thread the work runs on a scoped thread.
-#[cfg(feature = "postgres")]
-fn with_postgres<T: Send>(
-    config: &postgres::Config,
-    client: &Mutex<Option<postgres::Client>>,
-    work: impl FnOnce(&mut postgres::Client) -> io::Result<T> + Send,
-) -> io::Result<T> {
-    let mut guard = lock(client);
-    let slot: &mut Option<postgres::Client> = &mut guard;
-    let run = move || -> io::Result<T> {
-        let client = match slot {
-            Some(client) if !client.is_closed() => client,
-            _ => slot.insert(config.connect(postgres::NoTls).map_err(postgres_error)?),
-        };
-        work(client)
-    };
-    if tokio::runtime::Handle::try_current().is_ok() {
-        std::thread::scope(|scope| {
-            scope
-                .spawn(run)
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-        })
-    } else {
-        run()
-    }
 }
 
 /// An open transaction.
@@ -495,10 +467,29 @@ enum TxInner<'a> {
     #[cfg(feature = "sqlite")]
     Sqlite(rusqlite::Transaction<'a>),
     #[cfg(feature = "postgres")]
-    Postgres(postgres::Transaction<'a>),
+    Postgres(tokio_postgres::Transaction<'a>),
 }
 
 impl Tx<'_> {
+    /// The database's clock, in Unix seconds: one clock for every Station's leases, whatever
+    /// their own clocks say.
+    pub(crate) fn now(&mut self) -> io::Result<f64> {
+        let sql = match &self.inner {
+            #[cfg(feature = "sqlite")]
+            TxInner::Sqlite(_) => "SELECT unixepoch('subsec')",
+            #[cfg(feature = "postgres")]
+            TxInner::Postgres(_) => "SELECT extract(epoch FROM clock_timestamp())::float8",
+        };
+        let now = self
+            .query_opt(sql, &[])?
+            .ok_or_else(|| invalid("the database returned no time"))?
+            .real(0)?;
+        if !now.is_finite() {
+            return Err(invalid("the database returned an invalid time"));
+        }
+        Ok(now)
+    }
+
     /// Runs one statement and returns how many rows it changed.
     pub(crate) fn execute(&mut self, sql: &str, params: &[Value]) -> io::Result<u64> {
         match &mut self.inner {
@@ -514,11 +505,8 @@ impl Tx<'_> {
             }
             #[cfg(feature = "postgres")]
             TxInner::Postgres(transaction) => {
-                let params: Vec<&(dyn postgres::types::ToSql + Sync)> = params
-                    .iter()
-                    .map(|value| value as &(dyn postgres::types::ToSql + Sync))
-                    .collect();
-                transaction.execute(sql, &params).map_err(postgres_error)
+                block_on(transaction.execute(sql, &postgres::params(params)))
+                    .map_err(postgres::error)
             }
         }
     }
@@ -547,15 +535,10 @@ impl Tx<'_> {
             }
             #[cfg(feature = "postgres")]
             TxInner::Postgres(transaction) => {
-                let params: Vec<&(dyn postgres::types::ToSql + Sync)> = params
+                block_on(transaction.query(sql, &postgres::params(params)))
+                    .map_err(postgres::error)?
                     .iter()
-                    .map(|value| value as &(dyn postgres::types::ToSql + Sync))
-                    .collect();
-                transaction
-                    .query(sql, &params)
-                    .map_err(postgres_error)?
-                    .iter()
-                    .map(postgres_row)
+                    .map(postgres::row)
                     .collect()
             }
         }
@@ -573,7 +556,7 @@ impl Tx<'_> {
             TxInner::Sqlite(transaction) => transaction.execute_batch(sql).map_err(sqlite_error),
             #[cfg(feature = "postgres")]
             TxInner::Postgres(transaction) => {
-                transaction.batch_execute(sql).map_err(postgres_error)
+                block_on(transaction.batch_execute(sql)).map_err(postgres::error)
             }
         }
     }
@@ -583,7 +566,9 @@ impl Tx<'_> {
             #[cfg(feature = "sqlite")]
             TxInner::Sqlite(transaction) => transaction.commit().map_err(sqlite_error),
             #[cfg(feature = "postgres")]
-            TxInner::Postgres(transaction) => transaction.commit().map_err(postgres_error),
+            TxInner::Postgres(transaction) => {
+                block_on(transaction.commit()).map_err(postgres::error)
+            }
         }
     }
 }
@@ -628,77 +613,4 @@ fn sqlite_error(error: rusqlite::Error) -> io::Error {
         _ => io::ErrorKind::Other,
     };
     io::Error::new(kind, format!("SQLite: {error}"))
-}
-
-#[cfg(feature = "postgres")]
-impl postgres::types::ToSql for Value {
-    fn to_sql(
-        &self,
-        ty: &postgres::types::Type,
-        out: &mut postgres::types::private::BytesMut,
-    ) -> Result<postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
-        use postgres::types::Type;
-        match self {
-            Self::Null => Ok(postgres::types::IsNull::Yes),
-            Self::Int(value) if *ty == Type::FLOAT8 => (*value as f64).to_sql(ty, out),
-            Self::Int(value) if *ty == Type::INT4 => i32::try_from(*value)?.to_sql(ty, out),
-            Self::Int(value) => value.to_sql(ty, out),
-            Self::Real(value) => value.to_sql(ty, out),
-            Self::Text(value) => value.as_str().to_sql(ty, out),
-            Self::Bytes(value) => value.as_slice().to_sql(ty, out),
-        }
-    }
-
-    fn accepts(ty: &postgres::types::Type) -> bool {
-        use postgres::types::Type;
-        [
-            Type::INT4,
-            Type::INT8,
-            Type::FLOAT8,
-            Type::TEXT,
-            Type::VARCHAR,
-            Type::BYTEA,
-        ]
-        .contains(ty)
-    }
-
-    postgres::types::to_sql_checked!();
-}
-
-#[cfg(feature = "postgres")]
-fn postgres_row(row: &postgres::Row) -> io::Result<Row> {
-    use postgres::types::Type;
-    let mut values = Vec::with_capacity(row.len());
-    for (index, column) in row.columns().iter().enumerate() {
-        let ty = column.type_();
-        let value = if *ty == Type::INT8 {
-            row.try_get::<_, Option<i64>>(index)
-                .map(|value| value.map(Value::Int))
-        } else if *ty == Type::INT4 {
-            row.try_get::<_, Option<i32>>(index)
-                .map(|value| value.map(|value| Value::Int(i64::from(value))))
-        } else if *ty == Type::FLOAT8 {
-            row.try_get::<_, Option<f64>>(index)
-                .map(|value| value.map(Value::Real))
-        } else if *ty == Type::BYTEA {
-            row.try_get::<_, Option<Vec<u8>>>(index)
-                .map(|value| value.map(Value::Bytes))
-        } else {
-            row.try_get::<_, Option<String>>(index)
-                .map(|value| value.map(Value::Text))
-        };
-        values.push(value.map_err(postgres_error)?.unwrap_or(Value::Null));
-    }
-    Ok(Row(values))
-}
-
-#[cfg(feature = "postgres")]
-fn postgres_error(error: postgres::Error) -> io::Error {
-    use postgres::error::SqlState;
-    let kind = match error.code() {
-        Some(code) if *code == SqlState::UNIQUE_VIOLATION => io::ErrorKind::AlreadyExists,
-        _ if error.is_closed() => io::ErrorKind::ConnectionAborted,
-        _ => io::ErrorKind::Other,
-    };
-    io::Error::new(kind, format!("PostgreSQL: {error}"))
 }

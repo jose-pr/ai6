@@ -98,19 +98,43 @@ pub trait ConfigSource: Send + Sync {
 /// `postgres`); the database's error when it cannot be opened. A directory is not read
 /// until the roster is loaded.
 pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>> {
-    let sql = location.starts_with("sqlite:")
-        || location.starts_with("postgres://")
-        || location.starts_with("postgresql://");
-    if !sql {
-        return Ok(Arc::new(TomlConfigDir::new(location)));
-    }
     #[cfg(any(feature = "sqlite", feature = "postgres"))]
-    return Ok(Arc::new(SqlConfigSource::open(location)?));
+    return open_with(
+        location,
+        &crate::directorates::registry::sql::SqlOptions::default(),
+    );
     #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "this build of ai6 has no SQL configuration support (cargo features `sqlite`, `postgres`)",
-    ))
+    if is_sql(location) {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this build of ai6 has no SQL configuration support (cargo features `sqlite`, `postgres`)",
+        ))
+    } else {
+        Ok(Arc::new(TomlConfigDir::new(location)))
+    }
+}
+
+/// As [`open`], connecting a SQL roster with `options` (password, timeouts).
+///
+/// # Errors
+///
+/// As [`open`].
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+pub fn open_with(
+    location: &str,
+    options: &crate::directorates::registry::sql::SqlOptions,
+) -> io::Result<Arc<dyn ConfigSource>> {
+    if is_sql(location) {
+        Ok(Arc::new(SqlConfigSource::open_with(location, options)?))
+    } else {
+        Ok(Arc::new(TomlConfigDir::new(location)))
+    }
+}
+
+fn is_sql(location: &str) -> bool {
+    location.starts_with("sqlite:")
+        || location.starts_with("postgres://")
+        || location.starts_with("postgresql://")
 }
 
 /// The configuration directory: `operations.toml`, `agents.toml` and `covers.toml`, read

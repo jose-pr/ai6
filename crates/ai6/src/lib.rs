@@ -115,7 +115,7 @@ pub use directorates::registry::sources::{
     SourceItem, SourcePoll, source_brief,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
-pub use directorates::registry::sql::SqlRegistry;
+pub use directorates::registry::sql::{SqlOptions, SqlRegistry};
 pub use directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, HeadquartersLease, Lease,
     LeaseRecovery, MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,

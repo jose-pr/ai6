@@ -27,11 +27,26 @@ struct Schema {
     name: String,
 }
 
+/// Runs `sql` on the test server, which takes a connection without TLS.
+fn admin(server: &str, sql: &str) -> Result<(), tokio_postgres::Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    runtime.block_on(async {
+        let (client, connection) = tokio_postgres::connect(server, tokio_postgres::NoTls).await?;
+        let driver = tokio::spawn(connection);
+        let result = client.batch_execute(sql).await;
+        drop(client);
+        let _ = driver.await;
+        result
+    })
+}
+
 impl Schema {
     fn new(server: &str) -> Self {
         let name = format!("ai6_ha_{}", uuid::Uuid::new_v4().simple());
-        postgres::Client::connect(server, postgres::NoTls)
-            .and_then(|mut admin| admin.batch_execute(&format!("CREATE SCHEMA {name}")))
+        admin(server, &format!("CREATE SCHEMA {name}"))
             .unwrap_or_else(|error| panic!("{POSTGRES_URL_ENV}: {error}"));
         Self {
             server: server.to_owned(),
@@ -50,9 +65,10 @@ impl Schema {
 
 impl Drop for Schema {
     fn drop(&mut self) {
-        if let Ok(mut admin) = postgres::Client::connect(&self.server, postgres::NoTls) {
-            let _ = admin.batch_execute(&format!("DROP SCHEMA IF EXISTS {} CASCADE", self.name));
-        }
+        let _ = admin(
+            &self.server,
+            &format!("DROP SCHEMA IF EXISTS {} CASCADE", self.name),
+        );
     }
 }
 

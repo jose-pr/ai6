@@ -109,6 +109,22 @@ fn put_lease(tx: &mut Tx<'_>, lease: &Lease, revision: i64) -> io::Result<()> {
     Ok(())
 }
 
+/// The leases of claimed briefs, in key order.
+fn leases_in(tx: &mut Tx<'_>) -> io::Result<Vec<Lease>> {
+    let keys = tx.query(
+        "SELECT l.key FROM ai6_brief_leases l JOIN ai6_briefs b ON b.key = l.key \
+         WHERE b.state = 'claimed' ORDER BY l.key",
+        &[],
+    )?;
+    let mut leases = Vec::with_capacity(keys.len());
+    for row in keys {
+        if let Some(lease) = lease_in(tx, &row.text(0)?)? {
+            leases.push(lease);
+        }
+    }
+    Ok(leases)
+}
+
 fn is_claimed(tx: &mut Tx<'_>, key: &str) -> io::Result<bool> {
     Ok(brief_state(tx, key)?.as_deref() == Some("claimed"))
 }
@@ -417,7 +433,7 @@ impl BriefStore for SqlRegistry {
             let lease = Lease {
                 key,
                 station: station.to_owned(),
-                expires: unix_time()? + duration.as_secs_f64(),
+                expires: tx.now()? + duration.as_secs_f64(),
                 attempt,
                 meta,
             };
@@ -448,20 +464,7 @@ impl BriefStore for SqlRegistry {
     }
 
     fn leases(&self) -> io::Result<Vec<Lease>> {
-        self.read(|tx| {
-            let keys = tx.query(
-                "SELECT l.key FROM ai6_brief_leases l JOIN ai6_briefs b ON b.key = l.key \
-                 WHERE b.state = 'claimed' ORDER BY l.key",
-                &[],
-            )?;
-            let mut leases = Vec::with_capacity(keys.len());
-            for row in keys {
-                if let Some(lease) = lease_in(tx, &row.text(0)?)? {
-                    leases.push(lease);
-                }
-            }
-            Ok(leases)
-        })
+        self.read(leases_in)
     }
 
     fn renew(&self, key: &str, station: &str, duration: Duration) -> io::Result<bool> {
@@ -474,19 +477,20 @@ impl BriefStore for SqlRegistry {
             if lease.station != station || !is_claimed(tx, key)? {
                 return Ok(false);
             }
-            lease.expires = unix_time()? + duration.as_secs_f64();
+            lease.expires = tx.now()? + duration.as_secs_f64();
             put_lease(tx, &lease, revision)?;
             Ok(true)
         })
     }
 
     fn expired(&self) -> io::Result<Vec<Lease>> {
-        let now = unix_time()?;
-        Ok(self
-            .leases()?
-            .into_iter()
-            .filter(|lease| lease.expires < now)
-            .collect())
+        self.read(|tx| {
+            let now = tx.now()?;
+            Ok(leases_in(tx)?
+                .into_iter()
+                .filter(|lease| lease.expires < now)
+                .collect())
+        })
     }
 
     fn recover(
@@ -497,7 +501,7 @@ impl BriefStore for SqlRegistry {
     ) -> io::Result<Option<LeaseRecovery>> {
         validate_registry_key(lease.key())?;
         self.write(|tx, revision| {
-            if lease_in(tx, lease.key())?.as_ref() != Some(lease) || lease.expires >= unix_time()? {
+            if lease_in(tx, lease.key())?.as_ref() != Some(lease) || lease.expires >= tx.now()? {
                 return Ok(None);
             }
             if !is_claimed(tx, lease.key())? {
@@ -539,7 +543,7 @@ impl BriefStore for SqlRegistry {
         validate_registry_key(lease.key())?;
         check_lease_request(station, duration)?;
         self.write(|tx, revision| {
-            let now = unix_time()?;
+            let now = tx.now()?;
             if lease_in(tx, lease.key())?.as_ref() != Some(lease)
                 || lease.expires >= now
                 || !is_claimed(tx, lease.key())?

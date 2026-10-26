@@ -9,7 +9,7 @@ use super::db::Tx;
 use crate::directorates::registry::store::{
     HeadquartersLease, MAX_STATION_RECORD_BYTES, MAX_STATIONS, StationRecord, StationRecordFile,
     StationSettings, StationStore, check_election, check_in_record, check_settings, elected,
-    invalid_data, unix_time, validate_station_id,
+    invalid_data, validate_station_id,
 };
 
 /// The Headquarters lease, read in the transaction that may replace it.
@@ -36,9 +36,10 @@ pub(super) fn headquarters_in(tx: &mut Tx<'_>) -> io::Result<Option<Headquarters
 
 impl StationStore for SqlRegistry {
     fn check_in(&self, station: &str, info: BTreeMap<String, serde_json::Value>) -> io::Result<()> {
-        let record = String::from_utf8(check_in_record(station, info)?)
-            .map_err(|_| invalid_data("station record is not UTF-8"))?;
+        validate_station_id(station)?;
         self.write(|tx, revision| {
+            let record = String::from_utf8(check_in_record(station, info, tx.now()?)?)
+                .map_err(|_| invalid_data("station record is not UTF-8"))?;
             tx.execute(
                 "INSERT INTO ai6_stations (station, record, revision) VALUES ($1, $2, $3) \
                  ON CONFLICT (station) DO UPDATE SET record = excluded.record, \
@@ -50,18 +51,18 @@ impl StationStore for SqlRegistry {
     }
 
     fn stations(&self, within: Duration) -> io::Result<Vec<StationRecord>> {
-        let rows = self.read(|tx| {
-            tx.query(
+        let (rows, now) = self.read(|tx| {
+            let rows = tx.query(
                 "SELECT record FROM ai6_stations ORDER BY station LIMIT $1",
                 &[(MAX_STATIONS + 1).into()],
-            )
+            )?;
+            Ok::<_, io::Error>((rows, tx.now()?))
         })?;
         if rows.len() > MAX_STATIONS {
             return Err(invalid_data(format!(
                 "Registry has more than {MAX_STATIONS} station records"
             )));
         }
-        let now = unix_time()?;
         let window = within.as_secs_f64();
         let mut stations = Vec::with_capacity(rows.len());
         for row in rows {
@@ -124,7 +125,7 @@ impl StationStore for SqlRegistry {
         check_election(station, ttl)?;
         self.write(|tx, revision| {
             let current = headquarters_in(tx)?;
-            let Some(lease) = elected(current.as_ref(), station, ttl, unix_time()?) else {
+            let Some(lease) = elected(current.as_ref(), station, ttl, tx.now()?) else {
                 return Ok(false);
             };
             tx.execute(

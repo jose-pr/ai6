@@ -160,22 +160,28 @@ impl PostgresStore {
     pub(crate) fn new() -> Option<Self> {
         let server = postgres_server()?;
         let schema = format!("ai6_test_{}", uuid::Uuid::new_v4().simple());
-        let mut admin = ::postgres::Client::connect(&server, ::postgres::NoTls)
+        super::sql::postgres_admin(&server, &format!("CREATE SCHEMA {schema}"))
             .unwrap_or_else(|error| panic!("{POSTGRES_URL_ENV} cannot be reached: {error}"));
-        admin
-            .batch_execute(&format!("CREATE SCHEMA {schema}"))
-            .expect("a test schema");
         Some(Self { server, schema })
     }
 
     /// The location of the Registry: the server, with this store's schema first on the
     /// search path.
     pub(crate) fn location(&self) -> String {
+        self.location_with(&[])
+    }
+
+    /// [`location`](Self::location) with more server settings for each session.
+    pub(crate) fn location_with(&self, settings: &[(&str, &str)]) -> String {
         let separator = if self.server.contains('?') { '&' } else { '?' };
-        format!(
-            "{}{separator}options=-c%20search_path%3D{}",
-            self.server, self.schema
-        )
+        let mut options = format!("-c%20search_path%3D{}", self.schema);
+        for (name, value) in settings {
+            options.push_str(&format!(
+                "%20-c%20{name}%3D{}",
+                value.replace(' ', "%5C%20")
+            ));
+        }
+        format!("{}{separator}options={options}", self.server)
     }
 }
 
@@ -189,9 +195,10 @@ impl Store for PostgresStore {
 #[cfg(feature = "postgres")]
 impl Drop for PostgresStore {
     fn drop(&mut self) {
-        if let Ok(mut admin) = ::postgres::Client::connect(&self.server, ::postgres::NoTls) {
-            let _ = admin.batch_execute(&format!("DROP SCHEMA IF EXISTS {} CASCADE", self.schema));
-        }
+        let _ = super::sql::postgres_admin(
+            &self.server,
+            &format!("DROP SCHEMA IF EXISTS {} CASCADE", self.schema),
+        );
     }
 }
 

@@ -59,30 +59,67 @@ pub trait RegistryBackend:
 /// `postgres`); the SQL Registry's errors when its database cannot be opened. A directory
 /// is not touched until the Registry is used.
 pub fn open(location: &str) -> io::Result<Arc<dyn RegistryBackend>> {
-    let sql = location.starts_with("sqlite:")
-        || location.starts_with("postgres://")
-        || location.starts_with("postgresql://");
-    if !sql {
-        return Ok(Arc::new(FileRegistry::open(location)));
-    }
     #[cfg(any(feature = "sqlite", feature = "postgres"))]
-    return Ok(Arc::new(super::sql::SqlRegistry::open(location)?));
+    return open_with(location, &super::sql::SqlOptions::default());
     #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "this build of ai6 has no SQL Registry support (cargo features `sqlite`, `postgres`)",
-    ))
+    if is_sql(location) {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this build of ai6 has no SQL Registry support (cargo features `sqlite`, `postgres`)",
+        ))
+    } else {
+        Ok(Arc::new(FileRegistry::open(location)))
+    }
+}
+
+/// As [`open`], connecting a SQL Registry with `options` (password, timeouts).
+///
+/// # Errors
+///
+/// As [`open`].
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+pub fn open_with(
+    location: &str,
+    options: &super::sql::SqlOptions,
+) -> io::Result<Arc<dyn RegistryBackend>> {
+    if is_sql(location) {
+        Ok(Arc::new(super::sql::SqlRegistry::open_with(
+            location, options,
+        )?))
+    } else {
+        Ok(Arc::new(FileRegistry::open(location)))
+    }
+}
+
+fn is_sql(location: &str) -> bool {
+    location.starts_with("sqlite:")
+        || location.starts_with("postgres://")
+        || location.starts_with("postgresql://")
 }
 
 /// Opens the Registry that `AI6_REGISTRY` names (a directory or SQL location, as for
-/// [`open`]), else the directory `AI6_HOME/registry` or the platform state directory.
+/// [`open`]), else the directory `AI6_HOME/registry` or the platform state directory. A
+/// PostgreSQL location without a password takes `AI6_REGISTRY_PASSWORD`.
 ///
 /// # Errors
 ///
 /// As [`open`], and `NotFound` when no state directory can be determined.
 pub fn from_environment() -> io::Result<Arc<dyn RegistryBackend>> {
     let location = default_registry_dir()?;
-    open(&location.to_string_lossy())
+    let location = location.to_string_lossy();
+    #[cfg(any(feature = "sqlite", feature = "postgres"))]
+    {
+        let mut options = super::sql::SqlOptions::default();
+        if let Some(password) = std::env::var("AI6_REGISTRY_PASSWORD")
+            .ok()
+            .filter(|password| !password.is_empty())
+        {
+            options = options.with_password(password);
+        }
+        open_with(&location, &options)
+    }
+    #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
+    open(&location)
 }
 
 impl<T> RegistryBackend for T where

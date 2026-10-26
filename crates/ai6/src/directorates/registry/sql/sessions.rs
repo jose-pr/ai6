@@ -12,7 +12,7 @@ use crate::directorates::registry::sessions::{
     apply_fenced, latest, lose, merged_exposure, opened, parse_session, session_json, take,
     validate_new_session, validate_session_id,
 };
-use crate::directorates::registry::store::{invalid_data, unix_time, validate_station_id};
+use crate::directorates::registry::store::{invalid_data, validate_station_id};
 
 fn term(tx: &mut Tx<'_>) -> io::Result<u64> {
     Ok(headquarters_in(tx)?.map_or(0, |lease| lease.term()))
@@ -58,28 +58,35 @@ fn records(tx: &mut Tx<'_>, mission: Option<&str>) -> io::Result<Vec<SessionReco
         .collect()
 }
 
+/// When a change happens: at a given time, or now on the database's clock.
+fn when(tx: &mut Tx<'_>, at: Option<f64>) -> io::Result<f64> {
+    at.map_or_else(|| tx.now(), Ok)
+}
+
 impl SqlRegistry {
-    /// Changes one Session record under the Registry clock; `change` may read the
-    /// Headquarters term in the same transaction.
+    /// Changes one Session record under the Registry clock at `at` (the database's clock when
+    /// `None`); `change` may read the Headquarters term in the same transaction.
     fn change_session(
         &self,
         id: &str,
-        change: impl FnOnce(&mut SessionRecord, &mut Tx<'_>) -> Result<(), SessionError> + Send,
+        at: Option<f64>,
+        change: impl FnOnce(&mut SessionRecord, &mut Tx<'_>, f64) -> Result<(), SessionError>,
     ) -> Result<SessionRecord, SessionError> {
         validate_session_id(id)?;
         self.write(|tx, revision| {
             let mut record = session_in(tx, id)?.ok_or(SessionError::NotFound)?;
-            change(&mut record, tx)?;
+            let now = when(tx, at)?;
+            change(&mut record, tx, now)?;
             put_session(tx, &record, revision)?;
             Ok(record)
         })
     }
 
-    pub(crate) fn open_session_at(
+    fn open_session_when(
         &self,
         new: NewSession,
         ttl: Duration,
-        now: f64,
+        at: Option<f64>,
     ) -> Result<SessionRecord, SessionError> {
         validate_new_session(&new)?;
         self.write(|tx, revision| {
@@ -92,12 +99,62 @@ impl SqlRegistry {
             if count >= MAX_SESSIONS as i64 {
                 return Err(io::Error::other("too many Session records").into());
             }
+            let now = when(tx, at)?;
             let record = opened(new, ttl, now, term(tx)?);
             put_session(tx, &record, revision)?;
             Ok(record)
         })
     }
 
+    fn take_session_when(
+        &self,
+        id: &str,
+        station: &str,
+        ttl: Duration,
+        at: Option<f64>,
+    ) -> Result<SessionRecord, SessionError> {
+        validate_station_id(station)?;
+        self.change_session(id, at, |record, tx, now| {
+            take(record, station, ttl, now, || term(tx))
+        })
+    }
+
+    fn write_fenced_when(
+        &self,
+        id: &str,
+        station: &str,
+        fence: u64,
+        at: Option<f64>,
+        renew: Option<Duration>,
+        update: SessionUpdate,
+    ) -> Result<SessionRecord, SessionError> {
+        self.change_session(id, at, |record, _, now| {
+            apply_fenced(record, station, fence, now, renew, update)
+        })
+    }
+
+    fn lose_session_when(
+        &self,
+        id: &str,
+        reason: &str,
+        at: Option<f64>,
+    ) -> Result<SessionRecord, SessionError> {
+        self.change_session(id, at, |record, tx, now| {
+            lose(record, reason, now, || term(tx))
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_session_at(
+        &self,
+        new: NewSession,
+        ttl: Duration,
+        now: f64,
+    ) -> Result<SessionRecord, SessionError> {
+        self.open_session_when(new, ttl, Some(now))
+    }
+
+    #[cfg(test)]
     pub(crate) fn take_session_at(
         &self,
         id: &str,
@@ -105,12 +162,10 @@ impl SqlRegistry {
         ttl: Duration,
         now: f64,
     ) -> Result<SessionRecord, SessionError> {
-        validate_station_id(station)?;
-        self.change_session(id, |record, tx| {
-            take(record, station, ttl, now, || term(tx))
-        })
+        self.take_session_when(id, station, ttl, Some(now))
     }
 
+    #[cfg(test)]
     pub(crate) fn write_fenced(
         &self,
         id: &str,
@@ -120,24 +175,23 @@ impl SqlRegistry {
         renew: Option<Duration>,
         update: SessionUpdate,
     ) -> Result<SessionRecord, SessionError> {
-        self.change_session(id, |record, _| {
-            apply_fenced(record, station, fence, now, renew, update)
-        })
+        self.write_fenced_when(id, station, fence, Some(now), renew, update)
     }
 
+    #[cfg(test)]
     pub(crate) fn lose_session_at(
         &self,
         id: &str,
         reason: &str,
         now: f64,
     ) -> Result<SessionRecord, SessionError> {
-        self.change_session(id, |record, tx| lose(record, reason, now, || term(tx)))
+        self.lose_session_when(id, reason, Some(now))
     }
 }
 
 impl SessionStore for SqlRegistry {
     fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError> {
-        self.open_session_at(new, ttl, unix_time()?)
+        self.open_session_when(new, ttl, None)
     }
 
     fn session(&self, id: &str) -> io::Result<Option<SessionRecord>> {
@@ -161,7 +215,7 @@ impl SessionStore for SqlRegistry {
         station: &str,
         ttl: Duration,
     ) -> Result<SessionRecord, SessionError> {
-        self.take_session_at(id, station, ttl, unix_time()?)
+        self.take_session_when(id, station, ttl, None)
     }
 
     fn renew_session(
@@ -171,11 +225,11 @@ impl SessionStore for SqlRegistry {
         fence: u64,
         ttl: Duration,
     ) -> Result<SessionRecord, SessionError> {
-        self.write_fenced(
+        self.write_fenced_when(
             id,
             station,
             fence,
-            unix_time()?,
+            None,
             Some(ttl),
             SessionUpdate::default(),
         )
@@ -188,11 +242,11 @@ impl SessionStore for SqlRegistry {
         fence: u64,
         update: SessionUpdate,
     ) -> Result<SessionRecord, SessionError> {
-        self.write_fenced(id, station, fence, unix_time()?, None, update)
+        self.write_fenced_when(id, station, fence, None, None, update)
     }
 
     fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError> {
-        self.lose_session_at(id, reason, unix_time()?)
+        self.lose_session_when(id, reason, None)
     }
 
     fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>> {
