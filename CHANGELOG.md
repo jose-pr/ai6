@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `refuse_held`, `clearance`, `clear_brief`, on the file and SQL Registries); a release
   clears the kinds it was held for. The timeline records `intake` events. `ai6::vet` and
   `VettingPolicy` are the library form.
+- The Chief of Staff: when an Operation has a qualified `chief-of-staff` Agent, each
+  untrusted brief that passes the vetting rules is reviewed by a short review Mission first
+  (`vetting.review = "untrusted" | "all" | "off"`). The review runs at `desk` clearance in an
+  empty directory with no Cable tools, is exposed from the start, quotes the brief and the
+  Operation's other work as data, and answers with a JSON verdict (`ai6::read_review`): a
+  clear verdict lets M place the brief, a hold holds it, and an unreadable answer or a failed
+  review holds it with `review-error`. The reviewer can only add holds. The example roster
+  gives `Tanner` the role.
 - Held briefs for operators: Universal Exports lists, releases and refuses them
   (`/v1/user/operations/{id}/held-briefs`, `mission.create`; audited as
   `mission.brief.released` and `mission.brief.refused`), `ai6ctl held-briefs

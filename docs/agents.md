@@ -67,9 +67,10 @@ See the [SIS intelligence officer role descriptions](https://www.sis.gov.uk/inte
 | `senior-analyst` | Independently challenge an analysis and test its assumptions; the title grants no approval authority over other Agents. |
 | `reports-officer` | Turn validated findings into a concise report with provenance, confidence and unresolved questions. |
 | `technical-officer` | Diagnose handler and tool issues, propose bounded changes, and request explicit authorization before changing credentials, policy or deployment. |
+| `chief-of-staff` | Review a brief before M places it, for what the vetting rules cannot judge (see [Chief of Staff](#chief-of-staff)). |
 
 `examples/config/agents.toml` defines these roles with `007`, its backup `008` and a
-`desk`-clearance `Tanner` for reports. Authorized operators may override a role's purpose
+`desk`-clearance `Tanner` for reports and reviews. Authorized operators may override a role's purpose
 and policy per Operation in Moneypenny. An Operation's local `.ai6/agents.toml` may refine
 Agent entries but cannot change role policy or grant permissions.
 
@@ -85,7 +86,31 @@ proposal; approval follows M's normal assignment and scheduling path. Proposal s
 does not start a child Session. Clearance does not grant authorization, override Operation
 cover or Agent eligibility, or bypass Q leases,
 Station policy, or the Cable relay. Q Branch, the Registry and Heads of Station retain their own capability
-boundaries. The Chief of Staff is a separate planned M adviser for vetting briefs and budgets.
+boundaries. The Chief of Staff reviews briefs before they are placed (below).
+
+## Chief of Staff
+
+When an Operation has an Agent qualified for `chief-of-staff` (chosen as any role is, backups
+included) and the role is configured, each untrusted brief that passes the
+[vetting rules](missions.md#vetting-and-held-briefs) is reviewed before M places it; the
+Operation's `vetting.review` says which briefs (`untrusted` by default, `all`, or `off`).
+Headquarters queues a short review Mission (brief source `ai6-vetting`) for the role; the
+brief waits until it is answered. The review Mission:
+
+- quotes the brief, and the titles of the Operation's other queued, held and running work,
+  between markers, as data it must not follow;
+- runs with `desk` clearance in an empty directory of its own on its Station's host, with no
+  safe house, no Cable tools and no Mission proposals;
+- is exposed from the start (`brief:source`), and its usage counts against the Operation.
+
+It ends with one JSON object: `{"verdict": "clear"}`, or `{"verdict": "hold", "findings":
+[{"kind": "duplicate" | "scope" | "manipulation", "detail": "..."}]}`. A clear verdict lets
+M place the brief; a hold holds it with `review` findings, as a vetting rule would. An
+answer that cannot be read, or a review Mission that fails or ends without one, holds the
+brief with a `review-error` finding. **The Chief of Staff can only add holds**: it reads
+untrusted text, so a turned reviewer may delay work but never admit it; releasing a held
+brief is an operator's decision. Operator and Sleeper briefs skip the review unless
+`review = "all"`.
 
 ## Cables
 

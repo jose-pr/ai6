@@ -457,9 +457,12 @@ A brief with no finding passes and is placed as usual. A refused brief is filed 
 outcome state `refused` (a Source still gets its CX report). Any other finding **holds** the
 brief: it leaves the queue for the Operation's held briefs, where no Station claims it, until
 an operator acts. Holding rather than refusing is deliberate: a real issue trips a check
-often enough that a person should decide. The Operation's timeline records each decision as
-an `intake` event (`passed`, `held`, `refused`, `released`) with the finding kinds, never
-the brief's text.
+often enough that a person should decide. When the Operation has a qualified
+`chief-of-staff` Agent, an untrusted brief that passes the rules is also reviewed by it
+before it is placed ([Chief of Staff](agents.md#chief-of-staff)); the review can only add a
+hold. The Operation's timeline records each decision as an `intake` event (`passed`,
+`reviewing`, `cleared`, `held`, `refused`, `released`) with the finding kinds, never the
+brief's text.
 
 An operator with `mission.create` on the Operation reviews held briefs in Moneypenny
 (Administration → Held briefs), with `ai6ctl held-briefs`, or through the API:
