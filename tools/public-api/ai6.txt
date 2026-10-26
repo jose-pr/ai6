@@ -3834,8 +3834,8 @@ pub mod ai6::station::identity
 pub use ai6::station::identity::Built
 pub use ai6::station::identity::CaPolicy
 pub use ai6::station::identity::Digest
-pub use ai6::station::identity::Fingerprint
 pub use ai6::station::identity::Identity
+pub use ai6::station::identity::PeerId
 pub use ai6::station::identity::PeerIdentity
 pub use ai6::station::identity::Pins
 pub use ai6::station::identity::Policy
@@ -3858,7 +3858,7 @@ impl core::fmt::Display for ai6::station::identity::StationIdentityError
 pub fn ai6::station::identity::StationIdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const ai6::station::identity::IDENTITY_FILE: &str
 pub const ai6::station::identity::STATION_ALPN: &[u8]
-pub fn ai6::station::identity::client_config(&coqui_peer_tls::identity::Identity, &coqui_peer_tls::Fingerprint, &coqui_peer_tls::policy::Policy) -> core::result::Result<coqui_peer_tls::config::Built<rustls::client::client_conn::ClientConfig>, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::client_config(&coqui_peer_tls::identity::Identity, &coqui_peer::id::PeerId, &coqui_peer_tls::policy::Policy) -> core::result::Result<coqui_peer_tls::config::Built<rustls::client::client_conn::ClientConfig>, ai6::station::identity::StationIdentityError>
 pub fn ai6::station::identity::open_identity(&std::path::Path) -> core::result::Result<coqui_peer_tls::identity::Identity, ai6::station::identity::StationIdentityError>
 pub fn ai6::station::identity::open_peers(&std::path::Path, &coqui_peer_tls::policy::Policy) -> core::result::Result<coqui_peer::store::TrustStore, ai6::station::identity::StationIdentityError>
 pub fn ai6::station::identity::server_config(&coqui_peer_tls::identity::Identity, &coqui_peer_tls::trust::Trust, &coqui_peer_tls::policy::Policy) -> core::result::Result<coqui_peer_tls::config::Built<rustls::server::server_conn::ServerConfig>, ai6::station::identity::StationIdentityError>
