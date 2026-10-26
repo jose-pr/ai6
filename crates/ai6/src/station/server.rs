@@ -1997,17 +1997,31 @@ async fn start_theater_tools(
     theater_id: &str,
     root: Option<&str>,
     environment: &mut BTreeMap<String, String>,
+    (mission, agent): (&Mission, &str),
 ) -> Result<(theater_mcp::Endpoint, String), String> {
     let client = state.transports.client(theater_id)?;
     let capabilities = client
         .capabilities()
         .map_err(|error| crate::directorates::q::transport::describe(&error))?;
+    let check = green_ink::step_check(state, mission, agent);
     let endpoint =
-        theater_mcp::Endpoint::start(client, capabilities.clone(), root.map(str::to_owned))
+        theater_mcp::Endpoint::start(client, capabilities.clone(), root.map(str::to_owned), check)
             .await
             .map_err(|error| format!("Theater MCP listener failed: {error}"))?;
     endpoint.add_environment(environment);
     Ok((endpoint, theater_mcp::instructions(root, &capabilities)))
+}
+
+/// A start or resume request's environment without what only an Agent's roster may set: the
+/// program the green ink hook runs.
+fn requested_environment(mut environment: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let gate = crate::directorates::section_00::gate::GATE_PROGRAM_ENV;
+    if environment.remove(gate).is_some() {
+        eprintln!(
+            "ai6: a start or resume request set {gate}, which only an Agent's roster may; it was dropped"
+        );
+    }
+    environment
 }
 
 /// The Theater a Session for `operation_id` runs in on this Station, or why it cannot.
@@ -3174,7 +3188,7 @@ async fn start_mission(
     }
     initial_context.extend(request.initial_context);
     let mut environment = agent.env.clone();
-    environment.extend(request.environment);
+    environment.extend(requested_environment(request.environment));
     if let Some(briefing) = configure_station_cover(
         &state.roster,
         mission.operation_id.as_deref(),
@@ -3234,10 +3248,15 @@ async fn start_mission(
     };
     #[cfg(feature = "cables-mcp")]
     let theater_mcp = if remote_hands {
-        let (endpoint, instructions) =
-            start_theater_tools(&state, &theater_id, plan.root.as_deref(), &mut environment)
-                .await
-                .map_err(configuration_error)?;
+        let (endpoint, instructions) = start_theater_tools(
+            &state,
+            &theater_id,
+            plan.root.as_deref(),
+            &mut environment,
+            (&mission, &agent.id),
+        )
+        .await
+        .map_err(configuration_error)?;
         initial_context.push(instructions);
         Some(endpoint)
     } else {
@@ -3714,7 +3733,7 @@ async fn resume_mission(
         }
     };
     let mut environment = environment;
-    environment.extend(request.environment.clone());
+    environment.extend(requested_environment(request.environment.clone()));
     configure_station_cover(
         &state.roster,
         mission.operation_id.as_deref(),
@@ -3858,10 +3877,15 @@ async fn resume_mission(
             .as_deref()
             .and_then(|id| state.roster.operation(id).ok());
         let root = remote_root(&state, operation, &theater_id);
-        let (endpoint, _) =
-            start_theater_tools(&state, &theater_id, root.as_deref(), &mut environment)
-                .await
-                .map_err(configuration_error)?;
+        let (endpoint, _) = start_theater_tools(
+            &state,
+            &theater_id,
+            root.as_deref(),
+            &mut environment,
+            (&mission, &resume_agent.id),
+        )
+        .await
+        .map_err(configuration_error)?;
         Some(endpoint)
     } else {
         None
@@ -9136,6 +9160,247 @@ mod tests {
                 "{lapse}"
             );
         }
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_green_ink_credential_needs_an_approval_of_its_target_and_is_leased_once_ever() {
+        let root = tempfile::tempdir().unwrap();
+        let theater_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(theater_root.path().join("work")).unwrap();
+        let (mut state, _) = remote_hands_state(root.path(), theater_root.path(), phone());
+        let mission_id = format!("credential-target-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "release the build".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let catalog = || -> crate::directorates::q::LoadoutCatalog {
+            "[loadout.007]\nsecrets = [\"release-token\"]\n\n\
+             [secret.release-token]\nenv = \"RELEASE_TOKEN\"\ngreen_ink = true\n\
+             kinds = [\"release\"]\ntargets = [\"tag v1.*\"]\n"
+                .parse()
+                .unwrap()
+        };
+        let secrets = FakeSecrets::default();
+        state.station = state
+            .station
+            .clone()
+            .with_loadouts(catalog())
+            .with_secret_backend(secrets.clone());
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let resume = |state: DaemonState| {
+            let mission_id = mission_id.clone();
+            async move {
+                let _ = resume_mission(
+                    State(state.clone()),
+                    axum::extract::Path(mission_id.clone()),
+                    Json(ResumeMission {
+                        message: Some("carry on".to_owned()),
+                        environment: BTreeMap::new(),
+                    }),
+                )
+                .await
+                .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+                wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+                RECORDED_RESUMES
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|request| request.mission_id.as_str() == mission_id)
+                    .map(|request| request.environment.contains_key("RELEASE_TOKEN"))
+                    .unwrap()
+            }
+        };
+        let approve = |target: &str, key: &str| {
+            let now = state.clock.now() as f64;
+            let request = crate::directorates::registry::approvals::ApprovalRequest::try_new(
+                "G",
+                MissionId::try_new(&mission_id).unwrap(),
+                SessionId::try_new("provider-session-remote").unwrap(),
+                "007",
+                crate::ActionScope::try_new("release", target).unwrap(),
+                "ship it",
+                key,
+            )
+            .unwrap()
+            .expiring(now, Duration::from_secs(600));
+            state.intake.request_approval(&request).unwrap();
+            state
+                .intake
+                .decide_approval(
+                    "G",
+                    &request.id,
+                    &crate::Ruling::approve("operator", now, now + 600.0),
+                )
+                .unwrap();
+        };
+
+        approve("tag v2.0.0", "release-2");
+        assert!(
+            !resume(state.clone()).await,
+            "an approval of another target does not unlock it"
+        );
+        approve("tag v1.4.0", "release-1");
+        assert!(resume(state.clone()).await);
+
+        // A restarted Station holds nothing in memory; the Registry remembers the use.
+        state.station.credentials = credentials::CredentialDesk::default()
+            .with_catalog(catalog())
+            .with_backend(Arc::new(secrets.clone()));
+        assert!(
+            !resume(state.clone()).await,
+            "the same approval does not lease it again after a restart"
+        );
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[test]
+    fn green_ink_secrets_without_targets_or_from_the_stations_own_files_are_weakenings() {
+        let loose: crate::directorates::q::LoadoutCatalog =
+            "[loadout.007]\nsecrets = [\"release\"]\n[secret.release]\ngreen_ink = true\n"
+                .parse()
+                .unwrap();
+        let own = credentials::CredentialDesk::default().with_catalog(loose.clone());
+        let weakened = own.weakenings();
+        assert!(
+            weakened.iter().any(|line| line.contains("any target")),
+            "{weakened:?}"
+        );
+        assert!(
+            weakened
+                .iter()
+                .any(|line| line.contains("cannot take the value back")),
+            "{weakened:?}"
+        );
+        let tight: crate::directorates::q::LoadoutCatalog =
+            "[loadout.007]\nsecrets = [\"release\"]\n\
+             [secret.release]\ngreen_ink = true\ntargets = [\"tag v*\"]\n"
+                .parse()
+                .unwrap();
+        let vault = credentials::CredentialDesk::default()
+            .with_catalog(tight)
+            .with_backend(Arc::new(FakeSecrets::default()));
+        assert!(vault.weakenings().is_empty());
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_remote_hands_command_waits_for_green_ink_at_the_station() {
+        let root = tempfile::tempdir().unwrap();
+        let theater_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(theater_root.path().join("work")).unwrap();
+        let (state, _) = remote_hands_state(root.path(), theater_root.path(), phone());
+        let mission_id = format!("theater-gate-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "push the release".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::from([(
+                    crate::directorates::section_00::gate::GATE_PROGRAM_ENV.to_owned(),
+                    "/tmp/always-allow".to_owned(),
+                )]),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let environment = RECORDED_STARTS
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|request| request.mission_id.as_str() == mission_id)
+            .map(|request| request.environment.clone())
+            .expect("the handler was started");
+        assert!(
+            !environment.contains_key(crate::directorates::section_00::gate::GATE_PROGRAM_ENV),
+            "a request cannot choose the gate program"
+        );
+
+        let run = |arguments: serde_json::Value| {
+            let environment = environment.clone();
+            async move { call_theater_tool(&environment, "theater_run", arguments).await }
+        };
+        for arguments in [
+            serde_json::json!({ "command": "cd /work && git push origin refs/heads/main" }),
+            serde_json::json!({ "argv": ["git", "push", "origin", "refs/heads/main"] }),
+        ] {
+            let held = run(arguments.clone()).await;
+            let error = held["error"].as_str().unwrap_or_default();
+            assert!(
+                error.contains("request_approval") && error.contains("origin:refs/heads/main"),
+                "{arguments}: {held}"
+            );
+        }
+        let ran =
+            run(serde_json::json!({ "command": "git push origin refs/heads/ai6/work" })).await;
+        assert_eq!(
+            ran["exit_code"], 0,
+            "a Mission branch needs no green ink: {ran}"
+        );
+
+        let now = state.clock.now() as f64;
+        let request = crate::directorates::registry::approvals::ApprovalRequest::try_new(
+            "G",
+            MissionId::try_new(&mission_id).unwrap(),
+            SessionId::try_new("provider-session-remote").unwrap(),
+            "007",
+            crate::ActionScope::try_new("push", "origin:main").unwrap(),
+            "release 2.0",
+            "theater-push",
+        )
+        .unwrap()
+        .expiring(now, Duration::from_secs(600));
+        state.intake.request_approval(&request).unwrap();
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request.id,
+                &crate::Ruling::approve("operator", now, now + 600.0),
+            )
+            .unwrap();
+        let ran = run(serde_json::json!({ "command": "git push origin refs/heads/main" })).await;
+        assert_eq!(ran["exit_code"], 0, "the approval covers it: {ran}");
+        assert!(
+            ran["stdout"]
+                .as_str()
+                .is_some_and(|out| out.contains("git push origin refs/heads/main"))
+        );
         state.stopping.store(true, Ordering::Release);
     }
 

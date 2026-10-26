@@ -3,7 +3,9 @@
 //! In remote-hands mode the harness runs on the Station and its own shell and file tools
 //! are turned off, so everything it does to the Theater goes through these tools and the
 //! Theater's transport. Paths are the Theater's; a relative path is resolved against the
-//! Mission's working directory there.
+//! Mission's working directory there. Every `theater_run` command passes the green ink gate
+//! first, asking the Theater's repository through the same transport: the Agent cannot route
+//! around it, because this is the only way it runs anything.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,8 +24,12 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use super::cables_mcp::authorize;
+use crate::directorates::m::approvals::{ActionScope, classify};
 use crate::directorates::q::transport::{
     Capabilities, ReadSpec, RunSpec, TransportClient, WriteSpec, describe,
+};
+use crate::directorates::section_00::gate::{
+    Answers, GateVerdict, GitOutput, GitRepository, decide,
 };
 use guatiao::Bytes;
 
@@ -33,6 +39,11 @@ const MAX_OUTPUT: u64 = 256 * 1024;
 const MAX_READ: u64 = 256 * 1024;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const MAX_TIMEOUT_SECS: u64 = 3600;
+/// How long one git question about the Theater's repository may take.
+const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Asks the Station whether a Mission's Agent may take steps now (`check_approval`).
+pub(super) type StepCheck = Arc<dyn Fn(&[ActionScope]) -> Result<Answers, String> + Send + Sync>;
 
 /// A local MCP listener bound to one Mission's Theater.
 pub(super) struct Endpoint {
@@ -47,6 +58,7 @@ impl Endpoint {
         client: Arc<TransportClient>,
         capabilities: Capabilities,
         root: Option<String>,
+        check: StepCheck,
     ) -> std::io::Result<Self> {
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -57,6 +69,7 @@ impl Endpoint {
                     client.clone(),
                     capabilities.clone(),
                     root.clone(),
+                    check.clone(),
                 ))
             },
             Arc::new(LocalSessionManager::default()),
@@ -114,15 +127,22 @@ struct TheaterTools {
     client: Arc<TransportClient>,
     capabilities: Capabilities,
     root: Option<String>,
+    check: StepCheck,
     tool_router: ToolRouter<Self>,
 }
 
 impl TheaterTools {
-    fn new(client: Arc<TransportClient>, capabilities: Capabilities, root: Option<String>) -> Self {
+    fn new(
+        client: Arc<TransportClient>,
+        capabilities: Capabilities,
+        root: Option<String>,
+        check: StepCheck,
+    ) -> Self {
         Self {
             client,
             capabilities,
             root,
+            check,
             tool_router: Self::tool_router(),
         }
     }
@@ -160,6 +180,31 @@ fn resolve(root: Option<&str>, path: &str) -> String {
         }
         _ => path.to_owned(),
     }
+}
+
+/// Runs `git` with `args` on the Theater.
+fn theater_git(client: &TransportClient, args: &[String]) -> Result<GitOutput, String> {
+    let mut argv = vec!["git".to_owned()];
+    argv.extend(args.iter().cloned());
+    let spec = RunSpec {
+        argv,
+        timeout_ms: GIT_TIMEOUT.as_millis() as u64,
+        max_output: MAX_OUTPUT,
+        ..RunSpec::default()
+    };
+    let output = client.run(&spec).map_err(|error| describe(&error))?;
+    Ok((
+        output.code == Some(0) && !output.timed_out,
+        String::from_utf8_lossy(&output.stdout.0).into_owned(),
+    ))
+}
+
+/// `argv` as one command line the classifier reads like a shell.
+fn command_line(argv: &[String]) -> String {
+    argv.iter()
+        .map(|arg| format!("'{}'", arg.replace('\'', "'\\''")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn failure(message: impl std::fmt::Display) -> String {
@@ -226,9 +271,15 @@ impl TheaterTools {
         if !self.capabilities.run {
             return failure("this Theater's transport cannot run commands");
         }
-        let argv = match (args.command, args.argv) {
-            (Some(command), None) => vec!["sh".to_owned(), "-c".to_owned(), command],
-            (None, Some(argv)) if !argv.is_empty() => argv,
+        let (argv, line) = match (args.command, args.argv) {
+            (Some(command), None) => (
+                vec!["sh".to_owned(), "-c".to_owned(), command.clone()],
+                command,
+            ),
+            (None, Some(argv)) if !argv.is_empty() => {
+                let line = command_line(&argv);
+                (argv, line)
+            }
             _ => return failure("give exactly one of `command` and a non-empty `argv`"),
         };
         let spec = RunSpec {
@@ -243,6 +294,20 @@ impl TheaterTools {
             max_output: MAX_OUTPUT,
             ..RunSpec::default()
         };
+        let check = self.check.clone();
+        let base = spec.cwd.clone().or_else(|| self.root.clone());
+        let verdict = self
+            .blocking(move |client| {
+                let repository =
+                    GitRepository::new(base, |args: &[String]| theater_git(client, args));
+                Ok(decide(classify(&line, &repository), |steps| check(steps)))
+            })
+            .await;
+        match verdict {
+            Ok(GateVerdict::Allow) => {}
+            Ok(GateVerdict::Hold(reason)) => return failure(reason),
+            Err(error) => return failure(format!("Green ink: the command is held: {error}")),
+        }
         match self
             .blocking(move |client| client.run(&spec).map_err(|error| describe(&error)))
             .await
@@ -353,6 +418,16 @@ mod tests {
     use super::*;
     use crate::station::transports::testing::DirTransport;
 
+    /// A Station whose policy lets the Agent take every step.
+    fn unchecked() -> StepCheck {
+        Arc::new(|steps| {
+            Ok(steps
+                .iter()
+                .map(|_| ("not_required".to_owned(), None))
+                .collect())
+        })
+    }
+
     async fn call(
         client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
         tool: &'static str,
@@ -406,7 +481,7 @@ mod tests {
         let runs = transport.runs();
         let capabilities = transport.capabilities_model();
         let client = Arc::new(TransportClient::new(Box::new(transport)));
-        let endpoint = Endpoint::start(client, capabilities, Some("/work".to_owned()))
+        let endpoint = Endpoint::start(client, capabilities, Some("/work".to_owned()), unchecked())
             .await
             .unwrap();
         let tools = connect(&endpoint).await;
@@ -498,7 +573,9 @@ mod tests {
         let capabilities = transport.capabilities_model();
         assert!(instructions(None, &capabilities).contains("use theater_run for files"));
         let client = Arc::new(TransportClient::new(Box::new(transport)));
-        let endpoint = Endpoint::start(client, capabilities, None).await.unwrap();
+        let endpoint = Endpoint::start(client, capabilities, None, unchecked())
+            .await
+            .unwrap();
         let tools = connect(&endpoint).await;
         let refused = call(&tools, "theater_read", serde_json::json!({"path": "a"})).await;
         assert!(

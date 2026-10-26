@@ -197,7 +197,38 @@ pub(super) struct StepAnswer {
     #[serde(skip_serializing_if = "Option::is_none")]
     request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    message: Option<String>,
+    pub(super) message: Option<String>,
+}
+
+/// The check `theater_run` makes before a command: [`Desk::check`] for `agent` on `mission`.
+/// A Mission without an Operation cannot be checked, so its governed steps are held.
+pub(super) fn step_check(
+    state: &DaemonState,
+    mission: &Mission,
+    agent: &str,
+) -> super::theater_mcp::StepCheck {
+    let desk = Desk::new(state.clone());
+    let operation = mission.operation_id.clone();
+    let mission = mission.mission_id.to_string();
+    let agent = agent.to_owned();
+    Arc::new(move |steps| {
+        let operation = operation
+            .clone()
+            .ok_or("the Mission has no Operation, so green ink cannot be checked")?;
+        let answers = desk.check(Checked {
+            operation,
+            mission: mission.clone(),
+            agent: agent.clone(),
+            steps: steps
+                .iter()
+                .map(|step| (step.kind.clone(), step.target.clone()))
+                .collect(),
+        })?;
+        Ok(answers
+            .into_iter()
+            .map(|answer| (answer.status.to_owned(), answer.message))
+            .collect())
+    })
 }
 
 impl Desk {
@@ -606,14 +637,40 @@ fn record_event(state: &DaemonState, request: &ApprovalRequest, action: &str, ac
 
 /// Lists, for the operator, the green ink settings each Operation loosens.
 pub(super) fn log_weakenings(roster: &Roster) {
+    for weakened in weakenings(roster) {
+        eprintln!("ai6: {weakened}");
+    }
+}
+
+/// Every green ink setting looser than its default: each Operation's policy, and each Agent
+/// whose roster environment names its own gate program for the Claude hook.
+fn weakenings(roster: &Roster) -> Vec<String> {
+    let gate = crate::directorates::section_00::gate::GATE_PROGRAM_ENV;
+    let mut weakened = Vec::new();
+    let mut agents = std::collections::BTreeMap::new();
     for operation in roster.operations() {
-        for weakened in operation.green_ink.weakenings() {
-            eprintln!(
-                "ai6: Operation {:?} green ink is weakened: {weakened}",
+        for line in operation.green_ink.weakenings() {
+            weakened.push(format!(
+                "Operation {:?} green ink is weakened: {line}",
                 operation.id
-            );
+            ));
+        }
+        for agent in roster
+            .agents_for_operation(&operation.id)
+            .unwrap_or_default()
+        {
+            if let Some(program) = agent.env.get(gate) {
+                agents.insert(agent.id.clone(), program.clone());
+            }
         }
     }
+    for (agent, program) in agents {
+        weakened.push(format!(
+            "Agent {agent:?} green ink is weakened: its {gate} runs {program:?} as the hook's gate \
+             instead of the ai6 program hosting the handler"
+        ));
+    }
+    weakened
 }
 
 #[cfg(test)]
@@ -1136,6 +1193,23 @@ mod tests {
         exposed.exposed = true;
         assert_eq!(desk.request(exposed).unwrap().status, "pending");
         assert_eq!(state.intake.class_authorizations("G").unwrap()[0].uses, 1);
+    }
+
+    #[test]
+    fn an_agent_naming_its_own_gate_program_is_a_weakening() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-recorder\"\n[agent.007.env]\nAI6_GREEN_INK_GATE = \"/opt/gate\"\n\
+             [agent.008]\nhandler = \"mock-recorder\"\n",
+        );
+        let weakened = weakenings(&state.roster);
+        assert_eq!(weakened.len(), 1, "{weakened:?}");
+        assert!(
+            weakened[0].contains("\"007\"") && weakened[0].contains("/opt/gate"),
+            "{weakened:?}"
+        );
     }
 
     #[test]

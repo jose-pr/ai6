@@ -210,6 +210,10 @@ pub struct Approval {
     /// When the Station told the Agent, as Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notified_at: Option<f64>,
+    /// When a green ink credential was leased against it, as Unix seconds; an approval unlocks
+    /// one lease, on any Station, ever.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spent_at: Option<f64>,
 }
 
 impl Approval {
@@ -538,6 +542,7 @@ impl FileRegistry {
             note: None,
             revoked: None,
             notified_at: None,
+            spent_at: None,
         };
         self.settle_locked(&approval)?;
         Ok(approval)
@@ -653,6 +658,15 @@ pub trait ApprovalStore {
     ///
     /// `NotFound` for a request without a decision; I/O errors otherwise.
     fn mark_approval_notified(&self, operation: &str, id: &str, at: f64) -> io::Result<()>;
+
+    /// Records that a green ink credential was leased against an approval. `true` the first
+    /// time; `false` when it was already spent, or is not a live approval at `at`, so a Station
+    /// that loses the race gives its lease back.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for a request without a decision; I/O errors otherwise.
+    fn spend_approval(&self, operation: &str, id: &str, at: f64) -> io::Result<bool>;
 
     /// Approves a new request with the first live class authorisation that covers it, counting
     /// one use. `None` when none covers it, or when the request is already stored.
@@ -819,6 +833,7 @@ impl ApprovalStore for FileRegistry {
                     note: ruling.note.clone(),
                     revoked: None,
                     notified_at: None,
+                    spent_at: None,
                 };
                 self.settle_locked(&approval)?;
                 Ok(approval)
@@ -856,6 +871,24 @@ impl ApprovalStore for FileRegistry {
             write_json(&path, &approval)?;
         }
         Ok(approval)
+    }
+
+    fn spend_approval(&self, operation: &str, id: &str, at: f64) -> io::Result<bool> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        let _lock = registry_lock(&self.root)?;
+        let path = self
+            .approvals_dir("decided", operation)
+            .join(format!("{id}.json"));
+        let mut approval = read_json::<Approval>(&path)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
+        })?;
+        if approval.spent_at.is_some() || !approval.is_live(at) {
+            return Ok(false);
+        }
+        approval.spent_at = Some(at);
+        write_json(&path, &approval)?;
+        Ok(true)
     }
 
     fn mark_approval_notified(&self, operation: &str, id: &str, at: f64) -> io::Result<()> {
@@ -915,6 +948,7 @@ impl ApprovalStore for FileRegistry {
             note: None,
             revoked: None,
             notified_at: Some(now),
+            spent_at: None,
         };
         self.index_locked(request)?;
         write_json(
@@ -1085,6 +1119,38 @@ mod tests {
         )
         .unwrap()
         .expiring(NOW, HOUR)
+    }
+
+    #[test]
+    fn an_approval_is_spent_once_and_only_while_live() {
+        let (root, registry) = registry();
+        let asked = request("release-1", "release", "tag v1");
+        registry.request_approval(&asked).unwrap();
+        assert!(
+            registry.spend_approval("G", &asked.id, NOW).is_err(),
+            "an undecided request cannot be spent"
+        );
+        registry
+            .decide_approval("G", &asked.id, &Ruling::approve("m", NOW, NOW + 60.0))
+            .unwrap();
+        assert!(
+            !registry.spend_approval("G", &asked.id, NOW + 61.0).unwrap(),
+            "expired"
+        );
+        assert!(registry.spend_approval("G", &asked.id, NOW + 1.0).unwrap());
+        assert!(
+            !registry.spend_approval("G", &asked.id, NOW + 2.0).unwrap(),
+            "the second Station to spend it loses"
+        );
+        // Another handle on the same Registry, as after a restart, sees the use.
+        let reopened = FileRegistry::open(root.path());
+        let Some(ApprovalStatus::Decided(approval)) =
+            reopened.approval("G", &asked.id, NOW + 3.0).unwrap()
+        else {
+            panic!("the request is decided");
+        };
+        assert_eq!(approval.spent_at, Some(NOW + 1.0));
+        assert!(!reopened.spend_approval("G", &asked.id, NOW + 3.0).unwrap());
     }
 
     #[test]

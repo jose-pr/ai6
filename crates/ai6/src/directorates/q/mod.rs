@@ -273,6 +273,7 @@ pub struct SecretDefinition {
     env: String,
     green_ink: bool,
     kinds: Vec<String>,
+    targets: Vec<String>,
     source: SecretSource,
 }
 
@@ -295,6 +296,7 @@ impl SecretDefinition {
             env,
             green_ink: false,
             kinds: Vec::new(),
+            targets: Vec::new(),
         }
     }
 
@@ -316,6 +318,34 @@ impl SecretDefinition {
     /// The approval kinds that unlock a green ink secret; empty means any.
     pub fn kinds(&self) -> &[String] {
         &self.kinds
+    }
+
+    /// Globs an approval's target must match to unlock a green ink secret (as a class
+    /// authorisation's `target_pattern` matches); empty means any target, a weakening.
+    pub fn targets(&self) -> &[String] {
+        &self.targets
+    }
+
+    /// Whether an approval of `kind` on `target` unlocks this secret.
+    pub fn unlocked_by(&self, kind: &str, target: &str) -> bool {
+        (self.kinds.is_empty() || self.kinds.iter().any(|listed| listed == kind))
+            && (self.targets.is_empty()
+                || self.targets.iter().any(|pattern| {
+                    globset::Glob::new(pattern)
+                        .is_ok_and(|glob| glob.compile_matcher().is_match(target))
+                }))
+    }
+
+    /// Why this green ink secret is looser than it could be, if it is: any approval of its
+    /// kinds unlocks it whatever its target.
+    pub fn green_ink_weakening(&self) -> Option<String> {
+        (self.green_ink && self.targets.is_empty()).then(|| {
+            format!(
+                "green ink secret {:?} is unlocked by an approval of any target; set `targets` \
+                 to the refs or releases it may act on",
+                self.name
+            )
+        })
     }
 
     /// Where [`StationSecrets`] reads it.
@@ -455,6 +485,8 @@ struct RawSecret {
     green_ink: bool,
     #[serde(default)]
     kinds: Vec<String>,
+    #[serde(default)]
+    targets: Vec<String>,
     from: Option<RawSource>,
 }
 
@@ -608,11 +640,19 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
             None => definition.source,
         };
         validate_names(&raw.kinds, QErrorKind::Schema, path.clone())?;
-        if !raw.kinds.is_empty() && !raw.green_ink {
+        if (!raw.kinds.is_empty() || !raw.targets.is_empty()) && !raw.green_ink {
+            return Err(QError::new(QErrorKind::Schema, path));
+        }
+        if raw
+            .targets
+            .iter()
+            .any(|pattern| pattern.trim().is_empty() || globset::Glob::new(pattern).is_err())
+        {
             return Err(QError::new(QErrorKind::Schema, path));
         }
         definition.green_ink = raw.green_ink;
         definition.kinds = raw.kinds;
+        definition.targets = raw.targets;
         secrets.insert(name, definition);
     }
 
@@ -819,6 +859,8 @@ from = { file = "/etc/ai6/secrets/release" }
             "[loadout.007]\n[secret.x]\nfrom = { env = \"\" }\n",
             "[loadout.007]\n[secret.x]\nfrom = { vault = \"x\" }\n",
             "[loadout.007]\n[secret.x]\nvalue = \"inline\"\n",
+            "[loadout.007]\n[secret.x]\ntargets = [\"origin:*\"]\n",
+            "[loadout.007]\n[secret.x]\ngreen_ink = true\ntargets = [\"refs/[\"]\n",
         ] {
             assert_eq!(
                 LoadoutCatalog::from_str(bad).unwrap_err().kind(),
@@ -826,6 +868,42 @@ from = { file = "/etc/ai6/secrets/release" }
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn a_green_ink_secret_is_unlocked_only_by_its_kinds_and_targets() {
+        let catalog = LoadoutCatalog::from_str(
+            r#"
+[loadout.007]
+secrets = ["release", "anything"]
+
+[secret.release]
+green_ink = true
+kinds = ["release"]
+targets = ["tag v1.*"]
+
+[secret.anything]
+green_ink = true
+"#,
+        )
+        .unwrap();
+        let release = catalog.secret("release");
+        assert_eq!(release.targets(), ["tag v1.*"]);
+        assert!(release.unlocked_by("release", "tag v1.4.0"));
+        assert!(
+            !release.unlocked_by("release", "tag v2.0.0"),
+            "another target"
+        );
+        assert!(!release.unlocked_by("push", "tag v1.4.0"), "another kind");
+        assert!(release.green_ink_weakening().is_none());
+        let anything = catalog.secret("anything");
+        assert!(anything.unlocked_by("push", "origin:refs/heads/main"));
+        assert!(
+            anything
+                .green_ink_weakening()
+                .unwrap()
+                .contains("any target")
+        );
     }
 
     #[test]

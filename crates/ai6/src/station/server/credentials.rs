@@ -36,7 +36,6 @@ pub(crate) struct CredentialDesk {
     /// Where the Station's own backend finds relative secret files.
     config_dir: Option<std::path::PathBuf>,
     issued: Arc<Mutex<BTreeMap<String, Vec<Issued>>>>,
-    spent: Arc<Mutex<BTreeSet<String>>>,
 }
 
 impl std::fmt::Debug for CredentialDesk {
@@ -78,22 +77,41 @@ impl CredentialDesk {
     }
 
     /// Resolves relative secret files against the Station's configuration directory, and
-    /// logs each secret read from a weaker source.
+    /// logs each weakening of its secrets.
     pub(crate) fn in_config_dir(mut self, dir: &std::path::Path) -> Self {
         self.config_dir = Some(dir.to_path_buf());
-        if self.backend.is_none()
-            && let Some(catalog) = &self.catalog
-        {
-            for definition in catalog.secrets() {
-                if let Some(weakening) = definition.source().weakening() {
-                    eprintln!(
-                        "ai6: secret {:?} is weakened: {weakening}",
-                        definition.name()
-                    );
-                }
-            }
+        for weakening in self.weakenings() {
+            eprintln!("ai6: {weakening}");
         }
         self
+    }
+
+    /// The ways these secrets are looser than they could be: a source every local harness
+    /// inherits, a green ink secret any target unlocks, and a green ink secret served from
+    /// the Station's own files or environment, where revoking a lease cannot take a value back.
+    pub(crate) fn weakenings(&self) -> Vec<String> {
+        let Some(catalog) = &self.catalog else {
+            return Vec::new();
+        };
+        let own_backend = self.backend.is_none();
+        let mut weakened = Vec::new();
+        for definition in catalog.secrets() {
+            let name = definition.name();
+            if own_backend && let Some(weakening) = definition.source().weakening() {
+                weakened.push(format!("secret {name:?} is weakened: {weakening}"));
+            }
+            if let Some(weakening) = definition.green_ink_weakening() {
+                weakened.push(weakening);
+            }
+            if own_backend && definition.green_ink() {
+                weakened.push(format!(
+                    "green ink secret {name:?} is served from the Station's own files or \
+                     environment, so revoking its lease cannot take the value back; use a \
+                     backend that issues credentials of its own"
+                ));
+            }
+        }
+        weakened
     }
 
     /// The names of the secrets leased to `mission_id`'s Session now.
@@ -206,19 +224,16 @@ pub(super) fn issue(
 
     let mut approvals = Vec::new();
     if !protected.is_empty() {
-        let approved = live_approvals(state, mission);
-        let mut spent = desk
-            .spent
-            .lock()
-            .map_err(|_| "credential lock was poisoned")?;
+        let mut approved = live_approvals(state, mission);
         for definition in &protected {
-            let Some(approval) = approved.iter().find(|approval| {
-                !spent.contains(&approval.request.id)
-                    && (definition.kinds().is_empty()
-                        || definition.kinds().contains(&approval.request.scope.kind))
+            let Some(position) = approved.iter().position(|approval| {
+                approval.spent_at.is_none()
+                    && definition
+                        .unlocked_by(&approval.request.scope.kind, &approval.request.scope.target)
             }) else {
                 continue;
             };
+            let approval = approved.remove(position);
             let now = state.clock.now() as f64;
             let remaining = approval.expires_at.unwrap_or(now) - now;
             // Clamped before converting: an approval may expire centuries from now.
@@ -238,14 +253,35 @@ pub(super) fn issue(
                     continue;
                 }
             };
+            // Single use is held in the Registry, so another Station, or this one after a
+            // restart, does not lease against the same approval again.
+            let request = &approval.request;
+            match state
+                .intake
+                .spend_approval(&request.operation, &request.id, now)
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    let _ = lease.revoke();
+                    continue;
+                }
+                Err(error) => {
+                    let _ = lease.revoke();
+                    eprintln!(
+                        "ai6: green ink approval {:?} could not be marked spent, so {:?} was not leased: {error}",
+                        request.id,
+                        definition.name()
+                    );
+                    continue;
+                }
+            }
             leases.hand_over(
                 lease,
-                Some(approval.request.id.clone()),
+                Some(request.id.clone()),
                 std::slice::from_ref(definition),
                 environment,
             )?;
-            spent.insert(approval.request.id.clone());
-            approvals.push(approval.request.id.clone());
+            approvals.push(request.id.clone());
             leased.push(definition.name().to_owned());
         }
     }
