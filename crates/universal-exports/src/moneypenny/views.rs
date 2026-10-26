@@ -23,7 +23,7 @@ const MAX_SERIES: usize = 8;
 const MAX_POINTS: usize = 200;
 const MAX_DIFF: usize = 16 * 1024;
 const MAX_FIELDS: usize = 20;
-const MAX_VIEW_BYTES: usize = 256 * 1024;
+const MAX_VIEW_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

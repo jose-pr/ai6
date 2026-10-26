@@ -44,7 +44,7 @@ use crate::{
     ApiError, Gateway, GatewayError, authorize_resource_action, bearer, resolve_user,
     unix_timestamp,
 };
-use store::{Conversation, Entry, Pending, Role, Store};
+use store::{Bounds, Conversation, Entry, Pending, Role, Store};
 
 /// Moneypenny's settings: which Agent she is and how much the gateway keeps.
 #[derive(Debug, Clone, PartialEq)]
@@ -56,7 +56,11 @@ pub struct AssistantConfig {
     max_entries: usize,
     token_ttl: Duration,
     answer_timeout: Duration,
+    answer_deadline: Duration,
     tool_calls_per_minute: u32,
+    live_per_person: usize,
+    conversation_bytes: usize,
+    person_bytes: usize,
 }
 
 impl Default for AssistantConfig {
@@ -69,7 +73,11 @@ impl Default for AssistantConfig {
             max_entries: 500,
             token_ttl: Duration::from_secs(3_600),
             answer_timeout: Duration::from_secs(60),
+            answer_deadline: Duration::from_secs(10 * 60),
             tool_calls_per_minute: 120,
+            live_per_person: 2,
+            conversation_bytes: 1024 * 1024,
+            person_bytes: 4 * 1024 * 1024,
         }
     }
 }
@@ -130,6 +138,39 @@ impl AssistantConfig {
         self
     }
 
+    /// How long an accepted message may go without word from its Station before the answer
+    /// is given up (default 10 minutes).
+    #[must_use]
+    pub fn with_answer_deadline(mut self, deadline: Duration) -> Self {
+        self.answer_deadline = deadline;
+        self
+    }
+
+    /// How many of one person's conversations may have a harness running or a message being
+    /// answered at once (default 2, at least 1). Past it, the person's least recently used
+    /// idle harness is closed; when every one is answering, the message is refused.
+    #[must_use]
+    pub fn with_live_conversations_per_person(mut self, conversations: usize) -> Self {
+        self.live_per_person = conversations.max(1);
+        self
+    }
+
+    /// The bytes of entries kept per conversation (default 1 MiB) and per person (default
+    /// 4 MiB); the oldest go first, a person's views before anything else.
+    #[must_use]
+    pub fn with_memory_limits(mut self, per_conversation: usize, per_person: usize) -> Self {
+        self.conversation_bytes = per_conversation.max(64 * 1024);
+        self.person_bytes = per_person.max(self.conversation_bytes);
+        self
+    }
+
+    fn bounds(&self) -> Bounds {
+        Bounds {
+            entries: self.max_entries,
+            bytes: self.conversation_bytes,
+        }
+    }
+
     /// How many tool calls one conversation may make in a minute (default 120).
     #[must_use]
     pub fn with_tool_calls_per_minute(mut self, calls: u32) -> Self {
@@ -138,20 +179,57 @@ impl AssistantConfig {
     }
 }
 
-/// The token a harness presents, and whose conversation it is.
+/// The token a harness presents: whose conversation it is, and the Station whose harness was
+/// given it. It is withdrawn when the conversation moves to another Station.
 struct Grant {
     conversation_id: String,
     person_id: String,
+    station: String,
     expires_at: f64,
 }
 
 #[derive(Default)]
 struct Desk {
     store: Store,
-    /// Tokens by their SHA-256, so the token itself is never kept.
+    /// Tokens by their SHA-256.
     tokens: HashMap<String, Grant>,
     /// Tool calls in the current minute, by conversation.
     calls: HashMap<String, (Instant, u32)>,
+    /// Jobs that close a harness, by the Station that runs it.
+    closes: Vec<(String, AssistantJob)>,
+    /// The IDs of close jobs a Station has not answered yet.
+    closing: std::collections::HashSet<String>,
+}
+
+impl Desk {
+    /// Asks the Station running `conversation_id`'s harness to close it, and withdraws the
+    /// conversation's tokens.
+    fn close_harness(&mut self, conversation_id: &str, agent_id: &str) {
+        let Some(conversation) = self.store.conversations.get_mut(conversation_id) else {
+            return;
+        };
+        conversation.live = false;
+        conversation.token = None;
+        let Some(station) = conversation.station.clone() else {
+            return;
+        };
+        let job = AssistantJob {
+            job_id: Uuid::new_v4().to_string(),
+            conversation_id: conversation_id.to_owned(),
+            agent_id: agent_id.to_owned(),
+            message: String::new(),
+            context: Vec::new(),
+            // Never accepted anywhere: a close starts no harness.
+            mcp_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+            token_expires_at: now() + 60.0,
+            session_id: conversation.session_id.clone(),
+            close: true,
+        };
+        self.tokens
+            .retain(|_, grant| grant.conversation_id != conversation_id);
+        self.closing.insert(job.job_id.clone());
+        self.closes.push((station, job));
+    }
 }
 
 /// Moneypenny's state in one gateway.
@@ -169,8 +247,12 @@ impl fmt::Debug for Assistant {
     }
 }
 
-/// The most tokens one conversation holds; a harness uses the newest, older ones age out.
-const MAX_TOKENS_PER_CONVERSATION: usize = 8;
+/// A token with less left than this is not given to another message: a Station restarts a
+/// harness whose token has under two minutes left, so the new one must outlast that.
+const TOKEN_REUSE_MARGIN_SECS: f64 = 600.0;
+/// The most entries `ready` sends, newest first, and their most bytes.
+const READY_ENTRIES: usize = 100;
+const READY_BYTES: usize = 512 * 1024;
 /// The longest message the app may send, in bytes.
 const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 /// How much of the conversation so far a new harness is given, in bytes.
@@ -291,9 +373,7 @@ impl Assistant {
         message: &str,
         shown: Option<&str>,
     ) -> Result<(), (&'static str, String)> {
-        let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let now = now();
-        let expires_at = now + self.config.token_ttl.as_secs_f64();
         {
             let mut desk = self.desk();
             let conversation = desk
@@ -306,6 +386,36 @@ impl Assistant {
                     "Moneypenny is still answering the last message.".to_owned(),
                 ));
             }
+            // At most `live_per_person` of the person's conversations hold a harness or wait
+            // for an answer: the least recently used idle harness makes room.
+            let mut others: Vec<(f64, String, bool)> = desk
+                .store
+                .conversations
+                .values()
+                .filter(|other| other.person_id == person_id && other.id != conversation_id)
+                .filter(|other| other.busy || other.live)
+                .map(|other| (other.updated_at, other.id.clone(), other.busy))
+                .collect();
+            let over = (others.len() + 1).saturating_sub(self.config.live_per_person);
+            if over > 0 {
+                others.retain(|(_, _, busy)| !busy);
+                if others.len() < over {
+                    return Err((
+                        "busy_elsewhere",
+                        "Moneypenny is answering in your other conversations; wait for one \
+                         to finish."
+                            .to_owned(),
+                    ));
+                }
+                others.sort_by(|a, b| a.0.total_cmp(&b.0));
+                for (_, other, _) in others.into_iter().take(over) {
+                    desk.close_harness(&other, &self.config.agent_id);
+                }
+            }
+            let conversation = desk
+                .store
+                .owned(conversation_id, person_id)
+                .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
             let mut context = guide::context();
             if let Some(recap) = recap(conversation) {
                 context.push(recap);
@@ -318,8 +428,9 @@ impl Assistant {
                 agent_id: self.config.agent_id.clone(),
                 message: cut(&parts.join("\n\n"), MAX_ASSISTANT_MESSAGE_BYTES),
                 context,
-                mcp_token: token.clone(),
-                token_expires_at: expires_at,
+                // Set when the job is placed: the token is bound to its Station.
+                mcp_token: String::new(),
+                token_expires_at: 0.0,
                 session_id: conversation.session_id.clone(),
                 close: false,
             };
@@ -331,7 +442,7 @@ impl Assistant {
                         at: now,
                         data: None,
                     },
-                    self.config.max_entries,
+                    self.config.bounds(),
                 );
             }
             conversation.answered = false;
@@ -344,25 +455,8 @@ impl Assistant {
                 refused_by: Vec::new(),
                 reason: None,
             });
-            let grant = Grant {
-                conversation_id: conversation_id.to_owned(),
-                person_id: person_id.to_owned(),
-                expires_at,
-            };
-            desk.tokens.retain(|_, grant| grant.expires_at > now);
-            let mut held: Vec<(String, f64)> = desk
-                .tokens
-                .iter()
-                .filter(|(_, held)| held.conversation_id == conversation_id)
-                .map(|(key, held)| (key.clone(), held.expires_at))
-                .collect();
-            held.sort_by(|a, b| a.1.total_cmp(&b.1));
-            while held.len() >= MAX_TOKENS_PER_CONVERSATION {
-                let (oldest, _) = held.remove(0);
-                desk.tokens.remove(&oldest);
-            }
-            desk.tokens.insert(digest(&token), grant);
         }
+        self.ready.notify_waiters();
         self.place(gateway, conversation_id).await;
         Ok(())
     }
@@ -387,7 +481,7 @@ impl Assistant {
             .chain(healthy)
             .find(|station| !refused.contains(station));
         let mut desk = self.desk();
-        let max_entries = self.config.max_entries;
+        let max_entries = self.config.bounds();
         let Some(conversation) = desk.store.conversations.get_mut(conversation_id) else {
             return;
         };
@@ -396,9 +490,43 @@ impl Assistant {
         };
         match chosen {
             Some(station) => {
-                pending.station = Some(station);
+                // The harness on that Station keeps its token while it lasts; a new one is
+                // made for a new Station or before the old one runs out, and the tokens of
+                // any other Station are withdrawn, so a harness left there stops working.
+                let now = now();
+                let reuse = conversation
+                    .token
+                    .clone()
+                    .filter(|(_, held_by, expires_at)| {
+                        *held_by == station && *expires_at > now + TOKEN_REUSE_MARGIN_SECS
+                    });
+                let (token, expires_at) = match reuse {
+                    Some((token, _, expires_at)) => (token, expires_at),
+                    None => (
+                        format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+                        now + self.config.token_ttl.as_secs_f64(),
+                    ),
+                };
+                conversation.token = Some((token.clone(), station.clone(), expires_at));
+                pending.job.mcp_token = token.clone();
+                pending.job.token_expires_at = expires_at;
+                pending.station = Some(station.clone());
                 pending.taken_at = None;
-                pending.queued_at = now();
+                pending.queued_at = now;
+                let person_id = conversation.person_id.clone();
+                desk.tokens.retain(|_, grant| {
+                    grant.expires_at > now
+                        && (grant.conversation_id != conversation_id || grant.station == station)
+                });
+                desk.tokens.insert(
+                    digest(&token),
+                    Grant {
+                        conversation_id: conversation_id.to_owned(),
+                        person_id,
+                        station,
+                        expires_at,
+                    },
+                );
                 drop(desk);
                 self.ready.notify_waiters();
             }
@@ -445,17 +573,48 @@ impl Assistant {
                     again.push(conversation.id.clone());
                 }
             }
+            // An accepted message whose Station went quiet is given up, so the conversation
+            // can take another message and be evicted like any idle one.
+            let deadline = self.config.answer_deadline.as_secs_f64();
+            let bounds = self.config.bounds();
+            for conversation in desk.store.conversations.values_mut() {
+                if conversation.busy
+                    && conversation.pending.is_none()
+                    && now - conversation.heard_at > deadline
+                {
+                    conversation.live = false;
+                    conversation.push(
+                        Entry {
+                            role: Role::Error,
+                            text: "No word from Moneypenny's Station for too long; her answer \
+                                   was given up. Ask again."
+                                .to_owned(),
+                            at: now,
+                            data: None,
+                        },
+                        bounds,
+                    );
+                    conversation.set_busy(false);
+                }
+            }
         }
         for conversation in again {
             self.place(gateway, &conversation).await;
         }
     }
 
-    /// The next job for `station`.
+    /// The next job for `station`: a close first, then the oldest message.
     async fn take(&self, gateway: &Gateway, station: &str) -> Option<AssistantJob> {
         self.sweep(gateway).await;
         let now = now();
         let mut desk = self.desk();
+        if let Some(index) = desk
+            .closes
+            .iter()
+            .position(|(held_by, _)| held_by == station)
+        {
+            return Some(desk.closes.remove(index).1);
+        }
         desk.store
             .conversations
             .values_mut()
@@ -477,15 +636,22 @@ impl Assistant {
         {
             return Err(StatusCode::BAD_REQUEST);
         }
-        let max_entries = self.config.max_entries;
+        let max_entries = self.config.bounds();
         let mut refused = false;
         {
             let mut desk = self.desk();
+            if let Some(job_id) = &report.job_id
+                && desk.closing.remove(job_id)
+            {
+                // The answer to a close: the harness reports `closed` when it is gone.
+                return Ok(());
+            }
             let conversation = desk
                 .store
                 .conversations
                 .get_mut(&report.conversation_id)
                 .ok_or(StatusCode::NOT_FOUND)?;
+            conversation.heard_at = now();
             if let Some(job_id) = &report.job_id {
                 let pending = conversation
                     .pending
@@ -499,6 +665,7 @@ impl Assistant {
                 match answer.kind.as_str() {
                     EVENT_ACCEPTED => {
                         conversation.pending = None;
+                        conversation.live = true;
                         if conversation.station.as_deref() != Some(report.station_id.as_str()) {
                             conversation.station = Some(report.station_id.clone());
                         }
@@ -527,6 +694,8 @@ impl Assistant {
             {
                 apply(conversation, event, max_entries);
             }
+            let person = conversation.person_id.clone();
+            desk.store.trim_person(&person, self.config.person_bytes);
         }
         if refused {
             self.place(gateway, &report.conversation_id).await;
@@ -590,7 +759,7 @@ impl Assistant {
             session: digest(&granted.bearer),
             result: None,
         };
-        let max_entries = self.config.max_entries;
+        let max_entries = self.config.bounds();
         {
             let mut desk = self.desk();
             let Some(conversation) = desk
@@ -767,7 +936,7 @@ impl Assistant {
             }
         };
         let id = format!("view-{}", Uuid::new_v4().simple());
-        let max_entries = self.config.max_entries;
+        let max_entries = self.config.bounds();
         let mut desk = self.desk();
         let Some(conversation) = desk
             .store
@@ -784,6 +953,8 @@ impl Assistant {
             },
             max_entries,
         );
+        desk.store
+            .trim_person(&granted.person_id, self.config.person_bytes);
         tools::Outcome {
             text: format!("Shown to the person as {id}."),
             is_error: false,
@@ -905,11 +1076,25 @@ fn expire_proposals(conversation: &mut Conversation) {
 }
 
 /// What the app is shown when it opens a conversation.
+///
+/// Only the newest entries that fit [`READY_ENTRIES`] and [`READY_BYTES`] are sent; `earlier`
+/// counts those left out.
 fn ready(conversation: &Conversation) -> Value {
+    let mut shown = Vec::new();
+    let mut bytes = 0;
+    for entry in conversation.entries.iter().rev().take(READY_ENTRIES) {
+        bytes += store::entry_bytes(entry);
+        if bytes > READY_BYTES && !shown.is_empty() {
+            break;
+        }
+        shown.push(entry);
+    }
+    shown.reverse();
     json!({
         "type": "ready",
         "conversation": conversation.id,
-        "entries": conversation.entries,
+        "entries": shown,
+        "earlier": conversation.entries.len() - shown.len(),
         "busy": conversation.busy,
     })
 }
@@ -977,7 +1162,7 @@ fn cut(text: &str, limit: usize) -> String {
 }
 
 /// Records one harness event in the conversation.
-fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: usize) {
+fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: Bounds) {
     let at = now();
     let text = event.text.clone().unwrap_or_default();
     let entry = |role, text: String| Entry {
@@ -1008,10 +1193,16 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: u
             } else {
                 format!("Moneypenny stopped: {}", or_unknown(&text))
             };
+            conversation.live = false;
             conversation.push(entry(Role::Error, what), max_entries);
             conversation.set_busy(false);
         }
-        EVENT_CLOSED if conversation.busy && conversation.pending.is_none() => {
+        EVENT_CLOSED if !conversation.busy || conversation.pending.is_some() => {
+            // An idle harness closed, or the one a new job replaces.
+            conversation.live = false;
+        }
+        EVENT_CLOSED => {
+            conversation.live = false;
             conversation.push(
                 entry(
                     Role::Error,

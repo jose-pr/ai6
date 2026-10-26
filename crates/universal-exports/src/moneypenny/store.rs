@@ -80,6 +80,29 @@ pub(crate) struct Conversation {
     /// What Moneypenny is told with the next message (proposals confirmed or cancelled).
     pub(crate) notes: Vec<String>,
     pub(crate) proposals: Vec<Proposal>,
+    /// A harness runs for the conversation on `station`, as far as the gateway knows.
+    pub(crate) live: bool,
+    /// When a Station last reported on the conversation, Unix seconds.
+    pub(crate) heard_at: f64,
+    /// The MCP token the conversation's harness was given, the Station it was given for, and
+    /// when it expires; reused for later messages to that Station while it lasts.
+    pub(crate) token: Option<(String, String, f64)>,
+    /// The size of `entries`, as the app is sent them, in bytes.
+    pub(crate) bytes: usize,
+}
+
+/// How much one conversation keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Bounds {
+    /// Entries kept, newest first.
+    pub(crate) entries: usize,
+    /// Bytes of entries kept, newest first.
+    pub(crate) bytes: usize,
+}
+
+/// The size an entry adds to a conversation, as sent to the app.
+pub(crate) fn entry_bytes(entry: &Entry) -> usize {
+    serde_json::to_vec(entry).map_or(0, |bytes| bytes.len())
 }
 
 impl fmt::Debug for Conversation {
@@ -111,18 +134,27 @@ impl Conversation {
             events: broadcast::channel(EVENT_BUFFER).0,
             notes: Vec::new(),
             proposals: Vec::new(),
+            live: false,
+            heard_at: now,
+            token: None,
+            bytes: 0,
         }
     }
 
-    /// Adds an entry, keeping the newest `max_entries`, and tells the app.
-    pub(crate) fn push(&mut self, entry: Entry, max_entries: usize) {
+    /// Adds an entry, keeping the newest that fit `bounds`, and tells the app.
+    pub(crate) fn push(&mut self, entry: Entry, bounds: Bounds) {
         self.updated_at = entry.at;
         let _ = self
             .events
             .send(serde_json::json!({"type": "entry", "entry": &entry}));
+        self.bytes += entry_bytes(&entry);
         self.entries.push_back(entry);
-        while self.entries.len() > max_entries {
-            self.entries.pop_front();
+        while self.entries.len() > bounds.entries
+            || (self.bytes > bounds.bytes && self.entries.len() > 1)
+        {
+            if let Some(dropped) = self.entries.pop_front() {
+                self.bytes = self.bytes.saturating_sub(entry_bytes(&dropped));
+            }
         }
     }
 
@@ -134,7 +166,9 @@ impl Conversation {
             entry.role == Role::Proposal
                 && entry.data.as_ref().and_then(|data| data.get("id")) == Some(&id)
         }) {
+            let before = entry_bytes(entry);
             entry.data = Some(shown.clone());
+            self.bytes = (self.bytes + entry_bytes(entry)).saturating_sub(before);
         }
         let _ = self
             .events
@@ -200,6 +234,58 @@ impl Store {
         }
     }
 
+    /// Keeps `person`'s conversations within `budget` bytes in all: their oldest views give
+    /// way first (the entry stays, saying it was removed), then their oldest entries.
+    pub(crate) fn trim_person(&mut self, person: &str, budget: usize) {
+        let total = |store: &Self| -> usize {
+            store
+                .conversations
+                .values()
+                .filter(|conversation| conversation.person_id == person)
+                .map(|conversation| conversation.bytes)
+                .sum()
+        };
+        while total(self) > budget {
+            let oldest_view = self
+                .conversations
+                .values()
+                .filter(|conversation| conversation.person_id == person)
+                .flat_map(|conversation| {
+                    conversation
+                        .entries
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, entry)| entry.role == Role::View && entry.data.is_some())
+                        .map(|(index, entry)| (entry.at, conversation.id.clone(), index))
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            if let Some((_, id, index)) = oldest_view
+                && let Some(conversation) = self.conversations.get_mut(&id)
+                && let Some(entry) = conversation.entries.get_mut(index)
+            {
+                let before = entry_bytes(entry);
+                entry.data = None;
+                entry.text = "(an older view was removed to save space)".to_owned();
+                conversation.bytes =
+                    (conversation.bytes + entry_bytes(entry)).saturating_sub(before);
+                continue;
+            }
+            let oldest = self
+                .conversations
+                .values_mut()
+                .filter(|conversation| {
+                    conversation.person_id == person && !conversation.entries.is_empty()
+                })
+                .min_by(|a, b| a.updated_at.total_cmp(&b.updated_at));
+            let Some(conversation) = oldest else {
+                return;
+            };
+            if let Some(dropped) = conversation.entries.pop_front() {
+                conversation.bytes = conversation.bytes.saturating_sub(entry_bytes(&dropped));
+            }
+        }
+    }
+
     /// The conversation `id` when it is `person`'s.
     pub(crate) fn owned(&mut self, id: &str, person: &str) -> Option<&mut Conversation> {
         self.conversations
@@ -254,7 +340,10 @@ mod tests {
                     at: f64::from(at),
                     data: None,
                 },
-                3,
+                Bounds {
+                    entries: 3,
+                    bytes: usize::MAX,
+                },
             );
         }
         let texts: Vec<_> = conversation
@@ -264,5 +353,60 @@ mod tests {
             .collect();
         assert_eq!(texts, ["2", "3", "4"]);
         assert!(!format!("{conversation:?}").contains("secret"));
+    }
+
+    fn view(at: f64, size: usize) -> Entry {
+        Entry {
+            role: Role::View,
+            text: String::new(),
+            at,
+            data: Some(serde_json::json!({"id": format!("view-{at}"), "view": "x".repeat(size)})),
+        }
+    }
+
+    #[test]
+    fn bytes_are_bounded_per_conversation_and_per_person_views_first() {
+        let unbounded = Bounds {
+            entries: usize::MAX,
+            bytes: usize::MAX,
+        };
+        let mut conversation = Conversation::new("c".into(), "p".into(), "t".into(), 1.0);
+        for at in 0..4 {
+            conversation.push(
+                view(f64::from(at), 1_000),
+                Bounds {
+                    entries: usize::MAX,
+                    bytes: 2_500,
+                },
+            );
+        }
+        assert_eq!(conversation.entries.len(), 2, "the oldest views went");
+        assert!(conversation.bytes <= 2_500);
+
+        let mut store = Store::default();
+        for (id, first) in [("a", 0.0), ("b", 10.0)] {
+            let mut conversation = Conversation::new(id.into(), "p".into(), "t".into(), first);
+            conversation.push(view(first, 1_000), unbounded);
+            conversation.push(
+                Entry {
+                    role: Role::Person,
+                    text: "hello".into(),
+                    at: first + 1.0,
+                    data: None,
+                },
+                unbounded,
+            );
+            store.conversations.insert(id.into(), conversation);
+        }
+        store.trim_person("p", 1_500);
+        let a = &store.conversations["a"];
+        assert!(
+            a.entries[0].data.is_none(),
+            "the oldest view of all went first"
+        );
+        assert!(a.entries[0].text.contains("removed"));
+        assert!(store.conversations["b"].entries[0].data.is_some());
+        let total: usize = store.conversations.values().map(|c| c.bytes).sum();
+        assert!(total <= 1_500, "{total}");
     }
 }

@@ -477,7 +477,10 @@ async fn which_stations_are_busy_is_answered_through_the_board_tool() {
             .iter()
             .any(|item| item.contains("Which Stations are busy?"))
     );
-    assert_ne!(second.mcp_token, job.mcp_token);
+    assert_eq!(
+        second.mcp_token, job.mcp_token,
+        "the harness on the same Station keeps its token"
+    );
 
     // Coming back to the conversation shows what was said.
     let url = format!(
@@ -1108,4 +1111,194 @@ async fn views_are_shown_only_when_they_fit_the_schema_and_forms_become_proposal
     assert_eq!(proposal["status"], "pending");
     assert_eq!(proposal["request"]["path"], "/v1/user/roster/agents/008");
     assert_eq!(proposal["request"]["body"], json!({"priority": 3}));
+}
+
+#[tokio::test]
+async fn the_harness_token_outlives_many_messages_to_its_station() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, first) = accepted(&served, &served.operator, "message 1").await;
+    finish(&served, &mut app, &first).await;
+    for message in 2..=9 {
+        say(&mut app, &format!("message {message}"), None).await;
+        let job = take(&served, "hq").await;
+        assert_eq!(job.mcp_token, first.mcp_token, "message {message}");
+        report(
+            &served,
+            "hq",
+            &job,
+            Some(&job.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+        )
+        .await;
+        finish(&served, &mut app, &job).await;
+    }
+    // The harness started with the first message still reaches its tools.
+    let board = call_tool(&served, &first.mcp_token, "board", json!({})).await;
+    assert_eq!(board["isError"], false, "{board}");
+}
+
+#[tokio::test]
+async fn a_token_is_withdrawn_when_its_conversation_moves_to_another_station() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, on_hq) = accepted(&served, &served.operator, "first").await;
+    finish(&served, &mut app, &on_hq).await;
+    say(&mut app, "second", None).await;
+    let refused_here = take(&served, "hq").await;
+    report(
+        &served,
+        "hq",
+        &refused_here,
+        Some(&refused_here.job_id),
+        vec![AssistantEvent::new(
+            EVENT_REJECTED,
+            Some("as many as it may".to_owned()),
+        )],
+    )
+    .await;
+    let on_worker = take(&served, "worker").await;
+    assert_ne!(on_worker.mcp_token, on_hq.mcp_token);
+    assert_eq!(
+        mcp(&served, &on_hq.mcp_token, "tools/list", json!({}))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "the harness left on hq cannot call tools any more"
+    );
+    assert_eq!(
+        mcp(&served, &on_worker.mcp_token, "tools/list", json!({}))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    // A late accept from hq is refused, which tells hq to close what it started.
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &refused_here,
+            Some(&refused_here.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::CONFLICT
+    );
+}
+
+#[tokio::test]
+async fn one_person_holds_at_most_two_live_conversations() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut first, first_job) = accepted(&served, &served.operator, "one").await;
+    finish(&served, &mut first, &first_job).await;
+    let (mut second, second_job) = accepted(&served, &served.operator, "two").await;
+    finish(&served, &mut second, &second_job).await;
+
+    // A third conversation closes the least recently used idle harness first.
+    let (mut third, _) = open(&served, &served.operator).await;
+    say(&mut third, "three", None).await;
+    let close = take(&served, "hq").await;
+    assert!(close.close, "{close:?}");
+    assert_eq!(close.conversation_id, first_job.conversation_id);
+    assert_eq!(
+        mcp(&served, &first_job.mcp_token, "tools/list", json!({}))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "a closed conversation's token is withdrawn"
+    );
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &close,
+            Some(&close.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    let third_job = take(&served, "hq").await;
+    assert_eq!(third_job.message, "three");
+    report(
+        &served,
+        "hq",
+        &third_job,
+        Some(&third_job.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+
+    // With both others answering, a fourth is refused rather than closing a busy one.
+    say(&mut second, "two again", None).await;
+    take(&served, "hq").await;
+    let (mut fourth, _) = open(&served, &served.operator).await;
+    say(&mut fourth, "four", None).await;
+    let frames = receive_until(&mut fourth, |frame| frame["type"] == "error").await;
+    assert_eq!(frames.last().unwrap()["code"], "busy_elsewhere");
+}
+
+#[tokio::test]
+async fn an_accepted_answer_that_never_comes_is_given_up() {
+    let served =
+        served(AssistantConfig::default().with_answer_deadline(Duration::from_secs(1))).await;
+    let (mut app, _) = accepted(&served, &served.operator, "hello?").await;
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+    assert!(
+        frames.iter().any(|frame| frame["type"] == "entry"
+            && frame["entry"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("given up"))),
+        "{frames:?}"
+    );
+    say(&mut app, "again", None).await;
+    take(&served, "hq").await;
+}
+
+#[tokio::test]
+async fn views_are_held_to_a_budget_and_ready_sends_only_the_newest() {
+    let served = served(AssistantConfig::default().with_memory_limits(64 * 1024, 96 * 1024)).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Show me lots.").await;
+    let rows: Vec<Value> = (0..200)
+        .map(|row| json!([format!("{row:0>400}"), row]))
+        .collect();
+    let big = json!({"version": 1, "blocks": [{"kind": "table",
+        "columns": ["padding", "n"], "rows": rows}]});
+    let shown = call_tool(&served, &job.mcp_token, "show", json!({"view": big})).await;
+    assert_eq!(shown["isError"], true, "a view past 64 KiB is refused");
+    let rows: Vec<Value> = (0..40)
+        .map(|row| json!([format!("{row:0>200}"), row]))
+        .collect();
+    let view = json!({"version": 1, "blocks": [{"kind": "table",
+        "columns": ["padding", "n"], "rows": rows}]});
+    for _ in 0..12 {
+        let shown = call_tool(&served, &job.mcp_token, "show", json!({"view": view})).await;
+        assert_eq!(shown["isError"], false);
+    }
+    finish(&served, &mut app, &job).await;
+    let url = format!(
+        "{}/v1/user/moneypenny",
+        served.base.replacen("http", "ws", 1)
+    );
+    let (mut again, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    again
+        .send(WsMessage::Text(
+            json!({"type": "hello", "token": served.operator, "conversation": job.conversation_id})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let ready = receive(&mut again).await;
+    let size = ready.to_string().len();
+    assert!(size <= 96 * 1024, "{size}");
+    let views = ready["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["role"] == "view" && entry.get("data").is_some())
+        .count();
+    assert!(views < 12, "older views gave way: {views}");
+    assert!(ready["earlier"].as_u64().unwrap() > 0 || views < 12);
 }
