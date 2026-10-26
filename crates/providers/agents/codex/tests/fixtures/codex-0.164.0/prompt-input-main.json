@@ -1,0 +1,151 @@
+[
+  {
+    "type": "additional_tools",
+    "role": "developer",
+    "tools": [
+      {
+        "type": "namespace",
+        "name": "functions",
+        "description": "",
+        "tools": [
+          {
+            "type": "custom",
+            "name": "exec",
+            "description": "Run JavaScript code to orchestrate/compose tool calls\n- Evaluates the provided JavaScript code in a fresh V8 isolate as "
+          },
+          {
+            "type": "function",
+            "name": "wait",
+            "description": "Waits on a yielded `exec` cell and returns new output or completion.\n- Use `wait` only after `exec` returns `Script runn"
+          },
+          {
+            "type": "function",
+            "name": "request_user_input",
+            "description": "Request user input for one to three short questions and wait for the response. This tool is only available in Plan mode."
+          },
+          {
+            "type": "function",
+            "name": "request_user_input_async",
+            "description": "Ask the user one or more questions during ongoing work. Use this tool only to request missing information, preferences, "
+          }
+        ]
+      },
+      {
+        "type": "namespace",
+        "name": "clock",
+        "description": "Tools for reading and waiting on time.",
+        "tools": [
+          {
+            "type": "function",
+            "name": "sleep",
+            "description": "Pause execution for a specified duration. The sleep ends early when new input arrives for the active turn. Returns the e"
+          }
+        ]
+      },
+      {
+        "type": "namespace",
+        "name": "collaboration",
+        "description": "Tools for spawning and managing sub-agents.",
+        "tools": [
+          {
+            "type": "function",
+            "name": "followup_task",
+            "description": "Send a follow-up task to an existing non-root target agent and trigger a turn if it is idle. If the target is already ru"
+          },
+          {
+            "type": "function",
+            "name": "interrupt_agent",
+            "description": "Interrupt an agent's current turn, if any, and return its previous status. The agent remains available for messages and "
+          },
+          {
+            "type": "function",
+            "name": "list_agents",
+            "description": "List live agents in the current root thread tree. Optionally filter by task-path prefix."
+          },
+          {
+            "type": "function",
+            "name": "send_message",
+            "description": "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn."
+          },
+          {
+            "type": "function",
+            "name": "spawn_agent",
+            "description": "\n        Available model overrides (optional; inherited parent model is preferred):\n- `gpt-6.1-sol`: Latest workhorse mo"
+          },
+          {
+            "type": "function",
+            "name": "wait_agent",
+            "description": "Wait for a mailbox update from any live agent, including queued messages and final-status notifications. The wait also e"
+          }
+        ]
+      },
+      {
+        "type": "namespace",
+        "name": "mcp__cua_repl",
+        "description": "UI automation through cua_repl using the initialized cua API.",
+        "tools": [
+          {
+            "type": "function",
+            "name": "js",
+            "description": "Control native apps or browsers on the user’s computer by reading or operating UI. Prefer purpose-built skills, connecto"
+          },
+          {
+            "type": "function",
+            "name": "js_reset",
+            "description": "Reset the persistent cua_repl JavaScript session. All JavaScript bindings are discarded. The next cua_repl.js call initi"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ]
+  }
+]

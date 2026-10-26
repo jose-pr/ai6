@@ -5,6 +5,10 @@
 
 ai6::guatiao::providers!(CodexHandler);
 
+mod tools;
+
+pub use tools::{KEPT_FEATURES, TOOL_CHECK_ENV};
+
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -75,7 +79,7 @@ impl AgentHandler for CodexHandler {
         request: AgentResume,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
-        let process = spawn(
+        let (process, weakening) = spawn(
             terminal,
             &self.config.executable,
             &request.working_directory,
@@ -84,11 +88,14 @@ impl AgentHandler for CodexHandler {
                 project_settings: request.project_settings,
                 answer_only: request.answer_only || request.assistant.is_some(),
                 assistant: request.assistant.as_ref(),
+                model: request.model.as_deref(),
             },
         )?;
         let gate = station_gate(&request.environment)
             .filter(|_| !(request.answer_only || request.assistant.is_some()));
-        let mut session = CodexSession::new(process, request.effort).with_gate(gate);
+        let mut session = CodexSession::new(process, request.effort)
+            .with_gate(gate)
+            .with_weakening(weakening);
         session.request(
             "initialize",
             json!({
@@ -148,7 +155,7 @@ impl CodexHandler {
         terminal: Object<dyn AgentTerminal>,
         gate: Option<Gate>,
     ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
-        let process = spawn(
+        let (process, weakening) = spawn(
             terminal,
             &self.config.executable,
             &request.working_directory,
@@ -157,10 +164,13 @@ impl CodexHandler {
                 project_settings: request.project_settings,
                 answer_only: request.answer_only || request.assistant.is_some(),
                 assistant: request.assistant.as_ref(),
+                model: request.model.as_deref(),
             },
         )?;
         let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
-        let mut session = CodexSession::new(process, request.effort).with_gate(gate);
+        let mut session = CodexSession::new(process, request.effort)
+            .with_gate(gate)
+            .with_weakening(weakening);
         session.request(
             "initialize",
             json!({
@@ -257,6 +267,26 @@ impl CodexSession {
 
     fn with_gate(mut self, gate: Option<Gate>) -> Self {
         self.gate = gate;
+        self
+    }
+
+    /// Reports what a `warn` tool check found, on the Station's log and as the Session's
+    /// first event (kind `weakened`).
+    fn with_weakening(self, weakening: Option<String>) -> Self {
+        if let Some(text) = weakening {
+            eprintln!("ai6: weakening: {text}");
+            if let Ok(mut events) = self.events.lock() {
+                events.push_back(AgentEvent {
+                    kind: "weakened".to_owned(),
+                    text: Some(text),
+                    data: None,
+                    limit: None,
+                    usage: None,
+                    tools: Vec::new(),
+                    quota: Vec::new(),
+                });
+            }
+        }
         self
     }
 
@@ -672,15 +702,19 @@ struct Mode<'a> {
     /// Set for answer-only and assistant threads alike: both run read-only and never ask.
     answer_only: bool,
     assistant: Option<&'a AssistantMode>,
+    /// The model the thread asks for; what Codex offers it depends on the model.
+    model: Option<&'a str>,
 }
 
+/// Starts the app server, and returns what a `warn` tool check found. A restricted (answer-only
+/// or assistant) app server starts only after its tool check ([`tools`]).
 fn spawn(
     terminal: Object<dyn AgentTerminal>,
     executable: &str,
     cwd: &str,
     environment: &std::collections::BTreeMap<String, String>,
     mode: Mode<'_>,
-) -> Result<Object<dyn TerminalSession>, ProviderError> {
+) -> Result<(Object<dyn TerminalSession>, Option<String>), ProviderError> {
     let mut argv = if let Some(assistant) = mode.assistant {
         assistant_argv(executable, environment, assistant)?
     } else if mode.answer_only {
@@ -691,6 +725,31 @@ fn spawn(
     if !mode.project_settings || mode.answer_only {
         argv.extend(untrusted_project(cwd));
     }
+    let mut weakening = None;
+    if mode.answer_only {
+        let servers = mode
+            .assistant
+            .map(|assistant| {
+                assistant
+                    .mcp_servers
+                    .iter()
+                    .map(|server| server.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let checked = tools::Probe {
+            terminal: &terminal,
+            executable,
+            overrides: &argv[2..],
+            cwd,
+            environment,
+            model: mode.model,
+            servers: &servers,
+        }
+        .check()?;
+        argv.extend(checked.overrides);
+        weakening = checked.weakening;
+    }
     let spec = Spec {
         argv,
         cwd: Some(cwd.to_string()),
@@ -699,7 +758,7 @@ fn spawn(
         cols: STREAM_COLS,
     };
     let value = spec.to_value().map_err(internal)?;
-    terminal.spawn(&value)
+    Ok((terminal.spawn(&value)?, weakening))
 }
 
 fn app_server_argv(
@@ -726,18 +785,22 @@ fn app_server_argv(
 }
 
 /// The settings that leave an answer-only or assistant thread no built-in tool that reads,
-/// runs or reaches anything: no command execution (`features.shell_tool`, and its resumable
-/// form `features.unified_exec`), no local image attachment (`tools.view_image`), no web
-/// search, no sub-agents and no app connectors. Names and meanings from the Codex
-/// configuration reference (learn.chatgpt.com/docs/config-file/config-reference, read
-/// 2026-10-26). The read-only sandbox and approval policy `never` stay as a second line.
-const NO_BUILT_IN_TOOLS: [&str; 6] = [
+/// runs or reaches anything: no command execution (`features.shell_tool`; Codex ignores a
+/// user's `features.unified_exec = false`), no local image attachment (`tools.view_image`), no
+/// web search, no sub-agents (`features.multi_agent`, `agents.enabled`), no app connectors, and
+/// a skills catalog too small to list one (`skills.max_context_tokens`, which takes no 0).
+/// Names and meanings from the Codex configuration reference
+/// (learn.chatgpt.com/docs/config-file/config-reference). Every other feature Codex enables is
+/// switched off by the tool check ([`tools`]), and the read-only sandbox and approval policy
+/// `never` stay as a further line.
+const NO_BUILT_IN_TOOLS: [&str; 7] = [
     "features.shell_tool=false",
-    "features.unified_exec=false",
     "tools.view_image=false",
     "web_search=\"disabled\"",
     "features.multi_agent=false",
+    "agents.enabled=false",
     "features.apps=false",
+    "skills.max_context_tokens=1",
 ];
 
 /// `-c` overrides for [`NO_BUILT_IN_TOOLS`].
@@ -903,6 +966,7 @@ mod tests {
             let mut child = Command::new(std::env::current_exe().map_err(internal)?)
                 .args(["--exact", "tests::fake_codex_child", "--nocapture"])
                 .env("AI6_FAKE_CODEX_CHILD", "1")
+                .env("AI6_FAKE_CODEX_ARGV", spec.argv[1..].join("\u{1f}"))
                 .envs(spec.env.unwrap_or_default())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -922,7 +986,12 @@ mod tests {
                 )
             })?;
             let (sender, receiver) = mpsc::channel();
-            thread::spawn(move || forward_json_lines(stdout, sender));
+            // The tool check's commands get everything, libtest's lines included.
+            let json_only = spec
+                .argv
+                .get(1)
+                .is_some_and(|command| command == "app-server");
+            thread::spawn(move || forward_json_lines(stdout, sender, json_only));
 
             Ok(ProcessTerminalSession {
                 child: Mutex::new(child),
@@ -934,14 +1003,14 @@ mod tests {
         }
     }
 
-    fn forward_json_lines(mut stdout: impl Read, sender: mpsc::Sender<Vec<u8>>) {
+    fn forward_json_lines(mut stdout: impl Read, sender: mpsc::Sender<Vec<u8>>, json_only: bool) {
         let mut reader = BufReader::new(&mut stdout);
         let mut line = Vec::new();
         loop {
             line.clear();
             match reader.read_until(b'\n', &mut line) {
                 Ok(0) | Err(_) => return,
-                Ok(_) if serde_json::from_slice::<Value>(&line).is_ok() => {
+                Ok(_) if !json_only || serde_json::from_slice::<Value>(&line).is_ok() => {
                     if sender.send(line.clone()).is_err() {
                         return;
                     }
@@ -1016,9 +1085,48 @@ mod tests {
         if std::env::var_os("AI6_FAKE_CODEX_CHILD").is_none() {
             return;
         }
-        let thread_id = std::env::var("CODEX_FIXTURE_THREAD_ID").unwrap();
+        let argv = std::env::var("AI6_FAKE_CODEX_ARGV").unwrap_or_default();
+        let argv = argv.split('\u{1f}').collect::<Vec<_>>();
         let stdout = std::io::stdout();
         let mut stdout = stdout.lock();
+        // The tool check's commands, as Codex 0.164.0 answers them: libtest's own lines
+        // around the output stand in for a terminal's noise.
+        match argv.first().copied() {
+            Some("--version") => {
+                writeln!(stdout, "codex-cli 0.164.0").unwrap();
+                return;
+            }
+            Some("features") => {
+                for line in [
+                    "code_mode_host                           stable             true",
+                    "memories                                 stable             false",
+                    "secret_auth_storage                      stable             true",
+                    "tool_suggest                             under development  true",
+                ] {
+                    writeln!(stdout, "{line}").unwrap();
+                }
+                return;
+            }
+            Some("debug") => {
+                let output = std::env::var("CODEX_FIXTURE_PROMPT_INPUT").unwrap_or_else(|_| {
+                    let servers = argv
+                        .iter()
+                        .any(|argument| argument.starts_with("mcp_servers={moneypenny="));
+                    if servers {
+                        "[{\"type\":\"additional_tools\",\"tools\":[{\"type\":\"namespace\",\
+                         \"name\":\"mcp__moneypenny\",\"tools\":[{\"type\":\"function\",\
+                         \"name\":\"board\"}]}]}]"
+                            .to_owned()
+                    } else {
+                        "[{\"type\":\"message\",\"role\":\"user\",\"content\":[]}]".to_owned()
+                    }
+                });
+                writeln!(stdout, "{output}").unwrap();
+                return;
+            }
+            _ => {}
+        }
+        let thread_id = std::env::var("CODEX_FIXTURE_THREAD_ID").unwrap();
         // A turn whose text is `run: COMMAND` asks the client to approve COMMAND, as the
         // app-server does before running a command, and reports the decision it receives.
         let mut asked = 900_u64;
@@ -1989,12 +2097,14 @@ mod tests {
             assert_eq!(policy["approvalPolicy"], "never");
             assert_eq!(policy["config"]["web_search"], "disabled");
         }
-        let specs = terminal.specs.lock().unwrap();
+        let all_specs = terminal.specs.lock().unwrap();
+        let specs = all_specs
+            .iter()
+            .filter(|spec| spec.argv[1] == "app-server")
+            .collect::<Vec<_>>();
         assert_eq!(specs.len(), 2);
-        let expected = [
+        let settings = [
             vec![
-                "codex-assistant-fixture".to_owned(),
-                "app-server".to_owned(),
                 "-c".to_owned(),
                 "mcp_servers={moneypenny={url=\"https://exports.example/v1/moneypenny/mcp\",\
                  bearer_token_env_var=\"AI6_MONEYPENNY_MCP_TOKEN\"}}"
@@ -2004,6 +2114,35 @@ mod tests {
             untrusted_project(&cwd).to_vec(),
         ]
         .concat();
+        // The fixture's feature list enables code_mode_host, secret_auth_storage and
+        // tool_suggest; the kept one stays on.
+        let switched_off = [
+            "-c",
+            "features.code_mode_host=false",
+            "-c",
+            "features.tool_suggest=false",
+        ]
+        .map(str::to_owned);
+        let expected = [
+            vec![
+                "codex-assistant-fixture".to_owned(),
+                "app-server".to_owned(),
+            ],
+            settings.clone(),
+            switched_off.to_vec(),
+        ]
+        .concat();
+        let checked = all_specs
+            .iter()
+            .find(|spec| spec.argv.len() > 2 && spec.argv[1..3] == ["debug", "prompt-input"])
+            .expect("the tools were checked");
+        assert_eq!(
+            checked.argv[3..],
+            [settings, switched_off.to_vec()].concat(),
+            "with the app server's own settings"
+        );
+        assert_eq!(checked.env, specs[0].env, "and environment");
+        assert_eq!(checked.cwd, specs[0].cwd, "and working directory");
         assert_no_built_in_tools(&specs[0].argv);
         assert_no_built_in_tools(&specs[1].argv);
         assert_eq!(
@@ -2019,11 +2158,169 @@ mod tests {
             servers["moneypenny"]["bearer_token_env_var"].as_str(),
             Some("AI6_MONEYPENNY_MCP_TOKEN")
         );
-        assert!(specs.iter().all(|spec| {
+        assert!(all_specs.iter().all(|spec| {
             spec.argv
                 .iter()
                 .all(|argument| !argument.contains("conversation-token"))
         }));
+    }
+
+    fn answer_only_start(environment: BTreeMap<String, String>) -> AgentStart {
+        let mut environment = environment;
+        environment.insert(
+            "CODEX_FIXTURE_THREAD_ID".to_owned(),
+            "codex-review-thread".to_owned(),
+        );
+        AgentStart {
+            mission_id: "review--brief".parse().unwrap(),
+            agent_id: "m".to_owned(),
+            prompt: "Review this.".to_owned(),
+            initial_context: Vec::new(),
+            working_directory: std::env::current_dir()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            clearance: "desk".to_owned(),
+            environment,
+            model: Some("gpt-6.1-sol".to_owned()),
+            effort: None,
+            max_cost_micro_usd: None,
+            project_settings: false,
+            project_mcp: false,
+            answer_only: true,
+            assistant: None,
+        }
+    }
+
+    /// Codex 0.164.0's own answer with the settings this handler passed before the tool check.
+    const OFFERS_EXEC: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/prompt-input-main.json");
+
+    #[test]
+    fn an_answer_only_thread_offered_extra_tools_is_not_started() {
+        let terminal = ProcessTerminal::new();
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-strict-fixture".to_owned(),
+        })
+        .unwrap();
+        let environment = BTreeMap::from([(
+            "CODEX_FIXTURE_PROMPT_INPUT".to_owned(),
+            OFFERS_EXEC.replace('\n', ""),
+        )]);
+        let refused = match handler.start(
+            answer_only_start(environment),
+            terminal.clone().into_object(),
+        ) {
+            Ok(_) => panic!("a thread offered functions.exec started"),
+            Err(error) => error.to_string(),
+        };
+        assert!(refused.contains("functions.exec"), "{refused}");
+        let specs = terminal.specs.lock().unwrap();
+        assert!(
+            specs.iter().all(|spec| spec.argv[1] != "app-server"),
+            "no app server was started"
+        );
+        let checked = specs
+            .iter()
+            .find(|spec| spec.argv.len() > 2 && spec.argv[1..3] == ["debug", "prompt-input"])
+            .unwrap();
+        assert!(
+            checked
+                .argv
+                .ends_with(&["-c".to_owned(), "model=\"gpt-6.1-sol\"".to_owned()]),
+            "what Codex offers depends on the model: {:?}",
+            checked.argv
+        );
+    }
+
+    #[test]
+    fn a_warned_thread_starts_and_reports_the_extra_tools_first() {
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-warn-fixture".to_owned(),
+        })
+        .unwrap();
+        let environment = BTreeMap::from([
+            (
+                "CODEX_FIXTURE_PROMPT_INPUT".to_owned(),
+                OFFERS_EXEC.replace('\n', ""),
+            ),
+            (TOOL_CHECK_ENV.to_owned(), "warn".to_owned()),
+        ]);
+        let session = handler
+            .start(
+                answer_only_start(environment),
+                ProcessTerminal::new().into_object(),
+            )
+            .unwrap();
+        let first = session.next_event(1_000).unwrap().unwrap();
+        assert_eq!(first.kind, "weakened");
+        let text = first.text.unwrap();
+        assert!(
+            text.contains("functions.exec") && text.contains("mcp__cua_repl.js"),
+            "{text}"
+        );
+        session.close().unwrap();
+    }
+
+    #[test]
+    fn an_answer_only_thread_with_no_tool_passes_and_keeps_its_plumbing() {
+        let terminal = ProcessTerminal::new();
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-pass-fixture".to_owned(),
+        })
+        .unwrap();
+        let session = handler
+            .start(
+                answer_only_start(BTreeMap::new()),
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        session.close().unwrap();
+        let specs = terminal.specs.lock().unwrap();
+        let server = specs
+            .iter()
+            .find(|spec| spec.argv[1] == "app-server")
+            .unwrap();
+        assert!(
+            server
+                .argv
+                .iter()
+                .any(|a| a == "features.code_mode_host=false")
+        );
+        assert!(
+            !server
+                .argv
+                .iter()
+                .any(|a| a.starts_with("features.secret_auth_storage"))
+        );
+    }
+
+    #[test]
+    fn a_passed_check_is_reused_for_the_same_codex_and_settings() {
+        let terminal = ProcessTerminal::new();
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-cache-fixture".to_owned(),
+        })
+        .unwrap();
+        for _ in 0..2 {
+            let session = handler
+                .start(
+                    answer_only_start(BTreeMap::new()),
+                    terminal.clone().into_object(),
+                )
+                .unwrap();
+            session.close().unwrap();
+        }
+        let specs = terminal.specs.lock().unwrap();
+        let count = |command: &str| {
+            specs
+                .iter()
+                .filter(|spec| spec.argv.get(1).map(String::as_str) == Some(command))
+                .count()
+        };
+        assert_eq!(count("--version"), 2, "the version is asked every time");
+        assert_eq!(count("debug"), 1, "the tools are checked once");
+        assert_eq!(count("app-server"), 2);
     }
 
     #[test]
@@ -2077,10 +2374,15 @@ mod tests {
         }
         let off = |table: &str, key: &str| settings[table][key].as_bool();
         assert_eq!(off("features", "shell_tool"), Some(false), "{argv:?}");
-        assert_eq!(off("features", "unified_exec"), Some(false), "{argv:?}");
         assert_eq!(off("tools", "view_image"), Some(false), "{argv:?}");
         assert_eq!(off("features", "multi_agent"), Some(false), "{argv:?}");
+        assert_eq!(off("agents", "enabled"), Some(false), "{argv:?}");
         assert_eq!(off("features", "apps"), Some(false), "{argv:?}");
+        assert_eq!(
+            settings["skills"]["max_context_tokens"].as_integer(),
+            Some(1),
+            "{argv:?}"
+        );
         assert_eq!(
             settings["web_search"].as_str(),
             Some("disabled"),

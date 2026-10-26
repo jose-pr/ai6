@@ -1,0 +1,77 @@
+[
+  {
+    "type": "additional_tools",
+    "role": "developer",
+    "tools": [
+      {
+        "type": "namespace",
+        "name": "functions",
+        "description": "",
+        "tools": [
+          {
+            "type": "custom",
+            "name": "exec",
+            "description": "Run JavaScript code to orchestrate/compose tool calls\n- Evaluates the provided JavaScript code in a fresh V8 isolate as "
+          },
+          {
+            "type": "function",
+            "name": "wait",
+            "description": "Waits on a yielded `exec` cell and returns new output or completion.\n- Use `wait` only after `exec` returns `Script runn"
+          },
+          {
+            "type": "function",
+            "name": "request_user_input",
+            "description": "Request user input for one to three short questions and wait for the response. This tool is only available in Plan mode."
+          },
+          {
+            "type": "function",
+            "name": "request_user_input_async",
+            "description": "Ask the user one or more questions during ongoing work. Use this tool only to request missing information, preferences, "
+          }
+        ]
+      },
+      {
+        "type": "namespace",
+        "name": "mcp__moneypenny",
+        "description": "Tools in the mcp__moneypenny namespace.",
+        "tools": [
+          {
+            "type": "function",
+            "name": "board",
+            "description": "Reads the board."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ]
+  }
+]

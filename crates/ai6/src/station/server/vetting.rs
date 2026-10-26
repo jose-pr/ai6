@@ -50,7 +50,7 @@ const REVIEW_DIR_PREFIX: &str = "ai6-review-";
 /// What a review's harness keeps of its Agent's environment: where to find its own files and
 /// how to reach and authenticate to its model. A review is issued no loadout secret and no
 /// pool account.
-const REVIEW_ENVIRONMENT: [&str; 21] = [
+const REVIEW_ENVIRONMENT: [&str; 22] = [
     "PATH",
     "HOME",
     "USERPROFILE",
@@ -68,6 +68,8 @@ const REVIEW_ENVIRONMENT: [&str; 21] = [
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "CODEX_HOME",
+    // The Codex handler's tool check choice; it reaches no model.
+    "AI6_CODEX_TOOL_CHECK",
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "NO_PROXY",
