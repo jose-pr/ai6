@@ -99,12 +99,12 @@ see it, and the credential it needs is leased only against an approval.
 | **Sleepers** | real tradecraft | Standing orders: a schedule wakes an Agent with a set brief, once each authorized by M (`operation.<id>.sleepers`) |
 | **CX report** | real (SIS reporting) | The outcome report a Source receives when its Mission ends: an issue comment, a Jira transition |
 | **Chief of Staff** | novel, film (Bill Tanner) | The `chief-of-staff` role: reviews untrusted briefs before M places them, and can only hold them; the deterministic vetting before it is M's (`operation.<id>.vetting`) |
+| **Head of Station** | novel (*The Man with the Golden Gun*: "Heads of Station"), real (SIS) | The `head-of-station` role: a round of each Station on a schedule, with the Station's logbook, its own tools and fixed unattended limits ([Stations](stations.md#head-of-station)) |
 
 ## Planned posts
 
 | Name | Canon | Would own |
 | --- | --- | --- |
-| **Head of Station** | novel (*The Man with the Golden Gun*: "Heads of Station"), real (SIS) | A long-lived agent per Station: local logistics, Theater setup, safe houses |
 | **Bona fides** | real (proof something is genuine) | Provenance and signatures for briefs, providers and hooks |
 | **Liaison** | real | A2A federation with agent systems outside AI6 |
 

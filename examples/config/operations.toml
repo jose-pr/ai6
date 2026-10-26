@@ -1,3 +1,16 @@
+# Housekeeping: a Head of Station round on every Station each hour (see docs/stations.md).
+# The path must exist on every Station; authorize with `ai6 sleeper authorize housekeeping rounds`.
+# [operation.housekeeping]
+# path = "/var/lib/ai6/housekeeping"
+# clearance = "field"
+#
+# [operation.housekeeping.sleepers.rounds]
+# schedule = "0 * * * *"
+# title = "Station round"
+# prompt = "Look over this Station with station_report, act within its limits and file_report what you found."
+# role = "head-of-station"
+# each_station = true
+
 [operation.G]
 name = "AI6"
 path = "."

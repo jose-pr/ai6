@@ -157,6 +157,47 @@ view of Station health, roles, capacity, the Operations each Station serves, the
 each Station reaches and the current Headquarters Station; host and process details are
 omitted.
 
+## Head of Station
+
+The **Head of Station** keeps each Station fit: its free space, its safe houses, its
+Theaters. It is an Agent role, `head-of-station`, not a process of its own: each **round** is
+an ordinary Mission that an `each_station` [Sleeper](missions.md#sleepers) queues for every
+Station, narrowed to that Station, under an Operation set aside for housekeeping.
+
+```toml
+# operations.toml
+[operation.housekeeping]
+path = "/var/lib/ai6/housekeeping"   # must exist on every Station that keeps rounds
+clearance = "field"
+
+[operation.housekeeping.sleepers.rounds]
+schedule = "0 * * * *"               # hourly, in UTC
+title = "Station round"
+prompt = "Look over this Station with station_report, act within its limits and file_report what you found."
+role = "head-of-station"
+each_station = true
+
+# agents.toml
+[role.head-of-station]
+purpose = "Keep one Station fit: disk, safe houses and Theaters."
+policy = "Act only through the Station's tools and within their limits; report the rest."
+```
+
+Qualify an Agent for the role (`roles = [..., "head-of-station"]`) and authorize the rounds:
+`ai6 sleeper authorize housekeeping rounds`.
+
+- **A round per Station per window.** Headquarters queues one brief for each Station whose
+  last check-in placement accepts for the Operation, keyed by the window and the Station, so
+  a failover never doubles a round. A busy Station's round waits for room.
+- **Rounds, not one long Session.** A single endless Session would hit context limits, park
+  on provider limits and spend tokens idling; each round is a Mission of its own. What one
+  round saw reaches the next through the Station's **logbook**: the newest 20 reports, kept
+  in the Registry (`logbook/<station>.json`, or the `ai6_logbooks` table) and handed to each
+  round as context, fenced as data.
+- **Which Mission is a round.** Only a Mission of role `head-of-station` whose brief, as this
+  Station leased it, names this Station alone gets the logbook. Any other Mission of the role
+  is an ordinary one.
+
 ## Station identity
 
 With the `station-tls` feature, each Station has a persistent certificate:
