@@ -3657,6 +3657,7 @@ pub struct ai6::directorates::section_00::agent::AgentMessage
 pub ai6::directorates::section_00::agent::AgentMessage::text: alloc::string::String
 pub struct ai6::directorates::section_00::agent::AgentResume
 pub ai6::directorates::section_00::agent::AgentResume::answer_only: bool
+pub ai6::directorates::section_00::agent::AgentResume::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
 pub ai6::directorates::section_00::agent::AgentResume::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::max_cost_micro_usd: core::option::Option<u64>
@@ -3670,6 +3671,7 @@ pub ai6::directorates::section_00::agent::AgentResume::working_directory: alloc:
 pub struct ai6::directorates::section_00::agent::AgentStart
 pub ai6::directorates::section_00::agent::AgentStart::agent_id: alloc::string::String
 pub ai6::directorates::section_00::agent::AgentStart::answer_only: bool
+pub ai6::directorates::section_00::agent::AgentStart::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
 pub ai6::directorates::section_00::agent::AgentStart::clearance: alloc::string::String
 pub ai6::directorates::section_00::agent::AgentStart::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentStart::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -3681,6 +3683,24 @@ pub ai6::directorates::section_00::agent::AgentStart::project_mcp: bool
 pub ai6::directorates::section_00::agent::AgentStart::project_settings: bool
 pub ai6::directorates::section_00::agent::AgentStart::prompt: alloc::string::String
 pub ai6::directorates::section_00::agent::AgentStart::working_directory: alloc::string::String
+pub struct ai6::directorates::section_00::agent::AssistantMode
+pub ai6::directorates::section_00::agent::AssistantMode::interpreters: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::agent::AssistantMode::mcp_servers: alloc::vec::Vec<ai6::directorates::section_00::agent::McpServerRef>
+pub ai6::directorates::section_00::agent::AssistantMode::network: ai6::directorates::section_00::agent::AssistantNetwork
+pub ai6::directorates::section_00::agent::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::section_00::agent::AssistantMode
+pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
+pub fn ai6::directorates::section_00::agent::AssistantMode::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub struct ai6::directorates::section_00::agent::AssistantNetwork
+pub ai6::directorates::section_00::agent::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::agent::AssistantNetwork::policy: alloc::string::String
+impl ai6::directorates::section_00::agent::AssistantNetwork
+pub fn ai6::directorates::section_00::agent::AssistantNetwork::reaches_nothing(&self) -> bool
+impl core::default::Default for ai6::directorates::section_00::agent::AssistantNetwork
+pub fn ai6::directorates::section_00::agent::AssistantNetwork::default() -> Self
+pub struct ai6::directorates::section_00::agent::McpServerRef
+pub ai6::directorates::section_00::agent::McpServerRef::env_prefix: alloc::string::String
+pub ai6::directorates::section_00::agent::McpServerRef::name: alloc::string::String
 pub struct ai6::directorates::section_00::agent::QuotaReport
 pub ai6::directorates::section_00::agent::QuotaReport::resets_at: core::option::Option<i64>
 pub ai6::directorates::section_00::agent::QuotaReport::status: core::option::Option<alloc::string::String>
@@ -3720,6 +3740,51 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+pub mod ai6::directorates::section_00::assistant
+pub struct ai6::directorates::section_00::assistant::AssistantEvent
+pub ai6::directorates::section_00::assistant::AssistantEvent::kind: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantEvent::text: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantEvent::tools: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::section_00::assistant::AssistantEvent
+pub fn ai6::directorates::section_00::assistant::AssistantEvent::new(&str, core::option::Option<alloc::string::String>) -> Self
+pub struct ai6::directorates::section_00::assistant::AssistantJob
+pub ai6::directorates::section_00::assistant::AssistantJob::agent_id: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::close: bool
+pub ai6::directorates::section_00::assistant::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantJob::conversation_id: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::job_id: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::mcp_token: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::message: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantJob::token_expires_at: f64
+impl ai6::directorates::section_00::assistant::AssistantJob
+pub fn ai6::directorates::section_00::assistant::AssistantJob::validate(&self) -> core::result::Result<(), alloc::string::String>
+impl core::fmt::Debug for ai6::directorates::section_00::assistant::AssistantJob
+pub fn ai6::directorates::section_00::assistant::AssistantJob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::section_00::assistant::AssistantReport
+pub ai6::directorates::section_00::assistant::AssistantReport::conversation_id: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantReport::events: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantEvent>
+pub ai6::directorates::section_00::assistant::AssistantReport::job_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantReport::session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantReport::station_id: alloc::string::String
+pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_ENV_PREFIX: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_PATH: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_SERVER: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_TOKEN_ENV: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_URL_ENV: &str
+pub const ai6::directorates::section_00::assistant::EVENT_ACCEPTED: &str
+pub const ai6::directorates::section_00::assistant::EVENT_CLOSED: &str
+pub const ai6::directorates::section_00::assistant::EVENT_COMPLETED: &str
+pub const ai6::directorates::section_00::assistant::EVENT_FAILED: &str
+pub const ai6::directorates::section_00::assistant::EVENT_LIMIT: &str
+pub const ai6::directorates::section_00::assistant::EVENT_REJECTED: &str
+pub const ai6::directorates::section_00::assistant::EVENT_TEXT: &str
+pub const ai6::directorates::section_00::assistant::EVENT_TOOL: &str
+pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_CONTEXT_BYTES: usize
+pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENTS: usize
+pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENT_BYTES: usize
+pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_MESSAGE_BYTES: usize
+pub fn ai6::directorates::section_00::assistant::valid_identity(&str) -> bool
 pub mod ai6::directorates::section_00::gate
 pub enum ai6::directorates::section_00::gate::GateVerdict
 pub ai6::directorates::section_00::gate::GateVerdict::Allow
@@ -4516,6 +4581,7 @@ pub fn ai6::directorates::registry::agent_records::AgentRecord::in_operation(&se
 pub fn ai6::directorates::registry::agent_records::AgentRecord::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::AgentResume
 pub ai6::AgentResume::answer_only: bool
+pub ai6::AgentResume::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
 pub ai6::AgentResume::effort: core::option::Option<alloc::string::String>
 pub ai6::AgentResume::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::AgentResume::max_cost_micro_usd: core::option::Option<u64>
@@ -4536,6 +4602,7 @@ pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result:
 pub struct ai6::AgentStart
 pub ai6::AgentStart::agent_id: alloc::string::String
 pub ai6::AgentStart::answer_only: bool
+pub ai6::AgentStart::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
 pub ai6::AgentStart::clearance: alloc::string::String
 pub ai6::AgentStart::effort: core::option::Option<alloc::string::String>
 pub ai6::AgentStart::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -4590,6 +4657,47 @@ impl ai6::directorates::registry::approvals::ApprovalRequest
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::expiring(self, f64, core::time::Duration) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::proposing_role(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, ai6::directorates::m::identity::SessionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::approvals::ActionScope, impl core::convert::Into<alloc::string::String>, &str) -> core::io::error::Result<Self>
+pub struct ai6::AssistantEvent
+pub ai6::AssistantEvent::kind: alloc::string::String
+pub ai6::AssistantEvent::text: core::option::Option<alloc::string::String>
+pub ai6::AssistantEvent::tools: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::section_00::assistant::AssistantEvent
+pub fn ai6::directorates::section_00::assistant::AssistantEvent::new(&str, core::option::Option<alloc::string::String>) -> Self
+pub struct ai6::AssistantJob
+pub ai6::AssistantJob::agent_id: alloc::string::String
+pub ai6::AssistantJob::close: bool
+pub ai6::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
+pub ai6::AssistantJob::conversation_id: alloc::string::String
+pub ai6::AssistantJob::job_id: alloc::string::String
+pub ai6::AssistantJob::mcp_token: alloc::string::String
+pub ai6::AssistantJob::message: alloc::string::String
+pub ai6::AssistantJob::session_id: core::option::Option<alloc::string::String>
+pub ai6::AssistantJob::token_expires_at: f64
+impl ai6::directorates::section_00::assistant::AssistantJob
+pub fn ai6::directorates::section_00::assistant::AssistantJob::validate(&self) -> core::result::Result<(), alloc::string::String>
+impl core::fmt::Debug for ai6::directorates::section_00::assistant::AssistantJob
+pub fn ai6::directorates::section_00::assistant::AssistantJob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::AssistantMode
+pub ai6::AssistantMode::interpreters: alloc::vec::Vec<alloc::string::String>
+pub ai6::AssistantMode::mcp_servers: alloc::vec::Vec<ai6::directorates::section_00::agent::McpServerRef>
+pub ai6::AssistantMode::network: ai6::directorates::section_00::agent::AssistantNetwork
+pub ai6::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::section_00::agent::AssistantMode
+pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
+pub fn ai6::directorates::section_00::agent::AssistantMode::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub struct ai6::AssistantNetwork
+pub ai6::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
+pub ai6::AssistantNetwork::policy: alloc::string::String
+impl ai6::directorates::section_00::agent::AssistantNetwork
+pub fn ai6::directorates::section_00::agent::AssistantNetwork::reaches_nothing(&self) -> bool
+impl core::default::Default for ai6::directorates::section_00::agent::AssistantNetwork
+pub fn ai6::directorates::section_00::agent::AssistantNetwork::default() -> Self
+pub struct ai6::AssistantReport
+pub ai6::AssistantReport::conversation_id: alloc::string::String
+pub ai6::AssistantReport::events: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantEvent>
+pub ai6::AssistantReport::job_id: core::option::Option<alloc::string::String>
+pub ai6::AssistantReport::session_id: core::option::Option<alloc::string::String>
+pub ai6::AssistantReport::station_id: alloc::string::String
 pub struct ai6::AuditRecord
 pub ai6::AuditRecord::action: alloc::string::String
 pub ai6::AuditRecord::actor: alloc::string::String
@@ -5255,6 +5363,9 @@ impl ai6::directorates::q::McpServer
 pub fn ai6::directorates::q::McpServer::command(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::McpServer::deny(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::McpServer::name(&self) -> &str
+pub struct ai6::McpServerRef
+pub ai6::McpServerRef::env_prefix: alloc::string::String
+pub ai6::McpServerRef::name: alloc::string::String
 pub struct ai6::MemoryConfigSource
 impl ai6::directorates::m::config::MemoryConfigSource
 pub fn ai6::directorates::m::config::MemoryConfigSource::new(ai6::directorates::m::roster::Roster) -> Self
@@ -6386,6 +6497,11 @@ pub ai6::WriteSpec::create_dirs: bool
 pub ai6::WriteSpec::data: guatiao::value::convert::Bytes
 pub ai6::WriteSpec::path: alloc::string::String
 pub const ai6::ACTIONS: &[&str]
+pub const ai6::ASSISTANT_MCP_ENV_PREFIX: &str
+pub const ai6::ASSISTANT_MCP_PATH: &str
+pub const ai6::ASSISTANT_MCP_SERVER: &str
+pub const ai6::ASSISTANT_MCP_TOKEN_ENV: &str
+pub const ai6::ASSISTANT_MCP_URL_ENV: &str
 pub const ai6::BRIEF_EXPOSURE_KEY: &str
 pub const ai6::BRIEF_REGISTRY_DROP: &str
 pub const ai6::BRIEF_SOURCE: &str
@@ -6430,6 +6546,14 @@ pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
 pub const ai6::DEFAULT_TERMINAL: &str
 pub const ai6::DEFAULT_WARN_AT_PERMILLE: u16
 pub const ai6::DEFAULT_WINDOW_SECS: u64
+pub const ai6::EVENT_ACCEPTED: &str
+pub const ai6::EVENT_CLOSED: &str
+pub const ai6::EVENT_COMPLETED: &str
+pub const ai6::EVENT_FAILED: &str
+pub const ai6::EVENT_LIMIT: &str
+pub const ai6::EVENT_REJECTED: &str
+pub const ai6::EVENT_TEXT: &str
+pub const ai6::EVENT_TOOL: &str
 pub const ai6::EXPIRY_SIGNER: &str
 pub const ai6::GONE_DARK_AFTER: core::time::Duration
 pub const ai6::GREEN_INK_REASON: &str
@@ -6437,6 +6561,10 @@ pub const ai6::HEAD_OF_STATION_ROLE: &str
 pub const ai6::LIMIT_EVENT: &str
 pub const ai6::LOCAL_THEATER: &str
 pub const ai6::LOGBOOK_LENGTH: usize
+pub const ai6::MAX_ASSISTANT_CONTEXT_BYTES: usize
+pub const ai6::MAX_ASSISTANT_EVENTS: usize
+pub const ai6::MAX_ASSISTANT_EVENT_BYTES: usize
+pub const ai6::MAX_ASSISTANT_MESSAGE_BYTES: usize
 pub const ai6::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::MAX_CABLE_TTL: f64

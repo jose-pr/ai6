@@ -43,6 +43,16 @@ pub universal_exports::AgentView::operation: ai6::directorates::registry::agent_
 pub universal_exports::AgentView::posted: bool
 pub universal_exports::AgentView::promotion: core::option::Option<ai6::directorates::registry::approvals::ApprovalRequest>
 pub universal_exports::AgentView::retirement: core::option::Option<universal_exports::RetirementNotice>
+pub struct universal_exports::AssistantConfig
+impl universal_exports::AssistantConfig
+pub fn universal_exports::AssistantConfig::agent_id(&self) -> &str
+pub fn universal_exports::AssistantConfig::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, universal_exports::GatewayError>
+pub fn universal_exports::AssistantConfig::with_answer_timeout(self, core::time::Duration) -> Self
+pub fn universal_exports::AssistantConfig::with_conversation_limits(self, usize, usize, core::time::Duration) -> Self
+pub fn universal_exports::AssistantConfig::with_token_ttl(self, core::time::Duration) -> Self
+pub fn universal_exports::AssistantConfig::with_tool_calls_per_minute(self, u32) -> Self
+impl core::default::Default for universal_exports::AssistantConfig
+pub fn universal_exports::AssistantConfig::default() -> Self
 pub struct universal_exports::AttachGrant
 pub universal_exports::AttachGrant::mission_id: ai6_diptel::MissionId
 pub universal_exports::AttachGrant::mode: universal_exports::AttachMode
@@ -160,6 +170,7 @@ pub fn universal_exports::Gateway::router(self) -> axum::routing::Router
 pub async fn universal_exports::Gateway::serve_loopback<F>(self, u16, F) -> core::result::Result<(), core::io::error::Error> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn universal_exports::Gateway::submit_input(&self, &ai6_diptel::SessionId, &str, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, universal_exports::AccessProviders) -> Self
+pub fn universal_exports::Gateway::with_assistant(self, universal_exports::AssistantConfig) -> Self
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
 pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigSource>) -> Self
 impl core::fmt::Debug for universal_exports::Gateway
