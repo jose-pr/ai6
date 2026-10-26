@@ -207,12 +207,12 @@ pub universal_exports::LaunchManifest::agent_id: core::option::Option<alloc::str
 pub universal_exports::LaunchManifest::effort: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::environment_keys: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::LaunchManifest::handler_provider: alloc::string::String
-pub universal_exports::LaunchManifest::mode: core::option::Option<alloc::string::String>
+pub universal_exports::LaunchManifest::mode: alloc::string::String
 pub universal_exports::LaunchManifest::model: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::prompt: alloc::string::String
 pub universal_exports::LaunchManifest::provenance: core::option::Option<ai6::directorates::registry::bona_fides::Provenance>
 pub universal_exports::LaunchManifest::role_id: core::option::Option<alloc::string::String>
-pub universal_exports::LaunchManifest::station_id: core::option::Option<alloc::string::String>
+pub universal_exports::LaunchManifest::station_id: alloc::string::String
 pub universal_exports::LaunchManifest::terminal_provider: alloc::string::String
 pub universal_exports::LaunchManifest::theater_id: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::working_directory: alloc::string::String
