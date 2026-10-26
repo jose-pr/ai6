@@ -1087,22 +1087,34 @@ async fn scheduler_loop(state: DaemonState) {
     let desk = Arc::new(SourceDesk::new());
     let mut next_station_check_in = Instant::now();
     while !state.stopping.load(Ordering::Acquire) {
-        if Instant::now() >= next_station_check_in {
-            publish_station_check_in(&state);
+        // Registry calls block on files or a database: they run on the blocking pool, so a
+        // slow Registry never stalls the async workers that serve Sessions.
+        let check_in = Instant::now() >= next_station_check_in;
+        if check_in {
             next_station_check_in = Instant::now() + STATION_CHECK_IN_INTERVAL;
-            renew_session_leases(&state);
-            recovery::checkpoint_due(&state);
-            let sweeping = state.clone();
-            let _ = tokio::task::spawn_blocking(move || ephemeral::sweep(&sweeping)).await;
         }
-        medical::enforce_quarantines(&state);
+        let tick = state.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if check_in {
+                publish_station_check_in(&tick);
+                renew_session_leases(&tick);
+                recovery::checkpoint_due(&tick);
+                ephemeral::sweep(&tick);
+            }
+            medical::enforce_quarantines(&tick);
+        })
+        .await;
         #[cfg(feature = "cables-mcp")]
         green_ink::deliver_decisions(&state).await;
-        credentials::revoke_lapsed(&state);
+        let lapsing = state.clone();
+        let _ = tokio::task::spawn_blocking(move || credentials::revoke_lapsed(&lapsing)).await;
         schedule_recovered_once(&state).await;
         schedule_parked_once(&state).await;
         schedule_queued_once(&state).await;
-        let is_headquarters = schedule_intake_once(&state);
+        let intake = state.clone();
+        let is_headquarters = tokio::task::spawn_blocking(move || schedule_intake_once(&intake))
+            .await
+            .unwrap_or_default();
         if is_headquarters && SourceDesk::has_work(&state.roster) && desk.begin() {
             let (desk, plugins, roster, registry) = (
                 desk.clone(),
