@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::m::identity::SessionId;
-use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
+use ai6::directorates::q::terminal::{
+    AgentTerminal, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine, TerminalSession,
+};
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
     LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
@@ -230,7 +232,7 @@ fn set_approval_policy(
 struct CodexSession {
     terminal: Object<dyn TerminalSession>,
     gate: Option<Gate>,
-    output: Mutex<Vec<u8>>,
+    output: Mutex<JsonLines>,
     events: Mutex<VecDeque<AgentEvent>>,
     thread_id: Option<SessionId>,
     request_id: AtomicU64,
@@ -244,7 +246,7 @@ impl CodexSession {
         Self {
             terminal,
             gate: None,
-            output: Mutex::new(Vec::new()),
+            output: Mutex::new(JsonLines::new()),
             events: Mutex::new(VecDeque::new()),
             thread_id: None,
             request_id: AtomicU64::new(0),
@@ -275,10 +277,10 @@ impl CodexSession {
                     "Codex app-server timed out",
                 ));
             }
-            let Some(line) = self.read_line(remaining)? else {
+            // Anything but JSON is the harness's own diagnostics, which a reply never is.
+            let Some(StreamLine::Json { value: message, .. }) = self.read_line(remaining)? else {
                 continue;
             };
-            let message: Value = serde_json::from_slice(&line).map_err(internal)?;
             let ours = message.get("id").and_then(Value::as_u64) == Some(id);
             if ours && message.get("method").and_then(Value::as_str) == Some(method) {
                 continue;
@@ -307,16 +309,13 @@ impl CodexSession {
         self.terminal.write(&line)
     }
 
-    fn read_line(&self, timeout: Duration) -> Result<Option<Vec<u8>>, ProviderError> {
+    /// The next line the app server wrote, `None` when `timeout` passes first.
+    fn read_line(&self, timeout: Duration) -> Result<Option<StreamLine>, ProviderError> {
         let deadline = Instant::now() + timeout;
         loop {
-            let mut output = lock(&self.output)?;
-            if let Some(end) = output.iter().position(|byte| *byte == b'\n') {
-                let remainder = output.split_off(end + 1);
-                let line = std::mem::replace(&mut *output, remainder);
+            if let Some(line) = lock(&self.output)?.next_line() {
                 return Ok(Some(line));
             }
-            drop(output);
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Ok(None);
@@ -330,9 +329,8 @@ impl CodexSession {
                 return Ok(None);
             }
             if count == 0 {
-                let mut output = lock(&self.output)?;
-                if !output.is_empty() {
-                    return Ok(Some(std::mem::take(&mut *output)));
+                if let Some(line) = lock(&self.output)?.finish() {
+                    return Ok(Some(line));
                 }
                 return Err(refuse(
                     Status::GUATIAO_ERR_INTERNAL,
@@ -345,7 +343,7 @@ impl CodexSession {
                     "Codex terminal returned an invalid read count",
                 ));
             }
-            lock(&self.output)?.extend_from_slice(&bytes[..count as usize]);
+            lock(&self.output)?.push(&bytes[..count as usize]);
         }
     }
 
@@ -628,10 +626,21 @@ impl AgentSession for CodexSession {
         if let Some(event) = lock(&self.events)?.pop_front() {
             return Ok(Some(event));
         }
-        let Some(line) = self.read_line(Duration::from_millis(timeout_ms.max(0) as u64))? else {
-            return Ok(None);
+        let message = match self.read_line(Duration::from_millis(timeout_ms.max(0) as u64))? {
+            None => return Ok(None),
+            Some(StreamLine::Json { value, .. }) => value,
+            Some(StreamLine::Text(text)) => {
+                return Ok(Some(AgentEvent {
+                    kind: "output".to_owned(),
+                    text: Some(text),
+                    data: None,
+                    limit: None,
+                    usage: None,
+                    tools: Vec::new(),
+                    quota: Vec::new(),
+                }));
+            }
         };
-        let message: Value = serde_json::from_slice(&line).map_err(internal)?;
         if message.get("method").is_none() {
             return Ok(None);
         }
@@ -687,7 +696,7 @@ fn spawn(
         cwd: Some(cwd.to_string()),
         env: Some(environment.clone()),
         rows: 24,
-        cols: 80,
+        cols: STREAM_COLS,
     };
     let value = spec.to_value().map_err(internal)?;
     terminal.spawn(&value)
@@ -1599,6 +1608,65 @@ mod tests {
             "continue the same Session"
         );
         assert!(!killed.load(Ordering::Acquire));
+    }
+
+    /// The app server's replies as ConPTY renders them on Windows: mode and title sequences
+    /// first, CRLF line ends, a cursor move between lines, and a reply longer than the
+    /// terminal broken with CRLF and a cursor move.
+    #[test]
+    fn replies_rendered_by_conpty_read_as_the_lines_codex_wrote() {
+        let delta = "d".repeat(5_000);
+        let notification = format!(
+            "{{\"method\":\"item/agentMessage/delta\",\"params\":{{\"delta\":\"{delta}\"}}}}"
+        );
+        let (head, tail) = notification.split_at(2_000);
+        let mut input =
+            b"\x1b[?9001h\x1b[?1004h\x1b[m\x1b]0;C:\\bin\\codex.exe\x07\x1b[?25h\r\n".to_vec();
+        input.extend_from_slice(b"{\"id\":1,\"result\":{}}\r\n\x1b[?25l");
+        input.extend_from_slice(
+            b"\x1b[5;1H{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\r\n",
+        );
+        input.extend_from_slice(head.as_bytes());
+        input.extend_from_slice(b"\r\n\x1b[23;2000H");
+        input.extend_from_slice(tail.as_bytes());
+        input.extend_from_slice(b"\r\n");
+        let spec = Arc::new(Mutex::new(None));
+        let terminal = ResumeTerminal {
+            spec: spec.clone(),
+            input,
+            writes: Arc::new(Mutex::new(Vec::new())),
+            killed: Arc::new(AtomicBool::new(false)),
+        };
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-test".to_owned(),
+        })
+        .unwrap();
+        let session = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-42".parse().unwrap(),
+                    session_id: SessionId::try_new("codex-thread-42").unwrap(),
+                    message: None,
+                    working_directory: "C:\\station\\mission-42".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+        let event = session.next_event(50).unwrap().unwrap();
+        assert_eq!(
+            (event.kind.as_str(), event.text.as_deref()),
+            ("text", Some(&*delta))
+        );
+        assert_eq!(spec.lock().unwrap().as_ref().unwrap().cols, STREAM_COLS);
     }
 
     #[test]

@@ -45,6 +45,230 @@ pub struct ExitInfo {
 /// `read` answers this when nothing arrived within the timeout.
 pub const READ_TIMED_OUT: i64 = -1;
 
+/// The widest terminal every provider accepts: ConPTY takes its size as signed 16-bit
+/// numbers. A handler whose harness writes one JSON value per line asks for it, so that few
+/// lines wrap; [`JsonLines`] rejoins the ones that still do.
+pub const STREAM_COLS: u16 = 32767;
+
+/// The longest JSON line [`JsonLines`] holds while it waits for the rest; past it, what was
+/// held is handed over as text.
+pub const MAX_JSON_LINE: usize = 64 * 1024 * 1024;
+
+/// `bytes` without terminal control sequences: CSI (`ESC [ ... final`), OSC (`ESC ] ... BEL`
+/// or `ESC ] ... ESC \`) and two-byte escapes. Other bytes, line breaks included, are kept.
+pub fn strip_controls(bytes: &[u8]) -> Vec<u8> {
+    let mut visible = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match control_len(&bytes[index..]) {
+            Some((len, _)) => index += len,
+            None => {
+                visible.push(bytes[index]);
+                index += 1;
+            }
+        }
+    }
+    visible
+}
+
+/// The length of the control sequence `bytes` starts with, and whether it moves the cursor to
+/// another row (CUP, HVP, CNL, CPL, VPA, IND, NEL, RI); `None` when it starts with none. An
+/// unfinished sequence runs to the end.
+fn control_len(bytes: &[u8]) -> Option<(usize, bool)> {
+    if bytes.first() != Some(&0x1b) {
+        return None;
+    }
+    match bytes.get(1).copied() {
+        None => Some((1, false)),
+        Some(b'[') => {
+            let end = bytes[2..]
+                .iter()
+                .position(|byte| (0x40..=0x7e).contains(byte))
+                .map_or(bytes.len(), |at| at + 3);
+            let moves = matches!(bytes.get(end - 1), Some(b'H' | b'f' | b'E' | b'F' | b'd'));
+            Some((end, moves))
+        }
+        Some(b']') => {
+            let mut index = 2;
+            while index < bytes.len() {
+                if bytes[index] == 0x07 {
+                    return Some((index + 1, false));
+                }
+                if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+                    return Some((index + 2, false));
+                }
+                index += 1;
+            }
+            Some((bytes.len(), false))
+        }
+        Some(byte) => Some((2, matches!(byte, b'D' | b'E' | b'M'))),
+    }
+}
+
+/// One line of a harness's output, as [`JsonLines`] splits it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StreamLine {
+    /// A JSON object or array, with its text (terminal controls removed).
+    Json {
+        value: serde_json::Value,
+        text: Vec<u8>,
+    },
+    /// Anything else, trimmed and with terminal controls removed; never empty.
+    Text(String),
+}
+
+/// Splits a terminal's output into the JSON values a harness wrote one per line.
+///
+/// A pseudo-terminal is not a pipe: ConPTY on Windows renders the console it hosts, so its
+/// output carries mode and title sequences before and between lines, may move the cursor to
+/// the next row instead of writing a line break, and breaks a line longer than the terminal
+/// is wide (`\r\n`, then a cursor move). Lines are therefore cut at line breaks and at cursor
+/// moves to another row, stripped of controls, and a line that is the start of a JSON value
+/// but not the whole of it is joined with the lines that follow until it parses, up to
+/// [`MAX_JSON_LINE`] bytes. JSON text cannot hold a raw line break or `ESC`, so neither join
+/// nor strip changes a value the harness wrote.
+#[derive(Debug, Default)]
+pub struct JsonLines {
+    /// Output not yet ended by a line break.
+    buffer: Vec<u8>,
+    /// The start of a JSON value whose rest has not arrived.
+    partial: Vec<u8>,
+    ready: std::collections::VecDeque<StreamLine>,
+}
+
+impl JsonLines {
+    /// An empty splitter.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds output as read from the terminal.
+    pub fn push(&mut self, bytes: &[u8]) {
+        self.buffer.extend_from_slice(bytes);
+        let Some(end) = self.buffer.iter().rposition(|byte| *byte == b'\n') else {
+            return;
+        };
+        let rest = self.buffer.split_off(end + 1);
+        let complete = std::mem::replace(&mut self.buffer, rest);
+        self.cut(&complete);
+    }
+
+    /// The next whole line, if one has arrived.
+    pub fn next_line(&mut self) -> Option<StreamLine> {
+        self.ready.pop_front()
+    }
+
+    /// Everything still held, once no more output can arrive: the unended last line, and a
+    /// JSON value that never completed, as text.
+    pub fn finish(&mut self) -> Option<StreamLine> {
+        if !self.buffer.is_empty() {
+            let rest = std::mem::take(&mut self.buffer);
+            self.cut(&rest);
+        }
+        if !self.partial.is_empty() {
+            let partial = std::mem::take(&mut self.partial);
+            self.push_text(&partial);
+        }
+        self.ready.pop_front()
+    }
+
+    /// Cuts `bytes` at line breaks and row moves and takes each piece.
+    fn cut(&mut self, bytes: &[u8]) {
+        let mut line = Vec::new();
+        let mut index = 0;
+        while index < bytes.len() {
+            if let Some((len, moves)) = control_len(&bytes[index..]) {
+                if moves {
+                    self.take(&std::mem::take(&mut line));
+                }
+                index += len;
+                continue;
+            }
+            match bytes[index] {
+                b'\n' => self.take(&std::mem::take(&mut line)),
+                // JSON text holds no raw CR either; ConPTY ends a broken line with CRLF.
+                b'\r' => {}
+                byte => line.push(byte),
+            }
+            index += 1;
+        }
+        self.take(&line);
+    }
+
+    /// Takes one piece of a line. A piece that continues a held value is joined untrimmed,
+    /// since a break inside a string may fall among its spaces.
+    fn take(&mut self, piece: &[u8]) {
+        if !self.partial.is_empty() {
+            let mut joined = std::mem::take(&mut self.partial);
+            joined.extend_from_slice(piece);
+            match parse(&joined) {
+                Parsed::Value(value) => {
+                    joined.truncate(joined.trim_ascii_end().len());
+                    self.ready.push_back(StreamLine::Json {
+                        value,
+                        text: joined,
+                    });
+                    return;
+                }
+                // A whole value of its own means the held start was never finished.
+                Parsed::Incomplete
+                    if joined.len() <= MAX_JSON_LINE && !is_whole_value(piece.trim_ascii()) =>
+                {
+                    self.partial = joined;
+                    return;
+                }
+                _ => {
+                    let held = joined.len() - piece.len();
+                    self.push_text(&joined[..held]);
+                }
+            }
+        }
+        // The end stays: a value broken at the terminal's width may end in spaces of a string.
+        let line = piece.trim_ascii_start();
+        if line.is_empty() {
+            return;
+        }
+        if !matches!(line[0], b'{' | b'[') {
+            self.push_text(line);
+            return;
+        }
+        match parse(line) {
+            Parsed::Value(value) => self.ready.push_back(StreamLine::Json {
+                value,
+                text: line.trim_ascii_end().to_vec(),
+            }),
+            Parsed::Incomplete => self.partial = line.to_vec(),
+            Parsed::Invalid => self.push_text(line),
+        }
+    }
+
+    fn push_text(&mut self, bytes: &[u8]) {
+        let text = String::from_utf8_lossy(bytes).trim().to_owned();
+        if !text.is_empty() {
+            self.ready.push_back(StreamLine::Text(text));
+        }
+    }
+}
+
+enum Parsed {
+    Value(serde_json::Value),
+    Incomplete,
+    Invalid,
+}
+
+fn is_whole_value(line: &[u8]) -> bool {
+    matches!(line.first(), Some(b'{' | b'['))
+        && serde_json::from_slice::<serde::de::IgnoredAny>(line).is_ok()
+}
+
+fn parse(bytes: &[u8]) -> Parsed {
+    match serde_json::from_slice(bytes) {
+        Ok(value) => Parsed::Value(value),
+        Err(error) if error.is_eof() => Parsed::Incomplete,
+        Err(_) => Parsed::Invalid,
+    }
+}
+
 /// Starts programs on terminals.
 #[guatiao::kind(name = "ai6_terminal")]
 pub trait Terminal: Send + Sync {
@@ -240,6 +464,116 @@ mod tests {
     fn floor_hashes_are_pinned() {
         assert_eq!(TerminalVtable::FLOOR_HASH, 3285297011);
         assert_eq!(TerminalSessionVtable::FLOOR_HASH, 3148381037);
+    }
+
+    fn lines_of(chunks: &[&[u8]]) -> Vec<StreamLine> {
+        let mut lines = JsonLines::new();
+        let mut out = Vec::new();
+        for chunk in chunks {
+            lines.push(chunk);
+            out.extend(std::iter::from_fn(|| lines.next_line()));
+        }
+        out.extend(std::iter::from_fn(|| lines.finish()));
+        out
+    }
+
+    fn json(text: &str) -> StreamLine {
+        StreamLine::Json {
+            value: serde_json::from_str(text).unwrap(),
+            text: text.as_bytes().to_vec(),
+        }
+    }
+
+    // ConPTY's start-up sequences (Windows 11), as they precede a harness's first line.
+    const CONPTY_START: &[u8] =
+        b"\x1b[?9001h\x1b[?1004h\x1b[m\x1b]0;C:\\tools\\codex.exe\x07\x1b[?25h\x1b[?25l\r\n";
+
+    #[test]
+    fn json_lines_ignore_the_controls_conpty_writes_before_and_between_lines() {
+        let mut stream = CONPTY_START.to_vec();
+        stream.extend_from_slice(b"{\"id\":1}\r\n\x1b[?25h{\"id\":2}\x1b[m\r\n");
+        assert_eq!(
+            lines_of(&[&stream]),
+            [json("{\"id\":1}"), json("{\"id\":2}")]
+        );
+    }
+
+    #[test]
+    fn json_lines_cut_at_a_cursor_move_to_another_row() {
+        assert_eq!(
+            lines_of(&[b"{\"a\":1}\x1b[8;1H{\"b\":2}\x1b[11;1H\r\n"]),
+            [json("{\"a\":1}"), json("{\"b\":2}")]
+        );
+    }
+
+    /// ConPTY breaks a line longer than the terminal is wide as CRLF, a move back to the last
+    /// column of the row above and that column's character (Windows 11, 32767 columns).
+    #[test]
+    fn json_lines_rejoin_a_line_the_terminal_broke() {
+        let text = format!("{{\"text\":\"{}  {}\"}}", "x".repeat(40), "y".repeat(40));
+        let (head, tail) = text.split_at(30);
+        let (last, tail) = tail.split_at(1);
+        let broken = format!("{head}\r\n\x1b[23;32767H{last}{tail}\r\n");
+        assert_eq!(lines_of(&[broken.as_bytes()]), [json(&text)]);
+
+        let at_spaces = text.find("  ").unwrap() + 1;
+        let (head, tail) = text.split_at(at_spaces);
+        let broken = format!("{head}\r\n{tail}\r\n");
+        assert_eq!(
+            lines_of(&[broken.as_bytes()]),
+            [json(&text)],
+            "spaces at the break are kept"
+        );
+    }
+
+    #[test]
+    fn json_lines_arrive_whole_whatever_the_chunks() {
+        let mut stream = CONPTY_START.to_vec();
+        stream.extend_from_slice(b"{\"type\":\"system\",\"session_id\":\"s-1\"}\r\n");
+        stream.extend_from_slice(
+            "{\"type\":\"result\",\"result\":\"d\u{e9}j\u{e0}\"}\r\n".as_bytes(),
+        );
+        let chunks = stream.chunks(1).collect::<Vec<_>>();
+        assert_eq!(
+            lines_of(&chunks),
+            [
+                json("{\"type\":\"system\",\"session_id\":\"s-1\"}"),
+                json("{\"type\":\"result\",\"result\":\"d\u{e9}j\u{e0}\"}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn json_lines_hand_over_other_output_as_text() {
+        assert_eq!(
+            lines_of(&[b"\x1b[31mwarning: slow\x1b[0m\r\n42\r\n{not json}\r\n{\"ok\":true}\r\n"]),
+            [
+                StreamLine::Text("warning: slow".to_owned()),
+                StreamLine::Text("42".to_owned()),
+                StreamLine::Text("{not json}".to_owned()),
+                json("{\"ok\":true}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unfinished_value_gives_way_to_a_whole_one_and_ends_as_text() {
+        assert_eq!(
+            lines_of(&[b"{\"cut\":\"off\r\n{\"next\":1}\r\n{\"tail\":"]),
+            [
+                StreamLine::Text("{\"cut\":\"off".to_owned()),
+                json("{\"next\":1}"),
+                StreamLine::Text("{\"tail\":".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn strip_controls_keeps_text_and_line_breaks() {
+        assert_eq!(
+            strip_controls(b"\x1b[31mred\x1b[0m\r\n\x1b]0;title\x07ok\x1b]2;t\x1b\\!\x1b="),
+            b"red\r\nok!"
+        );
     }
 
     struct MockTerminal;

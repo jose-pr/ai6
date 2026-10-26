@@ -408,7 +408,7 @@ impl Watchdog {
 }
 
 fn observe_line(state: &mut ActivityState, now: Instant, config: &WatchdogConfig) {
-    let visible = strip_ansi(&state.partial_line);
+    let visible = crate::directorates::q::terminal::strip_controls(&state.partial_line);
     state.partial_line.clear();
     let mut normalized = Vec::with_capacity(visible.len());
     let mut digit_run = false;
@@ -442,7 +442,7 @@ fn observe_line(state: &mut ActivityState, now: Instant, config: &WatchdogConfig
     allow(dead_code, reason = "used only by the daemon")
 )]
 fn looks_like_prompt(raw: &[u8]) -> bool {
-    let visible = strip_ansi(raw);
+    let visible = crate::directorates::q::terminal::strip_controls(raw);
     let tail = visible
         .get(visible.len().saturating_sub(256)..)
         .unwrap_or(&visible);
@@ -483,48 +483,6 @@ fn trim_ascii_end(bytes: &[u8]) -> &[u8] {
         .rposition(|byte| !byte.is_ascii_whitespace())
         .map_or(0, |index| index + 1);
     &bytes[..end]
-}
-
-fn strip_ansi(bytes: &[u8]) -> Vec<u8> {
-    let mut visible = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] != 0x1b {
-            visible.push(bytes[index]);
-            index += 1;
-            continue;
-        }
-        let Some(next) = bytes.get(index + 1).copied() else {
-            break;
-        };
-        match next {
-            b'[' => {
-                index += 2;
-                while let Some(byte) = bytes.get(index).copied() {
-                    index += 1;
-                    if (0x40..=0x7e).contains(&byte) {
-                        break;
-                    }
-                }
-            }
-            b']' => {
-                index += 2;
-                while index < bytes.len() {
-                    if bytes[index] == 0x07 {
-                        index += 1;
-                        break;
-                    }
-                    if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
-                        index += 2;
-                        break;
-                    }
-                    index += 1;
-                }
-            }
-            _ => index += 2,
-        }
-    }
-    visible
 }
 
 #[cfg(test)]

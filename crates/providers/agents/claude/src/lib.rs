@@ -10,7 +10,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ai6::directorates::m::identity::SessionId;
-use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
+use ai6::directorates::q::terminal::{
+    AgentTerminal, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine, TerminalSession,
+};
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
     LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
@@ -430,7 +432,7 @@ fn decode_usage(value: &Value) -> Option<TokenUsage> {
 
 struct ClaudeSession {
     terminal: Object<dyn TerminalSession>,
-    output: Mutex<Vec<u8>>,
+    output: Mutex<JsonLines>,
     events: Mutex<VecDeque<AgentEvent>>,
     session_id: Mutex<Option<SessionId>>,
     expected_session_id: Option<SessionId>,
@@ -442,7 +444,7 @@ impl ClaudeSession {
     fn new(terminal: Object<dyn TerminalSession>, expected_session_id: Option<SessionId>) -> Self {
         Self {
             terminal,
-            output: Mutex::new(Vec::new()),
+            output: Mutex::new(JsonLines::new()),
             events: Mutex::new(VecDeque::new()),
             session_id: Mutex::new(None),
             expected_session_id,
@@ -488,24 +490,30 @@ impl ClaudeSession {
     }
 
     fn read_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
-        if self.eof.load(Ordering::Acquire) {
-            return Ok((!self.eof_reported.swap(true, Ordering::AcqRel)).then(|| {
-                event(
-                    "failed",
-                    Some("Claude process exited before completing the Session".to_owned()),
-                )
-            }));
-        }
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
         let line = loop {
-            let mut output = lock(&self.output)?;
-            if let Some(end) = output.iter().position(|byte| *byte == b'\n') {
-                let remainder = output.split_off(end + 1);
-                let line = std::mem::replace(&mut *output, remainder);
+            // What the terminal wrote before it closed is read before the exit is reported.
+            let ended = self.eof.load(Ordering::Acquire);
+            let next = {
+                let mut output = lock(&self.output)?;
+                if ended {
+                    output.finish()
+                } else {
+                    output.next_line()
+                }
+            };
+            if let Some(line) = next {
                 break line;
             }
-            drop(output);
+            if ended {
+                return Ok((!self.eof_reported.swap(true, Ordering::AcqRel)).then(|| {
+                    event(
+                        "failed",
+                        Some("Claude process exited before completing the Session".to_owned()),
+                    )
+                }));
+            }
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
                 return Ok(None);
@@ -520,17 +528,7 @@ impl ClaudeSession {
             }
             if count == 0 {
                 self.eof.store(true, Ordering::Release);
-                let mut output = lock(&self.output)?;
-                let tail = std::mem::take(&mut *output);
-                drop(output);
-                if tail.is_empty() {
-                    self.eof_reported.store(true, Ordering::Release);
-                    return Ok(Some(event(
-                        "failed",
-                        Some("Claude process exited before completing the Session".to_owned()),
-                    )));
-                }
-                break tail;
+                continue;
             }
             if count < 0 {
                 return Err(refuse(
@@ -538,13 +536,11 @@ impl ClaudeSession {
                     "Claude terminal returned an invalid read count",
                 ));
             }
-            lock(&self.output)?.extend_from_slice(&bytes[..count as usize]);
+            lock(&self.output)?.push(&bytes[..count as usize]);
         };
-        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
-            return Ok(Some(event(
-                "output",
-                Some(String::from_utf8_lossy(&line).trim().to_string()),
-            )));
+        let (value, line) = match line {
+            StreamLine::Json { value, text } => (value, text),
+            StreamLine::Text(text) => return Ok(Some(event("output", Some(text)))),
         };
         if let Some(id) = value.get("session_id").and_then(Value::as_str) {
             let session_id = SessionId::try_from(id.to_string())
@@ -641,7 +637,7 @@ fn spawn(
         cwd: Some(cwd.to_string()),
         env: Some(environment.clone()),
         rows: 24,
-        cols: 80,
+        cols: STREAM_COLS,
     };
     let value = spec.to_value().map_err(internal)?;
     terminal.spawn(&value)
@@ -1279,6 +1275,70 @@ mod tests {
             message["message"]["content"][0]["text"],
             "continue the same Session"
         );
+    }
+
+    /// Claude Code's stream as ConPTY renders it on Windows: mode and title sequences first, a
+    /// CRLF after each line, the echoed input, and a line longer than the terminal broken
+    /// with CRLF and a cursor move.
+    #[test]
+    fn a_stream_rendered_by_conpty_reads_as_the_lines_claude_wrote() {
+        let long = "w".repeat(20_000);
+        let assistant = format!(
+            "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"{long}\"}}]}}}}"
+        );
+        let (head, tail) = assistant.split_at(9_000);
+        let mut input =
+            b"\x1b[?9001h\x1b[?1004h\x1b[m\x1b]0;C:\\bin\\claude.exe\x07\x1b[?25h\r\n".to_vec();
+        input.extend_from_slice(
+            b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-42\"}\r\n",
+        );
+        input.extend_from_slice(b"{\"type\":\"user\",\"message\":{\"role\":\"user\"}}\r\n");
+        input.extend_from_slice(head.as_bytes());
+        input.extend_from_slice(b"\r\n\x1b[23;9000H");
+        input.extend_from_slice(tail.as_bytes());
+        input.extend_from_slice(b"\r\n\x1b[?25l{\"type\":\"result\",\"result\":\"done\"}\r\n");
+        let spec = Arc::new(Mutex::new(None));
+        let terminal = ResumeTerminal {
+            spec: spec.clone(),
+            input,
+            writes: Arc::new(Mutex::new(Vec::new())),
+        };
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-test".to_owned(),
+        })
+        .unwrap();
+        let session = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-42".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-session-42").unwrap(),
+                    message: None,
+                    working_directory: "C:\\station\\mission-42".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+        let kinds_and_texts = std::iter::from_fn(|| session.next_event(50).unwrap())
+            .map(|event| (event.kind, event.text))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds_and_texts,
+            [
+                ("system".to_owned(), None),
+                ("text".to_owned(), Some(long)),
+                ("completed".to_owned(), Some("done".to_owned())),
+            ]
+        );
+        assert_eq!(spec.lock().unwrap().as_ref().unwrap().cols, STREAM_COLS);
     }
 
     #[test]
