@@ -405,6 +405,7 @@ impl LoadoutCatalog {
     /// A [`QErrorKind::Schema`] error whose [`QError::reason`] names what is wrong.
     pub fn with_pool(mut self, pool: AccountPool) -> Result<Self, QError> {
         pool.validate()
+            .and_then(|()| refuse_green_ink(&pool, &self.secrets))
             .map_err(|reason| QError::new(QErrorKind::Schema, None).because(reason))?;
         self.pools.insert(pool.id().to_owned(), pool);
         Ok(self)
@@ -809,6 +810,11 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
         }
     }
 
+    for pool in pools.values() {
+        refuse_green_ink(pool, &secrets)
+            .map_err(|reason| QError::new(QErrorKind::Schema, path.clone()).because(reason))?;
+    }
+
     Ok(LoadoutCatalog {
         loadouts,
         sandboxes,
@@ -816,6 +822,27 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
         secrets,
         pools,
     })
+}
+
+/// Refuses a pool account whose secret is a green ink one: a pool account is handed to every
+/// Session that draws it, while a green ink credential is only for a step a person approved.
+fn refuse_green_ink(
+    pool: &AccountPool,
+    secrets: &BTreeMap<String, SecretDefinition>,
+) -> Result<(), String> {
+    for account in pool.accounts() {
+        if let Some(name) = account.secret_name()
+            && secrets.get(name).is_some_and(SecretDefinition::green_ink)
+        {
+            return Err(format!(
+                "pool {:?} account {:?}: secret {name:?} is a green ink secret, which is only for \
+                 approved steps; give the account a secret of its own",
+                pool.id(),
+                account.name()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_names(
@@ -1121,6 +1148,29 @@ kind = "openai-api-key"
         assert!(
             LoadoutCatalog::from_str("[pool.p]\nhandler = \"claude\"\nvalue = 1\n").is_err(),
             "unknown keys are refused"
+        );
+        let green = LoadoutCatalog::from_str(
+            "[pool.p]\nhandler = \"claude\"\n[pool.p.account.a]\nkind = \"anthropic-api-key\"\n\
+             secret = \"release\"\n[secret.release]\ngreen_ink = true\n",
+        )
+        .unwrap_err();
+        assert!(
+            green.to_string().contains("is a green ink secret"),
+            "{green}"
+        );
+        let catalog =
+            LoadoutCatalog::from_str("[loadout.007]\n[secret.release]\ngreen_ink = true\n")
+                .unwrap();
+        assert!(
+            catalog
+                .with_pool(super::AccountPool::new("p", "claude").account(
+                    super::Account::new("a", super::AccountKind::AnthropicApiKey).secret("release")
+                ))
+                .unwrap_err()
+                .reason()
+                .unwrap()
+                .contains("green ink"),
+            "built in code too"
         );
         assert!(
             LoadoutCatalog::default()
