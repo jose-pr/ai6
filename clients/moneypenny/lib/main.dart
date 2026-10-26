@@ -861,10 +861,14 @@ class MissionBoard extends ChangeNotifier {
     );
   }
 
+  /// Sets a Station's Mission capacity and, when given, the free memory (MiB) and CPU
+  /// percent past which it takes no new Missions; a limit left out keeps its value.
   Future<void> saveStationSettings(
     String stationId,
-    int maxConcurrentMissions,
-  ) async {
+    int maxConcurrentMissions, {
+    int? minFreeMemoryMb,
+    int? maxCpuPercent,
+  }) async {
     if (demo) {
       throw StateError('Station settings are unavailable in preview.');
     }
@@ -878,7 +882,11 @@ class MissionBoard extends ChangeNotifier {
         'authorization': 'Bearer $token',
         'content-type': 'application/json',
       },
-      body: jsonEncode({'max_concurrent_missions': maxConcurrentMissions}),
+      body: jsonEncode({
+        'max_concurrent_missions': maxConcurrentMissions,
+        'min_free_memory_mb': ?minFreeMemoryMb,
+        'max_cpu_percent': ?maxCpuPercent,
+      }),
     );
     if (response.statusCode != 204) {
       throw StateError('The gateway refused the Station settings update.');
@@ -1766,12 +1774,25 @@ class StationSettingsSummary {
     required this.maxConcurrentMissions,
     required this.configured,
     required this.executionEnabled,
+    this.minFreeMemoryMb = defaultMinFreeMemoryMb,
+    this.maxCpuPercent = defaultMaxCpuPercent,
   });
+
+  /// The Station's defaults when nothing was set: below 512 MiB free or above 95% CPU it
+  /// takes no new Missions.
+  static const defaultMinFreeMemoryMb = 512;
+  static const defaultMaxCpuPercent = 95;
 
   final String stationId;
   final int maxConcurrentMissions;
   final bool configured;
   final bool executionEnabled;
+
+  /// Free memory in MiB below which the Station takes no new Missions; 0 turns it off.
+  final int minFreeMemoryMb;
+
+  /// CPU percent above which the Station takes no new Missions; 100 turns it off.
+  final int maxCpuPercent;
 
   factory StationSettingsSummary.fromJson(Map<String, dynamic> json) =>
       StationSettingsSummary(
@@ -1779,6 +1800,9 @@ class StationSettingsSummary {
         maxConcurrentMissions: json['max_concurrent_missions'] as int,
         configured: json['configured'] as bool,
         executionEnabled: json['execution_enabled'] as bool,
+        minFreeMemoryMb:
+            json['min_free_memory_mb'] as int? ?? defaultMinFreeMemoryMb,
+        maxCpuPercent: json['max_cpu_percent'] as int? ?? defaultMaxCpuPercent,
       );
 }
 
@@ -2856,6 +2880,8 @@ class StationSettingsPage extends StatefulWidget {
 
 class _StationSettingsPageState extends State<StationSettingsPage> {
   final _capacity = TextEditingController();
+  final _minFreeMemory = TextEditingController();
+  final _maxCpu = TextEditingController();
   String? _stationId;
   Future<StationSettingsSummary>? _settings;
   bool _saving = false;
@@ -2874,6 +2900,8 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
   @override
   void dispose() {
     _capacity.dispose();
+    _minFreeMemory.dispose();
+    _maxCpu.dispose();
     super.dispose();
   }
 
@@ -2888,6 +2916,8 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
       settings.then((value) {
         if (mounted && _stationId == stationId) {
           _capacity.text = '${value.maxConcurrentMissions}';
+          _minFreeMemory.text = '${value.minFreeMemoryMb}';
+          _maxCpu.text = '${value.maxCpuPercent}';
         }
       }),
     );
@@ -2896,20 +2926,30 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
   Future<void> _save() async {
     final stationId = _stationId;
     final capacity = int.tryParse(_capacity.text.trim());
-    if (stationId == null ||
-        capacity == null ||
-        capacity < 1 ||
-        capacity > 1024) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Mission capacity must be from 1 to 1,024.'),
-        ),
-      );
+    final minFreeMemory = int.tryParse(_minFreeMemory.text.trim());
+    final maxCpu = int.tryParse(_maxCpu.text.trim());
+    String? problem;
+    if (capacity == null || capacity < 1 || capacity > 1024) {
+      problem = 'Mission capacity must be from 1 to 1,024.';
+    } else if (minFreeMemory == null || minFreeMemory < 0) {
+      problem = 'Minimum free memory must be a whole number of MiB, 0 or more.';
+    } else if (maxCpu == null || maxCpu < 0 || maxCpu > 100) {
+      problem = 'Maximum CPU must be a whole percent from 0 to 100.';
+    }
+    if (stationId == null || problem != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(problem ?? 'Choose a Station.')));
       return;
     }
     setState(() => _saving = true);
     try {
-      await widget.board.saveStationSettings(stationId, capacity);
+      await widget.board.saveStationSettings(
+        stationId,
+        capacity!,
+        minFreeMemoryMb: minFreeMemory,
+        maxCpuPercent: maxCpu,
+      );
       if (!mounted) return;
       setState(() => _settings = widget.board.loadStationSettings(stationId));
       ScaffoldMessenger.of(
@@ -2984,12 +3024,55 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 320),
                       child: TextField(
+                        key: const Key('station-capacity'),
                         controller: _capacity,
                         enabled: canConfigure && !_saving,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: 'Maximum concurrent Missions',
                           helperText: 'Allowed range: 1–1,024',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Resource limits',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'The Station and its Theaters take no new Missions with less free '
+                      'memory or a busier CPU than this.',
+                    ),
+                    const SizedBox(height: 16),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: TextField(
+                        key: const Key('station-min-free-memory'),
+                        controller: _minFreeMemory,
+                        enabled: canConfigure && !_saving,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Minimum free memory (MiB)',
+                          helperText:
+                              'Default ${StationSettingsSummary.defaultMinFreeMemoryMb}; '
+                              '0 turns the floor off',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: TextField(
+                        key: const Key('station-max-cpu'),
+                        controller: _maxCpu,
+                        enabled: canConfigure && !_saving,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Maximum CPU (%)',
+                          helperText:
+                              'Default ${StationSettingsSummary.defaultMaxCpuPercent}; '
+                              '0–100, 100 turns the ceiling off',
                         ),
                       ),
                     ),

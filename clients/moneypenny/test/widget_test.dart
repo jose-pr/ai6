@@ -5,7 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show FilledButton, MaterialApp, NavigationBar, SwitchListTile, TextField;
+    show
+        FilledButton,
+        Key,
+        MaterialApp,
+        NavigationBar,
+        ScaffoldMessenger,
+        SwitchListTile,
+        TextField;
 import 'package:moneypenny/main.dart';
 
 String stationBoardResponse() => jsonEncode({
@@ -225,6 +232,10 @@ void main() {
   testWidgets('Station settings update through the authorized gateway API', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final requests = <http.Request>[];
     final board = MissionBoard(
       apiOrigin: Uri.parse('https://moneypenny.example'),
@@ -236,6 +247,8 @@ void main() {
             jsonEncode({
               'station_id': 'station-alpha',
               'max_concurrent_missions': 4,
+              'min_free_memory_mb': 256,
+              'max_cpu_percent': 90,
               'configured': false,
               'execution_enabled': true,
             }),
@@ -270,14 +283,112 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Maximum concurrent Missions'), findsOneWidget);
     expect(find.textContaining('Current Station value.'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('station-min-free-memory')))
+          .controller!
+          .text,
+      '256',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('station-max-cpu')))
+          .controller!
+          .text,
+      '90',
+    );
 
-    await tester.enterText(find.byType(TextField).last, '7');
+    await tester.enterText(find.byKey(const Key('station-capacity')), '7');
+    await tester.enterText(
+      find.byKey(const Key('station-min-free-memory')),
+      '0',
+    );
+    await tester.enterText(find.byKey(const Key('station-max-cpu')), '100');
     await tester.tap(find.text('Save settings'));
     await tester.pumpAndSettle();
 
     final update = requests.singleWhere((request) => request.method == 'PUT');
     expect(update.url.path, '/v1/user/stations/station-alpha/settings');
-    expect(jsonDecode(update.body), {'max_concurrent_missions': 7});
+    expect(jsonDecode(update.body), {
+      'max_concurrent_missions': 7,
+      'min_free_memory_mb': 0,
+      'max_cpu_percent': 100,
+    });
+  });
+
+  testWidgets('Out-of-range resource limits show an error and send nothing', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final requests = <http.Request>[];
+    final board = MissionBoard(
+      apiOrigin: Uri.parse('https://moneypenny.example'),
+      pollInterval: null,
+      client: MockClient((request) async {
+        requests.add(request);
+        if (request.method == 'GET' && request.url.path.endsWith('/settings')) {
+          return http.Response(
+            jsonEncode({
+              'station_id': 'station-alpha',
+              'max_concurrent_missions': 4,
+              'min_free_memory_mb': 512,
+              'max_cpu_percent': 95,
+              'configured': true,
+              'execution_enabled': true,
+            }),
+            200,
+          );
+        }
+        return http.Response('[]', 200);
+      }),
+    );
+    board.accessToken = 'operator-token';
+    board.loading = false;
+    board.userSession = UserSessionSummary.fromJson(
+      jsonDecode(
+        userProfileResponse(
+          stations: [
+            {
+              'station_id': 'station-alpha',
+              'actions': ['station.read', 'station.configure'],
+            },
+          ],
+        ),
+      ) as Map<String, dynamic>,
+    );
+    addTearDown(board.dispose);
+
+    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.tap(navLabel('Administration'));
+    await tester.pumpAndSettle();
+    await tester.pumpAndSettle();
+
+    for (final (key, value, message) in [
+      ('station-max-cpu', '101', 'Maximum CPU must be a whole percent'),
+      ('station-max-cpu', 'lots', 'Maximum CPU must be a whole percent'),
+      ('station-min-free-memory', '-1', 'Minimum free memory must be'),
+    ]) {
+      await tester.enterText(
+        find.byKey(const Key('station-min-free-memory')),
+        '512',
+      );
+      await tester.enterText(find.byKey(const Key('station-max-cpu')), '95');
+      await tester.enterText(find.byKey(Key(key)), value);
+      await tester.tap(find.text('Save settings'));
+      await tester.pump();
+      expect(
+        find.textContaining(message),
+        findsOneWidget,
+        reason: '$key=$value',
+      );
+      ScaffoldMessenger.of(tester.element(find.text('Save settings')))
+          .removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+    }
+    expect(requests.where((request) => request.method == 'PUT'), isEmpty);
   });
 
   test(
