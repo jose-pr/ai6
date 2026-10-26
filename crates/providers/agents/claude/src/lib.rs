@@ -188,10 +188,13 @@ fn add_mcp(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
 }
 
 /// The Claude Code settings that hold a shell command taking a governed step until green ink
-/// covers it: a `PreToolUse` hook on the shell tools running `PROGRAM green-ink gate`. A hook
-/// that fails to run blocks the command (`onFailure`, Claude Code 2.1.295 or later), and hooks
-/// stay on whatever the project's settings say.
-fn gate_settings(program: &str) -> Value {
+/// covers it: a `PreToolUse` hook on the shell tools running `PROGRAM green-ink gate
+/// --cable-url URL`. The URL is in the hook's own arguments so a project's settings (`env`)
+/// cannot point the gate at another endpoint; the token stays in the environment, out of every
+/// command line, and a redirected token only makes the gate hold. A hook that fails to run
+/// blocks the command (`onFailure`, Claude Code 2.1.295 or later), and hooks stay on whatever
+/// the project's settings say.
+fn gate_settings(program: &str, cable_url: &str) -> Value {
     json!({
         "disableAllHooks": false,
         "hooks": {
@@ -200,7 +203,7 @@ fn gate_settings(program: &str) -> Value {
                 "hooks": [{
                     "type": "command",
                     "command": program,
-                    "args": ["green-ink", "gate"],
+                    "args": ["green-ink", "gate", "--cable-url", cable_url],
                     "timeout": 60,
                     "onFailure": "block"
                 }]
@@ -212,9 +215,12 @@ fn gate_settings(program: &str) -> Value {
 /// Adds the green ink gate when the Session has a Station to ask (its Cable endpoint). The
 /// gate is the `ai6` program hosting this handler, or the one `AI6_GREEN_INK_GATE` names.
 fn add_gate(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
-    if !has_endpoint(environment, "AI6_CABLE_MCP") {
+    let Some(cable_url) = environment
+        .get("AI6_CABLE_MCP_URL")
+        .filter(|_| has_endpoint(environment, "AI6_CABLE_MCP"))
+    else {
         return;
-    }
+    };
     let program = environment
         .get(GATE_PROGRAM_ENV)
         .filter(|program| !program.trim().is_empty())
@@ -225,7 +231,10 @@ fn add_gate(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
                 .map(|path| path.to_string_lossy().into_owned())
         });
     if let Some(program) = program {
-        argv.extend(["--settings".to_owned(), gate_settings(&program).to_string()]);
+        argv.extend([
+            "--settings".to_owned(),
+            gate_settings(&program, cable_url).to_string(),
+        ]);
     }
 }
 
@@ -1305,7 +1314,16 @@ mod tests {
         let hook = &entry["hooks"][0];
         assert_eq!(hook["type"], "command");
         assert_eq!(hook["command"], "/opt/ai6/bin/ai6");
-        assert_eq!(hook["args"], json!(["green-ink", "gate"]));
+        assert_eq!(
+            hook["args"],
+            json!([
+                "green-ink",
+                "gate",
+                "--cable-url",
+                "http://127.0.0.1:43210/mcp"
+            ]),
+            "the endpoint is pinned in the hook itself"
+        );
         assert_eq!(hook["onFailure"], "block");
         assert!(hook["timeout"].as_u64().unwrap() >= 30);
         assert!(

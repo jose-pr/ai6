@@ -95,9 +95,7 @@ impl AgentHandler for CodexHandler {
             params["model"] = json!(model);
         }
         params["cwd"] = json!(request.working_directory);
-        if is_remote_hands(&request.environment) {
-            restrict_to_remote_hands(&mut params);
-        }
+        set_approval_policy(&mut params, &request.environment);
         let response = match session.request("thread/resume", params, Duration::from_secs(30)) {
             Ok(response) => response,
             Err(error) => {
@@ -136,7 +134,7 @@ impl CodexHandler {
         &self,
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
-        gate: Gate,
+        gate: Option<Gate>,
     ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
         let process = spawn(
             terminal,
@@ -155,9 +153,7 @@ impl CodexHandler {
         )?;
         session.notify("initialized", json!({}))?;
         let mut params = json!({ "cwd": request.working_directory });
-        if is_remote_hands(&request.environment) {
-            restrict_to_remote_hands(&mut params);
-        }
+        set_approval_policy(&mut params, &request.environment);
         if let Some(model) = request.model {
             params["model"] = json!(model);
         }
@@ -186,16 +182,31 @@ type Gate = Arc<dyn Fn(&str, Option<&Path>) -> GateVerdict + Send + Sync>;
 
 /// The green ink gate asking the Session's Station through its Cable endpoint. A Session with
 /// no endpoint cannot ask for green ink at all, so it has no gate, as with Claude Code.
-fn station_gate(environment: &std::collections::BTreeMap<String, String>) -> Gate {
-    match GateClient::from_environment(environment) {
-        Some(client) => Arc::new(move |command, cwd| gate(command, cwd, Some(&client))),
-        None => Arc::new(|_, _| GateVerdict::Allow),
+fn station_gate(environment: &std::collections::BTreeMap<String, String>) -> Option<Gate> {
+    let client = GateClient::from_environment(environment)?;
+    Some(Arc::new(move |command, cwd| {
+        gate(command, cwd, Some(&client))
+    }))
+}
+
+/// When the thread asks before running a command. In remote-hands mode it never asks (its
+/// sandbox is read-only and the Station gates `theater_run`); with a green ink gate it asks
+/// (`untrusted`) for every command outside Codex's own list of safe reads, so the gate sees
+/// each one.
+fn set_approval_policy(
+    params: &mut Value,
+    environment: &std::collections::BTreeMap<String, String>,
+) {
+    if is_remote_hands(environment) {
+        restrict_to_remote_hands(params);
+    } else if GateClient::from_environment(environment).is_some() {
+        params["approvalPolicy"] = json!("untrusted");
     }
 }
 
 struct CodexSession {
     terminal: Object<dyn TerminalSession>,
-    gate: Gate,
+    gate: Option<Gate>,
     output: Mutex<Vec<u8>>,
     events: Mutex<VecDeque<AgentEvent>>,
     thread_id: Option<SessionId>,
@@ -209,7 +220,7 @@ impl CodexSession {
     fn new(terminal: Object<dyn TerminalSession>, effort: Option<String>) -> Self {
         Self {
             terminal,
-            gate: Arc::new(|_, _| GateVerdict::Allow),
+            gate: None,
             output: Mutex::new(Vec::new()),
             events: Mutex::new(VecDeque::new()),
             thread_id: None,
@@ -219,7 +230,7 @@ impl CodexSession {
         }
     }
 
-    fn with_gate(mut self, gate: Gate) -> Self {
+    fn with_gate(mut self, gate: Option<Gate>) -> Self {
         self.gate = gate;
         self
     }
@@ -338,14 +349,30 @@ const COMMAND_APPROVAL: &str = "item/commandExecution/requestApproval";
 impl CodexSession {
     /// Answers a command approval with the green ink gate: `accept` unless the gate holds the
     /// command, then `decline`, and the reason is steered into the running turn so the Agent
-    /// knows to ask for green ink. Input to a running command is accepted.
+    /// knows to ask for green ink. With a gate, input to a running command and a request that
+    /// names no command are declined: the gate cannot see what they run. Without one (no Cable
+    /// endpoint) everything is accepted.
     fn answer_command_approval(&self, id: &Value, params: &Value) -> Result<(), ProviderError> {
-        let command = params
-            .get("command")
-            .and_then(Value::as_str)
-            .filter(|_| params.get("kind").and_then(Value::as_str) != Some("writeStdin"));
+        let command = params.get("command").and_then(Value::as_str);
         let cwd = params.get("cwd").and_then(Value::as_str).map(Path::new);
-        let verdict = command.map_or(GateVerdict::Allow, |command| (self.gate)(command, cwd));
+        let verdict = match (
+            &self.gate,
+            params.get("kind").and_then(Value::as_str),
+            command,
+        ) {
+            (None, _, _) => GateVerdict::Allow,
+            (Some(_), Some("writeStdin"), _) => GateVerdict::Hold(
+                "Green ink: input to a running command is declined, because the gate cannot see \
+                 what it runs; run the command with all its arguments instead."
+                    .to_owned(),
+            ),
+            (Some(_), _, None) => GateVerdict::Hold(
+                "Green ink: an approval request that names no command is declined; run the \
+                 command with all its arguments instead."
+                    .to_owned(),
+            ),
+            (Some(gate), _, Some(command)) => gate(command, cwd),
+        };
         let decision = match verdict {
             GateVerdict::Allow => "accept",
             GateVerdict::Hold(_) => "decline",
@@ -837,11 +864,22 @@ mod tests {
                 stdout.flush().unwrap();
                 continue;
             }
+            // `stdin: TEXT` asks to write to a running `cat`; `nameless` names no command.
+            let text = message
+                .pointer("/params/input/0/text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let asks = if let Some(command) = text.strip_prefix("run: ") {
+                Some(("command", json!(command)))
+            } else if text.starts_with("stdin: ") {
+                Some(("writeStdin", json!("cat")))
+            } else if text == "nameless" {
+                Some(("command", Value::Null))
+            } else {
+                None
+            };
             if method == "turn/start"
-                && let Some(command) = message
-                    .pointer("/params/input/0/text")
-                    .and_then(Value::as_str)
-                    .and_then(|text| text.strip_prefix("run: "))
+                && let Some((kind, command)) = asks
             {
                 asked += 1;
                 pending = Some(asked);
@@ -854,7 +892,7 @@ mod tests {
                         "params": {
                             "threadId": thread_id, "turnId": "turn-7", "itemId": "item-1",
                             "startedAtMs": 1_790_000_000_000_u64, "command": command,
-                            "cwd": "/work", "kind": "command"
+                            "cwd": "/work", "kind": kind
                         }
                     })
                 )
@@ -1010,23 +1048,25 @@ mod tests {
         }
     }
 
-    fn approvals_gate(approved: Arc<Mutex<Vec<ai6::ActionScope>>>) -> Gate {
-        Arc::new(move |command, _cwd| match ai6::classify(command, &Branches) {
-            Err(reason) => GateVerdict::Hold(reason),
-            Ok(steps) => {
-                let approved = approved.lock().unwrap();
-                match steps
-                    .iter()
-                    .find(|step| !approved.iter().any(|approval| approval.covers(step)))
-                {
-                    None => GateVerdict::Allow,
-                    Some(step) => GateVerdict::Hold(format!(
-                        "call request_approval with kind {} and target {}",
-                        step.kind, step.target
-                    )),
+    fn approvals_gate(approved: Arc<Mutex<Vec<ai6::ActionScope>>>) -> Option<Gate> {
+        Some(Arc::new(move |command, _cwd| {
+            match ai6::classify(command, &Branches) {
+                Err(reason) => GateVerdict::Hold(reason),
+                Ok(steps) => {
+                    let approved = approved.lock().unwrap();
+                    match steps
+                        .iter()
+                        .find(|step| !approved.iter().any(|approval| approval.covers(step)))
+                    {
+                        None => GateVerdict::Allow,
+                        Some(step) => GateVerdict::Hold(format!(
+                            "call request_approval with kind {} and target {}",
+                            step.kind, step.target
+                        )),
+                    }
                 }
             }
-        })
+        }))
     }
 
     fn texts_until_completed(session: &Object<dyn AgentSession>) -> Vec<String> {
@@ -1101,7 +1141,56 @@ mod tests {
             })
             .unwrap();
         assert_eq!(texts_until_completed(&session), ["decision: accept"]);
+
+        // The gate cannot see what these run, so they are declined and the Agent told why.
+        for (text, why) in [
+            ("stdin: git push origin main", "input to a running command"),
+            ("nameless", "names no command"),
+        ] {
+            session
+                .send_message(AgentMessage {
+                    text: text.to_owned(),
+                })
+                .unwrap();
+            let declined = texts_until_completed(&session);
+            assert_eq!(declined[0], "decision: decline", "{text}: {declined:?}");
+            assert!(declined[1].contains(why), "{text}: {declined:?}");
+        }
         session.close().unwrap();
+    }
+
+    #[test]
+    fn a_gated_session_asks_before_every_untrusted_command() {
+        let cable = std::collections::BTreeMap::from([
+            (
+                "AI6_CABLE_MCP_URL".to_owned(),
+                "http://127.0.0.1:1/mcp".to_owned(),
+            ),
+            ("AI6_CABLE_MCP_TOKEN".to_owned(), "token".to_owned()),
+        ]);
+        let mut params = json!({ "cwd": "/work" });
+        set_approval_policy(&mut params, &cable);
+        assert_eq!(params["approvalPolicy"], "untrusted");
+
+        let mut remote = cable.clone();
+        remote.insert(
+            "AI6_THEATER_MCP_URL".to_owned(),
+            "http://127.0.0.1:2/mcp".to_owned(),
+        );
+        remote.insert("AI6_THEATER_MCP_TOKEN".to_owned(), "theater".to_owned());
+        let mut params = json!({ "cwd": "/work" });
+        set_approval_policy(&mut params, &remote);
+        assert_eq!(
+            params["approvalPolicy"], "never",
+            "the Station gates theater_run"
+        );
+
+        let mut params = json!({ "cwd": "/work" });
+        set_approval_policy(&mut params, &std::collections::BTreeMap::new());
+        assert!(
+            params.get("approvalPolicy").is_none(),
+            "no gate, Codex's own policy"
+        );
     }
 
     struct EofTerminalSession;
