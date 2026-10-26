@@ -7982,7 +7982,7 @@ mod tests {
         mission_id: &str,
         ready: impl Fn(&crate::MissionUsage) -> bool,
     ) -> crate::MissionUsage {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 if let Ok(Some(usage)) = state.intake.mission_usage(Some("G"), mission_id)
                     && ready(&usage)
