@@ -2233,7 +2233,7 @@ class BriefOrigin {
     this.itemUrl,
   });
 
-  /// `operator`, `source`, `sleeper`, `proposal` or `registry_drop`.
+  /// `operator`, `source`, `sleeper`, `proposal`, `review` or `registry_drop`.
   final String origin;
 
   /// The Station, or `universal-exports`, that accepted the brief.
@@ -2265,6 +2265,7 @@ class BriefOrigin {
     'sleeper' => 'Sleeper ${principal ?? 'unknown'}, fired by $receivedBy',
     'proposal' =>
       'Proposal by Agent ${principal ?? 'unknown'}, approved via $receivedBy',
+    'review' => 'Chief of Staff review queued by $receivedBy',
     'registry_drop' =>
       'Dropped into the Registry queue (unauthenticated), found by $receivedBy',
     _ => '$origin via $receivedBy',

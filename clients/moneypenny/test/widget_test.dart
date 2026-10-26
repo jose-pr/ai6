@@ -146,6 +146,10 @@ void main() {
       origin({'origin': 'proposal', 'principal': '007'}).describe(),
       'Proposal by Agent 007, approved via universal-exports',
     );
+    expect(
+      origin({'origin': 'review', 'received_by': 'hq'}).describe(),
+      'Chief of Staff review queued by hq',
+    );
     expect(origin({'origin': 'registry_drop'}).isRegistryDrop, isTrue);
     final brief = MissionBriefSummary.fromMissionJson({
       'operation_id': 'G',

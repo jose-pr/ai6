@@ -37,6 +37,60 @@ List<VettingFinding> vettingFindings(Map<String, dynamic>? vetting) => [
     VettingFinding.fromJson(finding as Map<String, dynamic>),
 ];
 
+/// Whether [rune] renders as nothing: direction controls and marks, zero-width characters,
+/// variation selectors, fillers, invisible operators and the soft hyphen, as AI6's vetting
+/// counts them. Tag characters are decoded apart by [revealInvisible].
+bool _isInvisible(int rune) =>
+    (rune >= 0x202A && rune <= 0x202E) ||
+    (rune >= 0x2066 && rune <= 0x2069) ||
+    rune == 0x200E ||
+    rune == 0x200F ||
+    rune == 0x061C ||
+    (rune >= 0x200B && rune <= 0x200D) ||
+    (rune >= 0x2060 && rune <= 0x2064) ||
+    rune == 0xFEFF ||
+    (rune >= 0xFE00 && rune <= 0xFE0F) ||
+    (rune >= 0xE0100 && rune <= 0xE01EF) ||
+    rune == 0x180E ||
+    rune == 0x115F ||
+    rune == 0x1160 ||
+    rune == 0x3164 ||
+    rune == 0xFFA0 ||
+    rune == 0x00AD;
+
+/// [text] with the characters that render as nothing made visible, so an operator sees what
+/// vetting found: each as `<U+XXXX>`, and a run of tag characters (U+E0000 to U+E007F) as the
+/// text it spells, `<tags: ...>`.
+String revealInvisible(String text) {
+  final shown = StringBuffer();
+  final tags = StringBuffer();
+  void flushTags() {
+    if (tags.isEmpty) return;
+    shown.write('<tags: $tags>');
+    tags.clear();
+  }
+
+  for (final rune in text.runes) {
+    if (rune >= 0xE0000 && rune <= 0xE007F) {
+      final code = rune - 0xE0000;
+      tags.write(
+        code >= 0x20 && code <= 0x7E ? String.fromCharCode(code) : '?',
+      );
+      continue;
+    }
+    flushTags();
+    if (_isInvisible(rune)) {
+      shown.write(
+        '<U+${rune.toRadixString(16).toUpperCase().padLeft(4, '0')}>',
+      );
+    } else {
+      shown.writeCharCode(rune);
+    }
+  }
+  flushTags();
+  return shown.toString();
+}
+
 /// A brief vetting held for an operator.
 @immutable
 class HeldBriefSummary {
@@ -222,10 +276,16 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(held.title, style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            revealInvisible(held.title),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
           const SizedBox(height: 4),
-          Text('${held.source} · ${held.key} · held ${utcTime(held.heldAt)}'),
-          if (held.url != null) Text(held.url!),
+          Text(
+            '${revealInvisible(held.source)} · ${held.key} · '
+            'held ${utcTime(held.heldAt)}',
+          ),
+          if (held.url != null) Text(revealInvisible(held.url!)),
           const SizedBox(height: 8),
           for (final finding in held.findings) Text('• ${finding.line}'),
           // The text may carry the very thing vetting caught: shown on request, as text.
@@ -235,7 +295,7 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
             children: [
               Align(
                 alignment: Alignment.centerLeft,
-                child: SelectableText(held.body),
+                child: SelectableText(revealInvisible(held.body)),
               ),
             ],
           ),
@@ -295,9 +355,9 @@ class _HeldDecisionDialogState extends State<_HeldDecisionDialog> {
         children: [
           Text(
             release
-                ? 'Queue “${widget.held.title}” again. Vetting will not hold it '
+                ? 'Queue “${revealInvisible(widget.held.title)}” again. Vetting will not hold it '
                       'again for ${kinds.join(', ')}.'
-                : 'File “${widget.held.title}” as refused without running it.',
+                : 'File “${revealInvisible(widget.held.title)}” as refused without running it.',
           ),
           if (!release) ...[
             const SizedBox(height: 12),

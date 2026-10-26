@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart' show Tab, TextField;
+import 'package:moneypenny/held/held_briefs_page.dart' show revealInvisible;
 import 'package:moneypenny/main.dart';
 
 const heldKey = 'source_github--org_repo_7';
@@ -14,7 +15,7 @@ Map<String, Object?> heldBrief() => {
   'key': heldKey,
   'operation': 'G',
   'brief': {
-    'title': 'Resolve github item org/repo#7',
+    'title': 'Resolve github item\u200B org/repo#7',
     'body': untrustedText,
     'id': 'org/repo#7',
     'source': 'source:github',
@@ -58,7 +59,12 @@ class FakeHeldBriefs {
   http.Response answer(http.Request request) {
     final path = request.url.path;
     if (path.endsWith('/held-briefs')) {
-      return http.Response(jsonEncode(decided ? [] : [heldBrief()]), 200);
+      // As the gateway sends it: JSON, which the client reads as UTF-8.
+      return http.Response(
+        jsonEncode(decided ? [] : [heldBrief()]),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
     }
     if (path.endsWith('/release') || path.endsWith('/refuse')) {
       decided = true;
@@ -138,7 +144,7 @@ void main() {
     addTearDown(board.dispose);
     await openHeldBriefs(tester, board);
 
-    expect(find.text('Resolve github item org/repo#7'), findsOneWidget);
+    expect(find.text('Resolve github item<U+200B> org/repo#7'), findsOneWidget);
     expect(
       find.text('• screening: a phrase that tries to change the instructions'),
       findsOneWidget,
@@ -222,6 +228,16 @@ void main() {
       find.text('• screening: a phrase that tries to change the instructions'),
       findsOneWidget,
     );
+  });
+
+  test('characters that render as nothing are shown by code', () {
+    final tags = String.fromCharCodes([0xE006F, 0xE0062, 0xE0065, 0xE0079]);
+    expect(
+      revealInvisible('fix\u200Bit$tags\u00AD. caf\u00E9 \u202Ex'),
+      'fix<U+200B>it<tags: obey><U+00AD>. caf\u00E9 <U+202E>x',
+    );
+    expect(revealInvisible('end$tags'), 'end<tags: obey>');
+    expect(revealInvisible('plain text'), 'plain text');
   });
 
   testWidgets('without mission.create there are no held briefs to review', (
