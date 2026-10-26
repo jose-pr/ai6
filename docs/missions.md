@@ -461,6 +461,24 @@ often enough that a person should decide. The Operation's timeline records each 
 an `intake` event (`passed`, `held`, `refused`, `released`) with the finding kinds, never
 the brief's text.
 
+An operator with `mission.create` on the Operation reviews held briefs in Moneypenny
+(Administration → Held briefs), with `ai6ctl held-briefs`, or through the API:
+
+```bash
+ai6ctl held-briefs list --operation G
+ai6ctl held-briefs release source_jira--OPS-12 --operation G
+ai6ctl held-briefs refuse source_jira--OPS-13 --operation G --reason "a mirror of OPS-12"
+```
+
+Each held brief lists its findings (`duplicate: the same URL as other work (mission-41)`);
+its text, which may carry what screening caught, is shown only on request and as plain text.
+A **release** returns it to the queue cleared of the kinds it was held for, so the same
+checks do not hold it again; the clearance is kept apart from the brief, so a brief's own
+text cannot claim one. A **refusal** files it as failed with outcome state `refused`; a
+Source still gets its CX report, and the reason stays in the Registry. Both are audited
+(`mission.brief.released`, `mission.brief.refused`). A held brief is never claimed, and a
+Source that polls its item again leaves it alone.
+
 ## Sources
 
 A **Source** is a Guatiao provider that polls a tracker or CI system for work and posts the

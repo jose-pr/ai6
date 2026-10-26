@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `refuse_held`, `clearance`, `clear_brief`, on the file and SQL Registries); a release
   clears the kinds it was held for. The timeline records `intake` events. `ai6::vet` and
   `VettingPolicy` are the library form.
+- Held briefs for operators: Universal Exports lists, releases and refuses them
+  (`/v1/user/operations/{id}/held-briefs`, `mission.create`; audited as
+  `mission.brief.released` and `mission.brief.refused`), `ai6ctl held-briefs
+  list|release|refuse`, and Moneypenny's Administration has a Held briefs tab that shows the
+  findings and the brief's text only on request. Administration now also appears for an
+  account whose only administrative permission is `mission.create`.
 - Live configuration: a Station checks its roster source and `loadouts.toml` every 5 seconds
   (`ai6 serve --config-poll`, `StationConfig::with_config_poll`, 0 off) and applies a change
   without a restart; running Sessions keep what they started with. A revision that fails
