@@ -1,0 +1,145 @@
+{
+  "valid": {
+    "text": {
+      "version": 1,
+      "title": "Why mission-7 stalled",
+      "blocks": [
+        {
+          "kind": "text",
+          "markdown": "# Stalled\n\nThe Session **stopped writing** for *ten minutes*.\n\n- Station `worker` is full\n- See [the Mission](app:/missions/G/mission-7)"
+        }
+      ]
+    },
+    "table": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Station", "Running", "Healthy"],
+          "rows": [["hq", 0, true], ["worker", 4, true], ["field-2", null, false]]
+        }
+      ]
+    },
+    "key_values": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "key_values",
+          "items": [
+            {"key": "Headquarters", "value": "hq"},
+            {"key": "Missions running", "value": 4}
+          ]
+        }
+      ]
+    },
+    "bar_chart": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "chart",
+          "chart": "bar",
+          "title": "Tokens today",
+          "y_label": "tokens",
+          "series": [
+            {"name": "G", "points": [{"x": "007", "y": 1200}, {"x": "008", "y": 300}]}
+          ]
+        }
+      ]
+    },
+    "line_chart": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "chart",
+          "chart": "line",
+          "x_label": "hour",
+          "series": [
+            {"name": "cost", "points": [{"x": 1, "y": 0.5}, {"x": 2, "y": 1.25}, {"x": 3, "y": 0.75}]}
+          ]
+        }
+      ]
+    },
+    "cards": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "card",
+          "card": "mission",
+          "id": "mission-7",
+          "operation_id": "G",
+          "state": "stalled",
+          "fields": [{"key": "Agent", "value": "007"}]
+        },
+        {"kind": "card", "card": "station", "id": "worker", "state": "healthy"},
+        {"kind": "card", "card": "theater", "id": "build-box"}
+      ]
+    },
+    "timeline": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "timeline",
+          "items": [
+            {"at": 1798000000, "label": "working"},
+            {"at": 1798000600, "label": "stalled", "detail": "no output for 600 s"}
+          ]
+        }
+      ]
+    },
+    "diff": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "diff",
+          "title": "agents/008",
+          "before": "handler = \"codex\"\npriority = 1",
+          "after": "handler = \"codex\"\npriority = 3"
+        }
+      ]
+    },
+    "form": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "form",
+          "tool": "propose_roster_edit",
+          "title": "Edit Agent 008",
+          "fixed": {"kind": "agents", "key": "008"},
+          "fields": [
+            {"name": "definition", "label": "Settings (JSON)", "type": "json", "value": "{\"priority\": 3}"}
+          ]
+        }
+      ]
+    }
+  },
+  "invalid": [
+    {
+      "reason": "version",
+      "view": {"version": 2, "blocks": [{"kind": "text", "markdown": "hi"}]}
+    },
+    {
+      "reason": "unknown variant",
+      "view": {"version": 1, "blocks": [{"kind": "html", "markdown": "<script>alert(1)</script>"}]}
+    },
+    {
+      "reason": "unknown field",
+      "view": {"version": 1, "blocks": [{"kind": "text", "markdown": "hi", "onclick": "x"}]}
+    },
+    {
+      "reason": "into the app",
+      "view": {"version": 1, "blocks": [{"kind": "text", "markdown": "[log in](https://evil.example/login)"}]}
+    },
+    {
+      "reason": "one cell per column",
+      "view": {"version": 1, "blocks": [{"kind": "table", "columns": ["a", "b"], "rows": [["only one"]]}]}
+    },
+    {
+      "reason": "propose_",
+      "view": {"version": 1, "blocks": [{"kind": "form", "tool": "confirm", "title": "x", "fields": [{"name": "a", "label": "a", "type": "text"}]}]}
+    },
+    {
+      "reason": "1 to 24 blocks",
+      "view": {"version": 1, "blocks": []}
+    }
+  ]
+}

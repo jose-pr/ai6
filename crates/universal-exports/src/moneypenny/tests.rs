@@ -1031,3 +1031,81 @@ async fn a_confirmed_roster_edit_goes_through_the_roster_with_its_checks_and_aud
     assert_eq!(audits(&served, "roster.refused").len(), 1);
     assert_eq!(audits(&served, "moneypenny.confirmed").len(), 2);
 }
+
+#[tokio::test]
+async fn views_are_shown_only_when_they_fit_the_schema_and_forms_become_proposals() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Show me the Stations.").await;
+    let token = &job.mcp_token;
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../clients/moneypenny/test/fixtures/assistant_views.json"
+    ))
+    .unwrap();
+
+    let refused = call_tool(
+        &served,
+        token,
+        "show",
+        json!({"view": fixture["invalid"][1]["view"]}),
+    )
+    .await;
+    assert_eq!(refused["isError"], true);
+    let reason = refused["content"][0]["text"].as_str().unwrap();
+    assert!(reason.starts_with("View refused"), "{reason}");
+
+    let shown = call_tool(
+        &served,
+        token,
+        "show",
+        json!({"view": fixture["valid"]["table"]}),
+    )
+    .await;
+    assert_eq!(shown["isError"], false, "{shown}");
+    let form = call_tool(
+        &served,
+        token,
+        "show",
+        json!({"view": fixture["valid"]["form"]}),
+    )
+    .await;
+    let form_id = form["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .trim_start_matches("Shown to the person as ")
+        .trim_end_matches('.')
+        .to_owned();
+    let frames = finish(&served, &mut app, &job).await;
+    let views: Vec<&Value> = frames
+        .iter()
+        .filter(|frame| frame["type"] == "entry" && frame["entry"]["role"] == "view")
+        .map(|frame| &frame["entry"]["data"]["view"])
+        .collect();
+    assert_eq!(views.len(), 2, "the refused view never reached the app");
+    assert_eq!(views[0], &fixture["valid"]["table"]);
+
+    // Submitting the form records a proposal of its tool; a field it does not have is refused.
+    app.send(WsMessage::Text(
+        json!({"type": "submit", "view": form_id, "values": {"key": "007"}})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
+    let frames = receive_until(&mut app, |frame| frame["type"] == "error").await;
+    assert_eq!(frames.last().unwrap()["code"], "bad_request");
+    app.send(WsMessage::Text(
+        json!({"type": "submit", "view": form_id, "values": {"definition": "{\"priority\": 3}"}})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "entry" && frame["entry"]["role"] == "proposal"
+    })
+    .await;
+    let proposal = proposal_of(&frames);
+    assert_eq!(proposal["status"], "pending");
+    assert_eq!(proposal["request"]["path"], "/v1/user/roster/agents/008");
+    assert_eq!(proposal["request"]["body"], json!({"priority": 3}));
+}

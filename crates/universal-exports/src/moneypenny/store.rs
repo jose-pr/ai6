@@ -28,8 +28,10 @@ pub(crate) enum Role {
     Tools,
     /// A failure the person should see.
     Error,
-    /// A change Moneypenny proposed; data is the proposal, kept current.
+    /// A change Moneypenny proposed; `data` is the proposal, kept current.
     Proposal,
+    /// A view Moneypenny showed; `data` is `{id, view}`.
+    View,
 }
 
 /// One item of a conversation as the app shows it.

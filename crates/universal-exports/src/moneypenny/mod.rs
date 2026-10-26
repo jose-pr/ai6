@@ -16,6 +16,7 @@ mod guide;
 pub(crate) mod mcp;
 mod store;
 pub(crate) mod tools;
+pub(crate) mod views;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -754,6 +755,90 @@ impl Assistant {
         }
     }
 
+    /// Shows a view Moneypenny built, when it is exactly the view schema; otherwise tells her
+    /// why and shows nothing.
+    pub(crate) fn show(&self, granted: &Granted, input: &Value) -> tools::Outcome {
+        let view = match views::parse(input) {
+            Ok(view) => view,
+            Err(reason) => {
+                return tools::Outcome::error(format!(
+                    "View refused: {reason}. Nothing was shown; fix the view and call show again."
+                ));
+            }
+        };
+        let id = format!("view-{}", Uuid::new_v4().simple());
+        let max_entries = self.config.max_entries;
+        let mut desk = self.desk();
+        let Some(conversation) = desk
+            .store
+            .owned(&granted.conversation_id, &granted.person_id)
+        else {
+            return tools::Outcome::error("The conversation is gone.");
+        };
+        conversation.push(
+            Entry {
+                role: Role::View,
+                text: view.title.clone().unwrap_or_default(),
+                at: now(),
+                data: Some(json!({"id": id, "view": view})),
+            },
+            max_entries,
+        );
+        tools::Outcome {
+            text: format!("Shown to the person as {id}."),
+            is_error: false,
+        }
+    }
+
+    /// Turns a submitted form into a proposal of its tool, made in this socket's session.
+    async fn submit(
+        &self,
+        gateway: &Gateway,
+        conversation_id: &str,
+        person_id: &str,
+        token: &str,
+        view_id: &str,
+        values: &serde_json::Map<String, Value>,
+    ) -> Result<(), (&'static str, String)> {
+        let view = {
+            let mut desk = self.desk();
+            let conversation = desk
+                .store
+                .owned(conversation_id, person_id)
+                .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
+            let id = Value::String(view_id.to_owned());
+            conversation
+                .entries
+                .iter()
+                .filter(|entry| entry.role == Role::View)
+                .filter_map(|entry| entry.data.as_ref())
+                .find(|data| data.get("id") == Some(&id))
+                .and_then(|data| serde_json::from_value::<views::View>(data["view"].clone()).ok())
+                .ok_or(("not_found", "There is no such view.".to_owned()))?
+        };
+        let (tool, input) =
+            views::form_input(&view, values).map_err(|reason| ("bad_request", reason))?;
+        let tool = actions::write_tools()
+            .iter()
+            .find(|write| write.name == tool)
+            .ok_or(("bad_request", "The form names no tool.".to_owned()))?;
+        let granted = Granted {
+            conversation_id: conversation_id.to_owned(),
+            person_id: person_id.to_owned(),
+            bearer: token.to_owned(),
+        };
+        let outcome = self.propose(gateway, &granted, tool, &input).await;
+        if outcome.is_error {
+            return Err(("refused", outcome.text));
+        }
+        if let Some(conversation) = self.desk().store.owned(conversation_id, person_id) {
+            conversation.notes.push(format!(
+                "[App: the person submitted the form of {view_id}. {}]",
+                outcome.text
+            ));
+        }
+        Ok(())
+    }
     /// Cancels a pending proposal; Moneypenny hears of it with the next message.
     fn cancel(
         &self,
@@ -1001,6 +1086,10 @@ enum FromApp {
     Cancel {
         proposal: String,
     },
+    Submit {
+        view: String,
+        values: serde_json::Map<String, Value>,
+    },
 }
 
 fn frame(value: &Value) -> Message {
@@ -1084,6 +1173,15 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
                         Ok(FromApp::Cancel { proposal }) => {
                             if let Err((code, message)) =
                                 assistant.cancel(&conversation_id, &person.id, &proposal)
+                                && sender.send(frame(&problem(code, &message))).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(FromApp::Submit { view, values }) => {
+                            if let Err((code, message)) = assistant
+                                .submit(&gateway, &conversation_id, &person.id, &token, &view, &values)
+                                .await
                                 && sender.send(frame(&problem(code, &message))).await.is_err()
                             {
                                 break;
