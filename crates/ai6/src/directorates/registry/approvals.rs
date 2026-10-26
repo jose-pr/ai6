@@ -1122,6 +1122,7 @@ mod tests {
 
     backend_tests!(
         an_approval_is_spent_once_and_only_while_live,
+        stations_spending_one_approval_at_once_have_one_winner,
         a_request_is_approved_and_then_found_by_its_scope,
         expired_and_revoked_approvals_do_not_match,
         an_undecided_request_expires_as_refused,
@@ -1176,6 +1177,28 @@ mod tests {
         };
         assert_eq!(approval.spent_at, Some(NOW + 1.0));
         assert!(!reopened.spend_approval("G", &asked.id, NOW + 3.0).unwrap());
+    }
+
+    fn stations_spending_one_approval_at_once_have_one_winner(store: &dyn Store) {
+        let registry = store.handle();
+        let asked = request("release-2", "release", "tag v2");
+        registry.request_approval(&asked).unwrap();
+        registry
+            .decide_approval("G", &asked.id, &Ruling::approve("m", NOW, NOW + 60.0))
+            .unwrap();
+        let spenders = (0..4)
+            .map(|_| {
+                let station = store.handle();
+                let id = asked.id.clone();
+                std::thread::spawn(move || station.spend_approval("G", &id, NOW + 1.0).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let won = spenders
+            .into_iter()
+            .map(|spender| spender.join().unwrap())
+            .filter(|won| *won)
+            .count();
+        assert_eq!(won, 1);
     }
 
     fn a_request_is_approved_and_then_found_by_its_scope(store: &dyn Store) {
