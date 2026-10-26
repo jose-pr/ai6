@@ -40,6 +40,23 @@ pub universal_exports::Attachment::mode: universal_exports::AttachMode
 pub universal_exports::Attachment::replay: alloc::vec::Vec<alloc::vec::Vec<u8>>
 impl core::fmt::Debug for universal_exports::Attachment
 pub fn universal_exports::Attachment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct universal_exports::BoardAccount
+pub universal_exports::BoardAccount::account: alloc::string::String
+pub universal_exports::BoardAccount::active: alloc::vec::Vec<universal_exports::BoardClaim>
+pub universal_exports::BoardAccount::handler: alloc::string::String
+pub universal_exports::BoardAccount::kind: alloc::string::String
+pub universal_exports::BoardAccount::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub universal_exports::BoardAccount::last_used: core::option::Option<f64>
+pub universal_exports::BoardAccount::limited_until: core::option::Option<f64>
+pub universal_exports::BoardAccount::max_concurrent: core::option::Option<usize>
+pub universal_exports::BoardAccount::pool: alloc::string::String
+pub universal_exports::BoardAccount::priority: i64
+pub universal_exports::BoardAccount::tokens_today: u64
+pub universal_exports::BoardAccount::windows: alloc::vec::Vec<universal_exports::BoardWindow>
+#[non_exhaustive] pub struct universal_exports::BoardClaim
+pub universal_exports::BoardClaim::mission_id: alloc::string::String
+pub universal_exports::BoardClaim::since: f64
+pub universal_exports::BoardClaim::station_id: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::BoardMission
 pub universal_exports::BoardMission::attempts: alloc::vec::Vec<universal_exports::MissionAttempt>
 pub universal_exports::BoardMission::brief: core::option::Option<universal_exports::LaunchManifest>
@@ -85,6 +102,11 @@ pub universal_exports::BoardTheater::sessions: usize
 pub universal_exports::BoardTheater::unavailable: core::option::Option<alloc::string::String>
 pub universal_exports::BoardTheater::weakened: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardTheater::workdir: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::BoardWindow
+pub universal_exports::BoardWindow::name: alloc::string::String
+pub universal_exports::BoardWindow::resets_at: core::option::Option<f64>
+pub universal_exports::BoardWindow::status: core::option::Option<alloc::string::String>
+pub universal_exports::BoardWindow::used_permille: core::option::Option<u16>
 #[non_exhaustive] pub struct universal_exports::ControlStatus
 pub universal_exports::ControlStatus::action: alloc::string::String
 pub universal_exports::ControlStatus::agent: core::option::Option<alloc::string::String>
@@ -175,6 +197,9 @@ pub universal_exports::PlacementPreview::choices: alloc::vec::Vec<ai6::directora
 pub universal_exports::PlacementPreview::operation_id: alloc::string::String
 pub universal_exports::PlacementPreview::policy_station: alloc::string::String
 pub universal_exports::PlacementPreview::rejections: alloc::vec::Vec<ai6::directorates::m::placement::PlacementRejection>
+#[non_exhaustive] pub struct universal_exports::PoolBoard
+pub universal_exports::PoolBoard::accounts: alloc::vec::Vec<universal_exports::BoardAccount>
+pub universal_exports::PoolBoard::operation_id: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::StationBoard
 pub universal_exports::StationBoard::headquarters_station: core::option::Option<alloc::string::String>
 pub universal_exports::StationBoard::stations: alloc::vec::Vec<universal_exports::BoardStation>
