@@ -171,3 +171,49 @@ and the list is bounded per source address, in total, and by how often one peer 
 address is written down again. A Station's `identity.pem` and `peers/` directory from an
 earlier version are read as they are. The mechanism is the shared
 [coqui-peer-tls](https://boriken-dev.github.io/coqui-peer-tls/) crate.
+
+## Provider libraries: pins and publishers
+
+A Station runs every provider library it loads with its own privileges, so it checks them
+first (bona fides). A **pin set**, `plugins.toml` in the configuration directory (or
+`ai6 serve --plugin-pins PATH`), names the libraries it accepts:
+
+```toml
+# profile = "strict"   # optional; see below
+[[library]]
+file = "ai6_agent_claude.dll"
+pin = "sha256:..."               # the library's own digest
+
+[[library]]
+file = "ai6_agent_codex.dll"
+publisher = "ed25519:..."        # or: whoever holds this key signed it
+# require = "both"               # with pin and publisher together: both must hold
+```
+
+`ai6 plugins pin PATH...` prints the entry that pins each AI6 provider library it is given.
+A publisher signs the library's 32-byte SHA-256 with Ed25519 and ships the 64-byte signature
+beside it as `FILE.sig`; with OpenSSL:
+
+```console
+openssl dgst -sha256 -binary ai6_agent_codex.dll > digest.bin
+openssl pkeyutl -sign -rawin -inkey publisher.pem -in digest.bin -out ai6_agent_codex.dll.sig
+openssl pkey -in publisher.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n'
+```
+
+The last line prints the key's 64 hex digits for `publisher = "ed25519:..."`. A rebuilt
+library signed with the same key loads on every Station without re-pinning; removing the
+`publisher` line, or the entry, is how a key or a library stops being accepted. There is no
+key server and no revocation list.
+
+The **profile** (`--plugin-profile`, else the pin set's `profile`) decides what loads:
+
+| Profile | Default when | What loads |
+| --- | --- | --- |
+| `strict` | a pin set exists | only libraries a pin or publisher accepts. Each is read once, checked, and loaded from a copy written to the state directory's `plugins/verified/sha256-HEX.EXT`, never from where it was found. A refusal names the expected and found digests or the publisher. |
+| `report` | there is no pin set | every library, from where it was found; each one no entry accepts is a weakening |
+| `off` | never | every library, unchecked (itself a weakening) |
+
+Every weakening is printed when the Station starts, listed by `GET /internal/plugins` with
+each library's digest and verdict, and published in the Station's check-in
+(`plugins_weakened`). Only the libraries that declare an AI6 provider kind are checked;
+the field runner (`ai6 runner serve`) and `ai6 theater provision` scan under `report`.

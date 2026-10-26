@@ -60,6 +60,7 @@ and `Tanner`.
 
 ```console
 ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
+          [--plugin-pins PATH] [--plugin-profile strict|report|off]
           [--registry LOCATION] [--config LOCATION] [--headquarters-lease SECS]
           [--station ID] [--role control|execution]... [--label KEY=VALUE]...
           [--terminal ID] [--max-concurrent-missions N] [--resources-every SECS]
@@ -67,6 +68,7 @@ ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
           [watchdog options]
 ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]
 ai6 runner call [--state-dir PATH] METHOD PATH
+ai6 plugins pin PATH...
 ai6 identity
 ai6 peer waiting
 ai6 peer accept FINGERPRINT

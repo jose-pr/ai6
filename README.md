@@ -74,8 +74,10 @@ flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release \
 
 ```text
 ai6 serve [--listen ADDRESS] [--config-dir PATH] [--plugin-path PATH]...
+          [--plugin-pins PATH] [--plugin-profile strict|report|off]
           [--station ID] [--role control|execution]... [--label KEY=VALUE]...
           [--terminal ID] [--registry LOCATION] [--config LOCATION]
+ai6 plugins pin PATH...
 ai6 identity
 ai6 peer waiting
 ai6 peer accept FINGERPRINT

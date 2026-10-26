@@ -12,7 +12,9 @@ detail; the handler contract can support other harness transports.
 Claude and Codex handlers are Guatiao providers under `crates/providers/agents/`.
 AI6 resolves an Agent from the roster and the Operation's policy, then supplies the
 Mission ID, task prompt, initial context and working directory. The handler returns the
-provider-issued Session ID; AI6 retains that ID when resuming the same Session.
+provider-issued Session ID; AI6 retains that ID when resuming the same Session. A Station
+loads handler libraries the way it loads every provider: by pin or publisher signature
+under the `strict` profile ([Stations](stations.md#provider-libraries-pins-and-publishers)).
 
 ## Agents and roles
 

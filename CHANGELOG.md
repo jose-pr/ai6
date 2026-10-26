@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   gateway's Mission detail and Moneypenny show the origin. `submit_brief` stores it,
   `ingest_source_item`, `fire_sleeper` and `promote_mission_proposal` take the receiving
   Station or gateway.
+- Provider library pins and publishers (bona fides): a `plugins.toml` pin set
+  (`PinSet`, `ai6 serve --plugin-pins`) accepts each provider library by its `sha256:` digest
+  (`ai6 plugins pin PATH` prints the entry), by an Ed25519 publisher key whose signature of
+  the library's SHA-256 ships beside it as `FILE.sig`, or by both. Under the `strict`
+  profile, the default with a pin set, only accepted libraries load, each from a verified
+  copy under the state directory, and a refusal names the expected and found digests or
+  the publisher; `report`, the default without one, loads everything and lists each
+  unaccepted library as a weakening; `off` checks nothing (`--plugin-profile`). Weakenings
+  are printed at start, served by `/internal/plugins` and published in the check-in.
 
 - Account pools: provider accounts shared by every Station and balanced by the quota they
   have left. `loadouts.toml` declares `[pool.<id>]` (handler, `operations` globs, strategy

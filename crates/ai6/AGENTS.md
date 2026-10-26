@@ -16,9 +16,9 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | `postgres` | `SqlRegistry` and `SqlConfigSource` in PostgreSQL, shared by the Stations of an HA deployment. | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
-MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, serde, toml, fs2, sha2, lru and zeroize.
-`daemon` adds Axum, Tokio, Guatiao provider loading, `ureq`, `subtle` and `futures-util`,
-`publisher` adds `url`, and `station-tls` adds `coqui-peer-tls`, `coqui-peer` and rustls.
+MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, `coqui-peer` (digest text for pins), serde, toml, fs2, sha2, lru and zeroize.
+`daemon` adds Axum, Tokio, Guatiao provider loading, `ureq`, `subtle`, `futures-util` and `ring` (Ed25519 publisher signatures),
+`publisher` adds `url`, and `station-tls` adds `coqui-peer-tls` and rustls.
 `sqlite` adds `rusqlite` with SQLite compiled in (a C compiler at build time); `postgres`
 adds `tokio-postgres`, Tokio, `tokio-rustls`, rustls (ring) and `rustls-native-certs`. `cli` adds clap and Tokio signal support. The crate builds as a
 Rust library and contains no `unsafe` code. `cables-mcp` adds RMCP's Streamable HTTP
@@ -2663,10 +2663,54 @@ with every setting at its default (the `claude` and `codex` handlers); a provide
 required setting answers `PluginBuildError::ConfigurationRequired`.
 `scan_summary()` reports loaded, skipped, failed and unreadable paths.
 
+```rust
+impl Plugins { pub fn scan_with(paths: &[PathBuf], policy: &PluginPolicy) -> Plugins; } // scan() = default policy
+pub struct PluginPolicy;   // Default: report, no pins
+impl PluginPolicy {
+    pub fn new(pins: Option<PinSet>, verified_dir: impl Into<PathBuf>) -> Self; // profile: pin set's, else strict with pins, report without
+    pub fn with_profile(self, profile: PluginProfile) -> Self;
+    pub fn profile(&self) -> PluginProfile;  pub fn pins(&self) -> &PinSet;
+}
+pub struct PluginScanSummary { pub profile: String, pub loaded, skipped, failed, unreadable: Vec<String>,
+    pub checked: Vec<LibraryCheck>, pub refused: Vec<String>, pub weakened: Vec<String> }
+pub struct LibraryCheck { pub path: String, pub digest: String /* sha256:HEX */,
+    pub verdict: String /* accepted: ... | unpinned | refused: ... */, pub loaded_from: Option<String> }
+pub fn pin_entry(path: &Path) -> io::Result<LibraryPin>;  // the digest entry for an AI6 provider library
+pub fn log_scan(summary: &PluginScanSummary);           // refusals and weakenings to stderr
+
+// ai6::directorates::registry::bona_fides
+pub enum PluginProfile { Strict, Report, Off }           // lowercase; FromStr; default_for(pins: bool)
+pub struct PublisherKey;                                 // "ed25519:" + 64 hex; from_bytes, as_bytes
+pub enum Require { Either /* default */, Both }
+pub struct LibraryPin { pub file: String, pub pin: Option<coqui_peer::PeerId>, pub publisher: Option<PublisherKey>, pub require: Require }
+impl LibraryPin { digest(file, pin) / publisher(file, key) / with_pin / with_publisher / requiring_both }
+pub struct PinSet { pub profile: Option<PluginProfile>, pub libraries: Vec<LibraryPin> /* [[library]] */ }
+impl PinSet {
+    pub fn new() -> Self;  with_profile;  with_library;
+    pub fn from_toml(text: &str) -> Result<Self, String>;
+    pub fn load(path: &Path) -> io::Result<Option<Self>>;   // None when the file is absent
+    pub fn validate(&self) -> Result<(), String>;  pub fn weakenings(&self) -> Vec<String>; // SHA-1 pins
+    pub fn check(&self, file: &str, bytes: &[u8], signature: Option<&[u8]>,
+                 verify: &dyn Fn(&PublisherKey, &[u8], &[u8]) -> bool) -> PinCheck;
+}
+pub enum PinCheck { Accepted(String), Unpinned, Refused(String) }
+pub fn library_pin(bytes: &[u8]) -> coqui_peer::PeerId;  // sha256:HEX
+```
+
+Only files that declare an AI6 provider kind are checked. Under `strict` each is read once,
+checked against the pin set by its file name, and handed to Guatiao as a copy
+`verified_dir/sha256-HEX.EXT`; anything else is skipped without reaching the loader. A
+publisher entry needs `FILE.sig` beside the library: the 64-byte Ed25519 signature of the
+library's 32-byte SHA-256. Under `report` libraries load from where they were found and each
+unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-in carries
+`plugins_weakened` when the list is not empty.
+
 ## Command line
 
-- `ai6 serve [--listen 127.0.0.1:7081] [--station ID] [--role control|execution]... [--label KEY=VALUE]... [--terminal ID] [--config-dir PATH] [--plugin-path PATH]...`
-  (feature `cli`): run the Station and load Operation and Agent configuration.
+- `ai6 serve [--listen 127.0.0.1:7081] [--station ID] [--role control|execution]... [--label KEY=VALUE]... [--terminal ID] [--config-dir PATH] [--plugin-path PATH]... [--plugin-pins PATH] [--plugin-profile strict|report|off]`
+  (feature `cli`): run the Station and load Operation and Agent configuration. The pin set
+  defaults to `plugins.toml` in the configuration directory; verified copies go to the state
+  directory's `plugins/verified/`.
   `--terminal` pins the terminal provider; without it an available one is used,
   preferring `pty`. It accepts
   `--max-concurrent-missions 4`, `--stall-timeout 300`, `--loop-timeout 300`,
@@ -2686,6 +2730,8 @@ required setting answers `PluginBuildError::ConfigurationRequired`.
   means no runner answered.
 - `ai6 green-ink gate`: Claude Code's `PreToolUse` hook for shell commands (see Harness
   gate); the Claude handler passes it through `--settings`. Always exits 0.
+- `ai6 plugins pin PATH...` prints the `plugins.toml` entries that pin AI6 provider
+  libraries by SHA-256; anything else is refused with a non-zero exit.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.
 - `ai6 sleeper [--config-dir PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:
