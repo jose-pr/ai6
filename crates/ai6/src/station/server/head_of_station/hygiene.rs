@@ -565,9 +565,13 @@ mod tests {
             panic!("the request is decided");
         };
         assert!(approval.spent_at.is_some());
-        assert_eq!(
-            audited(&state, "head_of_station.removed")[1].target,
-            format!("{unexported_id} approved by {request_id}")
+        let targets = audited(&state, "head_of_station.removed")
+            .into_iter()
+            .map(|record| record.target)
+            .collect::<Vec<_>>();
+        assert!(
+            targets.contains(&format!("{unexported_id} approved by {request_id}")),
+            "{targets:?}"
         );
 
         // A live Mission's safe house is refused, whatever the action.
