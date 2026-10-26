@@ -10,7 +10,9 @@
 //! Output is read on a thread into a channel, so `read` can time out: a blocking
 //! master read is not reliably interrupted by killing the child. The child's exit
 //! is asked of the child itself, never inferred from EOF, because a pseudo-console
-//! can stay readable after its program has exited.
+//! can stay readable after its program has exited. For the same reason the end of the
+//! output is not left to the master: once the child has exited and nothing more has arrived
+//! for 200 ms, `read` reports it.
 //!
 //! On Windows the reading thread also removes cursor position queries (`ESC[6n`) from the
 //! output, and another thread answers them, so the reader never waits on the writer. ConPTY
@@ -44,6 +46,14 @@ use os::ProcessTree;
 
 const READ_CHUNK: usize = 65536;
 const EXIT_POLL: Duration = Duration::from_millis(10);
+/// How often a waiting `read` asks whether the child has exited.
+const EXIT_CHECK: Duration = Duration::from_millis(50);
+/// How long the output must stay quiet after the child has exited before `read` reports its
+/// end: ConPTY can deliver the last of a program's output after the program has exited, and
+/// keeps the output open until the pseudo-console is closed.
+const DRAIN_QUIET: Duration = Duration::from_millis(200);
+/// The longest `kill` waits for the child and its process tree to have exited.
+const KILL_WAIT: Duration = Duration::from_secs(2);
 /// ConPTY takes rows and columns as signed 16-bit numbers.
 const MAX_DIMENSION: u16 = i16::MAX as u16;
 /// A cursor position query (DSR 6).
@@ -75,6 +85,8 @@ struct PtySession {
     /// The part of a chunk that did not fit the caller's buffer.
     pending: Mutex<Vec<u8>>,
     eof: AtomicBool,
+    /// Since when the child has been seen exited with no output arriving.
+    quiet_since: Mutex<Option<Instant>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
@@ -182,6 +194,7 @@ impl PtySession {
             chunks: Mutex::new(rx),
             pending: Mutex::new(Vec::new()),
             eof: AtomicBool::new(false),
+            quiet_since: Mutex::new(None),
             writer,
             master: Mutex::new(pair.master),
             child: Mutex::new(child),
@@ -212,13 +225,35 @@ impl TerminalSession for PtySession {
             if self.eof.load(Ordering::Acquire) {
                 return Ok(0);
             }
-            let timeout = Duration::from_millis(timeout_ms.max(0) as u64);
-            match lock(&self.chunks)?.recv_timeout(timeout) {
-                Ok(chunk) => *pending = chunk,
-                Err(RecvTimeoutError::Timeout) => return Ok(READ_TIMED_OUT),
-                Err(RecvTimeoutError::Disconnected) => {
-                    self.eof.store(true, Ordering::Release);
-                    return Ok(0);
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+            let chunks = lock(&self.chunks)?;
+            loop {
+                let now = Instant::now();
+                let drained_at = match self.poll_exit()? {
+                    Some(_) => Some(*lock(&self.quiet_since)?.get_or_insert(now) + DRAIN_QUIET),
+                    None => None,
+                };
+                let until = drained_at.unwrap_or(now + EXIT_CHECK).min(deadline);
+                match chunks.recv_timeout(until.saturating_duration_since(now)) {
+                    Ok(chunk) => {
+                        *lock(&self.quiet_since)? = None;
+                        *pending = chunk;
+                        break;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        self.eof.store(true, Ordering::Release);
+                        return Ok(0);
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        let now = Instant::now();
+                        if drained_at.is_some_and(|at| now >= at) {
+                            self.eof.store(true, Ordering::Release);
+                            return Ok(0);
+                        }
+                        if now >= deadline {
+                            return Ok(READ_TIMED_OUT);
+                        }
+                    }
                 }
             }
         }
@@ -248,6 +283,11 @@ impl TerminalSession for PtySession {
         self.tree.kill().map_err(internal)?;
         // An error here means it already exited, which is what was asked.
         let _ = lock(&self.child)?.kill();
+        // Killing is asynchronous; a caller may remove the working directory next.
+        let deadline = Instant::now() + KILL_WAIT;
+        while (self.poll_exit()?.is_none() || self.tree.running()) && Instant::now() < deadline {
+            std::thread::sleep(EXIT_POLL);
+        }
         Ok(())
     }
 

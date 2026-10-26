@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The `pty` terminal reports the end of a program's output (`read` returns `0`) once the
+  program has exited and its output has been quiet for 200 ms, on every platform, so a
+  harness that exits is noticed although ConPTY keeps the output open after its program has
+  exited. `kill` returns once the program, and on Windows its whole Job Object, has exited
+  (at most 2 s).
 - The `pty` terminal on Linux and macOS starts its program in non-canonical mode with no
   echo, so a handler's input line of any length (a large stream-json message or JSON-RPC
   request) reaches the harness whole and what is written does not come back as output.

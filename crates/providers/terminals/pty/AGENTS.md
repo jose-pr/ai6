@@ -44,9 +44,17 @@ pinned with `ai6 serve --terminal`; Agents and handlers do not choose one.
 - **Exit** is asked of the child, never inferred from EOF: a pseudo-console can stay
   readable after its program exits. A signal is reported by number when `portable-pty`
   names it, else `-1`.
+- **End of output**: `read` returns `0` when the terminal closes, and also once the child
+  has exited and no output has arrived for 200 ms, on every platform. ConPTY keeps the
+  output open until the pseudo-console is closed, and on Unix a process the child left
+  running keeps the terminal open; either way the caller sees the end after the child's
+  last output. A waiting `read` asks for the exit every 50 ms. After the first `0`, every
+  `read` returns `0`.
 - **Kill** takes the whole process tree. On Unix the child is a session leader, so its
   process group is killed (`killpg`, SIGKILL). On Windows the child is assigned to a Job
-  Object with `KILL_ON_JOB_CLOSE`.
+  Object with `KILL_ON_JOB_CLOSE`. `kill` returns once the child has exited and, on Windows,
+  the Job Object has no process left, or after 2 s. Windows may still refuse to remove the
+  child's working directory for a few tens of milliseconds after that (os error 32): retry.
 - **Input** is passed through on Unix. On Windows, ConPTY reads Enter as CR, so a bare LF
   or a CRLF pair is sent as one CR.
 - **Drop** kills a running program and waits for it.

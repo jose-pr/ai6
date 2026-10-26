@@ -30,6 +30,12 @@ impl ProcessTree {
         unsafe { libc::killpg(self.0, libc::SIGKILL) };
         Ok(())
     }
+
+    /// Always `false`: a Unix directory or file can be removed while processes still use it,
+    /// so nothing waits on the rest of the group once the child itself has exited.
+    pub(crate) fn running(&self) -> bool {
+        false
+    }
 }
 
 /// Turns off line editing and echo on the terminal before the program starts, so input of any

@@ -567,7 +567,9 @@ pub trait TerminalSession: Send + Sync {
     /// The program's process id.
     fn pid(&self) -> i64;
     /// Copies output into `dst`: the byte count, `0` once no more can ever arrive, or
-    /// [`READ_TIMED_OUT`] after `timeout_ms` milliseconds with nothing.
+    /// [`READ_TIMED_OUT`] after `timeout_ms` milliseconds with nothing. A provider whose
+    /// output can stay open after its program has exited (ConPTY) answers `0` once the program
+    /// has exited and its output is drained.
     fn read(&self, dst: &mut [u8], timeout_ms: i64) -> Result<i64, ProviderError>;
     /// Input, as typed at the terminal; all of it, or an error.
     fn write(&self, data: &[u8]) -> Result<(), ProviderError>;

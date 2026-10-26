@@ -11,8 +11,9 @@ use std::ptr;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 
@@ -79,6 +80,24 @@ impl ProcessTree {
             return Err(io::Error::last_os_error());
         }
         Ok(())
+    }
+
+    /// Whether a process of the tree is still running. Until none is, the tree may hold its
+    /// working directory and files open, and Windows refuses to delete them.
+    pub(crate) fn running(&self) -> bool {
+        let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: `info` is the correctly sized structure for this info class, and `self.0`
+        // stays open until Drop.
+        let queried = unsafe {
+            QueryInformationJobObject(
+                self.0,
+                JobObjectBasicAccountingInformation,
+                (&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of_val(&info) as u32,
+                ptr::null_mut(),
+            )
+        } != 0;
+        queried && info.ActiveProcesses > 0
     }
 }
 

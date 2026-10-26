@@ -213,6 +213,113 @@ fn a_written_ctrl_c_interrupts_the_program() {
     assert!(status.signal.is_some(), "it exited with {status:?}");
 }
 
+/// Reads until the session reports the end of its output; fails if that takes 10 seconds.
+fn read_to_end(session: &Object<dyn TerminalSession>) -> Vec<u8> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut output = Vec::new();
+    let mut buffer = [0; 1024];
+    loop {
+        let count = session.read(&mut buffer, 100).unwrap();
+        if count == 0 {
+            return output;
+        }
+        if count > 0 {
+            output.extend_from_slice(&buffer[..count as usize]);
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the output never ended after the child exited: {}",
+            String::from_utf8_lossy(&output)
+        );
+    }
+}
+
+/// The child of [`a_child_that_exits_early_ends_its_output`]: a harness that writes an error
+/// line and exits with code 3 before reading any input.
+#[test]
+fn pty_exit_child() {
+    if std::env::var_os("AI6_PTY_EXIT").is_none() {
+        return;
+    }
+    println!("AI6_PTY_FATAL: the harness gave up");
+    std::io::stdout().flush().unwrap();
+    std::process::exit(3);
+}
+
+/// A harness that exits on its own ends the output once what it wrote has been read, although
+/// ConPTY keeps the output open until the pseudo-console is closed.
+#[test]
+fn a_child_that_exits_early_ends_its_output() {
+    let mut env: BTreeMap<String, String> = std::env::vars().collect();
+    env.insert("AI6_PTY_EXIT".to_owned(), "1".to_owned());
+    let argv = vec![
+        std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        "--exact".to_owned(),
+        "pty_exit_child".to_owned(),
+        "--nocapture".to_owned(),
+    ];
+    let session = Pty
+        .spawn(
+            &Spec {
+                env: Some(env),
+                cols: STREAM_COLS,
+                ..spec(argv)
+            }
+            .to_value()
+            .unwrap(),
+        )
+        .unwrap();
+    let output = read_to_end(&session);
+    assert!(
+        output.windows(13).any(|window| window == b"AI6_PTY_FATAL"),
+        "the last line is read before the end: {}",
+        String::from_utf8_lossy(&output)
+    );
+    let status = ExitInfo::from_value(&session.exit_status(0).unwrap()).unwrap();
+    assert_eq!(status.code, Some(3));
+    let mut byte = [0];
+    assert_eq!(session.read(&mut byte, 100).unwrap(), 0, "the end is final");
+}
+
+/// A process the child left running keeps a Unix terminal open after the child has exited,
+/// as ConPTY does on Windows; the output still ends.
+#[cfg(unix)]
+#[test]
+fn a_child_that_exits_leaving_a_process_behind_ends_its_output() {
+    let session = start(vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        "sleep 30 & printf AI6_PTY_LEFT; exit 4".to_owned(),
+    ]);
+    let output = read_to_end(&session);
+    assert!(output.windows(12).any(|window| window == b"AI6_PTY_LEFT"));
+    let status = ExitInfo::from_value(&session.exit_status(0).unwrap()).unwrap();
+    assert_eq!(status.code, Some(4));
+}
+
+/// `kill` returns once the child has exited, not when it was only told to.
+#[test]
+fn kill_returns_once_the_child_has_exited() {
+    #[cfg(windows)]
+    let argv = vec![
+        "ping.exe".to_owned(),
+        "-n".to_owned(),
+        "30".to_owned(),
+        "127.0.0.1".to_owned(),
+    ];
+    #[cfg(unix)]
+    let argv = vec!["sh".to_owned(), "-c".to_owned(), "exec sleep 30".to_owned()];
+    let session = start(argv);
+    let mut byte = [0];
+    let _ = session.read(&mut byte, 500).unwrap();
+    session.kill().unwrap();
+    let status = ExitInfo::from_value(&session.exit_status(0).unwrap()).unwrap();
+    assert!(!status.running, "kill returned before the child exited");
+}
+
 #[test]
 fn kill_ends_a_running_pty_process() {
     #[cfg(windows)]
