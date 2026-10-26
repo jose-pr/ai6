@@ -4882,10 +4882,13 @@ mod tests {
         worker_info.insert(
             "theaters".to_owned(),
             serde_json::json!([
-                {"id": "local", "access": "local", "labels": {}},
+                {
+                    "id": "local", "access": "local", "labels": {},
+                    "agents": "auto", "egress": "direct"
+                },
                 {
                     "id": "build-box", "access": "ssh", "host": "build.example.net",
-                    "labels": {"os": "linux"},
+                    "labels": {"os": "linux"}, "agents": "auto", "egress": "direct",
                     "capabilities": {
                         "terminal": true, "run": true, "files": true, "forward": true,
                         "os": "linux", "arch": "x86_64"

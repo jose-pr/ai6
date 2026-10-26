@@ -756,16 +756,13 @@ pub struct TheaterSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     /// Theater labels.
-    #[serde(default)]
     pub labels: BTreeMap<String, String>,
-    /// What the transport can do; absent from a Station that did not report it.
+    /// What the transport can do; absent when the Station could not learn it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<Capabilities>,
     /// Where the harness may run.
-    #[serde(default)]
     pub agents: AgentMode,
     /// How the Theater reaches the provider's API.
-    #[serde(default)]
     pub egress: EgressKind,
     /// Harnesses installed on the Theater.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1194,16 +1191,5 @@ agents = "remote-hands"
             .unwrap();
         file.merge(code);
         assert_eq!(file.find("a").unwrap().labels["k"], "v");
-    }
-
-    #[test]
-    fn an_older_check_in_without_the_new_keys_still_reads() {
-        let old: TheaterSummary = serde_json::from_value(
-            serde_json::json!({"id": "box", "access": "ssh", "host": "b", "labels": {}}),
-        )
-        .unwrap();
-        assert_eq!(old.agents, AgentMode::Auto);
-        assert_eq!(old.egress, EgressKind::Direct);
-        assert!(old.capabilities.is_none() && old.harnesses.is_empty());
     }
 }

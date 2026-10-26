@@ -260,16 +260,6 @@ mod tests {
         );
     }
 
-    // A spec written before checkpoints existed still reads.
-    #[test]
-    fn a_spec_without_a_checkpoint_still_reads() {
-        use guatiao::{Map, TryAsMut};
-        let mut value = spec().to_value().unwrap();
-        let map: &mut Map = value.try_as_mut().unwrap();
-        map.remove("checkpoint");
-        assert_eq!(SafeHouseSpec::from_value(&value).unwrap(), spec());
-    }
-
     #[test]
     fn a_spec_round_trips_through_a_value() {
         let spec = spec();

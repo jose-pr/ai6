@@ -980,11 +980,6 @@ struct OperationDefinition {
     clearance: String,
     max_concurrent: Option<usize>,
     workspace: WorkspaceDefinition,
-    // Keys of the earlier workspace settings, kept only to refuse them by name.
-    repos: Option<toml::Value>,
-    safe_houses: Option<toml::Value>,
-    branch: Option<toml::Value>,
-    base: Option<toml::Value>,
     station_labels: BTreeMap<String, String>,
     stations: Vec<String>,
     cover: String,
@@ -1034,32 +1029,7 @@ impl Default for WorkspaceDefinition {
 }
 
 impl OperationDefinition {
-    fn refuse_replaced_keys(&self, id: &str, source: &dyn fmt::Display) -> Result<(), RosterError> {
-        for (key, replacement) in [
-            ("repos", "workspace = { source = \"..\" }"),
-            ("safe_houses", "workspace = { isolate = true | false }"),
-            ("branch", "workspace = { branch = \"..\" }"),
-            ("base", "workspace = { base = \"..\" }"),
-        ] {
-            let present = match key {
-                "repos" => self.repos.is_some(),
-                "safe_houses" => self.safe_houses.is_some(),
-                "branch" => self.branch.is_some(),
-                _ => self.base.is_some(),
-            };
-            if present {
-                return Err(error(format!(
-                    "{source}: Operation {id:?}: `{key}` is no longer an Operation key; use {replacement}"
-                )));
-            }
-        }
-        Ok(())
-    }
-}
-
-impl OperationDefinition {
     fn resolve(self, id: String, source: &dyn fmt::Display) -> Result<Operation, RosterError> {
-        self.refuse_replaced_keys(&id, source)?;
         let in_file = |reason: RosterError| error(format!("{source}: {reason}"));
         let operation = self.into_operation(id).map_err(in_file)?;
         operation.validate().map_err(in_file)?;
@@ -2219,25 +2189,6 @@ sources = {{ jira = \"GUA\" }}\n",
         assert!(roster.agent(Some("not-registered"), "007").is_err());
         assert!(roster.agent(Some("G"), "007").is_err());
         assert!(roster.agent(Some("G"), "006").is_err());
-    }
-
-    #[test]
-    fn replaced_workspace_keys_are_refused_by_name() {
-        for (key, line) in [
-            ("repos", "repos = [\"https://example.invalid/repo\"]"),
-            ("safe_houses", "safe_houses = false"),
-            ("branch", "branch = \"{id}\""),
-            ("base", "base = \"main\""),
-        ] {
-            let directory = TestDirectory::new();
-            directory.write("operations.toml", &format!("[operation.G]\n{line}\n"));
-            let message = Roster::load(&directory.0).unwrap_err().to_string();
-            assert!(
-                message.contains(&format!("`{key}` is no longer an Operation key"))
-                    && message.contains("workspace"),
-                "{message}"
-            );
-        }
     }
 
     #[test]

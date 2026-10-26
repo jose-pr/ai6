@@ -305,9 +305,9 @@ impl StationFacts {
     /// Reads a Registry check-in. `load` is how many Missions are already leased to the
     /// Station; a Station silent for longer than `window` is unhealthy.
     ///
-    /// Check-ins written before Stations reported a key fall back to the permissive
-    /// reading: execution role, capacity one, nothing running, own host only, handlers and
-    /// resources unknown, default resource limits.
+    /// A key the check-in lacks or that does not parse claims nothing: no roles, no
+    /// capacity, nothing running, no Theaters, handlers and resources unknown, and the
+    /// default resource limits.
     pub fn from_record(record: &StationRecord, now: f64, window: Duration, load: usize) -> Self {
         let info = record.info();
         let strings = |key: &str| {
@@ -335,17 +335,17 @@ impl StationFacts {
         let theaters = info
             .get("theaters")
             .and_then(|value| serde_json::from_value::<Vec<TheaterSummary>>(value.clone()).ok())
-            .unwrap_or_else(|| vec![TheaterSummary::local()]);
+            .unwrap_or_default();
         Self {
             station: record.station().to_owned(),
             healthy: silent <= window.as_secs_f64(),
             silent_for: silent as u64,
-            roles: strings("roles").unwrap_or_else(|| vec!["execution".to_owned()]),
+            roles: strings("roles").unwrap_or_default(),
             capacity: info
                 .get("capacity")
                 .and_then(serde_json::Value::as_u64)
                 .and_then(|capacity| usize::try_from(capacity).ok())
-                .unwrap_or(1),
+                .unwrap_or_default(),
             load,
             running: info
                 .get("running")
@@ -424,7 +424,6 @@ pub struct PlacementChoice {
     /// The Agent's handler provider.
     pub handler: Option<String>,
     /// Whether the harness would run on the Theater or act on it from the Station.
-    #[serde(default)]
     pub mode: ExecutionMode,
     /// How loaded the Station and Theater are, 0 (idle) to 4; see the module docs.
     #[serde(default)]
@@ -1710,15 +1709,6 @@ mod tests {
             r.theater.as_deref() == Some("scratch-m1")
                 && r.reason == "it was made for Mission \"m1\" alone"
         }));
-    }
-
-    #[test]
-    fn an_older_choice_without_a_mode_reads_as_field() {
-        let choice: PlacementChoice = serde_json::from_value(serde_json::json!({
-            "station": "a", "theater": "local", "agent": "007", "handler": "claude"
-        }))
-        .unwrap();
-        assert_eq!(choice.mode, ExecutionMode::Field);
     }
 
     #[test]

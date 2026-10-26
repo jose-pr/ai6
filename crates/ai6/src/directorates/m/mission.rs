@@ -103,19 +103,14 @@ pub(crate) struct LaunchManifest {
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<String>,
     pub(crate) cover: Option<CoverAudit>,
-    /// The Station that supervises the Session; absent in records written before placement.
-    #[serde(default)]
+    /// The Station that supervises the Session.
     pub(crate) station_id: Option<String>,
-    /// The Theater the harness runs in; absent in records written before placement.
-    #[serde(default)]
+    /// The Theater the harness runs in.
     pub(crate) theater_id: Option<String>,
-    /// Whether the harness runs on the Theater or acts on it from the Station; records
-    /// written before remote-hands mode ran on the Theater.
-    #[serde(default)]
+    /// Whether the harness runs on the Theater or acts on it from the Station.
     pub(crate) mode: ExecutionMode,
-    /// The Registry Session record this Station holds for the Mission; absent in records
-    /// written before Session records were shared.
-    #[serde(default)]
+    /// The Registry Session record this Station holds for the Mission; `None` until the
+    /// Session is recorded.
     pub(crate) session: Option<SessionHold>,
     /// The key of the Session on the Theater's runner, when a runner supervises the harness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -153,7 +148,7 @@ impl MissionStore {
                     format!("Mission store: {error}"),
                 )
             })?;
-            if snapshot.version != 3
+            if snapshot.version != 1
                 || snapshot.missions.iter().any(|(key, mission)| {
                     key != mission.mission_id.as_str()
                         || mission.prompt.trim().is_empty()
@@ -631,7 +626,7 @@ impl MissionStore {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent)?;
         let bytes = serde_json::to_vec(&MissionSnapshot {
-            version: 3,
+            version: 1,
             missions: missions.clone(),
             operations: operations.clone(),
         })

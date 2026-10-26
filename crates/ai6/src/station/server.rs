@@ -6921,46 +6921,6 @@ mod tests {
         assert_eq!(record.fence, taken.fence);
     }
 
-    #[tokio::test]
-    async fn a_mission_started_before_session_records_resumes_with_a_new_record() {
-        let root = tempfile::tempdir().unwrap();
-        let state = capacity_test_state(root.path(), 2, 2);
-        start_first_mission(&state).await;
-        let old = session_hold(&state, "mission-1").unwrap();
-        // Strip the hold, as a record written by an earlier version has none.
-        let mut manifest = state
-            .missions
-            .lock()
-            .unwrap()
-            .operation("mission-1")
-            .unwrap();
-        manifest.session = None;
-        state
-            .missions
-            .lock()
-            .unwrap()
-            .set_operation("mission-1", manifest)
-            .unwrap();
-
-        let _ = resume_mission(
-            State(state.clone()),
-            axum::extract::Path("mission-1".to_owned()),
-            Json(ResumeMission {
-                message: None,
-                environment: BTreeMap::new(),
-            }),
-        )
-        .await
-        .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
-        let hold = session_hold(&state, "mission-1").unwrap();
-        assert_ne!(hold.id, old.id);
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
-        assert_eq!(
-            record.provider_session_id.as_deref(),
-            Some("provider-session-007")
-        );
-    }
-
     /// A state whose clock stands at `start` and moves only when the test stores a new time.
     pub(super) fn limited_state(
         root: &Path,
@@ -7662,6 +7622,10 @@ mod tests {
                 ("capacity".to_owned(), serde_json::json!(capacity)),
                 ("running".to_owned(), serde_json::json!(0)),
                 ("operations".to_owned(), serde_json::json!([])),
+                (
+                    "theaters".to_owned(),
+                    serde_json::json!([crate::directorates::m::theaters::TheaterSummary::local()]),
+                ),
             ])
         };
         intake
@@ -7782,6 +7746,12 @@ mod tests {
                     ("capacity".to_owned(), serde_json::json!(capacity)),
                     ("running".to_owned(), serde_json::json!(running)),
                     ("handlers".to_owned(), serde_json::json!(handlers)),
+                    (
+                        "theaters".to_owned(),
+                        serde_json::json!([
+                            crate::directorates::m::theaters::TheaterSummary::local()
+                        ]),
+                    ),
                 ]),
             )
             .unwrap();

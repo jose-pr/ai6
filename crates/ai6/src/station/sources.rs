@@ -852,6 +852,12 @@ mod tests {
                         ("capacity".to_owned(), serde_json::json!(2)),
                         ("running".to_owned(), serde_json::json!(running)),
                         ("handlers".to_owned(), serde_json::json!(handlers)),
+                        (
+                            "theaters".to_owned(),
+                            serde_json::json!([
+                                crate::directorates::m::theaters::TheaterSummary::local()
+                            ]),
+                        ),
                     ]),
                 )
                 .unwrap();

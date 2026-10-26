@@ -261,7 +261,7 @@ fn lose_held(state: &DaemonState, hold: &SessionHold, reason: &str) {
         }
         match state.intake.lose_session(&hold.id, reason) {
             Ok(_) | Err(SessionError::Ended) => return,
-            // The lapsed lease still reads as live within the same clock tick.
+            // Within the clock tick it lapsed in, the lease reads as live.
             Err(SessionError::HeldBy(holder)) if holder == station => {
                 std::thread::sleep(Duration::from_millis(5));
             }
