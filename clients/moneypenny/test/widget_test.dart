@@ -127,6 +127,40 @@ Finder navLabel(String label) =>
     find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
 
 void main() {
+  test('a brief origin says who asked for the Mission', () {
+    BriefOrigin origin(Map<String, dynamic> json) =>
+        BriefOrigin.fromJson({'received_by': 'universal-exports', ...json});
+    expect(
+      origin({'origin': 'operator', 'principal': 'person-m'}).describe(),
+      'Operator person-m via universal-exports',
+    );
+    final source = origin({
+      'origin': 'source',
+      'principal': 'github',
+      'reference': 'owner/repo#12',
+      'item_url': 'https://example.invalid/12',
+    });
+    expect(source.describe(), 'Source github item owner/repo#12');
+    expect(source.itemUrl, 'https://example.invalid/12');
+    expect(
+      origin({'origin': 'proposal', 'principal': '007'}).describe(),
+      'Proposal by Agent 007, approved via universal-exports',
+    );
+    expect(origin({'origin': 'registry_drop'}).isRegistryDrop, isTrue);
+    final brief = MissionBriefSummary.fromMissionJson({
+      'operation_id': 'G',
+      'mission_id': 'm',
+      'brief': {
+        'prompt': 'p',
+        'handler_provider': 'claude',
+        'terminal_provider': 'pty',
+        'working_directory': '/w',
+        'environment_keys': <String>[],
+      },
+    });
+    expect(brief!.origin, isNull, reason: 'a Station-started Mission has none');
+  });
+
   testWidgets('demo board explains that sign-in is unavailable', (
     tester,
   ) async {
@@ -844,6 +878,12 @@ void main() {
                   'station_id': 'station-alpha',
                   'theater_id': 'local',
                   'mode': 'field',
+                  'provenance': {
+                    'origin': 'registry_drop',
+                    'received_at': 1792922400,
+                    'received_by': 'station-alpha',
+                    'digest': 'sha256:${'0' * 64}',
+                  },
                 },
                 'attempts': [
                   {
@@ -1090,6 +1130,12 @@ void main() {
     await tester.tap(find.byTooltip('View Mission brief and launch context'));
     await tester.pumpAndSettle();
     expect(find.text('Review the requested change.'), findsOneWidget);
+    expect(
+      find.text(
+        'Dropped into the Registry queue (unauthenticated), found by station-alpha',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('case-officer'), findsOneWidget);
     expect(find.text('station-alpha'), findsOneWidget);
     expect(find.text('local'), findsOneWidget);

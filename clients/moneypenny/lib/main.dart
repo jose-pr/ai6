@@ -132,6 +132,11 @@ class MissionBoard extends ChangeNotifier {
           environmentKeys: ['AI6_MISSION_ID'],
           stationId: 'station-control-01',
           theaterId: 'local',
+          origin: BriefOrigin(
+            origin: 'operator',
+            principal: 'demo-operator',
+            receivedBy: 'universal-exports',
+          ),
         ),
       ];
       missionAttempts = const {
@@ -2089,11 +2094,16 @@ class MissionBriefSummary {
     this.stationId,
     this.theaterId,
     this.mode,
+    this.origin,
   });
 
   final String operationId;
   final String missionId;
   final String prompt;
+
+  /// Where the brief came from, as the Station recorded it; `null` for a Mission started
+  /// directly on a Station.
+  final BriefOrigin? origin;
   final String? agentId;
   final String? roleId;
   final String handlerProvider;
@@ -2128,8 +2138,62 @@ class MissionBriefSummary {
       stationId: brief['station_id'] as String?,
       theaterId: brief['theater_id'] as String?,
       mode: brief['mode'] as String?,
+      origin: switch (brief['provenance']) {
+        final Map<String, dynamic> provenance => BriefOrigin.fromJson(
+          provenance,
+        ),
+        _ => null,
+      },
     );
   }
+}
+
+/// Who asked for a Mission: the provenance AI6 recorded where its brief entered.
+class BriefOrigin {
+  const BriefOrigin({
+    required this.origin,
+    required this.receivedBy,
+    this.principal,
+    this.reference,
+    this.itemUrl,
+  });
+
+  /// `operator`, `source`, `sleeper`, `proposal` or `registry_drop`.
+  final String origin;
+
+  /// The Station, or `universal-exports`, that accepted the brief.
+  final String receivedBy;
+
+  /// The person, Source provider, Sleeper or proposing Agent; `null` for a registry drop.
+  final String? principal;
+
+  /// The Source item, Sleeper fingerprint or proposing Session.
+  final String? reference;
+  final String? itemUrl;
+
+  /// A brief nobody AI6 authenticated put into the queue.
+  bool get isRegistryDrop => origin == 'registry_drop';
+
+  factory BriefOrigin.fromJson(Map<String, dynamic> json) => BriefOrigin(
+    origin: json['origin'] as String,
+    receivedBy: json['received_by'] as String,
+    principal: json['principal'] as String?,
+    reference: json['reference'] as String?,
+    itemUrl: json['item_url'] as String?,
+  );
+
+  /// One line for the Mission detail.
+  String describe() => switch (origin) {
+    'operator' => 'Operator ${principal ?? 'unknown'} via $receivedBy',
+    'source' =>
+      'Source ${principal ?? 'unknown'} item ${reference ?? 'unknown'}',
+    'sleeper' => 'Sleeper ${principal ?? 'unknown'}, fired by $receivedBy',
+    'proposal' =>
+      'Proposal by Agent ${principal ?? 'unknown'}, approved via $receivedBy',
+    'registry_drop' =>
+      'Dropped into the Registry queue (unauthenticated), found by $receivedBy',
+    _ => '$origin via $receivedBy',
+  };
 }
 
 /// One attempt at a Mission: where it ran and how it stands.
@@ -4363,6 +4427,8 @@ class _MissionBriefPage extends StatelessWidget {
         const SizedBox(height: 24),
         Text('Launch context', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
+        _manifestRow('Origin', brief.origin?.describe() ?? 'Not recorded'),
+        if (brief.origin?.itemUrl case final url?) _manifestRow('Item', url),
         _manifestRow('Agent', brief.agentId ?? 'Unassigned'),
         _manifestRow('Role', brief.roleId ?? 'Unspecified'),
         _manifestRow('Station', brief.stationId ?? 'Not recorded'),
