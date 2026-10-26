@@ -1243,6 +1243,52 @@ async fn one_person_holds_at_most_two_live_conversations() {
     assert_eq!(frames.last().unwrap()["code"], "busy_elsewhere");
 }
 
+/// A Station reports a harness that died as `failed` then `closed`; its conversation stops
+/// counting against the person's live conversations at once, not after the answer deadline.
+#[tokio::test]
+async fn a_harness_that_fails_releases_its_conversation_at_once() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut first, first_job) = accepted(&served, &served.operator, "one").await;
+    let (_second, _) = accepted(&served, &served.operator, "two").await;
+    let (mut third, _) = open(&served, &served.operator).await;
+    say(&mut third, "three", None).await;
+    let frames = receive_until(&mut third, |frame| frame["type"] == "error").await;
+    assert_eq!(frames.last().unwrap()["code"], "busy_elsewhere");
+
+    let reason = "Claude Code exited with code 1 before completing the Session; its last \
+                  output:\nError: the stored login has expired";
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &first_job,
+            None,
+            vec![
+                AssistantEvent::new(EVENT_FAILED, Some(reason.to_owned())),
+                AssistantEvent::new(EVENT_CLOSED, Some("the harness stopped".to_owned())),
+            ],
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    let frames = receive_until(&mut first, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+    assert!(
+        frames.iter().any(|frame| frame["type"] == "entry"
+            && frame["entry"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("the stored login has expired"))),
+        "the person is told why: {frames:?}"
+    );
+
+    say(&mut third, "three", None).await;
+    let job = take(&served, "hq").await;
+    assert!(!job.close, "nothing had to be closed to make room: {job:?}");
+    assert_eq!(job.message, "three");
+}
+
 #[tokio::test]
 async fn an_accepted_answer_that_never_comes_is_given_up() {
     let served =
