@@ -135,6 +135,7 @@ pub fn ai6::directorates::m::config::MemoryConfigSource::fmt(&self, &mut core::f
 pub struct ai6::directorates::m::config::SqlConfigSource
 impl ai6::SqlConfigSource
 pub fn ai6::SqlConfigSource::open(&str) -> core::io::error::Result<Self>
+pub fn ai6::SqlConfigSource::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<Self>
 pub fn ai6::SqlConfigSource::put(&self, ai6::ConfigRecord, &str, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlConfigSource::remove(&self, ai6::ConfigRecord, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigSource for ai6::SqlConfigSource
@@ -162,6 +163,7 @@ impl ai6::directorates::m::config::ConfigSource for ai6::directorates::m::config
 pub fn ai6::directorates::m::config::TomlConfigDir::changes_since(&self, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::TomlConfigDir::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::open(&str) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigSource>>
+pub fn ai6::directorates::m::config::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigSource>>
 pub mod ai6::directorates::m::cover
 #[non_exhaustive] pub enum ai6::directorates::m::cover::Disclosure
 pub ai6::directorates::m::cover::Disclosure::Assisted
@@ -1755,6 +1757,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::operation_cost_on_day(&
 pub fn ai6::directorates::registry::store::FileRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
 pub fn ai6::directorates::registry::backend::from_environment() -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
 pub fn ai6::directorates::registry::backend::open(&str) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
+pub fn ai6::directorates::registry::backend::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
 pub mod ai6::directorates::registry::cables
 #[non_exhaustive] pub enum ai6::directorates::registry::cables::CableAction
 pub ai6::directorates::registry::cables::CableAction::Discover
@@ -2191,9 +2194,18 @@ pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 pub fn ai6::directorates::registry::sources::source_brief(&str, &str, &ai6::directorates::registry::sources::SourceItem) -> ai6::directorates::registry::store::Brief
 pub mod ai6::directorates::registry::sql
+pub struct ai6::directorates::registry::sql::SqlOptions
+impl ai6::directorates::registry::sql::SqlOptions
+pub fn ai6::directorates::registry::sql::SqlOptions::for_lease(core::time::Duration) -> Self
+pub fn ai6::directorates::registry::sql::SqlOptions::with_password(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::default::Default for ai6::directorates::registry::sql::SqlOptions
+pub fn ai6::directorates::registry::sql::SqlOptions::default() -> Self
+impl core::fmt::Debug for ai6::directorates::registry::sql::SqlOptions
+pub fn ai6::directorates::registry::sql::SqlOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::registry::sql::SqlRegistry
 impl ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::open(&str) -> core::io::error::Result<Self>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<Self>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
@@ -2287,6 +2299,8 @@ impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::regis
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
+pub fn ai6::directorates::registry::sql::redact(&str) -> alloc::string::String
+pub fn ai6::directorates::registry::sql::weakenings(&str) -> alloc::vec::Vec<alloc::string::String>
 pub mod ai6::directorates::registry::store
 #[non_exhaustive] pub enum ai6::directorates::registry::store::LeaseRecovery
 pub ai6::directorates::registry::store::LeaseRecovery::Failed
@@ -4238,6 +4252,7 @@ pub ai6::Spec::rows: u16
 pub struct ai6::SqlConfigSource
 impl ai6::SqlConfigSource
 pub fn ai6::SqlConfigSource::open(&str) -> core::io::error::Result<Self>
+pub fn ai6::SqlConfigSource::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<Self>
 pub fn ai6::SqlConfigSource::put(&self, ai6::ConfigRecord, &str, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlConfigSource::remove(&self, ai6::ConfigRecord, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigSource for ai6::SqlConfigSource
@@ -4245,9 +4260,18 @@ pub fn ai6::SqlConfigSource::changes_since(&self, ai6::directorates::m::config::
 pub fn ai6::SqlConfigSource::load(&self) -> core::result::Result<ai6::directorates::m::config::ConfigSnapshot, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::SqlConfigSource
 pub fn ai6::SqlConfigSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SqlOptions
+impl ai6::directorates::registry::sql::SqlOptions
+pub fn ai6::directorates::registry::sql::SqlOptions::for_lease(core::time::Duration) -> Self
+pub fn ai6::directorates::registry::sql::SqlOptions::with_password(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::default::Default for ai6::directorates::registry::sql::SqlOptions
+pub fn ai6::directorates::registry::sql::SqlOptions::default() -> Self
+impl core::fmt::Debug for ai6::directorates::registry::sql::SqlOptions
+pub fn ai6::directorates::registry::sql::SqlOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::SqlRegistry
 impl ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::open(&str) -> core::io::error::Result<Self>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<Self>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
