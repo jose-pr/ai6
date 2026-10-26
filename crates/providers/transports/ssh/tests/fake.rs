@@ -398,15 +398,9 @@ fn a_reverse_forward_carries_a_connection_from_the_host_to_the_station() {
 
     forward.close().unwrap();
     forward.close().unwrap();
-    // The server may finish tearing its listener down just after it answers the cancel.
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the host stops listening once the forward is closed"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    // The host stops listening once the forward is closed; the server may finish tearing its
+    // listener down just after it answers the cancel.
+    eventually(|| std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
 }
 
 #[test]
@@ -458,11 +452,9 @@ fn a_reverse_forward_listens_again_on_its_port_when_the_connection_is_remade() {
     assert_eq!(through(b"after"), b"after");
     echo.join().unwrap();
 
+    // Closing the forward stops the host listening on the new connection.
     forward.close().unwrap();
-    assert!(
-        std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
-        "closing the forward stops the host listening on the new connection"
-    );
+    eventually(|| std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
 }
 
 #[test]
