@@ -6,24 +6,39 @@
 //! Station takes its lease and re-attaches, so nothing is launched twice. Any other Session
 //! ended with its Station, so it is marked lost and its brief is queued again; the next
 //! attempt links to it, starts from its last checkpoint and is told what it was doing.
+//!
+//! A live Station gives up a Session the same way when its runner, or wrapped harness, stays
+//! out of reach past the Operation's `lost_after_secs` and a last probe fails, or when a
+//! re-attach keeps failing for that long ([`give_up`], [`reattach_failed`]).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::{DaemonState, INTAKE_MAX_ATTEMPTS, ensure_leased_mission, session_hold, unix_now};
+use super::{
+    DaemonState, INTAKE_MAX_ATTEMPTS, credentials, ensure_leased_mission, queue_event, runner_link,
+    session_hold, unix_now,
+};
 use crate::directorates::m::mission::{LaunchManifest, MissionState, SessionHold};
 use crate::directorates::m::placement::{OperationPolicy, PlacementRequest, StationFacts};
-use crate::directorates::m::recovery::adopter;
+use crate::directorates::m::recovery::{DEFAULT_LOST_AFTER_SECS, adopter, reattach_delay};
 use crate::directorates::m::roster::OnLost;
+use crate::directorates::m::theaters::TheaterAccess;
 use crate::directorates::q::safehouse::{CheckpointSpec, SafeHouseCheckpoint};
 use crate::directorates::registry::sessions::{
     MAX_RECENT_EVENT_CHARS, MAX_RECENT_EVENTS, SessionError, SessionLaunch, SessionRecord,
     SessionStatus, SessionUpdate,
 };
-use crate::directorates::registry::store::{DEFAULT_LEASE, GONE_DARK_AFTER, Lease};
-use crate::directorates::section_00::agent::AgentEvent;
+use crate::directorates::registry::store::{DEFAULT_LEASE, GONE_DARK_AFTER, Lease, LeaseRecovery};
+use crate::directorates::section_00::agent::{AgentEvent, AgentSession};
+use crate::station::reach::ReachWatch;
 use crate::{MissionId, SessionId};
+
+/// How long a lease this Station gives up is renewed for: it lapses at once, so the
+/// Registry treats the Session or brief like one whose Station stopped renewing it.
+const LAPSE: Duration = Duration::from_nanos(1);
+/// Tries at a Registry step that a concurrent renewal or an equal timestamp can refuse.
+const GIVE_UP_TRIES: u32 = 10;
 
 /// The brief-lease metadata key that hands a Station a Session to adopt; its value is the
 /// Session record's ID.
@@ -71,6 +86,12 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
     };
     let record = match state.intake.latest_session(mission_id) {
         Ok(Some(record)) if !record.status.is_closed() => record,
+        // A live Station that gave its Session up lets the brief lease lapse as well.
+        Ok(Some(record)) if record.status == SessionStatus::Lost => {
+            return Extraction::Lost {
+                on_lost: operation_on_lost(state, lease),
+            };
+        }
         Ok(_) => return Extraction::Requeue,
         Err(error) => {
             eprintln!("ai6: Mission {mission_id:?} not recovered yet: {error}");
@@ -115,10 +136,297 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
             return Extraction::Wait;
         }
     }
-    let on_lost = meta_str(lease, "operation")
+    Extraction::Lost {
+        on_lost: operation_on_lost(state, lease),
+    }
+}
+
+/// The `on_lost` of the Operation a brief lease names.
+fn operation_on_lost(state: &DaemonState, lease: &Lease) -> OnLost {
+    meta_str(lease, "operation")
         .and_then(|operation| state.roster.operation(operation).ok())
-        .map_or(OnLost::default(), |operation| operation.on_lost);
-    Extraction::Lost { on_lost }
+        .map_or(OnLost::default(), |operation| operation.on_lost)
+}
+
+/// The watch for a Session of `operation_id`, with that Operation's `lost_after_secs`.
+pub(super) fn reach_watch(state: &DaemonState, operation_id: Option<&str>) -> ReachWatch {
+    let secs = operation_id
+        .and_then(|id| state.roster.operation(id).ok())
+        .map_or(DEFAULT_LOST_AFTER_SECS, |operation| {
+            operation.lost_after_secs
+        });
+    ReachWatch::new(Duration::from_secs(secs))
+}
+
+/// Gives up a Session this Station holds whose harness is gone or stayed out of reach.
+///
+/// The Station stops acting on it and lets its leases lapse: the Session is marked lost with
+/// `reason`, and the Mission's brief goes back to the Registry, which queues it again as a new
+/// attempt or files it under the Operation's `on_lost`, as for a Session lost with its
+/// Station. A Mission that came from no brief has nothing to queue again and fails. `session`
+/// is the harness the caller reads, when it reads one; another one is left alone.
+pub(super) fn give_up(
+    state: &DaemonState,
+    mission_id: &str,
+    session: Option<&Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>>,
+    reason: &str,
+) {
+    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
+        let current = sessions.get(mission_id).is_some_and(|operation| {
+            session.is_none_or(|session| Arc::ptr_eq(&operation.session, session))
+        });
+        if current {
+            sessions.remove(mission_id)
+        } else {
+            None
+        }
+    });
+    if session.is_some() && operation.is_none() {
+        return;
+    }
+    eprintln!("ai6: Mission {mission_id:?} lost its Session: {reason}");
+    if let Some(operation) = &operation {
+        operation.gate.close();
+        // A runner that comes back keeps nothing for this Station; the next attempt ends it.
+        if let Some(runner) = &operation.runner {
+            runner
+                .detached
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        if let Ok(session) = operation.session.lock() {
+            let _ = session.close();
+        }
+    }
+    credentials::release(state, mission_id);
+
+    // The hold goes first, so nothing renews the Session lease this Station lets lapse.
+    let hold = state.missions.lock().ok().and_then(|mut missions| {
+        let mut manifest = missions.operation(mission_id)?;
+        let hold = manifest.session.take();
+        manifest.runner = None;
+        let _ = missions.set_operation(mission_id, manifest);
+        hold
+    });
+    if let Some(hold) = &hold {
+        lose_held(state, hold, reason);
+    }
+    let to = hand_back(state, mission_id);
+    if let Ok(mut missions) = state.missions.lock()
+        && let Err(error) = missions.transition(mission_id, to)
+    {
+        eprintln!("ai6: Mission {mission_id:?} could not be marked {to:?}: {error:?}");
+    }
+    queue_event(
+        state,
+        mission_id,
+        AgentEvent {
+            kind: "lost".to_owned(),
+            text: Some(reason.to_owned()),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+        },
+    );
+    #[cfg(feature = "publisher")]
+    if let Some(telemetry) = operation.and_then(|operation| operation.telemetry)
+        && let Some(name) = super::lifecycle_name(to)
+    {
+        telemetry.publish_lifecycle_for(name, None);
+    }
+    state.event_ready.notify_waiters();
+}
+
+/// Lets the Session lease `hold` names lapse and marks the Session lost.
+fn lose_held(state: &DaemonState, hold: &SessionHold, reason: &str) {
+    let station = state.station_id.as_str();
+    for _ in 0..GIVE_UP_TRIES {
+        match state
+            .intake
+            .renew_session(&hold.id, station, hold.fence, LAPSE)
+        {
+            Ok(_) => {}
+            // Ended, or another Station holds it now: it is not this Station's to lose.
+            Err(SessionError::Ended | SessionError::Stale | SessionError::HeldBy(_)) => return,
+            Err(error) => {
+                eprintln!("ai6: Session {:?} not marked lost: {error}", hold.id);
+                return;
+            }
+        }
+        match state.intake.lose_session(&hold.id, reason) {
+            Ok(_) | Err(SessionError::Ended) => return,
+            // The lapsed lease still reads as live within the same clock tick.
+            Err(SessionError::HeldBy(holder)) if holder == station => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => {
+                eprintln!("ai6: Session {:?} not marked lost: {error}", hold.id);
+                return;
+            }
+        }
+    }
+    eprintln!("ai6: Session {:?} not marked lost yet", hold.id);
+}
+
+/// Lets this Station's brief lease on the Mission lapse and recovers it under the
+/// Operation's `on_lost`. Answers the state the Mission ends in here: `Abandoned` when its
+/// brief is queued again, `Failed` when it is filed or there was no brief.
+fn hand_back(state: &DaemonState, mission_id: &str) -> MissionState {
+    let station = state.station_id.as_str();
+    let ours = || {
+        state.intake.leases().ok().and_then(|leases| {
+            leases.into_iter().find(|lease| {
+                lease.station() == station && meta_str(lease, "mission_id") == Some(mission_id)
+            })
+        })
+    };
+    let Some(first) = ours() else {
+        return MissionState::Failed;
+    };
+    let on_lost = operation_on_lost(state, &first);
+    let handed = match on_lost {
+        OnLost::Retry => MissionState::Abandoned,
+        OnLost::Fail => MissionState::Failed,
+    };
+    let max_attempts = Extraction::Lost { on_lost }
+        .max_attempts()
+        .unwrap_or(INTAKE_MAX_ATTEMPTS);
+    for _ in 0..GIVE_UP_TRIES {
+        let Some(lease) = ours() else {
+            // Another Headquarters recovered it once it lapsed.
+            return handed;
+        };
+        if let Err(error) = state.intake.renew(lease.key(), station, LAPSE) {
+            eprintln!("ai6: Mission {mission_id:?} brief not handed back yet: {error}");
+        }
+        // Read back: recovering compares the lease as stored.
+        if let Ok(Some(lapsed)) = state.intake.lease(lease.key())
+            && lapsed.station() == station
+        {
+            match state.intake.recover(&lapsed, max_attempts, station) {
+                Ok(Some(LeaseRecovery::Requeued)) => return MissionState::Abandoned,
+                Ok(Some(_)) => return MissionState::Failed,
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("ai6: Mission {mission_id:?} brief not handed back yet: {error}")
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    eprintln!(
+        "ai6: Mission {mission_id:?} brief not handed back; Headquarters recovers it once its \
+         lease lapses"
+    );
+    handed
+}
+
+/// Whether a lost attempt at a Mission this Station had left behind is what a new brief lease
+/// asks it to run: the Mission ended here, holds no Session, and its latest Session is lost.
+pub(super) fn retries_lost_attempt(state: &DaemonState, mission_id: &str) -> bool {
+    session_hold(state, mission_id).is_none()
+        && state
+            .intake
+            .latest_session(mission_id)
+            .ok()
+            .flatten()
+            .is_some_and(|record| record.status == SessionStatus::Lost)
+}
+
+/// Re-attach tries that failed in a row, and since when, by Station and Mission.
+static REATTACHING: Mutex<BTreeMap<(String, String), (u32, Instant)>> = Mutex::new(BTreeMap::new());
+
+/// A try at re-attaching to (or resuming) a Mission's Session after a restart or adoption
+/// failed. Answers when to try again; once the tries have failed for the Operation's
+/// `lost_after_secs`, the Session's runner or Theater is probed once more, and if that fails
+/// too the Session is given up as lost and `None` is answered.
+pub(super) fn reattach_failed(state: &DaemonState, mission_id: &str) -> Option<Instant> {
+    let key = (state.station_id.clone(), mission_id.to_owned());
+    let now = Instant::now();
+    let (failures, since) = {
+        let mut tries = REATTACHING.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = tries.entry(key.clone()).or_insert((0, now));
+        entry.0 += 1;
+        *entry
+    };
+    let operation_id = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id)?.operation_id.clone());
+    let grace = reach_watch(state, operation_id.as_deref()).grace();
+    if now.duration_since(since) >= grace {
+        match probe_harness(state, mission_id) {
+            Some(Err(why)) => {
+                reattached(state, mission_id);
+                give_up(
+                    state,
+                    mission_id,
+                    None,
+                    &format!(
+                        "its Session could not be re-attached for {}s and a probe through the \
+                         Theater's transport failed: {why}",
+                        grace.as_secs()
+                    ),
+                );
+                return None;
+            }
+            // It answers, or there is nothing remote to probe: keep trying, from a new grace.
+            _ => {
+                if let Ok(mut tries) = REATTACHING.lock() {
+                    tries.insert(key, (failures, Instant::now()));
+                }
+            }
+        }
+    }
+    Some(now + reattach_delay(failures))
+}
+
+/// Forgets the failed re-attach tries of a Mission, once one succeeds or it is given up.
+pub(super) fn reattached(state: &DaemonState, mission_id: &str) {
+    if let Ok(mut tries) = REATTACHING.lock() {
+        tries.remove(&(state.station_id.clone(), mission_id.to_owned()));
+    }
+}
+
+/// Probes what a Mission's Session ran on: its runner when one supervised it, else the
+/// Theater's transport. `None` when the harness ran on this Station's own host.
+fn probe_harness(state: &DaemonState, mission_id: &str) -> Option<Result<(), String>> {
+    let manifest = state.missions.lock().ok()?.operation(mission_id)?;
+    let theater_id = manifest.theater_id.clone()?;
+    if let Some(key) = &manifest.runner {
+        let link = match runner_link(state, &theater_id) {
+            Ok(Some(link)) => link,
+            Ok(None) => return Some(Err(format!("Theater {theater_id:?} has no runner now"))),
+            Err(why) => return Some(Err(why)),
+        };
+        return Some(match link.status(key) {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err(format!("the runner no longer has Session {key:?}")),
+            Err(why) => Err(why),
+        });
+    }
+    let theater = state.transports.theater(&theater_id)?;
+    if theater.access == TheaterAccess::Local {
+        return None;
+    }
+    let client = match state.transports.client(&theater_id) {
+        Ok(client) => client,
+        Err(why) => return Some(Err(why)),
+    };
+    Some(
+        client
+            .run(&crate::directorates::q::transport::RunSpec {
+                argv: vec!["true".to_owned()],
+                timeout_ms: 30_000,
+                ..Default::default()
+            })
+            .map_err(|error| crate::directorates::q::transport::describe(&error))
+            .and_then(|output| match output.code {
+                Some(0) => Ok(()),
+                code => Err(format!("`true` exited with {code:?} on the Theater")),
+            }),
+    )
 }
 
 /// The Station that should adopt `record`, or why none may.
@@ -304,8 +612,19 @@ pub(super) fn predecessor(state: &DaemonState, mission_id: &MissionId) -> Option
         })
 }
 
+/// Where a new attempt finds the work of the lost attempt it replaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WorkFrom {
+    /// Its working directory starts from the lost attempt's last checkpoint.
+    Checkpoint,
+    /// It works in the directory the lost attempt worked in, as that attempt left it.
+    Place,
+    /// Nothing of the lost attempt's work is here.
+    Nothing,
+}
+
 /// The brief a new attempt is given about the lost attempt it replaces.
-pub(super) fn hand_off(lost: &SessionRecord, starts_from_checkpoint: bool) -> String {
+pub(super) fn hand_off(lost: &SessionRecord, work: WorkFrom) -> String {
     let mut lines = vec![format!(
         "This Mission continues attempt {}, which was lost: {}.",
         lost.attempt,
@@ -314,8 +633,8 @@ pub(super) fn hand_off(lost: &SessionRecord, starts_from_checkpoint: bool) -> St
             .unwrap_or("its Station went dark")
             .trim_end_matches('.')
     )];
-    match (&lost.checkpoint, starts_from_checkpoint) {
-        (Some(checkpoint), true) => lines.push(format!(
+    match (&lost.checkpoint, work) {
+        (Some(checkpoint), WorkFrom::Checkpoint) => lines.push(format!(
             "Its work was last saved as commit {} on branch {} of {}; your working directory \
              starts from it. Inspect it before you continue: changes made after that save are \
              gone.",
@@ -323,6 +642,11 @@ pub(super) fn hand_off(lost: &SessionRecord, starts_from_checkpoint: bool) -> St
             checkpoint.branch,
             checkpoint.remote
         )),
+        (_, WorkFrom::Place) => lines.push(
+            "You work in the directory it worked in, as it left it. Inspect it before you \
+             continue: it may have stopped in the middle of a change."
+                .to_owned(),
+        ),
         _ => lines.push(
             "None of its work could be recovered here: start from the brief, and check \
              whether any of it was already published."
@@ -422,7 +746,15 @@ impl Notes {
     /// Writes the notes to the Session record when they changed and the last write is old
     /// enough, so a busy Session costs a Registry write every few seconds at most.
     pub(super) fn write_if_due(&mut self, state: &DaemonState, mission_id: &str) {
-        if !self.changed || self.written.is_some_and(|at| at.elapsed() < NOTES_EVERY) {
+        if self.written.is_some_and(|at| at.elapsed() < NOTES_EVERY) {
+            return;
+        }
+        self.write_now(state, mission_id);
+    }
+
+    /// Writes the notes to the Session record now if they changed, as before it is given up.
+    pub(super) fn write_now(&mut self, state: &DaemonState, mission_id: &str) {
+        if !self.changed {
             return;
         }
         let Some(hold) = session_hold(state, mission_id) else {
@@ -622,8 +954,52 @@ mod tests {
         std::thread::sleep(Duration::from_millis(20));
     }
 
+    /// The Theater `field`: this host, supervised by the runner serving `runner_dir`.
+    fn field_theater(root: &Path, runner_dir: &Path) -> Theater {
+        Theater::new("field", TheaterAccess::Local).with_runner(
+            crate::RunnerSettings::default()
+                .with_state_dir(runner_dir.to_string_lossy().into_owned())
+                // The test's own runner serves; never start this test binary as one.
+                .with_command(root.join("no-runner-command").to_string_lossy()),
+        )
+    }
+
+    /// The runner serving `runner_dir` dies as far as any Station can tell: its record points
+    /// at a port nothing listens on. Answers the record that brings it back.
+    fn kill_runner(runner_dir: &Path) -> Vec<u8> {
+        let path = runner_dir.join("runner.json");
+        let saved = fs::read(&path).unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut info: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+        info["url"] = serde_json::json!(format!("http://127.0.0.1:{port}"));
+        fs::write(&path, serde_json::to_vec(&info).unwrap()).unwrap();
+        saved
+    }
+
+    fn mission_state(state: &DaemonState, mission_id: &str) -> Option<MissionState> {
+        Some(state.missions.lock().unwrap().get(mission_id)?.state)
+    }
+
+    /// The hand-off the latest start of `mission_id` was briefed with.
+    fn latest_hand_off(mission_id: &str) -> Option<String> {
+        RECORDED_STARTS
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|start| start.mission_id.as_str() == mission_id)?
+            .initial_context
+            .iter()
+            .find(|text| text.starts_with("This Mission continues attempt 1, which was lost"))
+            .cloned()
+    }
+
     async fn until(what: &str, mut done: impl FnMut() -> bool) {
-        tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::time::timeout(Duration::from_secs(30), async {
             while !done() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
@@ -640,12 +1016,7 @@ mod tests {
         let runner_dir = root.path().join("runner");
         let _runner = start_test_runner(&runner_dir).await;
         // Both Stations reach the same runner as Theater `field`.
-        let field = Theater::new("field", TheaterAccess::Local).with_runner(
-            crate::RunnerSettings::default()
-                .with_state_dir(runner_dir.to_string_lossy().into_owned())
-                // The test's own runner serves; never start this test binary as one.
-                .with_command(root.path().join("no-runner-command").to_string_lossy()),
-        );
+        let field = field_theater(root.path(), &runner_dir);
         let agents = "[agent.007]\nhandler = \"mock-drip\"\n";
         let operation = "theater = \"field\"\n";
         let a = station(
@@ -859,6 +1230,195 @@ mod tests {
         assert!(hand_off.contains(&saved.branch), "{hand_off}");
         assert!(hand_off.contains("starts from it"), "{hand_off}");
         assert!(hand_off.ends_with("- blocked"), "{hand_off}");
+        a.stopping.store(true, Ordering::Release);
+        b.stopping.store(true, Ordering::Release);
+    }
+
+    /// Pops `mission_id`'s events on `state` until it completes, and answers its ticks.
+    async fn finish(state: &DaemonState, mission_id: &str) -> Vec<u32> {
+        let mut events = Vec::new();
+        until("the Session completes", || {
+            while let Some(event) = pop_event(state, mission_id) {
+                events.push(event);
+            }
+            ticks(&events).1
+        })
+        .await;
+        wait_for_state(state, mission_id, MissionState::Done).await;
+        ticks(&events).0
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_runner_that_dies_under_a_live_station_loses_its_session_and_the_mission_is_tried_again()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let registry = root.path().join("registry");
+        let runner_dir = root.path().join("runner");
+        let _runner = start_test_runner(&runner_dir).await;
+        let a = station(
+            root.path(),
+            "station-a",
+            &registry,
+            "theater = \"field\"\nlost_after_secs = 1\n",
+            "[agent.007]\nhandler = \"mock-drip\"\n",
+            Some(field_theater(root.path(), &runner_dir)),
+        );
+        let mission_id = submit(
+            a.intake.as_ref(),
+            &format!("runner-loss-{}", std::process::id()),
+        );
+        publish_station_check_in(&a);
+        assert!(schedule_intake_once(&a));
+        schedule_queued_once(&a).await;
+        let mut seen = Vec::new();
+        until("ticks before the runner dies", || {
+            while let Some(event) = pop_event(&a, &mission_id) {
+                seen.push(event);
+            }
+            ticks(&seen).0.len() >= 3
+        })
+        .await;
+        let first = session_hold(&a, &mission_id).unwrap();
+
+        // The runner dies and the Station lives: it waits out the grace, probes, gives up.
+        let saved = kill_runner(&runner_dir);
+        until("the Mission handed back", || {
+            mission_state(&a, &mission_id) == Some(MissionState::Abandoned)
+        })
+        .await;
+        let lost = a.intake.session(&first.id).unwrap().unwrap();
+        assert_eq!(lost.status, SessionStatus::Lost);
+        let reason = lost.lost.clone().unwrap();
+        assert!(reason.contains("out of reach for 1s"), "{reason}");
+        assert!(
+            lost.recent
+                .iter()
+                .any(|line| line.starts_with("text: tick")),
+            "its last events are kept for the next attempt: {:?}",
+            lost.recent
+        );
+        assert!(!a.sessions.lock().unwrap().contains_key(&mission_id));
+        while let Some(event) = pop_event(&a, &mission_id) {
+            seen.push(event);
+        }
+        assert!(
+            seen.iter()
+                .any(|event| event.kind == "lost" && event.text.as_deref() == Some(&reason)),
+            "the operator is told why"
+        );
+        assert!(a.intake.leases().unwrap().is_empty(), "the brief went back");
+        assert_eq!(a.intake.list_new().unwrap().len(), 1);
+
+        // The runner answers again; Headquarters posts the brief anew as a second attempt.
+        fs::write(runner_dir.join("runner.json"), saved).unwrap();
+        publish_station_check_in(&a);
+        assert!(schedule_intake_once(&a));
+        let lease = a.intake.leases().unwrap().pop().unwrap();
+        assert_eq!((lease.station(), lease.attempt()), ("station-a", 2));
+        schedule_queued_once(&a).await;
+        let second = session_hold(&a, &mission_id).expect("the second attempt holds a Session");
+        let record = a.intake.session(&second.id).unwrap().unwrap();
+        assert_eq!(
+            (record.attempt, record.predecessor.as_deref()),
+            (2, Some(first.id.as_str()))
+        );
+        let hand_off = latest_hand_off(&mission_id).expect("the second attempt is briefed");
+        assert!(hand_off.contains(&reason), "{hand_off}");
+        assert!(hand_off.contains("- text: tick"), "{hand_off}");
+        assert_eq!(finish(&a, &mission_id).await.len(), DRIP_TICKS as usize);
+        a.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_station_that_adopts_a_session_whose_runner_is_gone_gives_it_up_instead_of_waiting() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = root.path().join("registry");
+        let runner_dir = root.path().join("runner");
+        let _runner = start_test_runner(&runner_dir).await;
+        let operation = "theater = \"field\"\nlost_after_secs = 1\n";
+        let agents = "[agent.007]\nhandler = \"mock-drip\"\n";
+        let [a, b] = ["station-a", "station-b"].map(|id| {
+            station(
+                root.path(),
+                id,
+                &registry,
+                operation,
+                agents,
+                Some(field_theater(root.path(), &runner_dir)),
+            )
+        });
+        let mission_id = submit(
+            a.intake.as_ref(),
+            &format!("adopt-loss-{}", std::process::id()),
+        );
+        publish_station_check_in(&a);
+        publish_station_check_in(&b);
+        assert!(schedule_intake_once(&a));
+        schedule_queued_once(&a).await;
+        let mut seen = Vec::new();
+        until("ticks on station-a", || {
+            while let Some(event) = pop_event(&a, &mission_id) {
+                seen.push(event);
+            }
+            ticks(&seen).0.len() >= 3
+        })
+        .await;
+        let first = session_hold(&a, &mission_id).unwrap();
+
+        // Station A goes dark and its runner dies with it; Station B adopts the Session.
+        go_dark(&a, &mission_id);
+        let saved = kill_runner(&runner_dir);
+        publish_station_check_in(&b);
+        assert!(schedule_intake_once(&b));
+        assert_eq!(session_hold(&b, &mission_id).unwrap().id, first.id);
+
+        // The re-attach fails; the next try waits the first backoff, not a fixed 5 s loop.
+        let tried = tokio::time::Instant::now();
+        schedule_recovered_once(&b).await;
+        let retry_at = b.retry_after.lock().unwrap().get(&mission_id).copied();
+        assert!(
+            retry_at.is_some_and(|at| at >= tried + Duration::from_secs(4)),
+            "{retry_at:?}"
+        );
+        assert_eq!(mission_state(&b, &mission_id), Some(MissionState::Blocked));
+
+        // Past the grace, a failed try probes the runner, finds it gone and gives up.
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+        b.retry_after.lock().unwrap().clear();
+        schedule_recovered_once(&b).await;
+        let lost = b.intake.session(&first.id).unwrap().unwrap();
+        assert_eq!(lost.status, SessionStatus::Lost);
+        let reason = lost.lost.clone().unwrap();
+        assert!(
+            reason.contains("could not be re-attached for 1s"),
+            "{reason}"
+        );
+        assert_eq!(
+            mission_state(&b, &mission_id),
+            Some(MissionState::Abandoned)
+        );
+        assert!(!b.startup_recovery.lock().unwrap().contains(&mission_id));
+        assert_eq!(b.intake.list_new().unwrap().len(), 1, "the brief went back");
+        while pop_event(&b, &mission_id).is_some() {}
+
+        // With its runner back, the Mission runs again as a second attempt on Station B.
+        fs::write(runner_dir.join("runner.json"), saved).unwrap();
+        publish_station_check_in(&b);
+        assert!(schedule_intake_once(&b));
+        let lease = b.intake.leases().unwrap().pop().unwrap();
+        assert_eq!((lease.station(), lease.attempt()), ("station-b", 2));
+        schedule_queued_once(&b).await;
+        let second = session_hold(&b, &mission_id).expect("the second attempt holds a Session");
+        let record = b.intake.session(&second.id).unwrap().unwrap();
+        assert_eq!(
+            (record.attempt, record.predecessor.as_deref()),
+            (2, Some(first.id.as_str()))
+        );
+        assert!(
+            latest_hand_off(&mission_id).is_some_and(|hand_off| hand_off.contains(&reason)),
+            "the second attempt is briefed on the first"
+        );
+        assert_eq!(finish(&b, &mission_id).await.len(), DRIP_TICKS as usize);
         a.stopping.store(true, Ordering::Release);
         b.stopping.store(true, Ordering::Release);
     }

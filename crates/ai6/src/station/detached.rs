@@ -5,7 +5,9 @@
 //! output is appended to a file and its input read from a FIFO it holds open itself. While the
 //! link is down a read finds nothing new; once the transport reconnects, reads resume from the
 //! last byte taken. The Station still supervises the harness: one whose Station stops is
-//! left behind, and the next start for the same Mission ends it before starting another.
+//! left behind, and the next start for the same Mission ends it before starting another. A
+//! harness out of reach, or quiet, for its [`ReachWatch`] grace is probed once over the
+//! transport; one that is gone without recording an exit is given up as lost.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,6 +19,7 @@ use guatiao::{Bytes, FromValue, Status, ToValue, Value};
 use crate::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
 use crate::directorates::q::transport::kit::{is_variable_name, quote};
 use crate::directorates::q::transport::{ReadSpec, RunSpec, TransportClient, describe};
+use crate::station::reach::ReachWatch;
 
 /// Where wrapped harnesses keep their files: relative to the transport's default directory,
 /// the login user's home over SSH.
@@ -78,6 +81,10 @@ while [ ! -s pid ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
 cat pid
 "#;
 
+/// Exits 0 while the harness runs or once its exit is recorded; anything else means it is gone.
+const ALIVE: &str = r#"[ -f "$1/exit" ] || kill -0 "$2" 2>/dev/null
+"#;
+
 /// Ends the harness's session (its process group under `setsid`, else the wrapper).
 const KILL: &str = r#"pid=$(cat "$1/pid") || exit 0
 kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
@@ -92,6 +99,7 @@ pub(crate) struct DetachedTerminal {
     client: Arc<TransportClient>,
     prefix: String,
     relink: Option<Arc<dyn Fn() + Send + Sync>>,
+    reach: ReachWatch,
 }
 
 impl DetachedTerminal {
@@ -114,7 +122,15 @@ impl DetachedTerminal {
             client,
             prefix,
             relink: None,
+            reach: ReachWatch::default(),
         }
+    }
+
+    /// Notes in `reach` whether the harnesses this starts can be reached, and gives them up
+    /// there when they are gone.
+    pub(crate) fn watched_by(mut self, reach: ReachWatch) -> Self {
+        self.reach = reach;
+        self
     }
 
     /// Runs `relink` when a read gets through again after the link was down.
@@ -217,6 +233,7 @@ impl Terminal for DetachedTerminal {
             killed: AtomicBool::new(false),
             unreachable: AtomicBool::new(false),
             relink: self.relink.clone(),
+            reach: self.reach.clone(),
         }
         .into_object())
     }
@@ -231,11 +248,38 @@ struct DetachedSession {
     killed: AtomicBool,
     unreachable: AtomicBool,
     relink: Option<Arc<dyn Fn() + Send + Sync>>,
+    reach: ReachWatch,
 }
 
 impl DetachedSession {
     fn path(&self, name: &str) -> String {
         format!("{}/{name}", self.dir)
+    }
+
+    /// Asks the Theater, over the transport, whether the harness still runs or has exited.
+    fn probe(&self) -> Result<(), String> {
+        let output = self
+            .client
+            .run(&RunSpec {
+                argv: vec![
+                    "sh".to_owned(),
+                    "-c".to_owned(),
+                    ALIVE.to_owned(),
+                    "sh".to_owned(),
+                    self.dir.clone(),
+                    self.pid.to_string(),
+                ],
+                timeout_ms: SCRIPT_TIMEOUT_MS,
+                ..RunSpec::default()
+            })
+            .map_err(|error| describe(&error))?;
+        match output.code {
+            Some(0) => Ok(()),
+            _ => Err(format!(
+                "the harness's process {} is gone and recorded no exit",
+                self.pid
+            )),
+        }
     }
 
     /// Output after the last byte taken, up to `limit` bytes; `None` when the link is down.
@@ -262,6 +306,7 @@ impl DetachedSession {
                 Some(read.data.0)
             }
             Err(error) => {
+                self.reach.missed(|| self.probe());
                 if !self.unreachable.swap(true, Ordering::AcqRel) {
                     eprintln!(
                         "ai6: detached harness {} is unreachable; it keeps running: {}",
@@ -312,6 +357,7 @@ impl TerminalSession for DetachedSession {
             }
             if let Some(bytes) = self.output(dst.len()) {
                 if !bytes.is_empty() {
+                    self.reach.reached();
                     return Ok(self.take(&bytes, dst));
                 }
                 // The exit code is written after the last output, so output found after it
@@ -320,6 +366,8 @@ impl TerminalSession for DetachedSession {
                     let rest = self.output(dst.len()).unwrap_or_default();
                     return Ok(self.take(&rest, dst));
                 }
+                // A quiet harness is probed once per grace, to notice one that died unrecorded.
+                self.reach.missed(|| self.probe());
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {

@@ -11,7 +11,7 @@
 //! can read it. A Station acknowledges what it has read by asking for the events after it, so
 //! a Station that comes back, or another one, asks from the last acknowledgement and replays
 //! what it missed. A runner that restarts has lost the harnesses it supervised; it ends their
-//! Sessions with a `failed` event so a Station still learns what happened.
+//! Sessions with a [`LOST_EVENT`], which a Station takes as the Session lost.
 //!
 //! The state directory holds `runner.json` (where the runner listens, while it runs),
 //! `token`, `runner.lock` and `sessions/<key>/` with `events.jsonl`, `cursor` and
@@ -72,6 +72,9 @@ const KEEP_ENDED: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// The exit status of `ai6 runner call` when no runner answers it.
 pub const CALL_NOT_RUNNING: u8 = 3;
+/// The kind of the event a restarted runner ends a Session it lost with: the harness is gone,
+/// so the Station treats the Session as lost rather than failed.
+pub(crate) const LOST_EVENT: &str = "lost";
 
 /// Where a runner listens and what it was built from, as `runner.json` records it.
 #[non_exhaustive]
@@ -532,7 +535,7 @@ fn load_sessions(state_dir: &Path) -> io::Result<BTreeMap<String, Arc<Hosted>>> 
         };
         if !file.ended {
             let _ = lock_of(&hosted.spool).append(event(
-                "failed",
+                LOST_EVENT,
                 "the runner supervising this Session restarted, so its harness is gone",
             ));
             hosted.persist();
@@ -1052,7 +1055,7 @@ mod tests {
         assert!(live.ended);
         assert_eq!(live.last, 2);
         let events = lock_of(&sessions["live"].spool).after(0, 10);
-        assert_eq!(events[1].event.kind, "failed");
+        assert_eq!(events[1].event.kind, LOST_EVENT);
         assert!(
             events[1]
                 .event

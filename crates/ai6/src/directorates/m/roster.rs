@@ -16,6 +16,7 @@ use crate::directorates::m::approvals::{GreenInkDefinition, GreenInkPolicy};
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::m::placement::PlacementStrategy;
+use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition};
@@ -177,11 +178,15 @@ pub struct Operation {
     pub on_limit: OnLimit,
     /// Seconds to park when a limit reports no reset time.
     pub limit_fallback_secs: u64,
-    /// Response when a Session is lost with its Station and no other Station can adopt it.
+    /// Response when a Session is lost: with its Station when no other Station can adopt it,
+    /// or when its runner or wrapped harness stays out of reach past `lost_after_secs`.
     pub on_lost: OnLost,
     /// Whether Missions go to the least-loaded place (`spread`, the default) or fill the
     /// busiest place that still has room (`pack`).
     pub placement: PlacementStrategy,
+    /// Seconds a Session's runner, or its wrapped harness, may stay out of reach before its
+    /// Station probes it once more and, if it is still gone, marks the Session lost.
+    pub lost_after_secs: u64,
     /// Spending limits for this Operation's Missions; none is set unless configured.
     pub budget: Budget,
     /// What a Session may do once it has read untrusted input; strict unless configured.
@@ -724,6 +729,7 @@ struct OperationDefinition {
     limit_fallback_secs: Option<u64>,
     on_lost: OnLost,
     placement: PlacementStrategy,
+    lost_after_secs: Option<u64>,
     budget: BudgetDefinition,
     exposure: ExposureDefinition,
     quarantine: QuarantineDefinition,
@@ -865,6 +871,7 @@ impl OperationDefinition {
                 .unwrap_or(DEFAULT_LIMIT_FALLBACK_SECS),
             on_lost: self.on_lost,
             placement: self.placement,
+            lost_after_secs: self.lost_after_secs.unwrap_or(DEFAULT_LOST_AFTER_SECS),
             budget,
             exposure,
             quarantine,
@@ -888,8 +895,8 @@ impl Operation {
     }
 
     /// Checks the settings a configuration file is checked for: Sleeper names and
-    /// schedules, Station IDs, clearance, workspace, `on_blown`, checkpoint and limit
-    /// intervals and the cover identity.
+    /// schedules, Station IDs, clearance, workspace, `on_blown`, the checkpoint, limit and
+    /// `lost_after_secs` intervals and the cover identity.
     ///
     /// # Errors
     ///
@@ -950,6 +957,11 @@ impl Operation {
         if self.limit_fallback_secs == 0 {
             return Err(error(format!(
                 "Operation {id:?}: limit_fallback_secs must be greater than zero"
+            )));
+        }
+        if self.lost_after_secs == 0 {
+            return Err(error(format!(
+                "Operation {id:?}: lost_after_secs must be greater than zero"
             )));
         }
         if let Some(identity) = &self.cover_identity
@@ -1565,7 +1577,7 @@ sources = {{ jira = \"GUA\" }}\n",
         let directory = TestDirectory::new();
         directory.write(
             "operations.toml",
-            "[operation.A]\n[operation.B]\non_lost = \"fail\"\nplacement = \"pack\"\nworkspace = { checkpoint_remote = \"origin\", checkpoint_secs = 60 }\n",
+            "[operation.A]\n[operation.B]\non_lost = \"fail\"\nplacement = \"pack\"\nlost_after_secs = 10\nworkspace = { checkpoint_remote = \"origin\", checkpoint_secs = 60 }\n",
         );
         let roster = Roster::load(&directory.0).unwrap();
         let defaults = roster.operation("A").unwrap();
@@ -1575,16 +1587,19 @@ sources = {{ jira = \"GUA\" }}\n",
             roster.operation("B").unwrap().placement,
             PlacementStrategy::Pack
         );
+        assert_eq!(defaults.lost_after_secs, DEFAULT_LOST_AFTER_SECS);
         assert_eq!(defaults.workspace.checkpoint_remote, None);
         assert_eq!(defaults.workspace.checkpoint_secs, DEFAULT_CHECKPOINT_SECS);
         let set = roster.operation("B").unwrap();
         assert_eq!(set.on_lost, OnLost::Fail);
+        assert_eq!(set.lost_after_secs, 10);
         assert_eq!(set.workspace.checkpoint_remote.as_deref(), Some("origin"));
         assert_eq!(set.workspace.checkpoint_secs, 60);
 
         for invalid in [
             "on_lost = \"ignore\"",
             "placement = \"random\"",
+            "lost_after_secs = 0",
             "workspace = { checkpoint_secs = 0 }",
             "workspace = { checkpoint_remote = \" \" }",
         ] {

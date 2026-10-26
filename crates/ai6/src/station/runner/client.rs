@@ -17,6 +17,7 @@ use crate::directorates::m::identity::SessionId;
 use crate::directorates::m::theaters::{RunnerSettings, Theater, TheaterAccess};
 use crate::directorates::q::transport::{RunSpec, TransportClient, describe};
 use crate::directorates::section_00::agent::{AgentEvent, AgentMessage, AgentSession};
+use crate::station::reach::ReachWatch;
 
 /// How long one read of a runner's events may wait for a new one.
 const READ_WAIT_MS: u64 = 1_000;
@@ -296,13 +297,16 @@ fn refuse(message: impl std::fmt::Display) -> ProviderError {
 /// A Session on a runner, read from its spool.
 ///
 /// A read that cannot reach the runner answers "no event yet", so a dropped link costs only
-/// time: the next read that gets through continues from the last event the Station took.
+/// time: the next read that gets through continues from the last event the Station took. A
+/// runner out of reach past its [`ReachWatch`] grace, one that no longer has the Session, or
+/// one that restarted without its harness gives the Session up as lost through the watch.
 pub(crate) struct RunnerSession {
     link: Arc<RunnerLink>,
     key: String,
     reading: Mutex<Reading>,
     detached: Arc<AtomicBool>,
     relink: Option<Box<dyn Fn() + Send + Sync>>,
+    reach: ReachWatch,
 }
 
 #[derive(Default)]
@@ -316,12 +320,14 @@ struct Reading {
 }
 
 impl RunnerSession {
-    /// Reads Session `key` from the event after the last one a Station acknowledged.
+    /// Reads Session `key` from the event after the last one a Station acknowledged, noting in
+    /// `reach` whether the runner answers.
     pub(crate) fn attach(
         link: Arc<RunnerLink>,
         key: impl Into<String>,
         session_id: Option<SessionId>,
         detached: Arc<AtomicBool>,
+        reach: ReachWatch,
     ) -> Self {
         Self {
             link,
@@ -332,6 +338,33 @@ impl RunnerSession {
             }),
             detached,
             relink: None,
+            reach,
+        }
+    }
+
+    /// Hands the Station the next buffered event. The event a restarted runner ends the
+    /// Session with is taken as the Session lost instead.
+    fn pop(&self, reading: &mut Reading) -> Option<AgentEvent> {
+        let spooled = reading.buffered.pop_front()?;
+        reading.after = Some(spooled.seq);
+        if spooled.event.kind == super::LOST_EVENT {
+            self.reach.lose(
+                spooled
+                    .event
+                    .text
+                    .unwrap_or_else(|| "its runner lost the harness".to_owned()),
+            );
+            return None;
+        }
+        Some(spooled.event)
+    }
+
+    /// Asks the runner, through the Theater's transport, whether it still has the Session.
+    fn probe(&self) -> Result<(), String> {
+        match self.link.status(&self.key) {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err(format!("the runner no longer has Session {:?}", self.key)),
+            Err(why) => Err(why),
         }
     }
 
@@ -377,11 +410,10 @@ impl AgentSession for RunnerSession {
         let wait = u64::try_from(timeout_ms).unwrap_or(0).min(READ_WAIT_MS);
         let after = {
             let mut reading = self.reading();
-            if let Some(spooled) = reading.buffered.pop_front() {
-                reading.after = Some(spooled.seq);
-                return Ok(Some(spooled.event));
+            if !reading.buffered.is_empty() {
+                return Ok(self.pop(&mut reading));
             }
-            if reading.complete {
+            if reading.complete || self.reach.lost().is_some() {
                 drop(reading);
                 std::thread::sleep(Duration::from_millis(wait));
                 return Ok(None);
@@ -395,6 +427,7 @@ impl AgentSession for RunnerSession {
         match self.link.call("GET", &path, None) {
             Ok((200, body)) => {
                 let page: EventsPage = serde_json::from_value(body).map_err(refuse)?;
+                self.reach.reached();
                 let relinked = {
                     let mut reading = self.reading();
                     let relinked = std::mem::take(&mut reading.unreachable);
@@ -411,27 +444,25 @@ impl AgentSession for RunnerSession {
                         relink();
                     }
                 }
-                let mut reading = self.reading();
-                Ok(reading.buffered.pop_front().map(|spooled| {
-                    reading.after = Some(spooled.seq);
-                    spooled.event
-                }))
+                Ok(self.pop(&mut self.reading()))
             }
-            Ok((404, _)) => Err(refuse(format!(
-                "the runner no longer has Session {:?}",
-                self.key
-            ))),
+            Ok((404, _)) => {
+                self.reach.lose(format!(
+                    "the runner on its Theater no longer has Session {:?}",
+                    self.key
+                ));
+                Ok(None)
+            }
             Ok((status, body)) => Err(refuse(api_error(status, &body))),
             Err(Unreachable(why)) => {
-                let mut reading = self.reading();
-                if !reading.unreachable {
-                    reading.unreachable = true;
+                if self.reach.missed(|| self.probe()) {
+                    self.reading().unreachable = true;
                     eprintln!(
-                        "ai6: runner Session {:?} is unreachable; still waiting: {why}",
-                        self.key
+                        "ai6: runner Session {:?} is unreachable; waiting up to {}s for it: {why}",
+                        self.key,
+                        self.reach.grace().as_secs()
                     );
                 }
-                drop(reading);
                 std::thread::sleep(Duration::from_millis(wait.max(100)));
                 Ok(None)
             }

@@ -1,16 +1,44 @@
-//! Recovery: how a Mission carries on when the Station supervising its Session goes dark.
+//! Recovery: how a Mission carries on when the Station supervising its Session goes dark, or
+//! its harness does.
 //!
 //! A Session whose harness a runner supervises on a Theater other Stations reach outlives its
 //! Station: another Station takes the Session lease and re-attaches to the runner (adoption).
 //! Any other Session ended with its Station's host, so it is lost and the Mission is tried
 //! again as a new attempt. [`adopter`] decides which, with the reason when no Station may
 //! adopt.
+//!
+//! A live Station whose runner, or wrapped harness, stays out of reach for an Operation's
+//! `lost_after_secs` ([`DEFAULT_LOST_AFTER_SECS`] unless set) probes it once more and, when it
+//! is still gone, marks the Session lost the same way. A Station retrying a re-attach waits
+//! [`reattach_delay`] between tries.
+
+use std::time::Duration;
 
 use crate::directorates::m::placement::{
     self, ExecutionMode, OperationPolicy, PlacementChoice, PlacementRequest, StationFacts,
 };
 use crate::directorates::m::theaters::LOCAL_THEATER;
 use crate::directorates::registry::sessions::SessionRecord;
+
+/// Seconds a Session's runner, or its wrapped harness, may stay out of reach before its
+/// Station probes it and gives the Session up when it is still gone: three Station check-in
+/// intervals.
+pub const DEFAULT_LOST_AFTER_SECS: u64 = 45;
+
+/// The first wait between a Station's tries at re-attaching to a Session; each failed try
+/// doubles it, up to [`MAX_REATTACH_DELAY`].
+pub const FIRST_REATTACH_DELAY: Duration = Duration::from_secs(5);
+/// The longest wait between tries at re-attaching to a Session.
+pub const MAX_REATTACH_DELAY: Duration = Duration::from_secs(60);
+
+/// How long to wait before the next try at re-attaching to a Session after `failures` tries
+/// in a row failed.
+pub fn reattach_delay(failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(16);
+    FIRST_REATTACH_DELAY
+        .saturating_mul(1 << doublings)
+        .min(MAX_REATTACH_DELAY)
+}
 
 /// The live Station that should re-attach to `session`'s harness, or why none may.
 ///
@@ -193,6 +221,14 @@ mod tests {
             &session(LOCAL_THEATER, true),
         );
         assert!(local.unwrap_err().contains("own host"));
+    }
+
+    #[test]
+    fn reattach_tries_back_off_up_to_a_ceiling() {
+        let delays: Vec<u64> = (1..=6).map(|n| reattach_delay(n).as_secs()).collect();
+        assert_eq!(delays, [5, 10, 20, 40, 60, 60]);
+        assert_eq!(reattach_delay(0), FIRST_REATTACH_DELAY);
+        assert_eq!(reattach_delay(u32::MAX), MAX_REATTACH_DELAY);
     }
 
     #[test]
