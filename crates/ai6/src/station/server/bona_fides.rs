@@ -32,7 +32,7 @@ pub(super) fn record_origin(
 mod tests {
     use super::super::tests::test_state;
     use super::super::{publish_station_check_in, schedule_intake_once};
-    use crate::directorates::registry::bona_fides::{Origin, Provenance, brief_digest};
+    use crate::directorates::registry::bona_fides::{Origin, Provenance, record_digest};
     use crate::directorates::registry::store::Brief;
 
     #[test]
@@ -59,7 +59,7 @@ mod tests {
             "provenance": {
                 "origin": "operator", "principal": "person-m", "received_at": 1,
                 "received_by": "universal-exports",
-                "digest": brief_digest("Work forged", ""),
+                "digest": record_digest(&record("forged")),
             }
         });
         let queue = dir.path().join("registry").join("new");

@@ -75,13 +75,16 @@ pub struct Provenance {
     pub received_at: i64,
     /// The Station, or `universal-exports` for the gateway, that accepted it.
     pub received_by: String,
-    /// `sha256:HEX` of the brief's title and body as accepted ([`brief_digest`]).
+    /// `sha256:HEX` of the whole brief record as stored ([`record_digest`]): any change to
+    /// it after it was accepted, its Operation, assignment, data or text, drops the
+    /// provenance.
     pub digest: String,
 }
 
 impl Provenance {
     /// Provenance for `brief` accepted from `origin` by `received_by` at `received_at`
-    /// (Unix seconds). The digest is computed from the brief's title and body.
+    /// (Unix seconds). The digest is the brief's [`record_digest`]; the Registry takes it
+    /// again from the record it stores.
     pub fn new(
         origin: Origin,
         brief: &Brief,
@@ -95,7 +98,7 @@ impl Provenance {
             item_url: None,
             received_at,
             received_by: received_by.into(),
-            digest: brief_digest(&brief.title, &brief.body),
+            digest: record_digest(brief),
         }
     }
 
@@ -125,10 +128,10 @@ impl Provenance {
         Self::new(Origin::RegistryDrop, brief, station, at)
     }
 
-    /// Whether this provenance was recorded for `brief` as it is now: its title and body
-    /// still hash to [`Provenance::digest`].
+    /// Whether this provenance was recorded for `brief` as it is now: its record still
+    /// hashes to [`Provenance::digest`].
     pub fn matches(&self, brief: &Brief) -> bool {
-        self.digest == brief_digest(&brief.title, &brief.body)
+        self.digest == record_digest(brief)
     }
 
     pub(super) fn validate(&self) -> io::Result<()> {
@@ -150,15 +153,35 @@ impl Provenance {
     }
 }
 
-/// `sha256:HEX` over the length-framed title and body, so no two (title, body) pairs share a
-/// digest by moving text across the boundary.
-pub fn brief_digest(title: &str, body: &str) -> String {
-    let mut digest = Sha256::new();
-    for part in [title.as_bytes(), body.as_bytes()] {
-        digest.update((part.len() as u64).to_be_bytes());
-        digest.update(part);
+/// `sha256:HEX` of the brief record without its provenance, as canonical JSON: every field,
+/// object keys sorted at every depth, no whitespace.
+pub fn record_digest(brief: &Brief) -> String {
+    let record = Brief {
+        provenance: None,
+        ..brief.clone()
+    };
+    let canonical = serde_json::to_value(&record)
+        .map(canonical)
+        .and_then(|value| serde_json::to_vec(&value))
+        .unwrap_or_default();
+    format!("sha256:{}", hex_digest(&Sha256::digest(canonical)))
+}
+
+/// `value` with its object keys sorted at every depth, whatever order the map kept.
+fn canonical(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let sorted: std::collections::BTreeMap<String, serde_json::Value> = map
+                .into_iter()
+                .map(|(key, value)| (key, canonical(value)))
+                .collect();
+            serde_json::Value::Object(sorted.into_iter().collect())
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(canonical).collect())
+        }
+        other => other,
     }
-    format!("sha256:{}", hex_digest(&digest.finalize()))
 }
 
 fn is_digest(text: &str) -> bool {
@@ -185,18 +208,19 @@ pub(super) fn proposal_provenance(proposal: &MissionProposal, received_by: &str)
 }
 
 /// Splits what the Registry stores: the brief record without provenance, and the provenance
-/// kept beside it.
+/// kept beside it, its digest taken from that record.
 pub(super) fn seal(brief: &Brief) -> io::Result<(Brief, Option<Provenance>)> {
     let mut record = brief.clone();
-    let provenance = record.provenance.take();
-    if let Some(provenance) = &provenance {
+    let mut provenance = record.provenance.take();
+    if let Some(provenance) = &mut provenance {
+        provenance.digest = record_digest(&record);
         provenance.validate()?;
     }
     Ok((record, provenance))
 }
 
 /// Joins a stored brief with the provenance kept beside it, dropping any provenance the
-/// record itself carried and any kept one that does not match the brief's text.
+/// record itself carried and any kept one that does not match the record.
 pub(super) fn unseal(brief: &mut Brief, kept: Option<Provenance>) {
     brief.provenance =
         kept.filter(|provenance| provenance.validate().is_ok() && provenance.matches(brief));
@@ -607,6 +631,8 @@ mod tests {
     backend_tests!(
         provenance_is_kept_apart_from_the_brief_through_the_queue,
         a_dropped_brief_never_carries_the_provenance_it_claims,
+        a_brief_edited_after_it_was_sealed_is_a_registry_drop,
+        a_finished_brief_dropped_again_does_not_reuse_its_provenance,
     );
 
     fn operator(brief: &Brief) -> Provenance {
@@ -655,10 +681,93 @@ mod tests {
         assert_eq!(claimed.provenance, None);
     }
 
+    fn a_brief_edited_after_it_was_sealed_is_a_registry_drop(store: &dyn Store) {
+        let registry = store.handle();
+        let mut asked = brief("asked");
+        asked.operation = Some("G".to_owned());
+        asked.provenance = Some(operator(&asked));
+        registry.submit_brief(&asked).unwrap();
+        assert!(registry.list_new().unwrap()[0].provenance.is_some());
+
+        // The same text, aimed at another Operation and carrying exposure data of its own.
+        let mut edited = Brief {
+            provenance: None,
+            ..asked.clone()
+        };
+        edited.operation = Some("H".to_owned());
+        edited
+            .data
+            .insert("exposure".to_owned(), serde_json::json!([]));
+        registry.drop_brief(&asked.key(), &serde_json::to_string(&edited).unwrap());
+        let queued = registry.list_new().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].operation.as_deref(), Some("H"));
+        assert_eq!(queued[0].provenance, None, "the edit drops the origin");
+    }
+
+    fn a_finished_brief_dropped_again_does_not_reuse_its_provenance(store: &dyn Store) {
+        let registry = store.handle();
+        let mut asked = brief("replayed");
+        asked.provenance = Some(operator(&asked));
+        registry.submit_brief(&asked).unwrap();
+        let claimed = registry.claim_new(None).unwrap().unwrap();
+        assert!(claimed.provenance.is_some());
+        registry
+            .finish(
+                &claimed,
+                &serde_json::json!({"state": "done"}),
+                true,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let record = Brief {
+            provenance: None,
+            ..asked.clone()
+        };
+        registry.drop_brief(&asked.key(), &serde_json::to_string(&record).unwrap());
+        let queued = registry.list_new().unwrap();
+        assert_eq!(queued.len(), 1, "the same record, queued again by hand");
+        assert_eq!(
+            queued[0].provenance, None,
+            "a finished brief's origin is spent"
+        );
+    }
+
     #[test]
-    fn the_digest_frames_title_and_body() {
-        assert_ne!(brief_digest("ab", "c"), brief_digest("a", "bc"));
-        assert!(is_digest(&brief_digest("t", "b")));
+    fn the_record_digest_covers_every_field_and_ignores_key_order() {
+        let base = brief("d");
+        let digest = record_digest(&base);
+        assert!(is_digest(&digest));
+        for edit in [
+            |brief: &mut Brief| brief.operation = Some("H".to_owned()),
+            |brief: &mut Brief| brief.agent = Some("008".to_owned()),
+            |brief: &mut Brief| brief.role = Some("r".to_owned()),
+            |brief: &mut Brief| brief.stations = vec!["s".to_owned()],
+            |brief: &mut Brief| brief.url = Some("https://example.invalid".to_owned()),
+            |brief: &mut Brief| {
+                brief
+                    .data
+                    .insert("exposure".to_owned(), serde_json::json!([]));
+            },
+            |brief: &mut Brief| brief.title.push('!'),
+        ] {
+            let mut edited = base.clone();
+            edit(&mut edited);
+            assert_ne!(record_digest(&edited), digest);
+        }
+        let mut with_data = base.clone();
+        with_data
+            .data
+            .insert("x".to_owned(), serde_json::json!({"b": 1, "a": 2}));
+        let reordered: Brief = serde_json::from_str(
+            &serde_json::to_string(&with_data)
+                .unwrap()
+                .replace(r#"{"b":1,"a":2}"#, r#"{"a":2,"b":1}"#),
+        )
+        .unwrap();
+        assert_eq!(record_digest(&reordered), record_digest(&with_data));
     }
 
     #[test]

@@ -174,9 +174,11 @@ fn finish_in(
     let key = brief.key();
     let outcome = to_json(outcome)?;
     if is_claimed(tx, &key)? {
+        // The provenance is spent: a row queued again under this key finds none.
         tx.execute(
             "UPDATE ai6_briefs SET state = $2, outcome = $3, \
-             transcript = coalesce($4, transcript), revision = $5 WHERE key = $1",
+             transcript = coalesce($4, transcript), revision = $5, \
+             finished_provenance = provenance, provenance = NULL WHERE key = $1",
             &[
                 key.as_str().into(),
                 state.into(),
@@ -187,12 +189,15 @@ fn finish_in(
         )?;
     } else {
         tx.execute(
-            "INSERT INTO ai6_briefs (key, state, brief, outcome, transcript, revision, provenance) \
+            "INSERT INTO ai6_briefs \
+             (key, state, brief, outcome, transcript, revision, finished_provenance) \
              VALUES ($1, $2, $3, $4, $5, $6, $7) \
              ON CONFLICT (key) DO UPDATE SET state = excluded.state, brief = excluded.brief, \
              outcome = excluded.outcome, \
              transcript = coalesce(excluded.transcript, ai6_briefs.transcript), \
-             revision = excluded.revision",
+             revision = excluded.revision, \
+             finished_provenance = coalesce(ai6_briefs.provenance, excluded.finished_provenance), \
+             provenance = NULL",
             &[
                 key.as_str().into(),
                 state.into(),
@@ -251,7 +256,8 @@ impl SqlRegistry {
     pub(crate) fn drop_brief(&self, key: &str, record: &str) {
         self.write(|tx, revision| {
             tx.execute(
-                "INSERT INTO ai6_briefs (key, state, brief, revision) VALUES ($1, 'new', $2, $3)",
+                "INSERT INTO ai6_briefs (key, state, brief, revision) VALUES ($1, 'new', $2, $3) \
+                 ON CONFLICT (key) DO UPDATE SET state = 'new', brief = excluded.brief",
                 &[key.into(), record.into(), revision.into()],
             )
             .map(drop)
@@ -719,7 +725,7 @@ impl SourceStore for SqlRegistry {
     fn unreported_source_briefs(&self) -> io::Result<Vec<FinishedSourceBrief>> {
         self.read(|tx| {
             let rows = tx.query(
-                "SELECT key, state, brief, outcome, provenance FROM ai6_briefs \
+                "SELECT key, state, brief, outcome, finished_provenance FROM ai6_briefs \
                  WHERE state IN ('done', 'failed') AND reported = 0 AND report_attempts < $1 \
                  AND key LIKE 'source!_%' ESCAPE '!' ORDER BY key LIMIT $2",
                 &[MAX_REPORT_ATTEMPTS.into(), (MAX_BRIEFS * 8).into()],

@@ -193,20 +193,24 @@ pub(super) fn source_provenance(
 }
 
 /// Whether a finished brief may be reported to `provider`: the Registry kept a Source
-/// provenance for it naming that provider and the item its data names. A brief dropped into
-/// the queue with a `source:` name has none, so nothing is posted on its behalf.
+/// provenance for this exact record, naming that provider and the item its data names, and
+/// the data's Operation is the brief's. A brief dropped into the queue with a `source:` name
+/// has none, so nothing is posted on its behalf.
 pub fn reportable(brief: &Brief, provider: &str) -> bool {
-    let item = brief
-        .data
-        .get("source")
-        .and_then(|source| source.get("item"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or(&brief.id);
-    brief.provenance.as_ref().is_some_and(|provenance| {
-        provenance.origin == Origin::Source
-            && provenance.principal.as_deref() == Some(provider)
-            && provenance.reference.as_deref() == Some(item)
-    })
+    let source = brief.data.get("source");
+    let field = |key: &str| {
+        source
+            .and_then(|source| source.get(key))
+            .and_then(serde_json::Value::as_str)
+    };
+    let item = field("item").unwrap_or(&brief.id);
+    field("operation").is_some_and(|operation| brief.operation.as_deref() == Some(operation))
+        && brief.provenance.as_ref().is_some_and(|provenance| {
+            provenance.origin == Origin::Source
+                && provenance.matches(brief)
+                && provenance.principal.as_deref() == Some(provider)
+                && provenance.reference.as_deref() == Some(item)
+        })
 }
 
 /// Wraps an item's own words so an Agent reads them as data, not as instructions.
@@ -442,7 +446,7 @@ impl SourceStore for FileRegistry {
                 if !brief.source.starts_with(SOURCE_BRIEF_PREFIX) {
                     continue;
                 }
-                self.attach_provenance(&mut brief);
+                self.attach_spent_provenance(state, &mut brief);
                 let outcome = fs::read(directory.join(format!("{key}.outcome.json")))
                     .ok()
                     .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -548,6 +552,9 @@ mod tests {
         assert!(provenance.matches(&queued[0]), "the update re-recorded it");
         assert!(reportable(&queued[0], "github"));
         assert!(!reportable(&queued[0], "jira"));
+        let mut elsewhere = queued[0].clone();
+        elsewhere.operation = Some("H".to_owned());
+        assert!(!reportable(&elsewhere, "github"), "the Operation is bound");
     }
 
     fn a_claimed_or_finished_item_is_never_queued_again(store: &dyn Store) {

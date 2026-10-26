@@ -110,7 +110,7 @@ pub use directorates::registry::backend::{
 };
 pub use directorates::registry::bona_fides::{
     LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey, Require,
-    SignatureCheck, brief_digest, library_pin,
+    SignatureCheck, library_pin, record_digest,
 };
 pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,

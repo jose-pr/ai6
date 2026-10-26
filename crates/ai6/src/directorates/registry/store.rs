@@ -654,6 +654,19 @@ impl FileRegistry {
         bona_fides::unseal(brief, kept);
     }
 
+    /// Sets a finished brief's provenance from what the Registry kept for it in `state`.
+    pub(super) fn attach_spent_provenance(&self, state: &str, brief: &mut Brief) {
+        let kept = fs::read(
+            self.root
+                .join(state)
+                .join(format!("{}.provenance", brief.key())),
+        )
+        .ok()
+        .filter(|bytes| bytes.len() as u64 <= MAX_PROVENANCE_BYTES)
+        .and_then(|bytes| serde_json::from_slice::<Provenance>(&bytes).ok());
+        bona_fides::unseal(brief, kept);
+    }
+
     /// Writes a brief record without its provenance, which goes beside it.
     pub(super) fn write_brief(&self, path: &Path, brief: &Brief) -> io::Result<()> {
         let (record, provenance) = bona_fides::seal(brief)?;
@@ -2602,6 +2615,21 @@ fn finish_locked(
     )?;
     if let Some(transcript) = transcript {
         write_atomic(&root.join(state).join(format!("{key}.log")), transcript)?;
+    }
+    // The provenance is spent before the brief moves: a record queued again under this key
+    // finds none, and a crash in between leaves a brief without one, never one with two.
+    let spent = root.join(state).join(format!("{key}.provenance"));
+    match fs::rename(root.join("provenance").join(format!("{key}.json")), &spent) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if let (_, Some(provenance)) = bona_fides::seal(brief)? {
+                write_atomic(
+                    &spent,
+                    &serde_json::to_vec_pretty(&provenance).map_err(io::Error::other)?,
+                )?;
+            }
+        }
+        Err(error) => return Err(error),
     }
     let source = root.join("claimed").join(format!("{key}.json"));
     if source.is_file() {
