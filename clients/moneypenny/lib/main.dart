@@ -332,6 +332,7 @@ class MissionBoard extends ChangeNotifier {
             station: 'station-control-01',
             theater: 'local',
             agent: '007',
+            mode: 'field',
             score: 1.03,
           ),
         ],
@@ -1925,8 +1926,8 @@ class PlacementChoice {
     required this.station,
     required this.theater,
     required this.agent,
-    this.mode = 'field',
-    this.score,
+    required this.mode,
+    required this.score,
   });
 
   final String station;
@@ -1938,22 +1939,22 @@ class PlacementChoice {
   final String mode;
 
   /// How loaded the Station and Theater are, 0 (idle) to 4; `spread` prefers the lowest,
-  /// `pack` the highest. `null` from a gateway that does not score.
-  final double? score;
+  /// `pack` the highest.
+  final double score;
 
   factory PlacementChoice.fromJson(Map<String, dynamic> json) =>
       PlacementChoice(
         station: json['station'] as String,
         theater: json['theater'] as String,
         agent: json['agent'] as String,
-        mode: json['mode'] as String? ?? 'field',
-        score: (json['score'] as num?)?.toDouble(),
+        mode: json['mode'] as String,
+        score: (json['score'] as num).toDouble(),
       );
 
   String get description =>
       '$station \u00b7 $theater \u00b7 $agent'
       '${mode == 'field' ? '' : ' \u00b7 $mode'}'
-      '${score == null ? '' : ' \u00b7 score ${score!.toStringAsFixed(2)}'}';
+      ' \u00b7 score ${score.toStringAsFixed(2)}';
 }
 
 class PlacementRejection {

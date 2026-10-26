@@ -167,9 +167,9 @@ async fn served_with(
                 model: None,
                 effort: None,
                 environment_keys: Vec::new(),
-                station_id: Some("worker".to_owned()),
+                station_id: "worker".to_owned(),
                 theater_id: None,
-                mode: None,
+                mode: "field".to_owned(),
                 provenance: None,
             },
         )

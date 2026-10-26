@@ -974,7 +974,7 @@ impl Gateway {
                     operation.as_str() == transition.operation
                         && mission.as_str() == transition.mission
                 })
-                .and_then(|(_, brief)| brief.station_id.clone());
+                .map(|(_, brief)| brief.station_id.clone());
         }
         Ok(transition)
     }
@@ -3354,16 +3354,13 @@ pub struct LaunchManifest {
     pub effort: Option<String>,
     /// Environment variable names only; values are never published.
     pub environment_keys: Vec<String>,
-    /// The Station that supervises the Session, when the publishing Station reported it.
-    #[serde(default)]
-    pub station_id: Option<String>,
-    /// The Theater the harness runs in, when the publishing Station reported it.
-    #[serde(default)]
+    /// The Station that supervises the Session.
+    pub station_id: String,
+    /// The Theater the harness runs in, when the Station knows it.
     pub theater_id: Option<String>,
     /// Whether the harness runs on the Theater (`field`) or on the Station, acting on the
-    /// Theater through its transport (`remote-hands`); absent from older Stations.
-    #[serde(default)]
-    pub mode: Option<String>,
+    /// Theater through its transport (`remote-hands`).
+    pub mode: String,
     /// Where the Mission's brief came from (`origin` `operator`, `source`, `sleeper`,
     /// `proposal` or `registry_drop`, with who asked), as the Station recorded it; absent for
     /// a Mission started directly on a Station.
@@ -4508,7 +4505,10 @@ mod tests {
                     "working_directory": "C:/stations/a",
                     "model": "sonnet",
                     "effort": "high",
-                    "environment_keys": ["API_TOKEN"]
+                    "environment_keys": ["API_TOKEN"],
+                    "station_id": "station-a",
+                    "theater_id": "local",
+                    "mode": "field"
                 }
             }))
             .send()
@@ -4523,10 +4523,7 @@ mod tests {
         let brief = mission.brief.unwrap();
         assert_eq!(brief.prompt, "Inspect this change");
         assert_eq!(brief.environment_keys, ["API_TOKEN"]);
-        assert_eq!(
-            brief.station_id, None,
-            "a registration without placement still loads"
-        );
+        assert_eq!(brief.station_id, "station-a");
 
         let lifecycle = client
             .post(format!(
@@ -5010,9 +5007,9 @@ mod tests {
                     model: Some("claude-sonnet".to_owned()),
                     effort: Some("high".to_owned()),
                     environment_keys: vec!["API_TOKEN".to_owned()],
-                    station_id: Some("worker".to_owned()),
+                    station_id: "worker".to_owned(),
                     theater_id: Some("local".to_owned()),
-                    mode: Some("remote-hands".to_owned()),
+                    mode: "remote-hands".to_owned(),
                     provenance: Some(Provenance::new(
                         Origin::RegistryDrop,
                         &serde_json::from_value::<Brief>(

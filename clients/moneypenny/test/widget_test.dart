@@ -964,6 +964,7 @@ void main() {
                   'agent': '007',
                   'handler': 'claude',
                   'mode': 'remote-hands',
+                  'score': 2.5,
                 },
               ],
               'rejections': [
@@ -1144,7 +1145,7 @@ void main() {
     );
     expect(
       find.text(
-        'station-alpha \u00b7 build-box \u00b7 007 \u00b7 remote-hands',
+        'station-alpha \u00b7 build-box \u00b7 007 \u00b7 remote-hands \u00b7 score 2.50',
       ),
       findsOneWidget,
     );
