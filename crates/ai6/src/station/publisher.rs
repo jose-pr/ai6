@@ -376,6 +376,12 @@ impl Publisher {
         }
     }
 
+    /// The origin and Station credential of Universal Exports, for another worker of this
+    /// Station that talks to it on a link of its own (the assistant desk).
+    pub(crate) fn link(&self) -> (Url, String) {
+        (self.origin.clone(), self.token.clone())
+    }
+
     pub(crate) fn health(&self) -> Health {
         Health {
             enabled: true,

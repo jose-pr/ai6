@@ -2,6 +2,8 @@
 
 mod accounts;
 mod agents;
+#[cfg(feature = "publisher")]
+mod assistant;
 mod bona_fides;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
@@ -759,6 +761,8 @@ where
     let reloading = reload::spawn(&state);
     #[cfg(feature = "publisher")]
     let controls = controls::spawn(&state)?;
+    #[cfg(feature = "publisher")]
+    let assistant = assistant::spawn(&state)?;
     let stopping = state.stopping.clone();
     let served = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
@@ -774,6 +778,10 @@ where
     #[cfg(feature = "publisher")]
     if let Some(controls) = controls {
         let _ = tokio::time::timeout(Duration::from_secs(2), controls).await;
+    }
+    #[cfg(feature = "publisher")]
+    if let Some(assistant) = assistant {
+        let _ = tokio::time::timeout(Duration::from_secs(2), assistant).await;
     }
     let event_pumps = std::mem::take(
         &mut *state
