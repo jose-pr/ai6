@@ -29,7 +29,8 @@ const SCRIPT_TIMEOUT_MS: u64 = 30_000;
 /// Makes the harness's directory: ends a harness an earlier start of the same Mission left,
 /// then makes the environment and input FIFOs, the output file and the wrapper script, and
 /// prints the directory's absolute path. The environment passes through a FIFO, so no value
-/// (a leased credential among them) is ever written to the Theater's disk.
+/// (a leased credential among them) is ever written to the Theater's disk. The wrapper reads
+/// it with `cat` and `eval`s it: bash 3.2, macOS's `sh`, sources a FIFO as an empty file.
 const SETUP: &str = r#"set -e
 umask 077
 mkdir -p "$1"
@@ -46,8 +47,10 @@ mkfifo in
 : > out
 cat > run.sh <<'WRAPPER'
 echo $$ > pid
-. ./env
+ai6_env=$(cat ./env)
 rm -f ./env
+eval "$ai6_env"
+unset ai6_env
 ai6_dir=$(pwd -P)
 ai6_cwd=$1
 shift
