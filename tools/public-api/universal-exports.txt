@@ -166,6 +166,13 @@ pub universal_exports::GatewayLimits::max_sessions: usize
 pub universal_exports::GatewayLimits::scrollback_events: usize
 impl core::default::Default for universal_exports::GatewayLimits
 pub fn universal_exports::GatewayLimits::default() -> Self
+#[non_exhaustive] pub struct universal_exports::HeldBriefDecision
+pub universal_exports::HeldBriefDecision::key: alloc::string::String
+pub universal_exports::HeldBriefDecision::operation_id: alloc::string::String
+pub universal_exports::HeldBriefDecision::state: &'static str
+#[non_exhaustive] pub struct universal_exports::HeldBriefEntry
+pub universal_exports::HeldBriefEntry::held: ai6::directorates::registry::vetting::HeldBrief
+pub universal_exports::HeldBriefEntry::key: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::LaunchManifest
 pub universal_exports::LaunchManifest::agent_id: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::effort: core::option::Option<alloc::string::String>
