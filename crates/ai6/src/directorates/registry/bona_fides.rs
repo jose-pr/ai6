@@ -442,7 +442,10 @@ impl LibraryPin {
         verify: &SignatureCheck<'_>,
     ) -> Result<String, String> {
         let pinned = self.pin.map(|pin| {
-            let found = pin.digest().of(bytes);
+            let found = match pin.digest() {
+                coqui_peer::Digest::Sha256 => coqui_peer::PeerId::from_bytes(*digest),
+                other => other.of(bytes),
+            };
             if found == pin {
                 Ok(format!("pin {pin}"))
             } else {
@@ -611,10 +614,32 @@ impl PinSet {
         signature: Option<&[u8]>,
         verify: &SignatureCheck<'_>,
     ) -> PinCheck {
-        let digest: [u8; 32] = Sha256::digest(bytes).into();
+        if self.libraries.iter().all(|entry| entry.file != file) {
+            return PinCheck::Unpinned;
+        }
+        self.check_digested(
+            file,
+            bytes,
+            &Sha256::digest(bytes).into(),
+            signature,
+            verify,
+        )
+    }
+
+    /// [`PinSet::check`] for bytes whose SHA-256 the caller already holds as `sha256`: a
+    /// provider library is hundreds of megabytes in a debug build, too much to hash twice.
+    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+    pub(crate) fn check_digested(
+        &self,
+        file: &str,
+        bytes: &[u8],
+        sha256: &[u8; 32],
+        signature: Option<&[u8]>,
+        verify: &SignatureCheck<'_>,
+    ) -> PinCheck {
         let mut reasons = Vec::new();
         for entry in self.libraries.iter().filter(|entry| entry.file == file) {
-            match entry.accepts(bytes, &digest, signature, verify) {
+            match entry.accepts(bytes, sha256, signature, verify) {
                 Ok(held) => return PinCheck::Accepted(held),
                 Err(reason) => reasons.push(reason),
             }

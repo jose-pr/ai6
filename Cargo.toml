@@ -80,3 +80,9 @@ rustls-native-certs = "0.8"
 # SSH transport: one pure-Rust client on every OS, with the ring crypto provider.
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "3"
+
+# A plugin scan hashes every provider library it finds. In a Linux debug build each one
+# carries its debug info, hundreds of megabytes, which unoptimized SHA-256 takes seconds
+# to hash; optimized, a scan of a whole deps directory takes seconds, not minutes.
+[profile.dev.package.sha2]
+opt-level = 3

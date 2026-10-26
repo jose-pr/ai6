@@ -13,6 +13,7 @@ use guatiao::library::{
 };
 use guatiao::{Status, Value};
 use serde::Serialize;
+use sha2::Digest as _;
 
 use crate::directorates::registry::bona_fides::{
     LibraryPin, PinCheck, PinSet, PluginProfile, PublisherKey, library_pin,
@@ -574,11 +575,17 @@ fn check_candidate(
             return None;
         }
     };
-    let digest = library_pin(&bytes);
+    // Hashed once: the pin check reuses this digest instead of hashing the bytes again.
+    let sha256: [u8; 32] = sha2::Sha256::digest(&bytes).into();
+    let digest = PeerId::from_bytes(sha256);
     let signature = std::fs::read(candidate.with_file_name(format!("{file}.sig"))).ok();
-    let check = policy
-        .pins
-        .check(&file, &bytes, signature.as_deref(), &verify_ed25519);
+    let check = policy.pins.check_digested(
+        &file,
+        &bytes,
+        &sha256,
+        signature.as_deref(),
+        &verify_ed25519,
+    );
     let verdict = match &check {
         PinCheck::Accepted(held) => format!("accepted: {held}"),
         PinCheck::Unpinned => "unpinned".to_owned(),
