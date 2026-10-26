@@ -76,6 +76,7 @@ pub universal_exports::BoardSession::state: core::option::Option<alloc::string::
 pub universal_exports::BoardSession::updated_at: core::option::Option<f64>
 #[non_exhaustive] pub struct universal_exports::BoardStation
 pub universal_exports::BoardStation::capacity: usize
+pub universal_exports::BoardStation::config: core::option::Option<ai6::directorates::m::config::ConfigStatus>
 pub universal_exports::BoardStation::headquarters: bool
 pub universal_exports::BoardStation::healthy: bool
 pub universal_exports::BoardStation::operations: alloc::vec::Vec<alloc::string::String>
@@ -145,6 +146,7 @@ pub async fn universal_exports::Gateway::serve_loopback<F>(self, u16, F) -> core
 pub async fn universal_exports::Gateway::submit_input(&self, &ai6_diptel::SessionId, &str, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, universal_exports::AccessProviders) -> Self
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
+pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigSource>) -> Self
 impl core::fmt::Debug for universal_exports::Gateway
 pub fn universal_exports::Gateway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::GatewayConfig
@@ -201,6 +203,16 @@ pub universal_exports::PlacementPreview::rejections: alloc::vec::Vec<ai6::direct
 #[non_exhaustive] pub struct universal_exports::PoolBoard
 pub universal_exports::PoolBoard::accounts: alloc::vec::Vec<universal_exports::BoardAccount>
 pub universal_exports::PoolBoard::operation_id: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::RosterChange
+pub universal_exports::RosterChange::revision: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::RosterRecord
+pub universal_exports::RosterRecord::definition: serde_json::value::Value
+pub universal_exports::RosterRecord::key: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::RosterRecords
+pub universal_exports::RosterRecords::kind: alloc::string::String
+pub universal_exports::RosterRecords::records: alloc::vec::Vec<universal_exports::RosterRecord>
+pub universal_exports::RosterRecords::revision: alloc::string::String
+pub universal_exports::RosterRecords::writable: bool
 #[non_exhaustive] pub struct universal_exports::StationBoard
 pub universal_exports::StationBoard::headquarters_station: core::option::Option<alloc::string::String>
 pub universal_exports::StationBoard::stations: alloc::vec::Vec<universal_exports::BoardStation>
