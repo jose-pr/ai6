@@ -21,6 +21,8 @@ provider-issued Session ID for resume.
   of kind `limit` so AI6 can park the Session instead of failing it.
 - Reports the tokens and cost of a finished turn, names the tools an assistant message calls,
   and passes a Mission spend ceiling to Claude Code as `--max-budget-usd`.
+- Holds a shell command that pushes to a protected ref, merges or releases until green ink
+  covers it, through a `PreToolUse` hook (`ai6 green-ink gate`) passed with `--settings`.
 
 ## Installation
 

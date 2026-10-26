@@ -79,7 +79,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   for named Agents or roles, up to a use limit, and are revoked there. Records live in the
   Registry (`ai6::ApprovalRequest`, `Approval`, `ClassAuthorization`); decisions are audited
   and requests appear on the timeline. Moneypenny has Green ink and Class authorisations
-  tabs under Administration. AI6 does not yet stop a step taken without green ink.
+  tabs under Administration.
+- The green ink harness gate. The Claude handler passes Claude Code a `PreToolUse` hook on
+  `Bash|PowerShell` through `--settings` (`onFailure = "block"`, Claude Code 2.1.295 or
+  later) that runs `ai6 green-ink gate`; the Codex handler answers
+  `item/commandExecution/requestApproval` with the same gate (`accept`, or `decline` plus a
+  `turn/steer` naming what to ask for). The gate names the governed steps of a shell command
+  (`ai6::classify`: `git push` refs, `git push --delete`, `gh pr merge`, `gh release
+  create`, also inside `sh -c` and friends) and asks the Station through the Session's
+  Cable endpoint (new MCP tool `check_approval`) whether a live approval covers each one;
+  otherwise the command is refused with the `kind` and `target` to pass to
+  `request_approval`. `ai6::directorates::section_00::gate` (feature `gate`) holds the
+  client. `ActionScope::covers` matches an approval to a step however its ref was written,
+  and `ApprovalStore::live_approval` uses it. A push of every branch, tag or ref
+  (`refs/heads/*`) counts as protected when it can reach a protected ref.
+- A `green_ink` credential's lease is revoked at the secret backend as soon as its approval
+  expires or is revoked, and any lease past its lifetime is revoked at the next scheduler
+  pass (`credential` / `revoked` timeline event).
 - The DipTel lifecycle frame carries an optional `reason` (`green-ink`, `budget`), shown on
   the board beside the Session's state.
 

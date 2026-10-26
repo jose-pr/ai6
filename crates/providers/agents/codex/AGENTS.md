@@ -5,7 +5,7 @@ signature, contract and gotchas, so a consuming agent skips the source. It ships
 the package and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
-No features. MSRV: Rust 1.89. The crate depends on `ai6` and `serde_json`. It
+No features. MSRV: Rust 1.89. The crate depends on `ai6` (feature `gate`) and `serde_json`. It
 re-exports `CodexHandler` and `CodexConfig` from the root. The crate contains no
 `unsafe` code.
 
@@ -45,6 +45,17 @@ App-server then also receives overrides for an `ai6-theater` server, and `thread
 shell tool cannot be switched off: the sandbox keeps anything from being written on the
 Station. The two parameter names follow the app-server protocol and are not exercised against
 a live Codex.
+The handler answers every `item/commandExecution/requestApproval` server request (params
+`threadId`, `turnId`, `command`, `cwd`, `kind`) with the green ink gate
+(`ai6::directorates::section_00::gate::gate`, asking the Station through the Cable endpoint):
+`{"decision": "accept"}` unless the gate holds the command, then `{"decision": "decline"}`
+followed by `turn/steer {threadId, expectedTurnId: turnId, input: [{type: "text", text:
+REASON}]}` so the Agent learns what to ask for. A `writeStdin` approval or one without a
+command is accepted, and so is every command of a Session without a Cable endpoint, which
+cannot ask for green ink (no gate, as with the Claude handler). Whether
+Codex asks before a command depends on its own approval policy and sandbox, which the handler
+leaves alone outside remote-hands mode; a push that needs network from the default sandbox
+asks. These shapes follow the app-server protocol schema, not a live Codex.
 
 ## Gotchas
 

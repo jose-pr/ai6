@@ -89,7 +89,8 @@ and Cable bodies and briefs are untrusted text.
 approval of one irreversible step (a push to a protected branch, a release, a deletion):
 the Agent asks and waits, an operator signs or refuses, and the Agent is told. A **class
 authorisation**, the real UK term for standing approval of a class of activity, signs a kind
-of step in advance. AI6 does not yet stop a step taken without green ink.
+of step in advance. A step taken without it is refused by the harness gate where AI6 can
+see it, and the credential it needs is leased only against an approval.
 
 ## Built from the same lore
 

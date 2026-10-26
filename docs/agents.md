@@ -119,6 +119,16 @@ An Operation refuses an Agent above its clearance or outside its roster. M retai
 authorization authority; Agent role policy is guidance only. Q Branch controls which
 credentials are issued.
 
+Clearance is enforced at the harness as well as by policy. The Claude handler passes Claude
+Code a `PreToolUse` hook (through `--settings`) that runs `ai6 green-ink gate` before each
+`Bash` or `PowerShell` call, and the Codex handler answers Codex's command approval requests
+the same way: a command that pushes to a protected ref, deletes a ref, merges a pull request
+or creates a release without a live approval is refused, and the Agent is told what to ask
+for ([What holds a step](missions.md#what-holds-a-step)). The hook is the `ai6` program
+hosting the handler unless the Agent's environment names another in
+`AI6_GREEN_INK_GATE`. It needs Claude Code 2.1.295 or later, which blocks the call when the
+hook cannot run.
+
 ## Credentials
 
 Q issues each Session the credentials its Agent's loadout names, as leases, and nothing
@@ -167,7 +177,10 @@ kinds = ["release", "push"]                  # approvals that unlock it; default
   ink](missions.md#green-ink) approval of one of its `kinds`: once per approval, for no
   longer than the approval lasts. The Agent asks with `request_approval`, and the
   credential is in its environment from the next Session start or resume after the
-  operator signs.
+  operator signs. When the approval expires or is revoked, the Station revokes the lease at
+  its backend within a scheduler pass (`credential` / `revoked` on the timeline); a backend
+  that issues credentials of its own stops honouring it, while a value already in the
+  harness's environment stays there.
 - A Session the Operation's [exposure](medical.md) policy restricts with `secrets` gets no
   new leases.
 - Each lease is on the Mission's timeline (`credential` / `leased`), naming the secrets and

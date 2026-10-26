@@ -52,7 +52,20 @@ its tools (`--allowedTools mcp__ai6-theater`) and denies Claude's own shell and 
 nothing it does lands on the Station. Both flags are variadic, so each is followed by another
 flag. This applies to resume as well.
 
+With the Cable endpoint present, start and resume also pass `--settings` with the green ink
+gate: `{"disableAllHooks": false, "hooks": {"PreToolUse": [{"matcher": "Bash|PowerShell",
+"hooks": [{"type": "command", "command": PROGRAM, "args": ["green-ink", "gate"], "timeout":
+60, "onFailure": "block"}]}]}}`. `PROGRAM` is `AI6_GREEN_INK_GATE` from the Session
+environment when set and not blank, else the executable hosting the handler (`ai6` on a
+Station or field runner). The hook asks the Station whether a live green ink approval covers
+each governed step of a shell command and denies the call otherwise
+(`ai6::directorates::section_00::gate`). `onFailure` needs Claude Code 2.1.295 or later; a
+hook that cannot start or times out then blocks the call. The settings follow the Claude
+Code hooks reference and are not exercised against a live Claude Code.
+
 ## Gotchas
 
-The Claude executable must be available to the terminal environment. Tests use protocol
+The Claude executable must be available to the terminal environment. The gate is best
+effort: a command that builds its arguments at run time, or a step taken through a tool
+other than the shell, is not seen; leased credentials are the guarantee. Tests use protocol
 fixtures and a process-backed fake CLI; no real Claude account is required.

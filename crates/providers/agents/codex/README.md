@@ -22,6 +22,8 @@ initialization, thread start/resume, turn submission and event decoding.
   tool calls a turn makes.
 - Uses per-process app-server configuration to connect to the AI6 Cable MCP endpoint;
   the bearer token is read from the launch environment.
+- Answers Codex's command approval requests with the green ink gate: a push to a protected
+  ref, a merge or a release is declined until a live approval covers it.
 
 ## Installation
 

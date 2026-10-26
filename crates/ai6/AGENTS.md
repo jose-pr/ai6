@@ -10,6 +10,7 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | `daemon` | The Station's HTTP service, scheduler and Guatiao provider host, and the field runner. | No |
 | `publisher` | Bounded lifecycle and raw terminal-byte publication to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
+| `gate` | The green ink gate's client of a Station (`section_00::gate`), for agent providers; part of `daemon`. | No |
 | `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS (`coqui-peer-tls`). | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
@@ -1139,6 +1140,10 @@ pub const GREEN_INK_REASON: &str;          // "green-ink", the blocked_reason of
 impl ActionScope {
     pub fn try_new(kind, target) -> io::Result<Self>;   // InvalidInput out of bounds
     pub fn pushed_ref(&self) -> String;                 // "[REMOTE:]REF"; bare name -> refs/heads/NAME
+    pub fn remote(&self) -> Option<&str>;               // the REMOTE before the last ':'
+    pub fn covers(&self, attempted: &ActionScope) -> bool;   // same kind; push/delete: same ref and
+                                                        // remote (an unnamed remote matches any);
+                                                        // else target equal ignoring case, '#', spacing
 }
 #[non_exhaustive] pub enum Requirement { NotRequired, GreenInk, Refused }
 #[non_exhaustive] pub enum GreenInkPreset { Strict /* default */, Licensed }   // serde lowercase
@@ -1146,7 +1151,8 @@ pub struct GreenInkPolicy;   // Default = Strict
 impl GreenInkPolicy {
     pub fn preset(preset: GreenInkPreset) -> Self;
     pub fn requirement(&self, clearance: &str, scope: &ActionScope) -> Requirement;
-    pub fn is_protected(&self, reference: &str) -> bool;   // full ref, glob match
+    pub fn is_protected(&self, reference: &str) -> bool;   // full ref, glob match; "PREFIX*" is
+                                                         // protected when a protected pattern starts with PREFIX
     pub fn kinds(&self) / requesters(&self) -> impl Iterator<Item = &str>;
     pub fn protected(&self) -> &[String];
     pub fn request_ttl(&self) -> Duration;
@@ -1154,7 +1160,21 @@ impl GreenInkPolicy {
 }
 pub struct GreenInkDefinition;   // [operation.ID.green_ink]; resolve() -> Result<GreenInkPolicy, String>
 pub fn clearance_at_least(have: &str, min: &str) -> bool;   // desk < field < 00; unknown is false
+pub fn classify(command: &str, resolve: &dyn Fn(&str) -> Option<String>)
+    -> Result<Vec<ActionScope>, String>;   // the governed steps a shell command takes
 ```
+
+`classify` reads a command line as a shell splits it (quotes, `;` `&&` `||` `|`, newlines,
+leading `NAME=value`, `sudo`/`env`/`exec`/..., and the command inside `sh -c`, `bash -lc`,
+`pwsh -Command`, `cmd /c`, `eval`) and names, deduplicated in order: each ref a `git push`
+updates (`push`, target `[REMOTE:]refs/...`; `--force`, `+ref` and `-u` change nothing;
+`--all` is `refs/heads/*`, `--tags` `refs/tags/*`, `--mirror` `refs/*`; `tag NAME` is
+`refs/tags/NAME`), each ref it removes (`--delete`, `-d`, `:ref`: kind `delete`),
+`gh pr merge N|#N|URL` (`merge`, `PR N`) and `gh release create TAG` (`release`, `tag TAG`).
+`--dry-run`/`-n` and `gh pr merge --disable-auto` take no step. `resolve` maps a ref as written
+(`HEAD`, `main`, `v1.2.0`) to its full name; an unresolved bare name is a branch. `Err` is a
+sentence for the Agent: `git push` of a current branch `resolve` cannot name, or a merge or
+release naming no pull request or tag. Best effort: arguments built at run time are not seen.
 
 `strict` asks for every governed kind at every clearance and refuses requests from `desk`;
 `licensed` also lets `00` push and merge unattended. A push needs green ink only to a
@@ -1203,7 +1223,7 @@ pub trait ApprovalStore {
     fn approval(&self, operation, id, now: f64) -> io::Result<Option<ApprovalStatus>>;
     fn pending_approvals(&self, operation, now: f64) -> io::Result<Vec<ApprovalRequest>>;   // oldest first
     fn mission_approvals(&self, operation, mission, now: f64) -> io::Result<Vec<ApprovalStatus>>;
-    fn live_approval(&self, operation, mission, scope: &ActionScope, now: f64) -> io::Result<Option<Approval>>;
+    fn live_approval(&self, operation, mission, scope: &ActionScope, now: f64) -> io::Result<Option<Approval>>;   // one that covers scope
     fn decide_approval(&self, operation, id, ruling: &Ruling) -> io::Result<Approval>;
     fn revoke_approval(&self, operation, id, by, at: f64) -> io::Result<Approval>;
     fn mark_approval_notified(&self, operation, id, at: f64) -> io::Result<()>;
@@ -1219,9 +1239,42 @@ Every read that takes `now` first records pending requests past their expiry as 
 decided otherwise or expired, and `InvalidInput` for an approval without a later expiry or
 a refusal with one; the same decision again returns the record. `approve_by_class` counts
 one use of the first live covering class authorisation (oldest first) and stores the
-approval as already told; it returns `None` for a request already stored. Nothing here
-stops a step taken without green ink: the harness gate and leased credentials are not
-implemented.
+approval as already told; it returns `None` for a request already stored. Two things hold a
+step taken without green ink: the harness gate (below) and leased credentials (Station
+daemon, Credentials).
+
+## Harness gate (`ai6::directorates::section_00::gate`)
+
+```rust
+pub const GATE_PROGRAM_ENV: &str;   // "AI6_GREEN_INK_GATE": the gate program; unset, a handler uses
+                                    // the ai6 executable hosting it (Station or field runner)
+pub const CABLE_URL_ENV: &str;      // "AI6_CABLE_MCP_URL"
+pub const CABLE_TOKEN_ENV: &str;    // "AI6_CABLE_MCP_TOKEN"
+#[derive(Debug, Clone, PartialEq, Eq)] pub enum GateVerdict { Allow, Hold(String /* for the Agent */) }
+// feature `gate`:
+pub struct GateClient;   // the Station's check_approval tool over the Session's Cable endpoint
+impl GateClient {
+    pub fn from_environment(environment: &BTreeMap<String, String>) -> Option<Self>;
+    pub fn from_process_environment() -> Option<Self>;
+    pub fn check(&self, steps: &[ActionScope]) -> Result<Vec<(String /* status */, Option<String>)>, String>;
+}
+pub fn gate(command: &str, cwd: Option<&Path>, client: Option<&GateClient>) -> GateVerdict;
+pub fn git_resolver(dir: Option<PathBuf>) -> impl Fn(&str) -> Option<String>;   // git rev-parse --symbolic-full-name
+pub fn pre_tool_use(input: &str, client: Option<&GateClient>) -> Option<String>;   // Claude Code hook output
+```
+
+`gate` classifies the command (refs resolved with `git` in `cwd`) and allows it when it takes
+no governed step or the Station answers `approved` or `not_required` for every one. Anything
+else holds it: `needs_approval` (the text names the `kind` and `target` to pass to
+`request_approval`), `refused`, a step `classify` cannot name, no client, or a Station that
+cannot be asked. `GateClient::check` speaks MCP 2025-06-18 over HTTP (initialize,
+initialized, `tools/call check_approval`, then `DELETE` of the MCP session), reading JSON or
+server-sent events, 30 s per request. `pre_tool_use` takes the `PreToolUse` hook input
+(`tool_input.command`, `cwd`) and returns
+`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":…}}`
+for a held command, `None` otherwise (print nothing). `ai6 green-ink gate` is that hook: it
+reads standard input, asks through `AI6_CABLE_MCP_URL`/`AI6_CABLE_MCP_TOKEN`, prints the
+decision and always exits 0.
 
 ## Sources (`ai6::directorates::registry::sources`)
 
@@ -1844,6 +1897,11 @@ an `AgentMessage` to a live Session, or a resume whose message carries the decis
 the Session ended, then the Mission returns to Working once nothing it asked for is
 pending. Requests and deliveries are `green_ink` timeline events; the lifecycle carries the
 reason (`green-ink`, `budget`) to Universal Exports.
+`check_approval {steps: [{kind, target}, ..]}` (at most 64) answers the harness gate without
+recording anything: a JSON array of `{kind, target, status, request_id?, message?}` with
+`status` `not_required`, `approved` (a live approval of the Mission covers the step,
+`ApprovalStore::live_approval`), `needs_approval` or `refused` (the Agent's clearance may not
+ask).
 Credentials: a Station with a loadout catalog (`loadouts.toml` in the configuration
 directory, or `StationConfig::with_loadouts`) leases the Agent's loadout secrets at every
 Session start and resume, last before the launch (one-hour lease, from
@@ -1855,7 +1913,10 @@ A backend refusal of an ordinary secret fails the start, and leases acquired by 
 issue are revoked. A `green_ink` secret is leased only while the Mission holds a live
 approval (`ApprovalStore::mission_approvals`) of one of its `kinds`, once per approval (kept
 in memory), with the approval's remaining time, at most an hour, as the TTL; otherwise its
-variable is absent. An exposed Session under the `secrets` restriction gets none. Leases are
+variable is absent. Each scheduler pass revokes, at the backend, every lease past its TTL
+and each green ink lease whose approval has expired or been revoked (a
+`credential`/`revoked` timeline event naming the secrets and the approval); an approval the
+Registry cannot read keeps its lease until the next pass. An exposed Session under the `secrets` restriction gets none. Leases are
 revoked when the Session's operation is finished, stopped, finalized or fenced out, on a
 failed start or resume, and when a later issue for the Mission replaces them. Each issue is a
 `credential`/`leased` timeline event (`secrets` = names, `approval` = request ID). Values are
@@ -2093,6 +2154,8 @@ required setting answers `PluginBuildError::ConfigurationRequired`.
   background and prints its `runner.json`. `ai6 runner call [--state-dir PATH] METHOD PATH`
   sends one request with a body from standard input and prints `{"status", "body"}`; exit 3
   means no runner answered.
+- `ai6 green-ink gate`: Claude Code's `PreToolUse` hook for shell commands (see Harness
+  gate); the Claude handler passes it through `--settings`. Always exits 0.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.
 - `ai6 sleeper [--config-dir PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:

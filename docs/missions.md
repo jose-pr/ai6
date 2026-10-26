@@ -123,12 +123,38 @@ Moneypenny's Class authorisations tab.
 
 Decisions and class authorisations are audited (`green_ink.approved`,
 `green_ink.rejected`, `class_authorization.created`, `class_authorization.revoked`); the
-reason text is not. AI6 does not yet stop a step an Agent takes without green ink: the
-request is how a well-behaved Agent asks, not a lock. What does hold is the credential: a
-loadout secret marked `green_ink` (say, the token that can push to `main`) reaches a
-Session only while the Mission holds a live approval of a kind it names, once per approval
-(see [Credentials](agents.md#credentials)). Credentials already on the Theater are outside
-that, which is why the Station reports them.
+reason text is not.
+
+### What holds a step
+
+Two things hold a step an Agent takes without green ink.
+
+The **harness gate** turns an attempt into a request. Before Claude Code runs a shell
+command (a `PreToolUse` hook running `ai6 green-ink gate`) and whenever Codex asks to run
+one, AI6 names the governed steps in it: each ref a `git push` updates (`--force` and
+`+ref` included; `--all`, `--tags` and `--mirror` as `refs/heads/*`, `refs/tags/*` and
+`refs/*`), each ref `git push --delete` or `:ref` removes, `gh pr merge NUMBER` and
+`gh release create TAG`, also inside `sh -c`, `bash -c`, `pwsh -Command` and `cmd /c`. It
+asks the Station whether the Operation's policy and a live approval of the Mission cover
+each one. If not, the command is refused and the Agent is told the exact `kind` and `target`
+to pass to `request_approval`:
+
+```text
+Green ink: it would push origin:refs/heads/main, which needs green ink: call
+request_approval with kind "push" and target "origin:refs/heads/main", wait until it is
+approved, then run the command again.
+```
+
+A push to a ref the Operation does not protect goes ahead. An approval covers the same ref
+however it was written (`origin:main` covers `git push origin refs/heads/main`), for as long
+as it lasts. The gate is best effort: a command that builds its arguments at run time, or a
+step taken through another tool, is not seen.
+
+The **credential** is the guarantee. A loadout secret marked `green_ink` (say, the token
+that can push to `main`) reaches a Session only while the Mission holds a live approval of a
+kind it names, once per approval, and its lease is revoked as soon as the approval expires
+or is revoked (see [Credentials](agents.md#credentials)). Credentials already on the
+Theater are outside that, which is why the Station reports them as weakenings.
 
 ## Activity timeline
 
