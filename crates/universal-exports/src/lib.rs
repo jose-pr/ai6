@@ -1376,6 +1376,9 @@ fn board_station(
         config: info
             .get("config")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        head_of_station: info
+            .get("head_of_station")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
     }
 }
 
@@ -3232,6 +3235,10 @@ pub struct BoardStation {
     /// changed files wait for a restart; absent from a Station that does not report it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<ai6::ConfigStatus>,
+    /// The latest report its Head of Station filed: a summary and typed findings; absent
+    /// until one is filed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_of_station: Option<ai6::StationReport>,
 }
 
 /// One Theater a Station reaches, as the Station published it at check-in.
@@ -4863,6 +4870,18 @@ mod tests {
         );
         worker_info.insert("handlers".to_owned(), serde_json::json!(["claude"]));
         worker_info.insert(
+            "head_of_station".to_owned(),
+            serde_json::json!({
+                "station": "worker", "at": 1_700_000_100,
+                "summary": "Disk at 12% free; two safe houses hold 40 GB of caches.",
+                "findings": [{
+                    "kind": "disk", "severity": "warning",
+                    "text": "12% free under the state directory"
+                }],
+                "mission": "round-1", "agent": "M"
+            }),
+        );
+        worker_info.insert(
             "operation_policies".to_owned(),
             serde_json::json!({"G": {
                 "operation": "G",
@@ -5582,6 +5601,19 @@ mod tests {
         assert_eq!(station_board["stations"][0]["healthy"], true);
         assert_eq!(station_board["stations"][0]["headquarters"], false);
         assert_eq!(station_board["stations"][0]["operations"][0], "G");
+        assert_eq!(
+            station_board["stations"][0]["head_of_station"],
+            serde_json::json!({
+                "station": "worker", "at": 1_700_000_100,
+                "summary": "Disk at 12% free; two safe houses hold 40 GB of caches.",
+                "findings": [{
+                    "kind": "disk", "severity": "warning",
+                    "text": "12% free under the state directory"
+                }],
+                "mission": "round-1", "agent": "M"
+            }),
+            "the Station's latest Head of Station report"
+        );
 
         let anonymous_preview = client
             .get(format!("{base}/v1/user/operations/G/placement-preview"))

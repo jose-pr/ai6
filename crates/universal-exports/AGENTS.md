@@ -178,6 +178,8 @@ pub struct BoardStation {
     pub config: Option<ai6::ConfigStatus>, // roster revision it runs (decimal string), why it
                                            // refused the newest one, files that need a restart;
                                            // omitted when the Station did not report it
+    pub head_of_station: Option<ai6::StationReport>, // its Head of Station's latest report
+                                           // (summary, typed findings); omitted until one is filed
 }
 
 #[non_exhaustive]
