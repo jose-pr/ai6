@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The `pty` terminal on Linux and macOS starts its program in non-canonical mode with no
+  echo, so a handler's input line of any length (a large stream-json message or JSON-RPC
+  request) reaches the harness whole and what is written does not come back as output.
+  Signals (a written `^C`), CR-to-LF on input and output processing stay on.
 - Theater setup on a round: a Head of Station round may call `provision_theater {theater,
   apply}` on a Theater its Station reaches. `apply = false` checks (as `ai6 theater provision
   --check`); `apply = true` runs exactly the steps the Theater's `requires`, `provision` and

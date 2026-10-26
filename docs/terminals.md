@@ -28,6 +28,18 @@ cargo build -p ai6 --features cli -p ai6-terminal-pty
 Pass the build output directory with `--plugin-path` when starting `ai6 serve`. AI6
 discovers Guatiao providers and reports unavailable ones in its diagnostics.
 
+## Terminal mode on Unix
+
+A Unix terminal starts in canonical mode with echo: it holds input until a line ends, cuts a
+line at its limit (4095 bytes on Linux; macOS never delivers a line over 1024 bytes), and
+copies what is written back into the output. The handlers write each stream-json message or
+JSON-RPC request as one line, of any length, and never need a line editor. So before the
+program starts, the `pty` provider turns off canonical mode, echo, `IEXTEN` and XON/XOFF flow
+control. It keeps signals (a written `^C` interrupts the program, as the Claude Code handler
+does), CR-to-LF on input (Enter typed in an attached viewer) and output processing (the
+program's LF arrives as CRLF, which `JsonLines` and an attached viewer both read). A program
+that wants another mode sets it itself.
+
 ## Adding a terminal provider
 
 A terminal provider implements Guatiao's `ai6_terminal` kind, the

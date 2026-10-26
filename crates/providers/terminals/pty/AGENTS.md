@@ -6,7 +6,7 @@ self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
 No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) and
-`portable-pty`; `libc` on Unix and `windows-sys` on Windows. The crate root exports
+`portable-pty`; `libc` and `nix` (`term`) on Unix and `windows-sys` on Windows. The crate root exports
 `Pty`, which implements `ai6::directorates::q::terminal::Terminal`; the library is both an
 `rlib` and the Guatiao `cdylib` a Station loads. Provider ID: `pty`. Unsafe code is
 limited to the platform calls in `unix.rs` (`killpg`) and `windows.rs` (Job Objects),
@@ -29,8 +29,14 @@ pinned with `ai6 serve --terminal`; Agents and handlers do not choose one.
   program's first output and holds that output until it is answered, because `portable-pty`
   0.9 creates every pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR` and offers no way not
   to. On Unix, and for other terminal queries, the bytes pass through as output.
-- **Input lines on Unix** are cut at 4095 bytes while the program reads in canonical mode
-  (Linux N_TTY); the pty is opened in that mode.
+- **Terminal mode on Unix**: before the program starts, the terminal is set to
+  non-canonical mode with no echo (`ICANON`, `IEXTEN`, `ECHO`, `ECHONL` and `IXON` off;
+  `VMIN` 1, `VTIME` 0), so an input line of any length reaches the program whole and what
+  is written never comes back as output. `ISIG` stays on (a written `^C` is SIGINT to the
+  program, which is how the Claude Code handler interrupts), as do `ICRNL` (Enter typed in
+  an attached viewer arrives as CR) and `OPOST` (the program's LF is output as CRLF). A
+  program may set its own mode afterwards; nothing is restored. In canonical mode Linux
+  cuts a line at 4095 bytes and macOS never delivers one over 1024 (`MAX_CANON`).
 - **ConPTY output is a rendering**, not the program's bytes: mode and title sequences come
   first, blank lines may become cursor moves, line-mode input is echoed, and a line longer
   than `cols` is broken with CRLF and a cursor move. Read JSON-line harnesses with
