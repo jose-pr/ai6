@@ -36,6 +36,8 @@ pub(crate) struct CredentialDesk {
     /// Where the Station's own backend finds relative secret files.
     config_dir: Option<std::path::PathBuf>,
     issued: Arc<Mutex<BTreeMap<String, Vec<Issued>>>>,
+    /// Pool account logins and the accounts Sessions hold.
+    pub(super) accounts: super::accounts::AccountDesk,
 }
 
 impl std::fmt::Debug for CredentialDesk {
@@ -51,6 +53,7 @@ impl PartialEq for CredentialDesk {
         self.catalog == other.catalog
             && self.config_dir == other.config_dir
             && Arc::ptr_eq(&self.issued, &other.issued)
+            && self.accounts == other.accounts
             && match (&self.backend, &other.backend) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a, b),
                 (None, None) => true,
@@ -74,6 +77,23 @@ impl CredentialDesk {
 
     pub(crate) fn has_catalog(&self) -> bool {
         self.catalog.is_some()
+    }
+
+    pub(super) fn catalog(&self) -> Option<&LoadoutCatalog> {
+        self.catalog.as_deref()
+    }
+
+    pub(crate) fn with_account_login(
+        mut self,
+        login: Arc<dyn crate::directorates::q::AccountLogin>,
+    ) -> Self {
+        self.accounts = self.accounts.with_login(login);
+        self
+    }
+
+    pub(crate) fn with_account_homes(mut self, dir: std::path::PathBuf) -> Self {
+        self.accounts = self.accounts.with_homes(dir);
+        self
     }
 
     /// Resolves relative secret files against the Station's configuration directory, and
@@ -158,18 +178,20 @@ impl SecretBackend for Shared {
     }
 }
 
-/// Leases the Agent's loadout secrets for a Session of `mission` and puts each value in
-/// `environment` under its variable, replacing what the Mission held before. An Agent
-/// without a loadout gets nothing; an exposed Session whose Operation restricts `secrets`
-/// gets no new leases.
+/// Claims a pool account for a Session of `mission` when its Agent draws from a pool, and
+/// leases the Agent's loadout secrets; puts each value in `environment` under its variable,
+/// replacing what the Mission held before. An Agent without a loadout or pool gets nothing;
+/// an exposed Session whose Operation restricts `secrets` gets no new leases.
 ///
-/// Fails when the backend refuses an ordinary secret, so a Session never starts without the
-/// credentials its loadout promises. Blocks on the backend and the Registry.
+/// Fails when the backend refuses an ordinary secret or no pool account can be had, so a
+/// Session never starts without the credentials its loadout and pools promise. Blocks on the
+/// backend and the Registry.
 pub(super) fn issue(
     state: &DaemonState,
     mission: &Mission,
     agent: &str,
     exposure: &ExposureGate,
+    site: super::accounts::Site,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
     let desk = &state.station.credentials;
@@ -178,12 +200,58 @@ pub(super) fn issue(
     let Some(catalog) = &desk.catalog else {
         return Ok(());
     };
-    let Ok(loadout) = catalog.for_agent(agent) else {
-        return Ok(());
-    };
-    if loadout.secret_names().is_empty() {
-        return Ok(());
+    let broker = desk.broker(catalog);
+    let mut leases = Leases::default();
+    let account = super::accounts::issue(
+        state,
+        catalog,
+        &broker,
+        mission,
+        agent,
+        exposure,
+        site,
+        environment,
+    )?;
+    if let Some(lease) = account {
+        leases.0.push(Issued {
+            lease,
+            approval: None,
+        });
     }
+    let issued = issue_loadout(
+        state,
+        (catalog, &broker),
+        mission,
+        agent,
+        exposure,
+        environment,
+        leases,
+    );
+    if issued.is_err() {
+        super::accounts::release(state, &mission_id);
+    }
+    issued
+}
+
+/// The loadout half of [`issue`]: the Agent's own secrets, ordinary and green ink, kept with
+/// `leases` (the account's) for the Mission.
+fn issue_loadout(
+    state: &DaemonState,
+    (catalog, broker): (&LoadoutCatalog, &SecretBroker),
+    mission: &Mission,
+    agent: &str,
+    exposure: &ExposureGate,
+    environment: &mut BTreeMap<String, String>,
+    mut leases: Leases,
+) -> Result<(), String> {
+    let mission_id = mission.mission_id.to_string();
+    let loadout = catalog
+        .for_agent(agent)
+        .ok()
+        .filter(|loadout| !loadout.secret_names().is_empty());
+    let Some(loadout) = loadout else {
+        return keep(state, &mission_id, leases);
+    };
     // What an earlier Session of the Mission held goes, so only this issue's leases remain.
     for name in loadout.secret_names() {
         environment.remove(catalog.secret(name).env());
@@ -193,16 +261,14 @@ pub(super) fn issue(
             "ai6: Mission {mission_id:?} read untrusted input and its Operation restricts \
              secrets, so its Session gets no credentials"
         );
-        return Ok(());
+        return keep(state, &mission_id, leases);
     }
-    let broker = desk.broker(catalog);
     let (ordinary, protected): (Vec<_>, Vec<_>) = loadout
         .secret_names()
         .iter()
         .map(|name| catalog.secret(name))
         .partition(|definition| !definition.green_ink());
     // Whatever was acquired is revoked if this issue fails part way.
-    let mut leases = Leases::default();
     let mut leased = Vec::new();
 
     if !ordinary.is_empty() {
@@ -286,16 +352,26 @@ pub(super) fn issue(
         }
     }
 
-    if !leases.0.is_empty() {
+    if !leased.is_empty() {
         record(state, mission, agent, &leased, &approvals);
-        let replaced = desk
-            .issued
-            .lock()
-            .map_err(|_| "credential lock was poisoned")?
-            .insert(mission_id, std::mem::take(&mut leases.0));
-        // A concurrent issue for the same Mission lost the race; its leases go too.
-        drop(Leases(replaced.unwrap_or_default()));
     }
+    keep(state, &mission_id, leases)
+}
+
+/// Keeps `leases` for `mission_id` until its Session stops here.
+fn keep(state: &DaemonState, mission_id: &str, mut leases: Leases) -> Result<(), String> {
+    if leases.0.is_empty() {
+        return Ok(());
+    }
+    let replaced = state
+        .station
+        .credentials
+        .issued
+        .lock()
+        .map_err(|_| "credential lock was poisoned")?
+        .insert(mission_id.to_owned(), std::mem::take(&mut leases.0));
+    // A concurrent issue for the same Mission lost the race; its leases go too.
+    drop(Leases(replaced.unwrap_or_default()));
     Ok(())
 }
 
@@ -342,9 +418,10 @@ impl Drop for Leases {
     }
 }
 
-/// Revokes every lease issued for `mission_id`, once its Session stops on this Station or the
-/// Mission ends.
+/// Revokes every lease issued for `mission_id` and frees its pool account, once its Session
+/// stops on this Station or the Mission ends.
 pub(super) fn release(state: &DaemonState, mission_id: &str) {
+    super::accounts::release(state, mission_id);
     let leases = state
         .station
         .credentials

@@ -50,6 +50,7 @@ pub(super) fn record_usage(
     reported: &TokenUsage,
 ) -> Option<Recorded> {
     let delta = tracker.observe(reported);
+    super::accounts::record_usage(state, mission_id, delta.tokens());
     let operation_id = operation_of(state, mission_id);
     let session =
         session_hold(state, mission_id).map_or_else(|| mission_id.to_owned(), |hold| hold.id);

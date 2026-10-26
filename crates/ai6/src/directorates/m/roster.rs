@@ -1589,16 +1589,16 @@ sources = {{ jira = \"GUA\" }}\n",
     }
 
     #[test]
-    fn an_operation_waits_out_a_provider_limit_unless_it_asks_for_a_backup() {
+    fn an_operation_rotates_accounts_on_a_provider_limit_unless_it_asks_otherwise() {
         let directory = TestDirectory::new();
         directory.write(
             "operations.toml",
             "[operation.A]\n[operation.B]\non_limit = \"backup\"\nlimit_fallback_secs = 90\n",
         );
         let roster = Roster::load(&directory.0).unwrap();
-        let wait = roster.operation("A").unwrap();
-        assert_eq!(wait.on_limit, OnLimit::Wait);
-        assert_eq!(wait.limit_fallback_secs, DEFAULT_LIMIT_FALLBACK_SECS);
+        let rotate = roster.operation("A").unwrap();
+        assert_eq!(rotate.on_limit, OnLimit::Rotate);
+        assert_eq!(rotate.limit_fallback_secs, DEFAULT_LIMIT_FALLBACK_SECS);
         let backup = roster.operation("B").unwrap();
         assert_eq!(backup.on_limit, OnLimit::Backup);
         assert_eq!(backup.limit_fallback_secs, 90);

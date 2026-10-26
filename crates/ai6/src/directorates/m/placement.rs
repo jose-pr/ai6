@@ -927,10 +927,51 @@ pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String>
     }
 }
 
+/// Rules `agent` out everywhere while none of its account `pools` has an account with room:
+/// each is limited by its provider or at its `max_concurrent`. `frees_at` (Unix seconds) is
+/// the earliest reset, when every account is limited.
+pub fn no_account_headroom(
+    agent: &str,
+    pools: &[String],
+    frees_at: Option<f64>,
+) -> PlacementRejection {
+    let mut reason = format!("no account with headroom in pools {}", pools.join(", "));
+    match frees_at {
+        Some(at) => reason.push_str(&format!(
+            "; the first limit resets at {at:.0} (Unix seconds)"
+        )),
+        None => reason.push_str("; each account is limited or at its max_concurrent"),
+    }
+    PlacementRejection {
+        station: None,
+        theater: None,
+        agent: Some(agent.to_owned()),
+        reason,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::directorates::m::theaters::{SshAccess, Theater, TheaterAccess};
+
+    #[test]
+    fn an_agent_without_account_headroom_is_ruled_out_with_the_pools_and_the_reset() {
+        let pools = ["claude-team".to_owned(), "claude-all".to_owned()];
+        let rejection = no_account_headroom("007", &pools, Some(1_790_000_000.0));
+        assert_eq!(rejection.agent.as_deref(), Some("007"));
+        assert_eq!((rejection.station, rejection.theater), (None, None));
+        assert_eq!(
+            rejection.reason,
+            "no account with headroom in pools claude-team, claude-all; the first limit \
+             resets at 1790000000 (Unix seconds)"
+        );
+        assert!(
+            no_account_headroom("007", &pools[..1], None)
+                .reason
+                .ends_with("each account is limited or at its max_concurrent")
+        );
+    }
 
     fn agent(id: &str, handler: &str, priority: i64) -> AgentFacts {
         AgentFacts {

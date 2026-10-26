@@ -1,5 +1,6 @@
 //! Local daemon HTTP service.
 
+mod accounts;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
 #[cfg(feature = "publisher")]
@@ -180,6 +181,25 @@ impl StationConfig {
     #[must_use]
     pub fn with_loadouts(mut self, catalog: crate::directorates::q::LoadoutCatalog) -> Self {
         self.credentials = self.credentials.with_catalog(catalog);
+        self
+    }
+
+    /// Logs Codex pool accounts in with `login` instead of running the pool's
+    /// `login_command` ([`CommandLogin`](crate::directorates::q::CommandLogin)).
+    #[must_use]
+    pub fn with_account_login(
+        mut self,
+        login: impl crate::directorates::q::AccountLogin + 'static,
+    ) -> Self {
+        self.credentials = self.credentials.with_account_login(Arc::new(login));
+        self
+    }
+
+    /// Makes the per-Mission `CODEX_HOME` of Codex pool accounts under `dir` instead of
+    /// `accounts` in the Station's state directory.
+    #[must_use]
+    pub fn with_account_homes(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.credentials = self.credentials.with_account_homes(dir.into());
         self
     }
 
@@ -660,6 +680,8 @@ where
     #[cfg(feature = "publisher")]
     let app = app.route("/internal/publisher", get(publisher_health));
     let app = app.with_state(state.clone());
+    let declaring = state.clone();
+    let _ = tokio::task::spawn_blocking(move || accounts::declare(&declaring)).await;
     let scheduler = tokio::spawn(scheduler_loop(state.clone()));
     #[cfg(feature = "publisher")]
     let controls = controls::spawn(&state)?;
@@ -1127,6 +1149,7 @@ async fn scheduler_loop(state: DaemonState) {
             if check_in {
                 publish_station_check_in(&tick);
                 renew_session_leases(&tick);
+                accounts::tend(&tick);
                 recovery::checkpoint_due(&tick);
                 ephemeral::sweep(&tick);
             }
@@ -1253,6 +1276,11 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         else {
             continue;
         };
+        let waits = accounts::intake_hold(state, &operation_id, &agent_id);
+        accounts::note_waiting(state, &brief.key(), &operation_id, waits.as_deref());
+        if waits.is_some() {
+            continue;
+        }
         let mut meta = BTreeMap::new();
         meta.insert(
             "mission_id".to_owned(),
@@ -1383,6 +1411,9 @@ fn sync_session_record(state: &DaemonState, mission_id: &str) {
     let mut update = SessionUpdate::default();
     if let Some(provider) = mission.session_ids.last() {
         update = update.provider_session(provider.as_str());
+    }
+    if let Some(account) = accounts::held(state, mission_id) {
+        update = update.account(account);
     }
     update = match mission.state {
         MissionState::Queued => return,
@@ -3473,8 +3504,18 @@ async fn start_mission(
     }
     let working_directory = area.path.clone();
     // Leased last, so every failure after it goes through `start_failure`, which revokes.
-    if let Err(error) = credentials::issue(&state, &mission, &agent.id, &exposure, &mut environment)
-    {
+    let site = accounts::Site {
+        resuming: false,
+        on_station: remote_hands || plan.own_host,
+    };
+    if let Err(error) = credentials::issue(
+        &state,
+        &mission,
+        &agent.id,
+        &exposure,
+        site,
+        &mut environment,
+    ) {
         return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
     }
     // A Mission started again (a later attempt) keeps the lease of the attempt it replaces
@@ -3694,6 +3735,9 @@ async fn start_mission(
     .with_theater(theater_id.as_str())
     .with_attempt(attempt, predecessor)
     .with_exposure(exposure.exposures());
+    if let Some(account) = accounts::held(&state, &mission_id) {
+        new_session = new_session.with_account(account);
+    }
     if let Some(provider) = &session_id {
         new_session = new_session.with_provider_session(provider.as_str());
     }
@@ -4130,11 +4174,16 @@ async fn resume_mission(
     };
     // A harness a runner still supervises keeps the environment it started with.
     if reattach.is_none() {
+        let site = accounts::Site {
+            resuming: true,
+            on_station: resume_mode == ExecutionMode::RemoteHands || resume_own_host,
+        };
         credentials::issue(
             &state,
             &mission,
             &resume_agent.id,
             &exposure,
+            site,
             &mut environment,
         )
         .map_err(configuration_error)?;
@@ -4934,45 +4983,86 @@ fn handle_limit(
             (operation.on_limit, operation.limit_fallback_secs)
         });
     let resets_at = event.limit.as_ref().and_then(|limit| limit.resets_at);
+    // The limited account is marked and freed whatever the policy.
+    let rotation = accounts::on_limit(state, &mission, resets_at, policy.1);
 
-    if policy.0 == OnLimit::Backup
-        && let Some(agent) = backup_agent(state, &mission, &operation.handler_provider)
-    {
-        let handed_off =
-            state.missions.lock().ok().is_some_and(|mut missions| {
-                missions.requeue_for(mission_id, agent.id.clone()).is_ok()
-            });
-        if handed_off {
-            // The limited attempt is over; the next start records the replacement.
-            if let Some(hold) = session_hold(state, mission_id) {
-                let _ = state.intake.update_session(
-                    &hold.id,
-                    &state.station_id,
-                    hold.fence,
-                    SessionUpdate::default().status(SessionStatus::Ended),
-                );
+    if policy.0 == OnLimit::Rotate {
+        match rotation {
+            // Parked until now: the next scheduler pass resumes it on another account.
+            accounts::Rotation::Resume => {
+                let now = state.clock.now();
+                if park_mission(state, mission_id, now) {
+                    eprintln!(
+                        "ai6: Mission {mission_id:?} hit a provider limit; resuming its Session on another account"
+                    );
+                    queue_event(state, mission_id, event);
+                    return;
+                }
             }
-            eprintln!(
-                "ai6: Mission {mission_id:?} hit a provider limit; posting Agent {:?} as a new attempt",
-                agent.id
-            );
-            queue_event(state, mission_id, event);
-            return;
+            accounts::Rotation::Retry => {
+                if let Some(agent) = mission.agent_id.clone()
+                    && hand_off(state, mission_id, agent)
+                {
+                    eprintln!(
+                        "ai6: Mission {mission_id:?} hit a provider limit; trying again on another account"
+                    );
+                    queue_event(state, mission_id, event);
+                    return;
+                }
+            }
+            accounts::Rotation::Unpooled | accounts::Rotation::Wait => {}
         }
     }
 
+    if policy.0 == OnLimit::Backup
+        && let Some(agent) = backup_agent(state, &mission, &operation.handler_provider)
+        && hand_off(state, mission_id, agent.id.clone())
+    {
+        eprintln!(
+            "ai6: Mission {mission_id:?} hit a provider limit; posting Agent {:?} as a new attempt",
+            agent.id
+        );
+        queue_event(state, mission_id, event);
+        return;
+    }
+
     let until = parked_until(state.clock.now(), resets_at, policy.1);
+    if park_mission(state, mission_id, until) {
+        queue_event(state, mission_id, event);
+    }
+}
+
+/// Queues an interrupted Mission again for `agent` as a new attempt and closes the attempt
+/// it replaces; the next start records the replacement. Whether it was queued.
+fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
+    let handed_off = state
+        .missions
+        .lock()
+        .ok()
+        .is_some_and(|mut missions| missions.requeue_for(mission_id, agent).is_ok());
+    if handed_off && let Some(hold) = session_hold(state, mission_id) {
+        let _ = state.intake.update_session(
+            &hold.id,
+            &state.station_id,
+            hold.fence,
+            SessionUpdate::default().status(SessionStatus::Ended),
+        );
+    }
+    handed_off
+}
+
+/// Parks a Mission until `until` (Unix seconds) and records it; whether it was parked.
+fn park_mission(state: &DaemonState, mission_id: &str, until: i64) -> bool {
     let parked = state
         .missions
         .lock()
         .ok()
         .is_some_and(|mut missions| missions.park(mission_id, until).is_ok());
-    if !parked {
-        return;
+    if parked {
+        sync_session_record(state, mission_id);
+        publish_lifecycle(state, mission_id, MissionState::Parked);
     }
-    sync_session_record(state, mission_id);
-    publish_lifecycle(state, mission_id, MissionState::Parked);
-    queue_event(state, mission_id, event);
+    parked
 }
 
 /// The next qualified Agent whose handler is not the one that hit the limit.
@@ -5856,13 +5946,13 @@ mod tests {
         }
     }
 
-    struct MockSession {
+    pub(super) struct MockSession {
         session_id: SessionId,
         events: Mutex<VecDeque<AgentEvent>>,
     }
 
     impl MockSession {
-        fn new(session_id: SessionId, event: &str) -> Self {
+        pub(super) fn new(session_id: SessionId, event: &str) -> Self {
             Self::with_event(
                 session_id,
                 AgentEvent {
@@ -5876,7 +5966,7 @@ mod tests {
             )
         }
 
-        fn with_event(session_id: SessionId, event: AgentEvent) -> Self {
+        pub(super) fn with_event(session_id: SessionId, event: AgentEvent) -> Self {
             Self {
                 session_id,
                 events: Mutex::new(VecDeque::from([event])),
@@ -6190,6 +6280,7 @@ mod tests {
         providers = [
             MockHandler,
             MockLimitedHandler,
+            super::accounts::testing::MockPooledHandler,
             MockSpendHandler,
             MockRecordingHandler,
             MockDripHandler,
@@ -6533,7 +6624,7 @@ mod tests {
     }
 
     /// A state whose clock stands at `start` and moves only when the test stores a new time.
-    fn limited_state(
+    pub(super) fn limited_state(
         root: &Path,
         operation_settings: &str,
         agents: &str,
@@ -6546,7 +6637,7 @@ mod tests {
         (state, now)
     }
 
-    async fn start_mission_one(state: &DaemonState) {
+    pub(super) async fn start_mission_one(state: &DaemonState) {
         let _ = start_mission(
             State(state.clone()),
             axum::extract::Path("mission-1".to_owned()),
@@ -6998,6 +7089,7 @@ mod tests {
                 "mock-drip",
                 "mock-limit",
                 "mock-lines",
+                "mock-pooled",
                 "mock-recorder",
                 "mock-spend"
             ])

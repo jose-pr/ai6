@@ -14,8 +14,12 @@ pub const RESET_GRACE_SECS: i64 = 15;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OnLimit {
-    /// Park the Session and resume the same provider Session when the limit resets.
+    /// Move the Session to another account of its pools that has headroom: the same provider
+    /// Session where its history goes with it (Claude's environment credentials), else a new
+    /// attempt with a hand-off. Without a pool account to move to, the same as `Wait`.
     #[default]
+    Rotate,
+    /// Park the Session and resume the same provider Session when the limit resets.
     Wait,
     /// Post the next qualified Agent as a new attempt; park only if there is none.
     Backup,
@@ -25,6 +29,7 @@ impl OnLimit {
     /// The configuration spelling.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Rotate => "rotate",
             Self::Wait => "wait",
             Self::Backup => "backup",
         }
@@ -64,10 +69,12 @@ mod tests {
     }
 
     #[test]
-    fn the_policy_defaults_to_waiting_and_parses_by_name() {
-        assert_eq!(OnLimit::default(), OnLimit::Wait);
+    fn the_policy_defaults_to_rotating_and_parses_by_name() {
+        assert_eq!(OnLimit::default(), OnLimit::Rotate);
         let parsed: OnLimit = serde_json::from_str("\"backup\"").unwrap();
         assert_eq!(parsed, OnLimit::Backup);
+        let parsed: OnLimit = serde_json::from_str("\"wait\"").unwrap();
+        assert_eq!(parsed, OnLimit::Wait);
         assert!(serde_json::from_str::<OnLimit>("\"retry\"").is_err());
     }
 }
