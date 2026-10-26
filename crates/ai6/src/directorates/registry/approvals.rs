@@ -59,9 +59,21 @@ pub struct ApprovalRequest {
     pub requested_at: f64,
     /// When the request expires as refused, as Unix seconds.
     pub expires_at: f64,
+    /// For a Mission proposal (kind `proposal`), the role the proposed work asks for; a class
+    /// authorisation covers it only when it is the parent Mission's role or one the class
+    /// authorisation lists in `proposed_roles`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_role: Option<String>,
 }
 
 impl ApprovalRequest {
+    /// Names the role a proposed Mission asks for.
+    #[must_use]
+    pub fn proposing_role(mut self, role: Option<String>) -> Self {
+        self.proposed_role = role;
+        self
+    }
+
     /// A request with an identity derived from the Session, the scope and a retry key, so
     /// asking again with the same key finds the same request. Its times are set by
     /// [`ApprovalRequest::expiring`].
@@ -109,6 +121,7 @@ impl ApprovalRequest {
             reason: reason.into(),
             requested_at: 0.0,
             expires_at: 0.0,
+            proposed_role: None,
         };
         request.validate_fields()?;
         Ok(request)
@@ -336,9 +349,32 @@ pub struct ClassAuthorization {
     /// Set when it was withdrawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked: Option<Revocation>,
+    /// For kind `proposal`: roles a proposed Mission may ask for besides its parent Mission's
+    /// own role. Empty: only the parent's role, or none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposed_roles: Vec<String>,
 }
 
 impl ClassAuthorization {
+    /// The roles, besides the parent Mission's own, a proposal it covers may ask for.
+    #[must_use]
+    pub fn for_proposed_roles(mut self, roles: Vec<String>) -> Self {
+        self.proposed_roles = roles;
+        self
+    }
+
+    /// Whether a request may use it: one that proposes no role, its parent Mission's own
+    /// role (`role`) or one listed in `proposed_roles`.
+    pub fn allows_proposed_role(&self, request: &ApprovalRequest, role: Option<&str>) -> bool {
+        match request.proposed_role.as_deref() {
+            None => true,
+            Some(proposed) => {
+                role == Some(proposed)
+                    || self.proposed_roles.iter().any(|listed| listed == proposed)
+            }
+        }
+    }
+
     /// A class authorisation of `kinds` on targets matching `target_pattern`, covering no
     /// Agent until [`ClassAuthorization::for_agents`] or [`ClassAuthorization::for_roles`]
     /// names some, for clearance `field` and above.
@@ -364,6 +400,7 @@ impl ClassAuthorization {
             signer: signer.into(),
             created_at,
             revoked: None,
+            proposed_roles: Vec::new(),
         }
     }
 
@@ -451,6 +488,16 @@ impl ClassAuthorization {
         {
             return Err(invalid_input(
                 "a class authorisation covers 1 to 64 Agents or roles",
+            ));
+        }
+        if self.proposed_roles.len() > MAX_CLASS_ENTRIES
+            || self
+                .proposed_roles
+                .iter()
+                .any(|name| !valid_text(name, 128, false))
+        {
+            return Err(invalid_input(
+                "a class authorisation lists at most 64 proposed roles",
             ));
         }
         if !clearance_at_least(&self.clearance_min, "desk") {
@@ -907,7 +954,9 @@ impl ApprovalStore for FileRegistry {
             .class_authorizations_locked(&request.operation)?
             .into_iter()
             .find(|class| {
-                class.is_live(now) && class.covers(&request.agent, role, clearance, &request.scope)
+                class.is_live(now)
+                    && class.covers(&request.agent, role, clearance, &request.scope)
+                    && class.allows_proposed_role(request, role)
             })
         else {
             return Ok(None);

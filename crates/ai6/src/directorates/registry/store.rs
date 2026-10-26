@@ -171,6 +171,10 @@ pub struct MissionProposal {
     /// What M's vetting found, once it has looked; `None` until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vetting: Option<Vetting>,
+    /// The parent Mission's role, recorded by AI6 when the proposal is submitted; a class
+    /// authorisation's roles are matched against it, never against the role proposed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_role: Option<String>,
 }
 
 impl MissionProposal {
@@ -235,7 +239,15 @@ impl MissionProposal {
             brief,
             created_at: 0.0,
             vetting: None,
+            parent_role: None,
         })
+    }
+
+    /// Records the parent Mission's role, as AI6 knows it.
+    #[must_use]
+    pub fn with_parent_role(mut self, role: Option<String>) -> Self {
+        self.parent_role = role;
+        self
     }
 
     pub(super) fn validate(&self) -> io::Result<()> {
@@ -249,6 +261,9 @@ impl MissionProposal {
             || self.brief.provenance.is_some()
             || !self.created_at.is_finite()
             || self.created_at < 0.0
+            || self.parent_role.as_deref().is_some_and(|role| {
+                role.is_empty() || role.len() > 128 || role.contains(char::is_control)
+            })
         {
             return Err(invalid_data("Mission proposal record is invalid"));
         }
@@ -728,6 +743,93 @@ impl FileRegistry {
     }
 }
 
+impl FileRegistry {
+    /// Promotes a pending proposal while the caller holds the Registry lock.
+    pub(super) fn promote_locked(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+        received_by: &str,
+    ) -> io::Result<Brief> {
+        let pending = self
+            .root
+            .join("proposals")
+            .join("pending")
+            .join(operation)
+            .join(format!("{proposal_id}.json"));
+        let approved = self
+            .root
+            .join("proposals")
+            .join("approved")
+            .join(operation)
+            .join(format!("{proposal_id}.json"));
+        if !pending.is_file() {
+            return match read_mission_proposal(&approved) {
+                Ok(proposal) => {
+                    let mut brief = proposal.brief;
+                    self.attach_provenance(&mut brief);
+                    Ok(brief)
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    let rejected = self
+                        .root
+                        .join("proposals")
+                        .join("rejected")
+                        .join(operation)
+                        .join(format!("{proposal_id}.json"));
+                    if rejected.is_file() {
+                        Err(io::Error::new(
+                            io::ErrorKind::AlreadyExists,
+                            "Mission proposal has already been rejected",
+                        ))
+                    } else {
+                        Err(error)
+                    }
+                }
+                Err(error) => Err(error),
+            };
+        }
+        let proposal = read_mission_proposal(&pending)?;
+        if proposal.operation_id != operation || proposal.id != proposal_id {
+            return Err(invalid_data(
+                "Mission proposal path does not match its identity",
+            ));
+        }
+        let mut brief = proposal.brief.clone();
+        let key = brief.key();
+        for state in ["claimed", "done", "failed"] {
+            if self.root.join(state).join(format!("{key}.json")).exists() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Mission proposal brief already exists in a terminal intake state",
+                ));
+            }
+        }
+        let queued = self.root.join("new").join(format!("{key}.json"));
+        if queued.is_file() {
+            let bytes = fs::read(&queued)?;
+            let existing: Brief =
+                serde_json::from_slice(&bytes).map_err(|error| invalid_data(error.to_string()))?;
+            if existing.provenance.is_some() || existing != brief {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Mission proposal brief conflicts with queued intake",
+                ));
+            }
+            self.attach_provenance(&mut brief);
+        } else {
+            brief.provenance = Some(proposal_provenance(&proposal, received_by));
+            self.write_brief(&queued, &brief)?;
+        }
+        let approved_parent = approved
+            .parent()
+            .ok_or_else(|| invalid_data("Mission proposal path has no parent"))?;
+        fs::create_dir_all(approved_parent)?;
+        fs::rename(&pending, &approved)?;
+        Ok(brief)
+    }
+}
+
 /// The brief queue: Mission proposals, queued briefs, their leases and outcomes.
 pub trait BriefStore {
     /// Stores an Agent-authored Mission proposal outside the scheduler's queue.
@@ -1022,82 +1124,7 @@ impl BriefStore for FileRegistry {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
         let _registry_lock = registry_lock(&self.root)?;
-        let pending = self
-            .root
-            .join("proposals")
-            .join("pending")
-            .join(operation)
-            .join(format!("{proposal_id}.json"));
-        let approved = self
-            .root
-            .join("proposals")
-            .join("approved")
-            .join(operation)
-            .join(format!("{proposal_id}.json"));
-        if !pending.is_file() {
-            return match read_mission_proposal(&approved) {
-                Ok(proposal) => {
-                    let mut brief = proposal.brief;
-                    self.attach_provenance(&mut brief);
-                    Ok(brief)
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    let rejected = self
-                        .root
-                        .join("proposals")
-                        .join("rejected")
-                        .join(operation)
-                        .join(format!("{proposal_id}.json"));
-                    if rejected.is_file() {
-                        Err(io::Error::new(
-                            io::ErrorKind::AlreadyExists,
-                            "Mission proposal has already been rejected",
-                        ))
-                    } else {
-                        Err(error)
-                    }
-                }
-                Err(error) => Err(error),
-            };
-        }
-        let proposal = read_mission_proposal(&pending)?;
-        if proposal.operation_id != operation || proposal.id != proposal_id {
-            return Err(invalid_data(
-                "Mission proposal path does not match its identity",
-            ));
-        }
-        let mut brief = proposal.brief.clone();
-        let key = brief.key();
-        for state in ["claimed", "done", "failed"] {
-            if self.root.join(state).join(format!("{key}.json")).exists() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "Mission proposal brief already exists in a terminal intake state",
-                ));
-            }
-        }
-        let queued = self.root.join("new").join(format!("{key}.json"));
-        if queued.is_file() {
-            let bytes = fs::read(&queued)?;
-            let existing: Brief =
-                serde_json::from_slice(&bytes).map_err(|error| invalid_data(error.to_string()))?;
-            if existing.provenance.is_some() || existing != brief {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "Mission proposal brief conflicts with queued intake",
-                ));
-            }
-            self.attach_provenance(&mut brief);
-        } else {
-            brief.provenance = Some(proposal_provenance(&proposal, received_by));
-            self.write_brief(&queued, &brief)?;
-        }
-        let approved_parent = approved
-            .parent()
-            .ok_or_else(|| invalid_data("Mission proposal path has no parent"))?;
-        fs::create_dir_all(approved_parent)?;
-        fs::rename(&pending, &approved)?;
-        Ok(brief)
+        self.promote_locked(operation, proposal_id, received_by)
     }
 
     fn reject_mission_proposal(

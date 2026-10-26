@@ -78,10 +78,13 @@ impl AgentHandler for CodexHandler {
             &self.config.executable,
             &request.working_directory,
             &request.environment,
-            request.project_settings,
+            Mode {
+                project_settings: request.project_settings,
+                answer_only: request.answer_only,
+            },
         )?;
-        let mut session = CodexSession::new(process, request.effort)
-            .with_gate(station_gate(&request.environment));
+        let gate = station_gate(&request.environment).filter(|_| !request.answer_only);
+        let mut session = CodexSession::new(process, request.effort).with_gate(gate);
         session.request(
             "initialize",
             json!({
@@ -96,7 +99,7 @@ impl AgentHandler for CodexHandler {
             params["model"] = json!(model);
         }
         params["cwd"] = json!(request.working_directory);
-        set_approval_policy(&mut params, &request.environment);
+        set_approval_policy(&mut params, &request.environment, request.answer_only);
         let response = match session.request("thread/resume", params, Duration::from_secs(30)) {
             Ok(response) => response,
             Err(error) => {
@@ -142,8 +145,12 @@ impl CodexHandler {
             &self.config.executable,
             &request.working_directory,
             &request.environment,
-            request.project_settings,
+            Mode {
+                project_settings: request.project_settings,
+                answer_only: request.answer_only,
+            },
         )?;
+        let gate = gate.filter(|_| !request.answer_only);
         let mut session = CodexSession::new(process, request.effort).with_gate(gate);
         session.request(
             "initialize",
@@ -155,7 +162,7 @@ impl CodexHandler {
         )?;
         session.notify("initialized", json!({}))?;
         let mut params = json!({ "cwd": request.working_directory });
-        set_approval_policy(&mut params, &request.environment);
+        set_approval_policy(&mut params, &request.environment, request.answer_only);
         if let Some(model) = request.model {
             params["model"] = json!(model);
         }
@@ -191,15 +198,18 @@ fn station_gate(environment: &std::collections::BTreeMap<String, String>) -> Opt
     }))
 }
 
-/// When the thread asks before running a command. In remote-hands mode it never asks (its
-/// sandbox is read-only and the Station gates `theater_run`); with a green ink gate it asks
-/// (`untrusted`) for every command outside Codex's own list of safe reads, so the gate sees
-/// each one.
+/// When the thread asks before running a command. Answer-only, or in remote-hands mode, it
+/// never asks (its sandbox is read-only, and in remote-hands mode the Station gates
+/// `theater_run`); with a green ink gate it asks (`untrusted`) for every command outside
+/// Codex's own list of safe reads, so the gate sees each one.
 fn set_approval_policy(
     params: &mut Value,
     environment: &std::collections::BTreeMap<String, String>,
+    answer_only: bool,
 ) {
-    if is_remote_hands(environment) {
+    if answer_only {
+        restrict_to_answer_only(params);
+    } else if is_remote_hands(environment) {
         restrict_to_remote_hands(params);
     } else if GateClient::from_environment(environment).is_some() {
         params["approvalPolicy"] = json!("untrusted");
@@ -635,15 +645,26 @@ impl AgentSession for CodexSession {
     }
 }
 
+/// What AI6 decided about the thread's settings.
+#[derive(Clone, Copy)]
+struct Mode {
+    project_settings: bool,
+    answer_only: bool,
+}
+
 fn spawn(
     terminal: Object<dyn AgentTerminal>,
     executable: &str,
     cwd: &str,
     environment: &std::collections::BTreeMap<String, String>,
-    project_settings: bool,
+    mode: Mode,
 ) -> Result<Object<dyn TerminalSession>, ProviderError> {
-    let mut argv = app_server_argv(executable, environment);
-    if !project_settings {
+    let mut argv = if mode.answer_only {
+        answer_only_argv(executable)
+    } else {
+        app_server_argv(executable, environment)
+    };
+    if !mode.project_settings || mode.answer_only {
         argv.extend(untrusted_project(cwd));
     }
     let spec = Spec {
@@ -680,6 +701,17 @@ fn app_server_argv(
     argv
 }
 
+/// The app server of an answer-only thread: the user's MCP servers replaced by none for this
+/// process, and AI6's left out.
+fn answer_only_argv(executable: &str) -> Vec<String> {
+    vec![
+        executable.to_owned(),
+        "app-server".to_owned(),
+        "-c".to_owned(),
+        "mcp_servers={}".to_owned(),
+    ]
+}
+
 /// Marks the working directory an untrusted project for this process, so Codex skips its
 /// project `.codex/` layer: project config, hooks and rules. `projects` is set as one inline
 /// table because a path holds dots, which a dotted `-c` key would split; it replaces the
@@ -704,6 +736,14 @@ fn is_remote_hands(environment: &std::collections::BTreeMap<String, String>) -> 
 fn restrict_to_remote_hands(params: &mut Value) {
     params["sandbox"] = json!("read-only");
     params["approvalPolicy"] = json!("never");
+}
+
+/// A thread that only reads its prompt and answers: Codex's shell cannot be switched off, so
+/// it runs in the read-only sandbox (no writes; Codex gives that sandbox no network), never
+/// asks, and has web search off (`web_search = "disabled"`).
+fn restrict_to_answer_only(params: &mut Value) {
+    restrict_to_remote_hands(params);
+    params["config"] = json!({ "web_search": "disabled" });
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderError> {
@@ -1037,6 +1077,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1065,6 +1106,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1178,6 +1220,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 ProcessTerminal::new().into_object(),
                 approvals_gate(approved.clone()),
@@ -1238,8 +1281,17 @@ mod tests {
             ("AI6_CABLE_MCP_TOKEN".to_owned(), "token".to_owned()),
         ]);
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &cable);
+        set_approval_policy(&mut params, &cable, false);
         assert_eq!(params["approvalPolicy"], "untrusted");
+
+        let mut params = json!({ "cwd": "/work" });
+        set_approval_policy(&mut params, &cable, true);
+        assert_eq!(
+            params["sandbox"], "read-only",
+            "answer-only wins over the gate"
+        );
+        assert_eq!(params["approvalPolicy"], "never");
+        assert_eq!(params["config"]["web_search"], "disabled");
 
         let mut remote = cable.clone();
         remote.insert(
@@ -1248,14 +1300,14 @@ mod tests {
         );
         remote.insert("AI6_THEATER_MCP_TOKEN".to_owned(), "theater".to_owned());
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &remote);
+        set_approval_policy(&mut params, &remote, false);
         assert_eq!(
             params["approvalPolicy"], "never",
             "the Station gates theater_run"
         );
 
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &std::collections::BTreeMap::new());
+        set_approval_policy(&mut params, &std::collections::BTreeMap::new(), false);
         assert!(
             params.get("approvalPolicy").is_none(),
             "no gate, Codex's own policy"
@@ -1385,6 +1437,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.into_object(),
             )
@@ -1457,6 +1510,7 @@ mod tests {
                 max_cost_micro_usd: None,
                 project_settings: false,
                 project_mcp: false,
+                answer_only: false,
             },
             terminal.into_object(),
         );
@@ -1656,6 +1710,15 @@ mod tests {
             parsed["projects"]["C:\\safe houses\\m.1"]["trust_level"].as_str(),
             Some("untrusted")
         );
+    }
+
+    #[test]
+    fn an_answer_only_app_server_has_no_mcp_server_at_all() {
+        let argv = answer_only_argv("codex");
+        assert_eq!(argv, ["codex", "app-server", "-c", "mcp_servers={}"]);
+        let (key, value) = argv[3].split_once('=').unwrap();
+        let parsed: toml::Table = toml::from_str(&format!("{key} = {value}")).unwrap();
+        assert!(parsed["mcp_servers"].as_table().unwrap().is_empty());
     }
 
     #[test]

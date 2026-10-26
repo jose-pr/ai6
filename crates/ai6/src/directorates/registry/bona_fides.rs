@@ -31,11 +31,13 @@ pub enum Origin {
     /// A brief found in the queue with no provenance: written there by hand or by an
     /// integration that did not go through AI6.
     RegistryDrop,
+    /// A Chief of Staff review Headquarters queued for a brief or proposal.
+    Review,
 }
 
 impl Origin {
     /// The name used in records and on the board: `operator`, `source`, `sleeper`,
-    /// `proposal`, `registry_drop`.
+    /// `proposal`, `registry_drop`, `review`.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Operator => "operator",
@@ -43,6 +45,7 @@ impl Origin {
             Self::Sleeper => "sleeper",
             Self::Proposal => "proposal",
             Self::RegistryDrop => "registry_drop",
+            Self::Review => "review",
         }
     }
 }

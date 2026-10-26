@@ -55,8 +55,8 @@ pub use directorates::m::vetting::{
     CHIEF_OF_STAFF_ROLE, DEFAULT_MAX_BRIEF_BYTES, DEFAULT_MAX_PER_HOUR,
     DEFAULT_MAX_PER_SOURCE_PER_HOUR, Finding, FindingKind, KnownWork, PROPOSAL_SOURCE,
     REVIEW_DATA_KEY, REVIEW_SOURCE, ReviewTarget, Vetting, VettingContext, VettingDefinition,
-    VettingPolicy, VettingScope, VettingVerdict, is_review, is_untrusted, read_review,
-    review_brief, review_target, vet, work_title,
+    VettingPolicy, VettingScope, VettingVerdict, content_digest, is_review, is_untrusted,
+    read_review, review_brief, review_target, vet, work_title,
 };
 pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_REGISTRY_DROP, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure,
@@ -149,7 +149,7 @@ pub use directorates::registry::store::{
 };
 pub use directorates::registry::timeline::{MAX_TIMELINE_EVENTS, TimelineEvent};
 pub use directorates::registry::vetting::{
-    Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_RESULTS,
+    Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_PER_OPERATION, MAX_HELD_RESULTS,
 };
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,

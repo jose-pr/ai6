@@ -311,7 +311,27 @@ mod tests {
             None,
         )
         .await;
-        assert_eq!(again.status(), 404, "a released brief is no longer held");
+        assert_eq!(again.status(), 200, "releasing again changes nothing");
+        assert_eq!(served.registry.list_new().unwrap().len(), 1);
+        served
+            .registry
+            .claim_with_lease(
+                Some(&released),
+                "hq",
+                std::time::Duration::from_secs(60),
+                std::collections::BTreeMap::new(),
+            )
+            .unwrap()
+            .unwrap();
+        let claimed = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &path,
+            None,
+        )
+        .await;
+        assert_eq!(claimed.status(), 409, "a placed brief is past releasing");
 
         let path = format!("G/held-briefs/{refused}/refuse");
         let body = serde_json::json!({ "reason": "a mirror of mission-g" });
@@ -349,7 +369,8 @@ mod tests {
             .into_iter()
             .map(|event| event.action)
             .collect();
-        assert_eq!(actions, ["released", "refused"]);
+        // Each request the operator made is recorded, the repeated release too.
+        assert_eq!(actions, ["released", "released", "refused"]);
     }
 
     #[tokio::test]

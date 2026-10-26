@@ -46,6 +46,7 @@ pub(super) struct Endpoint {
     server: JoinHandle<()>,
     registered: Option<CableEndpoint>,
     green_ink: Arc<OnceLock<Desk>>,
+    mission_role: Arc<OnceLock<String>>,
 }
 
 impl Endpoint {
@@ -75,6 +76,7 @@ impl Endpoint {
     ) -> std::io::Result<Self> {
         let principal = Arc::new(RwLock::new(None));
         let green_ink = Arc::new(OnceLock::new());
+        let mission_role = Arc::new(OnceLock::new());
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
@@ -85,6 +87,7 @@ impl Endpoint {
                 let intake = intake.clone();
                 let exposure = exposure.clone();
                 let green_ink = green_ink.clone();
+                let mission_role = mission_role.clone();
                 move || {
                     Ok(CableTools::new(
                         relay.clone(),
@@ -93,6 +96,7 @@ impl Endpoint {
                         allow_mission_proposals,
                         exposure.clone(),
                         green_ink.clone(),
+                        mission_role.clone(),
                     ))
                 }
             },
@@ -115,6 +119,7 @@ impl Endpoint {
             server,
             registered: None,
             green_ink,
+            mission_role,
         })
     }
 
@@ -122,6 +127,12 @@ impl Endpoint {
     /// green ink is unavailable.
     pub(super) fn open_green_ink(&self, desk: Desk) {
         let _ = self.green_ink.set(desk);
+    }
+
+    /// Records the role the Session's Mission was given, which its proposals carry as their
+    /// parent's role for class authorisations to match.
+    pub(super) fn set_mission_role(&self, role: &str) {
+        let _ = self.mission_role.set(role.to_owned());
     }
 
     /// The endpoint's URL, on a loopback port of the Station.
@@ -833,6 +844,7 @@ struct CableTools {
     allow_mission_proposals: bool,
     exposure: ExposureGate,
     green_ink: Arc<OnceLock<Desk>>,
+    mission_role: Arc<OnceLock<String>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -844,6 +856,7 @@ impl CableTools {
         allow_mission_proposals: bool,
         exposure: ExposureGate,
         green_ink: Arc<OnceLock<Desk>>,
+        mission_role: Arc<OnceLock<String>>,
     ) -> Self {
         Self {
             relay,
@@ -852,6 +865,7 @@ impl CableTools {
             allow_mission_proposals,
             exposure,
             green_ink,
+            mission_role,
             tool_router: Self::tool_router(),
         }
     }
@@ -1090,7 +1104,7 @@ impl CableTools {
             &args.idempotency_key,
             brief,
         ) {
-            Ok(proposal) => proposal,
+            Ok(proposal) => proposal.with_parent_role(self.mission_role.get().cloned()),
             Err(_) => return "Mission proposal is invalid".to_owned(),
         };
         let proposal_id = proposal.id.clone();

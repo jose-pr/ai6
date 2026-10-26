@@ -342,6 +342,7 @@ impl ApprovalStore for SqlRegistry {
                 .find(|class| {
                     class.is_live(now)
                         && class.covers(&request.agent, role, clearance, &request.scope)
+                        && class.allows_proposed_role(request, role)
                 })
             else {
                 return Ok(None);

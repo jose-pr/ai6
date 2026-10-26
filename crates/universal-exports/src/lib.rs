@@ -1700,16 +1700,21 @@ async fn approve_user_mission_proposal(
     let requested_id = proposal_id.clone();
     let approver = person.id.clone();
     let now = unix_timestamp()?;
+    // The operator saw the proposal's vetting: only a malformed brief is stopped again. The
+    // brief is promoted and cleared in one step, so no intake round sees it uncleared.
+    let cleared = ai6::FindingKind::ALL
+        .into_iter()
+        .filter(|kind| *kind != ai6::FindingKind::Malformed)
+        .collect::<Vec<_>>();
     let brief = tokio::task::spawn_blocking(move || {
-        let brief =
-            registry.promote_mission_proposal(&operation, &requested_id, GATEWAY_RECEIVER)?;
-        // The operator saw the proposal's vetting: only a malformed brief is stopped again.
-        let cleared = ai6::FindingKind::ALL
-            .into_iter()
-            .filter(|kind| *kind != ai6::FindingKind::Malformed)
-            .collect::<Vec<_>>();
-        let _ = registry.clear_brief(&brief.key(), &cleared, &approver, now);
-        Ok::<_, std::io::Error>(brief)
+        registry.promote_cleared(
+            &operation,
+            &requested_id,
+            GATEWAY_RECEIVER,
+            &cleared,
+            &approver,
+            now,
+        )
     })
     .await
     .map_err(|_| ApiError::internal())?

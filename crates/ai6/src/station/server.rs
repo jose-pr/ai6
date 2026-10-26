@@ -1382,6 +1382,7 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         leases.push(lease);
     }
     vetting.proposals();
+    vetting.requeue_expired();
     true
 }
 
@@ -3367,17 +3368,31 @@ async fn start_mission(
             role.id
         )));
     }
-    let made = {
+    // A review reads one brief and answers: on this Station's own host only, in a directory
+    // of its own, with no safe house, Cables, proposals, credentials or project settings.
+    let review = vetting::is_review_mission(&mission);
+    let made = if review {
+        None
+    } else {
         let (worker, worker_mission) = (state.clone(), mission.clone());
         tokio::task::spawn_blocking(move || ephemeral::prepare(&worker, &worker_mission))
             .await
             .map_err(|error| runtime_error(format!("Theater maker worker failed: {error}")))?
             .map_err(configuration_error)?
     };
-    let plan = launch_plan_in(&state, mission.operation_id.as_deref(), made.as_deref())
-        .map_err(configuration_error)?;
+    let plan = if review {
+        launch_plan_in(&state, None, Some(LOCAL_THEATER))
+    } else {
+        launch_plan_in(&state, mission.operation_id.as_deref(), made.as_deref())
+    }
+    .map_err(configuration_error)?;
     if let Some(reason) = plan.refuses(agent.handler.as_deref()) {
         return Err(configuration_error(reason));
+    }
+    if review && !(plan.mode == ExecutionMode::Field && plan.own_host) {
+        return Err(configuration_error(
+            "a Chief of Staff review runs only on this Station's own host",
+        ));
     }
     let theater_id = plan.theater_id.clone();
     let runner = match plan.mode {
@@ -3423,8 +3438,6 @@ async fn start_mission(
     let operation_id = mission.operation_id.clone();
     let requested_directory = request.working_directory.clone();
     let area_mission = mission.clone();
-    // A review reads one brief: no safe house, no Cables or proposals, desk clearance.
-    let review = vetting::is_review_mission(&mission);
     let remote_hands = plan.mode == ExecutionMode::RemoteHands;
     let (area_theater, area_root) = (theater_id.clone(), plan.root.clone());
     // An earlier attempt another Station recorded, when this Station holds none of its own.
@@ -3448,7 +3461,7 @@ async fn start_mission(
                 &area_theater,
             )
         } else if review {
-            vetting::review_area(&area_mission)
+            vetting::review_area()
         } else {
             resolve_working_area(
                 &roster,
@@ -3510,18 +3523,24 @@ async fn start_mission(
         initial_context.push(recovery::hand_off(lost, work));
     }
     initial_context.extend(request.initial_context);
-    let mut environment = agent.env.clone();
-    environment.extend(requested_environment(request.environment));
-    if let Some(briefing) = configure_station_cover(
-        &state.roster,
-        mission.operation_id.as_deref(),
-        &agent.id,
-        model.as_deref().unwrap_or_default(),
-        &mut environment,
-    )
-    .map_err(configuration_error)?
-    {
-        initial_context.push(briefing);
+    let mut environment = if review {
+        vetting::review_environment(&agent.env)
+    } else {
+        agent.env.clone()
+    };
+    if !review {
+        environment.extend(requested_environment(request.environment));
+        if let Some(briefing) = configure_station_cover(
+            &state.roster,
+            mission.operation_id.as_deref(),
+            &agent.id,
+            model.as_deref().unwrap_or_default(),
+            &mut environment,
+        )
+        .map_err(configuration_error)?
+        {
+            initial_context.push(briefing);
+        }
     }
     let exposure = medical::open_gate(&state, &mission);
     #[cfg(feature = "cables-mcp")]
@@ -3550,6 +3569,9 @@ async fn start_mission(
             .await
             .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
             endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
+            if let Some(role) = mission.role_id.as_deref() {
+                endpoint.set_mission_role(role);
+            }
             endpoint.add_environment(&mut environment);
             initial_context.push(cables_mcp::INSTRUCTIONS.to_owned());
             Some(endpoint)
@@ -3598,14 +3620,17 @@ async fn start_mission(
         resuming: false,
         on_station: remote_hands || plan.own_host,
     };
-    if let Err(error) = credentials::issue(
-        &state,
-        &mission,
-        &agent.id,
-        &exposure,
-        site,
-        &mut environment,
-    ) {
+    // A review authenticates to its model with what its Agent's own environment carries.
+    if !review
+        && let Err(error) = credentials::issue(
+            &state,
+            &mission,
+            &agent.id,
+            &exposure,
+            site,
+            &mut environment,
+        )
+    {
         return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
     }
     // A Mission started again (a later attempt) keeps the lease of the attempt it replaces
@@ -3660,14 +3685,20 @@ async fn start_mission(
             provenance: mission.provenance.clone(),
         });
     }
-    let project = harness::project_settings(
-        &state,
-        mission.operation_id.as_deref(),
-        mission_id.as_str(),
-        &working_directory,
-        remote_hands || plan.own_host,
-    )
-    .await;
+    // A review's directory is new and empty: there are no project settings to decide on.
+    let (project_settings, project_mcp) = if review {
+        (false, false)
+    } else {
+        let project = harness::project_settings(
+            &state,
+            mission.operation_id.as_deref(),
+            mission_id.as_str(),
+            &working_directory,
+            remote_hands || plan.own_host,
+        )
+        .await;
+        (project.load, project.mcp)
+    };
     let start_request = AgentStart {
         mission_id: mission.mission_id,
         agent_id: agent.id,
@@ -3683,8 +3714,9 @@ async fn start_mission(
         model: model.clone(),
         effort: effort.clone(),
         max_cost_micro_usd: medical::remaining_mission_cost(&state, &mission_id),
-        project_settings: project.load,
-        project_mcp: project.mcp,
+        project_settings,
+        project_mcp,
+        answer_only: review,
     };
     let attachment = runner_key.clone().map(|key| RunnerAttachment {
         key,
@@ -4099,16 +4131,25 @@ async fn resume_mission(
             )
         }
     };
-    let mut environment = environment;
-    environment.extend(requested_environment(request.environment.clone()));
-    configure_station_cover(
-        &state.roster,
-        mission.operation_id.as_deref(),
-        &resume_agent.id,
-        model.as_deref().unwrap_or_default(),
-        &mut environment,
-    )
-    .map_err(configuration_error)?;
+    // A review resumes as it started: answer-only, on this Station's own host, with nothing
+    // beyond what its harness needs to authenticate.
+    let review = vetting::is_review_mission(&mission);
+    let mut environment = if review {
+        vetting::review_environment(&environment)
+    } else {
+        environment
+    };
+    if !review {
+        environment.extend(requested_environment(request.environment.clone()));
+        configure_station_cover(
+            &state.roster,
+            mission.operation_id.as_deref(),
+            &resume_agent.id,
+            model.as_deref().unwrap_or_default(),
+            &mut environment,
+        )
+        .map_err(configuration_error)?;
+    }
     let resume_manifest = state
         .missions
         .lock()
@@ -4125,6 +4166,11 @@ async fn resume_mission(
         .transports
         .theater(&resume_theater)
         .is_none_or(|theater| theater.access == TheaterAccess::Local);
+    if review && !(resume_mode == ExecutionMode::Field && resume_own_host) {
+        return Err(configuration_error(
+            "a Chief of Staff review runs only on this Station's own host",
+        ));
+    }
     let runner = match resume_mode {
         ExecutionMode::Field => {
             runner_link(&state, &resume_theater).map_err(configuration_error)?
@@ -4199,7 +4245,8 @@ async fn resume_mission(
         )),
     };
     #[cfg(feature = "cables-mcp")]
-    let cables_mcp = if let Some(operation_id) = mission.operation_id.as_deref() {
+    let cables_mcp = if let Some(operation_id) = mission.operation_id.as_deref().filter(|_| !review)
+    {
         let theater = state
             .roster
             .operation(operation_id)
@@ -4226,6 +4273,9 @@ async fn resume_mission(
         .await
         .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
         endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
+        if let Some(role) = mission.role_id.as_deref() {
+            endpoint.set_mission_role(role);
+        }
         endpoint.add_environment(&mut environment);
         endpoint
             .bind_session(Some(&session_id))
@@ -4286,7 +4336,7 @@ async fn resume_mission(
         if let Some(record) = record {
             accounts::reattach(&state, &mission, &record);
         }
-    } else {
+    } else if !review {
         let site = accounts::Site {
             resuming: true,
             on_station: resume_mode == ExecutionMode::RemoteHands || resume_own_host,
@@ -4302,14 +4352,19 @@ async fn resume_mission(
         .map_err(configuration_error)?;
     }
     let message = request.message;
-    let project = harness::project_settings(
-        &state,
-        mission.operation_id.as_deref(),
-        mission_id.as_str(),
-        &working_directory,
-        resume_mode == ExecutionMode::RemoteHands || resume_own_host,
-    )
-    .await;
+    let (project_settings, project_mcp) = if review {
+        (false, false)
+    } else {
+        let project = harness::project_settings(
+            &state,
+            mission.operation_id.as_deref(),
+            mission_id.as_str(),
+            &working_directory,
+            resume_mode == ExecutionMode::RemoteHands || resume_own_host,
+        )
+        .await;
+        (project.load, project.mcp)
+    };
     let resume_request = AgentResume {
         mission_id: mission.mission_id.clone(),
         session_id: session_id.clone(),
@@ -4319,8 +4374,9 @@ async fn resume_mission(
         model: model.clone(),
         effort: effort.clone(),
         max_cost_micro_usd: medical::remaining_mission_cost(&state, &mission_id),
-        project_settings: project.load,
-        project_mcp: project.mcp,
+        project_settings,
+        project_mcp,
+        answer_only: review,
     };
     let attachment = runner.as_ref().map(|_| RunnerAttachment {
         key: reattach.as_ref().map_or_else(

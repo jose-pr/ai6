@@ -42,6 +42,12 @@ pub struct AgentStart {
     /// names; `false` keeps only the servers AI6 passes.
     #[serde(default)]
     pub project_mcp: bool,
+    /// Whether the Session only reads its prompt and answers: the handler starts the harness
+    /// with every tool it can switch off switched off, no MCP server, no settings of the
+    /// working directory, and a sandbox that cannot write or reach the network where the
+    /// harness has one. AI6 asks for it for a Chief of Staff review, which reads untrusted text.
+    #[serde(default)]
+    pub answer_only: bool,
 }
 
 /// How AI6 resumes a provider-issued Session.
@@ -73,6 +79,9 @@ pub struct AgentResume {
     /// names, decided again on every resume.
     #[serde(default)]
     pub project_mcp: bool,
+    /// Whether the Session only reads and answers, as [`AgentStart::answer_only`] started it.
+    #[serde(default)]
+    pub answer_only: bool,
 }
 
 /// A message AI6 sends to an already running Agent Session.

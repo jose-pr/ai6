@@ -87,9 +87,12 @@ impl AgentHandler for ClaudeHandler {
             argv.extend(["--effort".to_string(), effort.clone()]);
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
-        add_project_settings(&mut argv, request.project_settings, request.project_mcp);
-        add_mcp(&mut argv, &request.environment);
-        add_gate(&mut argv, &request.environment);
+        let mode = Mode {
+            project_settings: request.project_settings,
+            project_mcp: request.project_mcp,
+            answer_only: request.answer_only,
+        };
+        add_settings(&mut argv, &request.environment, mode);
         let session = spawn(
             terminal,
             argv,
@@ -126,9 +129,12 @@ impl AgentHandler for ClaudeHandler {
             argv.extend(["--effort".to_string(), effort]);
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
-        add_project_settings(&mut argv, request.project_settings, request.project_mcp);
-        add_mcp(&mut argv, &request.environment);
-        add_gate(&mut argv, &request.environment);
+        let mode = Mode {
+            project_settings: request.project_settings,
+            project_mcp: request.project_mcp,
+            answer_only: request.answer_only,
+        };
+        add_settings(&mut argv, &request.environment, mode);
         let session = spawn(
             terminal,
             argv,
@@ -150,6 +156,50 @@ impl AgentHandler for ClaudeHandler {
 /// Claude's own shell and file tools, turned off in remote-hands mode so that nothing the
 /// harness does lands on the Station.
 const OWN_TOOLS: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,Grep,LS";
+
+/// Every tool an answer-only Session is denied by name, besides `--tools=` turning the
+/// built-in ones off: Claude's own tools, its web and sub-agent tools, and any MCP tool.
+const ANSWER_ONLY_DENIED: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,\
+                                  Grep,LS,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*";
+
+/// What AI6 decided about the Session's settings.
+#[derive(Clone, Copy)]
+struct Mode {
+    project_settings: bool,
+    project_mcp: bool,
+    answer_only: bool,
+}
+
+/// Adds the settings flags: answer-only ([`add_answer_only`]), or the project settings AI6
+/// allowed, the Station's MCP servers and the green ink gate.
+fn add_settings(argv: &mut Vec<String>, environment: &BTreeMap<String, String>, mode: Mode) {
+    if mode.answer_only {
+        add_answer_only(argv);
+    } else {
+        add_project_settings(argv, mode.project_settings, mode.project_mcp);
+        add_mcp(argv, environment);
+        add_gate(argv, environment);
+    }
+}
+
+/// A Session that only reads its prompt and answers: `--restricted` (Claude Code 2.1.248 or
+/// later: no shell or code tools, no WebFetch, only managed settings and AI6's), no built-in
+/// tool at all (`--tools=`), the tools above denied by name, no MCP server (an empty strict
+/// MCP config) and only the user's settings file besides. An older Claude Code that does not
+/// know a flag refuses to start, which ends the Session without an answer.
+fn add_answer_only(argv: &mut Vec<String>) {
+    argv.extend([
+        "--restricted".to_owned(),
+        "--tools=".to_owned(),
+        "--disallowedTools".to_owned(),
+        ANSWER_ONLY_DENIED.to_owned(),
+        "--setting-sources".to_owned(),
+        "user".to_owned(),
+        "--strict-mcp-config".to_owned(),
+        "--mcp-config".to_owned(),
+        json!({ "mcpServers": {} }).to_string(),
+    ]);
+}
 
 /// Whether `environment` carries an MCP endpoint's URL and token under `prefix`.
 fn has_endpoint(environment: &BTreeMap<String, String>, prefix: &str) -> bool {
@@ -921,6 +971,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -948,6 +999,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1094,6 +1146,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.into_object(),
             )
@@ -1160,6 +1213,7 @@ mod tests {
                 max_cost_micro_usd: None,
                 project_settings: false,
                 project_mcp: false,
+                answer_only: false,
             },
             terminal.into_object(),
         ) {
@@ -1493,6 +1547,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1512,6 +1567,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1547,7 +1603,7 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        let start = |(project_settings, project_mcp)| AgentStart {
+        let start = |(project_settings, project_mcp, answer_only)| AgentStart {
             mission_id: "mission-settings".parse().unwrap(),
             agent_id: "007".to_owned(),
             prompt: "work".to_owned(),
@@ -1560,8 +1616,14 @@ mod tests {
             max_cost_micro_usd: None,
             project_settings,
             project_mcp,
+            answer_only,
         };
-        for mode in [(false, false), (true, true), (true, false)] {
+        for mode in [
+            (false, false, false),
+            (true, true, false),
+            (true, false, false),
+            (true, true, true),
+        ] {
             let started = handler
                 .start(start(mode), terminal.clone().into_object())
                 .unwrap();
@@ -1581,6 +1643,7 @@ mod tests {
                     max_cost_micro_usd: None,
                     project_settings: false,
                     project_mcp: false,
+                    answer_only: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1596,12 +1659,27 @@ mod tests {
                     .any(|argument| argument == "--strict-mcp-config")
         };
         let has = |argv: &[String], flag: &str| argv.iter().any(|argument| argument == flag);
-        let (ignored, loaded, pinned, resumed) = (
+        let (ignored, loaded, pinned, answer_only, resumed) = (
             &specs[0].argv,
             &specs[1].argv,
             &specs[2].argv,
             &specs[3].argv,
+            &specs[4].argv,
         );
+        // Answer-only wins over everything else asked for: no tool, no server, no gate.
+        assert!(shut_out(answer_only), "{answer_only:?}");
+        assert!(has(answer_only, "--restricted") && has(answer_only, "--tools="));
+        let position = |flag: &str| answer_only.iter().position(|a| a == flag).unwrap();
+        assert_eq!(
+            answer_only[position("--disallowedTools") + 1],
+            ANSWER_ONLY_DENIED
+        );
+        assert_eq!(
+            answer_only[position("--mcp-config") + 1],
+            r#"{"mcpServers":{}}"#
+        );
+        assert!(!has(answer_only, "--settings"), "no gate: nothing to gate");
+        assert!(!answer_only.iter().any(|a| a.contains("ai6-cables")));
         assert!(shut_out(ignored), "{ignored:?}");
         assert!(has(ignored, "--settings") && has(ignored, "--mcp-config"));
         assert!(!has(loaded, "--setting-sources") && !has(loaded, "--strict-mcp-config"));

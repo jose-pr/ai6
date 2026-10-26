@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::db::Tx;
 use super::{SqlRegistry, bounded_json, from_json, to_json};
-use crate::directorates::m::vetting::{FindingKind, Vetting};
+use crate::directorates::m::vetting::{FindingKind, Vetting, content_digest};
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, MAX_REPORT_ATTEMPTS, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore,
@@ -19,8 +19,9 @@ use crate::directorates::registry::store::{
     MissionProposal, invalid_data, lost_outcome, unix_time, validate_registry_key,
 };
 use crate::directorates::registry::vetting::{
-    Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_RECORD_BYTES, VettingStore, check_actor,
-    check_limit, merge_clearance, refused_outcome,
+    Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_PER_OPERATION, MAX_HELD_RECORD_BYTES,
+    VettingStore, already_decided, check_actor, check_limit, merge_clearance, refused_outcome,
+    too_many_held,
 };
 
 /// The brief record, without its provenance.
@@ -271,6 +272,71 @@ impl SqlRegistry {
     }
 }
 
+/// Promotes a pending proposal inside the caller's write transaction, recording
+/// `received_by` in the promoted brief's provenance.
+fn promote_in(
+    tx: &mut Tx<'_>,
+    revision: i64,
+    operation: &str,
+    proposal_id: &str,
+    received_by: &str,
+) -> io::Result<Brief> {
+    let (state, proposal) = proposal(tx, operation, proposal_id)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotFound, "Mission proposal does not exist")
+    })?;
+    let stored = |tx: &mut Tx<'_>, key: String| -> io::Result<Option<Brief>> {
+        tx.query_opt(
+            "SELECT brief, provenance FROM ai6_briefs WHERE key = $1",
+            &[key.into()],
+        )?
+        .map(|row| stored_brief(&row.text(0)?, row.opt_text(1)?))
+        .transpose()
+    };
+    match state.as_str() {
+        "approved" => {
+            let key = proposal.brief.key();
+            return Ok(stored(tx, key)?.unwrap_or(proposal.brief));
+        }
+        "rejected" => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "Mission proposal has already been rejected",
+            ));
+        }
+        _ => {}
+    }
+    let mut brief = proposal.brief.clone();
+    let key = brief.key();
+    match brief_state(tx, &key)?.as_deref() {
+        Some("new") => {
+            let queued = stored(tx, key)?.ok_or_else(|| invalid_data("queued brief vanished"))?;
+            let record = Brief {
+                provenance: None,
+                ..queued.clone()
+            };
+            if record != brief {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Mission proposal brief conflicts with queued intake",
+                ));
+            }
+            brief = queued;
+        }
+        Some(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "Mission proposal brief already exists in a terminal intake state",
+            ));
+        }
+        None => {
+            brief.provenance = Some(proposal_provenance(&proposal, received_by));
+            insert_brief(tx, &brief, revision)?;
+        }
+    }
+    set_proposal_state(tx, operation, proposal_id, "approved", revision)?;
+    Ok(brief)
+}
+
 impl BriefStore for SqlRegistry {
     fn submit_mission_proposal(&self, proposal: &MissionProposal) -> io::Result<()> {
         proposal.validate()?;
@@ -357,63 +423,7 @@ impl BriefStore for SqlRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
-        self.write(|tx, revision| {
-            let (state, proposal) = proposal(tx, operation, proposal_id)?.ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotFound, "Mission proposal does not exist")
-            })?;
-            let stored = |tx: &mut Tx<'_>, key: String| -> io::Result<Option<Brief>> {
-                tx.query_opt(
-                    "SELECT brief, provenance FROM ai6_briefs WHERE key = $1",
-                    &[key.into()],
-                )?
-                .map(|row| stored_brief(&row.text(0)?, row.opt_text(1)?))
-                .transpose()
-            };
-            match state.as_str() {
-                "approved" => {
-                    let key = proposal.brief.key();
-                    return Ok(stored(tx, key)?.unwrap_or(proposal.brief));
-                }
-                "rejected" => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::AlreadyExists,
-                        "Mission proposal has already been rejected",
-                    ));
-                }
-                _ => {}
-            }
-            let mut brief = proposal.brief.clone();
-            let key = brief.key();
-            match brief_state(tx, &key)?.as_deref() {
-                Some("new") => {
-                    let queued =
-                        stored(tx, key)?.ok_or_else(|| invalid_data("queued brief vanished"))?;
-                    let record = Brief {
-                        provenance: None,
-                        ..queued.clone()
-                    };
-                    if record != brief {
-                        return Err(io::Error::new(
-                            io::ErrorKind::AlreadyExists,
-                            "Mission proposal brief conflicts with queued intake",
-                        ));
-                    }
-                    brief = queued;
-                }
-                Some(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::AlreadyExists,
-                        "Mission proposal brief already exists in a terminal intake state",
-                    ));
-                }
-                None => {
-                    brief.provenance = Some(proposal_provenance(&proposal, received_by));
-                    insert_brief(tx, &brief, revision)?;
-                }
-            }
-            set_proposal_state(tx, operation, proposal_id, "approved", revision)?;
-            Ok(brief)
-        })
+        self.write(|tx, revision| promote_in(tx, revision, operation, proposal_id, received_by))
     }
 
     fn reject_mission_proposal(
@@ -817,25 +827,33 @@ impl SourceStore for SqlRegistry {
     }
 }
 
-/// The record of a brief `operation` holds under `key`.
-fn held_in(tx: &mut Tx<'_>, operation: &str, key: &str) -> io::Result<HeldBrief> {
-    let held = match tx.query_opt(
-        "SELECT held FROM ai6_briefs WHERE key = $1 AND state = 'held'",
+/// A brief's state, stored record, held record and outcome, when the Registry has it.
+struct VettedRow {
+    state: String,
+    brief: Brief,
+    held: Option<HeldBrief>,
+    outcome: Option<serde_json::Value>,
+}
+
+fn vetted_row(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<VettedRow>> {
+    let Some(row) = tx.query_opt(
+        "SELECT state, brief, held, outcome FROM ai6_briefs WHERE key = $1",
         &[key.into()],
-    )? {
-        Some(row) => row.opt_text(0)?,
-        None => None,
+    )?
+    else {
+        return Ok(None);
     };
-    match held
-        .map(|text| from_json::<HeldBrief>(&text, "held brief"))
-        .transpose()?
-    {
-        Some(held) if held.operation == operation && held.brief.key() == key => Ok(held),
-        _ => Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "the Operation holds no such brief",
-        )),
-    }
+    Ok(Some(VettedRow {
+        state: row.text(0)?,
+        brief: from_json(&row.text(1)?, "brief")?,
+        held: row
+            .opt_text(2)?
+            .map(|text| from_json::<HeldBrief>(&text, "held brief"))
+            .transpose()?,
+        outcome: row
+            .opt_text(3)?
+            .and_then(|text| serde_json::from_str(&text).ok()),
+    }))
 }
 
 fn clearance_in(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<Clearance>> {
@@ -847,6 +865,17 @@ fn clearance_in(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<Clearance>> {
         None => None,
     };
     text.map(|text| from_json(&text, "clearance")).transpose()
+}
+
+fn not_held() -> io::Error {
+    io::Error::new(io::ErrorKind::NotFound, "the Operation holds no such brief")
+}
+
+/// Whether `row` is held by `operation`.
+fn held_by<'a>(row: &'a VettedRow, operation: &str, key: &str) -> Option<&'a HeldBrief> {
+    row.held
+        .as_ref()
+        .filter(|held| held.operation == operation && held.brief.key() == key)
 }
 
 impl VettingStore for SqlRegistry {
@@ -867,13 +896,18 @@ impl VettingStore for SqlRegistry {
             else {
                 return Ok(None);
             };
-            let held_count = tx
-                .query_opt("SELECT count(*) FROM ai6_briefs WHERE state = 'held'", &[])?
-                .map_or(Ok(0), |row| row.int(0))?;
-            if held_count >= MAX_HELD_BRIEFS as i64 {
-                return Err(invalid_data(format!(
-                    "the Registry already holds {MAX_HELD_BRIEFS} briefs"
-                )));
+            let held_here = tx
+                .query(
+                    "SELECT held FROM ai6_briefs WHERE state = 'held' LIMIT $1",
+                    &[(MAX_HELD_BRIEFS + 1).into()],
+                )?
+                .iter()
+                .filter_map(|row| row.opt_text(0).ok().flatten())
+                .filter_map(|text| serde_json::from_str::<HeldBrief>(&text).ok())
+                .filter(|held| held.operation == operation)
+                .count();
+            if held_here >= MAX_HELD_PER_OPERATION {
+                return Err(too_many_held(operation));
             }
             let held = HeldBrief {
                 operation: operation.to_owned(),
@@ -924,15 +958,31 @@ impl VettingStore for SqlRegistry {
         validate_registry_key(key)?;
         check_actor(by, "")?;
         self.write(|tx, revision| {
-            let held = held_in(tx, operation, key)?;
-            let kinds = held.vetting.kinds().into_iter().collect::<Vec<_>>();
-            let clearance = merge_clearance(clearance_in(tx, key)?, &kinds, by, at);
-            tx.execute(
-                "UPDATE ai6_briefs SET state = 'new', held = NULL, clearance = $2, revision = $3 \
-                 WHERE key = $1",
-                &[key.into(), to_json(&clearance)?.into(), revision.into()],
-            )?;
-            Ok(held.brief)
+            let row = vetted_row(tx, key)?.ok_or_else(not_held)?;
+            match row.state.as_str() {
+                "held" => {
+                    let held = held_by(&row, operation, key).ok_or_else(not_held)?;
+                    let kinds = held.vetting.kinds().into_iter().collect::<Vec<_>>();
+                    let digest = content_digest(&held.brief);
+                    let clearance =
+                        merge_clearance(clearance_in(tx, key)?, &digest, &kinds, by, at);
+                    tx.execute(
+                        "UPDATE ai6_briefs SET state = 'new', held = NULL, clearance = $2, \
+                         revision = $3 WHERE key = $1",
+                        &[key.into(), to_json(&clearance)?.into(), revision.into()],
+                    )?;
+                    Ok(held.brief.clone())
+                }
+                // Released already.
+                "new"
+                    if clearance_in(tx, key)?
+                        .is_some_and(|clearance| !clearance.kinds_for(&row.brief).is_empty()) =>
+                {
+                    Ok(row.brief)
+                }
+                "new" => Err(not_held()),
+                _ => Err(already_decided()),
+            }
         })
     }
 
@@ -943,19 +993,48 @@ impl VettingStore for SqlRegistry {
         by: &str,
         reason: &str,
         at: f64,
-    ) -> io::Result<HeldBrief> {
+    ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
         check_actor(by, reason)?;
         self.write(|tx, revision| {
-            let held = held_in(tx, operation, key)?;
-            let outcome = refused_outcome(&held, by, reason, at);
-            finish_in(tx, &held.brief, &outcome, false, None, revision)?;
+            let row = vetted_row(tx, key)?.ok_or_else(not_held)?;
+            match row.state.as_str() {
+                "held" => {
+                    let held = held_by(&row, operation, key).ok_or_else(not_held)?;
+                    let outcome = refused_outcome(held, by, reason, at);
+                    finish_in(tx, &held.brief, &outcome, false, None, revision)?;
+                    Ok(held.brief.clone())
+                }
+                "failed"
+                    if row
+                        .outcome
+                        .as_ref()
+                        .is_some_and(|outcome| outcome["state"] == "refused") =>
+                {
+                    Ok(row.brief)
+                }
+                "new" => Err(not_held()),
+                _ => Err(already_decided()),
+            }
+        })
+    }
+
+    fn requeue_held(&self, operation: &str, key: &str) -> io::Result<bool> {
+        validate_registry_key(operation)?;
+        validate_registry_key(key)?;
+        self.write(|tx, revision| {
+            let Some(row) = vetted_row(tx, key)? else {
+                return Ok(false);
+            };
+            if row.state != "held" || held_by(&row, operation, key).is_none() {
+                return Ok(false);
+            }
             tx.execute(
-                "UPDATE ai6_briefs SET held = NULL WHERE key = $1",
-                &[key.into()],
+                "UPDATE ai6_briefs SET state = 'new', held = NULL, revision = $2 WHERE key = $1",
+                &[key.into(), revision.into()],
             )?;
-            Ok(held)
+            Ok(true)
         })
     }
 
@@ -967,25 +1046,55 @@ impl VettingStore for SqlRegistry {
     fn clear_brief(
         &self,
         key: &str,
+        digest: &str,
         kinds: &[FindingKind],
         by: &str,
         at: f64,
-    ) -> io::Result<Clearance> {
+    ) -> io::Result<Option<Clearance>> {
         validate_registry_key(key)?;
         check_actor(by, "")?;
         self.write(|tx, revision| {
-            if brief_state(tx, key)?.as_deref() != Some("new") {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "no such brief is queued",
-                ));
+            let row = vetted_row(tx, key)?
+                .filter(|row| row.state == "new")
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "no such brief is queued")
+                })?;
+            if content_digest(&row.brief) != digest {
+                return Ok(None);
             }
-            let clearance = merge_clearance(clearance_in(tx, key)?, kinds, by, at);
+            let clearance = merge_clearance(clearance_in(tx, key)?, digest, kinds, by, at);
             tx.execute(
                 "UPDATE ai6_briefs SET clearance = $2, revision = $3 WHERE key = $1",
                 &[key.into(), to_json(&clearance)?.into(), revision.into()],
             )?;
-            Ok(clearance)
+            Ok(Some(clearance))
+        })
+    }
+
+    fn promote_cleared(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+        received_by: &str,
+        kinds: &[FindingKind],
+        by: &str,
+        at: f64,
+    ) -> io::Result<Brief> {
+        validate_registry_key(operation)?;
+        validate_registry_key(proposal_id)?;
+        check_actor(by, "")?;
+        self.write(|tx, revision| {
+            let brief = promote_in(tx, revision, operation, proposal_id, received_by)?;
+            let key = brief.key();
+            if brief_state(tx, &key)?.as_deref() == Some("new") {
+                let digest = content_digest(&brief);
+                let clearance = merge_clearance(clearance_in(tx, &key)?, &digest, kinds, by, at);
+                tx.execute(
+                    "UPDATE ai6_briefs SET clearance = $2, revision = $3 WHERE key = $1",
+                    &[key.into(), to_json(&clearance)?.into(), revision.into()],
+                )?;
+            }
+            Ok(brief)
         })
     }
 }
