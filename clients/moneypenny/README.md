@@ -27,7 +27,7 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   audit), filtered by Operation and Mission, with older pages on request and new activity
   added on top every ten seconds; it needs `audit.read`.
 - Account pools: the pool accounts each Operation may draw from, with the Sessions using
-  each against its limit, quota used per window, tokens today and until when a limited
+  each against its limit (other Operations' counted, not named), quota used per window, tokens today and until when a limited
   account waits, refreshed every fifteen seconds; it needs `pool.read`.
 - Administration: Operation-scoped Agent roles (purpose and policy) and Station capacity.
 - Green ink: the irreversible steps Agents wait to take (scope, Agent, Mission, reason,

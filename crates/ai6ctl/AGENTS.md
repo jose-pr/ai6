@@ -29,7 +29,11 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
   as tab-separated `POOL ACCOUNT KIND SESSIONS WINDOWS LIMITED_UNTIL_UNIX TOKENS_TODAY`:
   `SESSIONS` is `active/max_concurrent` (or the count without a limit), `WINDOWS`
   `name=42.5%` per window (`name=?` without a figure) or `-`, `LIMITED_UNTIL_UNIX` `-`
-  unless in the future. A refusal names `pool.read`.
+  unless in the future; `SESSIONS` counts other Operations' Sessions too. A refusal names
+  `pool.read`.
+- `ai6ctl pools clear-limit <POOL> <ACCOUNT> --operation <OPERATION_ID>` posts
+  `.../pools/{pool}/{account}/clear-limit` and prints `pool/account: limit cleared`; 403 names
+  `pool.manage`, 404 an account not declared for the Operation.
 - `ai6ctl missions [--operation <ID>]` lists visible Missions and Session counts.
 - `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission and its provider
   Sessions; `--operation` disambiguates a Mission ID used by several Operations.

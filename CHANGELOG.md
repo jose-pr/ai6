@@ -23,7 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Session moves to another account (the same Claude Session, or a new Codex attempt with
   a hand-off). Intake keeps a brief queued while no account of its pools has headroom.
   Universal Exports serves the pool board (`GET /v1/user/operations/{id}/pools`,
-  `pool.read`), shown by `ai6ctl pools` and Moneypenny's Account pools view.
+  `pool.read`; other Operations' Sessions only as a count), shown by `ai6ctl pools` and
+  Moneypenny's Account pools view; `pool.manage` lifts a limit (`ai6ctl pools clear-limit`,
+  audited). Limits last at most eight days (`StationConfig::with_account_limit_horizon`). A
+  green ink secret cannot back a pool account, and a pooled Agent's loadout cannot set a
+  provider credential variable.
 
 - A SQL Registry and roster, so the Stations of an HA deployment need no shared
   filesystem. `SqlRegistry` (features `sqlite` and `postgres`) keeps every Registry record

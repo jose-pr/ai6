@@ -362,11 +362,13 @@ and an operator can resume a parked Mission early with the ordinary resume reque
 
 An Operation chooses the response with `on_limit` ([settings](operations.md#provider-limits)):
 
-- `rotate` (the default) first marks the Session's [pool account](agents.md#account-pools)
+- `rotate` (the default, also for a Mission outside any Operation) first marks the Session's [pool account](agents.md#account-pools)
   limited until the reset and frees it. When another account of the Agent's pools has
   headroom, a Session whose history goes with it (Claude Code on an environment
-  credential) is parked only until the next scheduler pass and resumed, same provider
-  Session, on that account; a Codex or `config-dir` Session is queued again as a new attempt,
+  credential, moving to another environment credential) is parked only until the next
+  scheduler pass and resumed, same provider Session, on that account; otherwise (a Codex or
+  `config-dir` Session, or no environment account with headroom) it is queued again as a new
+  attempt,
   told it continues an earlier one, and starts on the other account. The timeline records
   `account` / `limited` with the account, the reset and what happens next. A Session with no
   pool account, or whose pools have no account with headroom, parks as for `wait`.

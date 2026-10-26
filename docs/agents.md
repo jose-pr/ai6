@@ -239,7 +239,9 @@ kind = "openai-api-key"
 `env = "VAR"` puts the value (or directory) in another variable; a handler other than
 `claude` or `codex` needs it for `config-dir`. Each account's secret is an ordinary loadout
 secret: it is leased from the same backend, never written to the Registry, the safe house or
-the timeline.
+the timeline. A `green_ink` secret cannot back an account: the load fails, since a pool hands
+its accounts to every Session that draws them while a green ink credential is only for a step
+a person approved.
 
 - **Who may draw from a pool**: its `handler` must be the Agent's, its `operations` must admit
   the Operation, and the Operation's `pools` (default: every pool) must name it. An Agent may
@@ -250,25 +252,47 @@ the timeline.
   Session's environment (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
   `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`,
   `CODEX_HOME` and every account's `env`), then claims an account in the Registry and hands its
-  credential over. The claim is one Registry write, so two Stations never both take the last
-  place of an account. A resumed Session keeps its account while it has room.
+  credential over, after the Agent's loadout secrets so none can stand in for it. A loadout
+  secret whose `env` is one of those variables is not issued to a pooled Agent's Session, and
+  that is logged as a weakening. The claim is one Registry write, so two Stations never both
+  take the last place of an account, and it drops any claim the Mission held on another
+  account. A resumed Session keeps its account while it has room, and moves only to an
+  account whose kind carries its history: from one environment kind to another, never to or
+  from a `config-dir` or Codex account (those are tried again as a new attempt instead).
 - **Balancing**: `headroom` skips accounts that are limited or at `max_concurrent`, then
   takes the one whose most used quota window is lowest (an account whose provider has
   reported nothing counts as half used; a window past its reset counts as unused), then the
   one with fewest Sessions, then the least recently used, then the highest priority.
   `round_robin` takes the least recently used and `priority` the highest priority with room.
 - **Claims and usage**: a claim is released when the Session ends, fails or is fenced out,
-  and lapses with the Station's Session leases when the Station goes dark. The tokens each
-  Session uses count toward its account's day, and the quota windows Claude Code and Codex
-  report are kept per account.
+  and lapses with the Station's Session leases when the Station goes dark; the Station renews
+  the claims of its Sessions, those still being handed over included, at each check-in. A
+  Session a Station re-attaches to after a restart or an adoption keeps the account its
+  Session record names, claimed again even past its `max_concurrent` or a limit (`account` /
+  `reclaimed` on the timeline). The tokens each Session uses count toward its account's day,
+  and the quota windows Claude Code and Codex report are kept per account.
+- **Limits**: a limited account is skipped until its reset, but never longer than eight days
+  (`StationConfig::with_account_limit_horizon`), whatever the provider reports. An operator
+  with `pool.manage` lifts a limit early with `ai6ctl pools clear-limit POOL ACCOUNT
+  --operation <id>` (audited as `pool.limit.clear`).
 - **Weakenings**, logged at start: a `config-dir` account hands the harness a login kept on
   disk; a Codex login kind writes its login to a `CODEX_HOME` under the Station's state
-  directory (mode `0700`, with `cli_auth_credentials_store = "file"` so it stays there),
-  kept while the Mission may resume its thread and removed once the Mission is over. That
-  home is on the Station, so the harness must run on the Station's own host.
+  directory (mode `0700` on Unix; on Windows it keeps the access list it inherits, logged as
+  a weakening; with `cli_auth_credentials_store = "file"` so it stays there), kept while the
+  Mission may resume its thread and removed once the Mission is over, also after its pool is
+  gone. Only the directories the Station made there are removed, and nothing while its Mission
+  book cannot be read. That home is on the Station, so the harness must run on the Station's
+  own host.
+- **The board**: each Station records its own view of its accounts when it starts, with the
+  Operations of its roster that may draw from each pool; the board shows an account to an
+  Operation any Station names. Another Operation's Sessions on an account are shown only as a
+  count.
 
 Claude Code and Codex each also read a login of the host's user when no credential is
-given; pooled Sessions always get one.
+given; pooled Sessions always get one. Other variables that point a harness elsewhere
+(`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) are left as the
+Agent's environment sets them: an Agent that sets them sends its pooled Sessions there with
+the account's credential.
 
 ## Commands
 
