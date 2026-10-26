@@ -33,6 +33,11 @@ pub struct AgentStart {
     /// Spend, in millionths of a dollar, after which the harness should stop on its own, when
     /// it can; AI6 enforces its budgets itself regardless.
     pub max_cost_micro_usd: Option<u64>,
+    /// Whether the harness may load the settings its working directory carries (hooks, MCP
+    /// servers, permissions), as AI6 decided from the Operation's harness policy. `false`
+    /// keeps only the user's own settings and those AI6 passes itself.
+    #[serde(default)]
+    pub project_settings: bool,
 }
 
 /// How AI6 resumes a provider-issued Session.
@@ -56,6 +61,10 @@ pub struct AgentResume {
     /// Spend, in millionths of a dollar, after which the harness should stop on its own, when
     /// it can; AI6 enforces its budgets itself regardless.
     pub max_cost_micro_usd: Option<u64>,
+    /// Whether the harness may load the settings its working directory carries, decided
+    /// again on every resume.
+    #[serde(default)]
+    pub project_settings: bool,
 }
 
 /// A message AI6 sends to an already running Agent Session.

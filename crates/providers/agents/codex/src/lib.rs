@@ -78,6 +78,7 @@ impl AgentHandler for CodexHandler {
             &self.config.executable,
             &request.working_directory,
             &request.environment,
+            request.project_settings,
         )?;
         let mut session = CodexSession::new(process, request.effort)
             .with_gate(station_gate(&request.environment));
@@ -141,6 +142,7 @@ impl CodexHandler {
             &self.config.executable,
             &request.working_directory,
             &request.environment,
+            request.project_settings,
         )?;
         let mut session = CodexSession::new(process, request.effort).with_gate(gate);
         session.request(
@@ -638,8 +640,12 @@ fn spawn(
     executable: &str,
     cwd: &str,
     environment: &std::collections::BTreeMap<String, String>,
+    project_settings: bool,
 ) -> Result<Object<dyn TerminalSession>, ProviderError> {
-    let argv = app_server_argv(executable, environment);
+    let mut argv = app_server_argv(executable, environment);
+    if !project_settings {
+        argv.extend(untrusted_project(cwd));
+    }
     let spec = Spec {
         argv,
         cwd: Some(cwd.to_string()),
@@ -672,6 +678,18 @@ fn app_server_argv(
         }
     }
     argv
+}
+
+/// Marks the working directory an untrusted project for this process, so Codex skips its
+/// project `.codex/` layer: project config, hooks and rules. `projects` is set as one inline
+/// table because a path holds dots, which a dotted `-c` key would split; it replaces the
+/// user's own `projects` table for this process only.
+fn untrusted_project(cwd: &str) -> [String; 2] {
+    let path = serde_json::to_string(cwd).unwrap_or_else(|_| "\"\"".to_owned());
+    [
+        "-c".to_owned(),
+        format!("projects={{{path}={{trust_level=\"untrusted\"}}}}"),
+    ]
 }
 
 /// Whether the Station serves a Theater's tools, which is remote-hands mode.
@@ -1017,6 +1035,7 @@ mod tests {
                     model: Some("gpt-5".to_owned()),
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1043,6 +1062,7 @@ mod tests {
                     model: Some("gpt-5".to_owned()),
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1057,8 +1077,17 @@ mod tests {
 
         let specs = terminal.specs.lock().unwrap();
         assert_eq!(specs.len(), 2);
-        assert_eq!(specs[0].argv, ["codex-process-fixture", "app-server"]);
-        assert_eq!(specs[1].argv, ["codex-process-fixture", "app-server"]);
+        let cwd = std::env::current_dir().unwrap();
+        let expected = [
+            vec!["codex-process-fixture".to_owned(), "app-server".to_owned()],
+            untrusted_project(&cwd.to_string_lossy()).to_vec(),
+        ]
+        .concat();
+        assert_eq!(
+            specs[0].argv, expected,
+            "start ignores the project's settings"
+        );
+        assert_eq!(specs[1].argv, expected, "and so does resume");
     }
 
     /// A gate that holds every governed step until an approval in `approved` covers it, as
@@ -1145,6 +1174,7 @@ mod tests {
                     model: None,
                     effort: None,
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 ProcessTerminal::new().into_object(),
                 approvals_gate(approved.clone()),
@@ -1350,6 +1380,7 @@ mod tests {
                     model: Some("gpt-5".to_owned()),
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 terminal.into_object(),
             )
@@ -1358,7 +1389,14 @@ mod tests {
         assert_eq!(session.session_id().unwrap(), Some(session_id));
 
         let spec = spec.lock().unwrap().clone().unwrap();
-        assert_eq!(spec.argv, ["codex-test", "app-server"]);
+        assert_eq!(
+            spec.argv,
+            [
+                vec!["codex-test".to_owned(), "app-server".to_owned()],
+                untrusted_project("C:\\station\\mission-42").to_vec(),
+            ]
+            .concat()
+        );
         assert_eq!(spec.cwd.as_deref(), Some("C:\\station\\mission-42"));
         assert_eq!(
             spec.env.as_ref().unwrap().get("TOKEN").map(String::as_str),
@@ -1413,6 +1451,7 @@ mod tests {
                 model: None,
                 effort: None,
                 max_cost_micro_usd: None,
+                project_settings: false,
             },
             terminal.into_object(),
         );
@@ -1597,6 +1636,21 @@ mod tests {
         restrict_to_remote_hands(&mut params);
         assert_eq!(params["sandbox"], "read-only");
         assert_eq!(params["approvalPolicy"], "never");
+    }
+
+    /// Codex reads `projects.<path>.trust_level` (`trusted` or `untrusted`), and an untrusted
+    /// project skips its `.codex/` layer: config, hooks and rules (Codex config reference).
+    #[test]
+    fn an_ignored_project_is_marked_untrusted_in_one_inline_table() {
+        let [flag, value] = untrusted_project("C:\\safe houses\\m.1");
+        assert_eq!(flag, "-c");
+        let (key, table) = value.split_once('=').unwrap();
+        assert_eq!(key, "projects", "no dotted key for a path that holds dots");
+        let parsed: toml::Table = toml::from_str(&format!("projects = {table}")).unwrap();
+        assert_eq!(
+            parsed["projects"]["C:\\safe houses\\m.1"]["trust_level"].as_str(),
+            Some("untrusted")
+        );
     }
 
     #[test]

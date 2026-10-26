@@ -10,6 +10,7 @@ mod credentials;
 mod ephemeral;
 #[cfg(feature = "cables-mcp")]
 mod green_ink;
+mod harness;
 mod medical;
 mod recovery;
 mod reload;
@@ -639,6 +640,7 @@ where
     }
     #[cfg(feature = "cables-mcp")]
     green_ink::log_weakenings(&roster);
+    harness::log_weakenings(&roster);
     let state = DaemonState {
         plugins,
         roster,
@@ -3639,6 +3641,13 @@ async fn start_mission(
             provenance: mission.provenance.clone(),
         });
     }
+    let project_settings = harness::project_settings(
+        &state,
+        mission.operation_id.as_deref(),
+        mission_id.as_str(),
+        &working_directory,
+        remote_hands || plan.own_host,
+    );
     let start_request = AgentStart {
         mission_id: mission.mission_id,
         agent_id: agent.id,
@@ -3650,6 +3659,7 @@ async fn start_mission(
         model: model.clone(),
         effort: effort.clone(),
         max_cost_micro_usd: medical::remaining_mission_cost(&state, &mission_id),
+        project_settings,
     };
     let attachment = runner_key.clone().map(|key| RunnerAttachment {
         key,
@@ -4267,6 +4277,13 @@ async fn resume_mission(
         .map_err(configuration_error)?;
     }
     let message = request.message;
+    let project_settings = harness::project_settings(
+        &state,
+        mission.operation_id.as_deref(),
+        mission_id.as_str(),
+        &working_directory,
+        resume_mode == ExecutionMode::RemoteHands || resume_own_host,
+    );
     let resume_request = AgentResume {
         mission_id: mission.mission_id.clone(),
         session_id: session_id.clone(),
@@ -4276,6 +4293,7 @@ async fn resume_mission(
         model: model.clone(),
         effort: effort.clone(),
         max_cost_micro_usd: medical::remaining_mission_cost(&state, &mission_id),
+        project_settings,
     };
     let attachment = runner.as_ref().map(|_| RunnerAttachment {
         key: reattach.as_ref().map_or_else(

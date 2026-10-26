@@ -87,6 +87,7 @@ impl AgentHandler for ClaudeHandler {
             argv.extend(["--effort".to_string(), effort.clone()]);
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
+        add_project_settings(&mut argv, request.project_settings);
         add_mcp(&mut argv, &request.environment);
         add_gate(&mut argv, &request.environment);
         let session = spawn(
@@ -125,6 +126,7 @@ impl AgentHandler for ClaudeHandler {
             argv.extend(["--effort".to_string(), effort]);
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
+        add_project_settings(&mut argv, request.project_settings);
         add_mcp(&mut argv, &request.environment);
         add_gate(&mut argv, &request.environment);
         let session = spawn(
@@ -234,6 +236,20 @@ fn add_gate(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
         argv.extend([
             "--settings".to_owned(),
             gate_settings(&program, cable_url).to_string(),
+        ]);
+    }
+}
+
+/// Keeps the working directory's own settings out of the harness unless AI6 allowed them:
+/// only the user's settings file loads (`--setting-sources user`, so no project or local
+/// hooks), and only the MCP servers AI6 passes (`--strict-mcp-config`, so no `.mcp.json`).
+/// AI6's `--settings` and `--mcp-config` apply either way.
+fn add_project_settings(argv: &mut Vec<String>, allowed: bool) {
+    if !allowed {
+        argv.extend([
+            "--setting-sources".to_owned(),
+            "user".to_owned(),
+            "--strict-mcp-config".to_owned(),
         ]);
     }
 }
@@ -904,6 +920,7 @@ mod tests {
                     model: Some("sonnet".to_owned()),
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -929,6 +946,7 @@ mod tests {
                     model: Some("sonnet".to_owned()),
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1073,6 +1091,7 @@ mod tests {
                     model: Some("sonnet".to_owned()),
                     effort: Some("high".to_owned()),
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 terminal.into_object(),
             )
@@ -1137,6 +1156,7 @@ mod tests {
                 model: None,
                 effort: None,
                 max_cost_micro_usd: None,
+                project_settings: false,
             },
             terminal.into_object(),
         ) {
@@ -1468,6 +1488,7 @@ mod tests {
                     model: None,
                     effort: None,
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1485,6 +1506,7 @@ mod tests {
                     model: None,
                     effort: None,
                     max_cost_micro_usd: None,
+                    project_settings: false,
                 },
                 terminal.clone().into_object(),
             )
@@ -1499,6 +1521,83 @@ mod tests {
                 .expect("the gate is passed");
             assert!(spec.argv[position + 1].contains("green-ink"));
         }
+    }
+
+    /// `--setting-sources` takes `user`, `project` and `local`; `--strict-mcp-config` keeps only
+    /// `--mcp-config`'s servers; `--settings` sits above the setting files and is not one of
+    /// them (Claude Code CLI reference and settings precedence, code.claude.com/docs).
+    #[test]
+    fn project_settings_are_shut_out_unless_allowed_and_the_gate_stays_either_way() {
+        let mut environment = cable_environment();
+        environment.insert(
+            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
+            "claude-settings-session".to_owned(),
+        );
+        let terminal = ProcessTerminal::new();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-settings-fixture".to_owned(),
+        })
+        .unwrap();
+        let working_directory = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let start = |project_settings| AgentStart {
+            mission_id: "mission-settings".parse().unwrap(),
+            agent_id: "007".to_owned(),
+            prompt: "work".to_owned(),
+            initial_context: Vec::new(),
+            working_directory: working_directory.clone(),
+            clearance: "field".to_owned(),
+            environment: environment.clone(),
+            model: None,
+            effort: None,
+            max_cost_micro_usd: None,
+            project_settings,
+        };
+        for project_settings in [false, true] {
+            let started = handler
+                .start(start(project_settings), terminal.clone().into_object())
+                .unwrap();
+            read_to_completion(&started);
+            started.close().unwrap();
+        }
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-settings".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-settings-session").unwrap(),
+                    message: None,
+                    working_directory: working_directory.clone(),
+                    environment: environment.clone(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        resumed.close().unwrap();
+
+        let specs = terminal.specs.lock().unwrap();
+        let shut_out = |argv: &[String]| {
+            argv.windows(2)
+                .any(|pair| pair[0] == "--setting-sources" && pair[1] == "user")
+                && argv
+                    .iter()
+                    .any(|argument| argument == "--strict-mcp-config")
+        };
+        let has = |argv: &[String], flag: &str| argv.iter().any(|argument| argument == flag);
+        let (ignored, loaded, resumed) = (&specs[0].argv, &specs[1].argv, &specs[2].argv);
+        assert!(shut_out(ignored), "{ignored:?}");
+        assert!(has(ignored, "--settings") && has(ignored, "--mcp-config"));
+        assert!(!has(loaded, "--setting-sources") && !has(loaded, "--strict-mcp-config"));
+        assert!(
+            has(loaded, "--settings"),
+            "the gate does not depend on the mode"
+        );
+        assert!(shut_out(resumed), "{resumed:?}");
     }
 
     #[test]

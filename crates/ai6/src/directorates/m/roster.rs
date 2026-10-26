@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::approvals::{GreenInkDefinition, GreenInkPolicy};
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
+use crate::directorates::m::harness::HarnessPolicy;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
@@ -205,6 +206,9 @@ pub struct Operation {
     /// The account pools its Missions may draw from; `None` (the default) is every pool
     /// whose own `operations` admit the Operation.
     pub pools: Option<Vec<String>>,
+    /// Whether a harness may load the settings its working directory carries; `ignore`
+    /// unless configured.
+    pub harness: HarnessPolicy,
 }
 
 /// How an Operation's Missions get their working directory (`workspace = { .. }`).
@@ -779,6 +783,7 @@ struct OperationDefinition {
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
     pools: Option<Vec<String>>,
+    harness: HarnessPolicy,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -856,6 +861,9 @@ impl OperationDefinition {
             .quarantine
             .resolve()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        self.harness
+            .validate()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         let green_ink = self
             .green_ink
             .resolve()
@@ -922,6 +930,7 @@ impl OperationDefinition {
             sources: self.sources,
             sleepers: self.sleepers,
             pools: self.pools,
+            harness: self.harness,
         })
     }
 }
