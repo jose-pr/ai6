@@ -127,6 +127,7 @@ mod tests {
             checkouts: Vec::new(),
             handlers: Some(vec!["claude".to_owned()]),
             theaters,
+            resources: None,
         }
     }
 

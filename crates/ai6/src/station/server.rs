@@ -1580,6 +1580,10 @@ fn publish_station_check_in(state: &DaemonState) {
         }),
     );
     info.insert("running".to_owned(), serde_json::json!(active_sessions));
+    info.insert(
+        "resources".to_owned(),
+        serde_json::json!(crate::station::resources::sample()),
+    );
     info.insert("operations".to_owned(), serde_json::json!(operations));
     let policies: BTreeMap<String, OperationPolicy> = state
         .roster
@@ -6738,6 +6742,20 @@ mod tests {
             DEFAULT_MAX_CONCURRENT_MISSIONS
         );
         assert_eq!(stations[0].info()["running"], 0);
+        let resources = StationFacts::from_record(&stations[0], unix_now(), GONE_DARK_AFTER, 0)
+            .resources
+            .expect("the check-in carries the host's resources");
+        assert!(
+            resources.cpus.is_some_and(|cpus| cpus >= 1.0),
+            "{resources:?}"
+        );
+        assert!(
+            resources
+                .memory_available_mb
+                .zip(resources.memory_total_mb)
+                .is_some_and(|(available, total)| available <= total),
+            "{resources:?}"
+        );
         assert_eq!(stations[0].info()["operations"], serde_json::json!(["G"]));
         assert_eq!(
             stations[0].info()["theaters"],

@@ -755,6 +755,22 @@ pub struct StationFacts {
     pub station: String, pub healthy: bool, pub silent_for: u64, pub roles: Vec<String>,
     pub capacity: usize, pub load: usize, pub labels: BTreeMap<String, String>,
     pub checkouts: Vec<String>, pub handlers: Option<Vec<String>>, pub theaters: Vec<TheaterSummary>,
+    pub resources: Option<Resources>,   // None from a Station that did not report them
+}
+/// A host's or Theater's CPU and memory; an unreported value is None, never guessed.
+/// `Eq` holds because every value is finite (JSON has no NaN; the samplers drop them).
+#[non_exhaustive]
+#[derive(Default)]
+pub struct Resources {
+    pub cpus: Option<f64>,               // a fraction under a container's CPU quota
+    pub cpu_percent: Option<f64>,        // 0-100 since the previous sample
+    pub load_1m: Option<f64>,            // none on Windows
+    pub memory_total_mb: Option<u64>, pub memory_available_mb: Option<u64>,
+    pub sampled_at: u64,                 // Unix seconds
+}
+impl Resources {
+    pub fn cpu_busy(&self) -> Option<f64>;    // 0-1: cpu_percent, else load_1m / cpus
+    pub fn memory_used(&self) -> Option<f64>; // 0-1, when total and available are known
 }
 impl StationFacts {
     /// `load` = Missions already leased to the Station; silent for longer than `window` = unhealthy.
@@ -1127,6 +1143,8 @@ different Station takes the lease, is unchanged by the holder renewing it, and r
 a lease written before terms existed. Headquarters
 leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating Stations
 need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`,
+the host's `resources` (sysinfo: CPU count, CPU percent from the second sample on, the
+one-minute load average except on Windows, total and available memory),
 local Operation paths, available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
 placement policy (`operation_policies`, omitted with a log line when over 512 KiB) with
 each Station check-in every 15 seconds, alongside host and

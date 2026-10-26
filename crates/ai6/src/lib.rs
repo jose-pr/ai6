@@ -33,7 +33,7 @@ pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
 pub use directorates::m::placement::{
     AgentFacts, ExecutionMode, OperationPolicy, Placement, PlacementChoice, PlacementRejection,
-    PlacementRequest, StationFacts, execution_mode, fitness, harness_verdict, place,
+    PlacementRequest, Resources, StationFacts, execution_mode, fitness, harness_verdict, place,
 };
 pub use directorates::m::roster::{
     Agent, AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS, OnLost, Operation, Roster,

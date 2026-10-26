@@ -109,6 +109,56 @@ impl OperationPolicy {
     }
 }
 
+/// CPU and memory of a Station's host or a Theater, as last sampled. A value the host did
+/// not report is `None`, never a guess.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Resources {
+    /// CPUs available: the host's count, or a fraction under a container's CPU quota.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<f64>,
+    /// How busy the CPUs were since the previous sample, 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_percent: Option<f64>,
+    /// The one-minute load average; Windows has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_1m: Option<f64>,
+    /// Memory in MiB: the host's, or a container's memory limit when lower.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_total_mb: Option<u64>,
+    /// Memory in MiB that new work can still use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_available_mb: Option<u64>,
+    /// When it was sampled, as Unix seconds.
+    #[serde(default)]
+    pub sampled_at: u64,
+}
+
+// Every value is finite: JSON cannot carry NaN or infinity, and the samplers drop them.
+impl Eq for Resources {}
+
+impl Resources {
+    /// How busy the CPUs are, 0 to 1: the CPU percent, else the load average per CPU, else
+    /// `None`.
+    pub fn cpu_busy(&self) -> Option<f64> {
+        self.cpu_percent
+            .map(|percent| percent / 100.0)
+            .or_else(|| {
+                let load = self.load_1m?;
+                let cpus = self.cpus.filter(|cpus| *cpus > 0.0)?;
+                Some(load / cpus)
+            })
+            .map(|busy| busy.clamp(0.0, 1.0))
+    }
+
+    /// The share of memory in use, 0 to 1, when both totals are known.
+    pub fn memory_used(&self) -> Option<f64> {
+        let total = self.memory_total_mb.filter(|total| *total > 0)?;
+        let available = self.memory_available_mb?.min(total);
+        Some((total - available) as f64 / total as f64)
+    }
+}
+
 /// What a Station last checked in, reduced to what placement needs.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +183,9 @@ pub struct StationFacts {
     pub handlers: Option<Vec<String>>,
     /// Theaters it reaches.
     pub theaters: Vec<TheaterSummary>,
+    /// Its host's CPU and memory; `None` from a Station that did not report them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<Resources>,
 }
 
 impl StationFacts {
@@ -140,7 +193,8 @@ impl StationFacts {
     /// Station; a Station silent for longer than `window` is unhealthy.
     ///
     /// Check-ins written before Stations reported a key fall back to the permissive
-    /// reading: execution role, capacity one, own host only, handlers unknown.
+    /// reading: execution role, capacity one, own host only, handlers and resources
+    /// unknown.
     pub fn from_record(record: &StationRecord, now: f64, window: Duration, load: usize) -> Self {
         let info = record.info();
         let strings = |key: &str| {
@@ -184,6 +238,9 @@ impl StationFacts {
             checkouts: strings("operations").unwrap_or_default(),
             handlers: strings("handlers"),
             theaters,
+            resources: info
+                .get("resources")
+                .and_then(|value| serde_json::from_value(value.clone()).ok()),
         }
     }
 }
@@ -719,7 +776,52 @@ mod tests {
             checkouts: vec!["G".to_owned()],
             handlers: Some(vec!["claude".to_owned(), "codex".to_owned()]),
             theaters: vec![TheaterSummary::local()],
+            resources: None,
         }
+    }
+
+    #[test]
+    fn a_check_in_carries_resources_and_one_without_them_reads_as_unknown() {
+        use crate::directorates::registry::backend::StationStore;
+        use crate::directorates::registry::store::FileRegistry;
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
+        let info = |resources: Option<serde_json::Value>| {
+            let mut info = BTreeMap::new();
+            if let Some(resources) = resources {
+                info.insert("resources".to_owned(), resources);
+            }
+            info
+        };
+        registry
+            .check_in(
+                "new",
+                info(Some(serde_json::json!({
+                    "cpus": 8.0, "cpu_percent": 12.5, "memory_total_mb": 16384,
+                    "memory_available_mb": 9000, "sampled_at": 1_700_000_000
+                }))),
+            )
+            .unwrap();
+        registry.check_in("old", info(None)).unwrap();
+        registry
+            .check_in("odd", info(Some(serde_json::json!("not resources"))))
+            .unwrap();
+        let facts: BTreeMap<String, StationFacts> = registry
+            .stations(Duration::MAX)
+            .unwrap()
+            .iter()
+            .map(|record| {
+                let facts = StationFacts::from_record(record, record.seen(), Duration::MAX, 0);
+                (facts.station.clone(), facts)
+            })
+            .collect();
+        let resources = facts["new"].resources.as_ref().unwrap();
+        assert_eq!(resources.cpus, Some(8.0));
+        assert_eq!(resources.load_1m, None, "an absent value stays unknown");
+        assert_eq!(resources.memory_used(), Some((16384.0 - 9000.0) / 16384.0));
+        assert_eq!(resources.cpu_busy(), Some(0.125));
+        assert_eq!(facts["old"].resources, None);
+        assert_eq!(facts["odd"].resources, None, "a malformed value is ignored");
     }
 
     fn policy() -> OperationPolicy {

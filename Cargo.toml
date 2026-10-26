@@ -56,6 +56,8 @@ coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = 
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 # Self-signed and CA-issued certificates for the Station TLS tests.
 rcgen = "0.14"
+# CPU and memory of a Station's host for placement; 0.38 is the last line within the 1.89 MSRV.
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 globset = "0.4"
 data-encoding = { version = "2", default-features = false }
 # Validates gateway origins and encodes Session IDs as URL path segments.

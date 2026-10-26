@@ -1,7 +1,8 @@
 # Stations and failover
 
 A **Station** is a node running the `ai6` daemon. It checks in to the shared Registry
-with its roles, labels, capacity, active work and the Operation checkouts it has. One
+with its roles, labels, capacity, active work, the Operation checkouts it has and its
+host's CPU and memory (`resources`). One
 control Station holds the Headquarters lease at a time and is the **Headquarters Station
 (HQS)**; M's authority follows that lease.
 

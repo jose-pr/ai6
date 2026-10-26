@@ -13,7 +13,7 @@ exclude = [".*", "*.local.*"]
 [features]
 default = []
 # The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
-daemon = ["gate", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "guatiao/load"]
+daemon = ["gate", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "guatiao/load"]
 # The harness gate's client of a Station's Cable endpoint (`ai6::directorates::section_00::gate`).
 gate = ["dep:ureq"]
 # Adds bounded background event publication to the Universal Exports gateway.
@@ -65,6 +65,7 @@ tokio-postgres = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 regex.workspace = true
 subtle = { workspace = true, optional = true }
+sysinfo = { workspace = true, optional = true }
 tempfile.workspace = true
 toml.workspace = true
 tokio = { workspace = true, optional = true }
