@@ -14,7 +14,9 @@ use ai6::{Authenticator, Authorizer, Directory, RoleAuthorizer};
 use clap::Parser;
 use guatiao::value::Number;
 use serde_json::Value as JsonValue;
-use universal_exports::{AccessProviders, Gateway, GatewayConfig, GatewayLimits, LoginLimits};
+use universal_exports::{
+    AccessProviders, AssistantConfig, Gateway, GatewayConfig, GatewayLimits, LoginLimits,
+};
 
 const DEFAULT_PORT: u16 = 7082;
 const STATION_TOKEN_ENV: &str = "AI6_EXPORTS_STATION_TOKEN";
@@ -101,6 +103,18 @@ struct Cli {
     /// administration under /v1/user/roster. The password may come from AI6_CONFIG_PASSWORD.
     #[arg(long, env = "AI6_EXPORTS_ROSTER", value_name = "LOCATION")]
     roster: Option<String>,
+    /// The roster Agent that is Moneypenny, the operator's assistant; her model runs on a
+    /// Station with that Agent's handler, model, effort and credentials.
+    #[arg(
+        long,
+        env = "AI6_EXPORTS_ASSISTANT_AGENT",
+        value_name = "AGENT",
+        default_value = "moneypenny"
+    )]
+    assistant_agent: String,
+    /// Serve no assistant: the app's Moneypenny socket answers 503.
+    #[arg(long, env = "AI6_EXPORTS_NO_ASSISTANT")]
+    no_assistant: bool,
 }
 
 #[tokio::main]
@@ -180,6 +194,15 @@ async fn main() -> ExitCode {
             }
             Err(error) => {
                 eprintln!("universal-exports: the roster at {shown} cannot be opened: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if !cli.no_assistant {
+        match AssistantConfig::new(cli.assistant_agent.clone()) {
+            Ok(assistant) => gateway = gateway.with_assistant(assistant),
+            Err(error) => {
+                eprintln!("universal-exports: the assistant Agent is not valid: {error}");
                 return ExitCode::FAILURE;
             }
         }

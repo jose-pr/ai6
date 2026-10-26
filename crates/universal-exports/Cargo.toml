@@ -36,6 +36,7 @@ serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true, features = ["alloc"] }
 tokio = { workspace = true, features = ["sync", "time"] }
+tower = { workspace = true }
 uuid = { workspace = true, features = ["std"] }
 
 [dev-dependencies]

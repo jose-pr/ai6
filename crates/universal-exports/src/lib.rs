@@ -8,6 +8,7 @@ mod controls;
 mod green_ink;
 mod held;
 mod login_limit;
+mod moneypenny;
 mod pools;
 mod roster;
 mod timeline;
@@ -55,6 +56,7 @@ pub use controls::ControlStatus;
 pub use held::{HeldBriefDecision, HeldBriefEntry};
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
+pub use moneypenny::AssistantConfig;
 pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
 pub use roster::{RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{DEFAULT_TIMELINE_PAGE, MAX_TIMELINE_PAGE, TimelineItem, TimelinePage};
@@ -401,6 +403,7 @@ pub struct Gateway {
     login_guard: std::sync::Arc<LoginGuard>,
     controls: Arc<std::sync::Mutex<ControlBook>>,
     control_ready: Arc<tokio::sync::Notify>,
+    assistant: Option<Arc<moneypenny::Assistant>>,
 }
 
 impl fmt::Debug for Gateway {
@@ -471,6 +474,7 @@ impl Gateway {
             login_guard,
             controls: Arc::default(),
             control_ready: Arc::default(),
+            assistant: None,
         }
     }
 
@@ -498,6 +502,15 @@ impl Gateway {
     #[must_use]
     pub fn with_roster(mut self, source: Arc<dyn ConfigSource>) -> Self {
         self.roster = Some(source);
+        self
+    }
+
+    /// Serves Moneypenny, the operator's assistant: the app's conversation socket, her tools'
+    /// MCP endpoint and the Stations' assistant routes. Her model runs on a Station as the
+    /// roster Agent the config names. Without it the socket answers 503.
+    #[must_use]
+    pub fn with_assistant(mut self, config: AssistantConfig) -> Self {
+        self.assistant = Some(Arc::new(moneypenny::Assistant::new(config)));
         self
     }
 
@@ -1188,6 +1201,10 @@ impl Gateway {
                 axum::routing::delete(green_ink::revoke_class),
             )
             .route("/v1/user/attach-grants", post(issue_user_attach_token))
+            .route("/v1/user/moneypenny", get(moneypenny::socket))
+            .route("/v1/moneypenny/mcp", post(moneypenny::mcp::endpoint))
+            .route("/v1/station/assistant/next", get(moneypenny::next))
+            .route("/v1/station/assistant/reports", post(moneypenny::reports))
             .route("/v1/auth/login", post(login))
             .route("/v1/auth/logout", post(logout))
             .route("/v1/auth/session", get(access_session))

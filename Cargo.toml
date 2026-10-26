@@ -63,6 +63,8 @@ data-encoding = { version = "2", default-features = false }
 # Validates gateway origins and encodes Session IDs as URL path segments.
 url = { version = "2", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+# Sends Moneypenny's tool calls through Universal Exports' own router; axum already builds it.
+tower = { version = "0.5", default-features = false, features = ["util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = "0.29"
 tempfile = "3"
