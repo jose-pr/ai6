@@ -80,6 +80,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
               padding: const EdgeInsets.all(12),
               reverse: true,
               children: [
+                // Reversed: the oldest last.
                 for (final entry in controller.entries.reversed)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
@@ -88,6 +89,12 @@ class _AssistantPanelState extends State<AssistantPanel> {
                       controller: controller,
                       onOpen: widget.onOpen,
                     ),
+                  ),
+                if (controller.earlier > 0)
+                  Text(
+                    '${controller.earlier} earlier entries are not shown.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall,
                   ),
               ],
             ),
@@ -191,6 +198,18 @@ class _EntryView extends StatelessWidget {
   }
 }
 
+/// [value] with every string in it, keys included, passed through [revealInvisible], so a
+/// character that renders as nothing shows as `<U+XXXX>` in what the person confirms.
+Object? revealStrings(Object? value) => switch (value) {
+  String() => revealInvisible(value),
+  List() => [for (final item in value) revealStrings(item)],
+  Map() => {
+    for (final entry in value.entries)
+      revealInvisible('${entry.key}'): revealStrings(entry.value),
+  },
+  _ => value,
+};
+
 /// `mcp__moneypenny__board` as `board`.
 String _toolName(String tool) => tool.split('__').last;
 
@@ -240,8 +259,10 @@ class ProposalCard extends StatelessWidget {
               ],
             ),
             SelectableText(
-              '${request['method']} ${request['path']}'
-              '${body == null ? '' : '\n${const JsonEncoder.withIndent('  ').convert(body)}'}',
+              revealInvisible('${request['method']} ${request['path']}') +
+                  (body == null
+                      ? ''
+                      : '\n${const JsonEncoder.withIndent('  ').convert(revealStrings(body))}'),
               style: const TextStyle(fontFamily: 'monospace'),
             ),
             Text(

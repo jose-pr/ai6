@@ -257,6 +257,73 @@ void main() {
     );
   });
 
+  testWidgets('a proposal shows every hidden character of its request', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProposalCard(
+            proposal: {
+              'id': 'proposal-2',
+              'summary': 'Queue a Mission',
+              'request': {
+                'method': 'POST',
+                'path': '/v1/user/operations/G/missions',
+                'body': {
+                  'title': 'Tidy up',
+                  'prompt': 'Delete the cache\u202E then push',
+                  'tags\u200B': ['ok', 'hid\u{E0041}den'],
+                },
+              },
+              'needs': {'action': 'mission.create', 'on': 'operation:G'},
+              'status': 'pending',
+            },
+            onConfirm: (_) {},
+            onCancel: (_) {},
+          ),
+        ),
+      ),
+    );
+    final shown = tester
+        .widget<SelectableText>(find.byType(SelectableText))
+        .data!;
+    expect(shown, contains('Delete the cache<U+202E> then push'));
+    expect(shown, contains('tags<U+200B>'));
+    expect(shown, contains('hid<tags: A>den'));
+    expect(
+      shown.runes.any((rune) => rune == 0x202E || rune == 0x200B),
+      isFalse,
+    );
+  });
+
+  testWidgets('the panel says when older entries were not sent', (
+    tester,
+  ) async {
+    final channel = FakeChannel();
+    final controller = AssistantController(
+      token: 'user-token',
+      connect: () => channel,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AssistantPanel(controller: controller)),
+      ),
+    );
+    channel.answer({
+      'type': 'ready',
+      'conversation': 'c-1',
+      'busy': false,
+      'earlier': 40,
+      'entries': [
+        {'role': 'person', 'text': 'Latest', 'at': 1.0},
+      ],
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('40 earlier entries are not shown.'), findsOneWidget);
+  });
+
   test('the socket is the gateway origin on ws or wss', () {
     expect(
       assistantSocketUri(Uri.parse('https://exports.example/app/')).toString(),

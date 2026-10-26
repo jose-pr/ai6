@@ -85,6 +85,9 @@ class AssistantController extends ChangeNotifier {
   StreamSubscription<String>? _subscription;
   String? conversationId;
   List<AssistantEntry> entries = const [];
+
+  /// How many older entries Universal Exports kept but did not send.
+  int earlier = 0;
   bool busy = false;
   bool connected = false;
   String? problem;
@@ -131,6 +134,7 @@ class AssistantController extends ChangeNotifier {
         problem = null;
         conversationId = message['conversation'] as String?;
         busy = message['busy'] == true;
+        earlier = (message['earlier'] as num?)?.toInt() ?? 0;
         entries = [
           for (final entry in message['entries'] as List? ?? const [])
             AssistantEntry.fromJson((entry as Map).cast<String, Object?>()),
