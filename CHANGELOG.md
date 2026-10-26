@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Live configuration: a Station checks its roster source and `loadouts.toml` every 5 seconds
+  (`ai6 serve --config-poll`, `StationConfig::with_config_poll`, 0 off) and applies a change
+  without a restart; running Sessions keep what they started with. A revision that fails
+  the configuration checks is refused once, logged, audited as `config.refused` and
+  reported at check-in while the last good one keeps running; a changed `loadouts.toml`
+  declares the pool accounts again and withdraws the ones gone
+  (`AccountStore::withdraw_account`). Changes to `theaters.toml` and `cables.toml` are
+  reported as needing a restart. Each Station publishes a `ConfigStatus` (`config`) the
+  board shows. `ConfigSource` gains `revision`, `definitions`, `put` and `remove`;
+  `RosterError::kind` tells an invalid configuration from an unavailable or read-only
+  source; a configuration directory resolves every Agent when it loads
+  (`Roster::check_agents`). Universal Exports serves roster administration from
+  `--roster` / `AI6_EXPORTS_ROSTER` (`/v1/user/roster/...`, `roster.read` and
+  `roster.manage` on the new scope `config:roster`; edits audited as `roster.update`,
+  `roster.remove` or `roster.refused`), and Moneypenny's Administration has a Roster tab.
+- Moneypenny's Station settings set the minimum free memory and maximum CPU percent past
+  which a Station takes no new Missions.
 - Account pools: provider accounts shared by every Station and balanced by the quota they
   have left. `loadouts.toml` declares `[pool.<id>]` (handler, `operations` globs, strategy
   `headroom`, `round_robin` or `priority`) and its accounts (kind `claude-oauth-token`,

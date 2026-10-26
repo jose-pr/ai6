@@ -31,11 +31,15 @@ With no `source` they live in memory and are gone at exit.
 ## The access policy
 
 `access.toml` binds people to roles at a scope. A scope is `*` or `station:<id>`,
-`operation:<id>` or `theater:<id>`; the first rule that matches decides, and no match denies.
-The actions Universal Exports checks are `agent.configure`, `agent.read`, `approval.class`,
-`approval.decide`, `audit.read`, `mission.control`, `mission.create`, `mission.read`,
-`pool.manage`, `pool.read`, `session.input`, `session.read`, `station.configure` and
-`station.read`. `pool.read` shows the [account pools](agents.md#account-pools) an Operation
+`operation:<id>`, `theater:<id>` or `config:roster` (the roster every Station reads); the
+first rule that matches decides, and no match denies. The actions Universal Exports checks
+are `agent.configure`, `agent.read`, `approval.class`, `approval.decide`, `audit.read`,
+`mission.control`, `mission.create`, `mission.read`, `pool.manage`, `pool.read`,
+`roster.manage`, `roster.read`, `session.input`, `session.read`, `station.configure` and
+`station.read`. `roster.read` and `roster.manage` at `config:roster` list and edit the
+roster's Operations, Agents, roles and covers ([Changing the configuration of running
+Stations](operations.md#changing-the-configuration-of-running-stations)); `audit.read` there
+shows those edits and the refused ones. `pool.read` shows the [account pools](agents.md#account-pools) an Operation
 may draw from, never a credential; `pool.manage` lifts an account's limit. `mission.control`
 (cancel, retry, resume and interrupt a Mission) is separate from `session.input`: typing into
 a Session does not grant stopping it. `approval.decide` signs or refuses an Agent's request

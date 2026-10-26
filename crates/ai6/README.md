@@ -63,6 +63,7 @@ ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
           [--registry LOCATION] [--config LOCATION] [--headquarters-lease SECS]
           [--station ID] [--role control|execution]... [--label KEY=VALUE]...
           [--terminal ID] [--max-concurrent-missions N] [--resources-every SECS]
+          [--config-poll SECS]
           [watchdog options]
 ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]
 ai6 runner call [--state-dir PATH] METHOD PATH
@@ -86,7 +87,10 @@ ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
   is printed as a warning. Passwords come from `password_file=PATH`,
   `AI6_REGISTRY_PASSWORD` or `AI6_CONFIG_PASSWORD`. `--headquarters-lease` (default 60
   seconds) is how long a standby control Station waits before taking over; the
-  database timeouts are derived from it.
+  database timeouts are derived from it. `--config-poll` (default 5 seconds, `0` off) is how
+  often the Station checks its roster and `loadouts.toml` and applies a change that passes
+  the configuration checks without a restart; a refused one is audited and the last good
+  configuration keeps running.
 - `ai6 runner serve` runs the field runner on a Theater: it supervises harnesses there for
   Stations, spooling their events under its state directory (default `runner` in AI6's state
   directory) and serving them on a token-protected loopback port. `--detach` starts it in

@@ -149,6 +149,8 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/user/operations/{operation_id}/timeline?cursor=<c>&mission=<id>&limit=<n>` | Require `audit.read`; return one newest-first page (default 50, at most 200) of the Operation's lifecycle transitions, control outcomes, Cables sent, Sleeper authorizations and audit records, correlated by Station, Mission and Session, with `next_cursor` for the older page. |
 | `GET` | `/v1/user/operations/{operation_id}/pools` | Require `pool.read`; return the pool accounts the Operation may draw from, with the Sessions using each, quota windows, limited-until and tokens today; never a credential. |
 | `POST` | `/v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit` | Require `pool.manage`; lift an account's provider limit, audited. |
+| `GET` | `/v1/user/roster/{kind}` | Require `roster.read` on `config:roster`; list the roster's `operations`, `agents`, `roles` or `covers` with the revision and whether it takes edits. |
+| `PUT`, `DELETE` | `/v1/user/roster/{kind}/{key}` | Require `roster.manage` on `config:roster`; store (a JSON object) or remove one record through the roster source. The whole roster is checked first: `422` with the reason when it would not be acceptable, `409` for a read-only source. Accepted and refused edits are audited. |
 | `GET` | `/v1/user/operations/{operation_id}/agent-roles` | Require `agent.read`; return the Headquarters Station role catalog merged with this Operation's validated overrides. Each role has `operation_override` to identify whether it replaces the Station definition. |
 | `PUT` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; validate and store a role purpose and policy in the shared Registry. |
 | `DELETE` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; remove the Operation override, fall back to the Station definition and record a metadata-only audit event. |
@@ -246,6 +248,7 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 | `AI6_EXPORTS_ACCESS_POLICY` | TOML policy for the built-in RoleAuthorizer; alternative to `AI6_EXPORTS_AUTHORIZER`. | Deny all |
 | `AI6_EXPORTS_AUTHORIZER` | Optional custom Guatiao Authorizer provider ID; alternative to `AI6_EXPORTS_ACCESS_POLICY`. | None |
 | `AI6_EXPORTS_AUTHORIZER_CONFIG` | Path to the custom Authorizer's JSON config object. | None |
+| `AI6_EXPORTS_ROSTER` | The roster the Stations read (as `ai6 serve --config`): a configuration directory (read-only), `sqlite:PATH` or a `postgres://` URL; its password may come from `AI6_CONFIG_PASSWORD`. | None (roster routes answer 503) |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
 | `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None |
