@@ -38,10 +38,22 @@ Map<String, Object?> heldBrief() => {
   'held_at': 1_798_000_000.0,
 };
 
+Map<String, Object?> proposal(String id, Map<String, Object?>? vetting) => {
+  'id': id,
+  'operation_id': 'G',
+  'parent_mission_id': 'mission-007',
+  'proposer_agent_id': '007',
+  'proposer_session_id': 'provider-session-007',
+  'brief': {'title': 'Proposal $id', 'body': 'Do $id.'},
+  'created_at': 1_798_000_000.0,
+  'vetting': ?vetting,
+};
+
 /// A gateway holding one brief in Operation G; every request is kept in [requests].
 class FakeHeldBriefs {
   final requests = <http.Request>[];
   bool decided = false;
+  List<Map<String, Object?>> proposals = [];
 
   http.Response answer(http.Request request) {
     final path = request.url.path;
@@ -56,7 +68,7 @@ class FakeHeldBriefs {
       );
     }
     if (path.endsWith('/mission-proposals')) {
-      return http.Response('[]', 200);
+      return http.Response(jsonEncode(proposals), 200);
     }
     throw StateError('unexpected request to $path');
   }
@@ -172,6 +184,44 @@ void main() {
     );
     expect(jsonDecode(refused.body), {'reason': 'a mirror of mission-007'});
     expect(find.text('Brief refused.'), findsOneWidget);
+  });
+
+  testWidgets('the proposal inbox shows what vetting found in each proposal', (
+    tester,
+  ) async {
+    final gateway = FakeHeldBriefs()
+      ..proposals = [
+        proposal('waiting', null),
+        proposal('clean', {'verdict': 'pass', 'findings': []}),
+        proposal('screened', {
+          'verdict': 'hold',
+          'findings': [
+            {
+              'kind': 'screening',
+              'detail': 'a phrase that tries to change the instructions',
+            },
+          ],
+        }),
+      ];
+    final board = await signedIn(gateway);
+    addTearDown(board.dispose);
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.tap(find.text('Administration'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(Tab, 'Mission proposals'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Vetting: not finished'), findsOneWidget);
+    expect(find.text('Vetting: nothing found'), findsOneWidget);
+    expect(find.text('Vetting found:'), findsOneWidget);
+    expect(
+      find.text('• screening: a phrase that tries to change the instructions'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('without mission.create there are no held briefs to review', (

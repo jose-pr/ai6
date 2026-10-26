@@ -485,6 +485,7 @@ class MissionBoard extends ChangeNotifier {
           tags: ['configuration', 'review'],
           priority: 2,
           createdAt: 1_798_000_000,
+          vetting: [],
         ),
       ];
     }
@@ -1977,6 +1978,7 @@ class MissionProposalSummary {
     required this.tags,
     required this.priority,
     required this.createdAt,
+    this.vetting,
   });
 
   final String id;
@@ -1990,6 +1992,9 @@ class MissionProposalSummary {
   final List<String> tags;
   final int priority;
   final double createdAt;
+
+  /// What M's vetting found: `null` until it has looked, empty when the proposal is clean.
+  final List<VettingFinding>? vetting;
 
   factory MissionProposalSummary.fromJson(Map<String, dynamic> json) {
     final brief = json['brief'] as Map<String, dynamic>;
@@ -2005,6 +2010,9 @@ class MissionProposalSummary {
       tags: (brief['tags'] as List<dynamic>? ?? const []).cast<String>(),
       priority: brief['priority'] as int? ?? 0,
       createdAt: (json['created_at'] as num).toDouble(),
+      vetting: json['vetting'] == null
+          ? null
+          : vettingFindings(json['vetting'] as Map<String, dynamic>),
     );
   }
 }
@@ -3048,6 +3056,20 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                                         ].join(' · '),
                                       ),
                                     ),
+                                  const SizedBox(height: 6),
+                                  ...switch (proposal.vetting) {
+                                    null => [
+                                      const Text('Vetting: not finished'),
+                                    ],
+                                    [] => [
+                                      const Text('Vetting: nothing found'),
+                                    ],
+                                    final findings => [
+                                      const Text('Vetting found:'),
+                                      for (final finding in findings)
+                                        Text('• ${finding.line}'),
+                                    ],
+                                  },
                                   const SizedBox(height: 12),
                                   Wrap(
                                     spacing: 8,
