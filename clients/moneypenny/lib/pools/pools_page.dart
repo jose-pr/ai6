@@ -47,6 +47,7 @@ class PoolAccountSummary {
     required this.handler,
     required this.kind,
     required this.active,
+    this.otherSessions = 0,
     this.maxConcurrent,
     this.windows = const [],
     this.limitedUntil,
@@ -58,8 +59,11 @@ class PoolAccountSummary {
   final String handler;
   final String kind;
 
-  /// The Missions whose Sessions use it now.
+  /// This Operation's Missions whose Sessions use it now.
   final List<String> active;
+
+  /// How many Sessions of other Operations use it now.
+  final int otherSessions;
   final int? maxConcurrent;
   final List<QuotaWindowSummary> windows;
 
@@ -77,6 +81,7 @@ class PoolAccountSummary {
           for (final claim in json['active'] as List<dynamic>)
             (claim as Map<String, dynamic>)['mission_id'] as String,
         ],
+        otherSessions: json['other_sessions'] as int? ?? 0,
         maxConcurrent: json['max_concurrent'] as int?,
         windows: [
           for (final window in json['windows'] as List<dynamic>)
@@ -88,7 +93,7 @@ class PoolAccountSummary {
 
   /// `1/2 Sessions`, or `1 Session` without a limit.
   String get sessions {
-    final count = active.length;
+    final count = active.length + otherSessions;
     final noun = (maxConcurrent ?? count) == 1 ? 'Session' : 'Sessions';
     return maxConcurrent == null
         ? '$count $noun'

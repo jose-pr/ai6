@@ -13,6 +13,7 @@ Finder navLabel(String label) =>
 Map<String, Object?> account(
   String name, {
   List<String> missions = const [],
+  int others = 0,
   int? max,
   int? used,
   double? limitedUntil,
@@ -29,6 +30,7 @@ Map<String, Object?> account(
     for (final mission in missions)
       {'station_id': 'station-alpha', 'mission_id': mission, 'since': 1.0},
   ],
+  'other_sessions': others,
   'windows': [
     if (used != null)
       {
@@ -67,6 +69,7 @@ Future<MissionBoard> signedIn(
                     account(
                       'alpha',
                       missions: ['mission-1'],
+                      others: 1,
                       max: 2,
                       used: 425,
                       tokens: 1200,
@@ -118,7 +121,7 @@ void main() {
     expect(asked.single.path, '/v1/user/operations/G/pools');
     expect(find.text('team/alpha'), findsOneWidget);
     expect(
-      find.text('1/2 Sessions · five_hour 42.5% · 1200 tokens today'),
+      find.text('2/2 Sessions · five_hour 42.5% · 1200 tokens today'),
       findsOneWidget,
     );
     expect(find.text('Used by mission-1'), findsOneWidget);
