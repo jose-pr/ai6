@@ -7,6 +7,7 @@ mod controls;
 mod green_ink;
 mod login_limit;
 mod pools;
+mod roster;
 mod timeline;
 
 use core::future::Future;
@@ -19,8 +20,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ai6::directorates::registry::backend::*;
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
-    Authorizer, Brief, Directory, Lookup, MissionProposal, MissionUsage, Person, Quarantine,
-    StationSettings, Verdict,
+    Authorizer, Brief, ConfigSource, Directory, Lookup, MissionProposal, MissionUsage, Person,
+    Quarantine, StationSettings, Verdict,
 };
 use ai6_diptel::{
     FrameReceiver, IncomingFrame, LifecycleEvent, MissionId, OperationId, SessionId, SessionState,
@@ -48,6 +49,7 @@ pub use controls::ControlStatus;
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
 pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
+pub use roster::{RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{DEFAULT_TIMELINE_PAGE, MAX_TIMELINE_PAGE, TimelineItem, TimelinePage};
 
 const MAX_BUFFER_BUDGET_BYTES: usize = 512 * 1024 * 1024;
@@ -388,6 +390,7 @@ pub struct Gateway {
     input_rx: std::sync::Arc<Mutex<mpsc::Receiver<AgentInput>>>,
     registry: Option<Arc<dyn RegistryBackend>>,
     access: Option<AccessProviders>,
+    roster: Option<Arc<dyn ConfigSource>>,
     login_guard: std::sync::Arc<LoginGuard>,
     controls: Arc<std::sync::Mutex<ControlBook>>,
     control_ready: Arc<tokio::sync::Notify>,
@@ -457,6 +460,7 @@ impl Gateway {
             input_rx: std::sync::Arc::new(Mutex::new(input_rx)),
             registry: None,
             access: None,
+            roster: None,
             login_guard,
             controls: Arc::default(),
             control_ready: Arc::default(),
@@ -479,6 +483,15 @@ impl Gateway {
         let mut gateway = Self::with_registry(config, registry);
         gateway.access = Some(access);
         gateway
+    }
+
+    /// Serves roster administration (`/v1/user/roster/...`) from `source`, the roster every
+    /// Station reads. Edits need a source that takes changes, such as a SQL roster; without a
+    /// source those routes answer 503.
+    #[must_use]
+    pub fn with_roster(mut self, source: Arc<dyn ConfigSource>) -> Self {
+        self.roster = Some(source);
+        self
     }
 
     /// Checks whether a presented secret is the configured Station channel credential.
@@ -1118,6 +1131,11 @@ impl Gateway {
                 "/v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit",
                 post(pools::clear_limit),
             )
+            .route("/v1/user/roster/{kind}", get(roster::records))
+            .route(
+                "/v1/user/roster/{kind}/{key}",
+                axum::routing::put(roster::put_record).delete(roster::remove_record),
+            )
             .route(
                 "/v1/user/operations/{operation_id}/green-ink",
                 get(green_ink::pending),
@@ -1327,6 +1345,9 @@ fn board_station(
         theaters: station_theaters(info),
         resources: info
             .get("resources")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        config: info
+            .get("config")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),
     }
 }
@@ -1877,6 +1898,8 @@ struct UserProfile {
     expires_at: f64,
     operations: Vec<UserOperationAccess>,
     stations: Vec<UserStationAccess>,
+    /// The actions the person holds on the roster (`config:roster`).
+    roster: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -2178,7 +2201,7 @@ async fn user_profile(
         .authorizer
         .clone();
     let authorization_person = person.clone();
-    let (operations, stations) = tokio::task::spawn_blocking(move || {
+    let (operations, stations, roster) = tokio::task::spawn_blocking(move || {
         let mut operation_ids = BTreeSet::new();
         let mut stations = Vec::new();
         for station in &station_records {
@@ -2255,7 +2278,21 @@ async fn user_profile(
             }
         }
         stations.sort_by(|left, right| left.station_id.cmp(&right.station_id));
-        Ok::<_, ApiError>((operations, stations))
+        let mut roster = Vec::new();
+        for action in ["roster.read", "roster.manage", "audit.read"] {
+            let allowed = authorizer
+                .authorize(AuthorizationRequest {
+                    person: authorization_person.clone(),
+                    action: action.to_owned(),
+                    resource: roster::ROSTER_RESOURCE.to_owned(),
+                })
+                .map_err(|_| ApiError::internal())?
+                .allowed;
+            if allowed {
+                roster.push(action.to_owned());
+            }
+        }
+        Ok::<_, ApiError>((operations, stations, roster))
     })
     .await
     .map_err(|_| ApiError::internal())??;
@@ -2267,6 +2304,7 @@ async fn user_profile(
         expires_at: record.expires_at(),
         operations,
         stations,
+        roster,
     }))
 }
 
@@ -3142,6 +3180,10 @@ pub struct BoardStation {
     /// time; absent from a Station that does not report them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resources: Option<ai6::Resources>,
+    /// The configuration the Station runs: its roster revision, what it refused and which
+    /// changed files wait for a restart; absent from a Station that does not report it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<ai6::ConfigStatus>,
 }
 
 /// One Theater a Station reaches, as the Station published it at check-in.
@@ -4732,6 +4774,14 @@ mod tests {
         worker_info.insert("capacity".to_owned(), serde_json::json!(4));
         worker_info.insert("running".to_owned(), serde_json::json!(2));
         worker_info.insert(
+            "config".to_owned(),
+            serde_json::json!({
+                "revision": "18446744073709551615",
+                "refused": ["roster revision 7: Agent \"009\": clearance"],
+                "needs_restart": ["theaters.toml"]
+            }),
+        );
+        worker_info.insert(
             "resources".to_owned(),
             serde_json::json!({
                 "cpus": 8.0, "cpu_percent": 25.0, "load_1m": 1.5, "memory_total_mb": 16384,
@@ -5551,6 +5601,15 @@ mod tests {
                 "cpus": 8.0, "cpu_percent": 25.0, "load_1m": 1.5, "memory_total_mb": 16384,
                 "memory_available_mb": 12288, "sampled_at": 1_700_000_000
             })
+        );
+        assert_eq!(
+            station_board["stations"][0]["config"],
+            serde_json::json!({
+                "revision": "18446744073709551615",
+                "refused": ["roster revision 7: Agent \"009\": clearance"],
+                "needs_restart": ["theaters.toml"]
+            }),
+            "the configuration a Station runs, as it reported it"
         );
         assert!(
             !serde_json::to_string(&station_board)

@@ -175,6 +175,9 @@ pub struct BoardStation {
     pub theaters: Vec<BoardTheater>,
     pub resources: Option<ai6::Resources>, // the host's CPUs, load, memory and `sampled_at`;
                                            // omitted when the Station did not report them
+    pub config: Option<ai6::ConfigStatus>, // roster revision it runs (decimal string), why it
+                                           // refused the newest one, files that need a restart;
+                                           // omitted when the Station did not report it
 }
 
 #[non_exhaustive]
@@ -362,6 +365,10 @@ impl Gateway {
         registry: Arc<dyn ai6::RegistryBackend>,
         access: AccessProviders,
     ) -> Self;
+    /// Serves `/v1/user/roster/...` from the roster the Stations read; without it those
+    /// routes answer 503. The command opens `AI6_EXPORTS_ROSTER` with ai6's config::open_with.
+    #[must_use]
+    pub fn with_roster(self, source: Arc<dyn ai6::ConfigSource>) -> Self;
     pub fn authenticate_station(&self, presented: &str) -> Result<(), GatewayError>;
     pub async fn register_session(
         &self,
@@ -510,10 +517,13 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Session and UTC day) once a provider has reported any, and its `attempts` from the shared Session records. `GET /v1/missions` carries `attempts` too. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret. |
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. |
-| `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role, `approval.decide`/`approval.class`, `pool.read` and `pool.manage` actions; Station grants include `station.read`, `station.configure` and `audit.read`. Every action is computed by the Authorizer, not inferred from directory groups. |
+| `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role, `approval.decide`/`approval.class`, `pool.read` and `pool.manage` actions; Station grants include `station.read`, `station.configure` and `audit.read`; `roster` lists the person's `roster.read`, `roster.manage` and `audit.read` on `config:roster`. Every action is computed by the Authorizer, not inferred from directory groups. |
 | `GET /v1/user/audit?operation_id=<id>&station_id=<id>&limit=<n>` | Requires a user bearer and `audit.read`; the optional Operation and Station filters are mutually exclusive. Returns at most 500 newest metadata-only records, filtered by the Authorizer for each resource. Records contain actor, action, resource scope, target and time; prompts, terminal output and secrets are excluded. |
 | `GET /v1/user/operations/{operation_id}/timeline?cursor=&mission=&limit=` | Requires `audit.read` on the Operation; returns a `TimelinePage` (see Activity timeline). |
 | `GET /v1/user/operations/{operation_id}/pools` | Requires `pool.read` on the Operation; returns a `PoolBoard { operation_id, accounts: Vec<BoardAccount> }`: each account a Station declared for the Operation with `pool`, `account`, `handler`, `kind`, `priority`, `max_concurrent`, `labels`, `active` (`BoardClaim { station_id, mission_id, since }`, this Operation's live claims only), `other_sessions` (the count of other Operations' live claims), `windows` (`BoardWindow { name, used_permille, resets_at, status }`), `limited_until` (only while in the future), `last_used` and `tokens_today` (UTC). Never a credential, its secret's name or a login directory. |
+| `GET /v1/user/roster/{kind}` | `kind` is `operations`, `agents`, `roles` or `covers` (else `404`). Requires `roster.read` on `config:roster`; returns `RosterRecords { kind, revision, writable, records: Vec<RosterRecord { key, definition }> }`: each definition is the JSON object of its table in the configuration files, `revision` the roster revision in decimal (compare `BoardStation.config.revision`), `writable` whether edits are taken. `503` without a roster source. |
+| `PUT /v1/user/roster/{kind}/{key}` | Body: the record's definition, a JSON object (else `400`). Requires `roster.manage` on `config:roster`. The source checks the whole roster first: `200` `RosterChange { revision }` and a `roster.update` audit event; `422` `{"refused": reason}` and a `roster.refused` audit event (target `<kind> <key>: <reason>`) when the roster it would leave is not acceptable, nothing changed; `409` for a read-only source (a configuration directory). Audit resource `config:roster`, target `<kind> <key>`. Every Station takes up an accepted edit at its next poll. |
+| `DELETE /v1/user/roster/{kind}/{key}` | As `PUT`: `200` with the revision and a `roster.remove` audit event, `404` when there is no such record, `422` when the removal leaves the roster unacceptable (an Agent another extends). |
 | `POST /v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit` | Requires `pool.manage` on the Operation; lifts the account's limit (`404` unless a Station declared it for the Operation) and records a `pool.limit.clear` audit event with target `pool/account`; `204`. |
 | `GET /v1/user/operations/{operation_id}/agent-roles` | Requires `agent.read`; returns the Headquarters Station catalog merged with validated Operation-scoped Registry overrides. Each role includes `operation_override` provenance. |
 | `PUT /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; validates and stores the role override and records only actor/action/Operation/role ID/time in audit. |
@@ -609,6 +619,7 @@ The library reads no environment variables. The commands read:
 | `AI6_EXPORTS_ACCESS_POLICY` | TOML configuration for the built-in role Authorizer. | Deny all |
 | `AI6_EXPORTS_AUTHORIZER` | Optional custom Authorizer provider ID; conflicts with access-policy. | None |
 | `AI6_EXPORTS_AUTHORIZER_CONFIG` | Path to a JSON object containing the custom Authorizer's Guatiao config. | None |
+| `AI6_EXPORTS_ROSTER` | The roster the Stations read (`ai6 serve --config`): a configuration directory (listed, read-only), `sqlite:PATH` or a `postgres://` URL (editable); overridden by `--roster`. Its password may come from `AI6_CONFIG_PASSWORD`. | None (roster routes answer 503) |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address at the login route. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
 | `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None (the connection's address) |

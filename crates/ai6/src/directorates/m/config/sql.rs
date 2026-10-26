@@ -216,6 +216,7 @@ impl ConfigSource for SqlConfigSource {
         Ok(ConfigDefinitions {
             revision: revision_of(revision)?,
             records: parsed(rows)?,
+            writable: true,
         })
     }
 

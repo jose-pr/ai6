@@ -58,10 +58,12 @@ the old `lineupmux_*` names are gone, so a provider built for any host loads her
 What AI6 adds:
 
 ```rust
-pub const SCOPE_KINDS: [&str; 3] = ["station", "operation", "theater"];
+pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
+                              // "config:roster" is the roster every Station reads
 pub const ACTIONS: &[&str];   // agent.configure, agent.read, approval.class,
                               // approval.decide, audit.read, mission.control,
-                              // mission.create, mission.read, session.input,
+                              // mission.create, mission.read, pool.manage, pool.read,
+                              // roster.manage, roster.read, session.input,
                               // session.read, station.configure, station.read
 pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
 pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError>;
@@ -401,7 +403,11 @@ impl ConfigRecord {
     pub fn from_name(name: &str) -> Option<Self>;
 }
 #[non_exhaustive] #[derive(Clone, PartialEq)]
-pub struct ConfigDefinitions { pub revision: ConfigRevision, pub records: Vec<(String, serde_json::Value)> }
+pub struct ConfigDefinitions {
+    pub revision: ConfigRevision,
+    pub records: Vec<(String, serde_json::Value)>,   // by key
+    pub writable: bool,                              // the source takes put/remove
+}
 /// Check-in key `config` of every Station (serde; empty fields are omitted).
 #[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigStatus {
@@ -1072,7 +1078,7 @@ pub struct AuditRecord {
     pub actor: String,
     pub action: String,
     pub operation: String,
-    pub resource: Option<String>,
+    pub resource: Option<String>,   // `station:<id>` or `config:roster`; required without an Operation
     pub target: String,
     pub at: f64,
 }

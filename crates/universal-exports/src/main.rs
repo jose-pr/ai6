@@ -88,6 +88,11 @@ struct Cli {
     /// JSON configuration file for the selected custom Authorizer.
     #[arg(long, env = "AI6_EXPORTS_AUTHORIZER_CONFIG", requires = "authorizer")]
     authorizer_config: Option<PathBuf>,
+    /// The roster the Stations read (the location they take with `ai6 serve --config`): a
+    /// configuration directory (read-only), `sqlite:PATH` or a `postgres://` URL, served for
+    /// administration under /v1/user/roster. The password may come from AI6_CONFIG_PASSWORD.
+    #[arg(long, env = "AI6_EXPORTS_ROSTER", value_name = "LOCATION")]
+    roster: Option<String>,
 }
 
 #[tokio::main]
@@ -145,10 +150,32 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let gateway = match access {
+    let mut gateway = match access {
         Some(access) => Gateway::with_access(config, registry, access),
         None => Gateway::with_registry(config, registry),
     };
+    if let Some(location) = &cli.roster {
+        let mut options = ai6::directorates::registry::sql::SqlOptions::default();
+        if let Some(password) = std::env::var("AI6_CONFIG_PASSWORD")
+            .ok()
+            .filter(|password| !password.is_empty())
+        {
+            options = options.with_password(password);
+        }
+        let shown = ai6::directorates::registry::sql::redact(location);
+        match ai6::directorates::m::config::open_with(location, &options) {
+            Ok(source) => {
+                for weakening in ai6::directorates::registry::sql::weakenings(location) {
+                    eprintln!("universal-exports: warning: the roster at {shown}: {weakening}");
+                }
+                gateway = gateway.with_roster(source);
+            }
+            Err(error) => {
+                eprintln!("universal-exports: the roster at {shown} cannot be opened: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     match gateway.serve_loopback(cli.port, shutdown_signal()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

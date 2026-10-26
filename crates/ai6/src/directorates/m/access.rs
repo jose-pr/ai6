@@ -19,9 +19,10 @@ pub use coqui_roles::{
 };
 use serde::Deserialize;
 
-/// The resource kinds a role rule may be scoped to in AI6: `station:<id>`, `operation:<id>`
-/// and `theater:<id>`. A rule may also name `*`.
-pub const SCOPE_KINDS: [&str; 3] = ["station", "operation", "theater"];
+/// The resource kinds a role rule may be scoped to in AI6: `station:<id>`, `operation:<id>`,
+/// `theater:<id>` and `config:roster` (the roster every Station reads). A rule may also name
+/// `*`.
+pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
 
 /// The actions the gateway checks, for writing roles.
 pub const ACTIONS: &[&str] = &[
@@ -33,6 +34,10 @@ pub const ACTIONS: &[&str] = &[
     "mission.control",
     "mission.create",
     "mission.read",
+    "pool.manage",
+    "pool.read",
+    "roster.manage",
+    "roster.read",
     "session.input",
     "session.read",
     "station.configure",

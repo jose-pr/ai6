@@ -253,7 +253,8 @@ pub struct AuditRecord {
     pub action: String,
     /// Operation that authorized the action.
     pub operation: String,
-    /// Explicit non-Operation resource for Station-scoped administrative changes.
+    /// Explicit non-Operation resource for Station-scoped (`station:<id>`) or roster
+    /// (`config:roster`) administrative changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
     /// Safe identifier for the affected resource; never a prompt or payload.
@@ -285,7 +286,7 @@ impl AuditRecord {
         }
         if let Some(resource) = &self.resource {
             validate_audit_text(resource, 512, "resource")?;
-            if !resource.starts_with("station:") {
+            if !resource.starts_with("station:") && !resource.starts_with("config:") {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "audit resource must use a supported scope",

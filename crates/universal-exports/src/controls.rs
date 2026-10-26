@@ -672,6 +672,14 @@ pub(crate) mod tests {
 
     /// As [`served`], with another role policy for `operator-007` and `viewer-007`.
     pub(crate) async fn served_with(roles: &str) -> Served {
+        served_with_roster(roles, None).await
+    }
+
+    /// As [`served_with`], serving roster administration from `roster`.
+    pub(crate) async fn served_with_roster(
+        roles: &str,
+        roster: Option<Arc<dyn ai6::ConfigSource>>,
+    ) -> Served {
         let directory = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(directory.path());
         for (station, operations) in [("hq", vec![]), ("worker", vec!["G", "L"])] {
@@ -703,6 +711,10 @@ pub(crate) mod tests {
             Arc::new(registry.clone()),
             AccessProviders::new(Arc::new(People), Arc::new(People), Arc::new(authorizer)),
         );
+        let gateway = match roster {
+            Some(roster) => gateway.with_roster(roster),
+            None => gateway,
+        };
         for (operation, mission, session) in [
             ("G", "mission-g", "session-g"),
             ("L", "mission-l", "session-l"),

@@ -85,6 +85,9 @@ pub struct ConfigDefinitions {
     /// Each record's key and definition: a JSON object with the keys of its table in the
     /// configuration files, ordered by key.
     pub records: Vec<(String, serde_json::Value)>,
+    /// Whether the source takes [`put`](ConfigSource::put) and
+    /// [`remove`](ConfigSource::remove).
+    pub writable: bool,
 }
 
 /// The configuration a Station runs, as it reports it at check-in (key `config`).
@@ -363,6 +366,7 @@ impl ConfigSource for TomlConfigDir {
                 return Ok(ConfigDefinitions {
                     revision,
                     records: Vec::new(),
+                    writable: false,
                 });
             }
             Err(failure) => {
@@ -386,7 +390,11 @@ impl ConfigSource for TomlConfigDir {
             Some(_) => return Err(in_file(&format!("`{}` is not a table", record.name()))),
             None => Vec::new(),
         };
-        Ok(ConfigDefinitions { revision, records })
+        Ok(ConfigDefinitions {
+            revision,
+            records,
+            writable: false,
+        })
     }
 }
 
@@ -494,6 +502,55 @@ mod tests {
         // A file the roster is not read from is not a change.
         fs::write(root.path().join("theaters.toml"), "").unwrap();
         assert!(source.changes_since(changed.revision).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_config_directory_lists_its_tables_and_takes_no_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let source = TomlConfigDir::new(root.path());
+        fs::write(
+            root.path().join("agents.toml"),
+            "[agent.007]\nhandler = \"mock-agent\"\npriority = 5\n\
+             [role.case-officer]\npurpose = \"Runs it.\"\npolicy = \"Report.\"\n",
+        )
+        .unwrap();
+        let agents = source.definitions(ConfigRecord::Agent).unwrap();
+        assert_eq!(agents.revision, source.revision().unwrap());
+        assert!(!agents.writable);
+        assert_eq!(
+            agents.records,
+            [(
+                "007".to_owned(),
+                serde_json::json!({"handler": "mock-agent", "priority": 5})
+            )]
+        );
+        let roles = source.definitions(ConfigRecord::Role).unwrap();
+        assert_eq!(roles.records[0].0, "case-officer");
+        assert!(
+            source
+                .definitions(ConfigRecord::Operation)
+                .unwrap()
+                .records
+                .is_empty()
+        );
+        let refused = source
+            .put(ConfigRecord::Agent, "008", &serde_json::json!({}))
+            .unwrap_err();
+        assert_eq!(refused.kind(), RosterErrorKind::ReadOnly);
+        assert_eq!(ConfigRecord::from_name("agent"), Some(ConfigRecord::Agent));
+    }
+
+    #[test]
+    fn an_agent_that_cannot_resolve_makes_a_config_directory_invalid() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("agents.toml"),
+            "[agent.008]\nextends = \"nobody\"\n",
+        )
+        .unwrap();
+        let refused = TomlConfigDir::new(root.path()).load().unwrap_err();
+        assert_eq!(refused.kind(), RosterErrorKind::Invalid);
+        assert!(refused.to_string().contains("nobody"), "{refused}");
     }
 
     #[test]
