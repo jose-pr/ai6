@@ -2910,11 +2910,14 @@ mod tests {
                 .elect("station-a", Duration::from_nanos(1))
                 .unwrap()
         );
+        // Expiry is the backend's call: SQL judges it by the database's clock.
+        let standby = store.handle();
         crate::directorates::registry::suite::until(|| {
-            let lease = registry.headquarters().unwrap().unwrap();
-            (lease.expires() < unix_time().unwrap()).then_some(())
+            standby
+                .elect("station-b", DEFAULT_LEASE)
+                .unwrap()
+                .then_some(())
         });
-        assert!(store.handle().elect("station-b", DEFAULT_LEASE).unwrap());
         let taken = registry.headquarters().unwrap().unwrap();
         assert_eq!((taken.station(), taken.term()), ("station-b", 2));
         assert!(!registry.elect("station-a", DEFAULT_LEASE).unwrap());
