@@ -1,5 +1,6 @@
 //! The smaller record families: access tokens, audit, Agent roles, Cables and their
-//! quotas, quarantines, Sleeper authorizations, the timeline and the usage ledger.
+//! quotas, quarantines, Sleeper authorizations, Station logbooks, the timeline and the
+//! usage ledger.
 
 use std::io;
 
@@ -9,6 +10,9 @@ use crate::directorates::m::roster::AgentRole;
 use crate::directorates::medical::quarantine::Incident;
 use crate::directorates::medical::usage::{MissionUsage, UsageTotals};
 use crate::directorates::registry::cables::{Cable, CableState};
+use crate::directorates::registry::logbook::{
+    LogbookStore, MAX_LOGBOOK_BYTES, StationReport, append_report,
+};
 use crate::directorates::registry::quarantine::{
     MAX_QUARANTINES, MAX_RECORD_BYTES as MAX_QUARANTINE_BYTES, Quarantine, QuarantineStore,
     add_incident, quarantine_report, validate_quarantine,
@@ -22,7 +26,7 @@ use crate::directorates::registry::store::{
     MAX_AUDIT_RECORD_BYTES, MAX_AUDIT_RESULTS, MAX_CABLE_FILES, MAX_CABLE_RECORD_BYTES,
     cable_error, cable_sent_event, check_quota_buckets, invalid_data, quota_allows, quota_balances,
     unix_time, validate_access_token_record, validate_cable_id, validate_registry_key,
-    validate_token_digest,
+    validate_station_id, validate_token_digest,
 };
 use crate::directorates::registry::timeline::{MAX_TIMELINE_EVENTS, TimelineEvent, TimelineStore};
 use crate::directorates::registry::usage::{UsageStore, add_usage, cost_on_day, parse_ledger};
@@ -733,14 +737,51 @@ impl SleeperStore for SqlRegistry {
         operation: &str,
         name: &str,
         sleeper: &Sleeper,
-        window: i64,
+        round: (i64, Option<&str>),
         received_by: &str,
     ) -> io::Result<Fire> {
-        match self.submit_brief(&fired_brief(operation, name, sleeper, window, received_by)) {
+        match self.submit_brief(&fired_brief(operation, name, sleeper, round, received_by)) {
             Ok(()) => Ok(Fire::Queued),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
             Err(error) => Err(error),
         }
+    }
+}
+
+impl LogbookStore for SqlRegistry {
+    fn file_station_report(&self, report: &StationReport) -> io::Result<()> {
+        report.validate()?;
+        self.write(|tx, revision| {
+            let mut logbook: Vec<StationReport> = match tx.query_opt(
+                "SELECT reports FROM ai6_logbooks WHERE station = $1",
+                &[report.station.as_str().into()],
+            )? {
+                Some(row) => from_json(&row.text(0)?, "Station logbook")?,
+                None => Vec::new(),
+            };
+            append_report(&mut logbook, report);
+            let text = bounded_json(&logbook, MAX_LOGBOOK_BYTES, "Station logbook")?;
+            tx.execute(
+                "INSERT INTO ai6_logbooks (station, reports, revision) VALUES ($1, $2, $3) \
+                 ON CONFLICT (station) DO UPDATE SET reports = excluded.reports, \
+                 revision = excluded.revision",
+                &[report.station.as_str().into(), text.into(), revision.into()],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn logbook(&self, station: &str) -> io::Result<Vec<StationReport>> {
+        validate_station_id(station)?;
+        self.read(|tx| {
+            match tx.query_opt(
+                "SELECT reports FROM ai6_logbooks WHERE station = $1",
+                &[station.into()],
+            )? {
+                Some(row) => from_json(&row.text(0)?, "Station logbook"),
+                None => Ok(Vec::new()),
+            }
+        })
     }
 }
 

@@ -12,12 +12,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::directorates::m::cover::Disclosure;
+use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::roster::{Operation, Roster};
 use crate::directorates::registry::backend::*;
-use crate::directorates::registry::sleepers::Fire;
+use crate::directorates::registry::sleepers::{Fire, Sleeper};
 use crate::directorates::registry::sources::{
     CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
+use crate::directorates::registry::store::GONE_DARK_AFTER;
 use crate::station::plugins::Plugins;
 use guatiao::ToValue;
 
@@ -325,22 +327,92 @@ pub(crate) fn fire_due_sleepers(
             let Some(window) = sleeper.due_window(now, approval.at) else {
                 continue;
             };
-            match registry.fire_sleeper(&operation.id, name, sleeper, window, station) {
-                Ok(Fire::Queued) => {
-                    queued += 1;
-                    eprintln!(
-                        "ai6: sleeper {name} of Operation {} queued a brief",
-                        operation.id
-                    );
-                }
-                Ok(Fire::AlreadyFired) => {}
-                Err(error) => {
-                    eprintln!("ai6: sleeper {name} of Operation {}: {error}", operation.id);
+            let rounds = if sleeper.each_station {
+                round_stations(registry, roster, &operation.id, sleeper, now)
+                    .into_iter()
+                    .map(Some)
+                    .collect()
+            } else {
+                vec![None]
+            };
+            for round in rounds {
+                match registry.fire_sleeper(
+                    &operation.id,
+                    name,
+                    sleeper,
+                    (window, round.as_deref()),
+                    station,
+                ) {
+                    Ok(Fire::Queued) => {
+                        queued += 1;
+                        match &round {
+                            Some(round) => eprintln!(
+                                "ai6: sleeper {name} of Operation {} queued the round of Station {round}",
+                                operation.id
+                            ),
+                            None => eprintln!(
+                                "ai6: sleeper {name} of Operation {} queued a brief",
+                                operation.id
+                            ),
+                        }
+                    }
+                    Ok(Fire::AlreadyFired) => {}
+                    Err(error) => {
+                        eprintln!("ai6: sleeper {name} of Operation {}: {error}", operation.id);
+                    }
                 }
             }
         }
     }
     queued
+}
+
+/// The Stations an `each_station` sleeper holds a round on: every Station whose last check-in
+/// placement accepts for the Operation, within the sleeper's own `stations`, for the Agent or
+/// role it names.
+///
+/// What only delays a brief does not exclude a Station: its load, its resources and Agent
+/// quarantines are left out, so a busy Station still gets its round and runs it when it has
+/// room. A Station that has gone dark gets none; it gets the window's round when it checks
+/// in again while the window may still fire.
+fn round_stations(
+    registry: &dyn RegistryBackend,
+    roster: &Roster,
+    operation: &str,
+    sleeper: &Sleeper,
+    now: i64,
+) -> Vec<String> {
+    let Ok(policy) = OperationPolicy::from_roster(roster, operation) else {
+        return Vec::new();
+    };
+    let records = match registry.stations(Duration::MAX) {
+        Ok(records) => records,
+        Err(error) => {
+            eprintln!("ai6: Stations for the rounds of Operation {operation}: {error}");
+            return Vec::new();
+        }
+    };
+    records
+        .iter()
+        .filter(|record| {
+            sleeper.stations.is_empty() || sleeper.stations.iter().any(|s| s == record.station())
+        })
+        .filter_map(|record| {
+            let mut facts = StationFacts::from_record(record, now as f64, GONE_DARK_AFTER, 0);
+            facts.running = 0;
+            facts.resources = None;
+            let request = PlacementRequest {
+                stations: vec![record.station().to_owned()],
+                agent: sleeper.agent.clone(),
+                role: sleeper.role.clone(),
+                ..PlacementRequest::default()
+            };
+            (!placement::place(&policy, &request, &[facts])
+                .choices
+                .is_empty())
+            .then(|| record.station().to_owned())
+        })
+        .collect()
 }
 
 fn unix_seconds() -> i64 {
@@ -749,6 +821,96 @@ mod tests {
             1
         );
         assert_eq!(takeover.list_new().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_each_station_sleeper_rounds_every_eligible_station_once_per_window_across_failover() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("operations.toml"),
+            "[operation.H]\nclearance = \"field\"\n\
+             [operation.H.sleepers.rounds]\nschedule = \"0 * * * *\"\ntitle = \"Station round\"\n\
+             role = \"head-of-station\"\neach_station = true\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("agents.toml"),
+            "[agent.M]\nhandler = \"mock\"\nclearance = \"field\"\nroles = [\"head-of-station\"]\n\
+             [role.head-of-station]\npurpose = \"Keep the Station fit.\"\npolicy = \"Report.\"\n",
+        )
+        .unwrap();
+        let roster = Roster::load(dir.path()).unwrap();
+        let sleeper = roster.operation("H").unwrap().sleepers["rounds"].clone();
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let check_in = |station: &str, roles: &[&str], handlers: &[&str], running: usize| {
+            registry
+                .check_in(
+                    station,
+                    BTreeMap::from([
+                        ("roles".to_owned(), serde_json::json!(roles)),
+                        ("capacity".to_owned(), serde_json::json!(2)),
+                        ("running".to_owned(), serde_json::json!(running)),
+                        ("handlers".to_owned(), serde_json::json!(handlers)),
+                    ]),
+                )
+                .unwrap();
+        };
+        // A full Station still gets its round; it runs it when it has room.
+        check_in("station-a", &["execution"], &["mock"], 2);
+        check_in("station-b", &["control", "execution"], &["mock"], 0);
+        check_in("station-c", &["control"], &["mock"], 0);
+        check_in("station-d", &["execution"], &["other"], 0);
+        // Just after the hour, so every call below evaluates the same window while the
+        // check-ins, taken at the real time, are still fresh.
+        let real = unix_seconds();
+        let now = real - real.rem_euclid(3600) + 1;
+        let window = sleeper.due_window(now, 0).unwrap();
+        registry
+            .authorize_sleeper("H", "rounds", &sleeper, "operator", window - 60)
+            .unwrap();
+
+        let mut warned = BTreeSet::new();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-b", now, &mut warned),
+            2
+        );
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-b", now + 30, &mut warned),
+            0
+        );
+        // The Station that takes over the Headquarters lease fires no second round.
+        let takeover = FileRegistry::open(state.path());
+        let mut fresh = BTreeSet::new();
+        assert_eq!(
+            fire_due_sleepers(&takeover, &roster, "station-a", now + 40, &mut fresh),
+            0
+        );
+        let mut queued = takeover.list_new().unwrap();
+        queued.sort_by_key(|brief| brief.key());
+        let rounds = queued
+            .iter()
+            .map(|brief| (brief.stations.clone(), brief.role.clone()))
+            .collect::<Vec<_>>();
+        let role = Some("head-of-station".to_owned());
+        assert_eq!(
+            rounds,
+            [
+                (vec!["station-a".to_owned()], role.clone()),
+                (vec!["station-b".to_owned()], role)
+            ]
+        );
+        // A Station that has gone dark is held no round.
+        assert!(round_stations(&registry, &roster, "H", &sleeper, real + 120).is_empty());
+        // A sleeper's own `stations` narrows the rounds.
+        let narrowed = Sleeper {
+            stations: vec!["station-b".to_owned()],
+            ..sleeper
+        };
+        assert_eq!(
+            round_stations(&registry, &roster, "H", &narrowed, now),
+            ["station-b"]
+        );
     }
 
     #[test]

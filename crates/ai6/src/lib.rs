@@ -125,8 +125,8 @@ pub use directorates::registry::approvals::{
 };
 pub use directorates::registry::backend::{
     AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore, AuditStore,
-    BriefStore, CableStore, ClearanceStore, QuarantineStore, RegistryBackend, SessionStore,
-    SleeperStore, SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
+    BriefStore, CableStore, ClearanceStore, LogbookStore, QuarantineStore, RegistryBackend,
+    SessionStore, SleeperStore, SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
     LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey, Require,
@@ -140,6 +140,10 @@ pub use directorates::registry::cables::{
     MAX_CABLE_FANOUT, MAX_CABLE_TTL,
 };
 pub use directorates::registry::clearance::ClearanceGrant;
+pub use directorates::registry::logbook::{
+    HEAD_OF_STATION_ROLE, LOGBOOK_LENGTH, Severity, StationFinding, StationFindingKind,
+    StationReport,
+};
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
     MAX_RECENT_EVENT_CHARS, MAX_RECENT_EVENTS, NewSession, SessionError, SessionLaunch,

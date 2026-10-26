@@ -12,6 +12,7 @@ mod ephemeral;
 #[cfg(feature = "cables-mcp")]
 mod green_ink;
 mod harness;
+mod head_of_station;
 mod medical;
 mod promotion;
 mod recovery;
@@ -3509,6 +3510,14 @@ async fn start_mission(
     if let Some(role) = &role {
         initial_context.push(format!("Role purpose: {}", role.purpose));
         initial_context.push(format!("Role policy: {}", role.policy));
+    }
+    let (worker, worker_mission) = (state.clone(), mission.clone());
+    if let Ok(Some(logbook)) = tokio::task::spawn_blocking(move || {
+        head_of_station::round_context(&worker, &worker_mission)
+    })
+    .await
+    {
+        initial_context.push(logbook);
     }
     if session_hold(&state, &mission_id).is_some() {
         initial_context.push(

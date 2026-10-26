@@ -15,9 +15,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::bona_fides::{Origin, Provenance, now_secs};
+use super::logbook::station_key;
 use super::store::{
     Brief, FileRegistry, hex_digest, invalid_data, registry_lock, safe_component, unix_time,
-    write_atomic,
+    validate_station_id, write_atomic,
 };
 use super::timeline::{TimelineEvent, record_event_locked};
 use crate::directorates::registry::backend::*;
@@ -51,6 +52,20 @@ pub struct Sleeper {
     /// Higher values sort first.
     #[serde(default)]
     pub priority: i64,
+    /// Stations its briefs are limited to; empty adds no limit. Like a brief's `stations`, it
+    /// only narrows the Operation's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stations: Vec<String>,
+    /// Queue one brief per window for each live Station that placement accepts for the
+    /// Operation, each narrowed to that Station: a round of every Station.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub each_station: bool,
+}
+
+// Unset fields stay out of the serialized form, so the fingerprint of a definition that does
+// not use them is the one it had before they existed.
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl Sleeper {
@@ -58,7 +73,8 @@ impl Sleeper {
     ///
     /// # Errors
     ///
-    /// Returns a message for a bad cron expression, an empty title or an oversized prompt.
+    /// Returns a message for a bad cron expression, an empty title, an oversized prompt or a
+    /// `stations` entry that is not a Station ID.
     pub fn validate(&self) -> Result<(), String> {
         Cron::parse(&self.schedule).map_err(|e| format!("schedule: {e}"))?;
         if self.title.trim().is_empty() {
@@ -66,6 +82,15 @@ impl Sleeper {
         }
         if self.prompt.len() > MAX_PROMPT_BYTES {
             return Err(format!("prompt is over {MAX_PROMPT_BYTES} bytes"));
+        }
+        if let Some(station) = self
+            .stations
+            .iter()
+            .find(|station| validate_station_id(station).is_err())
+        {
+            return Err(format!(
+                "stations entry {station:?} is not a valid Station ID"
+            ));
         }
         Ok(())
     }
@@ -268,28 +293,43 @@ pub fn window_label(window: i64) -> String {
     )
 }
 
-/// Builds the brief a sleeper queues for one window.
-pub fn sleeper_brief(operation: &str, name: &str, sleeper: &Sleeper, window: i64) -> Brief {
+/// Builds the brief a sleeper queues for one window. `station` names the Station of one
+/// round of an [`each_station`](Sleeper::each_station) sleeper: the brief is narrowed to it
+/// and its key names it, so each Station's round is queued once.
+pub fn sleeper_brief(
+    operation: &str,
+    name: &str,
+    sleeper: &Sleeper,
+    window: i64,
+    station: Option<&str>,
+) -> Brief {
     let label = window_label(window);
     let mut data = BTreeMap::new();
-    data.insert(
-        "sleeper".to_owned(),
-        serde_json::json!({ "operation": operation, "name": name, "window": label }),
+    let mut origin = serde_json::json!({ "operation": operation, "name": name, "window": label });
+    let mut id = format!(
+        "{}.{}.{label}",
+        safe_component(operation),
+        safe_component(name)
     );
+    if let Some(station) = station {
+        origin["station"] = serde_json::json!(station);
+        id.push('.');
+        id.push_str(&station_key(station));
+    }
+    data.insert("sleeper".to_owned(), origin);
     Brief {
         title: sleeper.title.clone(),
         body: sleeper.prompt.clone(),
-        id: format!(
-            "{}.{}.{label}",
-            safe_component(operation),
-            safe_component(name)
-        ),
+        id,
         source: SLEEPER_BRIEF_SOURCE.to_owned(),
         operation: Some(operation.to_owned()),
         agent: sleeper.agent.clone(),
         role: sleeper.role.clone(),
         tags: Vec::new(),
-        stations: Vec::new(),
+        stations: match station {
+            Some(station) => vec![station.to_owned()],
+            None => sleeper.stations.clone(),
+        },
         priority: sleeper.priority,
         url: None,
         data,
@@ -343,7 +383,9 @@ pub trait SleeperStore {
     /// Returns an error when the Registry cannot be written.
     fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool>;
 
-    /// Queues the brief for one window unless it already exists in any Registry state. Its
+    /// Queues the brief for one `(window, station)` round: the window's brief, or with a
+    /// `station` that Station's round in it (see [`sleeper_brief`]), unless it already
+    /// exists in any Registry state. Its
     /// [`Provenance`] names the sleeper, its definition's fingerprint and `received_by`, the
     /// Station that fired it.
     ///
@@ -355,20 +397,20 @@ pub trait SleeperStore {
         operation: &str,
         name: &str,
         sleeper: &Sleeper,
-        window: i64,
+        round: (i64, Option<&str>),
         received_by: &str,
     ) -> io::Result<Fire>;
 }
 
-/// The brief a sleeper queues for one window, with its provenance.
+/// The brief a sleeper queues for one window and round, with its provenance.
 pub(super) fn fired_brief(
     operation: &str,
     name: &str,
     sleeper: &Sleeper,
-    window: i64,
+    (window, station): (i64, Option<&str>),
     received_by: &str,
 ) -> Brief {
-    let mut brief = sleeper_brief(operation, name, sleeper, window);
+    let mut brief = sleeper_brief(operation, name, sleeper, window, station);
     brief.provenance = Some(
         Provenance::new(Origin::Sleeper, &brief, received_by, now_secs())
             .with_principal(name)
@@ -438,10 +480,10 @@ impl SleeperStore for FileRegistry {
         operation: &str,
         name: &str,
         sleeper: &Sleeper,
-        window: i64,
+        round: (i64, Option<&str>),
         received_by: &str,
     ) -> io::Result<Fire> {
-        match self.submit_brief(&fired_brief(operation, name, sleeper, window, received_by)) {
+        match self.submit_brief(&fired_brief(operation, name, sleeper, round, received_by)) {
             Ok(_) => Ok(Fire::Queued),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
             Err(error) => Err(error),
@@ -457,6 +499,7 @@ mod tests {
     backend_tests!(
         a_window_fires_once_however_many_stations_evaluate_it,
         approval_covers_one_exact_definition,
+        each_station_s_round_is_its_own_brief_narrowed_to_it,
     );
 
     /// 2026-10-25T10:00:00Z
@@ -559,7 +602,88 @@ mod tests {
             agent: None,
             role: Some("maintenance".to_owned()),
             priority: 1,
+            stations: Vec::new(),
+            each_station: false,
         }
+    }
+
+    #[test]
+    fn unset_round_fields_leave_the_fingerprint_as_it_was() {
+        // The digest of `nightly()` as written before `stations` and `each_station` existed.
+        let before = hex_digest(&Sha256::digest(
+            br#"{"schedule":"0 3 * * *","title":"Update dependencies","prompt":"Update the lockfile and open a branch.","agent":null,"role":"maintenance","priority":1}"#,
+        ));
+        assert_eq!(nightly().fingerprint(), before);
+        let rounds = Sleeper {
+            each_station: true,
+            ..nightly()
+        };
+        let narrowed = Sleeper {
+            stations: vec!["station-a".to_owned()],
+            ..nightly()
+        };
+        assert_ne!(rounds.fingerprint(), before);
+        assert_ne!(narrowed.fingerprint(), before);
+        assert_ne!(rounds.fingerprint(), narrowed.fingerprint());
+        let bad = Sleeper {
+            stations: vec![String::new()],
+            ..nightly()
+        };
+        assert!(bad.validate().unwrap_err().contains("stations"));
+    }
+
+    #[test]
+    fn a_narrowed_sleeper_s_brief_carries_its_stations() {
+        let narrowed = Sleeper {
+            stations: vec!["station-a".to_owned(), "station-b".to_owned()],
+            ..nightly()
+        };
+        let brief = sleeper_brief("G", "deps", &narrowed, NOW, None);
+        assert_eq!(brief.stations, ["station-a", "station-b"]);
+        assert_eq!(brief.id, "G.deps.20261025T1000Z");
+        // Odd Station IDs that read alike as a key still make distinct rounds.
+        let one = sleeper_brief("G", "deps", &nightly(), NOW, Some("a b"));
+        let other = sleeper_brief("G", "deps", &nightly(), NOW, Some("a/b"));
+        assert_ne!(one.id, other.id);
+        assert_eq!(one.stations, ["a b"]);
+        assert_eq!(one.data["sleeper"]["station"], "a b");
+    }
+
+    fn each_station_s_round_is_its_own_brief_narrowed_to_it(store: &dyn Store) {
+        let headquarters = store.handle();
+        let takeover = store.handle();
+        let rounds = Sleeper {
+            each_station: true,
+            ..nightly()
+        };
+        let window = rounds.due_window(NOW, 0).unwrap();
+        for station in ["station-a", "station-b"] {
+            assert_eq!(
+                headquarters
+                    .fire_sleeper("G", "deps", &rounds, (window, Some(station)), "hq")
+                    .unwrap(),
+                Fire::Queued
+            );
+            assert_eq!(
+                takeover
+                    .fire_sleeper("G", "deps", &rounds, (window, Some(station)), "hq-2")
+                    .unwrap(),
+                Fire::AlreadyFired,
+                "a takeover Headquarters fires no second round for {station}"
+            );
+        }
+        let mut queued = headquarters.list_new().unwrap();
+        queued.sort_by_key(Brief::key);
+        assert_eq!(
+            queued.iter().map(Brief::key).collect::<Vec<_>>(),
+            [
+                "sleeper--G.deps.20261025T0300Z.station-a",
+                "sleeper--G.deps.20261025T0300Z.station-b"
+            ]
+        );
+        assert_eq!(queued[0].stations, ["station-a"]);
+        assert_eq!(queued[1].stations, ["station-b"]);
+        assert!(queued.iter().all(|brief| brief.provenance.is_some()));
     }
 
     fn a_window_fires_once_however_many_stations_evaluate_it(store: &dyn Store) {
@@ -570,13 +694,13 @@ mod tests {
 
         assert_eq!(
             first_hq
-                .fire_sleeper("G", "deps", &sleeper, window, "station-a")
+                .fire_sleeper("G", "deps", &sleeper, (window, None), "station-a")
                 .unwrap(),
             Fire::Queued
         );
         assert_eq!(
             second_hq
-                .fire_sleeper("G", "deps", &sleeper, window, "station-a")
+                .fire_sleeper("G", "deps", &sleeper, (window, None), "station-a")
                 .unwrap(),
             Fire::AlreadyFired
         );
@@ -600,7 +724,7 @@ mod tests {
         let brief = first_hq.claim_new(None).unwrap().unwrap();
         assert_eq!(
             second_hq
-                .fire_sleeper("G", "deps", &sleeper, window, "station-a")
+                .fire_sleeper("G", "deps", &sleeper, (window, None), "station-a")
                 .unwrap(),
             Fire::AlreadyFired
         );
@@ -615,7 +739,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             second_hq
-                .fire_sleeper("G", "deps", &sleeper, window, "station-a")
+                .fire_sleeper("G", "deps", &sleeper, (window, None), "station-a")
                 .unwrap(),
             Fire::AlreadyFired
         );
@@ -625,7 +749,7 @@ mod tests {
         let next = sleeper.due_window(NOW + 86_400, 0).unwrap();
         assert_eq!(
             second_hq
-                .fire_sleeper("G", "deps", &sleeper, next, "station-a")
+                .fire_sleeper("G", "deps", &sleeper, (next, None), "station-a")
                 .unwrap(),
             Fire::Queued
         );

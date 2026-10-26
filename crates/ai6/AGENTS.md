@@ -1019,6 +1019,7 @@ pub trait AgentRoleStore;    // the per-Operation Agent-role overlay (store.rs)
 pub trait AgentRecordStore;  // Agent track records (agent_records.rs)
 pub trait ClearanceStore;    // clearance grants per Agent and Operation (clearance.rs)
 pub trait ApprovalStore;     // green ink and class authorisations (approvals.rs)
+pub trait LogbookStore;      // each Station's Head of Station reports (logbook.rs)
 pub trait QuarantineStore;   // quarantines and incidents (quarantine.rs)
 pub trait SessionStore;      // Session records and fenced leases (sessions.rs)
 pub trait SleeperStore;      // Sleeper authorizations and fired windows (sleepers.rs)
@@ -1028,7 +1029,7 @@ pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
 pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
 pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
 pub trait RegistryBackend: AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
-    + AuditStore + AgentRoleStore + ApprovalStore + ClearanceStore + QuarantineStore + SessionStore
+    + AuditStore + AgentRoleStore + ApprovalStore + ClearanceStore + LogbookStore + QuarantineStore + SessionStore
     + SleeperStore + SourceStore + TimelineStore + UsageStore + VettingStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
@@ -2008,10 +2009,12 @@ pub struct Sleeper {
     pub agent: Option<String>,
     pub role: Option<String>,
     pub priority: i64,
+    pub stations: Vec<String>,   // narrows its briefs, like Brief.stations; empty adds no limit
+    pub each_station: bool,      // one round per eligible Station per window (default false)
 }
 impl Sleeper {
-    pub fn validate(&self) -> Result<(), String>;
-    pub fn fingerprint(&self) -> String;   // SHA-256 over every field
+    pub fn validate(&self) -> Result<(), String>;   // also refuses a `stations` entry that is no Station ID
+    pub fn fingerprint(&self) -> String;   // SHA-256 over every set field; unset stations/each_station leave it as before
     pub fn due_window(&self, now: i64, authorized_at: i64) -> Option<i64>;
 }
 pub struct SleeperAuthorization { pub fingerprint: String, pub authorized_by: String, pub at: i64 }
@@ -2025,22 +2028,63 @@ impl Cron {
     pub fn latest_at_or_before(&self, now: i64) -> Option<i64>; // Unix seconds, looks back 366 days
 }
 pub fn window_label(window: i64) -> String; // "20261025T0300Z"
+/// The brief of one window; with `station`, that Station's round, narrowed to it.
+pub fn sleeper_brief(operation: &str, name: &str, sleeper: &Sleeper, window: i64, station: Option<&str>) -> Brief;
 
 SleeperStore::authorize_sleeper(operation: &str, name: &str, sleeper: &Sleeper, authorized_by: &str, at: i64) -> io::Result<()>
 SleeperStore::sleeper_authorization(operation: &str, name: &str) -> io::Result<Option<SleeperAuthorization>>
 SleeperStore::revoke_sleeper(operation: &str, name: &str) -> io::Result<bool>
-SleeperStore::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, window: i64, received_by: &str) -> io::Result<Fire>
+SleeperStore::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, round: (i64, Option<&str>), received_by: &str) -> io::Result<Fire>  // (window, station)
 ```
 
 Cron fields take `*`, numbers, `a-b`, `,` lists and `/step`; day-of-week is 0-7 (0 and 7 are
 Sunday); when both day fields are restricted a day matches if either does. A schedule that
 never matches within a year (`0 0 30 2 *`) parses but never fires.
 
-`fire_sleeper` submits a brief keyed `sleeper--<operation>.<name>.<window>` and reports
+`fire_sleeper` submits a brief keyed `sleeper--<operation>.<name>.<window>` (with a Station,
+`...<window>.<station>`, the ID made key-safe with a digest when it had to change) and reports
 `AlreadyFired` when that key exists in `new`, `claimed`, `done` or `failed`, which is what
-makes a window fire once across Stations. Authorizations are stored under `sleepers/`. The
+makes a window, or one Station's round in it, fire once across Stations. A brief's
+`stations` is the sleeper's, or `[station]` for a round; its data's `sleeper` object names
+`operation`, `name`, `window` and, for a round, `station`. For an `each_station` sleeper the
+Headquarters holder fires one round for each Station whose last check-in placement accepts
+for the Operation and the sleeper's Agent or role, within the sleeper's `stations`; load,
+resources and quarantines are ignored there (they only delay a brief), and a Station dark
+past `GONE_DARK_AFTER` gets no round until it checks in again. Authorizations are stored under `sleepers/`. The
 Headquarters holder fires only sleepers whose stored fingerprint equals the current
 definition, using windows after the approval time and no more than a day old.
+
+## Station logbooks (`ai6::directorates::registry::logbook`)
+
+Each Station's logbook keeps the newest `LOGBOOK_LENGTH` (20) reports its Head of Station
+filed, oldest first, under `logbook/<station>.json` (SQL table `ai6_logbooks`). A Mission of
+role `HEAD_OF_STATION_ROLE` whose brief, as its Station leased it, names that Station alone is
+the Station's round: the Station starts it with the logbook as fenced context.
+
+```rust
+pub const HEAD_OF_STATION_ROLE: &str = "head-of-station";
+pub const LOGBOOK_LENGTH: usize = 20;
+pub const MAX_SUMMARY_BYTES: usize = 4096;
+pub const MAX_FINDINGS: usize = 32;
+pub const MAX_FINDING_BYTES: usize = 1024;
+#[non_exhaustive] pub enum StationFindingKind { Disk, Theater, SafeHouse, Provider, Other } // kebab-case; as_str, FromStr, Display
+#[non_exhaustive] pub enum Severity { Info, Warning, Critical }                     // lowercase; ordered
+#[non_exhaustive] pub struct StationFinding { pub kind: StationFindingKind, pub severity: Severity, pub text: String }
+impl StationFinding { pub fn new(kind, severity, text) -> Self; }
+#[non_exhaustive] pub struct StationReport {
+    pub station: String, pub at: i64, pub summary: String, pub findings: Vec<StationFinding>,
+    pub mission: Option<String>, pub agent: Option<String>,
+}
+impl StationReport {
+    pub fn new(station, summary, at: i64) -> Self;
+    pub fn with_findings(self, findings: impl IntoIterator<Item = StationFinding>) -> Self;
+    pub fn filed_by(self, mission, agent) -> Self;
+    pub fn worst(&self) -> Option<Severity>;
+    pub fn validate(&self) -> io::Result<()>;   // InvalidInput: Station ID, 1..=4096-byte summary, <= 32 findings of 1..=1024 bytes
+}
+LogbookStore::file_station_report(report: &StationReport) -> io::Result<()>   // drops the oldest past 20
+LogbookStore::logbook(station: &str) -> io::Result<Vec<StationReport>>         // oldest first; empty when none
+```
 
 ## Vetting (`ai6::directorates::m::vetting`, `ai6::directorates::registry::vetting`)
 

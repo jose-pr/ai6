@@ -184,6 +184,13 @@ CREATE TABLE ai6_sleeper_authorizations (
     PRIMARY KEY (operation, name)
 );
 
+-- Each Station's logbook: the newest Head of Station reports, oldest first.
+CREATE TABLE ai6_logbooks (
+    station TEXT PRIMARY KEY,
+    reports TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+
 CREATE TABLE ai6_source_cursors (
     operation TEXT NOT NULL,
     provider TEXT NOT NULL,

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Head of Station rounds: a Sleeper may set `stations` (narrowing its briefs, like a brief's
+  `stations`) and `each_station = true`, which queues one brief per window for each Station
+  whose last check-in placement accepts for the Operation and the sleeper's Agent or role,
+  narrowed to that Station and keyed `sleeper--<operation>.<name>.<window>.<station>`, so a
+  Headquarters failover never doubles a round; load, resources and quarantines do not exclude
+  a Station. Both fields are part of the fingerprint when set (an unchanged definition keeps
+  its approval). `SleeperStore::fire_sleeper` takes `(window, station)`. Each Station keeps a
+  logbook of the newest 20 Head of Station reports (`LogbookStore`: `file_station_report`,
+  `logbook`, on the file and SQL Registries; `StationReport`, `StationFinding`, `StationFindingKind`,
+  `Severity`), and a Mission of role `head-of-station` (`HEAD_OF_STATION_ROLE`) whose leased
+  brief names its Station alone starts with that logbook as fenced context. The example
+  roster defines the role and a commented `housekeeping` Operation.
 - Vetting: before M places a brief, the Headquarters holder runs deterministic checks under
   the Operation's `[operation.ID.vetting]` settings (`vetting = "off"` turns them off, a
   reported weakening). A malformed brief (no visible title, text past `max_brief_bytes`,
