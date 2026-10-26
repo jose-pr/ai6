@@ -289,6 +289,9 @@ directory (`token`, readable only by its user). On the Station's own host the St
 to it directly. On another host it runs `ai6 runner call` there through the Theater's
 transport for each request, and `ai6 runner serve --detach` when no runner answers; a link
 that drops costs only time, since the runner keeps every event until a read gets through.
+A runner out of reach for longer than the Operation's `lost_after_secs` is probed once more
+and, if it is gone, its Session is lost and the Mission tried again
+([Runner loss](missions.md#runner-loss-the-station-lives)).
 The harness's Cable tools go through a relay the runner gives each Session, with its own URL
 and token, which the Station points at its own Cable endpoint (on another host, through a
 reverse forward over the transport) and repoints when it re-attaches or the link returns;
@@ -297,7 +300,8 @@ while no Station is attached the relay answers that none is.
 Run one by hand with `ai6 runner serve [--state-dir PATH] [--plugin-path PATH]...` (or
 `--detach` to start it in the background); `ai6 runner call METHOD PATH` sends it one
 request. Stopping the runner stops the harnesses it supervises, and a runner that restarts
-ends the Sessions it lost with a `failed` event saying why. Its events are in
+ends the Sessions it lost with a `lost` event saying why, which their Station takes as the
+Session lost. Its events are in
 `sessions/<key>/events.jsonl`; ended Sessions are removed a week after they started, the
 next time a runner starts.
 
@@ -318,7 +322,11 @@ where there is none), so the link that started it can drop without ending it:
   directory stays after the Mission for inspection.
 - The Station reads `out` from the last byte it took and writes to `in`. While the link is
   down a read finds nothing new and the harness keeps running; once the transport
-  reconnects, the Station reads on from where it stopped, so nothing is lost.
+  reconnects, the Station reads on from where it stopped, so nothing is lost. A link down,
+  or a harness quiet, for the Operation's `lost_after_secs` gets one probe over the
+  transport; a Theater that cannot be reached, or a harness whose process is gone with no
+  `exit` recorded, loses the Session
+  ([Runner loss](missions.md#runner-loss-the-station-lives)).
 - The harness reaches the Station's Cable endpoint through a reverse forward on a loopback
   port of the Theater, which the transport re-opens on the same port after a reconnect.
 - The harness gets the host's login environment plus the Session's, and no terminal: it is

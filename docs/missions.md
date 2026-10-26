@@ -275,9 +275,38 @@ Mission (a brief whose Mission never started is simply queued again):
   already been tried three times is filed as lost either way.
 
 Only Missions that came from a brief are recovered this way: a Mission created on one
-Station through its private API lives only in that Station's book. A Theater with a
-runner that dies while its Station lives is not handled yet: the Station keeps waiting for
-the runner.
+Station through its private API lives only in that Station's book.
+
+### Runner loss: the Station lives
+
+A Station that cannot reach a Session's runner keeps waiting, since a dropped link costs
+only time: the runner spools what it misses. It does not wait forever. Once the runner has
+been out of reach for the Operation's `lost_after_secs` (45 seconds, three check-ins, unless
+set), the Station probes it once more through the Theater's transport. If the runner answers,
+the Station carries on reading where it stopped and the wait starts over. If the runner is
+gone, no longer has the Session, or the Theater cannot be reached, the Station gives the
+Session up:
+
+- it stops reading the harness and lets its Session lease lapse, so the record is marked
+  `lost` with the reason (the last events it saw are kept for the hand-off);
+- it hands the brief back, which the Registry queues again as a [new
+  attempt](#lost-sessions-a-new-attempt-with-a-hand-off), or files when the Operation says
+  `on_lost = "fail"`; the Mission is `abandoned` in this Station's book, or `failed` when it
+  came from no brief;
+- the Mission's events end with a `lost` event naming the reason.
+
+A runner that restarts has lost the harnesses it supervised and says so with a `lost` event,
+which the Station handles the same way at once. A harness the [detached
+wrapper](theaters.md#the-detached-wrapper) runs without a runner is treated alike: out of reach
+for the grace, or quiet for it while its process is gone with no exit recorded, it is lost.
+
+The same holds after a restart or an adoption. A Station that cannot re-attach to a Session
+tries again after 5 seconds, then 10, 20 and 40, and every minute after that; once its tries
+have failed for `lost_after_secs`, it probes the runner (or the Theater) and gives the
+Session up the same way when the probe fails too.
+
+When the next attempt runs on the Theater the lost one ran on, its Station first ends the
+lost harness if the runner still has it, so the two never work side by side.
 
 ### Lost Sessions: a new attempt with a hand-off
 
@@ -305,7 +334,9 @@ touching the Agent's worktree, staging area or `HEAD`. The commit follows the Op
 cover (no Agent or model named, the cover's footer, the `cover_identity` as author). The
 next attempt's safe house is then a new worktree on that branch at that commit, so the
 `git` provider fetches it from the remote; a provider without history starts from the base.
-Without a checkpoint the hand-off says the work could not be recovered.
+An attempt that works where the lost one did (the safe house its Station kept, or the same
+directory on the same Theater) is told to inspect the work it finds there instead. Otherwise
+the hand-off says the work could not be recovered.
 
 The attempts are on the Mission: `GET /v1/missions` and the Mission detail list each one's
 Station, Theater, status, why it was lost and the branch it was checkpointed to, and

@@ -123,7 +123,7 @@ see it, and the credential it needs is leased only against an approval.
 | **Relocation** | Headquarters authority moving to a fallback Station |
 | **Outstation** | an execution-only Station |
 | **Check-in / gone dark** | a Station's recurring Registry record / a Station whose check-ins lapsed |
-| **Extraction** | carrying a Mission on when its Station goes dark: another Station adopts a Session a runner keeps alive, or a lost Session is tried again elsewhere with a hand-off (`recovery` in code; an Operation's `on_lost`) |
+| **Extraction** | carrying a Mission on when its Station goes dark, or its runner does: another Station adopts a Session a runner keeps alive, or a lost Session is tried again with a hand-off (`recovery` in code; an Operation's `on_lost` and `lost_after_secs`) |
 | **Theater** | the host or environment a Session runs in (an Operation's `theater`) |
 | **Safe house** | a Mission's isolated workspace, made by a safe-house provider (`SafeHouseProvider`; the `workspace` key on an Operation) |
 | **Registry** | the shared store for briefs, leases, check-ins and audit (`RegistryBackend`: a shared directory, `FileRegistry`, or a database, `SqlRegistry`) |

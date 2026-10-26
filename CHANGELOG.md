@@ -44,6 +44,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (default) or `"pack"` orders them. The board, placement previews, Moneypenny and
   `ai6ctl stations` show the figures, their sample time and each choice's score
   (`ai6::Resources`, `ResourceLimits`, `PlacementStrategy`, `probe_resources`).
+- Recovery when a runner dies while its Station lives. A Station that cannot reach a
+  Session's runner, or the harness the detached wrapper runs, for the Operation's
+  `lost_after_secs` (default 45, `directorates::m::recovery::DEFAULT_LOST_AFTER_SECS`)
+  probes it once more through the Theater's transport; if the runner is gone, no longer has
+  the Session, or the Theater cannot be reached, the Session is marked `lost` with the
+  reason and the brief is handed back, to be tried again or filed under `on_lost` like a
+  Session lost with its Station. A runner that restarts ends the Sessions it lost with a
+  `lost` event, which the Station handles the same way. A Station re-attaching after a
+  restart or an adoption backs off between tries (`reattach_delay`: 5 s doubling to a
+  minute) instead of retrying every 5 seconds forever, and gives the Session up once its
+  tries have failed for `lost_after_secs` and a probe fails. A retry on the same Theater
+  ends the lost runner Session first, and a retry working where the lost attempt did is
+  told so in its hand-off.
 - Recovery when a Station goes dark. Once its brief lease and its Session's lease lapse, the
   Headquarters Station hands the brief to a live Station that reaches the same Theater's
   field runner, which takes the Session lease (fenced) and re-attaches, replaying the events

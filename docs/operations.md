@@ -92,19 +92,23 @@ Both are overridable per Operation and an unknown `on_limit` value fails the loa
 
 ## Lost Sessions
 
-When a Station goes dark with a Session that no other Station can re-attach to (its harness
-ran on that Station's own host), the Session is lost:
+A Session is lost when its Station goes dark and no other Station can re-attach to it (its
+harness ran on that Station's own host), or when its Station lives but the Theater's runner,
+or a wrapped harness, stays out of reach:
 
 ```toml
 [operation.G]
 on_lost = "retry" # or "fail"
+lost_after_secs = 45
 ```
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `on_lost` | `retry` | `retry` queues the brief again as a new attempt on another eligible Station, starting from the last checkpoint (see `workspace.checkpoint_remote`) with a hand-off about the lost attempt, up to three attempts in all. `fail` files the brief as lost |
+| `on_lost` | `retry` | `retry` queues the brief again as a new attempt on an eligible Station, starting from the last checkpoint (see `workspace.checkpoint_remote`) with a hand-off about the lost attempt, up to three attempts in all. `fail` files the brief as lost |
+| `lost_after_secs` | `45` | Seconds a Session's runner or wrapped harness may stay out of reach (three Station check-ins) before its Station probes it once more through the Theater's transport and, if it is still gone, marks the Session lost. Must be above zero |
 
-An unknown value fails the load. See [Station loss](missions.md#station-loss-adoption).
+An unknown value fails the load. See [Station loss](missions.md#station-loss-adoption) and
+[Runner loss](missions.md#runner-loss-the-station-lives).
 
 ## Spreading or packing work
 

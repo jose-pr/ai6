@@ -260,6 +260,7 @@ pub struct Operation {
     pub limit_fallback_secs: u64,                 // park time when a limit has no reset time; default 1800
     pub on_lost: OnLost,                          // Retry (default) or Fail; see Recovery
     pub placement: PlacementStrategy,             // Spread (default) or Pack; see Placement
+    pub lost_after_secs: u64,                     // runner/wrapped harness out of reach before it is probed and lost; default 45; above 0
     pub budget: Budget,                           // no limit unless configured
     pub exposure: ExposurePolicy,                 // strict unless configured
     pub quarantine: QuarantinePolicy,             // 3 stalls/loops, 2 budget stops, 1 blown cover per 24 h
@@ -1292,6 +1293,21 @@ that adopts the Session or marks the Session lost and queues the brief again (or
 `on_lost = "fail"`). A new attempt links to the lost Session, starts its safe house from the
 lost one's checkpoint and is told what it was doing.
 
+A live Station gives a Session up the same way when its runner (or detached-wrapper harness)
+stays out of reach for the Operation's `lost_after_secs` and one more probe through the
+Theater's transport fails (runner gone, Session unknown to it, Theater unreachable; for the
+wrapper, also a quiet harness whose process is gone with no `exit`), or when a runner
+restart ends the Session with a `lost` event. It writes the Session's notes, lets its Session
+lease lapse and marks it lost, then lets its brief lease lapse and recovers it under
+`on_lost` (no new Registry method: a lapsed lease is lost and recovered as for a dark
+Station). Its Mission book says `abandoned` (or `failed` when filed, or without a brief),
+and a `lost` event carries the reason. The Headquarters treats an expired brief lease whose
+latest Session is already `lost` under `on_lost`. A Station handed the brief back re-queues
+its own `abandoned` copy of the Mission (`MissionStore::retry`) and the new attempt, on the
+same Theater, first closes the lost runner Session. Re-attach tries after a restart or an
+adoption back off by `reattach_delay`; once they have failed for `lost_after_secs`, the
+runner (or the Theater's transport) is probed and the Session given up the same way.
+
 ```rust
 /// The live Station that should re-attach to `session`'s runner harness, placed like a new
 /// Session but only on that Theater, in field mode, never on `session.station`. Errs, with
@@ -1299,6 +1315,10 @@ lost one's checkpoint and is told what it was doing.
 /// eligible Station.
 pub fn adopter(policy: &OperationPolicy, request: &PlacementRequest,
                stations: &[StationFacts], session: &SessionRecord) -> Result<PlacementChoice, String>
+pub const DEFAULT_LOST_AFTER_SECS: u64 = 45;              // Operation::lost_after_secs default
+pub const FIRST_REATTACH_DELAY: Duration = 5 s;          // doubles per failed re-attach try
+pub const MAX_REATTACH_DELAY: Duration = 60 s;
+pub fn reattach_delay(failures: u32) -> Duration         // 5, 10, 20, 40, 60, 60, ... s
 ```
 
 ## Usage ledger and quarantine records (`ai6::directorates::registry::{usage, quarantine}`)
@@ -2257,7 +2277,8 @@ before any Station can read it. `after` acknowledges everything up to `N` and is
 `cursor`; a read without it starts from the cursor, so a Station that comes back replays what
 it missed (at least once: the last event it took may come again). A `completed`, `failed`
 or `limit` event ends the Session and stops the harness. A runner that restarts ends every
-Session it had running with a `failed` event saying so; ended Sessions older than seven days
+Session it had running with a `lost` event saying so (a Station gives such a Session up as
+lost); ended Sessions older than seven days
 are removed when a runner starts. When the start environment carries `AI6_CABLE_MCP_URL` and
 `_TOKEN`, the runner starts a loopback relay with its own URL and token, gives the harness
 those, and relays to the Station's endpoint, which `PUT .../cable` replaces; with none set it
@@ -2278,7 +2299,9 @@ PATH` through the Theater's transport for every request (`command` defaults to `
 `<command> runner serve --detach` with the settings' plugin paths and terminal when none
 answers. A read that cannot reach the runner answers "no event yet", so a dropped link costs
 only time; the Station re-opens its Cable forward and repoints the relay once a read gets
-through again. The start records the runner Session's key in the launch record before the
+through again. Past the Operation's `lost_after_secs` out of reach it probes once more and,
+if the runner is gone (or answers 404 for the Session), gives the Session up as lost (see
+Recovery). The start records the runner Session's key in the launch record before the
 harness starts. Shutdown and losing the Session lease let go without stopping the harness;
 the Mission stays Working, so a restarted Station re-attaches to the same runner Session (a
 parked Mission is resumed instead) and repoints the Cable relay at its own endpoint.
