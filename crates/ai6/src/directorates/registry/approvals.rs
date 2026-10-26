@@ -221,7 +221,7 @@ impl Approval {
     }
 }
 
-/// A person's decision, as handed to [`FileRegistry::decide_approval`].
+/// A person's decision, as handed to [`ApprovalStore::decide_approval`].
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ruling {
@@ -619,7 +619,7 @@ pub trait ApprovalStore {
     ///
     /// # Errors
     ///
-    /// As [`FileRegistry::mission_approvals`].
+    /// As [`ApprovalStore::mission_approvals`].
     fn live_approval(
         &self,
         operation: &str,

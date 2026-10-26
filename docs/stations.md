@@ -87,7 +87,11 @@ clocks. Check-ins expire after 45 seconds; a Station whose check-ins lapse has *
 and its leased briefs are recovered by the Headquarters Station: a Session a runner still
 supervises is adopted by another Station, any other is lost and tried again
 ([Recovery](missions.md#recovery)). The Registry is file-backed; a SQL
-backend is not supported.
+backend is not supported. Stations and Universal Exports reach it only through the
+`RegistryBackend` traits (one per kind of record: briefs, Stations, Sessions, Cables,
+approvals and so on), and the shared directory (`FileRegistry`) is the one store that
+implements them; a program embedding the Station can pass another with
+`ServeConfig::with_registry`.
 
 ## Capacity and visibility
 

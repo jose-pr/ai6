@@ -2,7 +2,7 @@
 //!
 //! An Agent asks before an irreversible step (a push to a protected ref, a merge, a release,
 //! a deletion, a change of clearance); an operator signs or refuses, and the decision is kept
-//! in the Registry ([`crate::FileRegistry::request_approval`]). An Operation's
+//! in the Registry ([`crate::ApprovalStore::request_approval`]). An Operation's
 //! [`GreenInkPolicy`] says which steps need that: the `strict` preset (the default) asks for
 //! every built-in kind at every clearance and lets `desk` Agents ask for nothing, `licensed`
 //! lets `00` Agents push and merge unattended, and every part can be chosen individually.

@@ -3,7 +3,8 @@
 An Operation is a registered project or workspace and its policy. Operations are global:
 no Station owns one, and any Station whose labels match the Operation's `station_labels` (and
 that has its checkout) can run its Missions. The configuration owns the checkout, Agent
-roster, clearance ceiling, concurrency budget, workspace and placement. AI6 reads Operations from `operations.toml` in its configuration directory.
+roster, clearance ceiling, concurrency budget, workspace and placement. AI6 reads Operations from `operations.toml` in its configuration directory
+unless the Station is given another source ([Where configuration comes from](#where-configuration-comes-from)).
 Only registered Operations may contribute a local `.ai6/agents.toml` override.
 
 ```toml
@@ -193,6 +194,22 @@ schedule = "0 3 * * *"
 title = "Update dependencies"
 prompt = "Update the lockfile and run the tests."
 ```
+
+## Where configuration comes from
+
+A Station's roster (Operations, Agents, roles and covers) comes from a configuration
+source. The default is the configuration directory's `operations.toml`, `agents.toml` and
+`covers.toml`. A program that embeds the Station can keep that configuration anywhere
+else (a database, an HTTP API, its own code): it builds the roster from typed records with
+`Roster::builder()` (or `Roster::from_parts`), where `Operation::new`, `Agent::new`,
+`AgentRole::new` and `Cover::new` start from the same defaults a file gives, and passes a
+`ConfigSource` to `ServeConfig::with_config_source`. Records built this way get the same
+checks as the files; an invalid configuration stops the Station rather than half-loading.
+
+A source reports a revision and whether it has changed since one, so a Station can tell
+cheaply when to reload. Today a Station reads its roster once, at start. Theaters are not
+part of it: each Station reads its own `theaters.toml`, along with its loadouts and Cable
+settings, from the configuration directory.
 
 Missions and provider Sessions are visible in the Moneypenny app and through `ai6ctl`. The Mission ID identifies
 the work; the provider-issued Session ID identifies one resumable agent run. See

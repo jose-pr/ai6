@@ -22,7 +22,8 @@ default feature set remains dependency-light.
 
 The library root re-exports common contracts. Two public modules group the rest.
 `directorates` holds the decisions: `directorates::m` owns access, identity, Missions, the
-roster and cover; `directorates::registry` owns the Registry (intake) and Cables; `directorates::q`
+roster, where it comes from (`config`) and cover; `directorates::registry` owns the Registry
+(intake), the traits a Registry store implements (`backend`) and Cables; `directorates::q`
 owns loadouts, secret leases, terminal contracts and the safe-house contract; `directorates::section_00` owns the
 AgentHandler contract; `directorates::medical` owns Session monitoring. `station` holds the
 node that runs them: `station::server` (daemon service and `serve*`), `station::plugins`
@@ -215,6 +216,10 @@ pub struct Agent {
     pub budget: Budget,                           // layered over the Operation's
     pub max_concurrent: Option<usize>,
 }
+impl Agent {
+    /// The defaults a file gives `[agent.ID]`: clearance "field", priority 0, nothing else.
+    pub fn new(id: impl Into<String>) -> Self;
+}
 #[non_exhaustive]
 pub struct AgentRole {
     pub id: String,
@@ -222,6 +227,7 @@ pub struct AgentRole {
     pub policy: String,
 }
 impl AgentRole {
+    pub fn new(id: impl Into<String>, purpose: impl Into<String>, policy: impl Into<String>) -> Self;
     pub fn validate(&self) -> Result<(), RosterError>;
 }
 #[non_exhaustive]
@@ -252,11 +258,16 @@ pub struct Operation {
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
 }
 impl Operation {
+    /// The defaults a file gives `[operation.ID]`: clearance "field", cover "covert",
+    /// on_blown "flag", strict exposure and green ink, `Workspace::default()`.
+    pub fn new(id: impl Into<String>) -> Self;
+    /// The checks the file loader runs after resolving an Operation.
+    pub fn validate(&self) -> Result<(), RosterError>;
     /// `workspace.provider`, else `"git"` when the source or `path` holds a `.git`, else `None`.
     pub fn safe_house_provider(&self) -> Option<String>;
 }
 #[non_exhaustive]
-pub struct Workspace {
+pub struct Workspace {   // Default: the defaults below
     pub provider: Option<String>,
     pub source: Option<PathBuf>,   // defaults to the Operation's `path`
     pub base: String,              // default "HEAD"
@@ -274,6 +285,13 @@ impl core::fmt::Display for RosterError;
 impl core::error::Error for RosterError;
 impl Roster {
     pub fn load(root: impl Into<PathBuf>) -> Result<Self, RosterError>;
+    pub fn from_parts(
+        operations: impl IntoIterator<Item = Operation>,
+        agents: impl IntoIterator<Item = Agent>,
+        roles: impl IntoIterator<Item = AgentRole>,
+        covers: Covers,
+    ) -> Result<Self, RosterError>;
+    pub fn builder() -> RosterBuilder;
     pub fn operation(&self, key: &str) -> Result<&Operation, RosterError>;
     pub fn operations(&self) -> impl Iterator<Item = &Operation>;
     pub fn role(&self, key: &str) -> Result<&AgentRole, RosterError>;
@@ -289,11 +307,24 @@ impl Roster {
     ) -> Result<Agent, RosterError>;
     pub fn agents_for_operation(&self, operation_key: &str) -> Result<Vec<Agent>, RosterError>;
 }
+#[must_use] #[derive(Default)]
+pub struct RosterBuilder;
+impl RosterBuilder {
+    pub fn operation(self, operation: Operation) -> Self;
+    pub fn agent(self, agent: Agent) -> Self;
+    pub fn role(self, role: AgentRole) -> Self;
+    pub fn cover(self, cover: Cover) -> Self;      // replaces a built-in of the same name
+    pub fn build(self) -> Result<Roster, RosterError>;   // Roster::from_parts
+}
 pub fn config_dir() -> Result<PathBuf, RosterError>;
 ```
 
 `load` reads `operations.toml` and `agents.toml`; missing files produce an empty roster and
-invalid files fail closed. Operations are global: an Operation is not owned by a Station,
+invalid files fail closed. `from_parts` (and `builder().build()`) is the way in without
+files: each Operation goes through `validate`, each role through `validate`, each Agent's
+codename and clearance are checked at once, and a key given twice is refused. A code-built
+Agent is complete as given (it inherits nothing); an Operation checkout's
+`.ai6/agents.toml` may still extend or replace it. Operations are global: an Operation is not owned by a Station,
 and its `station_labels` lists the Station labels a Station must carry to run its Missions.
 `stations = ["id", ..]` optionally lists the Stations allowed to run them; a Mission's brief
 may narrow that list but never widen it. `theater` binds the Operation to one Theater by ID.
@@ -314,6 +345,36 @@ Agent matched. `operations` yields stable codename order. `config_dir` resolves
 `AI6_CONFIG_DIR`, then `XDG_CONFIG_HOME/ai6`, then the platform configuration directory.
 `Agent.limits` is layered over the daemon-wide watchdog settings when a Mission starts or
 resumes.
+
+## Configuration sources (`ai6::directorates::m::config`)
+
+Where a Station's roster comes from. Theaters are not part of it: each Station reads its
+own.
+
+```rust
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConfigRevision;   // opaque; new(u64), get()
+#[non_exhaustive]
+pub struct ConfigSnapshot { pub revision: ConfigRevision, pub roster: Roster }
+impl ConfigSnapshot { pub fn new(revision: ConfigRevision, roster: Roster) -> Self; }
+pub trait ConfigSource: Send + Sync {
+    fn load(&self) -> Result<ConfigSnapshot, RosterError>;
+    /// Default: load and compare revisions.
+    fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError>;
+}
+pub struct TomlConfigDir;   // ConfigSource; new(root), root()
+pub struct MemoryConfigSource;   // ConfigSource; new(roster), replace(&self, roster)
+```
+
+A source hands out only checked rosters: an unacceptable configuration is an error. The
+shape is coqui-access-kit's `Table` (load plus a cheap `changes_since`) for one value, the
+roster. `TomlConfigDir` is `Roster::load` over `operations.toml`, `agents.toml` and
+`covers.toml`; its revision is a digest of those three files' contents, taken before they
+are parsed, so `changes_since` reads them but parses nothing while they are unchanged.
+`MemoryConfigSource` starts at revision 0 and moves to the next on each `replace`. Any
+other store (a database, an HTTP API) builds its roster with `Roster::from_parts`. The
+daemon reads the roster once at start (`ServeConfig::with_config_source`; default
+`TomlConfigDir` over the configuration directory).
 
 ## Theaters (`ai6::directorates::m::theaters`)
 
@@ -724,6 +785,41 @@ zero) in `operations.toml`; an unknown value or zero fails the roster load. `Wai
 Mission and resumes the same provider Session; `Backup` posts the next qualified Agent
 whose handler differs from the limited one as a new attempt, and parks when none exists.
 
+## Registry backend (`ai6::directorates::registry::backend`)
+
+The Registry's operations are traits, one per record family, so the Station and Universal
+Exports can run on any store. `RegistryBackend` is all of them together, implemented for
+every type that implements each family (a blanket impl: nothing to write for it).
+
+```rust
+pub trait BriefStore;        // proposals, queued briefs, claims, leases, outcomes (store.rs)
+pub trait StationStore;      // check-ins, Station settings, Headquarters election (store.rs)
+pub trait AccessTokenStore;  // Universal Exports access tokens (store.rs)
+pub trait CableStore;        // Cables, their delivery state and send quotas (store.rs)
+pub trait AuditStore;        // audit records (store.rs)
+pub trait AgentRoleStore;    // the per-Operation Agent-role overlay (store.rs)
+pub trait ApprovalStore;     // green ink and class authorisations (approvals.rs)
+pub trait QuarantineStore;   // quarantines and incidents (quarantine.rs)
+pub trait SessionStore;      // Session records and fenced leases (sessions.rs)
+pub trait SleeperStore;      // Sleeper authorizations and fired windows (sleepers.rs)
+pub trait SourceStore;       // Source cursors, ingested items, reports owed (sources.rs)
+pub trait TimelineStore;     // the activity timeline (timeline.rs)
+pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
+pub trait RegistryBackend: BriefStore + StationStore + AccessTokenStore + CableStore
+    + AuditStore + AgentRoleStore + ApprovalStore + QuarantineStore + SessionStore
+    + SleeperStore + SourceStore + TimelineStore + UsageStore + Send + Sync {}
+impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
+```
+
+Every trait is re-exported at the crate root. The methods are synchronous; async callers run
+them on a blocking thread. Calls through `dyn RegistryBackend` need no import; calling them
+on a `FileRegistry` value needs the family trait in scope
+(`use ai6::directorates::registry::backend::*`). The sections below give each family's
+methods under the module that defines it. `FileRegistry` is the only implementation: one
+directory every Station shares. The daemon takes `Arc<dyn RegistryBackend>` through
+`ServeConfig::with_registry` (default `FileRegistry::from_environment()`), Universal Exports
+through `Gateway::with_registry`, and `CableRelay::new` takes one too.
+
 ## Registry store (`ai6::directorates::registry::store`)
 
 ```rust
@@ -753,14 +849,14 @@ pub struct MissionProposal {
     pub brief: Brief,
     pub created_at: f64,
 }
-FileRegistry::submit_mission_proposal(&MissionProposal) -> io::Result<PathBuf>
-FileRegistry::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
-FileRegistry::promote_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<Brief>
-FileRegistry::reject_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<MissionProposal>
+BriefStore::submit_mission_proposal(&MissionProposal) -> io::Result<()>
+BriefStore::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
+BriefStore::promote_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<Brief>
+BriefStore::reject_mission_proposal(operation: &str, proposal_id: &str) -> io::Result<MissionProposal>
 ```
 
-`FileRegistry::open(root)` reads the file-backed Registry's `new/` queue without
-creating or changing files; `from_environment()` resolves `AI6_REGISTRY`, then
+`FileRegistry::open(root)` opens the file-backed Registry without creating or changing
+files; `from_environment()` resolves `AI6_REGISTRY`, then
 `AI6_HOME/registry`, then the platform state directory. `list_new()` returns valid
 version-1 `Brief` values ordered by priority descending, creation time ascending, then
 key. It skips malformed briefs, rejects unknown fields and
@@ -770,14 +866,14 @@ is read-only. `claim_new(key)` moves one queued brief to `claimed/` under the sh
 
 ```rust
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
-record_audit(entry: &AuditRecord) -> io::Result<PathBuf>
+record_audit(entry: &AuditRecord) -> io::Result<()>
 list_audit(limit: usize) -> io::Result<Vec<AuditRecord>>
 audit_records() -> io::Result<Vec<AuditRecord>>
 record_event(event: &TimelineEvent) -> io::Result<()>
 timeline_events(operation: &str) -> io::Result<Vec<TimelineEvent>>
 station_settings(station: &str) -> io::Result<Option<StationSettings>>
 set_station_settings(station: &str, settings: &StationSettings) -> io::Result<()>
-submit_brief(brief: &Brief) -> io::Result<PathBuf>
+submit_brief(brief: &Brief) -> io::Result<()>
 claim_with_lease(key: Option<&str>, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>
 lease(key: &str) -> io::Result<Option<Lease>>
 read_claimed(key: &str) -> io::Result<Option<Brief>>
@@ -786,7 +882,7 @@ expired() -> io::Result<Vec<Lease>>
 renew(key: &str, station: &str, duration: Duration) -> io::Result<bool>
 recover(lease: &Lease, max_attempts: u32, by: &str) -> io::Result<Option<LeaseRecovery>>
 hand_over(lease: &Lease, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>  // same claim and attempt; None if the lease changed or is live
-finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<&[u8]>, station: Option<&str>) -> io::Result<Option<PathBuf>>
+finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<&[u8]>, station: Option<&str>) -> io::Result<bool>
 ```
 
 `submit_brief` validates and atomically writes a unique Mission brief to `new/`; it
@@ -842,7 +938,7 @@ fails the Cable or authorization it describes. Events never hold prompts, messag
 bodies, terminal bytes or secrets.
 
 `StationSettings::try_new(station, capacity)` accepts a Station ID and a maximum
-concurrent Mission count from 1 through 1,024. `FileRegistry::station_settings(station)`
+concurrent Mission count from 1 through 1,024. `StationStore::station_settings(station)`
 reads the validated current value; `set_station_settings(station, settings)` persists it
 under a collision-resistant Station-specific file and the shared Registry lock. A daemon
 uses the live value for new Mission admission and scheduling; absent settings retain its
@@ -859,8 +955,8 @@ global role catalog for authorized Universal Exports readers.
 `read_claimed` reads a leased Brief without changing it. `claim_with_lease` returns
 `None` when no brief matches. Renew returns `false` if the Station no longer owns the
 claimed brief. `recover` returns `Requeued`, `Failed`, or `None` when another Station
-changed the lease. `finish` returns the destination path or `None` when the caller's lease
-was lost. Lease expiration uses wall-clock Unix seconds; shared Stations need synchronized
+changed the lease. `finish` returns `true` once the outcome is filed and `false` when the
+caller's lease was lost. Lease expiration uses wall-clock Unix seconds; shared Stations need synchronized
 clocks. SQL Registry URLs remain unsupported. Station liveness and Headquarters election
 use the same versioned file layout and `.ai6-registry.lock`; the scheduler does not yet
 use election for distributed placement.
@@ -952,16 +1048,16 @@ pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStat
                           //   .launch(SessionLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
 #[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, HeldBy(String), Stale, Io(io::Error) }
 
-impl FileRegistry {
-    pub fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>
-    pub fn session(&self, id: &str) -> io::Result<Option<SessionRecord>>
-    pub fn sessions(&self) -> io::Result<Vec<SessionRecord>>          // stable ID order
-    pub fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>  // every Session of the Mission, earliest first
-    pub fn take_session(&self, id: &str, station: &str, ttl: Duration) -> Result<SessionRecord, SessionError>
-    pub fn renew_session(&self, id: &str, station: &str, fence: u64, ttl: Duration) -> Result<SessionRecord, SessionError>
-    pub fn update_session(&self, id: &str, station: &str, fence: u64, update: SessionUpdate) -> Result<SessionRecord, SessionError>
-    pub fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError>
-    pub fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>  // highest attempt
+pub trait SessionStore {
+    fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>
+    fn session(&self, id: &str) -> io::Result<Option<SessionRecord>>
+    fn sessions(&self) -> io::Result<Vec<SessionRecord>>          // stable ID order
+    fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>  // every Session of the Mission, earliest first
+    fn take_session(&self, id: &str, station: &str, ttl: Duration) -> Result<SessionRecord, SessionError>
+    fn renew_session(&self, id: &str, station: &str, fence: u64, ttl: Duration) -> Result<SessionRecord, SessionError>
+    fn update_session(&self, id: &str, station: &str, fence: u64, update: SessionUpdate) -> Result<SessionRecord, SessionError>
+    fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError>
+    fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>  // highest attempt
 }
 ```
 
@@ -1004,19 +1100,20 @@ pub fn adopter(policy: &OperationPolicy, request: &PlacementRequest,
 ## Usage ledger and quarantine records (`ai6::directorates::registry::{usage, quarantine}`)
 
 ```rust
-impl FileRegistry {
-    // usage/<operation>/<mission>.json; additions are made under the Registry lock
-    pub fn record_usage(&self, operation: Option<&str>, mission: &str, session: &str,
-                        delta: &UsageTotals, now: i64) -> io::Result<MissionUsage>
-    pub fn mission_usage(&self, operation: Option<&str>, mission: &str) -> io::Result<Option<MissionUsage>>
-    pub fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64>  // micro-dollars, UTC day
-
-    // quarantine/<agent>--<operation or _all>.json, plus quarantine/incidents/<agent>.json
-    pub fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine>   // an existing record is kept
-    pub fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
-    pub fn quarantines(&self) -> io::Result<Vec<Quarantine>>
-    pub fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
-    pub fn record_incident(&self, agent: &str, incident: Incident) -> io::Result<Vec<Incident>>  // history, 7 days kept
+pub trait UsageStore {
+    // FileRegistry: usage/<operation>/<mission>.json; additions are made under the Registry lock
+    fn record_usage(&self, operation: Option<&str>, mission: &str, session: &str,
+                    delta: &UsageTotals, now: i64) -> io::Result<MissionUsage>
+    fn mission_usage(&self, operation: Option<&str>, mission: &str) -> io::Result<Option<MissionUsage>>
+    fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64>  // micro-dollars, UTC day
+}
+pub trait QuarantineStore {
+    // FileRegistry: quarantine/<agent>--<operation or _all>.json, plus quarantine/incidents/<agent>.json
+    fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine>   // an existing record is kept
+    fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
+    fn quarantines(&self) -> io::Result<Vec<Quarantine>>
+    fn is_quarantined(&self, agent: &str, operation: Option<&str>) -> io::Result<bool>
+    fn record_incident(&self, agent: &str, incident: Incident) -> io::Result<Vec<Incident>>  // history, 7 days kept
 }
 #[non_exhaustive] pub struct Quarantine { pub agent: String, pub operation: Option<String> /* None: every Operation */,
                                           pub reason: String, pub by: String, pub at: f64 }
@@ -1101,19 +1198,19 @@ impl ClassAuthorization {
     pub fn covers(&self, agent: &str, role: Option<&str>, clearance: &str, scope: &ActionScope) -> bool;
     pub fn validate(&self) -> io::Result<()>;   // needs a kind, an Agent or role, a glob, an expiry after the grant
 }
-impl FileRegistry {
-    pub fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus>;   // same ID returns the record
-    pub fn approval(&self, operation, id, now: f64) -> io::Result<Option<ApprovalStatus>>;
-    pub fn pending_approvals(&self, operation, now: f64) -> io::Result<Vec<ApprovalRequest>>;   // oldest first
-    pub fn mission_approvals(&self, operation, mission, now: f64) -> io::Result<Vec<ApprovalStatus>>;
-    pub fn live_approval(&self, operation, mission, scope: &ActionScope, now: f64) -> io::Result<Option<Approval>>;
-    pub fn decide_approval(&self, operation, id, ruling: &Ruling) -> io::Result<Approval>;
-    pub fn revoke_approval(&self, operation, id, by, at: f64) -> io::Result<Approval>;
-    pub fn mark_approval_notified(&self, operation, id, at: f64) -> io::Result<()>;
-    pub fn approve_by_class(&self, request, role: Option<&str>, clearance: &str, now: f64) -> io::Result<Option<Approval>>;
-    pub fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()>;
-    pub fn class_authorizations(&self, operation) -> io::Result<Vec<ClassAuthorization>>;   // oldest first
-    pub fn revoke_class_authorization(&self, operation, id, by, at: f64) -> io::Result<ClassAuthorization>;
+pub trait ApprovalStore {
+    fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus>;   // same ID returns the record
+    fn approval(&self, operation, id, now: f64) -> io::Result<Option<ApprovalStatus>>;
+    fn pending_approvals(&self, operation, now: f64) -> io::Result<Vec<ApprovalRequest>>;   // oldest first
+    fn mission_approvals(&self, operation, mission, now: f64) -> io::Result<Vec<ApprovalStatus>>;
+    fn live_approval(&self, operation, mission, scope: &ActionScope, now: f64) -> io::Result<Option<Approval>>;
+    fn decide_approval(&self, operation, id, ruling: &Ruling) -> io::Result<Approval>;
+    fn revoke_approval(&self, operation, id, by, at: f64) -> io::Result<Approval>;
+    fn mark_approval_notified(&self, operation, id, at: f64) -> io::Result<()>;
+    fn approve_by_class(&self, request, role: Option<&str>, clearance: &str, now: f64) -> io::Result<Option<Approval>>;
+    fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()>;
+    fn class_authorizations(&self, operation) -> io::Result<Vec<ClassAuthorization>>;   // oldest first
+    fn revoke_class_authorization(&self, operation, id, by, at: f64) -> io::Result<ClassAuthorization>;
 }
 ```
 
@@ -1162,11 +1259,11 @@ pub enum Ingest { Queued, Updated, Unchanged, InFlight, Finished }
 pub struct FinishedSourceBrief { pub brief: Brief, pub outcome: serde_json::Value, pub ok: bool }
 pub fn source_brief(operation: &str, provider: &str, item: &SourceItem) -> Brief;
 
-FileRegistry::source_cursor(operation: &str, provider: &str) -> io::Result<Option<String>>
-FileRegistry::set_source_cursor(operation: &str, provider: &str, cursor: &str) -> io::Result<()>
-FileRegistry::ingest_source_item(operation: &str, provider: &str, item: &SourceItem) -> io::Result<Ingest>
-FileRegistry::unreported_source_briefs() -> io::Result<Vec<FinishedSourceBrief>>
-FileRegistry::mark_source_reported(finished: &FinishedSourceBrief, reported: bool) -> io::Result<()>
+SourceStore::source_cursor(operation: &str, provider: &str) -> io::Result<Option<String>>
+SourceStore::set_source_cursor(operation: &str, provider: &str, cursor: &str) -> io::Result<()>
+SourceStore::ingest_source_item(operation: &str, provider: &str, item: &SourceItem) -> io::Result<Ingest>
+SourceStore::unreported_source_briefs() -> io::Result<Vec<FinishedSourceBrief>>
+SourceStore::mark_source_reported(finished: &FinishedSourceBrief, reported: bool) -> io::Result<()>
 ```
 
 A provider receives its settings as `SourceConfig::settings_toml` and validates them itself;
@@ -1221,10 +1318,10 @@ impl Cron {
 }
 pub fn window_label(window: i64) -> String; // "20261025T0300Z"
 
-FileRegistry::authorize_sleeper(operation: &str, name: &str, sleeper: &Sleeper, authorized_by: &str, at: i64) -> io::Result<()>
-FileRegistry::sleeper_authorization(operation: &str, name: &str) -> io::Result<Option<SleeperAuthorization>>
-FileRegistry::revoke_sleeper(operation: &str, name: &str) -> io::Result<bool>
-FileRegistry::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, window: i64) -> io::Result<Fire>
+SleeperStore::authorize_sleeper(operation: &str, name: &str, sleeper: &Sleeper, authorized_by: &str, at: i64) -> io::Result<()>
+SleeperStore::sleeper_authorization(operation: &str, name: &str) -> io::Result<Option<SleeperAuthorization>>
+SleeperStore::revoke_sleeper(operation: &str, name: &str) -> io::Result<bool>
+SleeperStore::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, window: i64) -> io::Result<Fire>
 ```
 
 Cron fields take `*`, numbers, `a-b`, `,` lists and `/step`; day-of-week is 0-7 (0 and 7 are
@@ -1277,8 +1374,9 @@ them with `ai6 peer waiting` (fingerprint and source address) and accepts one wi
 as they are. The default AI6 state location can be overridden with `AI6_STATE` or `AI6_HOME`.
 `AccessTokenRecord` is the versioned device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
-expiry and optional revocation times; its debug output redacts the digest. `FileRegistry`
-stores and validates records in the `access-tokens/` and `access-token-digests/`
+expiry and optional revocation times; its debug output redacts the digest.
+`AccessTokenStore` (`store_access_token`, `find_access_token`, `revoke_access_token`);
+`FileRegistry` stores and validates records in the `access-tokens/` and `access-token-digests/`
 directories, returns only active records, and serializes revocation under the shared
 Registry lock.
 
@@ -1483,7 +1581,7 @@ Session; these value types do not authorize sends or resolve broadcast audiences
 trusted session adapters only; request objects have no sender identity. `CablePolicy`
 holds deny-by-default `CableGrant`s and per-Agent `CableInboundMode` values. A grant
 names an Agent (or `*`), a `CableAction` (`Send`, `Receive`, `Discover`, `Release`) and one exact
-`CableTarget`. `CableRelay::new(Arc<FileRegistry>, policy, endpoint_source, channels)`
+`CableTarget`. `CableRelay::new(Arc<dyn RegistryBackend>, policy, endpoint_source, channels)`
 uses the shared Registry, an authoritative Agent/Session directory and named channel
 members. `with_limits` configures bounded fan-out (1–1,000) and persistent sender/scope
 token buckets. `send(principal, CableSendRequest)` checks sender and every receiver,
@@ -1514,7 +1612,7 @@ and `scope_burst` bound routing. `ServeConfig::with_station_id` or `AI6_STATION_
 the Station identity; the default is `<host>-<random>`, created once and kept in `station-id`
 in the AI6 state directory so a restarted daemon stays the same Station.
 
-`FileRegistry::submit_cable(&cable)` stores the envelope under `cables/` with atomic
+`CableStore::submit_cable(&cable)` stores (in a `FileRegistry`) the envelope under `cables/` with atomic
 replacement and the same `.ai6-registry.lock` used by Registry claims. A retry with the
 same sender and idempotency key returns the stored record when immutable request content
 matches; conflicting content returns `AlreadyExists`. `find_cable(sender, key)` and
@@ -1617,7 +1715,10 @@ remains the authenticated public API.
 `Covers::default()` supplies `covert`, `partial` and `overt`. `Covers::load(config_dir)`
 loads `covers.toml`, with custom entries replacing built-ins of the same name;
 `parse_toml(source)` validates the same schema in memory. `get(name)` returns a policy or
-`CoverError`; `names()` returns sorted names.
+`CoverError`; `names()` returns sorted names; `insert(cover)` adds one in code, returning
+the policy it replaced. `Cover::new(name, description)` hides everything (no Agent author,
+trailer, model name, footer or announcement); the `with_*` methods set each `covers.toml`
+key, and `with_forbidden` fails on an invalid pattern.
 `Cover::briefing(identity, agent, model)` creates the initial Agent instructions and
 `check_commits(commits, identity, model)` returns ordered `CoverViolation` values for
 identity, attribution trailer, model mention, announcement, forbidden-pattern and footer
@@ -1636,8 +1737,17 @@ impl Covers {
     pub fn parse_toml(source: &str) -> Result<Self, CoverError>;
     pub fn get(&self, name: &str) -> Result<&Cover, CoverError>;
     pub fn names(&self) -> Vec<&str>;
+    pub fn insert(&mut self, cover: Cover) -> Option<Cover>;
 }
 impl Cover {
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self;
+    pub fn with_agent_author(self, allowed: bool) -> Self;       // agent_author
+    pub fn with_trailers(self, trailers: impl IntoIterator<Item = impl Into<String>>) -> Self;
+    pub fn with_suggestion(self, line: impl Into<String>) -> Self;  // suggest
+    pub fn with_model(self, allowed: bool) -> Self;              // model
+    pub fn with_footer(self, footer: impl Into<String>) -> Self;
+    pub fn with_announce(self, allowed: bool) -> Self;           // announce
+    pub fn with_forbidden(self, patterns: impl IntoIterator<Item = impl AsRef<str>>) -> Result<Self, CoverError>;
     pub fn name(&self) -> &str;
     pub fn disclosure(&self) -> Disclosure; // Hidden, Assisted or Full: what may be said outside the Operation
     pub fn briefing(&self, identity: Option<&CoverIdentity>, agent: &str, model: &str) -> String;
@@ -1659,9 +1769,14 @@ serve_with_config_dir_and_capacity(address: SocketAddr, plugin_paths: &[PathBuf]
 
 `ServeConfig::new(address)` defaults to the configured roster path, built-in Mission
 capacity, `StationConfig::default()` and no Universal Exports publisher.
-`with_plugin_paths`, `with_config_dir`, `with_station_id`, `with_station_config`,
-`with_max_concurrent_missions`, `with_watchdog` and, with feature `publisher`,
-`with_publisher` set those options before calling `serve_with_options`.
+`with_plugin_paths`, `with_config_dir`, `with_config_source`, `with_registry`,
+`with_station_id`, `with_station_config`, `with_max_concurrent_missions`, `with_watchdog`
+and, with feature `publisher`, `with_publisher` set those options before calling
+`serve_with_options`. The configuration directory (`with_config_dir`, default
+`config_dir()`) holds the Station's Theaters, loadouts and Cable settings, and its roster
+unless `with_config_source(Arc<dyn ConfigSource>)` names another source; the roster is
+read once at start. `with_registry(Arc<dyn RegistryBackend>)` replaces the
+`FileRegistry::from_environment()` default.
 
 Each returns `std::io::Result<()>`; `F: Future<Output = ()> + Send + 'static`. The
 background scheduler starts assigned queued Missions and leases file-backed Registry
@@ -1738,7 +1853,7 @@ resume request's `environment` under its `env`, after removing the loadout's var
 earlier Session held. A resume that re-attaches to a runner's live harness issues nothing.
 A backend refusal of an ordinary secret fails the start, and leases acquired by a failed
 issue are revoked. A `green_ink` secret is leased only while the Mission holds a live
-approval (`FileRegistry::mission_approvals`) of one of its `kinds`, once per approval (kept
+approval (`ApprovalStore::mission_approvals`) of one of its `kinds`, once per approval (kept
 in memory), with the approval's remaining time, at most an hour, as the TTL; otherwise its
 variable is absent. An exposed Session under the `secrets` restriction gets none. Leases are
 revoked when the Session's operation is finished, stopped, finalized or fenced out, on a

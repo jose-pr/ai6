@@ -1,7 +1,7 @@
 //! Quarantine: when an Agent is stopped everywhere, and what counts as a reason.
 //!
 //! The Registry keeps the quarantine records and the incidents that lead to them (see
-//! [`crate::FileRegistry::quarantine_agent`]). An Operation's [`QuarantinePolicy`] says how
+//! [`crate::QuarantineStore::quarantine_agent`]). An Operation's [`QuarantinePolicy`] says how
 //! many incidents within what window quarantine an Agent. Every threshold is a setting and
 //! `0` turns the matching trigger off; only an operator releases a quarantine.
 

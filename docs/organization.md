@@ -125,7 +125,7 @@ of step in advance. AI6 does not yet stop a step taken without green ink.
 | **Extraction** | carrying a Mission on when its Station goes dark: another Station adopts a Session a runner keeps alive, or a lost Session is tried again elsewhere with a hand-off (`recovery` in code; an Operation's `on_lost`) |
 | **Theater** | the host or environment a Session runs in (an Operation's `theater`) |
 | **Safe house** | a Mission's isolated workspace, made by a safe-house provider (`SafeHouseProvider`; the `workspace` key on an Operation) |
-| **Registry** | the shared store for briefs, leases, check-ins and audit (`FileRegistry`) |
+| **Registry** | the shared store for briefs, leases, check-ins and audit (`RegistryBackend`; the shared directory is `FileRegistry`) |
 | **Brief / debrief** | a Mission's request / the outcome the Registry files when it ends |
 | **Dead drop** | how the Registry works: briefs and outcomes exchanged without the sides meeting |
 | **Cable** | a durable, addressed agent-to-agent message with a relay-authenticated sender |

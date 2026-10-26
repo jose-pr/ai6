@@ -326,7 +326,7 @@ pub struct TimelineItem {
 
 `GET /v1/user/operations/{operation_id}/timeline` (query `cursor`, `mission`, `limit`;
 unknown parameters refused) needs `audit.read` on the Operation; another Operation's is
-`403`. It merges `ai6::FileRegistry::timeline_events(operation)` with the audit records
+`403`. It merges `ai6::TimelineStore::timeline_events(operation)` with the audit records
 whose Operation it is and, for each Station that hosts the Operation and whose `audit.read`
 the caller also holds, that Station's records (shown with `station_id`). Audit records of
 `mission.create.requested`, `mission.cancel`, `mission.retry`, `mission.resume` and
@@ -349,10 +349,11 @@ pub struct Gateway { /* shared, bounded state */ }
 
 impl Gateway {
     pub fn new(config: GatewayConfig) -> Self;
-    pub fn with_registry(config: GatewayConfig, registry: ai6::FileRegistry) -> Self;
+    /// Any Registry store: `Arc::new(ai6::FileRegistry::from_environment()?)` is the command's.
+    pub fn with_registry(config: GatewayConfig, registry: Arc<dyn ai6::RegistryBackend>) -> Self;
     pub fn with_access(
         config: GatewayConfig,
-        registry: ai6::FileRegistry,
+        registry: Arc<dyn ai6::RegistryBackend>,
         access: AccessProviders,
     ) -> Self;
     pub fn authenticate_station(&self, presented: &str) -> Result<(), GatewayError>;

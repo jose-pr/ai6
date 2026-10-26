@@ -295,6 +295,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The Registry's operations are traits, one per record family (`BriefStore`,
+  `StationStore`, `AccessTokenStore`, `CableStore`, `AuditStore`, `AgentRoleStore`,
+  `ApprovalStore`, `QuarantineStore`, `SessionStore`, `SleeperStore`, `SourceStore`,
+  `TimelineStore`, `UsageStore`), together `RegistryBackend`; `FileRegistry` implements
+  them, and calling them on it needs `use ai6::directorates::registry::backend::*`. The
+  Station, its Cable relay and `universal_exports::Gateway::{with_registry, with_access}`
+  take `Arc<dyn RegistryBackend>`; `ServeConfig::with_registry` sets the Station's.
+  `submit_brief`, `submit_mission_proposal` and `record_audit` return `()` and `finish`
+  returns whether it filed the outcome, rather than file paths.
+- A Station's roster comes from a `ConfigSource` (`load`, `changes_since` with a
+  `ConfigRevision`): `TomlConfigDir` (the configuration directory, the default) or
+  `MemoryConfigSource`, chosen with `ServeConfig::with_config_source`.
+  `Roster::from_parts` and `Roster::builder` build a roster from typed records, with
+  `Operation::new`, `Operation::validate`, `Agent::new`, `AgentRole::new`, `Cover::new`
+  and its `with_*` settings, and `Covers::insert`.
 - The detached wrapper passes a harness's environment through a FIFO instead of an `env`
   file, so nothing it carries is written on the Theater.
 - The project is renamed from coagent to AI6.
