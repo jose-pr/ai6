@@ -74,7 +74,8 @@ retire_warning_days = 14  # the default; 0 gives no warning
 | `retired` | The Agent is never chosen: its running Missions finish, queued ones go to the next qualified Agent, and a brief that names it, or whose role only it could fill, fails assignment with `no qualified Agent for role "R"; 007 retired on 2027-01-31` |
 
 Nothing falls back to a model the operator did not choose: a role with no other qualified
-Agent fails, and a queued Mission with no backup waits. Within `retire_warning_days` of the
+Agent fails, and a queued Mission with no backup waits, with the reason on the Mission and a
+`waiting` event on the Operation's timeline. Within `retire_warning_days` of the
 date each Station logs the coming retirement and lists it in its check-in (`retirements`),
 which the Agents view in Moneypenny and `ai6ctl agents` show. Changing `model` and clearing
 `retire_on` re-occupies the slot: the codename and its record carry on, and the record opens

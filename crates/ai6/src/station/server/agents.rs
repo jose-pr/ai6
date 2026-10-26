@@ -10,6 +10,7 @@ use crate::directorates::m::roster::{Agent, AgentQuery, Retirement, Roster, Rost
 use crate::directorates::registry::agent_records::{AgentOutcome, AgentOutcomeReport};
 use crate::directorates::registry::approvals::{ApprovalStatus, Decision, EXPIRY_SIGNER};
 use crate::directorates::registry::clearance::ClearanceGrant;
+use crate::directorates::registry::timeline::TimelineEvent;
 
 /// The highest-priority Agent posted to `operation` for `role` and `tags` whose handler is
 /// among `handlers` (any when `None`), passing over quarantined and retired Agents and those
@@ -146,10 +147,18 @@ pub(super) fn reassign_if_unavailable(state: &DaemonState, mission: &Mission) ->
     let retired = state
         .roster
         .agent(operation, agent)
-        .is_ok_and(|agent| agent.is_retired(state.clock.now()));
-    if !retired && !medical::is_quarantined(state, agent, operation) {
+        .ok()
+        .and_then(|agent| retired(state, &agent));
+    let unavailable = retired.or_else(|| {
+        medical::is_quarantined(state, agent, operation)
+            .then(|| format!("Agent {agent:?} is quarantined"))
+    });
+    let Some(unavailable) = unavailable else {
+        if mission.waiting.is_some() {
+            note_waiting(state, mission, None);
+        }
         return true;
-    }
+    };
     let handlers = super::available_handlers(state);
     let Ok(backup) = select(
         state,
@@ -159,6 +168,13 @@ pub(super) fn reassign_if_unavailable(state: &DaemonState, mission: &Mission) ->
         Some(&handlers),
         &[],
     ) else {
+        note_waiting(
+            state,
+            mission,
+            Some(format!(
+                "{unavailable}; no other qualified Agent can take it"
+            )),
+        );
         return false;
     };
     state.missions.lock().ok().is_some_and(|mut missions| {
@@ -166,6 +182,28 @@ pub(super) fn reassign_if_unavailable(state: &DaemonState, mission: &Mission) ->
             .reassign(mission.mission_id.as_str(), backup.id)
             .is_ok()
     })
+}
+
+/// Records on the Mission why it waits, and tells the timeline once per new reason.
+fn note_waiting(state: &DaemonState, mission: &Mission, reason: Option<String>) {
+    let mission_id = mission.mission_id.as_str();
+    let changed = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|mut missions| missions.set_waiting(mission_id, reason.clone()).ok())
+        .unwrap_or(false);
+    let (true, Some(reason), Some(operation)) = (changed, reason, &mission.operation_id) else {
+        return;
+    };
+    eprintln!("ai6: Mission {mission_id:?} waits: {reason}");
+    let event = TimelineEvent::new("mission", "waiting", operation, state.clock.now() as f64)
+        .station(state.station_id.clone())
+        .mission(mission_id)
+        .detail("reason", reason);
+    if let Err(error) = state.intake.record_event(&event) {
+        eprintln!("ai6: timeline event of Mission {mission_id:?} was not written: {error}");
+    }
 }
 
 /// The codenames of the roster's retired Agents, as Operation `operation` resolves them.
@@ -428,6 +466,26 @@ mod tests {
             !super::reassign_if_unavailable(&state, &mission),
             "its queued Mission waits"
         );
+        let waiting = state
+            .missions
+            .lock()
+            .unwrap()
+            .get("mission-1")
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            waiting.waiting.as_deref(),
+            Some("Agent \"007\" retired on 2027-01-31; no other qualified Agent can take it")
+        );
+        assert!(!super::reassign_if_unavailable(&state, &waiting));
+        let told: Vec<_> = state
+            .intake
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "mission" && event.action == "waiting")
+            .collect();
+        assert_eq!(told.len(), 1, "told once per reason");
     }
 
     const AGENTS: &str =

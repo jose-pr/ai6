@@ -80,6 +80,11 @@ pub struct Mission {
     /// `None` for a Mission started directly on the Station rather than from the queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<Provenance>,
+    /// Why a queued Mission waits instead of starting, when AI6 holds it back: its Agent may
+    /// not work (retired, quarantined) and no other qualified Agent can take it. Cleared when
+    /// it is reassigned or changes state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<String>,
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -212,6 +217,7 @@ impl MissionStore {
             blocked_reason: None,
             exposure: Vec::new(),
             provenance: None,
+            waiting: None,
         };
         let mut next = self.missions.clone();
         next.insert(key, mission.clone());
@@ -307,6 +313,7 @@ impl MissionStore {
         mission.state = state;
         mission.parked_until = None;
         mission.blocked_reason = None;
+        mission.waiting = None;
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
@@ -435,10 +442,29 @@ impl MissionStore {
             });
         }
         mission.agent_id = Some(agent_id);
+        mission.waiting = None;
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
         Ok(updated)
+    }
+
+    /// Records why a queued Mission waits (`None` clears it); `false` when that was already
+    /// recorded, so a caller tells of each new reason once.
+    pub fn set_waiting(
+        &mut self,
+        mission_id: &str,
+        reason: Option<String>,
+    ) -> Result<bool, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.waiting == reason {
+            return Ok(false);
+        }
+        mission.waiting = reason;
+        mission.revision += 1;
+        self.commit(next)?;
+        Ok(true)
     }
 
     /// Lists parked Missions whose resume time is `now` or earlier, in identity order.
@@ -478,6 +504,7 @@ impl MissionStore {
         mission.state = MissionState::Queued;
         mission.parked_until = None;
         mission.blocked_reason = None;
+        mission.waiting = None;
         mission.agent_id = Some(agent_id);
         mission.revision += 1;
         let updated = mission.clone();

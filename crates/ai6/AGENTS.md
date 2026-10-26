@@ -2617,6 +2617,10 @@ queued Mission another Agent. `block_for(id, reason)` blocks an active Mission a
 records `Mission.exposure`, the untrusted input the Mission itself came from;
 `record_provenance(id, provenance)` records `Mission.provenance` (`Option<Provenance>`, the
 first record stands; `None` for a Mission started on the Station rather than from the queue).
+`set_waiting(id, Option<String>) -> Result<bool, _>` records `Mission.waiting`, why a queued
+Mission is held back (its Agent retired or quarantined with no other qualified Agent; `false`
+when unchanged; cleared by `reassign`, `requeue_for` and every state change); the Station
+also writes a `mission`/`waiting` timeline event once per new reason.
 `MissionStore::set_cover_report(mission_id, report)` persists the cover audit. A Mission
 returns this value as its optional `cover` field beside `safe_house`. `Mission.role_id`
 stores the canonical configured Agent role independently of `agent_id` and provider
