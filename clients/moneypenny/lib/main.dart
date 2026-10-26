@@ -1495,6 +1495,7 @@ class StationSummary {
     this.theaters = const [],
     this.resources,
     this.config,
+    this.headOfStation,
   });
 
   final String stationId;
@@ -1512,6 +1513,9 @@ class StationSummary {
 
   /// The roster revision the Station runs and what it refused; `null` when not reported.
   final StationConfigStatus? config;
+
+  /// The latest report its Head of Station filed; `null` until one is filed.
+  final StationLogReport? headOfStation;
 
   factory StationSummary.fromJson(Map<String, dynamic> json) => StationSummary(
     stationId: json['station_id'] as String,
@@ -1533,7 +1537,80 @@ class StationSummary {
     config: json['config'] == null
         ? null
         : StationConfigStatus.fromJson(json['config'] as Map<String, dynamic>),
+    headOfStation: json['head_of_station'] == null
+        ? null
+        : StationLogReport.fromJson(
+            json['head_of_station'] as Map<String, dynamic>,
+          ),
   );
+}
+
+/// One thing a Head of Station round found on its Station.
+class StationLogFinding {
+  const StationLogFinding({
+    required this.kind,
+    required this.severity,
+    required this.text,
+  });
+
+  /// `disk`, `theater`, `safe-house`, `provider` or `other`.
+  final String kind;
+
+  /// `info`, `warning` or `critical`.
+  final String severity;
+  final String text;
+
+  factory StationLogFinding.fromJson(Map<String, dynamic> json) =>
+      StationLogFinding(
+        kind: json['kind'] as String,
+        severity: json['severity'] as String,
+        text: json['text'] as String,
+      );
+}
+
+/// A report a Station's Head of Station filed in its logbook.
+class StationLogReport {
+  const StationLogReport({
+    required this.at,
+    required this.summary,
+    this.findings = const [],
+    this.agent,
+  });
+
+  /// When it was filed, as Unix seconds.
+  final int at;
+  final String summary;
+  final List<StationLogFinding> findings;
+  final String? agent;
+
+  factory StationLogReport.fromJson(Map<String, dynamic> json) =>
+      StationLogReport(
+        at: (json['at'] as num).toInt(),
+        summary: json['summary'] as String,
+        findings: ((json['findings'] as List<dynamic>?) ?? const [])
+            .map(
+              (finding) =>
+                  StationLogFinding.fromJson(finding as Map<String, dynamic>),
+            )
+            .toList(growable: false),
+        agent: json['agent'] as String?,
+      );
+
+  /// `Head of Station 007 · 14:05`, in local time.
+  String get heading {
+    final filed = DateTime.fromMillisecondsSinceEpoch(
+      at * 1000,
+      isUtc: true,
+    ).toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return [
+      if (agent case final agent? when agent.isNotEmpty)
+        'Head of Station $agent'
+      else
+        'Head of Station',
+      '${two(filed.hour)}:${two(filed.minute)}',
+    ].join(' · ');
+  }
 }
 
 /// What a Station's transport can do on a Theater.
@@ -4292,6 +4369,46 @@ class _StationCard extends StatelessWidget {
                   ),
               ],
             ),
+          ],
+          if (station.headOfStation case final report?) ...[
+            const SizedBox(height: 10),
+            Text(report.heading, style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(height: 2),
+            Text(
+              report.summary,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            for (final finding in report.findings)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      switch (finding.severity) {
+                        'critical' => Icons.error_outline,
+                        'warning' => Icons.warning_amber,
+                        _ => Icons.info_outline,
+                      },
+                      size: 14,
+                      color: switch (finding.severity) {
+                        'critical' => const Color(0xffe36666),
+                        'warning' => const Color(0xffe3a466),
+                        _ => const Color(0xff86a39d),
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${finding.kind}: ${finding.text}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
           if (station.operations.isNotEmpty) ...[
             const SizedBox(height: 10),

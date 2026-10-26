@@ -27,6 +27,25 @@ String stationBoardResponse() => jsonEncode({
       'running': 2,
       'capacity': 4,
       'operations': ['operation-alpha'],
+      'head_of_station': {
+        'station': 'station-alpha',
+        'at': 1000,
+        'summary': 'Disk at 12% free; two safe houses hold 40 GB of caches.',
+        'findings': [
+          {
+            'kind': 'disk',
+            'severity': 'warning',
+            'text': '12% free under the state directory',
+          },
+          {
+            'kind': 'safe-house',
+            'severity': 'critical',
+            'text': 'mission-9 holds unexported commits',
+          },
+        ],
+        'mission': 'round-1',
+        'agent': 'M',
+      },
       'resources': {
         'cpus': 8.0,
         'cpu_percent': 25.0,
@@ -1053,6 +1072,24 @@ void main() {
         '8 CPUs \u00b7 25% busy \u00b7 load 1.50 \u00b7 12.0 GiB free of 16.0 GiB '
         '\u00b7 sampled ${const HostResources(sampledAt: 1000).sampledTime}',
       ),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        const StationLogReport(at: 1000, summary: '', agent: 'M').heading,
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Disk at 12% free; two safe houses hold 40 GB of caches.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('disk: 12% free under the state directory'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('safe-house: mission-9 holds unexported commits'),
       findsOneWidget,
     );
     expect(find.text('Theater local'), findsOneWidget);
