@@ -11,6 +11,11 @@
 //! master read is not reliably interrupted by killing the child. The child's exit
 //! is asked of the child itself, never inferred from EOF, because a pseudo-console
 //! can stay readable after its program has exited.
+//!
+//! The reading thread also answers cursor position queries (`ESC[6n`) and removes them from
+//! the output. ConPTY sends one before its program's first output and holds that output until
+//! it is answered (`portable-pty` creates every pseudo-console with
+//! `PSEUDOCONSOLE_INHERIT_CURSOR`), and nothing else is there to answer it.
 
 #![doc = include_str!("../README.md")]
 
@@ -24,9 +29,9 @@ mod os;
 mod os;
 
 use std::io::{Read, Write};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
@@ -38,6 +43,12 @@ use os::ProcessTree;
 
 const READ_CHUNK: usize = 65536;
 const EXIT_POLL: Duration = Duration::from_millis(10);
+/// ConPTY takes rows and columns as signed 16-bit numbers.
+const MAX_DIMENSION: u16 = i16::MAX as u16;
+/// A cursor position query (DSR 6).
+const CURSOR_QUERY: &[u8] = b"\x1b[6n";
+/// The answer to [`CURSOR_QUERY`]: row 1, column 1, where a fresh terminal's cursor is.
+const CURSOR_REPORT: &[u8] = b"\x1b[1;1R";
 
 #[derive(Default, ai6::guatiao::Provider)]
 #[provider(
@@ -61,7 +72,7 @@ struct PtySession {
     /// The part of a chunk that did not fit the caller's buffer.
     pending: Mutex<Vec<u8>>,
     eof: AtomicBool,
-    writer: Mutex<Box<dyn Write + Send>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
     tree: ProcessTree,
@@ -106,17 +117,29 @@ impl PtySession {
         let pid = child.process_id().map(i64::from).unwrap_or(-1);
 
         let mut reader = pair.master.try_clone_reader().map_err(internal)?;
-        let writer = pair.master.take_writer().map_err(internal)?;
+        let writer = Arc::new(Mutex::new(pair.master.take_writer().map_err(internal)?));
+        let answers = writer.clone();
         let (tx, rx) = channel();
         std::thread::Builder::new()
             .name(format!("pty-{pid}"))
             .spawn(move || {
                 let mut buf = vec![0u8; READ_CHUNK];
+                let mut queries = CursorQueries::default();
                 loop {
                     match reader.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
+                        Ok(0) | Err(_) => {
+                            let held = queries.finish();
+                            if !held.is_empty() {
+                                let _ = tx.send(held);
+                            }
+                            break;
+                        }
                         Ok(n) => {
-                            if tx.send(buf[..n].to_vec()).is_err() {
+                            let (output, asked) = queries.filter(&buf[..n]);
+                            for _ in 0..asked {
+                                answer(&answers);
+                            }
+                            if !output.is_empty() && tx.send(output).is_err() {
                                 break;
                             }
                         }
@@ -130,7 +153,7 @@ impl PtySession {
             chunks: Mutex::new(rx),
             pending: Mutex::new(Vec::new()),
             eof: AtomicBool::new(false),
-            writer: Mutex::new(writer),
+            writer,
             master: Mutex::new(pair.master),
             child: Mutex::new(child),
             tree,
@@ -227,6 +250,52 @@ impl Drop for PtySession {
     }
 }
 
+/// Writes [`CURSOR_REPORT`] as the terminal's answer. A failed write means the program is gone.
+fn answer(writer: &Mutex<Box<dyn Write + Send>>) {
+    if let Ok(mut writer) = writer.lock() {
+        let _ = writer
+            .write_all(CURSOR_REPORT)
+            .and_then(|()| writer.flush());
+    }
+}
+
+/// Removes [`CURSOR_QUERY`] from a stream read in chunks, holding back the end of a chunk that
+/// may be the start of one.
+#[derive(Default)]
+struct CursorQueries {
+    held: Vec<u8>,
+}
+
+impl CursorQueries {
+    /// The chunk with every whole query removed, and how many there were.
+    fn filter(&mut self, chunk: &[u8]) -> (Vec<u8>, usize) {
+        let mut bytes = std::mem::take(&mut self.held);
+        bytes.extend_from_slice(chunk);
+        let mut output = Vec::with_capacity(bytes.len());
+        let mut asked = 0;
+        let mut index = 0;
+        while index < bytes.len() {
+            let rest = &bytes[index..];
+            if rest.starts_with(CURSOR_QUERY) {
+                asked += 1;
+                index += CURSOR_QUERY.len();
+            } else if CURSOR_QUERY.starts_with(rest) {
+                self.held = rest.to_vec();
+                break;
+            } else {
+                output.push(bytes[index]);
+                index += 1;
+            }
+        }
+        (output, asked)
+    }
+
+    /// What was held back, once the stream has ended.
+    fn finish(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.held)
+    }
+}
+
 fn exit_info(status: &portable_pty::ExitStatus) -> ExitInfo {
     match status.signal() {
         Some(name) => ExitInfo {
@@ -259,20 +328,23 @@ fn signal_number(name: &str) -> i64 {
 
 fn size(rows: u16, cols: u16) -> PtySize {
     PtySize {
-        rows,
-        cols,
+        rows: rows.min(MAX_DIMENSION),
+        cols: cols.min(MAX_DIMENSION),
         pixel_width: 0,
         pixel_height: 0,
     }
 }
 
 fn dimension(n: i64) -> Result<u16, ProviderError> {
-    u16::try_from(n).ok().filter(|&n| n > 0).ok_or_else(|| {
-        refuse(
-            Status::GUATIAO_ERR_BAD_VALUE,
-            "rows and cols must be 1 to 65535",
-        )
-    })
+    u16::try_from(n)
+        .ok()
+        .filter(|&n| (1..=MAX_DIMENSION).contains(&n))
+        .ok_or_else(|| {
+            refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "rows and cols must be 1 to 32767",
+            )
+        })
 }
 
 fn lock<T>(m: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderError> {
@@ -286,4 +358,42 @@ fn refuse(status: Status, message: impl std::fmt::Display) -> ProviderError {
 
 fn internal(e: impl std::fmt::Display) -> ProviderError {
     refuse(Status::GUATIAO_ERR_INTERNAL, e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn filtered(chunks: &[&[u8]]) -> (Vec<u8>, usize) {
+        let mut queries = CursorQueries::default();
+        let mut output = Vec::new();
+        let mut asked = 0;
+        for chunk in chunks {
+            let (out, n) = queries.filter(chunk);
+            output.extend(out);
+            asked += n;
+        }
+        output.extend(queries.finish());
+        (output, asked)
+    }
+
+    #[test]
+    fn a_cursor_query_is_counted_and_removed_even_across_chunks() {
+        assert_eq!(
+            filtered(&[b"\x1b[6n\x1b[?9001hready\r\n"]),
+            (b"\x1b[?9001hready\r\n".to_vec(), 1)
+        );
+        assert_eq!(
+            filtered(&[b"a\x1b", b"[", b"6", b"nb\x1b[6n"]),
+            (b"ab".to_vec(), 2)
+        );
+    }
+
+    #[test]
+    fn other_sequences_and_a_held_tail_pass_through() {
+        assert_eq!(
+            filtered(&[b"\x1b[6m\x1b[66n", b"\x1b[6"]),
+            (b"\x1b[6m\x1b[66n\x1b[6".to_vec(), 0)
+        );
+    }
 }

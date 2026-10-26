@@ -1,6 +1,10 @@
+use std::collections::BTreeMap;
+use std::io::{BufRead, Write};
 use std::time::{Duration, Instant};
 
-use ai6::directorates::q::terminal::{ExitInfo, Spec, Terminal, TerminalSession};
+use ai6::directorates::q::terminal::{
+    ExitInfo, JsonLines, STREAM_COLS, Spec, StreamLine, Terminal, TerminalSession,
+};
 use ai6::guatiao::{FromValue, ToValue, library::Object};
 use ai6_terminal_pty::Pty;
 
@@ -26,9 +30,6 @@ fn read_until(session: &Object<dyn TerminalSession>, marker: &[u8]) -> Vec<u8> {
         let count = session.read(&mut buffer, 100).unwrap();
         if count > 0 {
             output.extend_from_slice(&buffer[..count as usize]);
-            if output.windows(4).any(|window| window == b"\x1b[6n") {
-                session.write(b"\x1b[24;1R").unwrap();
-            }
         }
         assert!(
             Instant::now() < deadline,
@@ -75,6 +76,107 @@ fn a_pty_child_emits_output_and_reports_exit() {
     let status = wait_for_exit(&session);
     assert_eq!(status.code, Some(0));
     assert_eq!(status.signal, None);
+}
+
+/// The child of [`a_child_waiting_for_its_input_answers_without_help`]: this test binary run
+/// again with `AI6_PTY_CHILD` set. It waits for one line, then writes one JSON line per
+/// length in `AI6_PTY_LINES`, each holding the length of what it read.
+#[test]
+fn pty_child() {
+    let Ok(lengths) = std::env::var("AI6_PTY_LINES") else {
+        return;
+    };
+    let mut input = String::new();
+    std::io::stdin().lock().read_line(&mut input).unwrap();
+    let read = input.trim_end().len();
+    let mut out = std::io::stdout().lock();
+    for (n, length) in lengths.split(',').enumerate() {
+        let text = format!(
+            "{}  {}",
+            "x".repeat(length.parse().unwrap()),
+            "\u{e9}\u{4e2d}"
+        );
+        writeln!(out, "{{\"n\":{n},\"read\":{read},\"text\":\"{text}\"}}").unwrap();
+    }
+    out.flush().unwrap();
+}
+
+/// A program that reads its input before writing anything, as Claude Code and Codex do,
+/// answers with no help from the caller: nobody here answers a cursor position query, which
+/// ConPTY sends at start and waits on. Its JSON lines arrive whole through [`JsonLines`] on
+/// the widest terminal, including one longer than that.
+#[test]
+fn a_child_waiting_for_its_input_answers_without_help() {
+    const INPUT: usize = 4_000;
+    let lengths = [300, 70_000, 1_000];
+    let mut env: BTreeMap<String, String> = std::env::vars().collect();
+    env.insert(
+        "AI6_PTY_LINES".to_owned(),
+        lengths.map(|n| n.to_string()).join(","),
+    );
+    let argv = [
+        std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        "--exact".to_owned(),
+        "pty_child".to_owned(),
+        "--nocapture".to_owned(),
+    ];
+    let session = Pty
+        .spawn(
+            &Spec {
+                argv: argv.to_vec(),
+                cwd: None,
+                env: Some(env),
+                rows: 24,
+                cols: STREAM_COLS,
+            }
+            .to_value()
+            .unwrap(),
+        )
+        .unwrap();
+    // A Unix pty in canonical mode cuts an input line at 4095 bytes (Linux N_TTY).
+    session
+        .write(format!("{}\n", "i".repeat(INPUT)).as_bytes())
+        .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut lines = JsonLines::new();
+    let mut raw = Vec::new();
+    let mut values = Vec::new();
+    let mut buffer = vec![0; 65536];
+    while values.len() < lengths.len() {
+        assert!(
+            Instant::now() < deadline,
+            "the child never answered; it wrote {:?}",
+            String::from_utf8_lossy(&raw[..raw.len().min(400)])
+        );
+        let count = session.read(&mut buffer, 100).unwrap();
+        if count > 0 {
+            raw.extend_from_slice(&buffer[..count as usize]);
+            lines.push(&buffer[..count as usize]);
+        }
+        while let Some(line) = lines.next_line() {
+            if let StreamLine::Json { value, .. } = line {
+                values.push(value);
+            }
+        }
+    }
+    for (n, (value, length)) in values.iter().zip(lengths).enumerate() {
+        assert_eq!(value.get("n").and_then(|n| n.as_u64()), Some(n as u64));
+        assert_eq!(
+            value.get("read").and_then(|n| n.as_u64()),
+            Some(INPUT as u64)
+        );
+        let text = format!("{}  {}", "x".repeat(length), "\u{e9}\u{4e2d}");
+        assert_eq!(value.get("text").and_then(|t| t.as_str()), Some(&*text));
+    }
+    assert!(
+        !raw.windows(4).any(|window| window == b"\x1b[6n"),
+        "the query was answered and removed"
+    );
+    assert_eq!(wait_for_exit(&session).code, Some(0));
 }
 
 #[test]
