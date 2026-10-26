@@ -11,7 +11,7 @@
 //! can read it. A Station acknowledges what it has read by asking for the events after it, so
 //! a Station that comes back, or another one, asks from the last acknowledgement and replays
 //! what it missed. A runner that restarts has lost the harnesses it supervised; it ends their
-//! Sessions with a [`LOST_EVENT`], which a Station takes as the Session lost.
+//! Sessions with a `lost` event, which a Station takes as the Session lost.
 //!
 //! The state directory holds `runner.json` (where the runner listens, while it runs),
 //! `token`, `runner.lock` and `sessions/<key>/` with `events.jsonl`, `cursor` and
