@@ -82,8 +82,10 @@ to submit a child-Mission brief to the Operation's pending proposal inbox. AI6 b
 proposer, parent Mission, provider Session and Operation; proposals stay outside runnable I
 intake until M explicitly authorizes and promotes them. Universal Exports' authenticated
 `mission.create` review endpoints let an operator inspect, approve and queue, or reject a
-proposal; approval follows M's normal assignment and scheduling path. Proposal submission
-does not start a child Session. Clearance does not grant authorization, override Operation
+proposal; approval follows M's normal assignment and scheduling path. Headquarters vets each
+proposal and shows what it found in the inbox, and promotes a clean one from an unexposed
+Session itself only when a class authorisation of kind `proposal` covers it
+([Green ink](missions.md#green-ink)). Proposal submission does not start a child Session. Clearance does not grant authorization, override Operation
 cover or Agent eligibility, or bypass Q leases,
 Station policy, or the Cable relay. Q Branch, the Registry and Heads of Station retain their own capability
 boundaries. The Chief of Staff reviews briefs before they are placed (below).

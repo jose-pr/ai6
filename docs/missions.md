@@ -121,6 +121,18 @@ restriction, see [Exposure](medical.md#exposure)). Operators with `approval.clas
 list and revoke them from `/v1/user/operations/{operation_id}/class-authorizations` or
 Moneypenny's Class authorisations tab.
 
+A class authorisation of kind `proposal` lets M promote Agents' Mission proposals without
+asking: its target pattern is matched against the proposal's title, its Agents against the
+proposing Agent and its roles against the role the proposal asks for. Headquarters vets each
+pending proposal (the [vetting rules](#vetting-and-held-briefs) other than the hourly rate,
+then the Chief of Staff's review when the Operation has one) and shows the result in the
+proposal inbox. A proposal whose vetting found nothing, from a Session that had not read
+untrusted input, is promoted when such a class authorisation covers it: one use is counted
+and the approval is audited as `mission.proposal.approved` by `class:<id>`. Every other
+proposal waits for an operator, as before; none is runnable before it is promoted. An
+operator's approval clears the promoted brief of what vetting found, except a malformed
+brief.
+
 An approval can be withdrawn before it expires (`POST
 .../green-ink/{request_id}/revoke`, or `ai6ctl green-ink revoke`); it then covers nothing,
 and a credential leased against it is revoked. Without the app, `ai6ctl` signs the same

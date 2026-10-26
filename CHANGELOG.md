@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   clear verdict lets M place the brief, a hold holds it, and an unreadable answer or a failed
   review holds it with `review-error`. The reviewer can only add holds. The example roster
   gives `Tanner` the role.
+- Vetted Mission proposals: Headquarters vets each pending proposal (the rules but the hourly
+  rate, then the Chief of Staff's review) and stores the result on it
+  (`MissionProposal::vetting`, `BriefStore::set_proposal_vetting`); the inbox, the API and
+  Moneypenny show it. A clean proposal from an unexposed Session that a live class
+  authorisation of kind `proposal` covers (proposer Agent or requested role, title pattern,
+  `max_uses`) is promoted by M and audited as `mission.proposal.approved` by `class:ID`;
+  every other proposal waits for an operator. An operator's approval clears the promoted
+  brief of every finding but `malformed`.
 - Held briefs for operators: Universal Exports lists, releases and refuses them
   (`/v1/user/operations/{id}/held-briefs`, `mission.create`; audited as
   `mission.brief.released` and `mission.brief.refused`), `ai6ctl held-briefs
