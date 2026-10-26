@@ -186,7 +186,7 @@ merge without asking. Every key overrides the preset:
 ```toml
 [operation.G.green_ink]
 preset = "licensed"
-kinds = ["deploy"]                       # added to push, merge, release, delete, clearance
+kinds = ["deploy"]                       # added to push, merge, release, delete, clearance, safe-house-delete
 requesters = ["field", "00"]             # clearances that may ask
 unattended = { "00" = ["push", "merge"], field = [] }   # per clearance named
 protected = ["refs/heads/main", "refs/heads/release/*", "refs/tags/*"]

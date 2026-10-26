@@ -194,9 +194,16 @@ Qualify an Agent for the role (`roles = [..., "head-of-station"]`) and authorize
   round saw reaches the next through the Station's **logbook**: the newest 20 reports, kept
   in the Registry (`logbook/<station>.json`, or the `ai6_logbooks` table) and handed to each
   round as context, fenced as data.
-- **Which Mission is a round.** Only a Mission of role `head-of-station` whose brief, as this
-  Station leased it, names this Station alone gets the logbook and the Station's tools. Any
-  other Mission of the role is an ordinary one.
+- **Which Mission is a round.** Only this Station's round of an authorized `each_station`
+  Sleeper, as the Registry recorded where its brief entered, gets the logbook and the
+  Station's tools: its role is `head-of-station`, it names this Station alone, and the Sleeper
+  is still configured and authorized exactly as it was when it fired. A brief anyone writes
+  with that role and Station is not a round; Universal Exports refuses the role on a brief, an
+  Agent may not propose it, and revoking the Sleeper takes the tools away from a round.
+- **Untrusted text.** The logbook reaches a round with every line quoted, and
+  `station_report` quotes what other Missions' Agents wrote (commit subjects, branch names),
+  so a round that reads either is treated as exposed to untrusted input: it sends no Cable
+  that is not a reply, and its requests always go to a person.
 
 ### Station tools and reports
 
@@ -211,7 +218,8 @@ A round's Cable endpoint also lists two tools that no other Session has:
 - `file_report { summary, findings }`: findings are typed (`disk`, `theater`, `safe-house`,
   `provider`, `other`) with a severity (`info`, `warning`, `critical`). The report goes into
   the logbook, is published with the Station's next check-in (`head_of_station` in
-  `GET /v1/stations`, shown on the Station's card in Moneypenny), and is sent as a Cable to the
+  `GET /v1/stations` for people with `station.read` on `station:ID`, since it covers every
+  Operation there, and on the Station's card in Moneypenny), and is sent as a Cable to the
   `heads-of-station` channel when `cables.toml` defines it and lets the Agent send there:
 
 ```toml
@@ -238,9 +246,9 @@ Station enforces in its own code, whatever the prompt or the Operation's policy 
 | What | When |
 | --- | --- |
 | Read anything `station_report` shows | always |
-| `caches`: remove the cache directories (`target`, `node_modules`, `.dart_tool`; `ai6 serve --safe-house-cache NAME` replaces the list) | unattended, for a Mission that is over whose safe house has been left alone for 7 days (`--safe-house-cache-age SECS`) |
-| `remove` a safe house whose work all exists elsewhere (every commit on a remote, nothing uncommitted) | unattended, for a Mission that is over |
-| `remove` a safe house holding work that exists nowhere else, or whose provider cannot tell (the `copy` provider) | green ink, kind `delete`: the round waits for a person, then calls again; the approval is spent on that one removal |
+| `caches`: remove the cache directories (`target`, `node_modules`, `.dart_tool`; `ai6 serve --safe-house-cache NAME` replaces the list); in a Git safe house only those Git ignores whole | unattended, for a Mission that is over whose safe house has been left alone for 7 days (`--safe-house-cache-age SECS`) |
+| `remove` a safe house whose work all exists elsewhere (every commit on a remote, checked against the remote itself; nothing uncommitted or untracked; ignored files only inside cache directories) | unattended, for a Mission that is over |
+| `remove` a safe house holding anything else (unpushed commits, uncommitted or ignored files such as `.env`, submodules, Git LFS objects), or whose provider cannot tell (the `copy` provider) | green ink, kind `safe-house-delete`, asked of the Operation the safe house belongs to; no class authorisation approves it. The round carries on; a later call, in this round or a later one, removes it once a person approved, spending that approval on that one removal |
 | `provision_theater` with `apply`: the steps a Theater's declaration calls for | unattended; anything outside the declaration is a finding |
 | Change configuration, the roster or policy; read a secret; act on another Station; touch the safe house of a Mission that is not over | never: the tools cannot, or refuse |
 
@@ -250,7 +258,10 @@ declaration, or with `apply` runs exactly the declared steps (see
 declared them, and a run that changed something is audited (`head_of_station.provisioned`).
 
 A green ink request for a removal is made even when the Operation's green ink policy would let
-the Agent delete unattended. Every removal is audited (`head_of_station.caches_removed`,
+the Agent delete unattended. A tidy holds the Mission's start reservation while it works, so a
+retry or resume of that Mission waits for it, and a tidy of a Mission being started is
+refused. Applying a Theater's provisioning is refused while a Mission of this Station works on
+it, and a failed step's output is withheld from the round (`ai6 theater provision` shows it). Every removal is audited (`head_of_station.caches_removed`,
 `head_of_station.removed`) with the Station as its resource.
 
 ## Station identity
