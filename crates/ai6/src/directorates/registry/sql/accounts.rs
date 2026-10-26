@@ -1,7 +1,6 @@
 //! Pool accounts: one row per account, claimed in the write transaction that serializes
 //! every Registry writer.
 
-use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
 
@@ -9,7 +8,8 @@ use super::SqlRegistry;
 use super::db::Tx;
 use crate::directorates::registry::accounts::{
     AccountClaimRequest, AccountProfile, AccountRef, AccountState, AccountStore, QuotaWindow,
-    add_tokens, claim_in, parse_state, release_in, renew_in, report_in, state_bytes, validate_ref,
+    add_tokens, claim_among, parse_state, release_in, renew_in, report_in, state_bytes,
+    validate_ref,
 };
 use crate::directorates::registry::store::invalid_data;
 
@@ -69,8 +69,15 @@ impl SqlRegistry {
 }
 
 impl AccountStore for SqlRegistry {
-    fn declare_account(&self, account: &AccountRef, profile: &AccountProfile) -> io::Result<()> {
-        self.update_account(account, |state| state.profile = Some(profile.clone()))
+    fn declare_account(
+        &self,
+        account: &AccountRef,
+        station: &str,
+        profile: &AccountProfile,
+    ) -> io::Result<()> {
+        self.update_account(account, |state| {
+            state.profiles.insert(station.to_owned(), profile.clone());
+        })
     }
 
     fn claim_account(
@@ -83,17 +90,11 @@ impl AccountStore for SqlRegistry {
             validate_ref(account)?;
         }
         self.write(|tx, revision| {
-            let mut states = BTreeMap::new();
-            for account in &accounts {
-                states.insert(account.account.clone(), account_in(tx, account)?);
+            let (chosen, changed) = claim_among(all_accounts(tx)?, request, now);
+            for state in &changed {
+                put_account(tx, state, revision)?;
             }
-            let (chosen, changed) = claim_in(&mut states, request, now);
-            for name in changed {
-                if let Some(state) = states.get(&name) {
-                    put_account(tx, state, revision)?;
-                }
-            }
-            Ok(chosen.and_then(|name| states.remove(&name)))
+            Ok(chosen)
         })
     }
 
@@ -129,6 +130,14 @@ impl AccountStore for SqlRegistry {
 
     fn report_quota(&self, account: &AccountRef, windows: &[QuotaWindow]) -> io::Result<()> {
         self.update_account(account, |state| report_in(state, windows))
+    }
+
+    fn clear_account_limit(&self, account: &AccountRef) -> io::Result<bool> {
+        let mut cleared = false;
+        self.update_account(account, |state| {
+            cleared = state.limited_until.take().is_some();
+        })?;
+        Ok(cleared)
     }
 
     fn limit_account(&self, account: &AccountRef, until: f64) -> io::Result<()> {

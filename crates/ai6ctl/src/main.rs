@@ -101,8 +101,23 @@ enum Command {
     /// until when it is limited and tokens today (needs pool.read on the Operation).
     Pools {
         /// AI6 Operation ID.
-        #[arg(long)]
-        operation: String,
+        #[arg(long, global = true)]
+        operation: Option<String>,
+        #[command(subcommand)]
+        command: Option<PoolCommand>,
+    },
+}
+
+/// Changes to a pool account.
+#[derive(Debug, Subcommand)]
+enum PoolCommand {
+    /// Lift an account's provider limit so Sessions may use it again now (needs pool.manage
+    /// on the Operation; audited).
+    ClearLimit {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
     },
 }
 
@@ -538,17 +553,51 @@ async fn run() -> Result<(), String> {
             });
             print_sessions(selected);
         }
-        Command::Pools { operation } => {
+        Command::Pools { operation, command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let request = operation_request(
-                &client,
-                &server,
-                &token,
-                Method::GET,
-                &[&operation, "pools"],
-            )?;
-            let board: PoolBoard = send(request, "pool.read", "pool board").await?;
-            print_pools(&board, unix_now());
+            let operation = operation.ok_or("pass --operation")?;
+            match command {
+                None => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::GET,
+                        &[&operation, "pools"],
+                    )?;
+                    let board: PoolBoard = send(request, "pool.read", "pool board").await?;
+                    print_pools(&board, unix_now());
+                }
+                Some(PoolCommand::ClearLimit { pool, account }) => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::POST,
+                        &[&operation, "pools", &pool, &account, "clear-limit"],
+                    )?;
+                    let response = request
+                        .send()
+                        .await
+                        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+                    match response.status() {
+                        status if status.is_success() => {
+                            println!("{}/{}: limit cleared", plain(&pool), plain(&account));
+                        }
+                        StatusCode::FORBIDDEN => {
+                            return Err("Universal Exports returned HTTP 403 Forbidden \
+                                 (pool.manage on the Operation is required)"
+                                .to_owned());
+                        }
+                        StatusCode::NOT_FOUND => {
+                            return Err("Universal Exports returned HTTP 404 Not Found (no \
+                                 such account declared for the Operation)"
+                                .to_owned());
+                        }
+                        status => return Err(format!("Universal Exports returned HTTP {status}")),
+                    }
+                }
+            }
         }
         Command::GreenInk { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -852,6 +901,8 @@ struct PoolAccount {
     kind: String,
     max_concurrent: Option<usize>,
     active: Vec<serde_json::Value>,
+    #[serde(default)]
+    other_sessions: usize,
     windows: Vec<PoolWindow>,
     limited_until: Option<f64>,
     tokens_today: u64,
@@ -866,9 +917,10 @@ struct PoolWindow {
 fn print_pools(board: &PoolBoard, now: f64) {
     println!("POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY");
     for account in &board.accounts {
+        let using = account.active.len() + account.other_sessions;
         let sessions = match account.max_concurrent {
-            Some(max) => format!("{}/{max}", account.active.len()),
-            None => account.active.len().to_string(),
+            Some(max) => format!("{using}/{max}"),
+            None => using.to_string(),
         };
         let windows = account
             .windows

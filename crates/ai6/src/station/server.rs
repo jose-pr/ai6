@@ -195,8 +195,17 @@ impl StationConfig {
         self
     }
 
+    /// Keeps a limited pool account out for at most `horizon` (default 8 days), whatever
+    /// reset time its provider reports.
+    #[must_use]
+    pub fn with_account_limit_horizon(mut self, horizon: Duration) -> Self {
+        self.credentials = self.credentials.with_account_limit_horizon(horizon);
+        self
+    }
+
     /// Makes the per-Mission `CODEX_HOME` of Codex pool accounts under `dir` instead of
-    /// `accounts` in the Station's state directory.
+    /// `accounts` in the Station's state directory. Cleanup removes only the directories the
+    /// Station made there.
     #[must_use]
     pub fn with_account_homes(mut self, dir: impl Into<PathBuf>) -> Self {
         self.credentials = self.credentials.with_account_homes(dir.into());
@@ -4172,8 +4181,15 @@ async fn resume_mission(
     } else {
         None
     };
-    // A harness a runner still supervises keeps the environment it started with.
-    if reattach.is_none() {
+    // A harness a runner still supervises keeps the environment it started with, and the
+    // account its Session record names.
+    if reattach.is_some() {
+        let record = session_hold(&state, &mission_id)
+            .and_then(|hold| state.intake.session(&hold.id).ok().flatten());
+        if let Some(record) = record {
+            accounts::reattach(&state, &mission, &record);
+        }
+    } else {
         let site = accounts::Site {
             resuming: true,
             on_station: resume_mode == ExecutionMode::RemoteHands || resume_own_host,
@@ -4984,9 +5000,10 @@ fn handle_limit(
         .operation_id
         .as_deref()
         .and_then(|id| state.roster.operation(id).ok())
-        .map_or((OnLimit::Wait, DEFAULT_LIMIT_FALLBACK_SECS), |operation| {
-            (operation.on_limit, operation.limit_fallback_secs)
-        });
+        .map_or(
+            (OnLimit::default(), DEFAULT_LIMIT_FALLBACK_SECS),
+            |operation| (operation.on_limit, operation.limit_fallback_secs),
+        );
     let resets_at = event.limit.as_ref().and_then(|limit| limit.resets_at);
     // The limited account is marked and freed whatever the policy.
     let rotation = accounts::on_limit(state, &mission, resets_at, policy.1);

@@ -1115,6 +1115,10 @@ impl Gateway {
                 get(pools::operation_pools),
             )
             .route(
+                "/v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit",
+                post(pools::clear_limit),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/green-ink",
                 get(green_ink::pending),
             )
@@ -2229,6 +2233,7 @@ async fn user_profile(
                 "agent.read",
                 "agent.configure",
                 "pool.read",
+                "pool.manage",
             ] {
                 let allowed = authorizer
                     .authorize(AuthorizationRequest {

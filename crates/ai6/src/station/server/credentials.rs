@@ -96,6 +96,11 @@ impl CredentialDesk {
         self
     }
 
+    pub(crate) fn with_account_limit_horizon(mut self, horizon: Duration) -> Self {
+        self.accounts = self.accounts.with_limit_horizon(horizon);
+        self
+    }
+
     /// Resolves relative secret files against the Station's configuration directory, and
     /// logs each weakening of its secrets.
     pub(crate) fn in_config_dir(mut self, dir: &std::path::Path) -> Self {
@@ -201,8 +206,21 @@ pub(super) fn issue(
         return Ok(());
     };
     let broker = desk.broker(catalog);
+    // A pooled Agent's loadout may not set a provider credential variable.
+    let reserved = super::accounts::credential_variables(state, catalog, mission, agent);
     let mut leases = Leases::default();
-    let account = super::accounts::issue(
+    issue_loadout(
+        state,
+        (catalog, &broker),
+        mission,
+        agent,
+        exposure,
+        reserved.as_ref(),
+        environment,
+        &mut leases,
+    )?;
+    // The pool account goes last, so nothing issued after it can stand in for its credential.
+    if let Some(lease) = super::accounts::issue(
         state,
         catalog,
         &broker,
@@ -211,38 +229,28 @@ pub(super) fn issue(
         exposure,
         site,
         environment,
-    )?;
-    if let Some(lease) = account {
+    )? {
         leases.0.push(Issued {
             lease,
             approval: None,
         });
     }
-    let issued = issue_loadout(
-        state,
-        (catalog, &broker),
-        mission,
-        agent,
-        exposure,
-        environment,
-        leases,
-    );
-    if issued.is_err() {
-        super::accounts::release(state, &mission_id);
-    }
-    issued
+    keep(state, &mission_id, leases)
 }
 
-/// The loadout half of [`issue`]: the Agent's own secrets, ordinary and green ink, kept with
-/// `leases` (the account's) for the Mission.
+/// The loadout half of [`issue`]: the Agent's own secrets, ordinary and green ink, added to
+/// `leases`. A secret whose variable is in `reserved` (a pooled Agent's credential
+/// variables) is not issued, and that is logged.
+#[allow(clippy::too_many_arguments)]
 fn issue_loadout(
     state: &DaemonState,
     (catalog, broker): (&LoadoutCatalog, &SecretBroker),
     mission: &Mission,
     agent: &str,
     exposure: &ExposureGate,
+    reserved: Option<&BTreeSet<String>>,
     environment: &mut BTreeMap<String, String>,
-    mut leases: Leases,
+    leases: &mut Leases,
 ) -> Result<(), String> {
     let mission_id = mission.mission_id.to_string();
     let loadout = catalog
@@ -250,7 +258,7 @@ fn issue_loadout(
         .ok()
         .filter(|loadout| !loadout.secret_names().is_empty());
     let Some(loadout) = loadout else {
-        return keep(state, &mission_id, leases);
+        return Ok(());
     };
     // What an earlier Session of the Mission held goes, so only this issue's leases remain.
     for name in loadout.secret_names() {
@@ -261,12 +269,24 @@ fn issue_loadout(
             "ai6: Mission {mission_id:?} read untrusted input and its Operation restricts \
              secrets, so its Session gets no credentials"
         );
-        return keep(state, &mission_id, leases);
+        return Ok(());
     }
     let (ordinary, protected): (Vec<_>, Vec<_>) = loadout
         .secret_names()
         .iter()
         .map(|name| catalog.secret(name))
+        .filter(|definition| {
+            let kept = reserved.is_none_or(|reserved| !reserved.contains(definition.env()));
+            if !kept {
+                eprintln!(
+                    "ai6: secret {:?} is weakened for Mission {mission_id:?}: Agent {agent:?} \
+                     draws from an account pool, so its variable {} is left to the pool account",
+                    definition.name(),
+                    definition.env()
+                );
+            }
+            kept
+        })
         .partition(|definition| !definition.green_ink());
     // Whatever was acquired is revoked if this issue fails part way.
     let mut leased = Vec::new();
@@ -355,7 +375,7 @@ fn issue_loadout(
     if !leased.is_empty() {
         record(state, mission, agent, &leased, &approvals);
     }
-    keep(state, &mission_id, leases)
+    Ok(())
 }
 
 /// Keeps `leases` for `mission_id` until its Session stops here.

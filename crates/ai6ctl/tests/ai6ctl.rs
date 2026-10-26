@@ -535,7 +535,9 @@ async fn pools_lists_an_operations_accounts_and_their_quota() {
         let account = ai6::AccountRef::new("team", name);
         let profile =
             ai6::AccountProfile::of(&pool, name, vec!["operation-01".to_owned()]).unwrap();
-        registry.declare_account(&account, &profile).unwrap();
+        registry
+            .declare_account(&account, "station-01", &profile)
+            .unwrap();
     }
     let alpha = ai6::AccountRef::new("team", "alpha");
     registry
@@ -551,7 +553,7 @@ async fn pools_lists_an_operations_accounts_and_their_quota() {
 
     let output = ai6ctl(
         server.clone(),
-        Some(token),
+        Some(token.clone()),
         &["pools", "--operation", "operation-01"],
     )
     .await;
@@ -568,8 +570,39 @@ async fn pools_lists_an_operations_accounts_and_their_quota() {
         )
     );
     assert_eq!(printed[2], "team\tbeta\tanthropic-api-key\t0\t-\t-\t0");
-    let refused = ai6ctl(server, None, &["pools", "--operation", "operation-01"]).await;
+    let refused = ai6ctl(
+        server.clone(),
+        None,
+        &["pools", "--operation", "operation-01"],
+    )
+    .await;
     assert!(!refused.status.success());
+    let cleared = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &[
+                "pools",
+                "clear-limit",
+                "team",
+                "alpha",
+                "--operation",
+                "operation-01",
+            ],
+        )
+        .await,
+    );
+    assert_eq!(cleared, ["team/alpha: limit cleared"]);
+    assert_eq!(
+        registry
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|state| state.account == alpha)
+            .unwrap()
+            .limited_until,
+        None
+    );
     let _ = shutdown.send(());
 }
 

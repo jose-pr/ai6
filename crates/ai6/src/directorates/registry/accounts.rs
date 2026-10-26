@@ -66,6 +66,10 @@ pub struct AccountClaim {
     pub since: f64,
     /// When the claim lapses unless its Station renews it, as Unix seconds.
     pub expires: f64,
+    /// The Mission's Operation, when it has one: the board shows another Operation's claims
+    /// only as a count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
 }
 
 /// How much of one provider quota window an account has used, as last reported.
@@ -171,9 +175,10 @@ impl AccountProfile {
 pub struct AccountState {
     /// Which account.
     pub account: AccountRef,
-    /// What its Stations' configuration says about it, once one has declared it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub profile: Option<AccountProfile>,
+    /// What each Station's configuration says about it, by Station ID: Stations with
+    /// different rosters each keep their own.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub profiles: BTreeMap<String, AccountProfile>,
     /// The Sessions using it now.
     #[serde(default)]
     pub active: Vec<AccountClaim>,
@@ -194,13 +199,28 @@ impl AccountState {
     pub fn new(account: AccountRef) -> Self {
         Self {
             account,
-            profile: None,
+            profiles: BTreeMap::new(),
             active: Vec::new(),
             windows: Vec::new(),
             limited_until: None,
             last_used: None,
             daily_tokens: BTreeMap::new(),
         }
+    }
+
+    /// What the Stations say about it together: the first Station's settings, open to every
+    /// Operation any Station names. `None` until one has declared it.
+    pub fn profile(&self) -> Option<AccountProfile> {
+        let mut merged = self.profiles.values().next()?.clone();
+        let mut operations: Vec<String> = self
+            .profiles
+            .values()
+            .flat_map(|profile| profile.operations.iter().cloned())
+            .collect();
+        operations.sort();
+        operations.dedup();
+        merged.operations = operations;
+        Some(merged)
     }
 
     /// The claims still live at `now`.
@@ -252,7 +272,9 @@ pub struct AccountClaimRequest {
     prefer: Option<String>,
     station: String,
     mission: String,
+    operation: Option<String>,
     ttl: Duration,
+    in_use: bool,
 }
 
 impl AccountClaimRequest {
@@ -278,8 +300,26 @@ impl AccountClaimRequest {
             prefer: None,
             station: station.into(),
             mission: mission.into(),
+            operation: None,
             ttl,
+            in_use: false,
         }
+    }
+
+    /// Records the Mission's Operation on the claim.
+    #[must_use]
+    pub fn operation(mut self, operation: Option<String>) -> Self {
+        self.operation = operation;
+        self
+    }
+
+    /// Records a claim on the first candidate whatever its room: a harness already running
+    /// on the account (a re-attached Session) is counted even past `max_concurrent` or a
+    /// limit.
+    #[must_use]
+    pub fn in_use(mut self) -> Self {
+        self.in_use = true;
+        self
     }
 
     /// Takes `account` whenever it has room, before the strategy is consulted: a Session
@@ -393,13 +433,17 @@ pub(super) fn claim_in(
             changed.push(candidate.account.clone());
         }
     }
-    let chosen = choose_account(
-        request.strategy,
-        &request.candidates,
-        states,
-        request.prefer.as_deref(),
-        now,
-    )
+    let chosen = if request.in_use {
+        request.candidates.first()
+    } else {
+        choose_account(
+            request.strategy,
+            &request.candidates,
+            states,
+            request.prefer.as_deref(),
+            now,
+        )
+    }
     .map(|candidate| candidate.account.clone());
     if let Some(name) = &chosen
         && let Some(state) = states.get_mut(name)
@@ -409,6 +453,7 @@ pub(super) fn claim_in(
             mission: request.mission.clone(),
             since: now,
             expires: now + request.ttl.as_secs_f64(),
+            operation: request.operation.clone(),
         });
         if state.active.len() > MAX_CLAIMS {
             state.active.remove(0);
@@ -421,6 +466,33 @@ pub(super) fn claim_in(
     (chosen, changed)
 }
 
+/// Applies a claim to every recorded account: [`claim_in`] on the request's pool, and the
+/// Session's claims on any other account dropped, so a Mission holds one account at a time.
+/// Returns the chosen account's state and every state that changed.
+pub(super) fn claim_among(
+    all: Vec<AccountState>,
+    request: &AccountClaimRequest,
+    now: f64,
+) -> (Option<AccountState>, Vec<AccountState>) {
+    let mut pool = BTreeMap::new();
+    let mut changed = Vec::new();
+    for mut state in all {
+        if state.account.pool == request.pool
+            && request
+                .candidates
+                .iter()
+                .any(|candidate| candidate.account == state.account.account)
+        {
+            pool.insert(state.account.account.clone(), state);
+        } else if release_in(&mut state, &request.station, &request.mission) {
+            changed.push(state);
+        }
+    }
+    let (chosen, names) = claim_in(&mut pool, request, now);
+    changed.extend(names.iter().filter_map(|name| pool.get(name).cloned()));
+    (chosen.and_then(|name| pool.remove(&name)), changed)
+}
+
 /// Drops `station`'s claims for `mission`; whether there were any.
 pub(super) fn release_in(state: &mut AccountState, station: &str, mission: &str) -> bool {
     let before = state.active.len();
@@ -430,8 +502,9 @@ pub(super) fn release_in(state: &mut AccountState, station: &str, mission: &str)
     state.active.len() != before
 }
 
-/// Extends `station`'s claims for `missions` to `now + ttl` and drops its others and every
-/// lapsed one; whether anything changed.
+/// Extends `station`'s claims for `missions` to `now + ttl`, drops its others made before
+/// `now` (a claim made since the caller listed its Missions stays) and every lapsed one;
+/// whether anything changed.
 pub(super) fn renew_in(
     state: &mut AccountState,
     station: &str,
@@ -442,7 +515,9 @@ pub(super) fn renew_in(
     let before = state.active.clone();
     state.active.retain(|claim| {
         claim.expires >= now
-            && (claim.station != station || missions.iter().any(|m| m == &claim.mission))
+            && (claim.station != station
+                || claim.since >= now
+                || missions.iter().any(|m| m == &claim.mission))
     });
     for claim in &mut state.active {
         if claim.station == station {
@@ -494,16 +569,22 @@ pub(super) fn validate_ref(account: &AccountRef) -> io::Result<()> {
 
 /// Pool accounts: their claims, quota and daily tokens.
 pub trait AccountStore {
-    /// Records what a Station's configuration says about an account, keeping what its
-    /// Sessions recorded.
+    /// Records what `station`'s configuration says about an account, replacing only that
+    /// Station's profile and keeping what Sessions recorded.
     ///
     /// # Errors
     ///
     /// Returns an error for an invalid name or when the Registry cannot be written.
-    fn declare_account(&self, account: &AccountRef, profile: &AccountProfile) -> io::Result<()>;
+    fn declare_account(
+        &self,
+        account: &AccountRef,
+        station: &str,
+        profile: &AccountProfile,
+    ) -> io::Result<()>;
 
-    /// Picks an account of the request's pool and records the claim, in one write. `None`
-    /// when no account has room: each is limited or at its `max_concurrent`.
+    /// Picks an account of the request's pool and records the claim, in one write; the
+    /// Session's claims on any other account are dropped in the same write. `None` when no
+    /// account has room: each is limited or at its `max_concurrent`.
     ///
     /// # Errors
     ///
@@ -549,6 +630,13 @@ pub trait AccountStore {
     ///
     /// Returns an error for an invalid name or when the Registry cannot be written.
     fn limit_account(&self, account: &AccountRef, until: f64) -> io::Result<()>;
+
+    /// Lifts an account's limit; whether it had one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid name or when the Registry cannot be written.
+    fn clear_account_limit(&self, account: &AccountRef) -> io::Result<bool>;
 
     /// Adds `tokens` to an account's count for the UTC day of `now` (Unix seconds).
     ///
@@ -624,8 +712,15 @@ pub(super) fn state_bytes(state: &AccountState) -> io::Result<Vec<u8>> {
 }
 
 impl AccountStore for FileRegistry {
-    fn declare_account(&self, account: &AccountRef, profile: &AccountProfile) -> io::Result<()> {
-        self.update_account(account, |state| state.profile = Some(profile.clone()))
+    fn declare_account(
+        &self,
+        account: &AccountRef,
+        station: &str,
+        profile: &AccountProfile,
+    ) -> io::Result<()> {
+        self.update_account(account, |state| {
+            state.profiles.insert(station.to_owned(), profile.clone());
+        })
     }
 
     fn claim_account(
@@ -637,18 +732,11 @@ impl AccountStore for FileRegistry {
             validate_ref(&AccountRef::new(&request.pool, &candidate.account))?;
         }
         let _lock = registry_lock(&self.root)?;
-        let mut states = BTreeMap::new();
-        for candidate in &request.candidates {
-            let account = AccountRef::new(&request.pool, &candidate.account);
-            states.insert(candidate.account.clone(), self.read_account(&account)?);
+        let (chosen, changed) = claim_among(self.accounts()?, request, now);
+        for state in &changed {
+            self.write_account(state)?;
         }
-        let (chosen, changed) = claim_in(&mut states, request, now);
-        for name in changed {
-            if let Some(state) = states.get(&name) {
-                self.write_account(state)?;
-            }
-        }
-        Ok(chosen.and_then(|name| states.remove(&name)))
+        Ok(chosen)
     }
 
     fn release_account(&self, station: &str, mission: &str) -> io::Result<bool> {
@@ -687,6 +775,14 @@ impl AccountStore for FileRegistry {
         self.update_account(account, |state| {
             state.limited_until = Some(state.limited_until.map_or(until, |own| own.max(until)));
         })
+    }
+
+    fn clear_account_limit(&self, account: &AccountRef) -> io::Result<bool> {
+        let mut cleared = false;
+        self.update_account(account, |state| {
+            cleared = state.limited_until.take().is_some();
+        })?;
+        Ok(cleared)
     }
 
     fn record_account_usage(&self, account: &AccountRef, tokens: u64, now: i64) -> io::Result<()> {
@@ -775,7 +871,48 @@ mod tests {
         a_session_keeps_its_preferred_account_while_it_has_room,
         claims_are_released_on_session_end_and_lapse_with_a_dark_station,
         quota_reports_and_usage_are_kept_per_account,
+        a_claim_in_another_pool_frees_the_missions_earlier_account,
+        stations_with_different_rosters_keep_their_own_profiles,
     );
+
+    fn a_claim_in_another_pool_frees_the_missions_earlier_account(store: &dyn Store) {
+        let registry = store.handle();
+        let first = pool(PoolStrategy::Headroom, &[("a", 0, None)]);
+        let second = AccountPool::new("other", "claude")
+            .account(Account::new("b", AccountKind::ClaudeOauthToken));
+        assert!(claim(registry.as_ref(), &first, "s", "m1", NOW).is_some());
+        assert!(claim(registry.as_ref(), &second, "s", "m1", NOW).is_some());
+        assert!(
+            state(registry.as_ref(), "a").active.is_empty(),
+            "a Mission holds one account at a time"
+        );
+        assert_eq!(state(registry.as_ref(), "b").active.len(), 1);
+    }
+
+    fn stations_with_different_rosters_keep_their_own_profiles(store: &dyn Store) {
+        let registry = store.handle();
+        let account = AccountRef::new("team", "a");
+        let pool = pool(PoolStrategy::Headroom, &[("a", 0, None)]);
+        for (station, operations) in [("s1", vec!["G"]), ("s2", vec!["L"]), ("s1", vec!["G", "H"])]
+        {
+            let profile = AccountProfile::of(
+                &pool,
+                "a",
+                operations.into_iter().map(str::to_owned).collect(),
+            )
+            .unwrap();
+            registry
+                .declare_account(&account, station, &profile)
+                .unwrap();
+        }
+        let a = state(registry.as_ref(), "a");
+        assert_eq!(
+            a.profiles.len(),
+            2,
+            "one per Station; a Station replaces its own"
+        );
+        assert_eq!(a.profile().unwrap().operations, ["G", "H", "L"]);
+    }
 
     fn concurrent_stations_claiming_a_pool_of_one_get_one_winner(store: &dyn Store) {
         let pool = Arc::new(pool(PoolStrategy::Headroom, &[("only", 0, Some(1))]));
@@ -1029,7 +1166,9 @@ mod tests {
                     .status("allowed_warning")],
             )
             .unwrap();
-        registry.declare_account(&account, &profile).unwrap();
+        registry
+            .declare_account(&account, "station-a", &profile)
+            .unwrap();
         let day = NOW as i64;
         registry.record_account_usage(&account, 1_000, day).unwrap();
         registry.record_account_usage(&account, 500, day).unwrap();
@@ -1038,7 +1177,7 @@ mod tests {
             .unwrap();
         let a = state(registry.as_ref(), "a");
         assert_eq!(
-            a.profile.as_ref(),
+            a.profile().as_ref(),
             Some(&profile),
             "declaring keeps the rest"
         );

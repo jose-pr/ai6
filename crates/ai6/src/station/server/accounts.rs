@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use crate::directorates::m::mission::Mission;
@@ -24,6 +24,7 @@ use crate::directorates::q::{
 use crate::directorates::registry::accounts::{
     AccountClaimRequest, AccountProfile, AccountRef, AccountState, QuotaWindow, choose_account,
 };
+use crate::directorates::registry::sessions::SessionRecord;
 use crate::directorates::registry::store::DEFAULT_LEASE;
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::section_00::agent::QuotaReport;
@@ -33,16 +34,26 @@ use super::DaemonState;
 /// How long a claim lasts unless the Station renews it at its check-in: a dark Station's
 /// accounts free up with its Session leases.
 pub(super) const CLAIM_TTL: Duration = DEFAULT_LEASE;
+/// The longest a provider limit keeps an account out unless the Station says otherwise: a
+/// reset reported years ahead is not trusted.
+pub(super) const DEFAULT_LIMIT_HORIZON: Duration = Duration::from_secs(8 * 24 * 3600);
 const TIMELINE_KIND: &str = "account";
 const CODEX_CONFIG: &str = "# Written by AI6: this home holds one pool account's login.\n\
                             cli_auth_credentials_store = \"file\"\n";
+/// Marks a Mission's directory of Codex homes as made by this Station, so cleanup removes
+/// nothing else that sits in the homes directory.
+const HOME_MARKER: &str = ".ai6-account-homes";
 
 /// The Station's account logins and the account each of its Missions holds.
 #[derive(Clone, Default)]
 pub(crate) struct AccountDesk {
     login: Option<Arc<dyn AccountLogin>>,
     homes: Option<PathBuf>,
+    limit_horizon: Option<Duration>,
     held: Arc<Mutex<BTreeMap<String, Held>>>,
+    /// Missions whose account is being claimed and handed over: their claims are renewed
+    /// like held ones.
+    pending: Arc<Mutex<BTreeSet<String>>>,
     waiting: Arc<Mutex<BTreeMap<String, String>>>,
 }
 
@@ -50,17 +61,24 @@ impl std::fmt::Debug for AccountDesk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AccountDesk")
             .field("homes", &self.homes)
+            .field("limit_horizon", &self.limit_horizon)
             .finish_non_exhaustive()
     }
 }
 
 impl PartialEq for AccountDesk {
     fn eq(&self, other: &Self) -> bool {
-        self.homes == other.homes && Arc::ptr_eq(&self.held, &other.held)
+        self.homes == other.homes
+            && self.limit_horizon == other.limit_horizon
+            && Arc::ptr_eq(&self.held, &other.held)
     }
 }
 
 impl Eq for AccountDesk {}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 impl AccountDesk {
     pub(crate) fn with_login(mut self, login: Arc<dyn AccountLogin>) -> Self {
@@ -70,6 +88,11 @@ impl AccountDesk {
 
     pub(crate) fn with_homes(mut self, dir: PathBuf) -> Self {
         self.homes = Some(dir);
+        self
+    }
+
+    pub(crate) fn with_limit_horizon(mut self, horizon: Duration) -> Self {
+        self.limit_horizon = Some(horizon);
         self
     }
 
@@ -88,10 +111,13 @@ impl AccountDesk {
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Held>> {
-        self.held
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn horizon_secs(&self) -> i64 {
+        i64::try_from(
+            self.limit_horizon
+                .unwrap_or(DEFAULT_LIMIT_HORIZON)
+                .as_secs(),
+        )
+        .unwrap_or(i64::MAX)
     }
 }
 
@@ -134,13 +160,39 @@ fn pools_for<'a>(
     )
 }
 
+/// The variables that carry a provider credential, for an Agent that draws from a pool:
+/// [`CREDENTIAL_VARIABLES`] and every account's own. `None` for an Agent no pool serves.
+pub(super) fn credential_variables(
+    state: &DaemonState,
+    catalog: &LoadoutCatalog,
+    mission: &Mission,
+    agent_id: &str,
+) -> Option<BTreeSet<String>> {
+    if let PoolChoice::Unpooled =
+        pools_for(state, catalog, mission.operation_id.as_deref(), agent_id)
+    {
+        return None;
+    }
+    let mut variables: BTreeSet<String> = CREDENTIAL_VARIABLES
+        .iter()
+        .map(|variable| (*variable).to_owned())
+        .collect();
+    for pool in catalog.pools() {
+        for account in pool.accounts() {
+            variables.extend(account.variable(pool.handler()));
+        }
+    }
+    Some(variables)
+}
+
 /// Claims an account for `mission`'s Session and puts its credential in `environment`,
 /// after removing every other credential variable, so the harness sees exactly one account.
 /// Returns the lease to revoke with the Session's, if the credential is a secret.
 ///
 /// An Agent no pool serves gets nothing here. A pool that may not be used, or no account
 /// with room, fails the start with the reason. A Session that continues a provider Session
-/// keeps its account when that Session cannot move (Codex, `config-dir`).
+/// keeps its account when that Session cannot move (Codex, `config-dir`), and moves only to
+/// an account of a kind that carries it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn issue(
     state: &DaemonState,
@@ -158,15 +210,8 @@ pub(super) fn issue(
         PoolChoice::Refused(reason) => return Err(format!("Agent {agent_id:?}: {reason}")),
         PoolChoice::Pools(pools) => pools,
     };
-    for variable in CREDENTIAL_VARIABLES {
-        environment.remove(*variable);
-    }
-    for pool in catalog.pools() {
-        for account in pool.accounts() {
-            if let Some(variable) = account.variable(pool.handler()) {
-                environment.remove(&variable);
-            }
-        }
+    for variable in credential_variables(state, catalog, mission, agent_id).unwrap_or_default() {
+        environment.remove(&variable);
     }
     let mission_id = mission.mission_id.as_str();
     if exposure.restricts(Restriction::Secrets) {
@@ -176,6 +221,29 @@ pub(super) fn issue(
         );
         return Ok(None);
     }
+    let desk = &state.station.credentials.accounts;
+    // A check-in during a slow hand-over (a Codex login) renews this claim too.
+    lock(&desk.pending).insert(mission_id.to_owned());
+    let issued = claim_and_hand_over(state, broker, &pools, mission, agent_id, site, environment);
+    lock(&desk.pending).remove(mission_id);
+    if issued.is_err()
+        && let Err(release) = state.intake.release_account(&state.station_id, mission_id)
+    {
+        eprintln!("ai6: account claim of Mission {mission_id:?} not released: {release}");
+    }
+    issued
+}
+
+fn claim_and_hand_over(
+    state: &DaemonState,
+    broker: &SecretBroker,
+    pools: &[&AccountPool],
+    mission: &Mission,
+    agent_id: &str,
+    site: Site,
+    environment: &mut BTreeMap<String, String>,
+) -> Result<Option<SecretLease>, String> {
+    let mission_id = mission.mission_id.as_str();
     let now = state.clock.now() as f64;
     let earlier = state
         .intake
@@ -183,62 +251,64 @@ pub(super) fn issue(
         .ok()
         .flatten()
         .and_then(|record| record.account);
-    let (pool, chosen) = claim(state, &pools, mission_id, earlier.as_ref(), site, now)?;
+    let (pool, chosen) = claim(state, pools, mission, earlier.as_ref(), site, now)?;
     let account = pool
         .get(&chosen.account.account)
         .ok_or("the claimed account is not configured")?;
-    match hand_over(state, broker, pool, account, mission_id, site, environment) {
-        Ok(lease) => {
-            state.station.credentials.accounts.lock().insert(
-                mission_id.to_owned(),
-                Held {
-                    account: chosen.account.clone(),
-                    kind: account.kind(),
-                },
-            );
-            if let Some(operation) = operation {
-                record(
-                    state,
-                    TimelineEvent::new(TIMELINE_KIND, "claimed", operation, now)
-                        .mission(mission_id)
-                        .actor(agent_id)
-                        .detail("account", chosen.account.to_string())
-                        .detail("kind", account.kind().as_str()),
-                );
-            }
-            Ok(lease)
-        }
-        Err(error) => {
-            if let Err(release) = state.intake.release_account(&state.station_id, mission_id) {
-                eprintln!("ai6: account claim of Mission {mission_id:?} not released: {release}");
-            }
-            Err(error)
-        }
+    let lease = hand_over(state, broker, pool, account, mission_id, site, environment)?;
+    lock(&state.station.credentials.accounts.held).insert(
+        mission_id.to_owned(),
+        Held {
+            account: chosen.account.clone(),
+            kind: account.kind(),
+        },
+    );
+    if let Some(operation) = mission.operation_id.as_deref() {
+        record(
+            state,
+            TimelineEvent::new(TIMELINE_KIND, "claimed", operation, now)
+                .mission(mission_id)
+                .actor(agent_id)
+                .detail("account", chosen.account.to_string())
+                .detail("kind", account.kind().as_str()),
+        );
     }
+    Ok(lease)
+}
+
+/// The kind of the account `earlier` names, when it is still configured.
+fn kind_of(pools: &[&AccountPool], earlier: &AccountRef) -> Option<AccountKind> {
+    pools
+        .iter()
+        .find(|pool| pool.id() == earlier.pool)
+        .and_then(|pool| pool.get(&earlier.account))
+        .map(Account::kind)
 }
 
 /// Claims the first account with room, pool by pool, preferring the account the Mission's
-/// last Session used.
+/// last Session used. A resumed provider Session keeps an account of a kind that cannot carry
+/// it, and otherwise moves only to accounts of a kind that can.
 fn claim<'a>(
     state: &DaemonState,
     pools: &[&'a AccountPool],
-    mission_id: &str,
+    mission: &Mission,
     earlier: Option<&AccountRef>,
     site: Site,
     now: f64,
 ) -> Result<(&'a AccountPool, AccountState), String> {
+    let mission_id = mission.mission_id.as_str();
     let request = |pool: &AccountPool| {
         AccountClaimRequest::new(pool, state.station_id.as_str(), mission_id, CLAIM_TTL)
+            .operation(mission.operation_id.clone())
     };
     let failed = |pool: &AccountPool, error: std::io::Error| {
         format!("pool {:?} could not be claimed from: {error}", pool.id())
     };
+    let earlier_kind = earlier.and_then(|earlier| kind_of(pools, earlier));
     if site.resuming
-        && let Some(earlier) = earlier
+        && let (Some(earlier), Some(kind)) = (earlier, earlier_kind)
+        && !kind.carries_session()
         && let Some(pool) = pools.iter().find(|pool| pool.id() == earlier.pool)
-        && pool
-            .get(&earlier.account)
-            .is_some_and(|account| !account.kind().carries_session())
     {
         let only = request(pool).only(&earlier.account);
         return match state.intake.claim_account(&only, now) {
@@ -250,8 +320,19 @@ fn claim<'a>(
             Err(error) => Err(failed(pool, error)),
         };
     }
+    let carried = site.resuming && earlier_kind.is_some_and(AccountKind::carries_session);
     for pool in pools {
         let mut wanted = request(pool);
+        if carried {
+            for account in pool.accounts() {
+                if !account.kind().carries_session() {
+                    wanted = wanted.excluding(account.name());
+                }
+            }
+        }
+        if wanted.candidates().is_empty() {
+            continue;
+        }
         if let Some(earlier) = earlier.filter(|earlier| earlier.pool == pool.id()) {
             wanted = wanted.prefer(&earlier.account);
         }
@@ -342,6 +423,7 @@ fn home_for(
     let home = mission.join(format!("{}--{}", pool.id(), account.name()));
     let made = (|| {
         fs::create_dir_all(&home)?;
+        fs::write(mission.join(HOME_MARKER), b"")?;
         for dir in [&root, &mission, &home] {
             private(dir)?;
         }
@@ -357,6 +439,8 @@ fn private(dir: &Path) -> std::io::Result<()> {
     fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
 }
 
+/// Windows keeps the inherited access list of the state directory; [`declare`] logs that as a
+/// weakening.
 #[cfg(not(unix))]
 fn private(_dir: &Path) -> std::io::Result<()> {
     Ok(())
@@ -377,11 +461,7 @@ fn path_component(id: &str) -> String {
 
 /// Frees the account `mission_id`'s Session holds on this Station, once it stops here.
 pub(super) fn release(state: &DaemonState, mission_id: &str) {
-    if state
-        .station
-        .credentials
-        .accounts
-        .lock()
+    if lock(&state.station.credentials.accounts.held)
         .remove(mission_id)
         .is_some()
         && let Err(error) = state.intake.release_account(&state.station_id, mission_id)
@@ -392,66 +472,131 @@ pub(super) fn release(state: &DaemonState, mission_id: &str) {
 
 /// The account `mission_id`'s Session holds on this Station.
 pub(super) fn held(state: &DaemonState, mission_id: &str) -> Option<AccountRef> {
-    state
-        .station
-        .credentials
-        .accounts
-        .lock()
+    lock(&state.station.credentials.accounts.held)
         .get(mission_id)
         .map(|held| held.account.clone())
 }
 
-/// At each check-in: renews this Station's claims for the Missions it still runs (dropping
-/// any other), and removes the Codex homes of Missions that are over.
-pub(super) fn tend(state: &DaemonState) {
-    let Some(catalog) = state.station.credentials.catalog() else {
+/// Takes the account a re-attached Session (after a restart or an adoption) already runs on,
+/// as its Session record names it: the harness keeps the credential it started with, so the
+/// claim is recorded even past the account's `max_concurrent` or a limit, and said so on the
+/// timeline.
+pub(super) fn reattach(state: &DaemonState, mission: &Mission, session: &SessionRecord) {
+    let Some(account) = &session.account else {
         return;
     };
-    if catalog.pools().next().is_none() {
+    let mission_id = mission.mission_id.as_str();
+    let configured = state.station.credentials.catalog().and_then(|catalog| {
+        let pool = catalog.pool(&account.pool)?;
+        Some((pool, pool.get(&account.account)?.kind()))
+    });
+    let Some((pool, kind)) = configured else {
+        eprintln!(
+            "ai6: Mission {mission_id:?} runs on account {account}, which this Station does not \
+             configure; its use is not counted"
+        );
         return;
-    }
-    let desk = &state.station.credentials.accounts;
-    let missions: Vec<String> = desk.lock().keys().cloned().collect();
+    };
+    let request = AccountClaimRequest::new(pool, state.station_id.as_str(), mission_id, CLAIM_TTL)
+        .operation(mission.operation_id.clone())
+        .only(&account.account)
+        .in_use();
     let now = state.clock.now() as f64;
-    if let Err(error) =
-        state
-            .intake
-            .renew_account_claims(&state.station_id, &missions, CLAIM_TTL, now)
+    match state.intake.claim_account(&request, now) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            eprintln!("ai6: account {account} of Mission {mission_id:?} could not be claimed");
+            return;
+        }
+        Err(error) => {
+            eprintln!("ai6: account {account} of Mission {mission_id:?} not claimed: {error}");
+            return;
+        }
+    }
+    lock(&state.station.credentials.accounts.held).insert(
+        mission_id.to_owned(),
+        Held {
+            account: account.clone(),
+            kind,
+        },
+    );
+    if let Some(operation) = mission.operation_id.as_deref() {
+        record(
+            state,
+            TimelineEvent::new(TIMELINE_KIND, "reclaimed", operation, now)
+                .mission(mission_id)
+                .detail("account", account.to_string())
+                .detail(
+                    "note",
+                    "a re-attached Session keeps its account, even past max_concurrent or a limit",
+                ),
+        );
+    }
+}
+
+/// At each check-in: renews this Station's claims for the Missions it still runs (dropping
+/// any other made before this pass), and removes the Codex homes of Missions that are over.
+pub(super) fn tend(state: &DaemonState) {
+    let desk = &state.station.credentials.accounts;
+    let has_pools = state
+        .station
+        .credentials
+        .catalog()
+        .is_some_and(|catalog| catalog.pools().next().is_some());
+    // Pending first: an issue moves its Mission to held before it leaves pending.
+    let mut missions: BTreeSet<String> = lock(&desk.pending).clone();
+    missions.extend(lock(&desk.held).keys().cloned());
+    let missions: Vec<String> = missions.into_iter().collect();
+    let now = state.clock.now() as f64;
+    if has_pools
+        && let Err(error) =
+            state
+                .intake
+                .renew_account_claims(&state.station_id, &missions, CLAIM_TTL, now)
     {
         eprintln!("ai6: account claims not renewed: {error}");
     }
-    let Ok(root) = desk.homes() else {
+    sweep_homes(state, &missions);
+}
+
+/// Removes the Codex homes of Missions that are over, also once their pool is gone. Only the
+/// directories this Station made are touched, and nothing while the Mission book is unreadable.
+fn sweep_homes(state: &DaemonState, claimed: &[String]) {
+    let Ok(root) = state.station.credentials.accounts.homes() else {
         return;
     };
     let Ok(entries) = fs::read_dir(&root) else {
         return;
     };
-    let live: BTreeSet<String> = state
-        .missions
-        .lock()
-        .map(|book| {
-            book.list()
-                .into_iter()
-                .filter(|mission| !super::is_terminal_state(mission.state))
-                .map(|mission| path_component(mission.mission_id.as_str()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let Ok(book) = state.missions.lock() else {
+        return;
+    };
+    let live: BTreeSet<String> = book
+        .list()
+        .into_iter()
+        .filter(|mission| !super::is_terminal_state(mission.state))
+        .map(|mission| path_component(mission.mission_id.as_str()))
+        .collect();
+    drop(book);
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !live.contains(&name)
-            && !missions
+        if live.contains(&name)
+            || claimed
                 .iter()
                 .any(|mission| path_component(mission) == name)
-            && let Err(error) = fs::remove_dir_all(entry.path())
+            || !entry.path().join(HOME_MARKER).is_file()
         {
+            continue;
+        }
+        if let Err(error) = fs::remove_dir_all(entry.path()) {
             eprintln!("ai6: account home {name:?} not removed: {error}");
         }
     }
 }
 
-/// Records each configured account in the Registry, with the Operations that may draw from
-/// its pool, so the board can show it before any Session claims it.
+/// Records this Station's view of each configured account in the Registry, with the
+/// Operations of its roster that may draw from the pool, so the board can show it before any
+/// Session claims it. Run when the Station starts, the only time it reads its configuration.
 pub(super) fn declare(state: &DaemonState) {
     let Some(catalog) = state.station.credentials.catalog() else {
         return;
@@ -473,20 +618,27 @@ pub(super) fn declare(state: &DaemonState) {
             let Some(profile) = AccountProfile::of(pool, account.name(), operations.clone()) else {
                 continue;
             };
-            if let Err(error) = state
-                .intake
-                .declare_account(&AccountRef::new(pool.id(), account.name()), &profile)
-            {
+            if let Err(error) = state.intake.declare_account(
+                &AccountRef::new(pool.id(), account.name()),
+                &state.station_id,
+                &profile,
+            ) {
                 eprintln!(
                     "ai6: account {}/{} not declared: {error}",
                     pool.id(),
                     account.name()
                 );
             }
-        }
-        for account in pool.accounts() {
             if let Some(weakening) = account.weakening(pool.id()) {
                 eprintln!("ai6: {weakening}");
+            }
+            if cfg!(windows) && account.kind().login_flag().is_some() {
+                eprintln!(
+                    "ai6: account {}/{}: on Windows its CODEX_HOME keeps the access list it \
+                     inherits from the Station's state directory",
+                    pool.id(),
+                    account.name()
+                );
             }
         }
     }
@@ -541,17 +693,18 @@ pub(super) fn observe_quota(state: &DaemonState, mission_id: &str, reports: &[Qu
 pub(super) enum Rotation {
     /// The Session holds no pool account.
     Unpooled,
-    /// Another account has room and the provider Session can move to it: resume it there.
+    /// Another account of a kind that carries the provider Session has room: resume it there.
     Resume,
-    /// Another account has room but the provider Session cannot move: start a new attempt.
+    /// Another account has room but the provider Session cannot move to it: start a new
+    /// attempt.
     Retry,
     /// No account has room: wait for the limit to reset.
     Wait,
 }
 
 /// Marks the account `mission_id`'s Session holds limited until `resets_at` (or
-/// `fallback_secs` from now), frees it, and says whether another account of the Mission's
-/// pools has room.
+/// `fallback_secs` from now, and never past the Station's limit horizon), frees it, and says
+/// whether another account of the Mission's pools has room.
 pub(super) fn on_limit(
     state: &DaemonState,
     mission: &Mission,
@@ -559,35 +712,48 @@ pub(super) fn on_limit(
     fallback_secs: u64,
 ) -> Rotation {
     let mission_id = mission.mission_id.as_str();
-    let Some(held) = state.station.credentials.accounts.lock().remove(mission_id) else {
+    let desk = &state.station.credentials.accounts;
+    let Some(held) = lock(&desk.held).remove(mission_id) else {
         return Rotation::Unpooled;
     };
     let now = state.clock.now();
     let until = resets_at
         .filter(|reset| *reset > now)
-        .unwrap_or_else(|| now.saturating_add(i64::try_from(fallback_secs).unwrap_or(i64::MAX)));
+        .unwrap_or_else(|| now.saturating_add(i64::try_from(fallback_secs).unwrap_or(i64::MAX)))
+        .min(now.saturating_add(desk.horizon_secs()));
     if let Err(error) = state.intake.limit_account(&held.account, until as f64) {
         eprintln!("ai6: account {} not marked limited: {error}", held.account);
     }
     if let Err(error) = state.intake.release_account(&state.station_id, mission_id) {
         eprintln!("ai6: account claim of Mission {mission_id:?} not released: {error}");
     }
-    let room = state.station.credentials.catalog().is_some_and(|catalog| {
-        let PoolChoice::Pools(pools) = pools_for(
-            state,
-            catalog,
-            mission.operation_id.as_deref(),
-            mission.agent_id.as_deref().unwrap_or_default(),
-        ) else {
-            return false;
-        };
-        let states = state.intake.accounts().unwrap_or_default();
-        has_room(&pools, &states, now as f64)
-    });
-    let rotation = match (room, held.kind.carries_session()) {
-        (false, _) => Rotation::Wait,
-        (true, true) => Rotation::Resume,
-        (true, false) => Rotation::Retry,
+    let (any_room, carrying_room) =
+        state
+            .station
+            .credentials
+            .catalog()
+            .map_or((false, false), |catalog| {
+                let PoolChoice::Pools(pools) = pools_for(
+                    state,
+                    catalog,
+                    mission.operation_id.as_deref(),
+                    mission.agent_id.as_deref().unwrap_or_default(),
+                ) else {
+                    return (false, false);
+                };
+                let states = state.intake.accounts().unwrap_or_default();
+                let now = now as f64;
+                (
+                    has_room(&pools, &states, now, |_| true),
+                    has_room(&pools, &states, now, |account| {
+                        account.kind().carries_session()
+                    }),
+                )
+            });
+    let rotation = match (held.kind.carries_session(), carrying_room, any_room) {
+        (true, true, _) => Rotation::Resume,
+        (_, _, true) => Rotation::Retry,
+        _ => Rotation::Wait,
     };
     if let Some(operation) = mission.operation_id.as_deref() {
         let next = match rotation {
@@ -607,10 +773,20 @@ pub(super) fn on_limit(
     rotation
 }
 
-/// Whether any of `pools` has an account with room at `now`.
-fn has_room(pools: &[&AccountPool], states: &[AccountState], now: f64) -> bool {
+/// Whether any of `pools`' accounts that `keep` admits has room at `now`.
+fn has_room(
+    pools: &[&AccountPool],
+    states: &[AccountState],
+    now: f64,
+    keep: impl Fn(&Account) -> bool,
+) -> bool {
     pools.iter().any(|pool| {
-        let request = AccountClaimRequest::new(pool, "", "", CLAIM_TTL);
+        let mut request = AccountClaimRequest::new(pool, "", "", CLAIM_TTL);
+        for account in pool.accounts() {
+            if !keep(account) {
+                request = request.excluding(account.name());
+            }
+        }
         choose_account(
             pool.balancing(),
             request.candidates(),
@@ -661,7 +837,7 @@ pub(super) fn intake_hold(
     };
     let states = state.intake.accounts().ok()?;
     let now = state.clock.now() as f64;
-    if has_room(&pools, &states, now) {
+    if has_room(&pools, &states, now, |_| true) {
         return None;
     }
     let ids: Vec<String> = pools.iter().map(|pool| pool.id().to_owned()).collect();
@@ -676,13 +852,7 @@ pub(super) fn note_waiting(
     operation_id: &str,
     reason: Option<&str>,
 ) {
-    let mut waiting = state
-        .station
-        .credentials
-        .accounts
-        .waiting
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut waiting = lock(&state.station.credentials.accounts.waiting);
     let Some(reason) = reason else {
         waiting.remove(key);
         return;
@@ -877,8 +1047,17 @@ mod tests {
         }
     }
 
+    /// The homes a fake `codex login` logged in to, and what it does while it logs in.
+    #[derive(Default)]
+    struct LoginLog {
+        homes: Vec<PathBuf>,
+        during: Option<Arc<dyn Fn() + Send + Sync>>,
+    }
+
+    type Logins = Arc<Mutex<LoginLog>>;
+
     /// Stands in for `codex login`: writes the credential to `login` in the home.
-    struct FakeLogin(Arc<Mutex<Vec<PathBuf>>>);
+    struct FakeLogin(Logins);
 
     impl AccountLogin for FakeLogin {
         fn login(
@@ -888,12 +1067,17 @@ mod tests {
             home: &Path,
             credential: &str,
         ) -> Result<(), String> {
-            self.0.lock().unwrap().push(home.to_path_buf());
+            let during = {
+                let mut log = self.0.lock().unwrap();
+                log.homes.push(home.to_path_buf());
+                log.during.clone()
+            };
+            if let Some(during) = during {
+                during();
+            }
             fs::write(home.join("login"), credential).map_err(|error| error.to_string())
         }
     }
-
-    type Logins = Arc<Mutex<Vec<PathBuf>>>;
 
     /// A Station whose Agent 007 (handler `mock-pooled`, plus `agent` settings) draws from
     /// the pools of `loadouts`, with Operation `G` set by `operation`, its clock at [`START`].
@@ -909,7 +1093,7 @@ mod tests {
             &format!("[agent.007]\nhandler = \"mock-pooled\"\n{agent}"),
             START,
         );
-        let logins = Arc::new(Mutex::new(Vec::new()));
+        let logins = Logins::default();
         state.station = state
             .station
             .clone()
@@ -1033,7 +1217,11 @@ secret = "env-gamma"
             root.path(),
             "",
             "[agent.007.env]\nANTHROPIC_API_KEY = \"stray\"\nCLAUDE_CONFIG_DIR = \"/stray\"\n",
-            ENV_POOLS,
+            &format!(
+                "{ENV_POOLS}\n[loadout.007]\nsecrets = [\"leftover\", \"forge\"]\n\
+                 [secret.leftover]\nenv = \"ANTHROPIC_API_KEY\"\n\
+                 [secret.forge]\nenv = \"GH_TOKEN\"\n"
+            ),
         );
         declare(&state);
         create_mission(&state, "pooled-env");
@@ -1052,6 +1240,10 @@ secret = "env-gamma"
         assert_eq!(
             environment["CLAUDE_CODE_OAUTH_TOKEN"],
             "fake-env-alpha-0451"
+        );
+        assert_eq!(
+            environment["GH_TOKEN"], "fake-forge-0451",
+            "a loadout secret outside the credential variables is still issued"
         );
         let hold = session_hold(&state, "pooled-env").unwrap();
         let record = state.intake.session(&hold.id).unwrap().unwrap();
@@ -1073,13 +1265,13 @@ secret = "env-gamma"
             "the Session's tokens count for it"
         );
         assert_eq!(
-            alpha.profile.unwrap().operations,
+            alpha.profile().unwrap().operations,
             ["G"],
             "declared with the Operations that may draw from it"
         );
         assert!(
             account(&state, "elsewhere", "gamma")
-                .profile
+                .profile()
                 .unwrap()
                 .operations
                 .is_empty(),
@@ -1273,7 +1465,7 @@ secret = "codex-b"
                 .any(|line| line.contains("continues an earlier attempt")),
             "the new attempt is told it continues one"
         );
-        assert_eq!(logins.lock().unwrap().len(), 2);
+        assert_eq!(logins.lock().unwrap().homes.len(), 2);
         assert_eq!(
             fs::read_to_string(Path::new(&homes[1]).join("config.toml")).unwrap(),
             CODEX_CONFIG,
@@ -1356,6 +1548,235 @@ secret = "codex-b"
                 .unwrap()
                 .state,
             MissionState::Queued
+        );
+    }
+
+    const CODEX_ONE: &str = r#"
+[pool.solo]
+handler = "mock-pooled"
+[pool.solo.account.only]
+kind = "openai-api-key"
+secret = "race-only"
+"#;
+
+    #[tokio::test]
+    async fn a_check_in_during_a_slow_hand_over_keeps_the_new_claim() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now, logins) = pooled_state(root.path(), "", "", CODEX_ONE);
+        let (watcher, kept) = (state.clone(), Arc::new(Mutex::new(None)));
+        let seen = kept.clone();
+        logins.lock().unwrap().during = Some(Arc::new(move || {
+            tend(&watcher);
+            let claimed = watcher.intake.accounts().unwrap().iter().any(|account| {
+                account
+                    .live_claims(START as f64)
+                    .any(|claim| claim.mission == "pooled-race")
+            });
+            *seen.lock().unwrap() = Some(claimed);
+        }));
+        create_mission(&state, "pooled-race");
+        start_mission_by_id(&state, "pooled-race").await;
+        wait_for_state(&state, "pooled-race", MissionState::Done).await;
+        assert_eq!(
+            *kept.lock().unwrap(),
+            Some(true),
+            "the check-in renewed the claim being handed over"
+        );
+    }
+
+    #[test]
+    fn a_reattached_session_takes_its_recorded_account_even_past_its_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let loadouts = "[pool.solo]\nhandler = \"mock-pooled\"\n[pool.solo.account.only]\n\
+                        kind = \"claude-oauth-token\"\nmax_concurrent = 1\n";
+        let (state, _now, _) = pooled_state(root.path(), "", "", loadouts);
+        let pool: crate::directorates::q::LoadoutCatalog = loadouts.parse().unwrap();
+        let pool = pool.pool("solo").unwrap().clone();
+        state
+            .intake
+            .claim_account(
+                &AccountClaimRequest::new(&pool, "elsewhere", "other", CLAIM_TTL),
+                START as f64,
+            )
+            .unwrap()
+            .unwrap();
+        create_mission(&state, "pooled-reattach");
+        let mission = state
+            .missions
+            .lock()
+            .unwrap()
+            .get("pooled-reattach")
+            .unwrap()
+            .clone();
+        let record = state
+            .intake
+            .open_session(
+                crate::directorates::registry::sessions::NewSession::new(
+                    "record-reattach",
+                    "pooled-reattach",
+                    "test",
+                )
+                .with_account(AccountRef::new("solo", "only")),
+                CLAIM_TTL,
+            )
+            .unwrap();
+        reattach(&state, &mission, &record);
+        assert_eq!(
+            held(&state, "pooled-reattach"),
+            Some(AccountRef::new("solo", "only"))
+        );
+        tend(&state);
+        let only = account(&state, "solo", "only");
+        let missions: Vec<_> = only
+            .live_claims(START as f64)
+            .map(|claim| claim.mission.as_str())
+            .collect();
+        assert_eq!(
+            missions,
+            ["other", "pooled-reattach"],
+            "counted past max_concurrent, and kept by the check-in"
+        );
+        let reclaimed = events(&state, "reclaimed");
+        assert_eq!(reclaimed.len(), 1);
+        assert!(reclaimed[0].detail["note"].contains("past max_concurrent"));
+    }
+
+    #[tokio::test]
+    async fn a_claude_session_is_not_resumed_on_a_config_dir_account_but_tried_again() {
+        let root = tempfile::tempdir().unwrap();
+        let loadouts = r#"
+[pool.mixed]
+handler = "mock-pooled"
+[pool.mixed.account.a]
+kind = "claude-oauth-token"
+secret = "mixed-limited-a"
+[pool.mixed.account.b]
+kind = "config-dir"
+dir = "/logins/b"
+env = "MOCK_CONFIG_DIR"
+"#;
+        let (state, _now, _) = pooled_state(root.path(), "", "", loadouts);
+        create_mission(&state, "pooled-mixed");
+        start_mission_by_id(&state, "pooled-mixed").await;
+        wait_for_state(&state, "pooled-mixed", MissionState::Queued).await;
+        assert_eq!(
+            events(&state, "limited")[0].detail["next"],
+            "new attempt on another account",
+            "b's directory holds none of a's transcript"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limit_keeps_an_account_out_no_longer_than_the_horizon() {
+        let root = tempfile::tempdir().unwrap();
+        let loadouts = "[pool.short]\nhandler = \"mock-pooled\"\n[pool.short.account.a]\n\
+                        kind = \"claude-oauth-token\"\nsecret = \"short-limited-a\"\n";
+        let (mut state, _now, _) = pooled_state(root.path(), "", "", loadouts);
+        state.station = state
+            .station
+            .clone()
+            .with_account_limit_horizon(Duration::from_secs(60));
+        create_mission(&state, "pooled-short");
+        start_mission_by_id(&state, "pooled-short").await;
+        wait_for_state(&state, "pooled-short", MissionState::Parked).await;
+        assert_eq!(
+            account(&state, "short", "a").limited_until,
+            Some((START + 60) as f64),
+            "the reported reset is an hour away; the horizon is a minute"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_mission_outside_any_operation_rotates_by_default() {
+        let root = tempfile::tempdir().unwrap();
+        let loadouts = r#"
+[pool.free]
+handler = "mock-pooled"
+[pool.free.account.a]
+kind = "claude-oauth-token"
+secret = "free-limited-a"
+[pool.free.account.b]
+kind = "claude-oauth-token"
+secret = "free-b"
+"#;
+        let (state, _now, _) = pooled_state(root.path(), "", "", loadouts);
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new("pooled-free").unwrap(),
+                None,
+                "work outside any Operation".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let Ok(_) = start_mission(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("pooled-free".to_owned()),
+            axum::Json(StartMission {
+                working_directory: Some(root.path().join("checkout").display().to_string()),
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        else {
+            panic!("the Mission starts");
+        };
+        wait_for_state(&state, "pooled-free", MissionState::Parked).await;
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("pooled-free")
+                .unwrap()
+                .parked_until,
+            Some(START),
+            "rotated: parked only until the next pass, not until the reset"
+        );
+    }
+
+    #[test]
+    fn homes_go_only_when_made_here_and_the_mission_book_is_readable() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut state, _now) = limited_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-pooled\"\n",
+            START,
+        );
+        let homes = root.path().join("homes");
+        // No pool is configured any more; homes made for one still go.
+        state.station = state
+            .station
+            .clone()
+            .with_loadouts("[loadout.007]\n".parse().unwrap())
+            .with_account_homes(homes.clone());
+        for name in ["gone", "gone-later"] {
+            fs::create_dir_all(homes.join(name).join("old--a")).unwrap();
+            fs::write(homes.join(name).join(HOME_MARKER), b"").unwrap();
+        }
+        fs::create_dir_all(homes.join("someone-elses")).unwrap();
+        let book = state.missions.clone();
+        let _ = std::thread::spawn(move || {
+            let _held = book.lock().unwrap();
+            panic!("poison the Mission book");
+        })
+        .join();
+        tend(&state);
+        assert!(
+            homes.join("gone").exists(),
+            "an unreadable Mission book removes nothing"
+        );
+        state.missions = Arc::new(Mutex::new(Default::default()));
+        tend(&state);
+        assert!(!homes.join("gone").exists() && !homes.join("gone-later").exists());
+        assert!(
+            homes.join("someone-elses").exists(),
+            "a directory the Station did not make stays"
         );
     }
 }

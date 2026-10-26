@@ -6,14 +6,18 @@
 
 use std::collections::BTreeMap;
 
-use ai6::AccountState;
+use ai6::{AccountRef, AccountState, AuditRecord};
 use ai6_diptel::OperationId;
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use serde::Serialize;
+use uuid::Uuid;
 
-use crate::{ApiError, Gateway, authorize_operation_action, bearer, resolve_user, unix_timestamp};
+use crate::{
+    ApiError, Gateway, GatewayError, authorize_operation_action, bearer, resolve_user,
+    unix_timestamp,
+};
 
 /// One quota window as the board shows it.
 #[non_exhaustive]
@@ -59,8 +63,10 @@ pub struct BoardAccount {
     pub max_concurrent: Option<usize>,
     /// Labels configured for it.
     pub labels: BTreeMap<String, String>,
-    /// The Sessions using it now.
+    /// This Operation's Sessions using it now.
     pub active: Vec<BoardClaim>,
+    /// How many Sessions of other Operations use it now: who they are is theirs to see.
+    pub other_sessions: usize,
     /// The quota windows last reported.
     pub windows: Vec<BoardWindow>,
     /// Until when its provider refuses work, as Unix seconds, while it does.
@@ -83,20 +89,24 @@ pub struct PoolBoard {
 
 /// The board entry for `state` at `now`, if a Station declared the account for `operation`.
 fn board_account(state: AccountState, operation: &str, now: f64) -> Option<BoardAccount> {
-    let profile = state.profile.clone()?;
+    let profile = state.profile()?;
     if !profile.operations.iter().any(|id| id == operation) {
         return None;
     }
+    let (own, others): (Vec<_>, Vec<_>) = state
+        .live_claims(now)
+        .partition(|claim| claim.operation.as_deref() == Some(operation));
     Some(BoardAccount {
         tokens_today: state.tokens_on_day(now as i64),
-        active: state
-            .live_claims(now)
+        active: own
+            .into_iter()
             .map(|claim| BoardClaim {
                 station_id: claim.station.clone(),
                 mission_id: claim.mission.clone(),
                 since: claim.since,
             })
             .collect(),
+        other_sessions: others.len(),
         windows: state
             .windows
             .iter()
@@ -144,6 +154,56 @@ pub(crate) async fn operation_pools(
     }))
 }
 
+/// `POST /v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit`: lifts an
+/// account's provider limit, for an account declared for the Operation. Needs `pool.manage`
+/// on the Operation and is audited (`pool.limit.clear`, target `pool/account`).
+pub(crate) async fn clear_limit(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, pool, account)): Path<(String, String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    let account = AccountRef::new(pool, account);
+    authorize_operation_action(&gateway, person.clone(), &operation, "pool.manage").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let operation_name = operation.to_string();
+    let target = account.clone();
+    tokio::task::spawn_blocking(move || {
+        let declared = registry
+            .accounts()
+            .map_err(|_| ApiError::internal())?
+            .into_iter()
+            .find(|state| state.account == target)
+            .and_then(|state| state.profile())
+            .is_some_and(|profile| profile.operations.contains(&operation_name));
+        if !declared {
+            return Err(ApiError::from(GatewayError::NotFound));
+        }
+        registry
+            .clear_account_limit(&target)
+            .map(|_| ())
+            .map_err(|_| ApiError::bad_request())
+    })
+    .await
+    .map_err(|_| ApiError::internal())??;
+    let audit = AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor: person.id,
+        action: "pool.limit.clear".to_owned(),
+        operation: operation.to_string(),
+        resource: None,
+        target: account.to_string(),
+        at: unix_timestamp()?,
+    };
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    tokio::task::spawn_blocking(move || registry.record_audit(&audit))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -165,7 +225,42 @@ mod tests {
         subject = "person:viewer-007"
         scope = "operation:G"
         role = "pools"
+
+        [role.pool-managers]
+        actions = ["pool.read", "pool.manage"]
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "operation:G"
+        role = "pool-managers"
     "#;
+
+    /// Declares `team/alpha` (two Sessions at once) for G and `team/beta` for L only.
+    fn declare(served: &Served) -> AccountPool {
+        let pool = AccountPool::new("team", "claude")
+            .account(
+                Account::new("alpha", AccountKind::ClaudeOauthToken)
+                    .secret("SECRET-NAME")
+                    .max_concurrent(2),
+            )
+            .account(Account::new("beta", AccountKind::ConfigDir).dir("/SECRET-DIR"));
+        for (name, operations) in [("alpha", vec!["G"]), ("beta", vec!["L"])] {
+            served
+                .registry
+                .declare_account(
+                    &AccountRef::new("team", name),
+                    "worker",
+                    &AccountProfile::of(
+                        &pool,
+                        name,
+                        operations.into_iter().map(Into::into).collect(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+        pool
+    }
 
     async fn board(served: &Served, token: &str, operation: &str) -> reqwest::Response {
         reqwest::Client::new()
@@ -188,37 +283,20 @@ mod tests {
             .as_secs_f64()
             // Whole seconds: serde_json does not round-trip every f64 exactly.
             .floor();
-        let pool = AccountPool::new("team", "claude")
-            .account(
-                Account::new("alpha", AccountKind::ClaudeOauthToken)
-                    .secret("SECRET-NAME")
-                    .max_concurrent(2),
-            )
-            .account(Account::new("beta", AccountKind::ConfigDir).dir("/SECRET-DIR"));
-        for (name, operations) in [("alpha", vec!["G"]), ("beta", vec!["L"])] {
+        let pool = declare(&served);
+        let alpha = AccountRef::new("team", "alpha");
+        for (mission, operation) in [("mission-g", "G"), ("SECRET-MISSION-L", "L")] {
             served
                 .registry
-                .declare_account(
-                    &AccountRef::new("team", name),
-                    &AccountProfile::of(
-                        &pool,
-                        name,
-                        operations.into_iter().map(Into::into).collect(),
-                    )
-                    .unwrap(),
+                .claim_account(
+                    &AccountClaimRequest::new(&pool, "worker", mission, Duration::from_secs(60))
+                        .operation(Some(operation.to_owned()))
+                        .only("alpha"),
+                    now,
                 )
+                .unwrap()
                 .unwrap();
         }
-        let alpha = AccountRef::new("team", "alpha");
-        served
-            .registry
-            .claim_account(
-                &AccountClaimRequest::new(&pool, "worker", "mission-g", Duration::from_secs(60))
-                    .only("alpha"),
-                now,
-            )
-            .unwrap()
-            .unwrap();
         served
             .registry
             .report_quota(
@@ -247,8 +325,13 @@ mod tests {
         assert_eq!(alpha["account"], "alpha");
         assert_eq!(alpha["kind"], "claude-oauth-token");
         assert_eq!(alpha["max_concurrent"], 2);
+        assert_eq!(alpha["active"].as_array().unwrap().len(), 1);
         assert_eq!(alpha["active"][0]["mission_id"], "mission-g");
         assert_eq!(alpha["active"][0]["station_id"], "worker");
+        assert_eq!(
+            alpha["other_sessions"], 1,
+            "another Operation's Session is only counted"
+        );
         assert_eq!(alpha["windows"][0]["used_permille"], 640);
         assert_eq!(alpha["limited_until"], now + 600.0);
         assert_eq!(alpha["tokens_today"], 1_234);
@@ -268,12 +351,69 @@ mod tests {
                 "last_used",
                 "limited_until",
                 "max_concurrent",
+                "other_sessions",
                 "pool",
                 "priority",
                 "tokens_today",
                 "windows",
             ],
             "no field carries a secret name or a login directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn clearing_a_limit_needs_pool_manage_and_is_audited() {
+        let served = served_with(ROLES).await;
+        declare(&served);
+        let alpha = AccountRef::new("team", "alpha");
+        served
+            .registry
+            .limit_account(&alpha, 4_000_000_000.0)
+            .unwrap();
+        let clear = |token: String, account: &'static str| {
+            let base = served.base.clone();
+            async move {
+                reqwest::Client::new()
+                    .post(format!(
+                        "{base}/v1/user/operations/G/pools/team/{account}/clear-limit"
+                    ))
+                    .bearer_auth(token)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status()
+            }
+        };
+        assert_eq!(
+            clear(served.viewer.clone(), "alpha").await,
+            StatusCode::FORBIDDEN,
+            "pool.read is not enough"
+        );
+        assert_eq!(
+            clear(served.operator.clone(), "beta").await,
+            StatusCode::NOT_FOUND,
+            "beta is not declared for G"
+        );
+        assert_eq!(
+            clear(served.operator.clone(), "alpha").await,
+            StatusCode::NO_CONTENT
+        );
+        let state = served
+            .registry
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|state| state.account == alpha)
+            .unwrap();
+        assert_eq!(state.limited_until, None);
+        let audit = served.registry.audit_records().unwrap();
+        assert!(
+            audit
+                .iter()
+                .any(|record| record.action == "pool.limit.clear"
+                    && record.target == "team/alpha"
+                    && record.actor == "operator-007"
+                    && record.operation == "G")
         );
     }
 
@@ -285,9 +425,9 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         assert_eq!(
-            board(&served, &served.operator, "G").await.status(),
+            board(&served, &served.operator, "L").await.status(),
             StatusCode::FORBIDDEN,
-            "the operator has no pool.read here"
+            "the operator has no pool.read in L"
         );
         let anonymous = reqwest::Client::new()
             .get(format!("{}/v1/user/operations/G/pools", served.base))
