@@ -166,12 +166,14 @@ impl AgentHandler for ClaudeHandler {
         )?;
         let operation = ClaudeSession::new(session, Some(expected_session_id))
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
-        if let Err(error) = operation.prime_session_id(std::time::Duration::from_secs(30)) {
+        // With stream-json input Claude Code writes nothing, not even its stream's
+        // initialization, until it has read a message: the message goes first, and the Session
+        // it reports is checked as its events are read.
+        if let Some(message) = request.message
+            && let Err(error) = operation.send(&message)
+        {
             let _ = operation.close();
             return Err(error);
-        }
-        if let Some(message) = request.message {
-            operation.send(&message)?;
         }
         Ok(operation.into_object())
     }
@@ -452,7 +454,7 @@ fn decode_usage(value: &Value) -> Option<TokenUsage> {
 struct ClaudeSession {
     terminal: Object<dyn TerminalSession>,
     output: Mutex<JsonLines>,
-    events: Mutex<VecDeque<AgentEvent>>,
+    /// The provider Session ID, once Claude has reported it.
     session_id: Mutex<Option<SessionId>>,
     expected_session_id: Option<SessionId>,
     eof: AtomicBool,
@@ -480,7 +482,6 @@ impl ClaudeSession {
         Self {
             terminal,
             output: Mutex::new(JsonLines::new()),
-            events: Mutex::new(VecDeque::new()),
             session_id: Mutex::new(None),
             expected_session_id,
             eof: AtomicBool::new(false),
@@ -576,36 +577,6 @@ impl ClaudeSession {
         let line = serde_json::to_vec(&ClaudeInput::user(text)).map_err(internal)?;
         self.terminal.write(&line)?;
         self.terminal.write(b"\n")
-    }
-
-    fn prime_session_id(&self, timeout: std::time::Duration) -> Result<(), ProviderError> {
-        let deadline = std::time::Instant::now() + timeout;
-        while self.session_id()?.is_none() {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(refuse(
-                    Status::GUATIAO_ERR_INTERNAL,
-                    "Claude did not report a Session ID while resuming",
-                ));
-            }
-            let event = self
-                .read_event(remaining.as_millis().min(i64::MAX as u128) as i64)?
-                .ok_or_else(|| {
-                    refuse(
-                        Status::GUATIAO_ERR_INTERNAL,
-                        "Claude did not report a Session ID while resuming",
-                    )
-                })?;
-            let ended = matches!(event.kind.as_str(), "completed" | "failed" | LIMIT_EVENT);
-            lock(&self.events)?.push_back(event);
-            if ended && self.session_id()?.is_none() {
-                return Err(refuse(
-                    Status::GUATIAO_ERR_BAD_VALUE,
-                    "Claude ended the process before identifying the resumed Session",
-                ));
-            }
-        }
-        Ok(())
     }
 
     fn read_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
@@ -711,9 +682,6 @@ impl ai6::directorates::section_00::agent::AgentSession for ClaudeSession {
     }
 
     fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
-        if let Some(event) = lock(&self.events)?.pop_front() {
-            return Ok(Some(event));
-        }
         self.read_event(timeout_ms.max(0))
     }
 
@@ -1156,15 +1124,16 @@ mod tests {
             std::process::exit(code.parse().unwrap());
         }
         let session_id = std::env::var("CLAUDE_FIXTURE_SESSION_ID").unwrap();
-        writeln!(
-            stdout,
-            "{}",
-            json!({"type":"system","subtype":"init","session_id":session_id})
-        )
-        .unwrap();
-        stdout.flush().unwrap();
-
+        let mut initialized = false;
         for line in std::io::stdin().lock().lines() {
+            if !std::mem::replace(&mut initialized, true) {
+                writeln!(
+                    stdout,
+                    "{}",
+                    json!({"type":"system","subtype":"init","session_id":session_id})
+                )
+                .unwrap();
+            }
             let message: Value = serde_json::from_str(&line.unwrap()).unwrap();
             let Some(text) = message
                 .pointer("/message/content/0/text")
@@ -1274,8 +1243,8 @@ mod tests {
                 terminal.clone().into_object(),
             )
             .unwrap();
-        assert_eq!(resumed.session_id().unwrap(), Some(session_id.clone()));
         let resumed_events = read_to_completion(&resumed);
+        assert_eq!(resumed.session_id().unwrap(), Some(session_id.clone()));
         assert!(resumed_events.iter().any(|event| {
             event.kind == "completed" && event.text.as_deref() == Some("resumed process turn")
         }));
@@ -1424,7 +1393,11 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(session.session_id().unwrap(), Some(session_id.clone()));
+        assert_eq!(
+            session.session_id().unwrap(),
+            None,
+            "unknown until Claude reports it"
+        );
         let event = session.next_event(50).unwrap().unwrap();
         assert_eq!(event.kind, "system");
         assert_eq!(session.session_id().unwrap(), Some(session_id));
@@ -1613,28 +1586,87 @@ mod tests {
             executable: "claude-test".to_owned(),
         })
         .unwrap();
-        let error = match handler.resume(
-            AgentResume {
-                mission_id: "mission-42".parse().unwrap(),
-                session_id: SessionId::try_new("claude-session-42").unwrap(),
-                message: None,
-                working_directory: "C:\\station\\mission-42".to_owned(),
-                environment: BTreeMap::new(),
-                model: None,
-                effort: None,
-                max_cost_micro_usd: None,
-                project_settings: false,
-                project_mcp: false,
-                answer_only: false,
-                assistant: None,
-                initial_context: Vec::new(),
-            },
-            terminal.into_object(),
-        ) {
-            Ok(_) => panic!("resume should reject a different provider Session ID"),
+        let session = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-42".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-session-42").unwrap(),
+                    message: None,
+                    working_directory: "C:\\station\\mission-42".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+        let error = match session.next_event(50) {
+            Ok(event) => panic!("a different provider Session ID was read as {event:?}"),
             Err(error) => error.to_string(),
         };
-        assert!(error.contains("different Session"));
+        assert!(error.contains("different Session"), "{error}");
+        assert_eq!(session.session_id().unwrap(), None);
+    }
+
+    /// Claude Code with stream-json input writes nothing until it has read a message, so a
+    /// resume that waited for its output before sending one would never see any.
+    #[test]
+    fn resume_sends_its_message_at_once_to_a_harness_silent_until_it_reads_input() {
+        let terminal = ProcessTerminal::new();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-silent-fixture".to_owned(),
+        })
+        .unwrap();
+        let started = Instant::now();
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-silent".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-silent-session").unwrap(),
+                    message: Some("are you there?".to_owned()),
+                    working_directory: std::env::current_dir()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    environment: BTreeMap::from([(
+                        "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
+                        "claude-silent-session".to_owned(),
+                    )]),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "resume waited for output"
+        );
+        let events = read_to_completion(&resumed);
+        assert!(events.iter().any(|event| {
+            event.kind == "completed" && event.text.as_deref() == Some("are you there?")
+        }));
+        assert_eq!(
+            resumed
+                .session_id()
+                .unwrap()
+                .as_ref()
+                .map(SessionId::as_str),
+            Some("claude-silent-session")
+        );
+        resumed.close().unwrap();
     }
 
     #[test]

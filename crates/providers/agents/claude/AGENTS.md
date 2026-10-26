@@ -24,9 +24,13 @@ A restricted Session (`answer_only`, or `assistant`) whose `assistant` message c
 not named `mcp__<server>__<tool>` for one of its servers is killed, ends with a `failed`
 event naming the tools, and nothing read after that becomes an event. `--resume <id>` finds a Session only from the directory that recorded
 it (Claude Code 2.1.310: from another one it answers "No conversation found with session
-ID"), so resume must be given that working directory. Resume waits for Claude's stream
-initialization, verifies the reported ID, and only then returns the resumed operation or
-sends its optional follow-up message. The end of Claude's output is the terminal's
+ID"), so resume must be given that working directory. With `--input-format stream-json`
+Claude Code writes nothing, not even its stream's initialization, until it has read a
+message, so resume sends its optional follow-up message right after starting the process and
+returns without waiting for output. `session_id()` is `None` until Claude reports the
+Session; a reported ID other than the one resumed makes `next_event` fail ("Claude resumed a
+different Session than requested"), and a Session Claude cannot find ends with a `failed`
+event quoting its message. The end of Claude's output is the terminal's
 end-of-file, or Claude's exit while the terminal keeps the output open (a read that times
 out asks the terminal's `exit_status`). After every line written before it, that emits one
 `failed` event whose text names the exit (`exited with code N`, `was ended by signal N`, or
