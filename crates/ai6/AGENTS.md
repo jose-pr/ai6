@@ -1742,7 +1742,8 @@ there is no reload, so a changed roster or loadout is declared at the next start
 A person's approval of one irreversible step. Policy:
 
 ```rust
-pub const BUILTIN_KINDS: [&str; 5];        // push, merge, release, delete, clearance
+pub const BUILTIN_KINDS: [&str; 6];        // push, merge, release, delete, clearance, safe-house-delete
+pub const SAFE_HOUSE_DELETE: &str;         // "safe-house-delete": covers only exactly the same target
 pub const DEFAULT_PROTECTED: [&str; 4];    // refs/heads/{main,master,release/*}, refs/tags/*
 pub const DEFAULT_REQUEST_TTL: Duration;   // 24 h: an undecided request then expires as refused
 pub const DEFAULT_APPROVAL_TTL: Duration;  // 1 h: an approval whose signer chose no lifetime
@@ -2061,12 +2062,20 @@ definition, using windows after the approval time and no more than a day old.
 ## Station logbooks (`ai6::directorates::registry::logbook`)
 
 Each Station's logbook keeps the newest `LOGBOOK_LENGTH` (20) reports its Head of Station
-filed, oldest first, under `logbook/<station>.json` (SQL table `ai6_logbooks`). A Mission of
-role `HEAD_OF_STATION_ROLE` whose brief, as its Station leased it, names that Station alone is
-the Station's round: the Station starts it with the logbook as fenced context.
+filed, oldest first, under `logbook/<station>.json` (SQL table `ai6_logbooks`). A round is
+a Mission of role `head-of-station` whose brief, as this Station leased it, is this Station's
+round of an authorized `each_station` Sleeper: the Registry kept `Origin::Sleeper` provenance
+for it, its `data.sleeper` names this Station, the Mission's Operation and the Sleeper, that
+Sleeper still exists with `each_station`, role `head-of-station` and the fingerprint the
+provenance names, and its stored authorization has that fingerprint. The Station starts a round with the logbook as fenced context, every line
+quoted (`> `), and marks its Session exposed (`STATION_LOGBOOK`) when the logbook holds reports.
+Universal Exports refuses a brief whose role `is_head_of_station_role`, and a Mission proposal
+asking for one is refused at the Cable endpoint.
 
 ```rust
 pub const HEAD_OF_STATION_ROLE: &str = "head-of-station";
+pub fn is_head_of_station_role(role: &str) -> bool;   // the role or one beneath it ("head-of-station/...")
+pub const HEAD_OF_STATION_CHANNEL: &str = "heads-of-station";
 pub const LOGBOOK_LENGTH: usize = 20;
 pub const MAX_SUMMARY_BYTES: usize = 4096;
 pub const MAX_FINDINGS: usize = 32;
@@ -2823,21 +2832,28 @@ The Station audits `green_ink.requested` (actor `agent:CODENAME`) for each new p
 request, `green_ink.expired` (actor `expiry`) when it tells the Agent a request expired, and
 `class_authorization.used` (actor `class:ID`); each target is `REQUEST_ID KIND TARGET`, never
 the reason.
-Head of Station tools: a Session whose Mission has role `head-of-station` and whose brief, as
-this Station leased it, names this Station alone (a round) also lists `station_report` and
-`file_report` on its endpoint; any other Session's endpoint has no such tools, so a call is an
-MCP error. Every call checks again that the Mission is not over and still such a round.
+Head of Station tools: a round (a Mission of role `head-of-station` whose brief, as this Station leased it, is this Station's
+round of an authorized `each_station` Sleeper: the Registry kept `Origin::Sleeper` provenance
+for it, its `data.sleeper` names this Station, the Mission's Operation and the Sleeper, that
+Sleeper still exists with `each_station`, role `head-of-station` and the fingerprint the
+provenance names, and its stored authorization has that fingerprint) also lists
+`station_report`, `file_report`, `tidy_safe_house` and `provision_theater` on its endpoint,
+whether started or resumed; any other Session's endpoint has no such tools, so a call is an
+MCP error. Every call checks again that the Mission is not over and still such a round, so
+revoking the Sleeper takes the tools away.
 `station_report` answers JSON: `station`, `at`, `capacity`, `missions` not over (`mission`,
 `operation`, `agent`, `role`, `state`, `session`), `disk` (`path`, `free_mb`, `total_mb` of the
 state directory), `resources`, `theaters` (each published `TheaterSummary` plus `unfit`, why
 placement would not run a Session there), `safe_houses` (each kept safe house still on disk:
 `mission`, `operation`, `state`, `live`, `path`, `branch`, `size_bytes`, `size_complete` (false
 past 500,000 entries), `age_secs` (since it or anything at its top level changed), `caches`
-(`path` relative, `size_bytes`; outermost directories named in the hygiene list, never `.git`,
-links never followed), `exported`, `unexported` (at most 20), `dirty`, `note` when the provider
-cannot tell), `plugins_weakened` and `limits` (the cache list and age and the unattended,
-green ink and never lists the Station enforces); no environment value, token, loadout or brief
-text. `file_report {summary, findings: [{kind, severity, text}]}` files a `StationReport` (filed
+(`path` relative, `size_bytes`; outermost directories named in the hygiene list; `.git` is
+never walked, links never followed), `exported` (nothing unexported, nothing uncommitted, and
+every ignored path inside a cache directory), `unexported` and `ignored` (at most 20 each),
+`dirty`, `note` when the provider cannot tell), `plugins_weakened` and `limits` (the cache list
+and age and the unattended, green ink and never lists the Station enforces); no environment
+value, token, loadout or brief text. Commit subjects and branch names in it were written by
+other Missions' Agents, so a successful call marks the Session exposed (`STATION_REPORT`). `file_report {summary, findings: [{kind, severity, text}]}` files a `StationReport` (filed
 by the Mission and its Agent) in the logbook, records a `head_of_station`/`reported` timeline
 event, and sends it as a Cable to channel `heads-of-station` (`HEAD_OF_STATION_CHANNEL`) when
 the Cable policy allows; it answers `{filed, at, cable}` where `cable` says `sent to N
@@ -2845,26 +2861,35 @@ recipients` or why not (an exposed Session sends none).
 `tidy_safe_house {mission, action, reason?}` acts on the kept safe house of a Mission of this
 Station that is over (terminal and no Session here; otherwise refused, as is a Mission this
 Station does not keep, the round itself, or an action other than `caches` and `remove`), after
-its provider re-attaches to it. `caches` removes the outermost directories the hygiene names
-once the safe house has been left alone for the cache age (else refused). `remove` discards
-it through the provider when `exports()` shows everything exists elsewhere; otherwise (work
-no remote holds, uncommitted changes, or a provider that cannot tell) it asks for green ink
-with `Desk::request_always`: kind `delete`, target `safe house MISSION on Station ID`, the
-round's Mission and Session, idempotency key the target, so the Operation's `unattended`
-policy never skips the person (a class authorisation may approve; an exposed round's request
-always goes to a person). A pending request blocks the round as any green ink does; the next
-call after an approval finds the live, unspent approval of the round, spends it and
-discards. A removal records `kept = false` on the Mission. Answers `{mission, status,
-removed?, freed_bytes, green_ink?}` with `status` `caches-removed`, `removed` or the green ink
-status. Audited with resource `station:ID`, actor `agent:CODENAME`:
+its provider re-attaches to it. The tidy holds the Mission's start reservation (`starting`)
+from its first check to its last change, so a start, retry or resume of it is refused
+meanwhile (and a tidy of a Mission being started is refused), and checks again that the
+Mission is over right before removing anything. `caches` removes the outermost directories the
+hygiene names once the safe house has been left alone for the cache age (else refused); with
+a provider that answers `exports()`, only a directory listed in `ignored` (ignored whole, so
+nothing in it is tracked) is removed and the rest are answered in `kept`. `remove` discards it
+through the provider when `exports()` shows nothing unexported, nothing uncommitted and every
+ignored path inside a cache directory; otherwise (or when `exports()` fails or is
+unsupported) it asks for green ink with `Desk::request_always`, kind `SAFE_HOUSE_DELETE`
+(`safe-house-delete`, compared as exact text), target `safe house MISSION on Station ID`,
+filed under the Operation that owns the safe house's Mission and on that Mission (the round's
+Session and Agent ask; idempotency key the target), so its policy and approvers decide, its
+`unattended` list never skips the person and no class authorisation approves it. The
+request does not block the round: any later call, from this round or a later one, finds a
+pending or rejected request and answers it without asking again, or finds the live, unspent
+approval, spends it and discards. A removal records `kept = false` on the Mission. Answers
+`{mission, status, removed?, kept?, freed_bytes, green_ink?: {request_id, operation, status,
+expires_at}}` with `status` `caches-removed`, `removed` or the green ink status. Audited with resource `station:ID`, actor `agent:CODENAME`:
 `head_of_station.caches_removed` (target `MISSION PATHS`) and `head_of_station.removed`
 (target `MISSION exported` or `MISSION approved by REQUEST`).
 `provision_theater {theater, apply = false}` runs `q::provision::provision` on a Theater this
 Station reaches with `check = !apply`, only the steps its `requires`, `provision` and
 `runner` declare; with `apply` it then probes again and records the report
 (`Transports::set_report`) and, when a step changed, audits `head_of_station.provisioned`
-(target `THEATER STEP...`). Answers `{theater, applied, steps: [ProvisionStep], fit}`. An
-ephemeral template, a Theater made for a Mission and one without a transport are refused.
+(target `THEATER STEP...`). Answers `{theater, applied, steps: [ProvisionStep], fit}`; a
+failed step's `detail` never carries what the command printed. An ephemeral template, a
+Theater made for a Mission and one without a transport are refused, and `apply` is refused
+while a Mission of this Station that is not over has the Theater in its launch record.
 `check_approval {steps: [{kind, target}, ..]}` (at most 64) answers the harness gate without
 recording anything: a JSON array of `{kind, target, status, request_id?, message?}` with
 `status` `not_required`, `approved` (a live approval of the Mission covers the step,
@@ -3082,9 +3107,13 @@ pub trait SafeHouseSession: Send + Sync {
 }
 pub struct SafeHouseExports {
     pub unexported: Vec<String>, // "<short id> <subject>" of changes since the base no remote holds
-    pub dirty: bool,             // uncommitted changes in the working directory
+    pub dirty: bool,             // uncommitted changes, untracked files included
+    pub ignored: Vec<String>,    // relative paths version control ignores; a directory ignored whole is one entry
 }
-impl SafeHouseExports { pub fn is_exported(&self) -> bool; } // nothing unexported and clean
+impl SafeHouseExports {
+    // nothing unexported, not dirty, and every ignored path is one `rebuildable` accepts
+    pub fn is_exported(&self, rebuildable: impl Fn(&str) -> bool) -> bool;
+}
 pub struct SafeHouseSpec {
     pub operation_id: String, pub mission_id: String, pub title: String,
     pub source: String,    // a local path today

@@ -21,8 +21,8 @@ pub use directorates::m::access::{
 };
 pub use directorates::m::approvals::{
     ActionScope, BUILTIN_KINDS, DEFAULT_APPROVAL_TTL, DEFAULT_PROTECTED, DEFAULT_REQUEST_TTL,
-    GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement, classify,
-    clearance_at_least,
+    GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement,
+    SAFE_HOUSE_DELETE, classify, clearance_at_least,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::m::config::SqlConfigSource;
@@ -142,7 +142,7 @@ pub use directorates::registry::cables::{
 pub use directorates::registry::clearance::ClearanceGrant;
 pub use directorates::registry::logbook::{
     HEAD_OF_STATION_ROLE, LOGBOOK_LENGTH, Severity, StationFinding, StationFindingKind,
-    StationReport,
+    StationReport, is_head_of_station_role,
 };
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{

@@ -1130,14 +1130,8 @@ impl CableTools {
         let Some(session) = principal.session_id().map(str::to_owned) else {
             return "Station tools require a bound provider Session".to_owned();
         };
-        let exposed = self.exposure.restricts(Restriction::Approvals);
         match tokio::task::spawn_blocking(move || {
-            desk.tidy(
-                (&session, exposed),
-                &args.mission,
-                &args.action,
-                args.reason,
-            )
+            desk.tidy(&session, &args.mission, &args.action, args.reason)
         })
         .await
         {
@@ -1156,8 +1150,15 @@ impl CableTools {
             return "The Station's tools are for a Head of Station round only".to_owned();
         };
         match tokio::task::spawn_blocking(move || desk.report()).await {
-            Ok(Ok(state)) => serde_json::to_string(&state)
-                .unwrap_or_else(|_| "The Station's state could not be encoded".to_owned()),
+            Ok(Ok(state)) => {
+                // The report quotes other Missions' text: whoever reads it is exposed.
+                self.exposure.mark(
+                    crate::directorates::medical::exposure::STATION_REPORT,
+                    unix_now(),
+                );
+                serde_json::to_string(&state)
+                    .unwrap_or_else(|_| "The Station's state could not be encoded".to_owned())
+            }
             Ok(Err(reason)) => format!("Station report refused: {reason}"),
             Err(_) => "Station report failed".to_owned(),
         }
@@ -1332,6 +1333,13 @@ impl CableTools {
         description = "Submit a child-Mission proposal for M's review. Proposals do not enter the runnable intake queue until M authorizes them."
     )]
     async fn propose_mission(&self, Parameters(args): Parameters<ProposeMissionArgs>) -> String {
+        if args
+            .role
+            .as_deref()
+            .is_some_and(crate::directorates::registry::logbook::is_head_of_station_role)
+        {
+            return "Mission proposal refused: only an authorized Sleeper queues a Head of Station round".to_owned();
+        }
         let Ok(principal) = self.principal() else {
             return "Mission proposal identity is unavailable".to_owned();
         };

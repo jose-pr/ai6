@@ -13,37 +13,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   apply}` on a Theater its Station reaches. `apply = false` checks (as `ai6 theater provision
   --check`); `apply = true` runs exactly the steps the Theater's `requires`, `provision` and
   `runner` declare, refreshes the probe report placement reads, and audits
-  `head_of_station.provisioned` when a step changed. An ephemeral template and a Theater made
-  for one Mission are refused.
+  `head_of_station.provisioned` when a step changed; it is refused while a Mission of the
+  Station works on the Theater, and a failed step's output is withheld from the round. An
+  ephemeral template and a Theater made for one Mission are refused.
 - Safe-house hygiene within fixed limits: a Head of Station round may call
   `tidy_safe_house {mission, action, reason?}` on the kept safe house of a Mission of its
-  Station that is over. `caches` removes the hygiene's cache directories once the safe house
-  has been left alone for the cache age; `remove` discards it at once when its provider shows
-  everything exists elsewhere, and otherwise files a green ink request (kind `delete`, target
-  `safe house MISSION on Station ID`) that a person must decide even when the Operation's
-  policy would let the Agent delete unattended (`green_ink::Desk::request_always`); a later
-  call spends the round's live approval on that one removal. A Mission that is not over, one
-  the Station does not keep, and any other action are refused. Removals are audited
+  Station that is over, holding the Mission's start reservation throughout so a retry or
+  resume cannot reopen it meanwhile. `caches` removes the hygiene's cache directories once the
+  safe house has been left alone for the cache age (in a Git safe house only directories Git
+  ignores whole); `remove` discards it at once when its provider shows everything exists
+  elsewhere (ignored files only inside cache directories), and otherwise files a green ink
+  request of the new built-in kind `safe-house-delete` (`SAFE_HOUSE_DELETE`, compared as exact
+  text; target `safe house MISSION on Station ID`) under the Operation that owns the safe
+  house, on its Mission, that a person must decide even when that Operation's policy would let
+  the Agent delete unattended (`green_ink::Desk::request_always`); no class authorisation
+  approves it. Any later call spends the live approval on that one removal. A Mission that is
+  not over or is being started, one the Station does not keep, and any other action are
+  refused. Removals are audited
   (`head_of_station.caches_removed`, `head_of_station.removed`, resource `station:ID`) and
   record `kept = false`. `ai6 serve --safe-house-cache NAME` (repeatable) and
   `--safe-house-cache-age SECS` set the hygiene.
-- Head of Station tools: a round (a Mission of role `head-of-station` whose leased brief names
-  its Station alone) gets `station_report` and `file_report` on its Cable endpoint; no other
-  Session lists them, and each call checks again that the round is live. `station_report`
+- Head of Station tools: a round (a Mission of role `head-of-station` whose leased brief is its
+  Station's round of an authorized `each_station` Sleeper, by the provenance the Registry kept)
+  gets `station_report` and `file_report` on its Cable endpoint, started or resumed; no other
+  Session lists them, and each call checks again that the round is live and its Sleeper still
+  authorized. Universal Exports refuses a brief for the `head-of-station` role and an Agent
+  may not propose one. A round that reads `station_report` or a non-empty logbook is marked
+  exposed (`STATION_REPORT`, `STATION_LOGBOOK`), since both quote other Missions' text; logbook
+  entries reach later rounds quoted. `station_report`
   reads the Station's capacity, Missions not over, free space under the state directory,
   resources, Theaters with why placement would not use them, every kept safe house (Mission
   state, age, size, cache directories, whether its work exists elsewhere), provider libraries
   loaded without a pin and the enforced limits; nothing secret. `file_report` files a
   `StationReport` with typed findings in the logbook, records a timeline event and sends it to
   the `heads-of-station` Cable channel when configured. Each check-in carries the latest
-  report (`head_of_station`); Universal Exports adds it to `BoardStation` and Moneypenny shows
-  it on the Station card. `StationConfig::with_safe_house_hygiene(SafeHouseHygiene)` names the
+  report (`head_of_station`); Universal Exports adds it to `BoardStation` for people with
+  `station.read` on the Station, and Moneypenny shows it on the Station card. `StationConfig::with_safe_house_hygiene(SafeHouseHygiene)` names the
   cache directories (default `target`, `node_modules`, `.dart_tool`) and their age (7 days).
 - Safe-house providers may say what of a safe house's work exists only there and remove one
   whatever it holds: two optional `SafeHouseSession` slots, `exports` (`SafeHouseExports`:
-  `unexported` change summaries and `dirty`; unsupported reads as all of it) and `discard`,
-  wrapped by `SafeHouse::exports` and `SafeHouse::discard`. The `git` provider lists commits
-  since the base that no remote-tracking ref holds and removes the worktree and its branch;
+  `unexported` change summaries, `dirty` and `ignored` paths; unsupported reads as all of it)
+  and `discard`, wrapped by `SafeHouse::exports` and `SafeHouse::discard`. The `git` provider
+  fetches each remote with `--prune` and lists commits since the base none of them holds,
+  counts untracked files whatever the status configuration says, lists ignored paths, and
+  reports submodules and Git LFS as unchecked work; it removes the worktree and its branch;
   the `copy` provider removes its copy and cannot tell what is exported. Neither ever removes
   work in place.
 - Head of Station rounds: a Sleeper may set `stations` (narrowing its briefs, like a brief's
@@ -55,8 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   its approval). `SleeperStore::fire_sleeper` takes `(window, station)`. Each Station keeps a
   logbook of the newest 20 Head of Station reports (`LogbookStore`: `file_station_report`,
   `logbook`, on the file and SQL Registries; `StationReport`, `StationFinding`, `StationFindingKind`,
-  `Severity`), and a Mission of role `head-of-station` (`HEAD_OF_STATION_ROLE`) whose leased
-  brief names its Station alone starts with that logbook as fenced context. The example
+  `Severity`), and a round (`HEAD_OF_STATION_ROLE`) starts with that logbook as fenced,
+  quoted context. The example
   roster defines the role and a commented `housekeeping` Operation.
 - Vetting: before M places a brief, the Headquarters holder runs deterministic checks under
   the Operation's `[operation.ID.vetting]` settings (`vetting = "off"` turns them off, a

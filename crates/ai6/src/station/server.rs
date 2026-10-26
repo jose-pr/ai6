@@ -3533,8 +3533,8 @@ async fn start_mission(
     .await
     .ok()
     .flatten();
-    if let Some(logbook) = &round {
-        initial_context.push(logbook.clone());
+    if let Some(round) = &round {
+        initial_context.push(round.context.clone());
     }
     if session_hold(&state, &mission_id).is_some() {
         initial_context.push(
@@ -3588,6 +3588,13 @@ async fn start_mission(
         }
     }
     let exposure = medical::open_gate(&state, &mission);
+    // Earlier rounds' reports quote other Missions' text: a round that reads them is exposed.
+    if round.as_ref().is_some_and(|round| round.read_reports) {
+        exposure.mark(
+            crate::directorates::medical::exposure::STATION_LOGBOOK,
+            unix_now(),
+        );
+    }
     #[cfg(feature = "cables-mcp")]
     let mut cables_mcp =
         if let Some(operation_id) = mission.operation_id.as_deref().filter(|_| !review) {
@@ -4324,6 +4331,17 @@ async fn resume_mission(
         endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
+        }
+        // A resumed round keeps its Station's tools, after the same check a start makes.
+        let (worker, worker_mission) = (state.clone(), mission.clone());
+        if tokio::task::spawn_blocking(move || head_of_station::is_round(&worker, &worker_mission))
+            .await
+            .unwrap_or(false)
+        {
+            endpoint.open_station_tools(head_of_station::Desk::new(
+                state.clone(),
+                mission.mission_id.as_str(),
+            ));
         }
         endpoint.add_environment(&mut environment);
         endpoint
@@ -6534,6 +6552,11 @@ mod tests {
                     .map(str::to_owned)
                     .collect(),
                 dirty: path.join(".mock-dirty").exists(),
+                ignored: fs::read_to_string(path.join(".mock-ignored"))
+                    .unwrap_or_default()
+                    .lines()
+                    .map(str::to_owned)
+                    .collect(),
             }
             .to_value()
             .map_err(|error| test_provider_error(&error.to_string()))

@@ -26,7 +26,17 @@ use serde::{Deserialize, Serialize};
 use crate::directorates::m::roster::CLEARANCES;
 
 /// The kinds of step every Operation governs.
-pub const BUILTIN_KINDS: [&str; 5] = ["push", "merge", "release", "delete", "clearance"];
+pub const BUILTIN_KINDS: [&str; 6] = [
+    "push",
+    "merge",
+    "release",
+    "delete",
+    "clearance",
+    SAFE_HOUSE_DELETE,
+];
+/// The kind of step that removes a kept safe house holding work that exists nowhere else; its
+/// target names the safe house and is compared as exact text.
+pub const SAFE_HOUSE_DELETE: &str = "safe-house-delete";
 /// The refs a push needs green ink for unless the Operation lists others: the usual default
 /// branches, release branches and tags.
 pub const DEFAULT_PROTECTED: [&str; 4] = [
@@ -123,11 +133,14 @@ impl ActionScope {
     /// Whether an approval of this scope covers the step `attempted`: the same kind and, for
     /// `push` and `delete`, the same ref on the same remote (an approval that names no remote
     /// covers every remote; a step that names none is covered only by such an approval); for
-    /// other kinds, the same target ignoring case, `#` and spacing, so `PR 42` does not cover
-    /// `PR other/repo#42`.
+    /// [`SAFE_HOUSE_DELETE`], exactly the same target; for other kinds, the same target
+    /// ignoring case, `#` and spacing, so `PR 42` does not cover `PR other/repo#42`.
     pub fn covers(&self, attempted: &ActionScope) -> bool {
         if self.kind != attempted.kind {
             return false;
+        }
+        if self.kind == SAFE_HOUSE_DELETE {
+            return self.target == attempted.target;
         }
         if matches!(self.kind.as_str(), "push" | "delete") {
             let remotes = match (self.remote(), attempted.remote()) {
@@ -537,6 +550,28 @@ mod tests {
         assert!(scope("merge", "pr #42").covers(&scope("merge", "PR 42")));
         assert!(!scope("merge", "PR 42").covers(&scope("merge", "PR 421")));
         assert!(scope("release", "tag  v1.2.0").covers(&scope("release", "Tag v1.2.0")));
+    }
+
+    #[test]
+    fn a_safe_house_delete_covers_exactly_its_own_target() {
+        let approved = scope(SAFE_HOUSE_DELETE, "safe house m-1 on Station a:b");
+        assert!(approved.covers(&scope(SAFE_HOUSE_DELETE, "safe house m-1 on Station a:b")));
+        for other in [
+            "safe house m-1 on Station x:b",
+            "Safe House m-1 on Station a:b",
+            "safe house  m-1 on Station a:b",
+            "safe house m-1 on Station a:b2",
+        ] {
+            assert!(
+                !approved.covers(&scope(SAFE_HOUSE_DELETE, other)),
+                "{other:?}"
+            );
+        }
+        assert!(!approved.covers(&scope("delete", "safe house m-1 on Station a:b")));
+        assert_eq!(
+            GreenInkPolicy::default().requirement("field", &approved),
+            Requirement::GreenInk
+        );
     }
 
     #[test]

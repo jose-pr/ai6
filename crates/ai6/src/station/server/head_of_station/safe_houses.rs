@@ -9,7 +9,7 @@ use serde::Serialize;
 use super::survey::{Survey, survey};
 use crate::directorates::m::mission::Mission;
 use crate::directorates::q::safehouse::SafeHouseReport;
-use crate::station::safehouse::SafeHouse;
+use crate::station::safehouse::{SafeHouse, SafeHouseHygiene};
 
 use super::super::{DaemonState, is_terminal_state, open_safe_house};
 
@@ -35,9 +35,20 @@ pub(super) struct KeptSafeHouse {
     pub(super) unexported: Vec<String>,
     /// Whether it holds uncommitted changes; `None` when that cannot be told.
     pub(super) dirty: Option<bool>,
+    /// Paths version control ignores (at most 20); those outside the cache directories exist
+    /// nowhere else.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) ignored: Vec<String>,
     /// Why `exported` is unknown, when it is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) note: Option<String>,
+}
+
+/// Whether an ignored `path` (relative, `/`-separated) lies in a cache directory the hygiene
+/// names, so it can be rebuilt.
+pub(super) fn rebuildable(hygiene: &SafeHouseHygiene, path: &str) -> bool {
+    path.split(['/', '\\'])
+        .any(|component| hygiene.is_cache(component))
 }
 
 /// Whether `mission` is over and no Session of it runs on this Station.
@@ -112,12 +123,19 @@ pub(super) fn describe(state: &DaemonState, mission: &Mission, now: SystemTime) 
         exported: None,
         unexported: Vec::new(),
         dirty: None,
+        ignored: Vec::new(),
         note: None,
     };
     match reopen(state, mission).and_then(|house| house.exports().map_err(|e| e.to_string())) {
         Ok(Some(exports)) => {
-            described.exported = Some(exports.is_exported());
+            let hygiene = &state.station.hygiene;
+            described.exported = Some(exports.is_exported(|path| rebuildable(hygiene, path)));
             described.dirty = Some(exports.dirty);
+            described.ignored = exports
+                .ignored
+                .into_iter()
+                .take(MAX_LISTED_CHANGES)
+                .collect();
             described.unexported = exports
                 .unexported
                 .into_iter()

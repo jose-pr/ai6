@@ -48,10 +48,18 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   nothing uncommitted the commit is `HEAD` itself. The worktree, its index and `HEAD` are
   untouched. Answers the remote, branch, commit and base. An in-place session has no branch
   and is refused.
-- `exports()`: `unexported` lists `"<short id> <subject>"` for each commit in
-  `<base>..HEAD` that no remote-tracking ref holds (`git log ... --not --remotes`, as last
-  fetched, so a stale ref reads as unexported); `dirty` is a non-empty `git status
-  --porcelain`. A path that has disappeared exports nothing.
+- `exports()`: first `git fetch --prune --no-tags <remote>` for every configured remote (a
+  remote that cannot be reached fails the call), then `unexported` lists `"<short id>
+  <subject>"` for each commit in `<base>..HEAD` that none of those remotes' branches holds
+  (`--not --remotes=<remote>/*`), so a stale or locally written remote-tracking ref never
+  makes work read as exported; a commit reachable only from a tag counts as unexported.
+  `.gitmodules` adds a line saying submodules are not checked, and `filter=lfs` in
+  `.gitattributes` a line saying LFS objects are not checked: either makes the work read as
+  unexported. `dirty` is a non-empty `git status --porcelain --untracked-files=all
+  --ignore-submodules=none`, whatever `status.showUntrackedFiles` says. `ignored` lists the
+  paths `git status --ignored` reports, a directory ignored whole as one entry (`target`), for
+  the caller to judge. Each call reaches the network once per remote. A path that has
+  disappeared exports nothing.
 - `discard()`: `git worktree remove --force --force` and `git branch -D` of the Mission's
   branch, whatever they hold; what is already gone is skipped. An in-place session is
   refused.

@@ -140,14 +140,21 @@ pub struct SafeHouseExports {
     /// One-line summaries of the changes made since the base that no remote holds, newest
     /// first: for a version-control provider, commits on no remote-tracking ref.
     pub unexported: Vec<String>,
-    /// Whether the working directory holds changes that were never recorded as a change.
+    /// Whether the working directory holds changes that were never recorded as a change,
+    /// including untracked files.
     pub dirty: bool,
+    /// Paths, relative to the safe house, that version control ignores: a directory ignored
+    /// whole is one entry. They exist nowhere else; a caller decides which are rebuildable.
+    pub ignored: Vec<String>,
 }
 
 impl SafeHouseExports {
-    /// Whether everything in the safe house also exists elsewhere.
-    pub fn is_exported(&self) -> bool {
-        self.unexported.is_empty() && !self.dirty
+    /// Whether everything in the safe house also exists elsewhere, counting an ignored path
+    /// as rebuildable only when `rebuildable` says so.
+    pub fn is_exported(&self, rebuildable: impl Fn(&str) -> bool) -> bool {
+        self.unexported.is_empty()
+            && !self.dirty
+            && self.ignored.iter().all(|path| rebuildable(path))
     }
 }
 

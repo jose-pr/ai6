@@ -23,6 +23,12 @@ use super::store::{
 /// The role of the Agent that keeps a Station: a Mission for this role narrowed to one Station
 /// is that Station's round, given its logbook and the Station's own tools.
 pub const HEAD_OF_STATION_ROLE: &str = "head-of-station";
+/// Whether `role` is [`HEAD_OF_STATION_ROLE`] or a role beneath it: only an authorized
+/// Sleeper may queue a brief for it.
+pub fn is_head_of_station_role(role: &str) -> bool {
+    role == HEAD_OF_STATION_ROLE || role.starts_with("head-of-station/")
+}
+
 /// The Cable channel a filed report is sent to, when `cables.toml` configures it.
 pub const HEAD_OF_STATION_CHANNEL: &str = "heads-of-station";
 /// How many reports a Station's logbook keeps; filing another drops the oldest.

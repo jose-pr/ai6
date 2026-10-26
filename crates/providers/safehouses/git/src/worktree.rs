@@ -259,30 +259,75 @@ impl Worktree {
         Ok(self.report(false, Vec::new()))
     }
 
-    /// The commits since the base that no remote-tracking ref holds, and whether anything is
-    /// uncommitted. Remote-tracking refs are as last fetched, so a stale one makes work read
-    /// as unexported, never the other way round.
+    /// What of the work exists only here, judged against the live remotes: each configured
+    /// remote is fetched with `--prune` first, so a stale or locally written remote-tracking
+    /// ref never makes work read as exported, and a remote that cannot be reached fails the
+    /// call. Untracked files count whatever `status.showUntrackedFiles` says; ignored files
+    /// are listed for the caller to judge. Submodules and Git LFS objects are not looked
+    /// into: their presence is listed as unexported work.
     pub(crate) fn exports(&self) -> Result<SafeHouseExports, Failure> {
         if !self.path.exists() {
             return Ok(SafeHouseExports::default());
         }
-        let unexported = git(
+        let remotes: Vec<String> = git(&self.path, &["remote"])?
+            .lines()
+            .map(str::trim)
+            .filter(|remote| !remote.is_empty())
+            .map(str::to_owned)
+            .collect();
+        for remote in &remotes {
+            git(
+                &self.path,
+                &["fetch", "--prune", "--quiet", "--no-tags", "--", remote],
+            )?;
+        }
+        let range = format!("{}..HEAD", self.base);
+        let mut args = vec!["log".to_owned(), "--format=%h %s".to_owned(), range];
+        if !remotes.is_empty() {
+            args.push("--not".to_owned());
+            args.extend(remotes.iter().map(|remote| format!("--remotes={remote}/*")));
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let mut unexported: Vec<String> =
+            git(&self.path, &args)?.lines().map(str::to_owned).collect();
+        if self.path.join(".gitmodules").exists() {
+            unexported.push("submodules: their own work is not checked".to_owned());
+        }
+        if fs::read_to_string(self.path.join(".gitattributes"))
+            .is_ok_and(|attributes| attributes.contains("filter=lfs"))
+        {
+            unexported.push("Git LFS objects: whether they were pushed is not checked".to_owned());
+        }
+        let dirty = !git(
             &self.path,
             &[
-                "log",
-                "--format=%h %s",
-                &format!("{}..HEAD", self.base),
-                "--not",
-                "--remotes",
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--ignore-submodules=none",
+            ],
+        )?
+        .trim()
+        .is_empty();
+        // Ignored directories are listed whole, not file by file.
+        let ignored = git(
+            &self.path,
+            &[
+                "status",
+                "--porcelain",
+                "--untracked-files=normal",
+                "--ignored=traditional",
             ],
         )?
         .lines()
-        .map(str::to_owned)
+        .filter_map(|line| line.strip_prefix("!! "))
+        .map(|path| path.trim_matches('"').trim_end_matches('/').to_owned())
         .collect();
-        let dirty = !git(&self.path, &["status", "--porcelain"])?
-            .trim()
-            .is_empty();
-        Ok(SafeHouseExports { unexported, dirty })
+        Ok(SafeHouseExports {
+            unexported,
+            dirty,
+            ignored,
+        })
     }
 
     /// Removes the worktree and its branch whatever they hold. Working in place is never
@@ -740,6 +785,56 @@ mod tests {
         let house = Worktree::open(&temp.spec(&repo, "mission-export", "{id}-{slug}")).unwrap();
         assert_eq!(house.exports().unwrap(), SafeHouseExports::default());
 
+        // A remote-tracking ref written locally, without the remote holding the commit, does not
+        // make the work exported: the remote is asked.
+        fs::write(house.path.join("forged.txt"), "forged\n").unwrap();
+        temp.git(&house.path, &["add", "forged.txt"]);
+        temp.git(&house.path, &["commit", "--quiet", "-m", "forged export"]);
+        temp.git(
+            &repo,
+            &[
+                "update-ref",
+                "refs/remotes/origin/forged",
+                &resolve(&house.path, "HEAD").unwrap(),
+            ],
+        );
+        let exports = house.exports().unwrap();
+        assert_eq!(exports.unexported.len(), 1, "{exports:?}");
+        temp.git(&house.path, &["reset", "--quiet", "--hard", "HEAD~1"]);
+
+        // Untracked files count even when status hides them; ignored ones are listed.
+        temp.git(&house.path, &["config", "status.showUntrackedFiles", "no"]);
+        fs::write(house.path.join(".gitignore"), ".env\ntarget/\n").unwrap();
+        temp.git(&house.path, &["add", ".gitignore"]);
+        temp.git(&house.path, &["commit", "--quiet", "-m", "ignore"]);
+        temp.git(
+            &house.path,
+            &["push", "--quiet", "origin", "HEAD:refs/heads/ignore"],
+        );
+        fs::create_dir_all(house.path.join("target/debug")).unwrap();
+        fs::write(house.path.join("target/debug/app"), "x").unwrap();
+        fs::write(house.path.join(".env"), "TOKEN=x\n").unwrap();
+        let exports = house.exports().unwrap();
+        assert!(exports.unexported.is_empty(), "{exports:?}");
+        assert!(!exports.dirty);
+        assert_eq!(exports.ignored, [".env", "target"]);
+        fs::write(house.path.join("loose.txt"), "loose\n").unwrap();
+        assert!(house.exports().unwrap().dirty);
+        fs::remove_file(house.path.join("loose.txt")).unwrap();
+        fs::remove_file(house.path.join(".env")).unwrap();
+        fs::remove_dir_all(house.path.join("target")).unwrap();
+        fs::write(house.path.join(".gitattributes"), "*.bin filter=lfs\n").unwrap();
+        assert!(
+            house
+                .exports()
+                .unwrap()
+                .unexported
+                .iter()
+                .any(|line| line.contains("LFS")),
+            "LFS objects are not looked into"
+        );
+        fs::remove_file(house.path.join(".gitattributes")).unwrap();
+
         fs::write(house.path.join("work.txt"), "work\n").unwrap();
         temp.git(&house.path, &["add", "work.txt"]);
         temp.git(&house.path, &["commit", "--quiet", "-m", "add work"]);
@@ -750,7 +845,7 @@ mod tests {
 
         let branch = house.branch.clone().unwrap();
         temp.git(&house.path, &["push", "--quiet", "origin", &branch]);
-        assert!(house.exports().unwrap().is_exported());
+        assert!(house.exports().unwrap().is_exported(|_| false));
         fs::write(house.path.join("loose.txt"), "loose\n").unwrap();
         assert!(house.exports().unwrap().dirty);
 

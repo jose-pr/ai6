@@ -331,12 +331,18 @@ mod tests {
         assert_eq!(house.exports().unwrap(), None);
         assert!(house.discard().is_err());
         let exported = SafeHouseExports::default();
-        assert!(exported.is_exported());
+        assert!(exported.is_exported(|_| false));
         let dirty = SafeHouseExports {
             dirty: true,
             ..SafeHouseExports::default()
         };
-        assert!(!dirty.is_exported());
+        assert!(!dirty.is_exported(|_| true));
+        let ignored = SafeHouseExports {
+            ignored: vec![".env".to_owned()],
+            ..SafeHouseExports::default()
+        };
+        assert!(!ignored.is_exported(|path| path == "target"));
+        assert!(ignored.is_exported(|path| path == ".env"));
     }
 
     #[test]

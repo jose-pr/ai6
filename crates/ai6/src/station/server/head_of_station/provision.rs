@@ -4,7 +4,10 @@
 //! `requires` and `provision` settings: the steps the operator declared, idempotent, and
 //! nothing else, which is why a round may run them unattended. What the declaration does
 //! not cover is reported, never acted on. A Theater made for one Mission and an ephemeral
-//! template are refused: they are fitted out when they are made.
+//! template are refused: they are fitted out when they are made. Applying is refused while a
+//! Mission of this Station works on the Theater. What a failed command printed stays out of
+//! the answer: it may carry anything the Theater holds, and `ai6 theater provision` shows it
+//! to an operator.
 
 use serde::Serialize;
 
@@ -53,8 +56,25 @@ pub(super) fn provision_theater(
             "Theater {id:?} was made for one Mission and fitted out then; it is not provisioned again"
         ));
     }
+    if apply {
+        let busy = working_on(state, id);
+        if !busy.is_empty() {
+            return Err(format!(
+                "Missions work on Theater {id:?} ({}): it is fitted out only while none does",
+                busy.join(", ")
+            ));
+        }
+    }
     let client = state.transports.client(id)?;
-    let steps = provision::provision(&client, &theater, !apply);
+    let mut steps = provision::provision(&client, &theater, !apply);
+    for step in &mut steps {
+        if step.status == StepStatus::Failed {
+            step.detail = format!(
+                "the step failed; what the Theater printed is withheld here (run `ai6 theater \
+                 provision {id}` to see it)"
+            );
+        }
+    }
     if apply {
         // What placement and the next station_report see, without waiting for the next probe.
         if let Ok(capabilities) = client.probe().map_err(|error| describe(&error)) {
@@ -83,6 +103,26 @@ pub(super) fn provision_theater(
             .all(|step| matches!(step.status, StepStatus::Ok | StepStatus::Changed)),
         steps,
     })
+}
+
+/// This Station's Missions that are not over and run on the Theater `id`.
+fn working_on(state: &DaemonState, id: &str) -> Vec<String> {
+    let Ok(missions) = state.missions.lock() else {
+        return vec!["the Mission book is unavailable".to_owned()];
+    };
+    missions
+        .list()
+        .into_iter()
+        .filter(|mission| !super::super::is_terminal_state(mission.state))
+        .filter(|mission| {
+            missions
+                .operation(mission.mission_id.as_str())
+                .and_then(|manifest| manifest.theater_id)
+                .as_deref()
+                == Some(id)
+        })
+        .map(|mission| mission.mission_id.to_string())
+        .collect()
 }
 
 fn audit(state: &DaemonState, round: &Mission, target: &str) {
@@ -116,11 +156,10 @@ mod tests {
     use guatiao::library::ProviderError;
     use guatiao::{Bytes, FromValue, Status, ToValue, Value};
 
-    use super::super::tests::{call, lease_round, start, station};
+    use super::super::tests::{call, lease_sleeper_round, start, station};
     use crate::directorates::m::theaters::{SshAccess, Theater, Theaters};
     use crate::directorates::q::provision::{ProvisionSpec, Requirements};
     use crate::directorates::q::transport::{Capabilities, Output, RunSpec, Transport};
-    use crate::directorates::registry::logbook::HEAD_OF_STATION_ROLE;
     use crate::station::transports::Transports;
 
     /// A host that answers the provisioning probe for the programs it has, installs one
@@ -166,6 +205,15 @@ mod tests {
                     installed.insert("buildtool".to_owned());
                     String::new()
                 }
+                [sh, c, command] if sh == "sh" && c == "-c" && command == "install-leaky" => {
+                    return Output {
+                        code: Some(1),
+                        stderr: Bytes(b"curl: token=SECRET-1234 rejected".to_vec()),
+                        ..Output::default()
+                    }
+                    .to_value()
+                    .map_err(internal);
+                }
                 // Resource samples and anything else answer nothing in particular.
                 _ => String::new(),
             };
@@ -186,6 +234,15 @@ mod tests {
         )
         .with_requirements(Requirements::default().with_tool("buildtool>=1.2".parse().unwrap()))
         .with_provision(ProvisionSpec::default().with_install("buildtool", "install-buildtool"))
+    }
+
+    fn leaky() -> Theater {
+        Theater::new(
+            "leaky-box",
+            crate::directorates::m::theaters::TheaterAccess::Ssh(SshAccess::new("l.example")),
+        )
+        .with_requirements(Requirements::default().with_tool("leaky".parse().unwrap()))
+        .with_provision(ProvisionSpec::default().with_install("leaky", "install-leaky"))
     }
 
     fn statuses(answer: &serde_json::Value) -> Vec<(String, String)> {
@@ -209,6 +266,7 @@ mod tests {
         let installed = Arc::new(Mutex::new(BTreeSet::new()));
         let mut theaters = Theaters::default();
         theaters.insert(declared()).unwrap();
+        theaters.insert(leaky()).unwrap();
         state.transports = Arc::new(
             Transports::build(&theaters, &crate::station::plugins::Plugins::scan(&[]))
                 .with_transport(
@@ -216,10 +274,16 @@ mod tests {
                     Box::new(ProvisionFake {
                         installed: installed.clone(),
                     }),
+                )
+                .with_transport(
+                    leaky(),
+                    Box::new(ProvisionFake {
+                        installed: Arc::default(),
+                    }),
                 ),
         );
         let round = format!("hos-provision-round-{}", std::process::id());
-        lease_round(&state, "H", &round, HEAD_OF_STATION_ROLE, &["test"]);
+        lease_sleeper_round(&state, &round);
         start(&state, &round).await;
         let provision = |apply: bool| {
             let (state, round) = (state.clone(), round.clone());
@@ -264,6 +328,72 @@ mod tests {
         assert_eq!(audited.len(), 2);
         assert_eq!(audited[0].target, "build-box buildtool");
         assert_eq!(audited[0].resource.as_deref(), Some("station:test"));
+
+        // What a failed command printed stays out of the answer.
+        let failed = call(
+            &state,
+            &round,
+            "provision_theater",
+            serde_json::json!({ "theater": "leaky-box", "apply": true }),
+        )
+        .await
+        .unwrap();
+        assert!(failed.contains("\"failed\""), "{failed}");
+        assert!(!failed.contains("SECRET-1234"), "{failed}");
+        assert!(failed.contains("withheld"), "{failed}");
+
+        // While a Mission of this Station works on the Theater it is only checked.
+        let working = format!("hos-provision-working-{}", std::process::id());
+        {
+            let mut missions = state.missions.lock().unwrap();
+            missions
+                .create(
+                    crate::MissionId::try_new(&working).unwrap(),
+                    Some("G".to_owned()),
+                    "build".to_owned(),
+                    Some("M".to_owned()),
+                    None,
+                )
+                .unwrap();
+            missions
+                .set_operation(
+                    &working,
+                    crate::directorates::m::mission::LaunchManifest {
+                        handler_provider: "mock-recorder".to_owned(),
+                        terminal_provider: "mock-terminal".to_owned(),
+                        working_directory: "/work".to_owned(),
+                        model: None,
+                        effort: None,
+                        cover: None,
+                        station_id: Some("test".to_owned()),
+                        theater_id: Some("build-box".to_owned()),
+                        mode: Default::default(),
+                        session: None,
+                        runner: None,
+                    },
+                )
+                .unwrap();
+            missions
+                .transition(
+                    &working,
+                    crate::directorates::m::mission::MissionState::Working,
+                )
+                .unwrap();
+        }
+        let busy = call(
+            &state,
+            &round,
+            "provision_theater",
+            serde_json::json!({ "theater": "build-box", "apply": true }),
+        )
+        .await
+        .unwrap();
+        assert!(busy.contains(&working), "{busy}");
+        assert_eq!(
+            statuses(&provision(false).await),
+            step("ok"),
+            "a check still runs"
+        );
 
         // A Theater this Station does not reach is refused.
         let refused = call(

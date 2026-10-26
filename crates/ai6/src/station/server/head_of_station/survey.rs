@@ -69,6 +69,10 @@ pub(super) fn survey(root: &Path, hygiene: &SafeHouseHygiene, now: SystemTime) -
             if metadata.is_dir() {
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
+                // Version control's own records are never a cache and are never walked.
+                if name == ".git" {
+                    continue;
+                }
                 let inner = match cache {
                     Some(index) => Some(index),
                     None if hygiene.is_cache(&name) => {
@@ -126,11 +130,11 @@ mod tests {
         fs::write(house.join("target/debug/target/x"), [0_u8; 5]).unwrap();
         fs::create_dir_all(house.join("web/node_modules/a")).unwrap();
         fs::write(house.join("web/node_modules/a/i.js"), [0_u8; 20]).unwrap();
-        fs::create_dir_all(house.join(".git")).unwrap();
-        fs::write(house.join(".git/HEAD"), [0_u8; 1]).unwrap();
+        fs::create_dir_all(house.join(".git/refs/heads/target")).unwrap();
+        fs::write(house.join(".git/refs/heads/target/x"), [0_u8; 1]).unwrap();
 
         let found = survey(house, &SafeHouseHygiene::default(), SystemTime::now());
-        assert_eq!(found.size_bytes, 136);
+        assert_eq!(found.size_bytes, 135, ".git is not walked");
         assert!(found.size_complete);
         assert!(found.age_secs.is_some_and(|age| age < 600));
         let caches = found

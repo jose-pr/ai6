@@ -18,6 +18,12 @@ pub const BRIEF_SOURCE: &str = "brief:source";
 pub const BRIEF_REGISTRY_DROP: &str = "brief:registry_drop";
 /// The source of a Session that read review text written by someone else.
 pub const REVIEW: &str = "review";
+/// The source of a Head of Station round that read its Station's report, which quotes what
+/// other Missions' Agents wrote (commit subjects, branch names).
+pub const STATION_REPORT: &str = "station:report";
+/// The source of a Head of Station round given its Station's logbook: reports earlier rounds
+/// wrote after reading other Missions' text.
+pub const STATION_LOGBOOK: &str = "station:logbook";
 /// The Brief `data` key under which a proposal carries its parent's exposure sources.
 pub const BRIEF_EXPOSURE_KEY: &str = "exposure";
 
