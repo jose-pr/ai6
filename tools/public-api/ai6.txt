@@ -432,7 +432,11 @@ pub fn ai6::directorates::m::placement::fitness(&ai6::directorates::m::theaters:
 pub fn ai6::directorates::m::placement::harness_verdict(&ai6::directorates::m::theaters::TheaterSummary, ai6::directorates::m::placement::ExecutionMode, &str) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::placement::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub mod ai6::directorates::m::recovery
+pub const ai6::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS: u64
+pub const ai6::directorates::m::recovery::FIRST_REATTACH_DELAY: core::time::Duration
+pub const ai6::directorates::m::recovery::MAX_REATTACH_DELAY: core::time::Duration
 pub fn ai6::directorates::m::recovery::adopter(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts], &ai6::directorates::registry::sessions::SessionRecord) -> core::result::Result<ai6::directorates::m::placement::PlacementChoice, alloc::string::String>
+pub fn ai6::directorates::m::recovery::reattach_delay(u32) -> core::time::Duration
 pub mod ai6::directorates::m::roster
 #[non_exhaustive] pub enum ai6::directorates::m::roster::OnLost
 pub ai6::directorates::m::roster::OnLost::Fail
@@ -478,6 +482,7 @@ pub ai6::directorates::m::roster::Operation::exposure: ai6::directorates::medica
 pub ai6::directorates::m::roster::Operation::green_ink: ai6::directorates::m::approvals::GreenInkPolicy
 pub ai6::directorates::m::roster::Operation::id: alloc::string::String
 pub ai6::directorates::m::roster::Operation::limit_fallback_secs: u64
+pub ai6::directorates::m::roster::Operation::lost_after_secs: u64
 pub ai6::directorates::m::roster::Operation::max_concurrent: core::option::Option<usize>
 pub ai6::directorates::m::roster::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::on_blown: alloc::string::String
@@ -3877,6 +3882,7 @@ pub ai6::Operation::exposure: ai6::directorates::medical::exposure::ExposurePoli
 pub ai6::Operation::green_ink: ai6::directorates::m::approvals::GreenInkPolicy
 pub ai6::Operation::id: alloc::string::String
 pub ai6::Operation::limit_fallback_secs: u64
+pub ai6::Operation::lost_after_secs: u64
 pub ai6::Operation::max_concurrent: core::option::Option<usize>
 pub ai6::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::Operation::on_blown: alloc::string::String
