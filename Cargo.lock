@@ -73,6 +73,7 @@ dependencies = [
  "lru",
  "rcgen",
  "regex",
+ "ring",
  "rmcp",
  "rusqlite",
  "rustls",
@@ -830,6 +831,7 @@ version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-peer?rev=d01b6907859029fad23e5d97398146a03c313ffe#d01b6907859029fad23e5d97398146a03c313ffe"
 dependencies = [
  "data-encoding",
+ "serde",
  "sha1 0.11.0",
  "sha2",
  "subtle",

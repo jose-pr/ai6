@@ -272,6 +272,7 @@ impl Default for StationConfig {
 pub struct ServeConfig {
     address: SocketAddr,
     plugin_paths: Vec<PathBuf>,
+    plugin_policy: plugins::PluginPolicy,
     config_dir: Option<PathBuf>,
     config_source: Option<Arc<dyn ConfigSource>>,
     registry: Option<Arc<dyn RegistryBackend>>,
@@ -289,6 +290,7 @@ impl ServeConfig {
         Self {
             address,
             plugin_paths: Vec::new(),
+            plugin_policy: plugins::PluginPolicy::default(),
             config_dir: None,
             config_source: None,
             registry: None,
@@ -304,6 +306,13 @@ impl ServeConfig {
     /// Sets directories and library files scanned for AgentHandler and Terminal providers.
     pub fn with_plugin_paths(mut self, paths: impl IntoIterator<Item = PathBuf>) -> Self {
         self.plugin_paths = paths.into_iter().collect();
+        self
+    }
+
+    /// Sets how the provider libraries on the plugin paths are checked before they load
+    /// (default: `report`, no pins).
+    pub fn with_plugin_policy(mut self, policy: plugins::PluginPolicy) -> Self {
+        self.plugin_policy = policy;
         self
     }
 
@@ -614,7 +623,11 @@ where
         scope_burst,
     )
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
-    let plugins = Arc::new(plugins::Plugins::scan(&config.plugin_paths));
+    let plugins = Arc::new(plugins::Plugins::scan_with(
+        &config.plugin_paths,
+        &config.plugin_policy,
+    ));
+    plugins::log_scan(plugins.scan_summary());
     let transports = Arc::new(
         Transports::build(&config.station.theaters, &plugins)
             .with_resources_every(config.station.resources_every),
@@ -1750,6 +1763,13 @@ fn publish_station_check_in(state: &DaemonState) {
         theater.sessions = running.get(&theater.id).copied().unwrap_or_default();
     }
     info.insert("theaters".to_owned(), serde_json::json!(theaters));
+    let plugins_weakened = &state.plugins.scan_summary().weakened;
+    if !plugins_weakened.is_empty() {
+        info.insert(
+            "plugins_weakened".to_owned(),
+            serde_json::json!(plugins_weakened),
+        );
+    }
     if let Err(error) = state.intake.check_in(&state.station_id, info) {
         eprintln!("ai6: Station check-in failed: {error}");
     }

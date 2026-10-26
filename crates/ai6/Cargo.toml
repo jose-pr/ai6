@@ -13,13 +13,13 @@ exclude = [".*", "*.local.*"]
 [features]
 default = []
 # The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
-daemon = ["gate", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "guatiao/load"]
+daemon = ["gate", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "guatiao/load"]
 # The harness gate's client of a Station's Cable endpoint (`ai6::directorates::section_00::gate`).
 gate = ["dep:ureq"]
 # Adds bounded background event publication to the Universal Exports gateway.
 publisher = ["daemon", "dep:ai6-diptel", "dep:url"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]
-station-tls = ["dep:coqui-peer", "dep:coqui-peer-tls", "dep:rustls"]
+station-tls = ["dep:coqui-peer-tls", "dep:rustls"]
 # A Registry and roster kept in a SQLite database file.
 sqlite = ["dep:rusqlite"]
 # A Registry and roster kept in PostgreSQL, shared by every Station of an HA deployment.
@@ -54,7 +54,9 @@ serde_json.workspace = true
 rmcp = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 sha2.workspace = true
-coqui-peer = { workspace = true, optional = true }
+coqui-peer = { workspace = true, features = ["serde"] }
+# Ed25519 for publisher signatures on provider libraries; already built for rustls.
+ring = { version = "0.17.14", optional = true }
 coqui-peer-tls = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 globset.workspace = true

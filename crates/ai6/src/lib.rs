@@ -107,7 +107,10 @@ pub use directorates::registry::backend::{
     CableStore, QuarantineStore, RegistryBackend, SessionStore, SleeperStore, SourceStore,
     StationStore, TimelineStore, UsageStore,
 };
-pub use directorates::registry::bona_fides::{Origin, Provenance, brief_digest};
+pub use directorates::registry::bona_fides::{
+    LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey, Require,
+    SignatureCheck, brief_digest, library_pin,
+};
 pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,
     CableError, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy,

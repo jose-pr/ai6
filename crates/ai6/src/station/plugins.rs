@@ -1,12 +1,22 @@
 //! Guatiao provider discovery and construction for the daemon.
 
 use core::fmt;
+use std::collections::BTreeMap;
+use std::env::consts::DLL_EXTENSION;
 use std::mem::ManuallyDrop;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use guatiao::library::{Instance, Kind, KindMismatch, Order, Registry, SearchPath, scan_path_with};
+use coqui_peer::PeerId;
+use guatiao::library::{
+    Declared, Instance, Kind, KindMismatch, Order, Registry, SearchPath, bundle_binary, probe,
+    scan_path_with,
+};
 use guatiao::{Status, Value};
 use serde::Serialize;
+
+use crate::directorates::registry::bona_fides::{
+    LibraryPin, PinCheck, PinSet, PluginProfile, PublisherKey, library_pin,
+};
 
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
 use crate::directorates::q::ephemeral::TheaterProvider;
@@ -30,7 +40,9 @@ pub struct ProviderInfo {
 /// What happened when the daemon scanned configured provider paths.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PluginScanSummary {
-    /// Guatiao libraries that loaded.
+    /// The plugin profile the scan ran under: `strict`, `report` or `off`.
+    pub profile: String,
+    /// Guatiao libraries that loaded, by the path they were found at.
     pub loaded: Vec<String>,
     /// Candidate files skipped by the kind filter or scanner.
     pub skipped: Vec<String>,
@@ -38,6 +50,86 @@ pub struct PluginScanSummary {
     pub failed: Vec<String>,
     /// Plugin paths or directories the daemon could not inspect.
     pub unreadable: Vec<String>,
+    /// Each AI6 provider library found, with its digest and what the pin set said.
+    pub checked: Vec<LibraryCheck>,
+    /// Libraries the `strict` profile did not load, and why.
+    pub refused: Vec<String>,
+    /// Every way the scan was looser than `strict` with every library pinned: the profile,
+    /// each library that loaded unpinned or unmatched, SHA-1 pins.
+    pub weakened: Vec<String>,
+}
+
+/// One AI6 provider library a scan found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LibraryCheck {
+    /// Where it was found.
+    pub path: String,
+    /// Its `sha256:HEX` digest.
+    pub digest: String,
+    /// `accepted: pin sha256:..`, `accepted: publisher ed25519:..`, `unpinned` or
+    /// `refused: <why>`.
+    pub verdict: String,
+    /// The verified copy it was handed to Guatiao as, under `strict`.
+    pub loaded_from: Option<String>,
+}
+
+/// How [`Plugins::scan_with`] checks the provider libraries it finds.
+///
+/// Under [`PluginProfile::Strict`] each library is read once, checked against the pin set,
+/// and loaded from a copy written into `verified_dir` under its digest, never from where it
+/// was found; under `Report` every library loads from where it was found and each one the
+/// pin set does not accept is a weakening; under `Off` nothing is checked.
+#[derive(Debug, Clone)]
+pub struct PluginPolicy {
+    profile: PluginProfile,
+    pins: PinSet,
+    verified_dir: Option<PathBuf>,
+}
+
+impl Default for PluginPolicy {
+    /// `report` with no pins: every library loads and each is listed as unpinned.
+    fn default() -> Self {
+        Self {
+            profile: PluginProfile::Report,
+            pins: PinSet::new(),
+            verified_dir: None,
+        }
+    }
+}
+
+impl PluginPolicy {
+    /// The policy for `pins` (`None` when the Station has no pin set), copying verified
+    /// libraries into `verified_dir`. The profile is the pin set's own, else `strict` with
+    /// a pin set and `report` without.
+    pub fn new(pins: Option<PinSet>, verified_dir: impl Into<PathBuf>) -> Self {
+        let profile = pins
+            .as_ref()
+            .map_or(PluginProfile::default_for(false), |pins| {
+                pins.profile.unwrap_or(PluginProfile::default_for(true))
+            });
+        Self {
+            profile,
+            pins: pins.unwrap_or_default(),
+            verified_dir: Some(verified_dir.into()),
+        }
+    }
+
+    /// Uses `profile` whatever the pin set asks for.
+    #[must_use]
+    pub fn with_profile(mut self, profile: PluginProfile) -> Self {
+        self.profile = profile;
+        self
+    }
+
+    /// The profile scans run under.
+    pub fn profile(&self) -> PluginProfile {
+        self.profile
+    }
+
+    /// The accepted libraries.
+    pub fn pins(&self) -> &PinSet {
+        &self.pins
+    }
 }
 
 /// Why a configured provider could not be constructed.
@@ -93,56 +185,64 @@ pub struct Plugins {
 }
 
 impl Plugins {
-    /// Scans each directory or library path for AI6 handlers, access providers, terminals, transports, safe houses or sources.
+    /// Scans each directory or library path for AI6 handlers, access providers, terminals,
+    /// transports, safe houses or sources under the default policy (`report`, no pins).
     ///
     /// The registry stays mapped for the daemon lifetime because instances and sessions
     /// may call code from the loaded libraries after construction.
     pub fn scan(paths: &[PathBuf]) -> Self {
+        Self::scan_with(paths, &PluginPolicy::default())
+    }
+
+    /// Scans each directory or library path under `policy`; see [`PluginPolicy`] for what
+    /// each profile loads and from where. A directory is not searched recursively.
+    pub fn scan_with(paths: &[PathBuf], policy: &PluginPolicy) -> Self {
         let mut registry = Registry::new("ai6", env!("CARGO_PKG_VERSION"));
+        let mut summary = PluginScanSummary {
+            profile: policy.profile.as_str().to_owned(),
+            weakened: policy.pins.weakenings(),
+            ..PluginScanSummary::default()
+        };
         let mut search = SearchPath::new();
-        for path in paths {
-            search.push(path.clone());
-        }
-        let report = scan_path_with(&mut registry, &search, Order::Ascending, |declared| {
-            if declared.kinds().any(|kind| {
-                kind.starts_with(KIND_PREFIX)
-                    || matches!(
-                        kind,
-                        "ai6_agent_handler"
-                            | "ai6_terminal"
-                            | "ai6_safehouse"
-                            | "ai6_transport"
-                            | "ai6_theater_provider"
-                            | "ai6_source"
-                    )
-            }) {
-                Ok(())
-            } else {
-                Err("it declares no supported AI6 provider kind".to_string())
+        let mut found_at = BTreeMap::new();
+        if policy.profile == PluginProfile::Off {
+            summary
+                .weakened
+                .push("plugin profile is off: provider libraries load unchecked".to_owned());
+            for path in paths {
+                search.push(path.clone());
             }
-        });
-        let summary = PluginScanSummary {
-            loaded: report
-                .loaded
-                .iter()
-                .map(|(path, _)| path.display().to_string())
-                .collect(),
-            skipped: report
+        } else {
+            for candidate in candidates(paths, &mut summary) {
+                if let Some(load) = check_candidate(&candidate, policy, &mut summary) {
+                    found_at.insert(load.clone(), candidate);
+                    search.push(load);
+                }
+            }
+        }
+        let report = scan_path_with(&mut registry, &search, Order::Ascending, declares_ai6_kind);
+        let shown = |path: &PathBuf| found_at.get(path).unwrap_or(path).display().to_string();
+        summary
+            .loaded
+            .extend(report.loaded.iter().map(|(path, _)| shown(path)));
+        summary.skipped.extend(
+            report
                 .skipped
                 .iter()
-                .map(|(path, reason)| format!("{}: {reason:?}", path.display()))
-                .collect(),
-            failed: report
+                .map(|(path, reason)| format!("{}: {reason:?}", shown(path))),
+        );
+        summary.failed.extend(
+            report
                 .failed
                 .iter()
-                .map(|(path, reason)| format!("{}: {reason}", path.display()))
-                .collect(),
-            unreadable: report
+                .map(|(path, reason)| format!("{}: {reason}", shown(path))),
+        );
+        summary.unreadable.extend(
+            report
                 .unreadable
                 .iter()
-                .map(|(path, reason)| format!("{}: {reason}", path.display()))
-                .collect(),
-        };
+                .map(|(path, reason)| format!("{}: {reason}", shown(path))),
+        );
         Self {
             registry: ManuallyDrop::new(registry),
             summary,
@@ -323,6 +423,225 @@ impl Plugins {
     pub fn scan_summary(&self) -> &PluginScanSummary {
         &self.summary
     }
+}
+
+/// Tells the operator, on standard error, what the scan refused and every way it was weaker
+/// than `strict`.
+pub fn log_scan(summary: &PluginScanSummary) {
+    for refused in &summary.refused {
+        eprintln!("ai6: plugin not loaded: {refused}");
+    }
+    for weakened in &summary.weakened {
+        eprintln!("ai6: warning: {weakened}");
+    }
+}
+
+/// The filter a scan applies to what a library declares: one of AI6's own kinds.
+fn declares_ai6_kind(declared: &Declared) -> Result<(), String> {
+    if declared.kinds().any(|kind| {
+        kind.starts_with(KIND_PREFIX)
+            || matches!(
+                kind,
+                "ai6_agent_handler"
+                    | "ai6_terminal"
+                    | "ai6_safehouse"
+                    | "ai6_transport"
+                    | "ai6_theater_provider"
+                    | "ai6_source"
+            )
+    }) {
+        Ok(())
+    } else {
+        Err("it declares no supported AI6 provider kind".to_string())
+    }
+}
+
+/// The library files on `paths`, as Guatiao's scan finds them: a directory's files with the
+/// platform's library extension and its bundles, in name order, and each file entry as given.
+fn candidates(paths: &[PathBuf], summary: &mut PluginScanSummary) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for entry in paths {
+        let entry = bundle_binary(entry).unwrap_or_else(|| entry.clone());
+        if entry.is_dir() {
+            match std::fs::read_dir(&entry) {
+                Ok(listing) => {
+                    let mut files: Vec<PathBuf> = listing
+                        .filter_map(Result::ok)
+                        .map(|item| item.path())
+                        .filter_map(|path| {
+                            if path.is_file() {
+                                path.extension()
+                                    .is_some_and(|extension| {
+                                        extension.eq_ignore_ascii_case(DLL_EXTENSION)
+                                    })
+                                    .then_some(path)
+                            } else {
+                                bundle_binary(&path)
+                            }
+                        })
+                        .collect();
+                    files.sort();
+                    found.extend(files);
+                }
+                Err(error) => summary
+                    .unreadable
+                    .push(format!("{}: {error}", entry.display())),
+            }
+        } else if entry.is_file() {
+            found.push(entry);
+        } else {
+            summary
+                .unreadable
+                .push(format!("{}: not found", entry.display()));
+        }
+    }
+    found.dedup();
+    found
+}
+
+/// Checks one candidate against the policy and returns the path to load it from, if it
+/// loads: the verified copy under `strict`, the file itself otherwise. Files that are not
+/// AI6 libraries are passed to Guatiao to report as it does.
+fn check_candidate(
+    candidate: &Path,
+    policy: &PluginPolicy,
+    summary: &mut PluginScanSummary,
+) -> Option<PathBuf> {
+    let shown = candidate.display().to_string();
+    let not_ai6 = match probe(candidate) {
+        Err(_) => Some("not a library this build can examine".to_owned()),
+        Ok(probed) if !probed.entry => Some("no Guatiao entry symbol".to_owned()),
+        Ok(probed) => declares_ai6_kind(&probed.declared).err(),
+    };
+    if let Some(reason) = not_ai6 {
+        // Under strict, nothing unchecked reaches the loader, even a file that looked inert:
+        // it could be replaced between this probe and Guatiao's.
+        if policy.profile == PluginProfile::Strict {
+            summary.skipped.push(format!("{shown}: {reason}"));
+            return None;
+        }
+        return Some(candidate.to_path_buf());
+    }
+    let file = candidate
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let bytes = match std::fs::read(candidate) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            summary.failed.push(format!("{shown}: {error}"));
+            return None;
+        }
+    };
+    let digest = library_pin(&bytes);
+    let signature = std::fs::read(candidate.with_file_name(format!("{file}.sig"))).ok();
+    let check = policy
+        .pins
+        .check(&file, &bytes, signature.as_deref(), &verify_ed25519);
+    let verdict = match &check {
+        PinCheck::Accepted(held) => format!("accepted: {held}"),
+        PinCheck::Unpinned => "unpinned".to_owned(),
+        PinCheck::Refused(why) => format!("refused: {why}"),
+    };
+    summary.checked.push(LibraryCheck {
+        path: shown.clone(),
+        digest: digest.to_string(),
+        verdict,
+        loaded_from: None,
+    });
+    match (policy.profile, check) {
+        (PluginProfile::Strict, PinCheck::Accepted(_)) => {
+            let Some(directory) = &policy.verified_dir else {
+                summary
+                    .refused
+                    .push(format!("{shown}: no directory for verified copies"));
+                return None;
+            };
+            match copy_verified(directory, &digest, &bytes) {
+                Ok(copy) => {
+                    if let Some(check) = summary.checked.last_mut() {
+                        check.loaded_from = Some(copy.display().to_string());
+                    }
+                    Some(copy)
+                }
+                Err(error) => {
+                    summary.failed.push(format!(
+                        "{shown}: the verified copy was not written: {error}"
+                    ));
+                    None
+                }
+            }
+        }
+        (PluginProfile::Strict, PinCheck::Unpinned) => {
+            summary.refused.push(format!(
+                "{shown}: {file} is not pinned ({digest}); `ai6 plugins pin` prints its entry"
+            ));
+            None
+        }
+        (PluginProfile::Strict, PinCheck::Refused(why)) => {
+            summary.refused.push(format!("{shown}: {why}"));
+            None
+        }
+        (_, PinCheck::Unpinned) => {
+            summary.weakened.push(format!(
+                "library {file} is not pinned ({digest}) and loads because the plugin profile is {}",
+                policy.profile.as_str()
+            ));
+            Some(candidate.to_path_buf())
+        }
+        (_, PinCheck::Refused(why)) => {
+            summary.weakened.push(format!(
+                "library {file} is not accepted by its pin ({why}) and loads because the plugin profile is {}",
+                policy.profile.as_str()
+            ));
+            Some(candidate.to_path_buf())
+        }
+        _ => Some(candidate.to_path_buf()),
+    }
+}
+
+/// Writes `bytes` into `directory` as `sha256-HEX.EXT`, unless a file of that name already
+/// holds them, and returns its path.
+fn copy_verified(directory: &Path, digest: &PeerId, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    std::fs::create_dir_all(directory)?;
+    let path = directory.join(format!("sha256-{}.{DLL_EXTENSION}", digest.hex()));
+    if std::fs::read(&path).is_ok_and(|held| library_pin(&held) == *digest) {
+        return Ok(path);
+    }
+    let mut copy = tempfile::NamedTempFile::new_in(directory)?;
+    copy.write_all(bytes)?;
+    copy.as_file().sync_all()?;
+    copy.persist(&path).map_err(|error| error.error)?;
+    Ok(path)
+}
+
+/// Whether `signature` is `key`'s Ed25519 signature of `message`.
+fn verify_ed25519(key: &PublisherKey, message: &[u8], signature: &[u8]) -> bool {
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key.as_bytes())
+        .verify(message, signature)
+        .is_ok()
+}
+
+/// The pin-set entry that accepts the AI6 provider library at `path` by its digest: what
+/// `ai6 plugins pin PATH` prints.
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be read or is not an AI6 provider library.
+pub fn pin_entry(path: &Path) -> std::io::Result<LibraryPin> {
+    let probed = probe(path)?;
+    if !probed.entry || declares_ai6_kind(&probed.declared).is_err() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not an AI6 provider library",
+        ));
+    }
+    let file = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    Ok(LibraryPin::digest(file, library_pin(&std::fs::read(path)?)))
 }
 
 fn providers(registry: &Registry, kind: &str) -> Vec<ProviderInfo> {
@@ -675,6 +994,241 @@ mod tests {
                 .unwrap(),
             Verdict::Unknown
         );
+    }
+
+    /// A directory under the build's own output: a library loaded from it stays mapped for
+    /// the test process, so Windows cannot remove it when the test ends, and `cargo clean`
+    /// then does.
+    fn scratch() -> tempfile::TempDir {
+        let parent = plugin_directory().join("plugin-scratch");
+        std::fs::create_dir_all(&parent).unwrap();
+        tempfile::tempdir_in(parent).unwrap()
+    }
+
+    /// A directory holding one provider library, the roles plugin, as `roles.EXT`.
+    fn one_library() -> (tempfile::TempDir, PathBuf, Vec<u8>) {
+        let original = std::fs::read_dir(plugin_directory())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == DLL_EXTENSION)
+                    && path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().contains("coqui_roles_plugin"))
+            })
+            .expect("the roles plugin is built beside the test binary");
+        let directory = scratch();
+        let library = directory.path().join(format!("roles.{DLL_EXTENSION}"));
+        let bytes = std::fs::read(original).unwrap();
+        std::fs::write(&library, &bytes).unwrap();
+        (directory, library, bytes)
+    }
+
+    fn file_name() -> String {
+        format!("roles.{DLL_EXTENSION}")
+    }
+
+    fn has_roles(plugins: &Plugins) -> bool {
+        plugins
+            .authorizers()
+            .iter()
+            .any(|provider| provider.id == "coqui_roles")
+    }
+
+    /// The library with its last byte changed: still a library a probe reads, other bytes.
+    fn tamper(library: &Path) {
+        let mut bytes = std::fs::read(library).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x5a;
+        std::fs::write(library, bytes).unwrap();
+    }
+
+    #[test]
+    fn a_pinned_library_loads_from_its_verified_copy() {
+        let (directory, library, bytes) = one_library();
+        let verified = scratch();
+        let pins = PinSet::new().with_library(LibraryPin::digest(file_name(), library_pin(&bytes)));
+        let policy = PluginPolicy::new(Some(pins), verified.path());
+        assert_eq!(
+            policy.profile(),
+            PluginProfile::Strict,
+            "a pin set defaults to strict"
+        );
+
+        let plugins = Plugins::scan_with(&[directory.path().to_path_buf()], &policy);
+        let summary = plugins.scan_summary();
+        assert!(has_roles(&plugins), "{summary:?}");
+        assert!(
+            summary.refused.is_empty() && summary.weakened.is_empty(),
+            "{summary:?}"
+        );
+        let check = &summary.checked[0];
+        assert_eq!(check.digest, library_pin(&bytes).to_string());
+        assert!(
+            check.verdict.starts_with("accepted: pin sha256:"),
+            "{check:?}"
+        );
+        let copy = verified.path().join(format!(
+            "sha256-{}.{DLL_EXTENSION}",
+            library_pin(&bytes).hex()
+        ));
+        assert_eq!(check.loaded_from.as_deref(), copy.to_str());
+        assert_eq!(std::fs::read(&copy).unwrap(), bytes);
+        assert_eq!(summary.loaded, [library.display().to_string()]);
+    }
+
+    #[test]
+    fn a_changed_byte_is_refused_under_strict_with_both_digests() {
+        let (directory, library, bytes) = one_library();
+        let verified = scratch();
+        let pin = library_pin(&bytes);
+        tamper(&library);
+        let found = library_pin(&std::fs::read(&library).unwrap());
+        let pins = PinSet::new().with_library(LibraryPin::digest(file_name(), pin));
+
+        let plugins = Plugins::scan_with(
+            &[directory.path().to_path_buf()],
+            &PluginPolicy::new(Some(pins), verified.path()),
+        );
+        let summary = plugins.scan_summary();
+        assert!(!has_roles(&plugins));
+        assert_eq!(summary.refused.len(), 1, "{summary:?}");
+        assert!(
+            summary.refused[0].contains(&format!("expected {pin}, found {found}")),
+            "{summary:?}"
+        );
+        assert!(summary.loaded.is_empty());
+    }
+
+    #[test]
+    fn report_loads_an_unpinned_or_unmatched_library_and_lists_it() {
+        let (directory, library, bytes) = one_library();
+        let plugins = Plugins::scan(&[directory.path().to_path_buf()]);
+        let summary = plugins.scan_summary();
+        assert_eq!(summary.profile, "report");
+        assert!(has_roles(&plugins));
+        let digest = library_pin(&bytes).to_string();
+        assert!(
+            summary
+                .weakened
+                .iter()
+                .any(|line| line.contains("not pinned") && line.contains(&digest)),
+            "{summary:?}"
+        );
+
+        // A loaded library stays mapped (and on Windows, locked): change a fresh copy.
+        let (changed, changed_library, _) = one_library();
+        tamper(&changed_library);
+        drop(library);
+        let pins = PinSet::new().with_library(LibraryPin::digest(file_name(), library_pin(&bytes)));
+        let verified = scratch();
+        let policy =
+            PluginPolicy::new(Some(pins), verified.path()).with_profile(PluginProfile::Report);
+        let plugins = Plugins::scan_with(&[changed.path().to_path_buf()], &policy);
+        assert!(has_roles(&plugins), "report still loads it");
+        assert!(
+            plugins
+                .scan_summary()
+                .weakened
+                .iter()
+                .any(|line| line.contains("not accepted by its pin")),
+            "{:?}",
+            plugins.scan_summary()
+        );
+        assert!(std::fs::read_dir(verified.path()).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn strict_refuses_an_unpinned_library_and_off_loads_it_as_a_weakening() {
+        let (directory, _library, _bytes) = one_library();
+        let verified = scratch();
+        let strict = PluginPolicy::new(Some(PinSet::new()), verified.path());
+        let plugins = Plugins::scan_with(&[directory.path().to_path_buf()], &strict);
+        assert!(!has_roles(&plugins));
+        assert!(plugins.scan_summary().refused[0].contains("is not pinned"));
+
+        let off = strict.with_profile(PluginProfile::Off);
+        let plugins = Plugins::scan_with(&[directory.path().to_path_buf()], &off);
+        assert!(has_roles(&plugins));
+        assert!(plugins.scan_summary().weakened[0].contains("off"));
+    }
+
+    fn publisher() -> (ring::signature::Ed25519KeyPair, PublisherKey) {
+        use ring::signature::KeyPair;
+        let random = ring::rand::SystemRandom::new();
+        let document = ring::signature::Ed25519KeyPair::generate_pkcs8(&random).unwrap();
+        let pair = ring::signature::Ed25519KeyPair::from_pkcs8(document.as_ref()).unwrap();
+        let key = PublisherKey::from_bytes(pair.public_key().as_ref().try_into().unwrap());
+        (pair, key)
+    }
+
+    fn sign(pair: &ring::signature::Ed25519KeyPair, library: &Path) {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(std::fs::read(library).unwrap());
+        let mut signature = library.as_os_str().to_owned();
+        signature.push(".sig");
+        std::fs::write(signature, pair.sign(&digest).as_ref()).unwrap();
+    }
+
+    #[test]
+    fn a_library_its_publisher_signed_loads_and_a_tampered_one_or_another_key_is_refused() {
+        let (directory, library, _bytes) = one_library();
+        let (pair, key) = publisher();
+        sign(&pair, &library);
+        let verified = scratch();
+        let policy = |key: PublisherKey| {
+            PluginPolicy::new(
+                Some(PinSet::new().with_library(LibraryPin::publisher(file_name(), key))),
+                verified.path(),
+            )
+        };
+        let scan = |key| Plugins::scan_with(&[directory.path().to_path_buf()], &policy(key));
+
+        let plugins = scan(key);
+        assert!(has_roles(&plugins), "{:?}", plugins.scan_summary());
+        assert_eq!(
+            plugins.scan_summary().checked[0].verdict,
+            format!("accepted: publisher {key}")
+        );
+
+        let (_, stranger) = publisher();
+        let plugins = scan(stranger);
+        assert!(!has_roles(&plugins));
+        assert!(
+            plugins.scan_summary().refused[0].contains(&format!(
+                "publisher {stranger}: the signature does not verify"
+            )),
+            "{:?}",
+            plugins.scan_summary()
+        );
+
+        tamper(&library);
+        let plugins = scan(key);
+        assert!(!has_roles(&plugins));
+        assert!(
+            plugins.scan_summary().refused[0]
+                .contains(&format!("publisher {key}: the signature does not verify")),
+            "{:?}",
+            plugins.scan_summary()
+        );
+    }
+
+    #[test]
+    fn pin_entry_prints_the_sha256_pin_of_a_provider_library() {
+        let (_directory, library, bytes) = one_library();
+        let entry = pin_entry(&library).unwrap();
+        assert_eq!(entry.file, file_name());
+        assert_eq!(entry.pin, Some(library_pin(&bytes)));
+        let text = toml::to_string(&PinSet::new().with_library(entry)).unwrap();
+        assert!(text.contains("[[library]]"), "{text}");
+        assert!(
+            PinSet::from_toml(&text).is_ok(),
+            "what it prints reads back: {text}"
+        );
+        let not_a_library = library.with_file_name("notes.txt");
+        std::fs::write(&not_a_library, "text").unwrap();
+        assert!(pin_entry(&not_a_library).is_err());
     }
 
     #[test]

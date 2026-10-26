@@ -27,6 +27,39 @@ fn serve_help_lists_watchdog_configuration() {
 }
 
 #[test]
+fn plugins_pin_prints_an_entry_for_a_provider_library_and_refuses_anything_else() {
+    // The access plugins are dev-dependencies, built beside this test binary.
+    let deps = std::env::current_exe().unwrap();
+    let library = std::fs::read_dir(deps.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == std::env::consts::DLL_EXTENSION)
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().contains("coqui_roles_plugin"))
+        })
+        .expect("the roles plugin is built beside the test binary");
+    let output = ai6()
+        .args(["plugins", "pin"])
+        .arg(&library)
+        .output()
+        .expect("the AI6 command should start");
+    assert!(output.status.success(), "{output:?}");
+    let entry = String::from_utf8(output.stdout).unwrap();
+    assert!(entry.starts_with("[[library]]\n"), "{entry}");
+    assert!(entry.contains("pin = \"sha256:"), "{entry}");
+
+    let output = ai6()
+        .args(["plugins", "pin"])
+        .arg(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("the AI6 command should start");
+    assert!(!output.status.success());
+}
+
+#[test]
 fn negative_watchdog_timeout_is_an_invalid_invocation() {
     let output = ai6()
         .args(["serve", "--stall-timeout", "-1"])

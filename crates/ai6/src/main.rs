@@ -57,6 +57,21 @@ enum Command {
         #[command(subcommand)]
         command: GreenInkCommand,
     },
+    /// Provider library pins (`plugins.toml`).
+    Plugins {
+        #[command(subcommand)]
+        command: PluginsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginsCommand {
+    /// Print the `plugins.toml` entry that pins each AI6 provider library by its SHA-256.
+    Pin {
+        /// Library files to pin.
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -192,6 +207,14 @@ struct ServeArgs {
     /// A directory or library path to scan for Guatiao AgentHandler providers.
     #[arg(long = "plugin-path")]
     plugin_paths: Vec<PathBuf>,
+    /// The provider library pin set (default: plugins.toml in the configuration directory).
+    #[arg(long, value_name = "PATH")]
+    plugin_pins: Option<PathBuf>,
+    /// How provider libraries are checked: strict (only pinned or signed ones load, from a
+    /// verified copy), report (all load; unpinned ones are reported) or off (default: the
+    /// pin set's profile, else strict with a pin set and report without).
+    #[arg(long, value_name = "PROFILE")]
+    plugin_profile: Option<ai6::PluginProfile>,
     /// AI6 configuration directory containing operations.toml and agents.toml.
     #[arg(long)]
     config_dir: Option<PathBuf>,
@@ -315,6 +338,30 @@ async fn main() -> ExitCode {
         Command::GreenInk {
             command: GreenInkCommand::Gate { cable_url },
         } => green_ink_gate(cable_url).await,
+        Command::Plugins {
+            command: PluginsCommand::Pin { paths },
+        } => {
+            let mut pins = ai6::PinSet::new();
+            for path in &paths {
+                match ai6::station::plugins::pin_entry(path) {
+                    Ok(entry) => pins = pins.with_library(entry),
+                    Err(error) => {
+                        eprintln!("ai6: {}: {error}", path.display());
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            match toml::to_string(&pins) {
+                Ok(text) => {
+                    print!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("ai6: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::Theater { command } => {
             match tokio::task::spawn_blocking(move || theater_command(command)).await {
                 Ok(code) => code,
@@ -328,6 +375,8 @@ async fn main() -> ExitCode {
             let ServeArgs {
                 listen,
                 plugin_paths,
+                plugin_pins,
+                plugin_profile,
                 config_dir,
                 config: roster_location,
                 registry,
@@ -372,8 +421,17 @@ async fn main() -> ExitCode {
             if let Some(terminal) = terminal {
                 station_config = station_config.with_terminal(terminal);
             }
+            let plugin_policy =
+                match plugin_policy(plugin_pins, plugin_profile, config_dir.as_deref()) {
+                    Ok(policy) => policy,
+                    Err(error) => {
+                        eprintln!("ai6: provider library pins: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                };
             let mut config = ai6::ServeConfig::new(listen)
                 .with_plugin_paths(plugin_paths)
+                .with_plugin_policy(plugin_policy)
                 .with_max_concurrent_missions(max_concurrent_missions)
                 .with_station_config(station_config)
                 .with_watchdog(
@@ -446,7 +504,35 @@ async fn main() -> ExitCode {
     }
 }
 
-/// Reads the hook input, asks the gate, and prints a denial when it holds the command.
+/// The provider library policy: the pin set at `pins` (else `plugins.toml` in the
+/// configuration directory), verified copies under the state directory's `plugins/verified`.
+fn plugin_policy(
+    pins: Option<PathBuf>,
+    profile: Option<ai6::PluginProfile>,
+    config_dir: Option<&std::path::Path>,
+) -> Result<ai6::station::plugins::PluginPolicy, String> {
+    let path = match (pins, config_dir) {
+        (Some(path), _) => Some(path),
+        (None, Some(dir)) => Some(dir.join("plugins.toml")),
+        (None, None) => ai6::directorates::m::roster::config_dir()
+            .ok()
+            .map(|dir| dir.join("plugins.toml")),
+    };
+    let pins = match &path {
+        Some(path) => {
+            ai6::PinSet::load(path).map_err(|error| format!("{}: {error}", path.display()))?
+        }
+        None => None,
+    };
+    let state = ai6::station::safehouse::state_dir().map_err(|error| error.to_string())?;
+    let policy =
+        ai6::station::plugins::PluginPolicy::new(pins, state.join("plugins").join("verified"));
+    Ok(match profile {
+        Some(profile) => policy.with_profile(profile),
+        None => policy,
+    })
+}
+
 /// Reads the hook input, asks the gate, and prints a denial when it holds the command; a
 /// failure to read the input or to decide denies too.
 async fn green_ink_gate(cable_url: Option<String>) -> ExitCode {
