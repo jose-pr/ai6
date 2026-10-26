@@ -45,6 +45,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the publisher; `report`, the default without one, loads everything and lists each
   unaccepted library as a weakening; `off` checks nothing (`--plugin-profile`). Weakenings
   are printed at start, served by `/internal/plugins` and published in the check-in.
+- Harness project settings: a harness no longer loads the hooks, permissions and MCP
+  servers its working directory carries unless the Operation allows it
+  (`[operation.ID.harness] project_settings = "ignore" | "pinned" | "load"`, default
+  `ignore`). Claude Code runs with `--setting-sources user --strict-mcp-config` and Codex
+  with the working directory marked an untrusted project; AI6's own green ink hook and MCP
+  servers apply either way. `pinned` loads them only while `.claude/settings.json`,
+  `.claude/settings.local.json`, `.mcp.json` and the `.codex/` files match the Operation's
+  `pins`, and otherwise starts as `ignore` with the reason on the timeline; `load` is a
+  reported weakening. `AgentStart` and `AgentResume` carry the decision
+  (`project_settings`).
 
 - Account pools: provider accounts shared by every Station and balanced by the quota they
   have left. `loadouts.toml` declares `[pool.<id>]` (handler, `operations` globs, strategy

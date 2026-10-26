@@ -272,6 +272,7 @@ pub struct Operation {
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
     pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
+    pub harness: HarnessPolicy,                   // [operation.ID.harness]; ignore unless configured
 }
 impl Operation {
     /// The defaults a file gives `[operation.ID]`: clearance "field", cover "covert",
@@ -369,6 +370,32 @@ Agent matched. `operations` yields stable codename order. `config_dir` resolves
 `AI6_CONFIG_DIR`, then `XDG_CONFIG_HOME/ai6`, then the platform configuration directory.
 `Agent.limits` is layered over the daemon-wide watchdog settings when a Mission starts or
 resumes.
+
+### Harness project settings (`ai6::directorates::m::harness`)
+
+```rust
+pub const PROJECT_SETTINGS_FILES: [&str; 5]; // .claude/settings.json, .claude/settings.local.json,
+                                             // .mcp.json, .codex/config.toml, .codex/hooks.json
+#[non_exhaustive] pub enum ProjectSettings { Ignore /* default */, Pinned, Load } // lowercase
+#[non_exhaustive] pub struct HarnessPolicy {
+    pub project_settings: ProjectSettings,
+    pub pins: BTreeMap<String, coqui_peer::PeerId>,  // path relative to the working directory -> sha256:HEX
+}
+impl HarnessPolicy {
+    pub fn pinned(pins: impl IntoIterator<Item = (String, PeerId)>) -> Self;
+    pub fn with(project_settings: ProjectSettings) -> Self;
+    pub fn validate(&self) -> Result<(), String>;    // pin paths stay inside the working directory
+    pub fn weakening(&self) -> Option<String>;       // Some for Load
+    pub fn check(&self, root: &Path) -> Result<(), String>; // Ok: may load; Err names each file off its pin
+}
+```
+
+Under `pinned` every file of `PROJECT_SETTINGS_FILES` and every pinned path is read: a
+pinned one must exist with that digest, an unpinned one must be absent. The Station decides
+at each start and resume (`AgentStart::project_settings`); a `pinned` Operation whose
+harness runs on another host than the Station is ignored. A refusal is printed and recorded
+on the Operation's timeline as kind `harness`, action `project-settings-ignored`, detail
+`reason`. A `load` Operation is printed as a weakening at start.
 
 ## Configuration sources (`ai6::directorates::m::config`)
 
@@ -2196,6 +2223,10 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
                         pub quota: Vec<QuotaReport> /* serde default: empty */ }
 // AgentStart and AgentResume carry `max_cost_micro_usd: Option<u64>`: a spend ceiling a
 // harness may enforce itself (Claude Code gets `--max-budget-usd`); AI6 enforces budgets anyway.
+// They also carry `project_settings: bool`: whether the harness may load the settings its
+// working directory carries, decided by the Station from the Operation's harness policy on
+// every start and resume. `false` means Claude Code runs with `--setting-sources user
+// --strict-mcp-config` and Codex with the working directory marked an untrusted project.
 ```
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with

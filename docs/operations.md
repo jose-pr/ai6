@@ -205,6 +205,32 @@ request_ttl_secs = 86400                 # an undecided request then expires as 
 An invalid value fails the load with an error naming the key. A Station prints each setting
 looser than `strict` when it starts.
 
+## Harness project settings
+
+`harness` says whether an Agent's harness may load the settings its working directory
+carries: Claude Code's `.claude/settings.json`, `.claude/settings.local.json` and `.mcp.json`,
+and Codex's `.codex/` layer (config, hooks, rules). A checkout can add hooks and MCP servers
+that run with the Agent's environment, and in an issue-driven Mission whoever wrote the
+branch could have written them ([Hooks](hooks.md)).
+
+```toml
+[operation.G.harness]
+project_settings = "pinned"       # ignore (default) | pinned | load
+pins = { ".claude/settings.json" = "sha256:...", ".mcp.json" = "sha256:..." }
+```
+
+| `project_settings` | The harness loads |
+| --- | --- |
+| `ignore` (default) | only the user's settings and AI6's own: Claude Code runs with `--setting-sources user --strict-mcp-config`, Codex with the working directory marked an untrusted project |
+| `pinned` | the project's settings when each of the files above matches its pin and every one present has a pin; otherwise it starts as `ignore` and the reason (expected and found digests) is on the Operation's timeline (`harness`, `project-settings-ignored`) |
+| `load` | whatever is there; a Station prints it as a weakening when it starts |
+
+`pins` keys are paths relative to the working directory; a value is `sha256:` and the hex
+digest of the file (`sha256sum`). The check runs at every start and resume. A `pinned`
+Operation whose harness runs on another host than its Station starts as `ignore`, since the
+Station cannot read the files there. AI6's own settings, the green ink hook (`--settings`)
+and the Station's MCP servers (`--mcp-config`), apply in every mode.
+
 ## Sleepers
 
 `sleepers` holds standing orders that queue a brief on a cron schedule, once an operator

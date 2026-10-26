@@ -24,6 +24,8 @@ initialization, thread start/resume, turn submission and event decoding.
   the bearer token is read from the launch environment.
 - Answers Codex's command approval requests with the green ink gate: a push to a protected
   ref, a merge or a release is declined until a live approval covers it.
+- Marks the working directory an untrusted project unless AI6 allows its settings, so a
+  checkout's `.codex/` config, hooks and rules do not load.
 
 ## Installation
 

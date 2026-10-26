@@ -23,6 +23,9 @@ provider-issued Session ID for resume.
   and passes a Mission spend ceiling to Claude Code as `--max-budget-usd`.
 - Holds a shell command that pushes to a protected ref, merges or releases until green ink
   covers it, through a `PreToolUse` hook (`ai6 green-ink gate`) passed with `--settings`.
+- Leaves out the working directory's own settings and `.mcp.json` unless AI6 allows them
+  (`--setting-sources user --strict-mcp-config`), so a checkout cannot add hooks or MCP
+  servers to an Agent.
 
 ## Installation
 

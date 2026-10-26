@@ -74,6 +74,15 @@ each governed step of a shell command and denies the call otherwise
 hook that cannot start or times out then blocks the call. The settings follow the Claude
 Code hooks reference and are not exercised against a live Claude Code.
 
+When `AgentStart::project_settings` (or `AgentResume::project_settings`) is `false`, the
+default AI6 decides for an Operation, start and resume add `--setting-sources user
+--strict-mcp-config`: Claude Code loads only the user's settings file, not the working
+directory's `.claude/settings.json` or `.claude/settings.local.json` (hooks, permissions,
+`env`), and only the MCP servers in `--mcp-config`, not `.mcp.json`. `--settings` (the green
+ink hook) sits above the setting files and applies either way. `true` adds neither flag.
+These follow the Claude Code CLI reference and settings precedence; they are not exercised
+against a live Claude Code.
+
 ## Gotchas
 
 The Claude executable must be available to the terminal environment. The gate is best

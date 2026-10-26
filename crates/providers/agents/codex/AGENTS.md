@@ -60,6 +60,13 @@ Cable endpoint cannot ask for green ink, so it has no gate and everything is acc
 the Claude handler. With a gate, `thread/start` and `thread/resume` carry
 `approvalPolicy = "untrusted"`, so Codex asks before every command outside its own list of
 safe reads; in remote-hands mode it stays `never`, and the Station gates `theater_run`. These shapes follow the app-server protocol schema, not a live Codex.
+When `AgentStart::project_settings` (or `AgentResume::project_settings`) is `false`, the
+default, app-server also receives `-c projects={"<working directory>"={trust_level="untrusted"}}`:
+an untrusted project skips its `.codex/` layer (project config, hooks and rules), while the
+user and system layers still load (Codex configuration reference). The table is one inline
+value because a path holds dots; it replaces the user's `projects` table for that process
+only. `true` leaves trust to the user's own configuration. Not exercised against a live
+Codex.
 
 ## Gotchas
 
