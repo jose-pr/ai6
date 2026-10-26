@@ -264,7 +264,11 @@ duplicates = true
 budget = true
 screening = "untrusted"       # or "all", "off"
 phrases = ["deploy to production now"]
+html_comments = true
+rate_hold_hours = 24          # 0 keeps rate holds until an operator decides
 review = "untrusted"          # or "all", "off"
+max_proposal_reviews_per_hour = 20             # 0 is no limit
+max_proposal_reviews_per_session_per_hour = 5  # 0 is no limit
 ```
 
 | Key | Default | Meaning |
@@ -276,10 +280,15 @@ review = "untrusted"          # or "all", "off"
 | `budget` | `true` | Hold briefs while the Operation's day spend is at `operation_cost_usd_per_day` |
 | `screening` | `untrusted` | Which briefs are screened for invisible Unicode, forged fence lines and manipulation phrases |
 | `phrases` | none | Phrases screened for beside the built-in patterns, matched ignoring case, punctuation and spacing |
+| `html_comments` | `true` | Screening also holds a brief whose text outside its quoted item carries HTML comments, which render as nothing |
+| `rate_hold_hours` | `24` | How long a brief held only for a rate limit stays held before it returns to the queue to be vetted again |
 | `review` | `untrusted` | Which briefs a qualified `chief-of-staff` Agent reviews before they are placed |
+| `max_proposal_reviews_per_hour` | `20` | Mission proposal reviews queued per rolling hour; the next proposal is held |
+| `max_proposal_reviews_per_session_per_hour` | `5` | The same, for the proposals of one Agent Session |
 
-Untrusted briefs are a Source's items and Agents' Mission proposals; an operator's or a
-Sleeper's brief is trusted. An invalid value fails the load with an error naming the key. A
+Untrusted briefs are a Source's items, Agents' Mission proposals, and any brief without a
+valid provenance (one dropped into the Registry queue by hand, or changed after it was
+accepted); an operator's or a Sleeper's brief is trusted. An invalid value fails the load with an error naming the key. A
 Station prints each setting looser than the default when it starts and when the
 configuration changes.
 

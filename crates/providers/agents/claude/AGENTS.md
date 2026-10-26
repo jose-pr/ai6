@@ -88,6 +88,19 @@ the Operation's pinned manifest holds that file or it loads project settings out
 These follow the Claude Code documentation; they are not exercised against a live Claude
 Code.
 
+When `AgentStart::answer_only` (or `AgentResume::answer_only`) is `true`, which AI6 sets for
+a Chief of Staff review, start and resume add, in place of the project settings, MCP and gate
+flags: `--restricted`, `--tools=`, `--disallowedTools
+Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,Grep,LS,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*`,
+`--setting-sources user`, `--strict-mcp-config` and `--mcp-config {"mcpServers":{}}`. Taken
+from `claude --help` (2.1.310) and the CLI reference: `--tools ""` turns every built-in tool
+off but not MCP tools, hence the `mcp__*` denial and the empty strict MCP config;
+`--restricted` (2.1.248 or later) removes the command and code tools and WebFetch and loads
+only managed settings besides AI6's. Inferred, not checked against a live Claude Code: that
+`--tools=` parses as the empty list, and that a stored login or `ANTHROPIC_API_KEY` still
+authenticates under `--restricted`. A Claude Code that does not know a flag refuses to start,
+which ends the review without an answer.
+
 ## Gotchas
 
 The Claude executable must be available to the terminal environment. The gate is best

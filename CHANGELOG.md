@@ -15,34 +15,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   default 64 KiB) is refused with outcome state `refused`; a duplicate of queued, held or
   running work (same URL or title), untrusted briefs past `max_per_hour` (20) or
   `max_per_source_per_hour` (10), the day's spend at `operation_cost_usd_per_day`, or
-  untrusted text carrying Unicode tag characters, bidirectional controls, zero-width runs,
-  forged fence lines or a manipulation phrase (`phrases` extends the list) is held. Held
-  briefs leave the queue (`VettingStore`: `hold_brief`, `held_briefs`, `release_held`,
-  `refuse_held`, `clearance`, `clear_brief`, on the file and SQL Registries); a release
-  clears the kinds it was held for. The timeline records `intake` events. `ai6::vet` and
-  `VettingPolicy` are the library form.
-- The Chief of Staff: when an Operation has a qualified `chief-of-staff` Agent, each
-  untrusted brief that passes the vetting rules is reviewed by a short review Mission first
-  (`vetting.review = "untrusted" | "all" | "off"`). The review runs at `desk` clearance in an
-  empty directory with no Cable tools, is exposed from the start, quotes the brief and the
-  Operation's other work as data, and answers with a JSON verdict (`ai6::read_review`): a
-  clear verdict lets M place the brief, a hold holds it, and an unreadable answer or a failed
-  review holds it with `review-error`. The reviewer can only add holds. The example roster
-  gives `Tanner` the role.
+  untrusted text carrying Unicode tag characters outside an emoji flag, bidirectional
+  overrides or unbalanced embeddings, runs of zero-width characters, variation selectors or
+  fillers, invisible operators, HTML comments (`html_comments`), forged fence lines or a
+  manipulation phrase (`phrases` extends the list; text is normalized first) is held.
+  Untrusted means a Source item, a Mission proposal, or a brief without valid provenance (a
+  registry drop). Held briefs leave the queue (`VettingStore`: `hold_brief`, `held_briefs`,
+  `release_held`, `refuse_held`, `requeue_held`, `clearance`, `clear_brief`,
+  `promote_cleared`, on the file and SQL Registries; at most 1,000 per Operation). A release
+  clears the kinds it was held for, for the brief's content as released
+  (`ai6::content_digest`): an edited brief is vetted again. Releasing or refusing again is a
+  no-op, and a claimed or finished brief can be neither. A brief held only for a rate limit
+  returns to the queue after `rate_hold_hours` (24). The timeline records `intake` events.
+  `ai6::vet` and `VettingPolicy` are the library form.
+- The Chief of Staff: when an Operation configures the `chief-of-staff` role, each untrusted
+  brief that passes the vetting rules is reviewed by a short review Mission first
+  (`vetting.review = "untrusted" | "all" | "off"`); with no qualified Agent available it is
+  held (`review-unavailable`), never placed unreviewed. The review runs answer-only
+  (`AgentStart::answer_only` and `AgentResume::answer_only`: Claude Code with `--restricted`,
+  no tools and no MCP servers; Codex in its read-only sandbox, never asking, web search off)
+  at `desk` clearance, on its Station's own host, in a new private directory removed when
+  it ends, with no Cable tools, loadout secrets, pool account or project settings, and only
+  the model credential of its Agent's environment. It is exposed from the start, carries
+  `review` provenance (`Origin::Review`), quotes the brief and the Operation's other work as
+  data, and answers with a JSON verdict (`ai6::read_review`): a single clear verdict lets M
+  place the brief as reviewed (`ReviewTarget` binds the review to the brief's content), any
+  hold holds it, and an unreadable or ambiguous answer, a failed review or one that ends
+  without an answer holds it with `review-error`. The reviewer can only add holds. The
+  example roster gives `Tanner` the role.
 - Vetted Mission proposals: Headquarters vets each pending proposal (the rules but the hourly
-  rate, then the Chief of Staff's review) and stores the result on it
-  (`MissionProposal::vetting`, `BriefStore::set_proposal_vetting`); the inbox, the API and
-  Moneypenny show it. A clean proposal from an unexposed Session that a live class
-  authorisation of kind `proposal` covers (proposer Agent or requested role, title pattern,
-  `max_uses`) is promoted by M and audited as `mission.proposal.approved` by `class:ID`;
-  every other proposal waits for an operator. An operator's approval clears the promoted
-  brief of every finding but `malformed`.
+  rate, then the Chief of Staff's review, at most `max_proposal_reviews_per_hour` (20) per
+  Operation and `max_proposal_reviews_per_session_per_hour` (5) per proposing Session) and
+  stores the result on it (`MissionProposal::vetting`, `BriefStore::set_proposal_vetting`);
+  the inbox, the API and Moneypenny show it. A clean proposal from an unexposed Session that
+  a live class authorisation of kind `proposal` covers (proposer Agent, or the parent
+  Mission's recorded role, `MissionProposal::parent_role`; a requested role must be that
+  role or one in `ClassAuthorization::proposed_roles`; title pattern; `max_uses`) is
+  promoted by M once it is 30 seconds old and audited as `mission.proposal.approved` by
+  `class:ID`; every other proposal waits for an operator. A promotion clears the promoted
+  brief in the same Registry step; an operator's approval clears every finding but
+  `malformed`.
 - Held briefs for operators: Universal Exports lists, releases and refuses them
   (`/v1/user/operations/{id}/held-briefs`, `mission.create`; audited as
   `mission.brief.released` and `mission.brief.refused`), `ai6ctl held-briefs
   list|release|refuse`, and Moneypenny's Administration has a Held briefs tab that shows the
-  findings and the brief's text only on request. Administration now also appears for an
-  account whose only administrative permission is `mission.create`.
+  findings and the brief's text only on request; both show invisible characters by code
+  (`<U+200B>`, `<tags: ...>`). Administration now also appears for an account whose only
+  administrative permission is `mission.create`.
 - Live configuration: a Station checks its roster source and `loadouts.toml` every 5 seconds
   (`ai6 serve --config-poll`, `StationConfig::with_config_poll`, 0 off) and applies a change
   without a restart; running Sessions keep what they started with. A revision that fails

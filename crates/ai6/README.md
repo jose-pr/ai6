@@ -167,11 +167,13 @@ qualified Agent until an operator releases it (`ai6 quarantine`).
 
 Before it places a brief, the Headquarters holder vets it under the Operation's `vetting`
 settings: a malformed brief is refused, and a duplicate, a flood past the hourly rate, spend at
-the day's limit or screened untrusted text holds it for an operator to release or refuse. When
-the Operation has a qualified `chief-of-staff` Agent, an untrusted brief that passes is first
-reviewed by a short `desk` Mission whose verdict can only add a hold. Agents' Mission proposals
-are vetted the same way, and a clean one is promoted when a class authorisation of kind
-`proposal` covers it.
+the day's limit or screened untrusted text holds it for an operator to release or refuse. A
+release applies to the brief as the operator read it. When the Operation configures the
+`chief-of-staff` role, an untrusted brief that passes is first reviewed by a short answer-only
+`desk` Mission whose verdict can only add a hold; with no reviewer available it is held, never
+placed unreviewed. Agents' Mission proposals are vetted the same way, and a clean one is
+promoted when a class authorisation of kind `proposal` covers its proposing Agent or the
+role of the Mission it was proposed from.
 
 The scheduler leases briefs from the file-backed Registry, uses each brief's
 `source--id` key as the Mission ID, selects an Agent by role, tags and priority among

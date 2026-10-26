@@ -71,6 +71,15 @@ path (its repository root, a canonical form), that project has no entry at all i
 replaced table: it gets Codex's default for an unlisted project, never a trust the user
 granted it. That the default is untrusted for an app-server session is not confirmed from
 the Codex documentation. Not exercised against a live Codex.
+When `AgentStart::answer_only` (or `AgentResume::answer_only`) is `true`, which AI6 sets for
+a Chief of Staff review, app-server receives `-c mcp_servers={}` and the untrusted-project
+override and none of AI6's servers, the Session has no gate, and `thread/start` and
+`thread/resume` carry `sandbox = "read-only"`, `approvalPolicy = "never"` and `config =
+{"web_search": "disabled"}`. Checked against the app-server protocol source
+(`ThreadStartParams`: `sandbox`, `approvalPolicy`, `config`; the `web_search` key and its
+`disabled` value): those for `thread/start`. Inferred: that `thread/resume` takes `config`
+as well, that the read-only sandbox has no network, and that the `mcp_servers` override
+replaces the user's table rather than merging into it.
 
 ## Gotchas
 

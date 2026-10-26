@@ -123,15 +123,21 @@ Moneypenny's Class authorisations tab.
 
 A class authorisation of kind `proposal` lets M promote Agents' Mission proposals without
 asking: its target pattern is matched against the proposal's title, its Agents against the
-proposing Agent and its roles against the role the proposal asks for. Headquarters vets each
-pending proposal (the [vetting rules](#vetting-and-held-briefs) other than the hourly rate,
-then the Chief of Staff's review when the Operation has one) and shows the result in the
-proposal inbox. A proposal whose vetting found nothing, from a Session that had not read
-untrusted input, is promoted when such a class authorisation covers it: one use is counted
+proposing Agent and its roles against the role the proposing Session's own Mission was given
+(recorded with the proposal, never the proposal's word for it). A proposal that asks for a
+role must ask for that same role or one the class authorisation lists in `proposed_roles`.
+Headquarters vets each pending proposal (the [vetting rules](#vetting-and-held-briefs)
+other than the hourly rate, then the Chief of Staff's review when the Operation has one) and
+shows the result in the proposal inbox. A proposal whose vetting found nothing is promoted
+when such a class authorisation covers it, once it is 30 seconds old (so the proposing
+Session's last tool results have reached the Registry) and only if its Session had not read
+untrusted input: neither the proposal's own mark nor, under an Operation that restricts
+proposals, the parent Mission's Session records may show an exposure. One use is counted
 and the approval is audited as `mission.proposal.approved` by `class:<id>`. Every other
-proposal waits for an operator, as before; none is runnable before it is promoted. An
-operator's approval clears the promoted brief of what vetting found, except a malformed
-brief.
+proposal waits for an operator, as before; none is runnable before it is promoted. A
+promotion, by a class authorisation or an operator, clears the promoted brief in the same
+Registry step: of its review when reviewed as a proposal, and, for an operator's approval,
+of everything vetting found except a malformed brief.
 
 An approval can be withdrawn before it expires (`POST
 .../green-ink/{request_id}/revoke`, or `ai6ctl green-ink revoke`); it then covers nothing,
@@ -250,6 +256,7 @@ brief record (in a directory Registry, `provenance/KEY.json`; in a database, a c
 | `source` | the Source provider (`github`) | the item; `item_url` its link | the Headquarters Station's poll |
 | `sleeper` | the sleeper's name | its definition's fingerprint | the Headquarters Station |
 | `proposal` | the proposing Agent | its provider Session | the approval (`universal-exports`) |
+| `review` | nobody | the review's identity | the Headquarters Station, for a [Chief of Staff review](agents.md#chief-of-staff) |
 | `registry_drop` | nobody | | the Station that took the brief |
 
 Each also carries `received_by`, `received_at` (Unix seconds) and `digest`, the
@@ -459,11 +466,15 @@ cost no tokens:
 | Same URL or title as queued, held or running work | every brief | `duplicate`, naming that work |
 | Untrusted briefs passed in the last hour, per Operation and per Source | untrusted briefs | `rate` |
 | The Operation's spend today at `operation_cost_usd_per_day` | every brief | `budget` |
-| Unicode tag characters, bidirectional controls, runs of zero-width characters, lines that imitate the markers around quoted text, manipulation phrases | untrusted briefs | `screening` |
+| Unicode tag characters (outside an emoji flag), bidirectional overrides and unbalanced embeddings or isolates, runs of zero-width characters, variation selectors or fillers, invisible operators, HTML comments outside the quoted item, lines that imitate the markers around quoted text, manipulation phrases | untrusted briefs | `screening` |
 
-**Untrusted** briefs are a Source's items and Agents' Mission proposals: their text was
-written outside AI6's operators. An operator's or a Sleeper's brief is trusted and is not
-screened or rate limited.
+**Untrusted** briefs are a Source's items, Agents' Mission proposals, and any brief whose
+[provenance](#provenance) is missing or no longer matches it (a registry drop):
+their text was written outside AI6's operators. An operator's or a Sleeper's brief is
+trusted and is not screened or rate limited. Screening normalizes text before it looks for
+phrases: invisible characters are removed, so a phrase split by one is still found. A lone
+direction mark, an emoji's joiner or presentation selector, and a subdivision flag's tag
+letters are ordinary text and are not findings.
 
 A brief with no finding passes and is placed as usual. A refused brief is filed as failed with
 outcome state `refused` (a Source still gets its CX report). Any other finding **holds** the
@@ -486,13 +497,23 @@ ai6ctl held-briefs refuse source_jira--OPS-13 --operation G --reason "a mirror o
 ```
 
 Each held brief lists its findings (`duplicate: the same URL as other work (mission-41)`);
-its text, which may carry what screening caught, is shown only on request and as plain text.
-A **release** returns it to the queue cleared of the kinds it was held for, so the same
-checks do not hold it again; the clearance is kept apart from the brief, so a brief's own
-text cannot claim one. A **refusal** files it as failed with outcome state `refused`; a
-Source still gets its CX report, and the reason stays in the Registry. Both are audited
-(`mission.brief.released`, `mission.brief.refused`). A held brief is never claimed, and a
-Source that polls its item again leaves it alone.
+its text, which may carry what screening caught, is shown only on request and as plain text,
+with each character that renders as nothing shown by its code (`<U+200B>`) and a run of tag
+characters as the text it spells (`<tags: ...>`). A **release** returns it to the queue
+cleared of the kinds it was held for, so the same checks do not hold it again. A clearance,
+an operator's or a review's, is bound to the brief as the operator or reviewer read it (the
+digest of its record): a brief that changes afterwards, such as a Source item edited while
+its brief waits, is vetted and reviewed again. The clearance is kept apart from the brief, so
+a brief's own text cannot claim one. A **refusal** files it as failed with outcome state
+`refused`; a Source still gets its CX report, and the reason stays in the Registry. Both
+are audited (`mission.brief.released`, `mission.brief.refused`). Releasing or refusing
+again changes nothing; a brief already placed or finished can be neither (`409`). A held
+brief is never claimed, and a Source that polls its item again leaves it alone.
+
+A brief held only for a rate limit returns to the queue on its own after the Operation's
+`rate_hold_hours` (24 by default) and is vetted again, so a burst does not leave work held
+for good; the timeline records it as `requeued`. An Operation holds at most 1,000 briefs;
+past that, a brief that would be held waits in the queue.
 
 ## Sources
 

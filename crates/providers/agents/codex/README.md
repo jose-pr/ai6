@@ -26,6 +26,8 @@ initialization, thread start/resume, turn submission and event decoding.
   ref, a merge or a release is declined until a live approval covers it.
 - Marks the working directory an untrusted project unless AI6 allows its settings, so a
   checkout's `.codex/` config, hooks and rules do not load.
+- Starts an answer-only thread (`AgentStart::answer_only`, for a Chief of Staff review) in the
+  read-only sandbox, never asking, with web search off and no MCP servers.
 
 ## Installation
 

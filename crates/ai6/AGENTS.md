@@ -1117,7 +1117,8 @@ secret backends.
 ## Bona fides (`ai6::directorates::registry::bona_fides`)
 
 ```rust
-#[non_exhaustive] pub enum Origin { Operator, Source, Sleeper, Proposal, RegistryDrop } // snake_case; as_str()
+#[non_exhaustive] pub enum Origin { Operator, Source, Sleeper, Proposal, Review, RegistryDrop } // snake_case; as_str()
+                                                       // Review: a Chief of Staff review Headquarters queued
 #[non_exhaustive] pub struct Provenance {
     pub origin: Origin,
     pub principal: Option<String>,   // person ID | Source provider | sleeper name | proposing Agent; None for a drop
@@ -1186,7 +1187,9 @@ pub struct MissionProposal {
     pub brief: Brief,
     pub created_at: f64,
     pub vetting: Option<Vetting>,   // serde default, skipped when None: set by Headquarters
+    pub parent_role: Option<String>, // serde default: the role the proposing Session's Mission was given
 }
+impl MissionProposal { pub fn with_parent_role(self, Option<String>) -> Self; }  // set by the Station, never the Agent
 BriefStore::submit_mission_proposal(&MissionProposal) -> io::Result<()>   // a retry keeps the stored vetting
 BriefStore::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
 BriefStore::promote_mission_proposal(operation: &str, proposal_id: &str, received_by: &str) -> io::Result<Brief>
@@ -1676,10 +1679,12 @@ IDs, at most 64), `class-authorizations/OP/ID.json`.
 pub const EXPIRY_SIGNER: &str;   // "expiry"
 #[non_exhaustive] pub struct ApprovalRequest { pub id: String /* green-ink-<sha256> */, pub operation: String,
     pub mission: MissionId, pub session: SessionId, pub agent: String, pub scope: ActionScope,
-    pub reason: String /* 1-2048, newlines allowed; never audited */, pub requested_at: f64, pub expires_at: f64 }
+    pub reason: String /* 1-2048, newlines allowed; never audited */, pub requested_at: f64, pub expires_at: f64,
+    pub proposed_role: Option<String> /* serde default: the role a Mission proposal asks for */ }
 impl ApprovalRequest {
     pub fn try_new(operation, mission, session, agent, scope, reason, idempotency_key: &str) -> io::Result<Self>;
     pub fn expiring(self, requested_at: f64, ttl: Duration) -> Self;   // required before storing
+    pub fn proposing_role(self, Option<String>) -> Self;
 }
 #[non_exhaustive] pub enum Decision { Approved, Rejected, Expired }   // serde snake_case; as_str()
 pub struct Revocation { pub by: String, pub at: f64 }
@@ -1695,12 +1700,16 @@ pub enum ApprovalStatus { Pending(ApprovalRequest), Decided(Approval) }   // req
 #[non_exhaustive] pub struct ClassAuthorization { pub id: String /* class-<uuid> */, pub operation: String,
     pub kinds: Vec<String>, pub target_pattern: String /* glob */, pub agents: Vec<String> /* "*" = any */,
     pub roles: Vec<String>, pub clearance_min: String /* "field" */, pub max_uses: Option<u32>, pub uses: u32,
-    pub expires_at: f64, pub signer: String, pub created_at: f64, pub revoked: Option<Revocation> }
+    pub expires_at: f64, pub signer: String, pub created_at: f64, pub revoked: Option<Revocation>,
+    pub proposed_roles: Vec<String> /* serde default; kind proposal: roles a proposal may ask for besides its parent's */ }
 impl ClassAuthorization {
     pub fn new(operation, kinds, target_pattern, signer, created_at, expires_at) -> Self;
-    pub fn for_agents(self, Vec<String>) / for_roles(self, Vec<String>) / with_clearance_min(self, c) / with_max_uses(self, u32) -> Self;
+    pub fn for_agents(self, Vec<String>) / for_roles(self, Vec<String>) / for_proposed_roles(self, Vec<String>)
+        / with_clearance_min(self, c) / with_max_uses(self, u32) -> Self;
     pub fn is_live(&self, now: f64) -> bool;
     pub fn covers(&self, agent: &str, role: Option<&str>, clearance: &str, scope: &ActionScope) -> bool;
+    /// No proposed role, or the parent Mission's `role`, or one in proposed_roles.
+    pub fn allows_proposed_role(&self, request: &ApprovalRequest, role: Option<&str>) -> bool;
     pub fn validate(&self) -> io::Result<()>;   // needs a kind, an Agent or role, a glob, an expiry after the grant
 }
 pub trait ApprovalStore {
@@ -1921,9 +1930,13 @@ pub struct VettingPolicy {   // Default: every check on
     pub max_per_source_per_hour: Option<u32>,
     pub duplicates: bool,                      // same normalized URL or title as known work
     pub budget: bool,                          // day spend ≥ operation_cost_micro_usd_per_day
-    pub screening: VettingScope,               // tag block, bidi controls, zero-width runs, fence lines, phrases
+    pub screening: VettingScope,               // hidden characters, fence lines, phrases (below)
     pub phrases: Vec<String>,                  // added to the built-in manipulation patterns
+    pub html_comments: bool,                   // screened text with an HTML comment is held
     pub review: VettingScope,                  // briefs a qualified chief-of-staff Agent reviews
+    pub rate_hold_secs: Option<u64>,           // 24 h: a rate-only hold returns to the queue; None keeps it
+    pub max_proposal_reviews_per_hour: Option<u32>,             // 20; past it a proposal is held (rate)
+    pub max_proposal_reviews_per_session_per_hour: Option<u32>, // 5, per proposing Session
 }
 impl VettingPolicy { pub fn off() -> Self; pub fn weakenings(&self) -> Vec<String>; }
 pub struct VettingDefinition;   // the `[operation.ID.vetting]` table; .resolve() -> Result<VettingPolicy, String>
@@ -1940,15 +1953,24 @@ pub struct VettingContext {
     pub day_limit_micro_usd: Option<u64>,
     pub cleared: BTreeSet<FindingKind>,        // not reported again
 }
-pub fn is_untrusted(brief: &Brief) -> bool;    // `source:` prefix or PROPOSAL_SOURCE
+/// `source:` prefix or PROPOSAL_SOURCE, or a provenance other than Operator, Sleeper or
+/// Review: a registry drop, or none (missing, or the record changed since it was sealed).
+pub fn is_untrusted(brief: &Brief) -> bool;
 pub fn work_title(brief: &Brief) -> String;    // a Source brief's own item title, else the title
 pub fn vet(brief: &Brief, policy: &VettingPolicy, context: &VettingContext) -> Vetting;
+pub fn content_digest(brief: &Brief) -> String; // bona_fides::record_digest: what clearances bind to
 ```
 
 Rate and screening apply to untrusted briefs only; size, duplicates and budget to every brief.
-A Source brief's quoted text counts two genuine fence lines; any other line matching
-`^\s*={3,}\s*(BEGIN|END)\b` is a forged one. Phrases are matched on lowercase words with
-invisible characters removed, so `ig\u{200B}nore previous instructions` still matches.
+Screening finds: tag characters (U+E0000..E007F) outside a subdivision flag (U+1F3F4, 1–8 tag
+letters or digits, U+E007F); bidi overrides (U+202D, U+202E) and embeddings or isolates left
+unbalanced on their line; runs of two or more zero-width characters, variation selectors
+(but U+FE0E, U+FE0F), fillers, soft hyphens or tags; any filler or invisible operator
+(U+180E, U+2061..2064, U+115F, U+1160, U+3164, U+FFA0); HTML comments outside the quoted
+item (`html_comments`). Lone direction marks are not findings. A Source brief's quoted text
+counts two genuine fence lines; any other line matching `^\s*={3,}\s*(BEGIN|END)\b` is a
+forged one. Phrases are matched on lowercase words with invisible characters removed, so
+`ig\u{200B}nore previous instructions` still matches.
 
 The Chief of Staff review, for briefs that pass the rules when the Operation has a qualified
 `chief-of-staff` Agent and `review` applies:
@@ -1956,47 +1978,71 @@ The Chief of Staff review, for briefs that pass the rules when the Operation has
 ```rust
 pub const REVIEW_SOURCE: &str = "ai6-vetting";       // review briefs; never vetted themselves
 pub const REVIEW_DATA_KEY: &str = "vetting_review";  // Brief.data key holding the ReviewTarget
-#[non_exhaustive] pub enum ReviewTarget { Brief(String /* key */), Proposal(String /* id */) }  // serde snake_case
-impl ReviewTarget { pub fn review_id(&self) -> String; }   // "review-" + 32 hex of SHA-256: one review per target
-pub fn is_review(brief: &Brief) -> bool;
-pub fn review_target(brief: &Brief) -> Option<ReviewTarget>;
-/// role chief-of-staff, priority of the reviewed brief, data: target + exposure ["brief:source"];
+#[non_exhaustive] pub enum ReviewTarget {            // serde snake_case, deny_unknown_fields
+    Brief { key: String, digest: String /* content_digest when queued */ },
+    Proposal { id: String },
+}
+impl ReviewTarget {
+    pub fn brief(brief: &Brief) -> Self;             // the brief as it reads now
+    pub fn review_id(&self) -> String;               // "review-" + 32 hex of SHA-256: one review per content
+    pub fn review_key(&self) -> String;              // "ai6-vetting--" + review_id
+}
+pub fn is_review(brief: &Brief) -> bool;             // REVIEW_SOURCE and an Origin::Review provenance
+pub fn review_target(brief: &Brief) -> Option<ReviewTarget>;  // None unless is_review
+/// role chief-of-staff, priority of the reviewed brief, data: target + exposure ["brief:source"],
+/// provenance Origin::Review (received_by, received_at; reference = review_id);
 /// the brief and up to 50 other work titles quoted between markers neither contains.
-pub fn review_brief(reviewed: &Brief, target: &ReviewTarget, operation: &str, purpose: &str, work: &[KnownWork]) -> Brief;
-/// The last JSON object in the final message's last 16 KiB shaped {"verdict", "findings"?}:
-/// "clear" (no findings) → pass; "hold" → Review findings "KIND: detail" (duplicate|scope|manipulation);
-/// anything else → hold with "review-error: ...". Never admits on a bad answer.
+pub fn review_brief(reviewed: &Brief, target: &ReviewTarget, operation: &str, purpose: &str,
+                    work: &[KnownWork], received: (&str, i64)) -> Brief;
+/// The JSON objects shaped {"verdict", "findings"?} in the final message's last 16 KiB: any
+/// "hold" → Review findings "KIND: detail" (duplicate|scope|manipulation); exactly one
+/// "clear" with no findings and only whitespace after it → pass; anything else (none, several,
+/// another verdict, text after) → hold with "review-error: ...". Never admits on a bad answer.
 pub fn read_review(text: &str) -> Vetting;
 ```
 
-The review Mission's ID is its brief key `ai6-vetting--review-…`. Its Station starts it with
-clearance `desk`, no Cable MCP tools (so no Cables, proposals or green ink) and, on the
-Station's own host, an empty working directory under the temporary directory instead of the
-Operation's checkout or a safe house. Its `completed` event text is read with `read_review`:
-clear → `clear_brief(key, [Review], "review:AGENT")`; otherwise `hold_brief`. A review Mission
-that ends without an applied answer holds the brief with `review-error`.
+The review Mission's ID is its brief key `ai6-vetting--review-…`. Its Station starts it only
+on its own host, with clearance `desk`, `AgentStart::answer_only`, no Cable MCP tools (so no
+Cables, proposals or green ink), no credentials issued (no loadout, no pool account), only the
+model-credential and path variables of its Agent's environment, no project settings, and a
+new 0700 directory `ai6-review-*` under the temporary directory, removed when the review
+ends. Its `completed` event text is read with `read_review` once the Mission's role is
+`chief-of-staff`, its brief `is_review` and its ID matches its target's: clear →
+`clear_brief(key, digest, [Review], "review:AGENT")`; otherwise `hold_brief` when the queued
+brief still has the reviewed digest (an edited brief gets a review of its own). A review that
+ends without an applied answer holds what it reviewed with `review-error`; with the role
+configured and no qualified Agent available, a brief is held with `review-unavailable`.
 
 ```rust
-pub const MAX_HELD_BRIEFS: usize = 1_000;   // across the Registry; past it a brief stays queued
+pub const MAX_HELD_PER_OPERATION: usize = 1_000;  // past it a brief stays queued
+pub const MAX_HELD_BRIEFS: usize = 10_000;        // records one listing reads, across Operations
 pub const MAX_HELD_RESULTS: usize = 500;
 #[non_exhaustive] pub struct HeldBrief { pub operation: String, pub brief: Brief, pub vetting: Vetting, pub held_at: f64 }
-#[non_exhaustive] pub struct Clearance { pub kinds: BTreeSet<FindingKind>, pub by: String, pub at: f64 }
+impl HeldBrief { pub fn held_only_for_rate(&self) -> bool; }
+#[non_exhaustive] pub struct Clearance { pub kinds: BTreeSet<FindingKind>, pub digest: String, pub by: String, pub at: f64 }
+impl Clearance { pub fn kinds_for(&self, brief: &Brief) -> BTreeSet<FindingKind>; } // empty unless digest matches
 
 VettingStore::hold_brief(operation, key, vetting: &Vetting, at: f64) -> io::Result<Option<HeldBrief>> // None: not queued
 VettingStore::held_briefs(operation, limit /* 1..=500 */) -> io::Result<Vec<HeldBrief>>         // oldest first
-VettingStore::release_held(operation, key, by, at) -> io::Result<Brief>     // NotFound unless that Operation holds it
-VettingStore::refuse_held(operation, key, by, reason /* ≤1024 B */, at) -> io::Result<HeldBrief>
+VettingStore::release_held(operation, key, by, at) -> io::Result<Brief>   // again: same brief; AlreadyExists once claimed/finished
+VettingStore::refuse_held(operation, key, by, reason /* ≤1024 B */, at) -> io::Result<Brief>  // idem
+VettingStore::requeue_held(operation, key) -> io::Result<bool>          // back to new/ with no clearance
 VettingStore::clearance(key) -> io::Result<Option<Clearance>>
-VettingStore::clear_brief(key, kinds: &[FindingKind], by, at) -> io::Result<Clearance>  // NotFound unless queued
+VettingStore::clear_brief(key, digest, kinds: &[FindingKind], by, at) -> io::Result<Option<Clearance>>
+                                         // NotFound unless queued; None when its content is no longer `digest`
+VettingStore::promote_cleared(operation, proposal_id, received_by, kinds, by, at) -> io::Result<Brief>
+                                         // promote_mission_proposal + clear_brief in one step
 ```
 
 A held brief is in `held/KEY.json` (SQL: state `held`, column `held`); it is never claimed,
 `submit_brief` refuses its key and Source polling treats it as in flight. `release_held`
-returns it to `new/` and clears the kinds it was held for (`vetting/KEY.json`, SQL column
-`clearance`), so the same checks do not hold it again; the clearance is kept apart from the
-brief's own JSON and dropped when the brief finishes. `refuse_held` files it as failed with
-outcome `{"state": "refused", "mission_id": KEY, "reason", "refused_by", "refused_at",
-"vetting"}`, so a Source still gets its CX report.
+returns it to `new/` and clears the kinds it was held for, for its content digest
+(`vetting/KEY.json`, SQL column `clearance`), so the same checks do not hold that content
+again; a clearance for another digest counts for nothing and is replaced by the next. The
+clearance is kept apart from the brief's own JSON and dropped when the brief finishes.
+`refuse_held` files it as failed with outcome `{"state": "refused", "mission_id": KEY,
+"reason", "refused_by", "refused_at", "vetting"}`, so a Source still gets its CX report. The
+file Registry writes `held/` before it removes `new/`, and settles a brief found in both.
 
 ## Identity and handler API
 
@@ -2369,6 +2415,12 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // resume. `project_settings: false` means Claude Code runs with `--setting-sources user` and
 // Codex with the working directory marked an untrusted project; Claude Code keeps
 // `--strict-mcp-config` unless both are true.
+// And `answer_only: bool` (serde default false), set for a Chief of Staff review: the harness
+// only reads and answers. Claude Code: `--restricted --tools= --disallowedTools <all of its own,
+// web, sub-agent and mcp__*> --setting-sources user --strict-mcp-config --mcp-config
+// {"mcpServers":{}}`, and no AI6 servers or gate. Codex: `-c mcp_servers={}`, the project
+// marked untrusted, thread `sandbox: "read-only"`, `approvalPolicy: "never"`, `config:
+// {"web_search": "disabled"}`, and no gate.
 ```
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with

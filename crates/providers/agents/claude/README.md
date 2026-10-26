@@ -26,6 +26,9 @@ provider-issued Session ID for resume.
 - Leaves out the working directory's own settings and `.mcp.json` unless AI6 allows them
   (`--setting-sources user --strict-mcp-config`), so a checkout cannot add hooks or MCP
   servers to an Agent.
+- Starts an answer-only Session (`AgentStart::answer_only`, for a Chief of Staff review) with
+  `--restricted`, no built-in tools and no MCP servers, so it can read and answer and do
+  nothing else.
 
 ## Installation
 

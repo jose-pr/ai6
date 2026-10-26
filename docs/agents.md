@@ -96,23 +96,48 @@ When an Operation has an Agent qualified for `chief-of-staff` (chosen as any rol
 included) and the role is configured, each untrusted brief that passes the
 [vetting rules](missions.md#vetting-and-held-briefs) is reviewed before M places it; the
 Operation's `vetting.review` says which briefs (`untrusted` by default, `all`, or `off`).
-Headquarters queues a short review Mission (brief source `ai6-vetting`) for the role; the
-brief waits until it is answered. The review Mission:
+Headquarters queues a short review Mission (brief source `ai6-vetting`, provenance `review`)
+for the role; the brief waits until it is answered. Once the role is configured, a brief that
+needs a review is never placed without one: with no qualified Agent available it is held with
+a `review-unavailable` finding. The review Mission:
 
 - quotes the brief, and the titles of the Operation's other queued, held and running work,
   between markers, as data it must not follow;
-- runs with `desk` clearance in an empty directory of its own on its Station's host, with no
-  safe house, no Cable tools and no Mission proposals;
+- runs **answer-only** with `desk` clearance, on its Station's own host only (never on a
+  remote Theater), in a new directory of its own under the system temporary directory, named
+  at random, readable by the Station's user only and removed when the review ends; with no
+  safe house, no Cable tools, no Mission proposals and no project settings;
+- gets no loadout secrets and no pool account: of its Agent's environment it keeps only
+  what the harness needs to find its files and reach its model (`PATH`, the home and
+  temporary directories, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
+  `CODEX_HOME`, the proxy variables and `SSL_CERT_FILE`), so it authenticates with that
+  Agent's own model credential or the harness's stored login;
 - is exposed from the start (`brief:source`), and its usage counts against the Operation.
+
+Answer-only is the `answer_only` field of the handler's start request. Claude Code gets
+`--restricted` (2.1.248 or later), `--tools=` (no built-in tool), `--disallowedTools` naming
+its shell, file, web, sub-agent and every MCP tool, `--setting-sources user` and
+`--strict-mcp-config` with an empty `--mcp-config`. Codex gets a thread in the `read-only`
+sandbox with approval policy `never` and `web_search = "disabled"`, with the user's MCP
+servers replaced by none and the working directory's project layer skipped. A harness too
+old for one of these refuses to start, which ends the review without an answer.
 
 It ends with one JSON object: `{"verdict": "clear"}`, or `{"verdict": "hold", "findings":
 [{"kind": "duplicate" | "scope" | "manipulation", "detail": "..."}]}`. A clear verdict lets
-M place the brief; a hold holds it with `review` findings, as a vetting rule would. An
-answer that cannot be read, or a review Mission that fails or ends without one, holds the
-brief with a `review-error` finding. **The Chief of Staff can only add holds**: it reads
-untrusted text, so a turned reviewer may delay work but never admit it; releasing a held
-brief is an operator's decision. Operator and Sleeper briefs skip the review unless
-`review = "all"`.
+M place the brief as the reviewer read it; a hold holds it with `review` findings, as a
+vetting rule would. Any `hold` in the final message holds; a clear passes only as the one
+answer, with nothing after it. An answer that cannot be read, more than one answer, or a
+review Mission that fails or ends without one, holds the brief with a `review-error` finding.
+A brief edited after its review is reviewed again. **The Chief of Staff can only add
+holds**: it reads untrusted text, so a turned reviewer may delay work but never admit it;
+releasing a held brief is an operator's decision. Operator and Sleeper briefs skip the review
+unless `review = "all"`.
+
+Mission proposals are reviewed the same way before a [class authorisation](missions.md#green-ink)
+may promote them, at most `max_proposal_reviews_per_hour` per Operation and
+`max_proposal_reviews_per_session_per_hour` per proposing Session; a proposal past either is
+held for an operator with a `rate` finding.
 
 ## Cables
 
