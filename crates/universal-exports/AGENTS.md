@@ -360,7 +360,7 @@ when a Station reports a control. Neither write can fail the publication or repo
 ```rust
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssistantConfig { /* private */ }
-impl Default for AssistantConfig { /* agent "moneypenny" */ }
+impl Default for AssistantConfig { /* agent "role":"person"|"moneypenny"|"tools"|"error"|"proposal"|"view","text","at","data"? */ }
 impl AssistantConfig {
     pub fn new(agent_id: impl Into<String>) -> Result<Self, GatewayError>; // InvalidConfiguration
     pub fn agent_id(&self) -> &str;
@@ -426,6 +426,24 @@ run. The proposal becomes `done` or `failed` with AI6's answer, sent as
 Moneypenny is told (`[App: the person confirmed …]`) at once when she is idle, else with the
 next message; a cancellation is told with the next message. 32 proposals are kept per
 conversation.
+
+The `show` tool takes `{"view": VIEW}` in the strict view schema version 1 (serde, unknown
+fields refused): `{"version": 1, "title"?, "blocks": [1..=24]}`, each block tagged by `kind`:
+`text` (`markdown` ≤ 8 KiB; every `](` link must target `app:/…`), `table` (`columns` 1..=12,
+`rows` ≤ 200 of one scalar per column), `key_values` (`items` 1..=100 `{key, value}`), `chart`
+(`chart` `bar`|`line`, `title`/`x_label`/`y_label`?, `series` 1..=8 of `{name, points` 1..=200
+`{x: scalar, y: finite number}}`), `card` (`card` `mission`|`station`|`theater`, `id`,
+`operation_id` (required for a Mission), `state`?, `fields` ≤ 20), `timeline` (`items` 1..=100
+`{at, label, detail?}`), `diff` (`title`?, `before`, `after` ≤ 16 KiB each), `form` (at most one:
+`tool` one of the `propose_*` tools, `title`, `fixed` (object), `fields` 1..=20 `{name, label,
+type: text|number|boolean|choice|json, value?, choices?}`; `choices` exactly for `choice`, no
+name both fixed and a field). Scalars are text (≤ 512 bytes, no control characters), finite
+numbers, booleans or null; the whole view ≤ 256 KiB. A view outside it answers `isError`
+"View refused: REASON" and nothing reaches the app; a valid one becomes a `view` entry with
+`data: {"id": "view-<hex>", "view"}`. The app's `{"type":"submit","view":ID,"values":{…}}`
+fills the form's tool from `fixed` plus the values of its own fields (a `json` field's text is
+parsed; a choice must be listed; another name is `bad_request`) and records a proposal as the
+tool would, in the submitting socket's session (`refused` with the tool's answer otherwise).
 
 ## Gateway state
 
@@ -639,7 +657,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/station/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with `x-ai6-operation-id`, `x-ai6-mission-id` and `x-ai6-session-id` headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
 | `GET /v1/station/controls/next?station=<id>&wait_ms=<n>` | Bearer-authenticated long poll for that Station's next control (`wait_ms` default 1000, capped at 25000); `200` with one `application/vnd.ai6.guatiao` control value frame on channel 4 (the receiver builds the schema from any control) and the control becomes `delivered`, or `204`. Stations share one credential, so `station` is the caller's own word. |
 | `POST /v1/station/controls/{control_id}/result` | Bearer-authenticated outcome `{"station","outcome":"applied"\|"rejected","state"?,"reason"?}`; `state` is a Mission state name, `reason` is cut to 512 characters without control characters. `204`; `404` unknown, `403` another Station's control, `409` already finished. |
-| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"busy"}`; a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"page"?:{…}}` (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}` and `{"type":"cancel","proposal":ID}`; the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
+| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"role":"person"|"moneypenny"|"tools"|"error"|"proposal"|"view","text","at","data"?,"code":"unauthorized"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"busy"}`; a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"page"?:{…}}` (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}` and `{"type":"submit","view":ID,"values":{…}}`; the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most 25,000). |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `failed`, `limit` and a `closed` while answering become `error` entries. |

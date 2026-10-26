@@ -11,6 +11,11 @@ Exports, AI6's authenticated public API.
 - Terminal input requires an explicit user-scoped write lease; keep viewing read-only by default.
 - A window closing only closes the view. It never stops or resumes the provider Session.
 - Treat API fields as untrusted input and keep terminal bytes separate from lifecycle metadata.
+- Moneypenny's views (`lib/assistant/`) are data in the version 1 view schema, rendered with
+  the app's own widgets: never render model-written HTML, run a script or follow an outside
+  link; a view the parser refuses is shown as refused with its reason. Proposals run only on
+  the operator's Confirm. `test/fixtures/assistant_views.json` is shared with the gateway's
+  tests: change both sides together.
 
 ## Flutter windowing
 

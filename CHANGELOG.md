@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   settings, class authorisations) only record a proposal the person confirms or cancels in
   the app, and only when the person holds the permission; a confirm from the session it was
   proposed in is audited (`moneypenny.confirmed`) and then sent through the usual route.
+  Her `show` tool displays views in a strict version 1 schema (text with in-app links only,
+  tables, key-value lists, bar and line charts, Mission, Station and Theater cards, timelines,
+  diffs, and forms that draft a proposal); an invalid view is refused with the reason. The
+  Moneypenny app has an **Ask Moneypenny** chat panel on every page that renders them
+  natively.
 - Vetting: before M places a brief, the Headquarters holder runs deterministic checks under
   the Operation's `[operation.ID.vetting]` settings (`vetting = "off"` turns them off, a
   reported weakening). A malformed brief (no visible title, text past `max_brief_bytes`,

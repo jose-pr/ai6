@@ -101,13 +101,37 @@ So text she reads cannot act through her: an issue body that tells her to change
 can at most make her propose it, in plain view, to a person who decides. Irreversible steps
 keep [green ink](missions.md#green-ink): she cannot sign it, only point you to the Green ink page.
 
+## Views she shows
+
+When a table or a chart says it better than prose, she shows a **view** with her `show` tool.
+A view is data in a strict, versioned schema that the app renders with its own widgets:
+
+| Block | Shows |
+| --- | --- |
+| `text` | Markdown: headings, lists, bold, italic, code, and links into the app only |
+| `table` | Columns and rows of plain values |
+| `key_values` | A list of names and values |
+| `chart` | A bar or line chart of up to eight series |
+| `card` | A Mission, Station or Theater, opening its page |
+| `timeline` | Dated events |
+| `diff` | Two texts, line by line |
+| `form` | A draft of one of her `propose_*` tools for the person to fill in |
+
+Nothing in a view runs: there is no HTML, no script and no outside link. Universal Exports
+refuses a view that is not exactly the schema, within its bounds, and tells her why, so the
+app never receives it; the app checks again and shows a refused view as "View refused" with
+the reason, never as a guess. Submitting a form records a proposal of its tool, which the
+person still confirms.
+
 ## In the app
 
-The app opens a WebSocket to `/v1/user/moneypenny` and sends its access token in the first
-frame. With each message it says which page the person is on (for example the board, or a
-Mission), so "why is this one stuck?" means something. Conversations are kept per person (20
-each, for a week) in Universal Exports' memory; reopening one shows what was said. One
-message is answered at a time.
+**Ask Moneypenny** (top right on every page) opens the chat. The app opens a WebSocket to
+`/v1/user/moneypenny` and sends its access token in the first frame. With each message it
+says which page the person is on (for example the Stations page, or the Session open beside
+the board), so "why is this one stuck?" means something. Her answers, the tools she used,
+her views and her proposals (with **Confirm** and **Cancel**) appear in the panel.
+Conversations are kept per person (20 each, for a week) in Universal Exports' memory;
+reopening one shows what was said. One message is answered at a time.
 
 ## Settings
 
