@@ -56,6 +56,9 @@ pub(crate) struct ClassRequest {
     agents: Vec<String>,
     #[serde(default)]
     roles: Vec<String>,
+    /// For kind `proposal`: roles a proposed Mission may ask for besides its parent's own.
+    #[serde(default)]
+    proposed_roles: Vec<String>,
     clearance_min: Option<String>,
     max_uses: Option<u32>,
     expires_in_secs: u64,
@@ -341,7 +344,8 @@ pub(crate) async fn create_class(
         now + lasts,
     )
     .for_agents(request.agents)
-    .for_roles(request.roles);
+    .for_roles(request.roles)
+    .for_proposed_roles(request.proposed_roles);
     if let Some(clearance) = request.clearance_min {
         record = record.with_clearance_min(clearance);
     }
@@ -730,6 +734,24 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(listed[0]["id"], id.as_str());
+
+        let proposals = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            "G/class-authorizations",
+            Some(serde_json::json!({
+                "kinds": ["proposal"],
+                "target_pattern": "Update the *",
+                "roles": ["implement"],
+                "proposed_roles": ["review"],
+                "expires_in_secs": 3600
+            })),
+        )
+        .await;
+        assert_eq!(proposals.status(), 201);
+        let proposals: serde_json::Value = proposals.json().await.unwrap();
+        assert_eq!(proposals["proposed_roles"], serde_json::json!(["review"]));
 
         let revoked = call(
             &served,
