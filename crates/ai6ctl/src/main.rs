@@ -271,6 +271,19 @@ struct BoardStation {
     headquarters: bool,
     seen: f64,
     operations: Vec<String>,
+    #[serde(default)]
+    resources: Option<StationResources>,
+}
+
+/// The host figures a Station published; each is absent when the host did not give it.
+#[derive(Debug, Deserialize)]
+struct StationResources {
+    cpus: Option<f64>,
+    cpu_percent: Option<f64>,
+    load_1m: Option<f64>,
+    memory_total_mb: Option<u64>,
+    memory_available_mb: Option<u64>,
+    sampled_at: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -375,7 +388,10 @@ async fn run() -> Result<(), String> {
             else {
                 return Err("Station was not found".to_owned());
             };
-            print_station(station, board.headquarters_station.as_deref());
+            println!(
+                "{}",
+                station_row(station, board.headquarters_station.as_deref())
+            );
         }
         Command::AgentRoles { operation } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -1074,15 +1090,26 @@ fn agent_roles_request(
 }
 
 fn print_stations(board: &StationBoard) {
-    println!("STATION\tHEALTH\tHQS\tRUNNING/CAPACITY\tROLES\tOPERATIONS\tSEEN_UNIX");
+    println!(
+        "STATION\tHEALTH\tHQS\tRUNNING/CAPACITY\tROLES\tOPERATIONS\tSEEN_UNIX\t\
+         CPU_PERCENT\tCPUS\tLOAD_1M\tMEM_FREE_MB\tMEM_TOTAL_MB\tSAMPLED_UNIX"
+    );
     for station in &board.stations {
-        print_station(station, board.headquarters_station.as_deref());
+        println!(
+            "{}",
+            station_row(station, board.headquarters_station.as_deref())
+        );
     }
 }
 
-fn print_station(station: &BoardStation, headquarters_station: Option<&str>) {
-    println!(
-        "{}\t{}\t{}\t{}/{}\t{}\t{}\t{:.0}",
+/// One Station as a table row; a figure it did not report reads `unknown`.
+fn station_row(station: &BoardStation, headquarters_station: Option<&str>) -> String {
+    fn known<T: std::fmt::Display>(value: Option<T>) -> String {
+        value.map_or_else(|| "unknown".to_owned(), |value| value.to_string())
+    }
+    let resources = station.resources.as_ref();
+    format!(
+        "{}\t{}\t{}\t{}/{}\t{}\t{}\t{:.0}\t{}\t{}\t{}\t{}\t{}\t{}",
         plain(&station.station_id),
         if station.healthy {
             "healthy"
@@ -1099,7 +1126,13 @@ fn print_station(station: &BoardStation, headquarters_station: Option<&str>) {
         plain(&station.roles.join(",")),
         plain(&station.operations.join(",")),
         station.seen,
-    );
+        known(resources.and_then(|r| r.cpu_percent)),
+        known(resources.and_then(|r| r.cpus)),
+        known(resources.and_then(|r| r.load_1m)),
+        known(resources.and_then(|r| r.memory_available_mb)),
+        known(resources.and_then(|r| r.memory_total_mb)),
+        known(resources.map(|r| r.sampled_at)),
+    )
 }
 
 fn print_agent_roles(roles: impl IntoIterator<Item = AgentRole>) {
@@ -1209,6 +1242,29 @@ mod tests {
         assert!(server_url("http://exports.example").is_err());
         assert!(server_url("https://user:password@exports.example").is_err());
         assert!(server_url("https://exports.example/path").is_err());
+    }
+
+    #[test]
+    fn a_station_row_prints_cpu_and_memory_and_unknown_for_what_was_not_reported() {
+        let mut station: BoardStation = serde_json::from_value(serde_json::json!({
+            "station_id": "worker", "healthy": true, "roles": ["execution"], "running": 1,
+            "capacity": 4, "headquarters": false, "seen": 1_700_000_005.0, "operations": ["G"],
+            "resources": {
+                "cpus": 8.0, "cpu_percent": 23.5, "memory_total_mb": 16384,
+                "memory_available_mb": 9000, "sampled_at": 1_700_000_000
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            station_row(&station, None),
+            "worker\thealthy\tno\t1/4\texecution\tG\t1700000005\t23.5\t8\tunknown\t9000\t16384\t1700000000"
+        );
+        station.resources = None;
+        assert!(
+            station_row(&station, Some("worker"))
+                .ends_with("\tunknown\tunknown\tunknown\tunknown\tunknown\tunknown"),
+            "a Station that reports no resources"
+        );
     }
 
     #[test]

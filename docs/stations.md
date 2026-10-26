@@ -83,8 +83,11 @@ Theater through its transport (see [Theaters](theaters.md#two-ways-to-work-on-a-
 
 Ask before launching: `GET /v1/user/operations/{id}/placement-preview` on Universal
 Exports (needs `mission.read` on the Operation) returns the eligible choices, best first,
-and a reason for every rejection. Moneypenny's Stations view has a **Placement preview**
-panel for it. The query parameters `agent`, `role`, `stations` and `tags` narrow it the
+each with its `score`, and a reason for every rejection. Moneypenny's Stations view has a
+**Placement preview** panel for it, and each Station card shows the host's CPUs, CPU busy,
+load, free memory and when they were sampled (`unknown` for a figure not reported); a
+Theater's tooltip shows its own and how many Sessions run there. `ai6ctl stations` prints
+the same figures as columns. The query parameters `agent`, `role`, `stations` and `tags` narrow it the
 way a Mission would. The preview uses the Operation's policy as the Headquarters Station
 published it at its last check-in, and it lists every Station in the Registry, not only
 those hosting the Operation.

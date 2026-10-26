@@ -17,8 +17,11 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
 
 - `ai6ctl health` checks `GET /health` and prints `Universal Exports is healthy`.
 - `ai6ctl stations` lists visible Station health, HQS status, running/capacity, roles,
-  authorized Operations and last check-in from `GET /v1/stations`.
-- `ai6ctl station <STATION_ID>` prints one visible Station; exit `1` if absent.
+  authorized Operations and last check-in from `GET /v1/stations`, then the host's
+  resources: header `STATION\tHEALTH\tHQS\tRUNNING/CAPACITY\tROLES\tOPERATIONS\tSEEN_UNIX\t
+  CPU_PERCENT\tCPUS\tLOAD_1M\tMEM_FREE_MB\tMEM_TOTAL_MB\tSAMPLED_UNIX` (one line, no
+  spaces); a figure the Station did not report prints `unknown`.
+- `ai6ctl station <STATION_ID>` prints one visible Station row (no header); exit `1` if absent.
 - `ai6ctl agent-roles --operation <OPERATION_ID>` lists role purpose, policy and whether
   the Operation overrides the Station definition (`agent.read` on that Operation). The
   Operation ID is encoded as one URL path segment.

@@ -335,8 +335,10 @@ A Station publishes the Theaters it reaches at each check-in: ID, access (`local
 `transport`), the SSH host or transport provider, labels, capabilities, `agents`, the kind of
 `egress` (never a proxy URL), `harnesses`, `requires` with the last probe's report, and why a
 Theater is unreachable. The SSH user, port, key path and `provision` settings stay on the
-Station. `GET /v1/stations` and Moneypenny's Stations view list them; a Theater whose
-requirements are unmet or unchecked shows a tool icon, and its tooltip says what is missing.
+Station. `GET /v1/stations` and Moneypenny's Stations view list them with their last
+resources sample (`resources`, with `sampled_at`) and the Sessions running there
+(`sessions`); a Theater whose requirements are unmet or unchecked shows a tool icon, and its
+tooltip says what is missing.
 
 A Session records the Station that supervises it, the Theater it works on and the mode
 (`station_id`, `theater_id`, `mode`); Moneypenny shows them on the Mission detail. Records

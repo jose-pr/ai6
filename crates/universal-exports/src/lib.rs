@@ -1315,6 +1315,9 @@ fn board_station(
         capacity: usize_value("capacity"),
         operations: operations.to_vec(),
         theaters: station_theaters(info),
+        resources: info
+            .get("resources")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
     }
 }
 
@@ -1342,6 +1345,8 @@ fn station_theaters(info: &BTreeMap<String, serde_json::Value>) -> Vec<BoardThea
             requires: theater.requires,
             report: theater.report,
             made_for: theater.made_for,
+            resources: theater.resources,
+            sessions: theater.sessions,
         })
         .collect()
 }
@@ -3121,6 +3126,10 @@ pub struct BoardStation {
     pub operations: Vec<String>,
     /// Theaters the Station reaches; its own host is always the `local` Theater.
     pub theaters: Vec<BoardTheater>,
+    /// The host's CPUs, load and memory as the Station last sampled them, with the sample
+    /// time; absent from a Station that does not report them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<ai6::Resources>,
 }
 
 /// One Theater a Station reaches, as the Station published it at check-in.
@@ -3170,6 +3179,17 @@ pub struct BoardTheater {
     /// The Mission an ephemeral Theater was made for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub made_for: Option<String>,
+    /// Its CPUs, load and memory as last sampled, with the sample time; absent until a
+    /// sample succeeds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<ai6::Resources>,
+    /// Sessions the Station is running there; omitted when none.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub sessions: usize,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 /// Mission instructions and non-secret launch metadata published by AI6.
@@ -4700,6 +4720,13 @@ mod tests {
         worker_info.insert("capacity".to_owned(), serde_json::json!(4));
         worker_info.insert("running".to_owned(), serde_json::json!(2));
         worker_info.insert(
+            "resources".to_owned(),
+            serde_json::json!({
+                "cpus": 8.0, "cpu_percent": 25.0, "load_1m": 1.5, "memory_total_mb": 16384,
+                "memory_available_mb": 12288, "sampled_at": 1_700_000_000
+            }),
+        );
+        worker_info.insert(
             "theaters".to_owned(),
             serde_json::json!([
                 {"id": "local", "access": "local", "labels": {}},
@@ -4710,7 +4737,12 @@ mod tests {
                         "terminal": true, "run": true, "files": true, "forward": true,
                         "os": "linux", "arch": "x86_64"
                     },
-                    "harnesses": ["claude"]
+                    "harnesses": ["claude"],
+                    "resources": {
+                        "cpus": 1.5, "load_1m": 0.5, "memory_total_mb": 4096,
+                        "memory_available_mb": 2048, "sampled_at": 1_700_000_010
+                    },
+                    "sessions": 1
                 }
             ]),
         );
@@ -5438,9 +5470,9 @@ mod tests {
             preview["choices"],
             serde_json::json!([{
                 "station": "worker", "theater": "local", "agent": "007", "handler": "claude",
-                "mode": "field", "score": 0.5
+                "mode": "field", "score": 1.0
             }]),
-            "the worker holds one lease of its capacity of two and reported no resources"
+            "half its capacity running, a quarter of its CPU busy and its memory in use"
         );
         let rejections = preview["rejections"].as_array().unwrap();
         assert!(rejections.iter().any(|r| {
@@ -5491,9 +5523,22 @@ mod tests {
                         "terminal": true, "run": true, "files": true, "forward": true,
                         "os": "linux", "arch": "x86_64"
                     },
-                    "agents": "auto", "egress": "direct", "harnesses": ["claude"]
+                    "agents": "auto", "egress": "direct", "harnesses": ["claude"],
+                    "resources": {
+                        "cpus": 1.5, "load_1m": 0.5, "memory_total_mb": 4096,
+                        "memory_available_mb": 2048, "sampled_at": 1_700_000_010
+                    },
+                    "sessions": 1
                 }
-            ])
+            ]),
+            "a Theater without resources or Sessions carries neither key"
+        );
+        assert_eq!(
+            station_board["stations"][0]["resources"],
+            serde_json::json!({
+                "cpus": 8.0, "cpu_percent": 25.0, "load_1m": 1.5, "memory_total_mb": 16384,
+                "memory_available_mb": 12288, "sampled_at": 1_700_000_000
+            })
         );
         assert!(
             !serde_json::to_string(&station_board)

@@ -173,6 +173,8 @@ pub struct BoardStation {
     pub seen: f64,
     pub operations: Vec<String>,
     pub theaters: Vec<BoardTheater>,
+    pub resources: Option<ai6::Resources>, // the host's CPUs, load, memory and `sampled_at`;
+                                           // omitted when the Station did not report them
 }
 
 #[non_exhaustive]
@@ -193,6 +195,8 @@ pub struct BoardTheater {
     pub requires: Option<ai6::Requirements>, // what Sessions need there
     pub report: Option<ai6::ProbeReport>,    // the Station's last probe: unmet, found, free space
     pub made_for: Option<String>,    // the Mission an ephemeral Theater was made for
+    pub resources: Option<ai6::Resources>, // last sample; omitted until one succeeds
+    pub sessions: usize,             // the Station's running Sessions there; omitted when 0
 }
 
 #[non_exhaustive]
@@ -243,7 +247,9 @@ Station's `headquarters` marker are populated only for an unexpired elected Head
 lease. The route filters Operations using `mission.read` and omits host and process
 metadata. Each Station lists the Theaters it reaches (`theaters`; a Station that published
 none reaches only its own `local` host) with what the transport can do there, and
-placement choices carry their `mode`.
+placement choices carry their `mode` and load `score` (0 idle to 4; the Operation's
+`placement` decides whether the lowest or highest comes first). Rejections include the
+resource limits a Station or Theater is below or above.
 
 `GET /v1/user/operations/{operation_id}/placement-preview` answers where a Mission for the
 Operation would run, and why the other places would not (see `ai6::place`). It requires
