@@ -160,6 +160,9 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/user/operations/{operation_id}/mission-proposals` | Require `mission.create`; list bounded pending Agent proposals for review in that Operation. |
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve` | Require `mission.create`; record the approving operator and promote the proposal into scheduler-visible intake. |
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/reject` | Require `mission.create`; record the rejecting operator and file the proposal outside runnable intake. |
+| `GET` | `/v1/user/operations/{operation_id}/held-briefs` | Require `mission.create`; list the briefs vetting held, with what it found. |
+| `POST` | `/v1/user/operations/{operation_id}/held-briefs/{key}/release` | Require `mission.create`; return the brief to the queue, cleared of the kinds it was held for. |
+| `POST` | `/v1/user/operations/{operation_id}/held-briefs/{key}/refuse` | Require `mission.create`; file the brief as refused, with an optional `reason` for the record. |
 | `GET` | `/v1/auth/session` | Validate a user bearer token and return its token ID, person ID and expiry. |
 | `GET` | `/v1/station/inputs/next` | Wait for one bounded binary terminal input or resize frame for M. |
 | `GET` | `/v1/station/controls/next?station=<id>&wait_ms=<n>` | Wait up to `wait_ms` (default 1000, at most 25000) for the next control queued for that Station; `200` with one DipTel control value frame (channel 4) or `204`. |

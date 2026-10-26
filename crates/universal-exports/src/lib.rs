@@ -5,6 +5,7 @@
 
 mod controls;
 mod green_ink;
+mod held;
 mod login_limit;
 mod pools;
 mod roster;
@@ -49,6 +50,7 @@ use uuid::Uuid;
 
 use controls::ControlBook;
 pub use controls::ControlStatus;
+pub use held::{HeldBriefDecision, HeldBriefEntry};
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
 pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
@@ -1089,6 +1091,18 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/reject",
                 post(reject_user_mission_proposal),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/held-briefs",
+                get(held::list),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/held-briefs/{key}/release",
+                post(held::release),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/held-briefs/{key}/refuse",
+                post(held::refuse),
             )
             .route(
                 "/v1/user/operations/{operation_id}/agent-roles",
