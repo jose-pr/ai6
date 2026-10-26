@@ -1,0 +1,480 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:material_ui/material_ui.dart';
+
+import '../main.dart';
+
+/// The roster revision a Station runs, what it refused and which changed files wait for a
+/// restart, as it reported them at check-in.
+@immutable
+class StationConfigStatus {
+  const StationConfigStatus({
+    this.revision,
+    this.refused = const [],
+    this.needsRestart = const [],
+  });
+
+  /// In decimal: a revision can pass what a JSON number holds exactly.
+  final String? revision;
+  final List<String> refused;
+  final List<String> needsRestart;
+
+  factory StationConfigStatus.fromJson(Map<String, dynamic> json) =>
+      StationConfigStatus(
+        revision: json['revision'] as String?,
+        refused: ((json['refused'] as List<dynamic>?) ?? const [])
+            .cast<String>(),
+        needsRestart: ((json['needs_restart'] as List<dynamic>?) ?? const [])
+            .cast<String>(),
+      );
+}
+
+/// One roster record: its key and its definition, the keys of its configuration table.
+@immutable
+class RosterRecord {
+  const RosterRecord({required this.key, required this.definition});
+
+  final String key;
+  final Map<String, dynamic> definition;
+
+  factory RosterRecord.fromJson(Map<String, dynamic> json) => RosterRecord(
+    key: json['key'] as String,
+    definition: json['definition'] as Map<String, dynamic>,
+  );
+}
+
+/// The records of one kind at one roster revision.
+@immutable
+class RosterRecords {
+  const RosterRecords({
+    required this.kind,
+    required this.revision,
+    required this.writable,
+    required this.records,
+  });
+
+  final String kind;
+  final String revision;
+
+  /// Whether the roster takes edits; a configuration directory is edited by hand.
+  final bool writable;
+  final List<RosterRecord> records;
+
+  factory RosterRecords.fromJson(Map<String, dynamic> json) => RosterRecords(
+    kind: json['kind'] as String,
+    revision: json['revision'] as String,
+    writable: json['writable'] as bool,
+    records: [
+      for (final record in json['records'] as List<dynamic>)
+        RosterRecord.fromJson(record as Map<String, dynamic>),
+    ],
+  );
+
+  /// Sample records for the preview build.
+  factory RosterRecords.demo(String kind) => RosterRecords(
+    kind: kind,
+    revision: '12',
+    writable: false,
+    records: switch (kind) {
+      'agents' => const [
+        RosterRecord(
+          key: '007',
+          definition: {
+            'handler': 'claude',
+            'model': 'opus',
+            'roles': ['case-officer'],
+            'priority': 5,
+          },
+        ),
+      ],
+      'operations' => const [
+        RosterRecord(
+          key: 'operation-alpha',
+          definition: {
+            'roster': ['007'],
+          },
+        ),
+      ],
+      _ => const [],
+    },
+  );
+}
+
+/// The source refused a roster change: the roster it would leave is not acceptable.
+class RosterRefused implements Exception {
+  const RosterRefused(this.reason);
+
+  final String reason;
+
+  @override
+  String toString() => reason;
+}
+
+const _kinds = {
+  'operations': 'Operations',
+  'agents': 'Agents',
+  'roles': 'Agent roles',
+  'covers': 'Cover policies',
+};
+
+/// The roster every Station reads: Operations, Agents, roles and cover policies, edited
+/// through Universal Exports. Each Station takes up an accepted edit at its next poll.
+class RosterPage extends StatefulWidget {
+  const RosterPage({required this.board, super.key});
+
+  final MissionBoard board;
+
+  @override
+  State<RosterPage> createState() => _RosterPageState();
+}
+
+class _RosterPageState extends State<RosterPage> {
+  String _kind = 'agents';
+  RosterRecords? _records;
+  String? _error;
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final kind = _kind;
+    setState(() => _loading = true);
+    try {
+      final records = await widget.board.loadRoster(kind);
+      if (!mounted || kind != _kind) return;
+      setState(() {
+        _records = records;
+        _error = null;
+      });
+    } on StateError catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _say(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _edit(RosterRecord? record) async {
+    final revision = await showDialog<String>(
+      context: context,
+      builder: (context) =>
+          _RecordEditor(board: widget.board, kind: _kind, record: record),
+    );
+    if (revision == null || !mounted) return;
+    _say(
+      'Saved as roster revision $revision; each Station takes it up at its next poll.',
+    );
+    await _load();
+  }
+
+  Future<void> _delete(RosterRecord record) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove ${record.key}?'),
+        content: const Text(
+          'Every Station stops using it at its next poll. Running Sessions keep '
+          'the roster they started with.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final revision = await widget.board.deleteRosterRecord(_kind, record.key);
+      if (!mounted) return;
+      _say('Removed; roster revision $revision.');
+      await _load();
+    } on Object catch (error) {
+      if (mounted) _say(error.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final records = _records;
+    final canEdit =
+        widget.board.canManageRoster && (records?.writable ?? false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+          child: Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              DropdownButton<String>(
+                value: _kind,
+                items: [
+                  for (final MapEntry(:key, :value) in _kinds.entries)
+                    DropdownMenuItem(value: key, child: Text(value)),
+                ],
+                onChanged: (kind) {
+                  if (kind == null || kind == _kind) return;
+                  setState(() {
+                    _kind = kind;
+                    _records = null;
+                  });
+                  unawaited(_load());
+                },
+              ),
+              IconButton(
+                tooltip: 'Refresh the roster',
+                onPressed: () => unawaited(_load()),
+                icon: const Icon(Icons.refresh),
+              ),
+              if (canEdit)
+                FilledButton.icon(
+                  onPressed: () => unawaited(_edit(null)),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add'),
+                ),
+            ],
+          ),
+        ),
+        if (records != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: _Reach(
+              revision: records.revision,
+              writable: records.writable,
+              stations: widget.board.stationBoard.stations,
+            ),
+          ),
+        if (_error case final error?)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(error),
+          ),
+        Expanded(
+          child: switch (records) {
+            null => Center(
+              child: _loading
+                  ? const CircularProgressIndicator()
+                  : const Text('The roster is unavailable.'),
+            ),
+            RosterRecords(records: []) => const Center(
+              child: Text('No records of this kind.'),
+            ),
+            _ => ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                for (final record in records.records)
+                  Card(
+                    child: ListTile(
+                      title: Text(record.key),
+                      subtitle: Text(
+                        jsonEncode(record.definition),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: canEdit
+                          ? Wrap(
+                              children: [
+                                IconButton(
+                                  tooltip: 'Edit ${record.key}',
+                                  onPressed: () => unawaited(_edit(record)),
+                                  icon: const Icon(Icons.edit_outlined),
+                                ),
+                                IconButton(
+                                  tooltip: 'Remove ${record.key}',
+                                  onPressed: () => unawaited(_delete(record)),
+                                  icon: const Icon(Icons.delete_outline),
+                                ),
+                              ],
+                            )
+                          : null,
+                    ),
+                  ),
+              ],
+            ),
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// Which Stations run this revision, and what each refused or waits to restart for.
+class _Reach extends StatelessWidget {
+  const _Reach({
+    required this.revision,
+    required this.writable,
+    required this.stations,
+  });
+
+  final String revision;
+  final bool writable;
+  final List<StationSummary> stations;
+
+  @override
+  Widget build(BuildContext context) {
+    final reporting = [
+      for (final station in stations)
+        if (station.config case final config?) (station.stationId, config),
+    ];
+    final current = reporting
+        .where((entry) => entry.$2.revision == revision)
+        .length;
+    final small = Theme.of(context).textTheme.bodySmall;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          [
+            'Roster revision $revision',
+            if (reporting.isNotEmpty)
+              'running on $current of ${reporting.length} Stations',
+            if (!writable) 'read-only: edit the configuration files',
+          ].join(' · '),
+        ),
+        for (final (station, config) in reporting) ...[
+          for (final reason in config.refused)
+            Text('$station refused: $reason', style: small),
+          for (final file in config.needsRestart)
+            Text('$station: $file changed; restart it to apply', style: small),
+        ],
+      ],
+    );
+  }
+}
+
+/// Edits one record's key and definition as a JSON object.
+class _RecordEditor extends StatefulWidget {
+  const _RecordEditor({
+    required this.board,
+    required this.kind,
+    required this.record,
+  });
+
+  final MissionBoard board;
+  final String kind;
+  final RosterRecord? record;
+
+  @override
+  State<_RecordEditor> createState() => _RecordEditorState();
+}
+
+class _RecordEditorState extends State<_RecordEditor> {
+  late final _key = TextEditingController(text: widget.record?.key ?? '');
+  late final _definition = TextEditingController(
+    text: const JsonEncoder.withIndent('  ')
+        .convert(widget.record?.definition ?? const <String, dynamic>{}),
+  );
+  String? _problem;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _key.dispose();
+    _definition.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final key = _key.text.trim();
+    Object? definition;
+    try {
+      definition = jsonDecode(_definition.text);
+    } on FormatException catch (error) {
+      setState(() => _problem = 'Not JSON: ${error.message}');
+      return;
+    }
+    if (key.isEmpty || definition is! Map<String, dynamic>) {
+      setState(
+        () => _problem = 'Give a key and a definition that is a JSON object.',
+      );
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _problem = null;
+    });
+    try {
+      final revision = await widget.board.saveRosterRecord(
+        widget.kind,
+        key,
+        definition,
+      );
+      if (mounted) Navigator.of(context).pop(revision);
+    } on RosterRefused catch (refused) {
+      if (mounted) setState(() => _problem = 'Refused: ${refused.reason}');
+    } on Object catch (error) {
+      if (mounted) setState(() => _problem = error.toString());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      widget.record == null
+          ? 'Add to ${_kinds[widget.kind]}'
+          : 'Edit ${widget.record!.key}',
+    ),
+    content: SizedBox(
+      width: 480,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            key: const Key('roster-key'),
+            controller: _key,
+            enabled: widget.record == null && !_saving,
+            decoration: const InputDecoration(labelText: 'Key'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('roster-definition'),
+            controller: _definition,
+            enabled: !_saving,
+            minLines: 6,
+            maxLines: 16,
+            decoration: const InputDecoration(
+              labelText: 'Definition (JSON)',
+              helperText: 'The keys of its table in the configuration files',
+            ),
+          ),
+          if (_problem case final problem?) ...[
+            const SizedBox(height: 12),
+            Text(
+              problem,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: _saving ? null : () => unawaited(_save()),
+        child: Text(_saving ? 'Saving…' : 'Save'),
+      ),
+    ],
+  );
+}

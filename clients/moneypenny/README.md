@@ -32,6 +32,12 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Administration: Operation-scoped Agent roles (purpose and policy), and each Station's
   Mission capacity and resource limits (the free memory and CPU past which it takes no new
   Missions; 0 MiB and 100% turn them off).
+- Roster: the Operations, Agents, Agent roles and cover policies every Station reads, with the
+  revision each Station runs and what any Station refused or waits to restart for
+  (`roster.read`); with `roster.manage` and a roster that takes edits (SQL), add, edit (the
+  record's definition as JSON) or remove a record. The roster checks the whole roster first:
+  a refused edit shows why and changes nothing; an accepted one reaches every Station at its
+  next poll.
 - Green ink: the irreversible steps Agents wait to take (scope, Agent, Mission, reason,
   expiry), each approved for a chosen time with an optional note or rejected with a reason
   (`approval.decide`), and the Operation's class authorisations with their uses, revoking

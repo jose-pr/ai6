@@ -18,6 +18,7 @@ import 'green_ink/green_ink_page.dart';
 import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
 import 'pools/pools_page.dart';
+import 'roster/roster_page.dart';
 import 'timeline/timeline_page.dart';
 
 const _apiOverride = String.fromEnvironment('MONEYPENNY_API');
@@ -607,6 +608,79 @@ class MissionBoard extends ChangeNotifier {
 
   /// Operations whose account pools this account may read (`pool.read`).
   List<String> get poolOperations => _operationsWith('pool.read');
+
+  /// Whether the person may read the roster every Station reads.
+  bool get canReadRoster =>
+      demo || (userSession?.roster.contains('roster.read') ?? false);
+
+  /// Whether the person may edit it.
+  bool get canManageRoster =>
+      !demo && (userSession?.roster.contains('roster.manage') ?? false);
+
+  /// The roster records of one kind (`operations`, `agents`, `roles` or `covers`).
+  Future<RosterRecords> loadRoster(String kind) async {
+    if (demo) return RosterRecords.demo(kind);
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/roster/${Uri.encodeComponent(kind)}',
+    );
+    if (response.statusCode == 503) {
+      throw StateError('Universal Exports serves no roster.');
+    }
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the roster.');
+    }
+    return RosterRecords.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Stores one record's definition; returns the roster revision it moved to. Throws
+  /// [RosterRefused] with the reason when the roster it would leave is not acceptable.
+  Future<String> saveRosterRecord(
+    String kind,
+    String key,
+    Map<String, dynamic> definition,
+  ) async {
+    if (demo) throw StateError('Roster changes are unavailable in preview.');
+    return _rosterChange(
+      await _userRequest(
+        'PUT',
+        '/v1/user/roster/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(key)}',
+        body: definition,
+      ),
+    );
+  }
+
+  /// Removes one record; returns the roster revision it moved to.
+  Future<String> deleteRosterRecord(String kind, String key) async {
+    if (demo) throw StateError('Roster changes are unavailable in preview.');
+    return _rosterChange(
+      await _userRequest(
+        'DELETE',
+        '/v1/user/roster/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(key)}',
+      ),
+    );
+  }
+
+  String _rosterChange(http.Response response) {
+    switch (response.statusCode) {
+      case 200:
+        return (jsonDecode(response.body) as Map<String, dynamic>)['revision']
+            as String;
+      case 422:
+        throw RosterRefused(
+          (jsonDecode(response.body) as Map<String, dynamic>)['refused']
+              as String,
+        );
+      case 409:
+        throw StateError('This roster is read-only; edit its files instead.');
+      case 404:
+        throw StateError('There is no such roster record.');
+      default:
+        throw StateError('The gateway refused the roster change.');
+    }
+  }
 
   /// The pool accounts an Operation may draw from.
   Future<List<PoolAccountSummary>> loadPools(String operationId) async {
@@ -1268,6 +1342,7 @@ class StationSummary {
     required this.operations,
     this.theaters = const [],
     this.resources,
+    this.config,
   });
 
   final String stationId;
@@ -1282,6 +1357,9 @@ class StationSummary {
 
   /// The host's CPUs, load and memory; `null` from a Station that does not report them.
   final HostResources? resources;
+
+  /// The roster revision the Station runs and what it refused; `null` when not reported.
+  final StationConfigStatus? config;
 
   factory StationSummary.fromJson(Map<String, dynamic> json) => StationSummary(
     stationId: json['station_id'] as String,
@@ -1300,6 +1378,9 @@ class StationSummary {
     resources: json['resources'] == null
         ? null
         : HostResources.fromJson(json['resources'] as Map<String, dynamic>),
+    config: json['config'] == null
+        ? null
+        : StationConfigStatus.fromJson(json['config'] as Map<String, dynamic>),
   );
 }
 
@@ -1709,6 +1790,7 @@ class UserSessionSummary {
     required this.expiresAt,
     required this.operations,
     this.stations = const [],
+    this.roster = const [],
   });
 
   final String personId;
@@ -1718,6 +1800,9 @@ class UserSessionSummary {
   final double expiresAt;
   final List<UserOperationAccess> operations;
   final List<UserStationAccess> stations;
+
+  /// The person's actions on the roster every Station reads (`roster.read`, `roster.manage`).
+  final List<String> roster;
 
   factory UserSessionSummary.fromJson(Map<String, dynamic> json) =>
       UserSessionSummary(
@@ -1739,6 +1824,7 @@ class UserSessionSummary {
                   UserStationAccess.fromJson(station as Map<String, dynamic>),
             )
             .toList(growable: false),
+        roster: (json['roster'] as List<dynamic>? ?? const []).cast<String>(),
       );
 }
 
@@ -2307,6 +2393,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
             ) ==
             true ||
         board.greenInkOperations.isNotEmpty ||
+        board.canReadRoster ||
         board.classAuthorizationOperations.isNotEmpty)
       _ControlSection.administration,
     if (board.poolOperations.isNotEmpty) _ControlSection.pools,
@@ -2595,9 +2682,11 @@ class AdministrationPage extends StatelessWidget {
     final canReviewProposals = board.proposalOperations.isNotEmpty;
     final canSign = board.greenInkOperations.isNotEmpty;
     final canManageClasses = board.classAuthorizationOperations.isNotEmpty;
+    final canReadRoster = board.canReadRoster;
     final pages = <Widget>[
       if (canReadRoles) AgentRolesPage(board: board),
       if (canReadStationSettings) StationSettingsPage(board: board),
+      if (canReadRoster) RosterPage(board: board),
       if (canReviewProposals) MissionProposalsPage(board: board),
       if (canSign) GreenInkPage(board: board),
       if (canManageClasses) ClassAuthorizationsPage(board: board),
@@ -2605,6 +2694,7 @@ class AdministrationPage extends StatelessWidget {
     final labels = <String>[
       if (canReadRoles) 'Agent roles',
       if (canReadStationSettings) 'Station settings',
+      if (canReadRoster) 'Roster',
       if (canReviewProposals) 'Mission proposals',
       if (canSign) 'Green ink',
       if (canManageClasses) 'Class authorisations',
