@@ -390,6 +390,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_lowered_clearance_stops_proposals_of_a_running_session() {
+        let root = tempfile::tempdir().unwrap();
+        let state = super::super::tests::test_state(
+            root.path(),
+            "clearance = \"00\"\n",
+            "[agent.007]\nhandler = \"mock-agent\"\nclearance = \"00\"\n",
+        );
+        let relay = Arc::new(CableRelay::new(
+            state.intake.clone(),
+            CablePolicy::try_new(Vec::new(), BTreeMap::new()).unwrap(),
+            Vec::new,
+            BTreeMap::new(),
+        ));
+        let identity = CablePrincipal::try_new(
+            "007".to_owned(),
+            "G".to_owned(),
+            None,
+            "test".to_owned(),
+            None,
+            Some("mission-1".to_owned()),
+        )
+        .unwrap();
+        let mut endpoint = Endpoint::start(relay, identity, state.intake.clone(), true)
+            .await
+            .unwrap();
+        endpoint.open_green_ink(Desk::new(state.clone()));
+        endpoint
+            .bind_session(Some(&SessionId::try_new("provider-session").unwrap()))
+            .unwrap();
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(endpoint.url.clone())
+                .auth_header(endpoint.token.clone()),
+        );
+        let client = ().serve(transport).await.unwrap();
+        let propose = |key: &str| {
+            let arguments = serde_json::from_value(serde_json::json!({
+                "title": "Split the work",
+                "body": "Two smaller Missions.",
+                "idempotency_key": key
+            }))
+            .unwrap();
+            client
+                .call_tool(CallToolRequestParams::new("propose_mission").with_arguments(arguments))
+        };
+        let text = |response: rmcp::model::CallToolResult| match response.content.first() {
+            Some(ContentBlock::Text(text)) => text.text.clone(),
+            _ => panic!("the tool answers in text"),
+        };
+        assert!(text(propose("first").await.unwrap()).contains("pending_authorization"));
+
+        let now = state.clock.now() as f64;
+        state
+            .intake
+            .put_clearance_grant(
+                &crate::directorates::registry::clearance::ClearanceGrant::lower(
+                    "007", "G", "field", "ops", now,
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            text(propose("second").await.unwrap()),
+            "Mission proposal permission is unavailable"
+        );
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn separate_sessions_can_exchange_cables_through_mcp_tools() {
         let directory = tempfile::tempdir().unwrap();
         let operation =
@@ -1048,12 +1115,26 @@ impl CableTools {
         description = "Submit a child-Mission proposal for M's review. Proposals do not enter the runnable intake queue until M authorizes them."
     )]
     async fn propose_mission(&self, Parameters(args): Parameters<ProposeMissionArgs>) -> String {
-        if !self.allow_mission_proposals {
-            return "Mission proposal permission is unavailable".to_owned();
-        }
         let Ok(principal) = self.principal() else {
             return "Mission proposal identity is unavailable".to_owned();
         };
+        // The clearance is read again for every proposal, so a lower, a removed raise or a
+        // retirement reaches a running Session; without a Station desk the start's answer holds.
+        let allowed = match self.green_ink.get().cloned() {
+            Some(desk) => {
+                let (operation, agent) = (
+                    principal.operation().to_owned(),
+                    principal.agent().to_owned(),
+                );
+                tokio::task::spawn_blocking(move || desk.may_propose(&operation, &agent))
+                    .await
+                    .unwrap_or(false)
+            }
+            None => self.allow_mission_proposals,
+        };
+        if !allowed {
+            return "Mission proposal permission is unavailable".to_owned();
+        }
         let (Some(parent_mission_id), Some(provider_session_id)) =
             (principal.mission_id(), principal.session_id())
         else {

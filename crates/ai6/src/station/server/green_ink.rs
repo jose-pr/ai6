@@ -73,6 +73,12 @@ impl Desk {
         Self { state }
     }
 
+    /// Whether `agent` may propose Missions in `operation` now: it works at `00` there.
+    pub(super) fn may_propose(&self, operation: &str, agent: &str) -> bool {
+        super::agents::effective(&self.state, Some(operation), agent)
+            .is_ok_and(|agent| agent.clearance == "00")
+    }
+
     /// Records a request and answers at once: approved by a class authorisation, not
     /// required by the Operation's policy, or pending while the Mission waits for a person.
     ///

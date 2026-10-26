@@ -171,7 +171,9 @@ AI6's **Cable** relay supports Agent unicast and permission-scoped Station, Thea
 Global and named-channel broadcasts. Its MCP tools provide peer discovery, sending,
 inbox reads, acknowledgements, replies and explicitly authorized held-Cable release. An
 authorized 00 Agent also has the `propose_mission` tool for submitting work to M; this does
-not make the proposal a Cable or scheduler input. Every Agent has `request_approval`, which
+not make the proposal a Cable or scheduler input. The Station checks the Agent's clearance
+again on every proposal, so a lowered clearance or a retirement stops a running Session's
+proposals at once. Every Agent has `request_approval`, which
 asks a person for [green ink](missions.md#green-ink) before an irreversible step.
 The relay supplies sender identity outside the tool schema and rechecks recipient
 permissions at delivery. Cables are durable messages; terminal output and live stream
