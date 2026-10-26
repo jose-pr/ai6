@@ -195,8 +195,39 @@ Qualify an Agent for the role (`roles = [..., "head-of-station"]`) and authorize
   in the Registry (`logbook/<station>.json`, or the `ai6_logbooks` table) and handed to each
   round as context, fenced as data.
 - **Which Mission is a round.** Only a Mission of role `head-of-station` whose brief, as this
-  Station leased it, names this Station alone gets the logbook. Any other Mission of the role
-  is an ordinary one.
+  Station leased it, names this Station alone gets the logbook and the Station's tools. Any
+  other Mission of the role is an ordinary one.
+
+### Station tools and reports
+
+A round's Cable endpoint also lists two tools that no other Session has:
+
+- `station_report`: the Station's capacity and the Missions not over, free space where its
+  state and safe houses are, its resources, each Theater it reaches and why placement would
+  not use it, every safe house it keeps (the Mission's state, age, size, cache directories and
+  whether its work exists anywhere else, as the safe-house provider tells it), provider
+  libraries loaded without a pin, and the limits below. It carries no secret: no environment
+  value, token, loadout or brief text.
+- `file_report { summary, findings }`: findings are typed (`disk`, `theater`, `safe-house`,
+  `provider`, `other`) with a severity (`info`, `warning`, `critical`). The report goes into
+  the logbook, is published with the Station's next check-in (`head_of_station` in
+  `GET /v1/stations`, shown on the Station's card in Moneypenny), and is sent as a Cable to the
+  `heads-of-station` channel when `cables.toml` defines it and lets the Agent send there:
+
+```toml
+# cables.toml
+[[grants]]
+agent = "008"
+action = "send"
+scope = "channel"
+name = "heads-of-station"
+
+[channels]
+heads-of-station = ["007", "008"]
+```
+
+Every call checks again that its Mission is still a live round of this Station; a Session of
+any other role, or a round that is over, is refused.
 
 ## Station identity
 
