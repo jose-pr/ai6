@@ -89,6 +89,11 @@ impl Drop for ProcessTree {
     }
 }
 
+/// Nothing to set: a program under ConPTY chooses its own console modes.
+pub(crate) fn set_terminal_mode(_master: &dyn portable_pty::MasterPty) -> io::Result<()> {
+    Ok(())
+}
+
 /// ConPTY reads Enter as CR; a bare LF or a CRLF pair becomes one CR.
 pub(crate) fn translate_input(data: &[u8]) -> Cow<'_, [u8]> {
     let mut translated = Vec::with_capacity(data.len());

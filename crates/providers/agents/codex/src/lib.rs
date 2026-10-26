@@ -371,6 +371,7 @@ impl CodexSession {
                 continue;
             };
             let ours = message.get("id").and_then(Value::as_u64) == Some(id);
+            // ConPTY echoes the request itself when the app server reads its input as lines.
             if ours && message.get("method").and_then(Value::as_str) == Some(method) {
                 continue;
             }

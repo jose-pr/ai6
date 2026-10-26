@@ -103,11 +103,12 @@ fn pty_child() {
 
 /// A program that reads its input before writing anything, as Claude Code and Codex do,
 /// answers with no help from the caller: nobody here answers a cursor position query, which
-/// ConPTY sends at start and waits on. Its JSON lines arrive whole through [`JsonLines`] on
-/// the widest terminal, including one longer than that.
+/// ConPTY sends at start and waits on. It reads an input line far longer than a Unix
+/// terminal's canonical-mode limit whole, and its JSON lines arrive whole through
+/// [`JsonLines`] on the widest terminal, including one longer than that.
 #[test]
 fn a_child_waiting_for_its_input_answers_without_help() {
-    const INPUT: usize = 4_000;
+    const INPUT: usize = 70_000;
     let lengths = [300, 70_000, 1_000];
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     env.insert(
@@ -136,7 +137,6 @@ fn a_child_waiting_for_its_input_answers_without_help() {
             .unwrap(),
         )
         .unwrap();
-    // A Unix pty in canonical mode cuts an input line at 4095 bytes (Linux N_TTY).
     session
         .write(format!("{}\n", "i".repeat(INPUT)).as_bytes())
         .unwrap();
@@ -177,6 +177,40 @@ fn a_child_waiting_for_its_input_answers_without_help() {
         "the query was answered and removed"
     );
     assert_eq!(wait_for_exit(&session).code, Some(0));
+}
+
+/// Input written to the program does not come back in its output.
+#[cfg(unix)]
+#[test]
+fn written_input_is_not_echoed() {
+    let session = start(vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        "IFS= read -r line; printf 'AI6_READ_%s.' \"${#line}\"".to_owned(),
+    ]);
+    session.write(b"AI6_SECRET_INPUT\n").unwrap();
+    let output = read_until(&session, b"AI6_READ_16.");
+    assert!(
+        !output.windows(10).any(|window| window == b"AI6_SECRET"),
+        "the input was echoed: {}",
+        String::from_utf8_lossy(&output)
+    );
+    assert_eq!(wait_for_exit(&session).code, Some(0));
+}
+
+/// A ^C written to the terminal interrupts its program, which is how the Claude Code handler
+/// interrupts a turn.
+#[cfg(unix)]
+#[test]
+fn a_written_ctrl_c_interrupts_the_program() {
+    let session = start(vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        "exec sleep 30".to_owned(),
+    ]);
+    session.write(&[3]).unwrap();
+    let status = wait_for_exit(&session);
+    assert!(status.signal.is_some(), "it exited with {status:?}");
 }
 
 #[test]

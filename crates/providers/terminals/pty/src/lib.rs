@@ -4,8 +4,8 @@
 
 //! `ai6-terminal-pty`: the `pty` terminal provider, on `portable-pty`, which is
 //! `openpty` on Unix and ConPTY on Windows. The session logic is shared; what differs
-//! per platform (owning the child's process tree, translating input) is in `unix.rs`
-//! and `windows.rs` behind one `os` interface.
+//! per platform (owning the child's process tree, the terminal's mode, translating input) is
+//! in `unix.rs` and `windows.rs` behind one `os` interface.
 //!
 //! Output is read on a thread into a channel, so `read` can time out: a blocking
 //! master read is not reliably interrupted by killing the child. The child's exit
@@ -91,6 +91,7 @@ impl PtySession {
         let pair = native_pty_system()
             .openpty(size(spec.rows, spec.cols))
             .map_err(internal)?;
+        os::set_terminal_mode(&*pair.master).map_err(internal)?;
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
         if let Some(env) = &spec.env {

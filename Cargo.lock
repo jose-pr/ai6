@@ -167,6 +167,7 @@ version = "0.1.0"
 dependencies = [
  "ai6",
  "libc",
+ "nix 0.28.0",
  "portable-pty",
  "windows-sys 0.61.2",
 ]
