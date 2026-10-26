@@ -103,9 +103,38 @@ impl WriteTool {
     pub(crate) fn draft(&self, input: &Value, proposal_id: &str) -> Result<Draft, Outcome> {
         check(&self.schema(), input, "input")
             .map_err(|problem| Outcome::error(format!("INVALID_INPUT: {problem}")))?;
+        hidden_characters(input, "input")
+            .map_err(|problem| Outcome::error(format!("INVALID_INPUT: {problem}")))?;
         let empty = Map::new();
         (self.plan)(input.as_object().unwrap_or(&empty), proposal_id)
             .map_err(|problem| Outcome::error(format!("INVALID_INPUT: {problem}")))
+    }
+}
+
+/// Refuses text holding characters that render as nothing (direction controls, zero-width
+/// characters, tags, selectors, fillers, as AI6's vetting counts them): a person confirming
+/// a proposal must see every character of what runs.
+fn hidden_characters(value: &Value, at: &str) -> Result<(), String> {
+    match value {
+        Value::String(text) => match text
+            .chars()
+            .find(|character| ai6::directorates::m::vetting::is_invisible(*character))
+        {
+            Some(character) => Err(format!(
+                "{at} holds a hidden character (U+{:04X}); write it without one",
+                u32::from(character)
+            )),
+            None => Ok(()),
+        },
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, item)| hidden_characters(item, &format!("{at}[{index}]"))),
+        Value::Object(object) => object.iter().try_for_each(|(key, item)| {
+            hidden_characters(&Value::String(key.clone()), &format!("{at} key"))?;
+            hidden_characters(item, &format!("{at}.{key}"))
+        }),
+        _ => Ok(()),
     }
 }
 
@@ -531,5 +560,36 @@ mod tests {
             control.call.body,
             Some(json!({"action": "cancel", "idempotency_key": "p-7"}))
         );
+    }
+
+    #[test]
+    fn a_proposal_with_hidden_characters_is_refused() {
+        let mission = write_tools()
+            .iter()
+            .find(|tool| tool.name == "propose_mission")
+            .unwrap();
+        for hidden in ["\u{202E}", "\u{200B}", "\u{E0041}", "\u{FE0F}"] {
+            let refused = mission
+                .draft(
+                    &json!({"operation_id": "G", "title": "Tidy up",
+                            "prompt": format!("Delete the cache{hidden}")}),
+                    "p",
+                )
+                .unwrap_err();
+            assert!(
+                refused.text.contains("hidden character"),
+                "{}",
+                refused.text
+            );
+        }
+        let edit = write_tools()
+            .iter()
+            .find(|tool| tool.name == "propose_roster_edit")
+            .unwrap();
+        let nested = json!({"kind": "agents", "key": "008",
+                            "definition": {"context": ["fine", "sneaky\u{2066}"]}});
+        assert!(edit.draft(&nested, "p").is_err());
+        let plain = json!({"operation_id": "G", "title": "Tidy up", "prompt": "Delete the cache"});
+        assert!(mission.draft(&plain, "p").is_ok());
     }
 }
