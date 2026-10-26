@@ -517,6 +517,61 @@ fn asked(registry: &FileRegistry, target: &str, key: &str) -> ai6::ApprovalReque
     request
 }
 
+#[tokio::test]
+async fn pools_lists_an_operations_accounts_and_their_quota() {
+    use ai6::directorates::registry::backend::*;
+
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    let pool = ai6::AccountPool::new("team", "claude")
+        .account(ai6::Account::new("alpha", ai6::AccountKind::ClaudeOauthToken).max_concurrent(2))
+        .account(ai6::Account::new("beta", ai6::AccountKind::AnthropicApiKey));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    for name in ["alpha", "beta"] {
+        let account = ai6::AccountRef::new("team", name);
+        let profile =
+            ai6::AccountProfile::of(&pool, name, vec!["operation-01".to_owned()]).unwrap();
+        registry.declare_account(&account, &profile).unwrap();
+    }
+    let alpha = ai6::AccountRef::new("team", "alpha");
+    registry
+        .report_quota(
+            &alpha,
+            &[ai6::QuotaWindow::new("five_hour", now).used_permille(425)],
+        )
+        .unwrap();
+    registry.limit_account(&alpha, now + 600.0).unwrap();
+    registry
+        .record_account_usage(&alpha, 900, now as i64)
+        .unwrap();
+
+    let output = ai6ctl(
+        server.clone(),
+        Some(token),
+        &["pools", "--operation", "operation-01"],
+    )
+    .await;
+    let printed = lines(&output);
+    assert_eq!(
+        printed[0],
+        "POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY"
+    );
+    assert_eq!(
+        printed[1],
+        format!(
+            "team\talpha\tclaude-oauth-token\t0/2\tfive_hour=42.5%\t{:.0}\t900",
+            now + 600.0
+        )
+    );
+    assert_eq!(printed[2], "team\tbeta\tanthropic-api-key\t0\t-\t-\t0");
+    let refused = ai6ctl(server, None, &["pools", "--operation", "operation-01"]).await;
+    assert!(!refused.status.success());
+    let _ = shutdown.send(());
+}
+
 /// The lines a successful ai6ctl run printed.
 fn lines(output: &std::process::Output) -> Vec<String> {
     assert!(

@@ -97,6 +97,13 @@ enum Command {
         #[command(subcommand)]
         command: ClassCommand,
     },
+    /// List the pool accounts an Operation may draw from: Sessions using each, quota used,
+    /// until when it is limited and tokens today (needs pool.read on the Operation).
+    Pools {
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+    },
 }
 
 /// Green ink: a person's approval of one irreversible step an Agent asked to take.
@@ -531,6 +538,18 @@ async fn run() -> Result<(), String> {
             });
             print_sessions(selected);
         }
+        Command::Pools { operation } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let request = operation_request(
+                &client,
+                &server,
+                &token,
+                Method::GET,
+                &[&operation, "pools"],
+            )?;
+            let board: PoolBoard = send(request, "pool.read", "pool board").await?;
+            print_pools(&board, unix_now());
+        }
         Command::GreenInk { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             green_ink(&client, &server, &token, command).await?;
@@ -818,6 +837,65 @@ async fn send<T: DeserializeOwned>(
         .json()
         .await
         .map_err(|_| format!("Universal Exports returned an invalid {what}"))
+}
+
+/// The pool board of one Operation, as Universal Exports serves it.
+#[derive(Debug, Deserialize)]
+struct PoolBoard {
+    accounts: Vec<PoolAccount>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PoolAccount {
+    pool: String,
+    account: String,
+    kind: String,
+    max_concurrent: Option<usize>,
+    active: Vec<serde_json::Value>,
+    windows: Vec<PoolWindow>,
+    limited_until: Option<f64>,
+    tokens_today: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PoolWindow {
+    name: String,
+    used_permille: Option<u16>,
+}
+
+fn print_pools(board: &PoolBoard, now: f64) {
+    println!("POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY");
+    for account in &board.accounts {
+        let sessions = match account.max_concurrent {
+            Some(max) => format!("{}/{max}", account.active.len()),
+            None => account.active.len().to_string(),
+        };
+        let windows = account
+            .windows
+            .iter()
+            .map(|window| match window.used_permille {
+                Some(used) => format!("{}={}.{}%", plain(&window.name), used / 10, used % 10),
+                None => format!("{}=?", plain(&window.name)),
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            plain(&account.pool),
+            plain(&account.account),
+            plain(&account.kind),
+            sessions,
+            if windows.is_empty() {
+                "-".to_owned()
+            } else {
+                windows.join(",")
+            },
+            account
+                .limited_until
+                .filter(|until| *until > now)
+                .map_or_else(|| "-".to_owned(), |until| format!("{until:.0}")),
+            account.tokens_today,
+        );
+    }
 }
 
 fn unix_now() -> f64 {

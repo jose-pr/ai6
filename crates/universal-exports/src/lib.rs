@@ -6,6 +6,7 @@
 mod controls;
 mod green_ink;
 mod login_limit;
+mod pools;
 mod timeline;
 
 use core::future::Future;
@@ -46,6 +47,7 @@ use controls::ControlBook;
 pub use controls::ControlStatus;
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
+pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
 pub use timeline::{DEFAULT_TIMELINE_PAGE, MAX_TIMELINE_PAGE, TimelineItem, TimelinePage};
 
 const MAX_BUFFER_BUDGET_BYTES: usize = 512 * 1024 * 1024;
@@ -1107,6 +1109,10 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/timeline",
                 get(timeline::operation_timeline),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/pools",
+                get(pools::operation_pools),
             )
             .route(
                 "/v1/user/operations/{operation_id}/green-ink",
@@ -2222,6 +2228,7 @@ async fn user_profile(
                 "audit.read",
                 "agent.read",
                 "agent.configure",
+                "pool.read",
             ] {
                 let allowed = authorizer
                     .authorize(AuthorizationRequest {
