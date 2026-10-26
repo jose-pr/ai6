@@ -95,11 +95,12 @@ impl core::cmp::PartialEq for ai6::directorates::m::approvals::GreenInkPolicy
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::eq(&self, &Self) -> bool
 impl core::default::Default for ai6::directorates::m::approvals::GreenInkPolicy
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::default() -> Self
-pub const ai6::directorates::m::approvals::BUILTIN_KINDS: [&str; 5]
+pub const ai6::directorates::m::approvals::BUILTIN_KINDS: [&str; 6]
 pub const ai6::directorates::m::approvals::DEFAULT_APPROVAL_TTL: core::time::Duration
 pub const ai6::directorates::m::approvals::DEFAULT_PROTECTED: [&str; 4]
 pub const ai6::directorates::m::approvals::DEFAULT_REQUEST_TTL: core::time::Duration
 pub const ai6::directorates::m::approvals::GREEN_INK_REASON: &str
+pub const ai6::directorates::m::approvals::SAFE_HOUSE_DELETE: &str
 pub trait ai6::directorates::m::approvals::Repository
 pub fn ai6::directorates::m::approvals::Repository::config(&self, &ai6::directorates::m::approvals::GitContext, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, alloc::string::String>
 pub fn ai6::directorates::m::approvals::Repository::full_name(&self, &ai6::directorates::m::approvals::GitContext, &str) -> core::result::Result<core::option::Option<alloc::string::String>, alloc::string::String>
@@ -973,6 +974,8 @@ pub const ai6::directorates::medical::exposure::BRIEF_REGISTRY_DROP: &str
 pub const ai6::directorates::medical::exposure::BRIEF_SOURCE: &str
 pub const ai6::directorates::medical::exposure::DEFAULT_EXPOSING_TOOLS: [&str; 2]
 pub const ai6::directorates::medical::exposure::REVIEW: &str
+pub const ai6::directorates::medical::exposure::STATION_LOGBOOK: &str
+pub const ai6::directorates::medical::exposure::STATION_REPORT: &str
 pub fn ai6::directorates::medical::exposure::cable_source(&str) -> alloc::string::String
 pub fn ai6::directorates::medical::exposure::tool_source(&str) -> alloc::string::String
 pub mod ai6::directorates::medical::quarantine
@@ -1245,6 +1248,12 @@ pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::base: core::option::Op
 pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::branch: alloc::string::String
 pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::commit: alloc::string::String
 pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::remote: alloc::string::String
+pub struct ai6::directorates::q::safehouse::SafeHouseExports
+pub ai6::directorates::q::safehouse::SafeHouseExports::dirty: bool
+pub ai6::directorates::q::safehouse::SafeHouseExports::ignored: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::safehouse::SafeHouseExports::unexported: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::q::safehouse::SafeHouseExports
+pub fn ai6::directorates::q::safehouse::SafeHouseExports::is_exported(&self, impl core::ops::function::Fn(&str) -> bool) -> bool
 pub struct ai6::directorates::q::safehouse::SafeHouseInfo
 pub ai6::directorates::q::safehouse::SafeHouseInfo::base: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::SafeHouseInfo::branch: core::option::Option<alloc::string::String>
@@ -1279,6 +1288,9 @@ pub fn ai6::directorates::q::safehouse::SafeHouseSession::changes(&self) -> core
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::discard(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::exports(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::exports_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -1289,6 +1301,9 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::discard(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::exports(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::exports_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -2258,6 +2273,15 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&se
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub trait ai6::directorates::registry::backend::LogbookStore
+pub fn ai6::directorates::registry::backend::LogbookStore::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::LogbookStore::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
 pub trait ai6::directorates::registry::backend::QuarantineStore
 pub fn ai6::directorates::registry::backend::QuarantineStore::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::QuarantineStore::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -2276,8 +2300,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
 pub trait ai6::directorates::registry::backend::SessionStore
 pub fn ai6::directorates::registry::backend::SessionStore::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -2310,17 +2334,17 @@ pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &st
 pub fn ai6::directorates::registry::store::FileRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub trait ai6::directorates::registry::backend::SleeperStore
 pub fn ai6::directorates::registry::backend::SleeperStore::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::backend::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::backend::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::backend::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 pub trait ai6::directorates::registry::backend::SourceStore
@@ -2739,6 +2763,66 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&se
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub mod ai6::directorates::registry::logbook
+#[non_exhaustive] pub enum ai6::directorates::registry::logbook::Severity
+pub ai6::directorates::registry::logbook::Severity::Critical
+pub ai6::directorates::registry::logbook::Severity::Info
+pub ai6::directorates::registry::logbook::Severity::Warning
+impl ai6::directorates::registry::logbook::Severity
+pub fn ai6::directorates::registry::logbook::Severity::as_str(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::registry::logbook::Severity
+pub fn ai6::directorates::registry::logbook::Severity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::registry::logbook::Severity
+pub type ai6::directorates::registry::logbook::Severity::Err = alloc::string::String
+pub fn ai6::directorates::registry::logbook::Severity::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub enum ai6::directorates::registry::logbook::StationFindingKind
+pub ai6::directorates::registry::logbook::StationFindingKind::Disk
+pub ai6::directorates::registry::logbook::StationFindingKind::Other
+pub ai6::directorates::registry::logbook::StationFindingKind::Provider
+pub ai6::directorates::registry::logbook::StationFindingKind::SafeHouse
+pub ai6::directorates::registry::logbook::StationFindingKind::Theater
+impl ai6::directorates::registry::logbook::StationFindingKind
+pub fn ai6::directorates::registry::logbook::StationFindingKind::as_str(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::registry::logbook::StationFindingKind
+pub fn ai6::directorates::registry::logbook::StationFindingKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::registry::logbook::StationFindingKind
+pub type ai6::directorates::registry::logbook::StationFindingKind::Err = alloc::string::String
+pub fn ai6::directorates::registry::logbook::StationFindingKind::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub struct ai6::directorates::registry::logbook::StationFinding
+pub ai6::directorates::registry::logbook::StationFinding::kind: ai6::directorates::registry::logbook::StationFindingKind
+pub ai6::directorates::registry::logbook::StationFinding::severity: ai6::directorates::registry::logbook::Severity
+pub ai6::directorates::registry::logbook::StationFinding::text: alloc::string::String
+impl ai6::directorates::registry::logbook::StationFinding
+pub fn ai6::directorates::registry::logbook::StationFinding::new(ai6::directorates::registry::logbook::StationFindingKind, ai6::directorates::registry::logbook::Severity, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::logbook::StationReport
+pub ai6::directorates::registry::logbook::StationReport::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::logbook::StationReport::at: i64
+pub ai6::directorates::registry::logbook::StationReport::findings: alloc::vec::Vec<ai6::directorates::registry::logbook::StationFinding>
+pub ai6::directorates::registry::logbook::StationReport::mission: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::logbook::StationReport::station: alloc::string::String
+pub ai6::directorates::registry::logbook::StationReport::summary: alloc::string::String
+impl ai6::directorates::registry::logbook::StationReport
+pub fn ai6::directorates::registry::logbook::StationReport::filed_by(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::logbook::StationReport::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, i64) -> Self
+pub fn ai6::directorates::registry::logbook::StationReport::validate(&self) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::logbook::StationReport::with_findings(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::registry::logbook::StationFinding>) -> Self
+pub fn ai6::directorates::registry::logbook::StationReport::worst(&self) -> core::option::Option<ai6::directorates::registry::logbook::Severity>
+pub const ai6::directorates::registry::logbook::HEAD_OF_STATION_CHANNEL: &str
+pub const ai6::directorates::registry::logbook::HEAD_OF_STATION_ROLE: &str
+pub const ai6::directorates::registry::logbook::LOGBOOK_LENGTH: usize
+pub const ai6::directorates::registry::logbook::MAX_FINDINGS: usize
+pub const ai6::directorates::registry::logbook::MAX_FINDING_BYTES: usize
+pub const ai6::directorates::registry::logbook::MAX_SUMMARY_BYTES: usize
+pub trait ai6::directorates::registry::logbook::LogbookStore
+pub fn ai6::directorates::registry::logbook::LogbookStore::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::logbook::LogbookStore::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+pub fn ai6::directorates::registry::logbook::is_head_of_station_role(&str) -> bool
 pub mod ai6::directorates::registry::quarantine
 #[non_exhaustive] pub struct ai6::directorates::registry::quarantine::Quarantine
 pub ai6::directorates::registry::quarantine::Quarantine::agent: alloc::string::String
@@ -2887,10 +2971,12 @@ impl core::fmt::Display for ai6::directorates::registry::sleepers::CronError
 pub fn ai6::directorates::registry::sleepers::CronError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::registry::sleepers::Sleeper
 pub ai6::directorates::registry::sleepers::Sleeper::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sleepers::Sleeper::each_station: bool
 pub ai6::directorates::registry::sleepers::Sleeper::priority: i64
 pub ai6::directorates::registry::sleepers::Sleeper::prompt: alloc::string::String
 pub ai6::directorates::registry::sleepers::Sleeper::role: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sleepers::Sleeper::schedule: alloc::string::String
+pub ai6::directorates::registry::sleepers::Sleeper::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::sleepers::Sleeper::title: alloc::string::String
 impl ai6::directorates::registry::sleepers::Sleeper
 pub fn ai6::directorates::registry::sleepers::Sleeper::due_window(&self, i64, i64) -> core::option::Option<i64>
@@ -2904,20 +2990,20 @@ pub const ai6::directorates::registry::sleepers::MAX_WINDOW_AGE_SECS: i64
 pub const ai6::directorates::registry::sleepers::SLEEPER_BRIEF_SOURCE: &str
 pub trait ai6::directorates::registry::sleepers::SleeperStore
 pub fn ai6::directorates::registry::sleepers::SleeperStore::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::sleepers::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sleepers::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sleepers::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sleepers::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
-pub fn ai6::directorates::registry::sleepers::sleeper_brief(&str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64) -> ai6::directorates::registry::store::Brief
+pub fn ai6::directorates::registry::sleepers::sleeper_brief(&str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, core::option::Option<&str>) -> ai6::directorates::registry::store::Brief
 pub fn ai6::directorates::registry::sleepers::window_label(i64) -> alloc::string::String
 pub mod ai6::directorates::registry::sources
 pub enum ai6::directorates::registry::sources::Ingest
@@ -3031,6 +3117,9 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self,
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -3049,7 +3138,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, 
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
@@ -3194,6 +3283,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&se
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -3212,7 +3304,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &st
 pub fn ai6::directorates::registry::store::FileRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
@@ -3803,6 +3895,8 @@ pub fn ai6::station::safehouse::SafeHouse::base(&self) -> core::option::Option<&
 pub fn ai6::station::safehouse::SafeHouse::branch(&self) -> core::option::Option<&str>
 pub fn ai6::station::safehouse::SafeHouse::changes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::safehouse::Change>, ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::checkpoint(&self, &ai6::directorates::q::safehouse::CheckpointSpec) -> core::result::Result<ai6::directorates::q::safehouse::SafeHouseCheckpoint, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::discard(&self) -> core::result::Result<(), ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::exports(&self) -> core::result::Result<core::option::Option<ai6::directorates::q::safehouse::SafeHouseExports>, ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::finish(&self) -> core::result::Result<ai6::directorates::q::safehouse::SafeHouseReport, ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::is_isolated(&self) -> bool
 pub fn ai6::station::safehouse::SafeHouse::open(&dyn ai6::directorates::q::safehouse::SafeHouseProvider, &ai6::directorates::q::safehouse::SafeHouseSpec) -> core::result::Result<Self, ai6::station::safehouse::SafeHouseError>
@@ -3814,6 +3908,17 @@ pub fn ai6::station::safehouse::SafeHouse::fmt(&self, &mut core::fmt::Formatter<
 impl core::error::Error for ai6::station::safehouse::SafeHouseError
 impl core::fmt::Display for ai6::station::safehouse::SafeHouseError
 pub fn ai6::station::safehouse::SafeHouseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::station::safehouse::SafeHouseHygiene
+impl ai6::station::safehouse::SafeHouseHygiene
+pub fn ai6::station::safehouse::SafeHouseHygiene::cache_age(&self) -> core::time::Duration
+pub fn ai6::station::safehouse::SafeHouseHygiene::caches(&self) -> &[alloc::string::String]
+pub fn ai6::station::safehouse::SafeHouseHygiene::is_cache(&self, &str) -> bool
+pub fn ai6::station::safehouse::SafeHouseHygiene::with_cache_age(self, core::time::Duration) -> Self
+pub fn ai6::station::safehouse::SafeHouseHygiene::with_caches(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> core::result::Result<Self, ai6::station::safehouse::SafeHouseError>
+impl core::default::Default for ai6::station::safehouse::SafeHouseHygiene
+pub fn ai6::station::safehouse::SafeHouseHygiene::default() -> Self
+pub const ai6::station::safehouse::DEFAULT_CACHE_AGE: core::time::Duration
+pub const ai6::station::safehouse::DEFAULT_CACHE_DIRS: [&str; 3]
 pub const ai6::station::safehouse::STATE_ENV: &str
 pub fn ai6::station::safehouse::state_dir() -> core::result::Result<std::path::PathBuf, ai6::station::safehouse::SafeHouseError>
 pub mod ai6::station::server
@@ -3844,6 +3949,7 @@ pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert:
 pub fn ai6::station::server::StationConfig::with_loadouts(self, ai6::directorates::q::LoadoutCatalog) -> Self
 pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
+pub fn ai6::station::server::StationConfig::with_safe_house_hygiene(self, ai6::station::safehouse::SafeHouseHygiene) -> Self
 pub fn ai6::station::server::StationConfig::with_secret_backend(self, impl ai6::SecretBackend + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
@@ -4159,6 +4265,30 @@ pub ai6::SessionStatus::Lost
 pub ai6::SessionStatus::Parked
 impl ai6::directorates::registry::sessions::SessionStatus
 pub fn ai6::directorates::registry::sessions::SessionStatus::is_closed(self) -> bool
+#[non_exhaustive] pub enum ai6::Severity
+pub ai6::Severity::Critical
+pub ai6::Severity::Info
+pub ai6::Severity::Warning
+impl ai6::directorates::registry::logbook::Severity
+pub fn ai6::directorates::registry::logbook::Severity::as_str(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::registry::logbook::Severity
+pub fn ai6::directorates::registry::logbook::Severity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::registry::logbook::Severity
+pub type ai6::directorates::registry::logbook::Severity::Err = alloc::string::String
+pub fn ai6::directorates::registry::logbook::Severity::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub enum ai6::StationFindingKind
+pub ai6::StationFindingKind::Disk
+pub ai6::StationFindingKind::Other
+pub ai6::StationFindingKind::Provider
+pub ai6::StationFindingKind::SafeHouse
+pub ai6::StationFindingKind::Theater
+impl ai6::directorates::registry::logbook::StationFindingKind
+pub fn ai6::directorates::registry::logbook::StationFindingKind::as_str(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::registry::logbook::StationFindingKind
+pub fn ai6::directorates::registry::logbook::StationFindingKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::registry::logbook::StationFindingKind
+pub type ai6::directorates::registry::logbook::StationFindingKind::Err = alloc::string::String
+pub fn ai6::directorates::registry::logbook::StationFindingKind::from_str(&str) -> core::result::Result<Self, Self::Err>
 #[non_exhaustive] pub enum ai6::StationRole
 pub ai6::StationRole::Control
 pub ai6::StationRole::Execution
@@ -4900,6 +5030,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&se
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -4918,7 +5051,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &st
 pub fn ai6::directorates::registry::store::FileRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
@@ -5541,6 +5674,12 @@ pub ai6::SafeHouseCheckpoint::base: core::option::Option<alloc::string::String>
 pub ai6::SafeHouseCheckpoint::branch: alloc::string::String
 pub ai6::SafeHouseCheckpoint::commit: alloc::string::String
 pub ai6::SafeHouseCheckpoint::remote: alloc::string::String
+pub struct ai6::SafeHouseExports
+pub ai6::SafeHouseExports::dirty: bool
+pub ai6::SafeHouseExports::ignored: alloc::vec::Vec<alloc::string::String>
+pub ai6::SafeHouseExports::unexported: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::q::safehouse::SafeHouseExports
+pub fn ai6::directorates::q::safehouse::SafeHouseExports::is_exported(&self, impl core::ops::function::Fn(&str) -> bool) -> bool
 pub struct ai6::SafeHouseInfo
 pub ai6::SafeHouseInfo::base: core::option::Option<alloc::string::String>
 pub ai6::SafeHouseInfo::branch: core::option::Option<alloc::string::String>
@@ -5721,10 +5860,12 @@ pub fn ai6::directorates::registry::sessions::SessionUpdate::recent(self, alloc:
 pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::directorates::registry::sessions::SessionStatus) -> Self
 pub struct ai6::Sleeper
 pub ai6::Sleeper::agent: core::option::Option<alloc::string::String>
+pub ai6::Sleeper::each_station: bool
 pub ai6::Sleeper::priority: i64
 pub ai6::Sleeper::prompt: alloc::string::String
 pub ai6::Sleeper::role: core::option::Option<alloc::string::String>
 pub ai6::Sleeper::schedule: alloc::string::String
+pub ai6::Sleeper::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::Sleeper::title: alloc::string::String
 impl ai6::directorates::registry::sleepers::Sleeper
 pub fn ai6::directorates::registry::sleepers::Sleeper::due_window(&self, i64, i64) -> core::option::Option<i64>
@@ -5816,6 +5957,9 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self,
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -5834,7 +5978,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, 
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
@@ -5932,6 +6076,7 @@ pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert:
 pub fn ai6::station::server::StationConfig::with_loadouts(self, ai6::directorates::q::LoadoutCatalog) -> Self
 pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
+pub fn ai6::station::server::StationConfig::with_safe_house_hygiene(self, ai6::station::safehouse::SafeHouseHygiene) -> Self
 pub fn ai6::station::server::StationConfig::with_secret_backend(self, impl ai6::SecretBackend + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
@@ -5954,11 +6099,30 @@ pub ai6::StationFacts::theaters: alloc::vec::Vec<ai6::directorates::m::theaters:
 impl ai6::directorates::m::placement::StationFacts
 pub fn ai6::directorates::m::placement::StationFacts::from_record(&ai6::directorates::registry::store::StationRecord, f64, core::time::Duration, usize) -> Self
 pub fn ai6::directorates::m::placement::StationFacts::occupied(&self) -> usize
+#[non_exhaustive] pub struct ai6::StationFinding
+pub ai6::StationFinding::kind: ai6::directorates::registry::logbook::StationFindingKind
+pub ai6::StationFinding::severity: ai6::directorates::registry::logbook::Severity
+pub ai6::StationFinding::text: alloc::string::String
+impl ai6::directorates::registry::logbook::StationFinding
+pub fn ai6::directorates::registry::logbook::StationFinding::new(ai6::directorates::registry::logbook::StationFindingKind, ai6::directorates::registry::logbook::Severity, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::StationRecord
 impl ai6::directorates::registry::store::StationRecord
 pub fn ai6::directorates::registry::store::StationRecord::info(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
 pub fn ai6::directorates::registry::store::StationRecord::seen(&self) -> f64
 pub fn ai6::directorates::registry::store::StationRecord::station(&self) -> &str
+#[non_exhaustive] pub struct ai6::StationReport
+pub ai6::StationReport::agent: core::option::Option<alloc::string::String>
+pub ai6::StationReport::at: i64
+pub ai6::StationReport::findings: alloc::vec::Vec<ai6::directorates::registry::logbook::StationFinding>
+pub ai6::StationReport::mission: core::option::Option<alloc::string::String>
+pub ai6::StationReport::station: alloc::string::String
+pub ai6::StationReport::summary: alloc::string::String
+impl ai6::directorates::registry::logbook::StationReport
+pub fn ai6::directorates::registry::logbook::StationReport::filed_by(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::logbook::StationReport::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, i64) -> Self
+pub fn ai6::directorates::registry::logbook::StationReport::validate(&self) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::logbook::StationReport::with_findings(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::registry::logbook::StationFinding>) -> Self
+pub fn ai6::directorates::registry::logbook::StationReport::worst(&self) -> core::option::Option<ai6::directorates::registry::logbook::Severity>
 pub struct ai6::StationSecrets
 impl ai6::StationSecrets
 pub fn ai6::StationSecrets::new(impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::q::SecretDefinition>) -> Self
@@ -6225,7 +6389,7 @@ pub const ai6::ACTIONS: &[&str]
 pub const ai6::BRIEF_EXPOSURE_KEY: &str
 pub const ai6::BRIEF_REGISTRY_DROP: &str
 pub const ai6::BRIEF_SOURCE: &str
-pub const ai6::BUILTIN_KINDS: [&str; 5]
+pub const ai6::BUILTIN_KINDS: [&str; 6]
 pub const ai6::CHIEF_OF_STAFF_ROLE: &str
 pub const ai6::CLEARANCE_KIND: &str
 pub const ai6::CREDENTIAL_VARIABLES: &[&str]
@@ -6269,8 +6433,10 @@ pub const ai6::DEFAULT_WINDOW_SECS: u64
 pub const ai6::EXPIRY_SIGNER: &str
 pub const ai6::GONE_DARK_AFTER: core::time::Duration
 pub const ai6::GREEN_INK_REASON: &str
+pub const ai6::HEAD_OF_STATION_ROLE: &str
 pub const ai6::LIMIT_EVENT: &str
 pub const ai6::LOCAL_THEATER: &str
+pub const ai6::LOGBOOK_LENGTH: usize
 pub const ai6::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::MAX_CABLE_TTL: f64
@@ -6294,6 +6460,7 @@ pub const ai6::READ_TIMED_OUT: i64
 pub const ai6::REVIEW: &str
 pub const ai6::REVIEW_DATA_KEY: &str
 pub const ai6::REVIEW_SOURCE: &str
+pub const ai6::SAFE_HOUSE_DELETE: &str
 pub const ai6::SCOPE_KINDS: [&str; 4]
 pub const ai6::SLEEPER_BRIEF_SOURCE: &str
 pub const ai6::SOURCE_BRIEF_PREFIX: &str
@@ -6587,6 +6754,15 @@ pub fn ai6::directorates::m::config::TomlConfigDir::load(&self) -> core::result:
 pub fn ai6::directorates::m::config::TomlConfigDir::put(&self, ai6::directorates::m::config::ConfigRecord, &str, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::TomlConfigDir::remove(&self, ai6::directorates::m::config::ConfigRecord, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::TomlConfigDir::revision(&self) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
+pub trait ai6::LogbookStore
+pub fn ai6::LogbookStore::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::LogbookStore::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
 pub trait ai6::QuarantineStore
 pub fn ai6::QuarantineStore::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::QuarantineStore::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -6605,8 +6781,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::RegistryBackend: ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::RegistryBackend: ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
 pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
@@ -6618,6 +6794,9 @@ pub fn ai6::SafeHouseSession::changes(&self) -> core::result::Result<guatiao::va
 pub fn ai6::SafeHouseSession::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::discard(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::exports(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::exports_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -6628,6 +6807,9 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::discard(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::exports(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::exports_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::finish_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -6671,17 +6853,17 @@ pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &st
 pub fn ai6::directorates::registry::store::FileRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub trait ai6::SleeperStore
 pub fn ai6::SleeperStore::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
+pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 pub trait ai6::Source: core::marker::Send + core::marker::Sync
@@ -6891,6 +7073,7 @@ pub fn ai6::describe(&guatiao::library::kind::ProviderError) -> alloc::string::S
 pub fn ai6::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
 pub fn ai6::fitness(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::harness_verdict(&ai6::directorates::m::theaters::TheaterSummary, ai6::directorates::m::placement::ExecutionMode, &str) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::is_head_of_station_role(&str) -> bool
 pub fn ai6::is_review(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::is_sha256_pin(&str) -> bool
 pub fn ai6::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
