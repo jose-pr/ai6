@@ -461,6 +461,18 @@ struct CoverDefinition {
     announce: bool,
 }
 
+/// A cover policy from the keys of its `[cover.<name>]` table, in any serde format.
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+pub(crate) fn cover_from<'de, D>(name: String, definition: D) -> Result<Cover, CoverError>
+where
+    D: serde::Deserializer<'de>,
+    D::Error: std::fmt::Display,
+{
+    CoverDefinition::deserialize(definition)
+        .map_err(|error| CoverError(format!("cover {name:?}: {error}")))?
+        .resolve(name)
+}
+
 impl CoverDefinition {
     fn resolve(self, name: String) -> Result<Cover, CoverError> {
         Cover::new(name, self.description)

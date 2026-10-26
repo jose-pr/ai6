@@ -26,10 +26,10 @@ use crate::directorates::m::identity::{MissionId, SessionId};
 /// The signer of a request that expired without a decision.
 pub const EXPIRY_SIGNER: &str = "expiry";
 
-const MAX_RECORD_BYTES: u64 = 16 * 1024;
-const MAX_PENDING: usize = 1_000;
-const MAX_CLASS_AUTHORIZATIONS: usize = 1_000;
-const MAX_MISSION_REQUESTS: usize = 64;
+pub(super) const MAX_RECORD_BYTES: u64 = 16 * 1024;
+pub(super) const MAX_PENDING: usize = 1_000;
+pub(super) const MAX_CLASS_AUTHORIZATIONS: usize = 1_000;
+pub(super) const MAX_MISSION_REQUESTS: usize = 64;
 const MAX_REASON_BYTES: usize = 2_048;
 const MAX_NOTE_BYTES: usize = 1_024;
 const MAX_SIGNER_BYTES: usize = 256;
@@ -135,7 +135,7 @@ impl ApprovalRequest {
         Ok(())
     }
 
-    fn validate(&self) -> io::Result<()> {
+    pub(super) fn validate(&self) -> io::Result<()> {
         self.validate_fields()?;
         if !(self.requested_at.is_finite()
             && self.requested_at > 0.0
@@ -533,17 +533,7 @@ impl FileRegistry {
     }
 
     fn expire_locked(&self, request: &ApprovalRequest) -> io::Result<Approval> {
-        let approval = Approval {
-            request: request.clone(),
-            decision: Decision::Expired,
-            signer: EXPIRY_SIGNER.to_owned(),
-            at: request.expires_at,
-            expires_at: None,
-            note: None,
-            revoked: None,
-            notified_at: None,
-            spent_at: None,
-        };
+        let approval = expired(request);
         self.settle_locked(&approval)?;
         Ok(approval)
     }
@@ -824,17 +814,7 @@ impl ApprovalStore for FileRegistry {
                 format!("the request was already {}", approval.decision.as_str()),
             )),
             Some(ApprovalStatus::Pending(request)) => {
-                let approval = Approval {
-                    request,
-                    decision: ruling.decision,
-                    signer: ruling.signer.clone(),
-                    at: ruling.at,
-                    expires_at: ruling.expires_at,
-                    note: ruling.note.clone(),
-                    revoked: None,
-                    notified_at: None,
-                    spent_at: None,
-                };
+                let approval = ruled(request, ruling);
                 self.settle_locked(&approval)?;
                 Ok(approval)
             }
@@ -939,17 +919,7 @@ impl ApprovalStore for FileRegistry {
                 .join(format!("{}.json", class.id)),
             &class,
         )?;
-        let approval = Approval {
-            request: request.clone(),
-            decision: Decision::Approved,
-            signer: format!("class:{}", class.id),
-            at: now,
-            expires_at: Some(class.expires_at),
-            note: None,
-            revoked: None,
-            notified_at: Some(now),
-            spent_at: None,
-        };
+        let approval = class_approval(request, &class, now);
         self.index_locked(request)?;
         write_json(
             &self
@@ -1009,7 +979,58 @@ impl ApprovalStore for FileRegistry {
     }
 }
 
-fn validate_ruling(ruling: &Ruling) -> io::Result<()> {
+/// The record of a request no one decided before it expired: refused, signed by
+/// [`EXPIRY_SIGNER`] at its expiry.
+pub(super) fn expired(request: &ApprovalRequest) -> Approval {
+    Approval {
+        request: request.clone(),
+        decision: Decision::Expired,
+        signer: EXPIRY_SIGNER.to_owned(),
+        at: request.expires_at,
+        expires_at: None,
+        note: None,
+        revoked: None,
+        notified_at: None,
+        spent_at: None,
+    }
+}
+
+/// The record of a person's ruling on a pending request.
+pub(super) fn ruled(request: ApprovalRequest, ruling: &Ruling) -> Approval {
+    Approval {
+        request,
+        decision: ruling.decision,
+        signer: ruling.signer.clone(),
+        at: ruling.at,
+        expires_at: ruling.expires_at,
+        note: ruling.note.clone(),
+        revoked: None,
+        notified_at: None,
+        spent_at: None,
+    }
+}
+
+/// The approval a class authorisation gives a request at `now`: it lasts as long as the
+/// class and counts as already told to the Agent.
+pub(super) fn class_approval(
+    request: &ApprovalRequest,
+    class: &ClassAuthorization,
+    now: f64,
+) -> Approval {
+    Approval {
+        request: request.clone(),
+        decision: Decision::Approved,
+        signer: format!("class:{}", class.id),
+        at: now,
+        expires_at: Some(class.expires_at),
+        note: None,
+        revoked: None,
+        notified_at: Some(now),
+        spent_at: None,
+    }
+}
+
+pub(super) fn validate_ruling(ruling: &Ruling) -> io::Result<()> {
     if !valid_text(&ruling.signer, MAX_SIGNER_BYTES, false) {
         return Err(invalid_input("the signer must be 1 to 256 bytes"));
     }
@@ -1097,15 +1118,20 @@ fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::registry::suite::{Store, backend_tests};
+
+    backend_tests!(
+        an_approval_is_spent_once_and_only_while_live,
+        a_request_is_approved_and_then_found_by_its_scope,
+        expired_and_revoked_approvals_do_not_match,
+        an_undecided_request_expires_as_refused,
+        a_class_authorisation_matches_by_kind_glob_and_agent_and_stops_at_max_uses,
+        a_class_authorisation_covers_roles_and_stops_when_revoked_or_expired,
+        requests_are_bounded,
+    );
 
     const NOW: f64 = 1_800_000_000.0;
     const HOUR: Duration = Duration::from_secs(3600);
-
-    fn registry() -> (tempfile::TempDir, FileRegistry) {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
-        (root, registry)
-    }
 
     fn request(key: &str, kind: &str, target: &str) -> ApprovalRequest {
         ApprovalRequest::try_new(
@@ -1121,9 +1147,8 @@ mod tests {
         .expiring(NOW, HOUR)
     }
 
-    #[test]
-    fn an_approval_is_spent_once_and_only_while_live() {
-        let (root, registry) = registry();
+    fn an_approval_is_spent_once_and_only_while_live(store: &dyn Store) {
+        let registry = store.handle();
         let asked = request("release-1", "release", "tag v1");
         registry.request_approval(&asked).unwrap();
         assert!(
@@ -1143,7 +1168,7 @@ mod tests {
             "the second Station to spend it loses"
         );
         // Another handle on the same Registry, as after a restart, sees the use.
-        let reopened = FileRegistry::open(root.path());
+        let reopened = store.handle();
         let Some(ApprovalStatus::Decided(approval)) =
             reopened.approval("G", &asked.id, NOW + 3.0).unwrap()
         else {
@@ -1153,9 +1178,8 @@ mod tests {
         assert!(!reopened.spend_approval("G", &asked.id, NOW + 3.0).unwrap());
     }
 
-    #[test]
-    fn a_request_is_approved_and_then_found_by_its_scope() {
-        let (_root, registry) = registry();
+    fn a_request_is_approved_and_then_found_by_its_scope(store: &dyn Store) {
+        let registry = store.handle();
         let asked = request("push-1", "push", "origin:refs/heads/main");
         let status = registry.request_approval(&asked).unwrap();
         assert_eq!(status, ApprovalStatus::Pending(asked.clone()));
@@ -1232,9 +1256,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn expired_and_revoked_approvals_do_not_match() {
-        let (_root, registry) = registry();
+    fn expired_and_revoked_approvals_do_not_match(store: &dyn Store) {
+        let registry = store.handle();
         let asked = request("push-2", "push", "main");
         registry.request_approval(&asked).unwrap();
         registry
@@ -1288,9 +1311,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_undecided_request_expires_as_refused() {
-        let (_root, registry) = registry();
+    fn an_undecided_request_expires_as_refused(store: &dyn Store) {
+        let registry = store.handle();
         let asked = request("delete-1", "delete", "origin:refs/heads/old");
         registry.request_approval(&asked).unwrap();
         let later = NOW + HOUR.as_secs_f64();
@@ -1329,9 +1351,10 @@ mod tests {
         assert_eq!(told.notified_at, Some(later));
     }
 
-    #[test]
-    fn a_class_authorisation_matches_by_kind_glob_and_agent_and_stops_at_max_uses() {
-        let (_root, registry) = registry();
+    fn a_class_authorisation_matches_by_kind_glob_and_agent_and_stops_at_max_uses(
+        store: &dyn Store,
+    ) {
+        let registry = store.handle();
         let class = ClassAuthorization::new(
             "G",
             vec!["push".to_owned()],
@@ -1406,9 +1429,8 @@ mod tests {
         assert_eq!(registry.class_authorizations("G").unwrap()[0].uses, 2);
     }
 
-    #[test]
-    fn a_class_authorisation_covers_roles_and_stops_when_revoked_or_expired() {
-        let (_root, registry) = registry();
+    fn a_class_authorisation_covers_roles_and_stops_when_revoked_or_expired(store: &dyn Store) {
+        let registry = store.handle();
         let class = ClassAuthorization::new(
             "G",
             vec!["merge".to_owned()],
@@ -1463,8 +1485,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn requests_are_bounded() {
+    fn requests_are_bounded(store: &dyn Store) {
         let mission = MissionId::try_new("mission-1").unwrap();
         let session = SessionId::try_new("provider-session-1").unwrap();
         let scope = ActionScope::try_new("push", "main").unwrap();
@@ -1484,7 +1505,7 @@ mod tests {
         assert!(attempt("007", "reason", "").is_err());
         assert!(attempt("../007", "reason", "key").is_err());
         assert!(attempt("007", &"x".repeat(MAX_REASON_BYTES + 1), "key").is_err());
-        let (_root, registry) = registry();
+        let registry = store.handle();
         let untimed = attempt("007", "reason", "key").unwrap();
         assert_eq!(
             registry.request_approval(&untimed).unwrap_err().kind(),

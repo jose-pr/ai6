@@ -165,10 +165,34 @@ impl TimelineEvent {
         Ok(())
     }
 
+    /// When it happened in whole microseconds: events sort by this, then by ID.
+    pub(super) fn micros(&self) -> u64 {
+        (self.at * 1_000_000.0) as u64
+    }
+
     /// The file name: microseconds first, so names sort by time.
     fn file_name(&self) -> String {
-        let micros = (self.at * 1_000_000.0) as u64;
-        format!("{micros:020}-{}.json", self.id)
+        format!("{:020}-{}.json", self.micros(), self.id)
+    }
+
+    /// The stored form of a checked event, within the size limit.
+    pub(super) fn to_record(&self) -> io::Result<Vec<u8>> {
+        self.validate()?;
+        let bytes = serde_json::to_vec(self).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_EVENT_BYTES {
+            return Err(invalid_data("timeline event exceeds the size limit"));
+        }
+        Ok(bytes)
+    }
+
+    /// Reads a stored event, `None` when it is out of bounds or invalid.
+    pub(super) fn from_record(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() as u64 > MAX_EVENT_BYTES {
+            return None;
+        }
+        serde_json::from_slice::<Self>(bytes)
+            .ok()
+            .filter(|event| event.validate().is_ok())
     }
 }
 
@@ -208,9 +232,8 @@ impl TimelineStore for FileRegistry {
             let Ok(bytes) = fs::read(&path) else {
                 continue;
             };
-            if let Ok(event) = serde_json::from_slice::<TimelineEvent>(&bytes)
+            if let Some(event) = TimelineEvent::from_record(&bytes)
                 && event.operation == operation
-                && event.validate().is_ok()
             {
                 events.push(event);
             }
@@ -221,11 +244,7 @@ impl TimelineStore for FileRegistry {
 
 /// Records an event while the caller already holds the Registry lock.
 pub(super) fn record_event_locked(root: &Path, event: &TimelineEvent) -> io::Result<()> {
-    event.validate()?;
-    let bytes = serde_json::to_vec(event).map_err(io::Error::other)?;
-    if bytes.len() as u64 > MAX_EVENT_BYTES {
-        return Err(invalid_data("timeline event exceeds the size limit"));
-    }
+    let bytes = event.to_record()?;
     fs::create_dir_all(root.join("timeline"))?;
     write_atomic(&root.join("timeline").join(event.file_name()), &bytes)?;
     let files = event_files(root)?;
@@ -264,11 +283,16 @@ fn event_files(root: &Path) -> io::Result<Vec<std::path::PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::registry::suite::{Store, backend_tests};
 
-    #[test]
-    fn events_in_the_same_second_keep_the_order_they_were_recorded_in() {
-        let directory = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(directory.path());
+    backend_tests!(
+        events_in_the_same_second_keep_the_order_they_were_recorded_in,
+        events_are_kept_per_operation_in_time_order_and_bounded,
+        events_outside_the_bounds_are_refused,
+    );
+
+    fn events_in_the_same_second_keep_the_order_they_were_recorded_in(store: &dyn Store) {
+        let registry = store.handle();
         let actions = (0..20)
             .map(|index| format!("step{index}"))
             .collect::<Vec<_>>();
@@ -286,10 +310,8 @@ mod tests {
         assert_eq!(recorded, actions);
     }
 
-    #[test]
-    fn events_are_kept_per_operation_in_time_order_and_bounded() {
-        let directory = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(directory.path());
+    fn events_are_kept_per_operation_in_time_order_and_bounded(store: &dyn Store) {
+        let registry = store.handle();
         let second = TimelineEvent::new("lifecycle", "working", "G", 2.0)
             .station("hq")
             .mission("mission-1")
@@ -308,10 +330,8 @@ mod tests {
         assert!(registry.timeline_events("Q").unwrap().is_empty());
     }
 
-    #[test]
-    fn events_outside_the_bounds_are_refused() {
-        let directory = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(directory.path());
+    fn events_outside_the_bounds_are_refused(store: &dyn Store) {
+        let registry = store.handle();
         for event in [
             TimelineEvent::new("Lifecycle", "working", "G", 1.0),
             TimelineEvent::new("lifecycle", "working", "G", 0.0),

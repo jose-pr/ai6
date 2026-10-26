@@ -73,19 +73,7 @@ impl UsageStore for FileRegistry {
         let _lock = registry_lock(&self.root)?;
         let path = self.usage_path(operation, mission);
         let mut usage = read_ledger(&path)?.unwrap_or_default();
-        usage.total.add(delta);
-        usage
-            .sessions
-            .entry(session.to_owned())
-            .or_default()
-            .add(delta);
-        if delta.cost_micro_usd > 0 {
-            let day = usage.daily_cost_micro_usd.entry(utc_day(now)).or_default();
-            *day = day.saturating_add(delta.cost_micro_usd);
-            while usage.daily_cost_micro_usd.len() > KEPT_DAYS {
-                usage.daily_cost_micro_usd.pop_first();
-            }
-        }
+        add_usage(&mut usage, session, delta, now);
         let bytes = serde_json::to_vec(&usage).map_err(io::Error::other)?;
         write_atomic(&path, &bytes)?;
         Ok(usage)
@@ -109,40 +97,70 @@ impl UsageStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
             Err(error) => return Err(error),
         };
-        let day = utc_day(now);
         let mut total = 0_u64;
         for entry in entries {
             let path = entry?.path();
             if path.extension().is_none_or(|extension| extension != "json") {
                 continue;
             }
-            if let Some(usage) = read_ledger(&path)?
-                && let Some(cost) = usage.daily_cost_micro_usd.get(&day)
-            {
-                total = total.saturating_add(*cost);
+            if let Some(usage) = read_ledger(&path)? {
+                total = total.saturating_add(cost_on_day(&usage, now));
             }
         }
         Ok(total)
     }
 }
 
+/// Adds `delta` to a Session's totals and the Mission's, and its cost to the UTC day of
+/// `now`, keeping the last few days.
+pub(super) fn add_usage(usage: &mut MissionUsage, session: &str, delta: &UsageTotals, now: i64) {
+    usage.total.add(delta);
+    usage
+        .sessions
+        .entry(session.to_owned())
+        .or_default()
+        .add(delta);
+    if delta.cost_micro_usd > 0 {
+        let day = usage.daily_cost_micro_usd.entry(utc_day(now)).or_default();
+        *day = day.saturating_add(delta.cost_micro_usd);
+        while usage.daily_cost_micro_usd.len() > KEPT_DAYS {
+            usage.daily_cost_micro_usd.pop_first();
+        }
+    }
+}
+
+/// What a ledger holds for the UTC day of `now`.
+pub(super) fn cost_on_day(usage: &MissionUsage, now: i64) -> u64 {
+    usage
+        .daily_cost_micro_usd
+        .get(&utc_day(now))
+        .copied()
+        .unwrap_or_default()
+}
+
 fn read_ledger(path: &std::path::Path) -> io::Result<Option<MissionUsage>> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
+    match fs::read(path) {
+        Ok(bytes) => parse_ledger(&bytes).map(Some),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Reads a stored ledger, refusing one over the size limit.
+pub(super) fn parse_ledger(bytes: &[u8]) -> io::Result<MissionUsage> {
     if bytes.len() as u64 > MAX_LEDGER_BYTES {
         return Err(invalid_data("usage ledger exceeds the size limit"));
     }
-    serde_json::from_slice(&bytes)
-        .map(Some)
+    serde_json::from_slice(bytes)
         .map_err(|error| invalid_data(format!("invalid usage ledger: {error}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::registry::suite::{Store, backend_tests};
+
+    backend_tests!(additions_accumulate_per_session_and_mission_and_day,);
 
     fn totals(input: u64, cost: u64) -> UsageTotals {
         UsageTotals {
@@ -152,10 +170,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn additions_accumulate_per_session_and_mission_and_day() {
-        let directory = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(directory.path());
+    fn additions_accumulate_per_session_and_mission_and_day(store: &dyn Store) {
+        let registry = store.handle();
         assert_eq!(registry.mission_usage(Some("op"), "m1").unwrap(), None);
         registry
             .record_usage(Some("op"), "m1", "s1", &totals(100, 1_000), 1_790_000_000)

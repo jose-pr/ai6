@@ -3,15 +3,23 @@
 //! A [`ConfigSource`] hands out the roster at a [`ConfigRevision`] and says cheaply whether
 //! it has changed since. [`TomlConfigDir`] reads `operations.toml`, `agents.toml` and
 //! `covers.toml` from a configuration directory, the default; [`MemoryConfigSource`] holds a
-//! roster built in code. Any other store builds its roster with [`Roster::from_parts`].
+//! roster built in code; with the `sqlite` or `postgres` feature, `SqlConfigSource` keeps it in
+//! a database every Station shares. Any other store builds its roster with
+//! [`Roster::from_parts`].
 //!
 //! Theaters are not part of it: each Station reads its own.
+
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+mod sql;
+
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+pub use sql::{ConfigRecord, SqlConfigSource};
 
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use sha2::{Digest, Sha256};
 
@@ -79,6 +87,30 @@ pub trait ConfigSource: Send + Sync {
         let snapshot = self.load()?;
         Ok((snapshot.revision != since).then_some(snapshot))
     }
+}
+
+/// Opens the roster at `location`: `sqlite:PATH` (or `sqlite://PATH`) or a `postgres://`
+/// URL for a `SqlConfigSource`, anything else a configuration directory ([`TomlConfigDir`]).
+///
+/// # Errors
+///
+/// `Unsupported` for a SQL location when this build lacks its cargo feature (`sqlite`,
+/// `postgres`); the database's error when it cannot be opened. A directory is not read
+/// until the roster is loaded.
+pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>> {
+    let sql = location.starts_with("sqlite:")
+        || location.starts_with("postgres://")
+        || location.starts_with("postgresql://");
+    if !sql {
+        return Ok(Arc::new(TomlConfigDir::new(location)));
+    }
+    #[cfg(any(feature = "sqlite", feature = "postgres"))]
+    return Ok(Arc::new(SqlConfigSource::open(location)?));
+    #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "this build of ai6 has no SQL configuration support (cargo features `sqlite`, `postgres`)",
+    ))
 }
 
 /// The configuration directory: `operations.toml`, `agents.toml` and `covers.toml`, read

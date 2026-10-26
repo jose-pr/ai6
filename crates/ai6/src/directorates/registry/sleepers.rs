@@ -429,6 +429,12 @@ impl SleeperStore for FileRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::registry::suite::{Store, backend_tests};
+
+    backend_tests!(
+        a_window_fires_once_however_many_stations_evaluate_it,
+        approval_covers_one_exact_definition,
+    );
 
     /// 2026-10-25T10:00:00Z
     const NOW: i64 = 1_792_922_400;
@@ -533,11 +539,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_window_fires_once_however_many_stations_evaluate_it() {
-        let root = tempfile::tempdir().unwrap();
-        let first_hq = FileRegistry::open(root.path());
-        let second_hq = FileRegistry::open(root.path());
+    fn a_window_fires_once_however_many_stations_evaluate_it(store: &dyn Store) {
+        let first_hq = store.handle();
+        let second_hq = store.handle();
         let sleeper = nightly();
         let window = sleeper.due_window(NOW, 0).unwrap();
 
@@ -618,10 +622,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn approval_covers_one_exact_definition() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn approval_covers_one_exact_definition(store: &dyn Store) {
+        let registry = store.handle();
         let sleeper = nightly();
         assert!(
             registry

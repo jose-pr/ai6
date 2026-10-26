@@ -20,7 +20,11 @@ gate = ["dep:ureq"]
 publisher = ["daemon", "dep:ai6-diptel", "dep:url"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]
 station-tls = ["dep:coqui-peer", "dep:coqui-peer-tls", "dep:rustls"]
-cli = ["daemon", "publisher", "cables-mcp", "station-tls", "dep:clap", "tokio/signal"]
+# A Registry and roster kept in a SQLite database file.
+sqlite = ["dep:rusqlite"]
+# A Registry and roster kept in PostgreSQL, shared by every Station of an HA deployment.
+postgres = ["dep:postgres", "dep:tokio"]
+cli = ["daemon", "publisher", "cables-mcp", "station-tls", "sqlite", "postgres", "dep:clap", "tokio/signal"]
 
 [[bin]]
 name = "ai6"
@@ -50,6 +54,8 @@ coqui-peer-tls = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 globset.workspace = true
 lru.workspace = true
+postgres = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
 regex.workspace = true
 subtle = { workspace = true, optional = true }
 tempfile.workspace = true

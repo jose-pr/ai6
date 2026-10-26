@@ -26,7 +26,7 @@ pub const SOURCE_BRIEF_PREFIX: &str = "source:";
 /// Largest item text kept in a brief; longer text is cut on a character boundary.
 pub const MAX_ITEM_TEXT_BYTES: usize = 64 * 1024;
 
-const MAX_REPORT_ATTEMPTS: u32 = 5;
+pub(super) const MAX_REPORT_ATTEMPTS: u32 = 5;
 
 /// Provider configuration: one Operation's settings for the provider, as TOML text.
 ///
@@ -228,6 +228,25 @@ fn fingerprint_of(brief: &Brief) -> Option<&str> {
     brief.data.get("source")?.get("fingerprint")?.as_str()
 }
 
+/// Compares an item's fresh brief with the one already queued for it. An unchanged item is
+/// [`Ingest::Unchanged`]; a changed one keeps the queued brief's creation time, priority,
+/// Agent and role, and is [`Ingest::Updated`].
+pub(super) fn refresh_queued(brief: &mut Brief, existing: Brief) -> Ingest {
+    if fingerprint_of(&existing) == fingerprint_of(brief) {
+        return Ingest::Unchanged;
+    }
+    brief.created = existing.created;
+    brief.priority = existing.priority;
+    brief.agent = existing.agent;
+    brief.role = existing.role;
+    Ingest::Updated
+}
+
+/// Whether a finished brief's key marks it as coming from a [`Source`].
+pub(super) fn is_source_key(key: &str) -> bool {
+    key.starts_with(&safe_component(SOURCE_BRIEF_PREFIX))
+}
+
 impl FileRegistry {
     fn cursor_path(&self, operation: &str, provider: &str) -> PathBuf {
         self.root.join("sources").join(format!(
@@ -340,14 +359,11 @@ impl SourceStore for FileRegistry {
             Ok(bytes) => {
                 let existing: Brief = serde_json::from_slice(&bytes)
                     .map_err(|error| invalid_data(error.to_string()))?;
-                if fingerprint_of(&existing) == fingerprint_of(&brief) {
-                    return Ok(Ingest::Unchanged);
+                let outcome = refresh_queued(&mut brief, existing);
+                if outcome == Ingest::Unchanged {
+                    return Ok(outcome);
                 }
-                brief.created = existing.created;
-                brief.priority = existing.priority;
-                brief.agent = existing.agent;
-                brief.role = existing.role;
-                Ingest::Updated
+                outcome
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ingest::Queued,
             Err(error) => return Err(error),
@@ -369,13 +385,12 @@ impl SourceStore for FileRegistry {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error),
             };
-            let prefix = safe_component(SOURCE_BRIEF_PREFIX);
             for entry in entries.take(MAX_BRIEFS * 4) {
                 let name = entry?.file_name().to_string_lossy().into_owned();
                 let Some(key) = name.strip_suffix(".json") else {
                     continue;
                 };
-                if !key.starts_with(&prefix) || key.ends_with(".outcome") {
+                if !is_source_key(key) || key.ends_with(".outcome") {
                     continue;
                 }
                 if self
@@ -428,7 +443,15 @@ impl SourceStore for FileRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::directorates::registry::backend::*;
+    use crate::directorates::registry::suite::{Store, backend_tests};
+
+    backend_tests!(
+        an_item_becomes_one_brief_and_changes_update_it,
+        a_claimed_or_finished_item_is_never_queued_again,
+        cursors_persist_per_operation_and_provider,
+        finished_source_briefs_are_listed_until_reported,
+        a_failing_report_is_retried_a_bounded_number_of_times,
+    );
 
     fn item(id: &str, body: &str, updated: &str) -> SourceItem {
         SourceItem {
@@ -448,10 +471,8 @@ mod tests {
         assert_eq!(SourceVtable::FLOOR_HASH, 728542076);
     }
 
-    #[test]
-    fn an_item_becomes_one_brief_and_changes_update_it() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn an_item_becomes_one_brief_and_changes_update_it(store: &dyn Store) {
+        let registry = store.handle();
         let first = item("o/r#1", "It fails.", "2026-01-01T00:00:00Z");
         assert_eq!(
             registry.ingest_source_item("G", "github", &first).unwrap(),
@@ -475,10 +496,8 @@ mod tests {
         assert!(queued[0].body.contains("It fails on macOS."));
     }
 
-    #[test]
-    fn a_claimed_or_finished_item_is_never_queued_again() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn a_claimed_or_finished_item_is_never_queued_again(store: &dyn Store) {
+        let registry = store.handle();
         let first = item("o/r#2", "Broken.", "2026-01-01T00:00:00Z");
         registry.ingest_source_item("G", "github", &first).unwrap();
         let brief = registry.claim_new(None).unwrap().unwrap();
@@ -548,10 +567,8 @@ mod tests {
         assert!(brief.body.len() < MAX_ITEM_TEXT_BYTES + 1024);
     }
 
-    #[test]
-    fn cursors_persist_per_operation_and_provider() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn cursors_persist_per_operation_and_provider(store: &dyn Store) {
+        let registry = store.handle();
         assert_eq!(registry.source_cursor("G", "github").unwrap(), None);
         registry
             .set_source_cursor("G", "github", "2026-01-01")
@@ -564,10 +581,8 @@ mod tests {
         assert_eq!(registry.source_cursor("H", "github").unwrap(), None);
     }
 
-    #[test]
-    fn finished_source_briefs_are_listed_until_reported() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn finished_source_briefs_are_listed_until_reported(store: &dyn Store) {
+        let registry = store.handle();
         registry
             .ingest_source_item("G", "github", &item("o/r#5", "x", "t"))
             .unwrap();
@@ -606,10 +621,8 @@ mod tests {
         assert!(registry.unreported_source_briefs().unwrap().is_empty());
     }
 
-    #[test]
-    fn a_failing_report_is_retried_a_bounded_number_of_times() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn a_failing_report_is_retried_a_bounded_number_of_times(store: &dyn Store) {
+        let registry = store.handle();
         registry
             .ingest_source_item("G", "github", &item("o/r#6", "x", "t"))
             .unwrap();

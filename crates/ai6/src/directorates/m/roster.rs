@@ -6,6 +6,7 @@
 //! roster.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -369,7 +370,7 @@ impl Roster {
         if operation_file.exists() {
             let document: OperationsDocument = parse_file(&operation_file)?;
             for (id, definition) in document.operation {
-                let operation = definition.resolve(id, &operation_file)?;
+                let operation = definition.resolve(id, &operation_file.display())?;
                 roster
                     .register(operation)
                     .map_err(|reason| error(format!("{}: {reason}", operation_file.display())))?;
@@ -394,7 +395,7 @@ impl Roster {
             for (id, definition) in document.role {
                 roster
                     .roles
-                    .insert(id.clone(), definition.resolve(id, &agents_file)?);
+                    .insert(id.clone(), definition.resolve(id, &agents_file.display())?);
             }
         }
         Ok(roster)
@@ -753,7 +754,7 @@ impl Default for WorkspaceDefinition {
 }
 
 impl OperationDefinition {
-    fn refuse_replaced_keys(&self, id: &str, source: &Path) -> Result<(), RosterError> {
+    fn refuse_replaced_keys(&self, id: &str, source: &dyn fmt::Display) -> Result<(), RosterError> {
         for (key, replacement) in [
             ("repos", "workspace = { source = \"..\" }"),
             ("safe_houses", "workspace = { isolate = true | false }"),
@@ -768,8 +769,7 @@ impl OperationDefinition {
             };
             if present {
                 return Err(error(format!(
-                    "{}: Operation {id:?}: `{key}` is no longer an Operation key; use {replacement}",
-                    source.display()
+                    "{source}: Operation {id:?}: `{key}` is no longer an Operation key; use {replacement}"
                 )));
             }
         }
@@ -778,9 +778,9 @@ impl OperationDefinition {
 }
 
 impl OperationDefinition {
-    fn resolve(self, id: String, source: &Path) -> Result<Operation, RosterError> {
+    fn resolve(self, id: String, source: &dyn fmt::Display) -> Result<Operation, RosterError> {
         self.refuse_replaced_keys(&id, source)?;
-        let in_file = |reason: RosterError| error(format!("{}: {reason}", source.display()));
+        let in_file = |reason: RosterError| error(format!("{source}: {reason}"));
         let operation = self.into_operation(id).map_err(in_file)?;
         operation.validate().map_err(in_file)?;
         Ok(operation)
@@ -985,16 +985,69 @@ struct AgentRoleDefinition {
 }
 
 impl AgentRoleDefinition {
-    fn resolve(self, id: String, source: &Path) -> Result<AgentRole, RosterError> {
+    fn resolve(self, id: String, source: &dyn fmt::Display) -> Result<AgentRole, RosterError> {
         let role = AgentRole {
             id,
             purpose: self.purpose,
             policy: self.policy,
         };
         role.validate()
-            .map_err(|validation| error(format!("{}: {validation}", source.display())))?;
+            .map_err(|validation| error(format!("{source}: {validation}")))?;
         Ok(role)
     }
+}
+
+/// The roster of records kept somewhere other than configuration files: each record's
+/// definition as the keys of its table in `operations.toml` or `agents.toml`, in any serde
+/// format, keyed by its ID, built into typed records and checked by [`Roster::from_parts`].
+/// `source` names where they came from in error messages.
+///
+/// Agents are resolved here, `extends` included, so the roster holds them complete.
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+pub(crate) fn roster_from_definitions<'de, D>(
+    operations: impl IntoIterator<Item = (String, D)>,
+    agents: impl IntoIterator<Item = (String, D)>,
+    roles: impl IntoIterator<Item = (String, D)>,
+    covers: Covers,
+    source: &dyn fmt::Display,
+) -> Result<Roster, RosterError>
+where
+    D: serde::Deserializer<'de>,
+    D::Error: fmt::Display,
+{
+    let invalid = |what: &str, id: &str, reason: &dyn fmt::Display| {
+        error(format!("{source}: {what} {id:?}: {reason}"))
+    };
+    let mut parsed = Vec::new();
+    for (id, definition) in operations {
+        let definition = OperationDefinition::deserialize(definition)
+            .map_err(|reason| invalid("Operation", &id, &reason))?;
+        parsed.push(definition.resolve(id, source)?);
+    }
+    let mut definitions = BTreeMap::new();
+    for (id, definition) in agents {
+        let definition = AgentDefinition::deserialize(definition)
+            .map_err(|reason| invalid("Agent", &id, &reason))?;
+        definition
+            .budget
+            .resolve()
+            .map_err(|message| invalid("Agent", &id, &message))?;
+        definitions.insert(id, AgentEntry::Defined(definition));
+    }
+    let resolved = definitions
+        .keys()
+        .map(|id| {
+            resolve_agent(id, &definitions, &mut BTreeSet::new())
+                .map_err(|reason| error(format!("{source}: {reason}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut typed_roles = Vec::new();
+    for (id, definition) in roles {
+        let definition = AgentRoleDefinition::deserialize(definition)
+            .map_err(|reason| invalid("Agent role", &id, &reason))?;
+        typed_roles.push(definition.resolve(id, source)?);
+    }
+    Roster::from_parts(parsed, resolved, typed_roles, covers)
 }
 
 fn valid_role_id(value: &str) -> bool {

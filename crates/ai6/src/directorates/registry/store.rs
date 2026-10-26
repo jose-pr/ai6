@@ -21,22 +21,22 @@ use crate::directorates::registry::timeline::{TimelineEvent, record_event_locked
 const BRIEF_VERSION: u32 = 1;
 pub(super) const MAX_BRIEF_BYTES: u64 = 1_048_576;
 pub(super) const MAX_BRIEFS: usize = 1_000;
-const MAX_STATION_RECORD_BYTES: u64 = 1_048_576;
-const MAX_STATIONS: usize = 1_000;
-const MAX_STATION_SETTINGS_BYTES: u64 = 4_096;
+pub(super) const MAX_STATION_RECORD_BYTES: u64 = 1_048_576;
+pub(super) const MAX_STATIONS: usize = 1_000;
+pub(super) const MAX_STATION_SETTINGS_BYTES: u64 = 4_096;
 /// The largest live Mission capacity accepted for one Station.
 pub const MAX_STATION_MISSION_CAPACITY: usize = 1_024;
-const MAX_CABLE_RECORD_BYTES: u64 = 2_097_152;
-const MAX_CABLE_FILES: usize = 10_000;
-const MAX_ACCESS_TOKEN_RECORD_BYTES: u64 = 16_384;
-const MAX_AUDIT_RECORD_BYTES: u64 = 16_384;
-const MAX_AUDIT_ENTRIES: usize = 10_000;
-const MAX_AUDIT_RESULTS: usize = 500;
-const MAX_AGENT_ROLE_RECORD_BYTES: u64 = 32_768;
-const MAX_AGENT_ROLES: usize = 256;
-const MAX_MISSION_PROPOSAL_BYTES: u64 = 1_048_576;
-const MAX_MISSION_PROPOSALS: usize = 1_000;
-const MAX_MISSION_PROPOSAL_RESULTS: usize = 500;
+pub(super) const MAX_CABLE_RECORD_BYTES: u64 = 2_097_152;
+pub(super) const MAX_CABLE_FILES: usize = 10_000;
+pub(super) const MAX_ACCESS_TOKEN_RECORD_BYTES: u64 = 16_384;
+pub(super) const MAX_AUDIT_RECORD_BYTES: u64 = 16_384;
+pub(super) const MAX_AUDIT_ENTRIES: usize = 10_000;
+pub(super) const MAX_AUDIT_RESULTS: usize = 500;
+pub(super) const MAX_AGENT_ROLE_RECORD_BYTES: u64 = 32_768;
+pub(super) const MAX_AGENT_ROLES: usize = 256;
+pub(super) const MAX_MISSION_PROPOSAL_BYTES: u64 = 1_048_576;
+pub(super) const MAX_MISSION_PROPOSALS: usize = 1_000;
+pub(super) const MAX_MISSION_PROPOSAL_RESULTS: usize = 500;
 const MAX_PROPOSAL_IDEMPOTENCY_KEY_BYTES: usize = 256;
 /// Default duration for a file-backed Registry claim.
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
@@ -223,7 +223,7 @@ impl MissionProposal {
         })
     }
 
-    fn validate(&self) -> io::Result<()> {
+    pub(super) fn validate(&self) -> io::Result<()> {
         validate_registry_key(&self.id)?;
         validate_registry_key(&self.operation_id)?;
         validate_registry_key(&self.proposer_agent_id)?;
@@ -262,7 +262,7 @@ pub struct AuditRecord {
 }
 
 impl AuditRecord {
-    fn validate(&self) -> io::Result<()> {
+    pub(super) fn validate(&self) -> io::Result<()> {
         if self.id.len() > 128 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -306,11 +306,11 @@ impl AuditRecord {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Lease {
-    key: String,
-    station: String,
-    expires: f64,
-    attempt: u32,
-    meta: BTreeMap<String, serde_json::Value>,
+    pub(super) key: String,
+    pub(super) station: String,
+    pub(super) expires: f64,
+    pub(super) attempt: u32,
+    pub(super) meta: BTreeMap<String, serde_json::Value>,
 }
 
 impl PartialEq for Lease {
@@ -354,17 +354,17 @@ impl Lease {
 #[non_exhaustive]
 pub struct StationRecord {
     #[serde(flatten)]
-    info: BTreeMap<String, serde_json::Value>,
-    station: String,
-    seen: f64,
+    pub(super) info: BTreeMap<String, serde_json::Value>,
+    pub(super) station: String,
+    pub(super) seen: f64,
 }
 
 /// A validated setting that can be changed for one Station while it is running.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct StationSettings {
-    station: String,
-    max_concurrent_missions: usize,
+    pub(super) station: String,
+    pub(super) max_concurrent_missions: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -403,7 +403,7 @@ impl StationSettings {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct StationRecordFile {
+pub(super) struct StationRecordFile {
     #[serde(flatten)]
     info: BTreeMap<String, serde_json::Value>,
     station: String,
@@ -411,7 +411,7 @@ struct StationRecordFile {
 }
 
 impl StationRecordFile {
-    fn into_station_record(self) -> io::Result<StationRecord> {
+    pub(super) fn into_station_record(self) -> io::Result<StationRecord> {
         validate_station_id(&self.station)?;
         if !self.seen.is_finite() {
             return Err(invalid_data("invalid station check-in time"));
@@ -445,9 +445,9 @@ impl StationRecord {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct HeadquartersLease {
-    station: String,
-    expires: f64,
-    term: u64,
+    pub(super) station: String,
+    pub(super) expires: f64,
+    pub(super) term: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -554,12 +554,18 @@ impl FileRegistry {
     }
 
     /// Resolves `AI6_REGISTRY`, `AI6_HOME/registry`, or the platform state directory.
+    ///
+    /// # Errors
+    ///
+    /// `Unsupported` when `AI6_REGISTRY` names a SQL Registry, which
+    /// [`backend::from_environment`](super::backend::from_environment) opens.
     pub fn from_environment() -> io::Result<Self> {
         let root = default_registry_dir()?;
-        if root.to_string_lossy().contains("://") {
+        let location = root.to_string_lossy();
+        if location.contains("://") || location.starts_with("sqlite:") {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "Rust intake supports file Registries, not SQL Registry URLs",
+                "AI6_REGISTRY names a SQL Registry, not a directory",
             ));
         }
         Ok(Self::open(root))
@@ -1332,12 +1338,7 @@ impl BriefStore for FileRegistry {
             Ok(brief) if brief.validate().is_ok() => brief,
             _ => return Ok(None),
         };
-        let outcome = serde_json::json!({
-            "state": "lost",
-            "reason": format!("station {} went dark; {} attempts spent", lease.station(), lease.attempt()),
-            "recovered_by": by,
-        });
-        finish_locked(&self.root, &brief, &outcome, false, None)?;
+        finish_locked(&self.root, &brief, &lost_outcome(lease, by), false, None)?;
         Ok(Some(LeaseRecovery::Failed))
     }
 
@@ -1461,26 +1462,8 @@ pub trait StationStore {
 }
 
 impl StationStore for FileRegistry {
-    fn check_in(
-        &self,
-        station: &str,
-        mut info: BTreeMap<String, serde_json::Value>,
-    ) -> io::Result<()> {
-        validate_station_id(station)?;
-        info.remove("station");
-        info.remove("seen");
-        let record = StationRecord {
-            info,
-            station: station.to_owned(),
-            seen: unix_time()?,
-        };
-        let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_STATION_RECORD_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "station record exceeds the size limit",
-            ));
-        }
+    fn check_in(&self, station: &str, info: BTreeMap<String, serde_json::Value>) -> io::Result<()> {
+        let bytes = check_in_record(station, info)?;
         let _registry_lock = registry_lock(&self.root)?;
         let path = self
             .root
@@ -1563,14 +1546,7 @@ impl StationStore for FileRegistry {
     }
 
     fn set_station_settings(&self, station: &str, settings: &StationSettings) -> io::Result<()> {
-        validate_station_id(station)?;
-        StationSettings::try_new(settings.station.clone(), settings.max_concurrent_missions)?;
-        if station != settings.station {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Station settings identity does not match",
-            ));
-        }
+        check_settings(station, settings)?;
         let record = StationSettingsFile {
             station: settings.station.clone(),
             max_concurrent_missions: settings.max_concurrent_missions,
@@ -1588,34 +1564,19 @@ impl StationStore for FileRegistry {
     }
 
     fn elect(&self, station: &str, ttl: Duration) -> io::Result<bool> {
-        validate_station_id(station)?;
-        if ttl.is_zero() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Headquarters lease duration must be positive",
-            ));
-        }
+        check_election(station, ttl)?;
         let _registry_lock = registry_lock(&self.root)?;
         let directory = self.root.join("headquarters");
         fs::create_dir_all(&directory)?;
         let path = directory.join("lease.json");
         let current = read_headquarters(&path)?;
-        let now = unix_time()?;
-        if let Some(held) = current.as_ref().filter(|lease| lease.station == station) {
-            return write_headquarters(
-                &path,
-                &HeadquartersLease {
-                    station: station.to_owned(),
-                    expires: now + ttl.as_secs_f64(),
-                    term: held.term,
-                },
-            )
-            .map(|()| true);
-        }
-        if current.as_ref().is_some_and(|lease| lease.expires >= now) {
+        let Some(elected) = elected(current.as_ref(), station, ttl, unix_time()?) else {
             return Ok(false);
-        }
-        if current.is_some() {
+        };
+        if current
+            .as_ref()
+            .is_some_and(|lease| lease.station != station)
+        {
             let lapsed = directory.join(format!(
                 "lease.lapsed.{}",
                 registry_station_component(station)
@@ -1626,14 +1587,7 @@ impl StationStore for FileRegistry {
                 Err(error) => return Err(error),
             }
         }
-        write_headquarters(
-            &path,
-            &HeadquartersLease {
-                station: station.to_owned(),
-                expires: now + ttl.as_secs_f64(),
-                term: current.as_ref().map_or(0, |lease| lease.term) + 1,
-            },
-        )?;
+        write_headquarters(&path, &elected)?;
         Ok(true)
     }
 
@@ -1837,33 +1791,8 @@ impl CableStore for FileRegistry {
         }
         let bytes = serde_json::to_vec(cable).map_err(io::Error::other)?;
         write_atomic(&path, &bytes)?;
-        // The timeline gets the Cable's metadata only: never its body or the target name
-        // the sending Agent chose.
-        let mut event = TimelineEvent::new(
-            "cable",
-            "sent",
-            cable.sender_operation(),
-            cable.created_at(),
-        )
-        .station(cable.sender_station())
-        .actor(cable.sender_agent())
-        .detail("cable", cable.id())
-        .detail(
-            "scope",
-            serde_json::to_value(cable.target().scope())
-                .ok()
-                .and_then(|scope| scope.as_str().map(str::to_owned))
-                .unwrap_or_default(),
-        )
-        .detail("recipients", cable.recipients().len().to_string());
-        if let Some(mission) = cable.mission_id() {
-            event = event.mission(mission);
-        }
-        if let Some(session) = cable.session_id() {
-            event = event.session(session);
-        }
         // The Cable is sent either way; its timeline entry is a record, not a condition.
-        let _ = record_event_locked(&self.root, &event);
+        let _ = record_event_locked(&self.root, &cable_sent_event(cable));
         Ok(cable.clone())
     }
 
@@ -1993,27 +1922,7 @@ impl CableStore for FileRegistry {
     }
 
     fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
-        if !now.is_finite() || buckets.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Cable quota buckets need a finite time and at least one limit",
-            ));
-        }
-        let mut keys = BTreeSet::new();
-        for (key, rate, capacity) in buckets {
-            if key.is_empty()
-                || !keys.insert(*key)
-                || !rate.is_finite()
-                || *rate <= 0.0
-                || *capacity == 0
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Cable quota needs unique keys, positive rates and positive bursts",
-                ));
-            }
-        }
-
+        check_quota_buckets(buckets, now)?;
         let _registry_lock = registry_lock(&self.root)?;
         let path = self.root.join("cable-quotas.json");
         let mut saved = fs::read(&path)
@@ -2022,32 +1931,21 @@ impl CableStore for FileRegistry {
                 serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).ok()
             })
             .unwrap_or_default();
-        let mut balances = Vec::with_capacity(buckets.len());
-        for (key, rate, capacity) in buckets {
-            let digest = Sha256::digest(key.as_bytes());
-            let key = hex_digest(&digest);
-            let restored = saved.get(&key).and_then(|value| {
+        let balances = quota_balances(buckets, now, |key| {
+            Ok(saved.get(key).and_then(|value| {
                 let values = value.as_array()?;
                 if values.len() != 2 {
                     return None;
                 }
-                let tokens = values[0].as_f64()?;
-                let updated = values[1].as_f64()?;
-                (tokens.is_finite() && updated.is_finite()).then_some((tokens, updated))
-            });
-            let (tokens, updated) = restored.unwrap_or((*capacity as f64, now));
-            let available = (*capacity as f64).min(tokens + (now - updated).max(0.0) * rate);
-            balances.push((key, available, *capacity as f64));
-        }
-
-        let allowed = balances.iter().all(|(_, available, _)| *available >= 1.0);
-        for (key, available, capacity) in balances {
-            let remaining = if allowed { available - 1.0 } else { available };
-            if remaining >= capacity {
-                saved.remove(&key);
-            } else {
-                saved.insert(key, serde_json::json!([remaining, now]));
-            }
+                Some((values[0].as_f64()?, values[1].as_f64()?))
+            }))
+        })?;
+        let allowed = quota_allows(&balances);
+        for balance in balances {
+            match balance.remaining(allowed) {
+                Some(tokens) => saved.insert(balance.key, serde_json::json!([tokens, now])),
+                None => saved.remove(&balance.key),
+            };
         }
         let bytes = serde_json::to_vec(&saved).map_err(io::Error::other)?;
         write_atomic(&path, &bytes)?;
@@ -2309,7 +2207,192 @@ fn validate_audit_action(action: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn validate_cable_id(id: &str) -> io::Result<()> {
+/// The outcome filed for a brief whose last allowed attempt was lost with its Station.
+pub(super) fn lost_outcome(lease: &Lease, by: &str) -> serde_json::Value {
+    serde_json::json!({
+        "state": "lost",
+        "reason": format!("station {} went dark; {} attempts spent", lease.station(), lease.attempt()),
+        "recovered_by": by,
+    })
+}
+
+/// The stored form of a check-in: `info` without its reserved keys, stamped with the
+/// Station and the current time, as pretty JSON within the size limit.
+pub(super) fn check_in_record(
+    station: &str,
+    mut info: BTreeMap<String, serde_json::Value>,
+) -> io::Result<Vec<u8>> {
+    validate_station_id(station)?;
+    info.remove("station");
+    info.remove("seen");
+    let record = StationRecord {
+        info,
+        station: station.to_owned(),
+        seen: unix_time()?,
+    };
+    let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
+    if bytes.len() as u64 > MAX_STATION_RECORD_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "station record exceeds the size limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Checks settings before they are stored for `station`.
+pub(super) fn check_settings(station: &str, settings: &StationSettings) -> io::Result<()> {
+    validate_station_id(station)?;
+    StationSettings::try_new(settings.station.clone(), settings.max_concurrent_missions)?;
+    if station != settings.station {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Station settings identity does not match",
+        ));
+    }
+    Ok(())
+}
+
+/// Checks a request for the Headquarters lease.
+pub(super) fn check_election(station: &str, ttl: Duration) -> io::Result<()> {
+    validate_station_id(station)?;
+    if ttl.is_zero() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Headquarters lease duration must be positive",
+        ));
+    }
+    Ok(())
+}
+
+/// The Headquarters lease after `station` asks for it at `now`: renewed with the same term
+/// when it holds the lease, taken with the next term when the holder's lapsed, and `None`
+/// while another Station's lease is live.
+pub(super) fn elected(
+    current: Option<&HeadquartersLease>,
+    station: &str,
+    ttl: Duration,
+    now: f64,
+) -> Option<HeadquartersLease> {
+    let expires = now + ttl.as_secs_f64();
+    match current {
+        Some(held) if held.station == station => Some(HeadquartersLease {
+            station: station.to_owned(),
+            expires,
+            term: held.term,
+        }),
+        Some(held) if held.expires >= now => None,
+        _ => Some(HeadquartersLease {
+            station: station.to_owned(),
+            expires,
+            term: current.map_or(0, |lease| lease.term) + 1,
+        }),
+    }
+}
+
+/// Checks Cable quota buckets: a finite time and unique keys with positive rates and bursts.
+pub(super) fn check_quota_buckets(buckets: &[(&str, f64, u32)], now: f64) -> io::Result<()> {
+    if !now.is_finite() || buckets.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Cable quota buckets need a finite time and at least one limit",
+        ));
+    }
+    let mut keys = BTreeSet::new();
+    for (key, rate, capacity) in buckets {
+        if key.is_empty()
+            || !keys.insert(*key)
+            || !rate.is_finite()
+            || *rate <= 0.0
+            || *capacity == 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Cable quota needs unique keys, positive rates and positive bursts",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// One Cable quota bucket's tokens before a send, keyed by the SHA-256 of its key.
+pub(super) struct QuotaBalance {
+    pub(super) key: String,
+    available: f64,
+    capacity: f64,
+}
+
+impl QuotaBalance {
+    /// The tokens to store after the send, or `None` when the bucket is full again and need
+    /// not be stored.
+    pub(super) fn remaining(&self, allowed: bool) -> Option<f64> {
+        let remaining = if allowed {
+            self.available - 1.0
+        } else {
+            self.available
+        };
+        (remaining < self.capacity).then_some(remaining)
+    }
+}
+
+/// Each bucket's tokens at `now`, refilled since `stored` (tokens, time) last saw it.
+pub(super) fn quota_balances(
+    buckets: &[(&str, f64, u32)],
+    now: f64,
+    mut stored: impl FnMut(&str) -> io::Result<Option<(f64, f64)>>,
+) -> io::Result<Vec<QuotaBalance>> {
+    let mut balances = Vec::with_capacity(buckets.len());
+    for (key, rate, capacity) in buckets {
+        let key = hex_digest(&Sha256::digest(key.as_bytes()));
+        let capacity = f64::from(*capacity);
+        let (tokens, updated) = stored(&key)?
+            .filter(|(tokens, updated)| tokens.is_finite() && updated.is_finite())
+            .unwrap_or((capacity, now));
+        let available = capacity.min(tokens + (now - updated).max(0.0) * rate);
+        balances.push(QuotaBalance {
+            key,
+            available,
+            capacity,
+        });
+    }
+    Ok(balances)
+}
+
+/// Whether every bucket has a token for the send.
+pub(super) fn quota_allows(balances: &[QuotaBalance]) -> bool {
+    balances.iter().all(|balance| balance.available >= 1.0)
+}
+
+/// The timeline entry for a sent Cable: its metadata only, never its body or the target
+/// name the sending Agent chose.
+pub(super) fn cable_sent_event(cable: &Cable) -> TimelineEvent {
+    let mut event = TimelineEvent::new(
+        "cable",
+        "sent",
+        cable.sender_operation(),
+        cable.created_at(),
+    )
+    .station(cable.sender_station())
+    .actor(cable.sender_agent())
+    .detail("cable", cable.id())
+    .detail(
+        "scope",
+        serde_json::to_value(cable.target().scope())
+            .ok()
+            .and_then(|scope| scope.as_str().map(str::to_owned))
+            .unwrap_or_default(),
+    )
+    .detail("recipients", cable.recipients().len().to_string());
+    if let Some(mission) = cable.mission_id() {
+        event = event.mission(mission);
+    }
+    if let Some(session) = cable.session_id() {
+        event = event.session(session);
+    }
+    event
+}
+
+pub(super) fn validate_cable_id(id: &str) -> io::Result<()> {
     if id.is_empty()
         || id.chars().count() > 64
         || !id
@@ -2361,7 +2444,7 @@ fn read_mission_proposal(path: &Path) -> io::Result<MissionProposal> {
     Ok(proposal)
 }
 
-fn cable_error(error: CableError) -> io::Error {
+pub(super) fn cable_error(error: CableError) -> io::Error {
     invalid_data(error.to_string())
 }
 
@@ -2430,7 +2513,7 @@ pub(crate) fn validate_station_id(station: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn validate_access_token_record(
+pub(super) fn validate_access_token_record(
     record: &crate::AccessTokenRecord,
 ) -> io::Result<crate::AccessTokenRecord> {
     crate::AccessTokenRecord::try_new(
@@ -2444,7 +2527,7 @@ fn validate_access_token_record(
     .map_err(|_| invalid_data("invalid access token record"))
 }
 
-fn validate_token_digest(digest: &str) -> io::Result<()> {
+pub(super) fn validate_token_digest(digest: &str) -> io::Result<()> {
     if digest.len() != 64
         || !digest
             .bytes()
@@ -2613,10 +2696,11 @@ pub(super) fn invalid_data(message: impl Into<String>) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::directorates::registry::backend::*;
     use crate::directorates::registry::cables::{
         CableDraft, CableRecipient, CableScope, CableTarget,
     };
+    use crate::directorates::registry::sources::SourceItem;
+    use crate::directorates::registry::suite::{Store, backend_tests, brief, lapse};
     use std::fs;
 
     fn test_cable(id: &str, key: &str, body: &str, session_id: &str) -> Cable {
@@ -2646,10 +2730,89 @@ mod tests {
         }
     }
 
-    #[test]
-    fn operation_agent_role_overrides_are_validated_and_isolated() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn proposal(retry_key: &str, title: &str, role: Option<&str>) -> MissionProposal {
+        MissionProposal::try_new(
+            "operation-a",
+            MissionId::try_new("parent-mission").unwrap(),
+            "coordinator",
+            SessionId::try_new("provider-session").unwrap(),
+            retry_key,
+            Brief {
+                title: title.to_owned(),
+                body: "Bounded child brief".to_owned(),
+                id: "child".to_owned(),
+                source: "agent".to_owned(),
+                operation: Some("ignored-operation".to_owned()),
+                agent: None,
+                role: role.map(str::to_owned),
+                tags: Vec::new(),
+                stations: Vec::new(),
+                priority: 0,
+                url: None,
+                data: BTreeMap::new(),
+                created: String::new(),
+                version: 1,
+            },
+        )
+        .unwrap()
+    }
+
+    fn source_item(id: &str) -> SourceItem {
+        SourceItem {
+            id: id.to_owned(),
+            title: "Fix the build".to_owned(),
+            body: "It fails.".to_owned(),
+            url: None,
+            labels: Vec::new(),
+            author: None,
+            updated: "2026-01-01T00:00:00Z".to_owned(),
+        }
+    }
+
+    fn access_token(now: f64) -> crate::AccessTokenRecord {
+        let secret = "ai6_device_secret_0123456789abcdef";
+        let digest = Sha256::digest([b"ai6-access-token\0".as_slice(), secret.as_bytes()].concat())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        crate::AccessTokenRecord::try_new(
+            "e747dbba-9a28-4463-a1ab-e31ed79d8991",
+            digest,
+            "person-007",
+            now,
+            now + 3_600.0,
+            None,
+        )
+        .unwrap()
+    }
+
+    backend_tests!(
+        operation_agent_role_overrides_are_validated_and_isolated,
+        check_ins_replace_reserved_keys_and_list_recent_stations,
+        headquarters_election_has_one_winner_and_renews_the_winner,
+        the_headquarters_term_grows_on_takeover_and_survives_renewal,
+        site_check_in_rejects_invalid_identity_and_oversized_metadata,
+        station_settings_are_validated_persisted_and_isolated_by_identity,
+        queued_briefs_list_by_priority_creation_time_and_key,
+        mission_proposals_are_idempotent_operation_scoped_and_not_runnable,
+        mission_proposal_identity_cannot_be_reused_for_different_content,
+        proposal_approval_promotes_once_and_rejection_stays_out_of_intake,
+        submit_brief_writes_once_to_shared_queue,
+        audit_entries_are_metadata_only_bounded_and_sorted_newest_first,
+        one_station_claims_a_brief,
+        a_leased_claim_is_listed_and_renewed_only_by_its_holder,
+        finish_requires_the_current_station_and_files_the_outcome,
+        expired_leases_requeue_or_fail_at_the_attempt_limit,
+        an_expired_lease_is_handed_over_once_with_its_claim_and_attempt,
+        leased_claim_is_exclusive_and_registry_keys_are_checked,
+        cable_store_is_idempotent_and_rejects_conflicting_retries,
+        cable_inbox_and_delivery_updates_follow_session_and_expiry,
+        cable_quotas_are_atomic_and_shared,
+        access_tokens_are_shared_by_registries_and_revocation_is_immediate,
+    );
+
+    fn operation_agent_role_overrides_are_validated_and_isolated(store: &dyn Store) {
+        let registry = store.handle();
         let first = test_agent_role("reviewer", "Review changes");
         registry.put_agent_role("operation-a", &first).unwrap();
 
@@ -2686,63 +2849,34 @@ mod tests {
         );
     }
 
-    #[test]
-    fn station_check_ins_follow_the_registry_record_contract() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn check_ins_replace_reserved_keys_and_list_recent_stations(store: &dyn Store) {
+        let registry = store.handle();
         let mut info = BTreeMap::new();
         info.insert("station_count".to_owned(), serde_json::json!(3));
         info.insert("station".to_owned(), serde_json::json!("forged"));
         info.insert("seen".to_owned(), serde_json::json!(-1));
+        let before = unix_time().unwrap();
 
         registry.check_in("Stätion/one", info).unwrap();
 
-        let path = root.path().join("stations/Stätion_one.json");
-        let stored: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-        assert_eq!(stored["station"], "Stätion/one");
-        assert_eq!(stored["station_count"], 3);
-        assert!(stored["seen"].as_f64().unwrap() > 0.0);
-        assert!(stored.get("info").is_none());
-
-        let stations = registry.stations(DEFAULT_LEASE).unwrap();
+        let stations = store.handle().stations(DEFAULT_LEASE).unwrap();
         assert_eq!(stations.len(), 1);
         assert_eq!(stations[0].station(), "Stätion/one");
         assert_eq!(stations[0].info()["station_count"], 3);
+        assert!(!stations[0].info().contains_key("station"));
+        assert!(stations[0].seen() >= before);
+        registry.check_in("Stätion/one", BTreeMap::new()).unwrap();
+        assert!(
+            registry.stations(DEFAULT_LEASE).unwrap()[0]
+                .info()
+                .is_empty(),
+            "a check-in replaces the last one"
+        );
     }
 
-    #[test]
-    fn site_registry_records_are_send_and_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-
-        assert_send_sync::<StationRecord>();
-        assert_send_sync::<HeadquartersLease>();
-    }
-
-    #[test]
-    fn site_listing_skips_stale_and_malformed_records() {
-        let root = tempfile::tempdir().unwrap();
-        let directory = root.path().join("stations");
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(
-            directory.join("stale.json"),
-            r#"{"station":"stale","seen":0}"#,
-        )
-        .unwrap();
-        fs::write(directory.join("malformed.json"), b"not json").unwrap();
-        let registry = FileRegistry::open(root.path());
-        registry.check_in("fresh", BTreeMap::new()).unwrap();
-
-        let stations = registry.stations(DEFAULT_LEASE).unwrap();
-
-        assert_eq!(stations.len(), 1);
-        assert_eq!(stations[0].station(), "fresh");
-    }
-
-    #[test]
-    fn headquarters_election_has_one_winner_and_renews_the_winner() {
-        let root = tempfile::tempdir().unwrap();
-        let first = FileRegistry::open(root.path());
-        let second = first.clone();
+    fn headquarters_election_has_one_winner_and_renews_the_winner(store: &dyn Store) {
+        let first = store.handle();
+        let second = store.handle();
         let first_thread =
             std::thread::spawn(move || first.elect("station-a", DEFAULT_LEASE).unwrap());
         let second_thread =
@@ -2750,7 +2884,7 @@ mod tests {
         let won = [first_thread.join().unwrap(), second_thread.join().unwrap()];
 
         assert_eq!(won.iter().filter(|won| **won).count(), 1);
-        let registry = FileRegistry::open(root.path());
+        let registry = store.handle();
         let current = registry.headquarters().unwrap().unwrap();
         let winner = if won[0] { "station-a" } else { "station-b" };
         let loser = if won[0] { "station-b" } else { "station-a" };
@@ -2760,62 +2894,32 @@ mod tests {
         assert!(registry.headquarters().unwrap().unwrap().expires() >= current.expires());
     }
 
-    #[test]
-    fn an_expired_headquarters_lease_is_filed_before_the_next_election() {
-        let root = tempfile::tempdir().unwrap();
-        let directory = root.path().join("headquarters");
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(
-            directory.join("lease.json"),
-            r#"{"station":"old-station","expires":0}"#,
-        )
-        .unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn the_headquarters_term_grows_on_takeover_and_survives_renewal(store: &dyn Store) {
+        let registry = store.handle();
+        assert!(registry.headquarters().unwrap().is_none());
+        assert!(registry.elect("station-a", DEFAULT_LEASE).unwrap());
+        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 1);
+        assert!(registry.elect("station-a", DEFAULT_LEASE).unwrap());
+        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 1);
 
-        assert!(registry.elect("new/station", DEFAULT_LEASE).unwrap());
-
-        let lapsed: serde_json::Value =
-            serde_json::from_slice(&fs::read(directory.join("lease.lapsed.new_station")).unwrap())
-                .unwrap();
-        assert_eq!(lapsed["station"], "old-station");
-        assert_eq!(
-            registry.headquarters().unwrap().unwrap().station(),
-            "new/station"
+        // The holder's last renewal runs out; another Station takes over in the next term.
+        assert!(
+            registry
+                .elect("station-a", Duration::from_nanos(1))
+                .unwrap()
         );
+        crate::directorates::registry::suite::until(|| {
+            let lease = registry.headquarters().unwrap().unwrap();
+            (lease.expires() < unix_time().unwrap()).then_some(())
+        });
+        assert!(store.handle().elect("station-b", DEFAULT_LEASE).unwrap());
+        let taken = registry.headquarters().unwrap().unwrap();
+        assert_eq!((taken.station(), taken.term()), ("station-b", 2));
+        assert!(!registry.elect("station-a", DEFAULT_LEASE).unwrap());
     }
 
-    #[test]
-    fn the_headquarters_term_grows_on_takeover_and_survives_renewal() {
-        let root = tempfile::tempdir().unwrap();
-        let directory = root.path().join("headquarters");
-        fs::create_dir_all(&directory).unwrap();
-        // A lease written before terms existed still loads, as term 0.
-        fs::write(
-            directory.join("lease.json"),
-            r#"{"station":"old-station","expires":0}"#,
-        )
-        .unwrap();
-        let registry = FileRegistry::open(root.path());
-        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 0);
-
-        assert!(registry.elect("station-a", DEFAULT_LEASE).unwrap());
-        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 1);
-        assert!(registry.elect("station-a", DEFAULT_LEASE).unwrap());
-        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 1);
-
-        fs::write(
-            directory.join("lease.json"),
-            r#"{"station":"station-a","expires":0,"term":1}"#,
-        )
-        .unwrap();
-        assert!(registry.elect("station-b", DEFAULT_LEASE).unwrap());
-        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 2);
-    }
-
-    #[test]
-    fn site_check_in_rejects_invalid_identity_and_oversized_metadata() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn site_check_in_rejects_invalid_identity_and_oversized_metadata(store: &dyn Store) {
+        let registry = store.handle();
         assert_eq!(
             registry
                 .check_in("bad\nsite", BTreeMap::new())
@@ -2835,10 +2939,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn station_settings_are_validated_persisted_and_isolated_by_identity() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn station_settings_are_validated_persisted_and_isolated_by_identity(store: &dyn Store) {
+        let registry = store.handle();
         let first = StationSettings::try_new("station/a", 7).unwrap();
         let second = StationSettings::try_new("station?a", 9).unwrap();
 
@@ -2850,7 +2952,7 @@ mod tests {
             Some(first.clone())
         );
         assert_eq!(
-            registry.station_settings("station?a").unwrap(),
+            store.handle().station_settings("station?a").unwrap(),
             Some(second)
         );
         assert!(StationSettings::try_new("station/a", 0).is_err());
@@ -2858,70 +2960,33 @@ mod tests {
         assert!(registry.set_station_settings("station?a", &first).is_err());
     }
 
-    #[test]
-    fn brief_key_and_prompt_follow_the_registry_contract() {
-        let brief: Brief = serde_json::from_str(
-            r#"{"title":"  Do it  ","body":"  carefully ","id":"A / 42","source":"help desk","url":"https://example.test"}"#,
-        )
-        .unwrap();
-        assert_eq!(brief.key(), "help_desk--A_42");
+    fn queued_briefs_list_by_priority_creation_time_and_key(store: &dyn Store) {
+        let registry = store.handle();
+        for brief in [
+            r#"{"title":"low","id":"low","priority":2,"created":"2026-01-01"}"#,
+            r#"{"title":"high late","id":"late","priority":9,"created":"2026-02-01"}"#,
+            r#"{"title":"high early b","id":"early-b","priority":9,"created":"2026-01-01"}"#,
+            r#"{"title":"high early a","id":"early-a","priority":9,"created":"2026-01-01"}"#,
+        ] {
+            registry
+                .submit_brief(&serde_json::from_str(brief).unwrap())
+                .unwrap();
+        }
         assert_eq!(
-            brief.prompt(),
-            "Do it\n\ncarefully\n\nSource: https://example.test"
-        );
-    }
-
-    #[test]
-    fn lists_valid_new_briefs_in_registry_order_and_skips_bad_files() {
-        let root = tempfile::tempdir().unwrap();
-        let queue = root.path().join("new");
-        fs::create_dir(&queue).unwrap();
-        fs::write(queue.join("invalid.json"), b"not json").unwrap();
-        let low = r#"{"title":"low","id":"low","priority":2,"created":"2026-01-01"}"#;
-        let high_late = r#"{"title":"high late","id":"late","priority":9,"created":"2026-02-01"}"#;
-        let high_early =
-            r#"{"title":"high early","id":"early","priority":9,"created":"2026-01-01"}"#;
-        fs::write(queue.join("a.json"), low).unwrap();
-        fs::write(queue.join("b.json"), high_late).unwrap();
-        fs::write(queue.join("c.json"), high_early).unwrap();
-        let briefs = FileRegistry::open(root.path()).list_new().unwrap();
-        assert_eq!(
-            briefs
+            store
+                .handle()
+                .list_new()
+                .unwrap()
                 .iter()
                 .map(|brief| brief.title.as_str())
                 .collect::<Vec<_>>(),
-            ["high early", "high late", "low"]
+            ["high early a", "high early b", "high late", "low"]
         );
     }
 
-    #[test]
-    fn mission_proposals_are_idempotent_operation_scoped_and_not_runnable() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
-        let proposal = MissionProposal::try_new(
-            "operation-a",
-            MissionId::try_new("parent-mission").unwrap(),
-            "coordinator",
-            SessionId::try_new("provider-session").unwrap(),
-            "child-1",
-            Brief {
-                title: "Inspect the role catalog".to_owned(),
-                body: "Report invalid role assignments.".to_owned(),
-                id: "ignored-by-registry".to_owned(),
-                source: "agent".to_owned(),
-                operation: Some("ignored-operation".to_owned()),
-                agent: None,
-                role: Some("analyst".to_owned()),
-                tags: Vec::new(),
-                stations: Vec::new(),
-                priority: 0,
-                url: None,
-                data: BTreeMap::new(),
-                created: String::new(),
-                version: 1,
-            },
-        )
-        .unwrap();
+    fn mission_proposals_are_idempotent_operation_scoped_and_not_runnable(store: &dyn Store) {
+        let registry = store.handle();
+        let proposal = proposal("child-1", "Inspect the role catalog", Some("analyst"));
 
         registry.submit_mission_proposal(&proposal).unwrap();
         // A repeat of the same proposal is accepted and stores nothing new.
@@ -2938,81 +3003,25 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mission_proposal_identity_cannot_be_reused_for_different_content() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
-        let create = |title: &str| {
-            MissionProposal::try_new(
-                "operation-a",
-                MissionId::try_new("parent-mission").unwrap(),
-                "coordinator",
-                SessionId::try_new("provider-session").unwrap(),
-                "same-retry-key",
-                Brief {
-                    title: title.to_owned(),
-                    body: String::new(),
-                    id: "child".to_owned(),
-                    source: "agent".to_owned(),
-                    operation: None,
-                    agent: None,
-                    role: None,
-                    tags: Vec::new(),
-                    stations: Vec::new(),
-                    priority: 0,
-                    url: None,
-                    data: BTreeMap::new(),
-                    created: String::new(),
-                    version: 1,
-                },
-            )
-            .unwrap()
-        };
+    fn mission_proposal_identity_cannot_be_reused_for_different_content(store: &dyn Store) {
+        let registry = store.handle();
         registry
-            .submit_mission_proposal(&create("First brief"))
+            .submit_mission_proposal(&proposal("same-retry-key", "First brief", None))
             .unwrap();
 
         assert_eq!(
             registry
-                .submit_mission_proposal(&create("Different brief"))
+                .submit_mission_proposal(&proposal("same-retry-key", "Different brief", None))
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::AlreadyExists
         );
     }
 
-    #[test]
-    fn proposal_approval_promotes_once_and_rejection_stays_out_of_intake() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
-        let make_proposal = |retry_key: &str, title: &str| {
-            MissionProposal::try_new(
-                "operation-a",
-                MissionId::try_new("parent-mission").unwrap(),
-                "coordinator",
-                SessionId::try_new("provider-session").unwrap(),
-                retry_key,
-                Brief {
-                    title: title.to_owned(),
-                    body: "Bounded child brief".to_owned(),
-                    id: "child".to_owned(),
-                    source: "agent".to_owned(),
-                    operation: None,
-                    agent: None,
-                    role: Some("analyst".to_owned()),
-                    tags: Vec::new(),
-                    stations: Vec::new(),
-                    priority: 0,
-                    url: None,
-                    data: BTreeMap::new(),
-                    created: String::new(),
-                    version: 1,
-                },
-            )
-            .unwrap()
-        };
-        let approved = make_proposal("approve-key", "Approved work");
-        let rejected = make_proposal("reject-key", "Rejected work");
+    fn proposal_approval_promotes_once_and_rejection_stays_out_of_intake(store: &dyn Store) {
+        let registry = store.handle();
+        let approved = proposal("approve-key", "Approved work", Some("analyst"));
+        let rejected = proposal("reject-key", "Rejected work", Some("analyst"));
         registry.submit_mission_proposal(&approved).unwrap();
         registry.submit_mission_proposal(&rejected).unwrap();
 
@@ -3057,12 +3066,24 @@ mod tests {
                 .kind(),
             io::ErrorKind::AlreadyExists
         );
+        assert_eq!(
+            registry
+                .reject_mission_proposal("operation-a", &approved.id)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(
+            registry
+                .promote_mission_proposal("operation-a", "proposal-unknown")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
     }
 
-    #[test]
-    fn submit_brief_writes_once_to_shared_queue() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn submit_brief_writes_once_to_shared_queue(store: &dyn Store) {
+        let registry = store.handle();
         let brief = Brief {
             title: "Review the control pane".to_owned(),
             body: "Check the Operation context.".to_owned(),
@@ -3081,12 +3102,7 @@ mod tests {
         };
 
         registry.submit_brief(&brief).unwrap();
-        assert!(
-            root.path()
-                .join("new/universal-exports--mission-123.json")
-                .is_file()
-        );
-        let queued = registry.list_new().unwrap();
+        let queued = store.handle().list_new().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0], brief);
         assert_eq!(
@@ -3095,10 +3111,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn audit_entries_are_metadata_only_bounded_and_sorted_newest_first() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn audit_entries_are_metadata_only_bounded_and_sorted_newest_first(store: &dyn Store) {
+        let registry = store.handle();
         let older = AuditRecord {
             id: "event-1".to_owned(),
             actor: "operator-007".to_owned(),
@@ -3139,43 +3153,26 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidInput
         );
-        let persisted = fs::read_to_string(root.path().join("audit/event-1.json")).unwrap();
-        assert!(!persisted.contains("prompt"));
-        assert!(!persisted.contains("secret"));
+        assert_eq!(store.handle().audit_records().unwrap().len(), 2);
     }
 
-    #[test]
-    fn claim_moves_only_one_copy_under_the_shared_registry_lock() {
-        let root = tempfile::tempdir().unwrap();
-        let queue = root.path().join("new");
-        fs::create_dir(&queue).unwrap();
-        fs::write(
-            queue.join("manual--brief-1.json"),
-            r#"{"title":"Inspect","id":"brief-1"}"#,
-        )
-        .unwrap();
-        let first = FileRegistry::open(root.path());
-        let second = FileRegistry::open(root.path());
+    fn one_station_claims_a_brief(store: &dyn Store) {
+        store.handle().submit_brief(&brief("brief-1")).unwrap();
+        let first = store.handle();
+        let second = store.handle();
         let first_thread = std::thread::spawn(move || first.claim_new(None).unwrap());
         let second_thread = std::thread::spawn(move || second.claim_new(None).unwrap());
         let claims = [first_thread.join().unwrap(), second_thread.join().unwrap()];
 
         assert_eq!(claims.iter().filter(|claim| claim.is_some()).count(), 1);
-        assert!(root.path().join("claimed/manual--brief-1.json").is_file());
-        assert!(!root.path().join("new/manual--brief-1.json").exists());
+        let registry = store.handle();
+        assert!(registry.read_claimed("manual--brief-1").unwrap().is_some());
+        assert!(registry.list_new().unwrap().is_empty());
     }
 
-    #[test]
-    fn leased_claim_follows_the_registry_layout_and_renewal_contract() {
-        let root = tempfile::tempdir().unwrap();
-        let queue = root.path().join("new");
-        fs::create_dir(&queue).unwrap();
-        fs::write(
-            queue.join("manual--brief-1.json"),
-            r#"{"title":"Inspect","id":"brief-1"}"#,
-        )
-        .unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn a_leased_claim_is_listed_and_renewed_only_by_its_holder(store: &dyn Store) {
+        let registry = store.handle();
+        registry.submit_brief(&brief("brief-1")).unwrap();
         let mut meta = BTreeMap::new();
         meta.insert("operation".to_owned(), serde_json::json!("operation-01"));
 
@@ -3187,33 +3184,20 @@ mod tests {
         assert_eq!(lease.station(), "operation-01");
         assert_eq!(lease.attempt(), 1);
         assert_eq!(lease.meta(), &meta);
-        assert!(!queue.join("manual--brief-1.json").exists());
-        assert!(root.path().join("claimed/manual--brief-1.json").is_file());
-        assert_eq!(
-            fs::read_to_string(root.path().join("attempts/manual--brief-1.json")).unwrap(),
-            "1"
-        );
-        let stored: serde_json::Value = serde_json::from_slice(
-            &fs::read(root.path().join("leases/manual--brief-1.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(stored["station"], "operation-01");
-        assert_eq!(stored["attempt"], 1);
-        assert_eq!(stored["meta"]["operation"], "operation-01");
-        assert!(stored.get("key").is_none());
-        let reopened = registry.lease(lease.key()).unwrap().unwrap();
+        assert!(registry.list_new().unwrap().is_empty());
+        assert!(registry.read_claimed(lease.key()).unwrap().is_some());
+
+        let other = store.handle();
+        let reopened = other.lease(lease.key()).unwrap().unwrap();
         assert_eq!(reopened.key(), lease.key());
         assert_eq!(reopened.station(), lease.station());
         assert_eq!(reopened.attempt(), lease.attempt());
         assert_eq!(reopened.meta(), lease.meta());
         assert!((reopened.expires() - lease.expires()).abs() < 0.000_001);
-        let listed = registry.leases().unwrap();
+        let listed = other.leases().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].key(), lease.key());
-        assert_eq!(listed[0].station(), lease.station());
-        assert_eq!(listed[0].attempt(), lease.attempt());
-        assert_eq!(listed[0].meta(), lease.meta());
-        assert!((listed[0].expires() - lease.expires()).abs() < 0.000_001);
+        assert!(other.expired().unwrap().is_empty());
 
         assert!(
             !registry
@@ -3226,19 +3210,18 @@ mod tests {
                 .unwrap()
         );
         assert!(registry.lease(lease.key()).unwrap().unwrap().expires() >= lease.expires());
+        assert!(
+            !registry
+                .renew("manual--absent", "operation-01", DEFAULT_LEASE)
+                .unwrap()
+        );
     }
 
-    #[test]
-    fn finish_requires_the_current_site_and_files_the_outcome_and_transcript() {
-        let root = tempfile::tempdir().unwrap();
-        let queue = root.path().join("new");
-        fs::create_dir(&queue).unwrap();
-        fs::write(
-            queue.join("manual--brief-1.json"),
-            r#"{"title":"Inspect","id":"brief-1"}"#,
-        )
-        .unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn finish_requires_the_current_station_and_files_the_outcome(store: &dyn Store) {
+        let registry = store.handle();
+        registry
+            .ingest_source_item("G", "github", &source_item("o/r#1"))
+            .unwrap();
         let brief = registry.list_new().unwrap().remove(0);
         registry
             .claim_with_lease(
@@ -3262,6 +3245,7 @@ mod tests {
                 )
                 .unwrap()
         );
+        assert!(registry.unreported_source_briefs().unwrap().is_empty());
         assert!(
             registry
                 .finish(
@@ -3269,90 +3253,102 @@ mod tests {
                     &outcome,
                     true,
                     Some(b"output"),
-                    Some("operation-01"),
+                    Some("operation-01")
                 )
                 .unwrap()
         );
-        let target = root.path().join("done/manual--brief-1.json");
-        assert!(target.is_file());
-        assert_eq!(fs::read(target.with_extension("log")).unwrap(), b"output");
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &fs::read(target.with_file_name("manual--brief-1.outcome.json")).unwrap()
-            )
-            .unwrap(),
-            outcome
-        );
         assert!(registry.lease(&brief.key()).unwrap().is_none());
+        assert!(registry.read_claimed(&brief.key()).unwrap().is_none());
+        assert!(registry.list_new().unwrap().is_empty());
+        let finished = store.handle().unreported_source_briefs().unwrap();
+        assert_eq!(finished.len(), 1);
+        assert_eq!((finished[0].ok, &finished[0].outcome), (true, &outcome));
+        assert_eq!(
+            registry
+                .finish(&brief, &serde_json::json!("done"), true, None, None)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
     }
 
-    #[test]
-    fn expired_leases_requeue_or_fail_at_the_attempt_limit() {
+    fn expired_leases_requeue_or_fail_at_the_attempt_limit(store: &dyn Store) {
         for (id, max_attempts, expected) in [
-            ("requeue", 3, LeaseRecovery::Requeued),
-            ("fail", 1, LeaseRecovery::Failed),
+            ("o/r#requeue", 3, LeaseRecovery::Requeued),
+            ("o/r#fail", 1, LeaseRecovery::Failed),
         ] {
-            let root = tempfile::tempdir().unwrap();
-            let queue = root.path().join("new");
-            fs::create_dir(&queue).unwrap();
-            let key = format!("manual--{id}");
-            fs::write(
-                queue.join(format!("{key}.json")),
-                format!(r#"{{"title":"Inspect","id":"{id}"}}"#),
-            )
-            .unwrap();
-            let registry = FileRegistry::open(root.path());
+            let registry = store.handle();
             registry
+                .ingest_source_item("G", "github", &source_item(id))
+                .unwrap();
+            let lease = registry
                 .claim_with_lease(None, "operation-01", DEFAULT_LEASE, BTreeMap::new())
                 .unwrap()
                 .unwrap();
-            let lease_path = root.path().join("leases").join(format!("{key}.json"));
-            let mut record: serde_json::Value =
-                serde_json::from_slice(&fs::read(&lease_path).unwrap()).unwrap();
-            record["expires"] = serde_json::json!(0.0);
-            write_atomic(&lease_path, &serde_json::to_vec(&record).unwrap()).unwrap();
-
-            let expired = registry.expired().unwrap();
-            assert_eq!(expired.len(), 1);
+            let key = lease.key().to_owned();
             assert_eq!(
                 registry
+                    .recover(&lease, max_attempts, "operation-02")
+                    .unwrap(),
+                None
+            );
+
+            let lapsed = lapse(registry.as_ref(), &key, "operation-01");
+            let expired = registry.expired().unwrap();
+            assert_eq!(expired.len(), 1);
+            assert_eq!(expired[0], lapsed);
+            assert_eq!(
+                store
+                    .handle()
                     .recover(&expired[0], max_attempts, "operation-02")
                     .unwrap(),
                 Some(expected)
             );
+            assert_eq!(
+                registry
+                    .recover(&expired[0], max_attempts, "operation-02")
+                    .unwrap(),
+                None,
+                "a lease is recovered once"
+            );
+            assert!(registry.lease(&key).unwrap().is_none());
             match expected {
                 LeaseRecovery::Requeued => {
-                    assert!(
-                        root.path()
-                            .join("new")
-                            .join(format!("{key}.json"))
-                            .is_file()
-                    );
+                    assert_eq!(registry.list_new().unwrap()[0].key(), key);
+                    let again = registry
+                        .claim_with_lease(None, "operation-02", DEFAULT_LEASE, BTreeMap::new())
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(again.attempt(), 2);
+                    registry
+                        .finish(
+                            &registry.read_claimed(&key).unwrap().unwrap(),
+                            &serde_json::json!({"state": "done"}),
+                            true,
+                            None,
+                            Some("operation-02"),
+                        )
+                        .unwrap();
                 }
                 LeaseRecovery::Failed => {
-                    let outcome: serde_json::Value = serde_json::from_slice(
-                        &fs::read(
-                            root.path()
-                                .join("failed")
-                                .join(format!("{key}.outcome.json")),
-                        )
-                        .unwrap(),
-                    )
-                    .unwrap();
-                    assert_eq!(outcome["state"], "lost");
-                    assert_eq!(outcome["recovered_by"], "operation-02");
+                    assert!(registry.list_new().unwrap().is_empty());
+                    let failed = registry
+                        .unreported_source_briefs()
+                        .unwrap()
+                        .into_iter()
+                        .find(|finished| finished.brief.key() == key)
+                        .unwrap();
+                    assert!(!failed.ok);
+                    assert_eq!(failed.outcome["state"], "lost");
+                    assert_eq!(failed.outcome["recovered_by"], "operation-02");
                 }
             }
-            assert!(registry.lease(&key).unwrap().is_none());
         }
     }
 
-    #[test]
-    fn an_expired_lease_is_handed_over_once_with_its_claim_and_attempt() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
-        let brief: Brief = serde_json::from_str(r#"{"title":"Inspect","id":"hand-over"}"#).unwrap();
-        registry.submit_brief(&brief).unwrap();
+    fn an_expired_lease_is_handed_over_once_with_its_claim_and_attempt(store: &dyn Store) {
+        let registry = store.handle();
+        registry.submit_brief(&brief("hand-over")).unwrap();
         let meta = BTreeMap::from([("mission_id".to_owned(), serde_json::json!("m-1"))]);
         let lease = registry
             .claim_with_lease(None, "station-a", DEFAULT_LEASE, meta)
@@ -3369,14 +3365,9 @@ mod tests {
         );
 
         // The holder's last renewal runs out.
-        assert!(
-            registry
-                .renew(lease.key(), "station-a", Duration::from_nanos(1))
-                .unwrap()
-        );
-        std::thread::sleep(Duration::from_millis(5));
-        let expired = registry.lease(lease.key()).unwrap().unwrap();
-        let handed = registry
+        let expired = lapse(registry.as_ref(), lease.key(), "station-a");
+        let handed = store
+            .handle()
             .hand_over(&expired, "station-b", DEFAULT_LEASE, extra.clone())
             .unwrap()
             .unwrap();
@@ -3403,20 +3394,17 @@ mod tests {
                 .renew(lease.key(), "station-b", DEFAULT_LEASE)
                 .unwrap()
         );
+        assert!(
+            !registry
+                .renew(lease.key(), "station-a", DEFAULT_LEASE)
+                .unwrap()
+        );
     }
 
-    #[test]
-    fn leased_claim_is_exclusive_and_registry_keys_cannot_escape_the_root() {
-        let root = tempfile::tempdir().unwrap();
-        let queue = root.path().join("new");
-        fs::create_dir(&queue).unwrap();
-        fs::write(
-            queue.join("manual--brief-1.json"),
-            r#"{"title":"Inspect","id":"brief-1"}"#,
-        )
-        .unwrap();
-        let first = FileRegistry::open(root.path());
-        let second = FileRegistry::open(root.path());
+    fn leased_claim_is_exclusive_and_registry_keys_are_checked(store: &dyn Store) {
+        store.handle().submit_brief(&brief("brief-1")).unwrap();
+        let first = store.handle();
+        let second = store.handle();
         let first_thread = std::thread::spawn(move || {
             first.claim_with_lease(None, "one", DEFAULT_LEASE, BTreeMap::new())
         });
@@ -3428,33 +3416,31 @@ mod tests {
             second_thread.join().unwrap().unwrap(),
         ];
         assert_eq!(claims.iter().filter(|claim| claim.is_some()).count(), 1);
-        assert!(FileRegistry::open(root.path()).lease("../outside").is_err());
-    }
-
-    #[test]
-    fn rejects_unknown_fields_and_newer_versions() {
-        assert!(serde_json::from_str::<Brief>(r#"{"title":"x","typo":1}"#).is_err());
-        let brief: Brief = serde_json::from_str(r#"{"title":"x","version":2}"#).unwrap();
+        let registry = store.handle();
+        assert!(registry.lease("../outside").is_err());
+        assert!(registry.read_claimed("../outside").is_err());
         assert_eq!(
-            brief.validate().unwrap_err().kind(),
-            io::ErrorKind::InvalidData
+            registry
+                .claim_with_lease(None, " ", DEFAULT_LEASE, BTreeMap::new())
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
         );
     }
 
-    #[test]
-    fn cable_store_is_idempotent_and_rejects_conflicting_retries() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn cable_store_is_idempotent_and_rejects_conflicting_retries(store: &dyn Store) {
+        let registry = store.handle();
         let cable = test_cable("cable-1", "send-1", "Review this", "session-8");
 
         assert_eq!(registry.submit_cable(&cable).unwrap(), cable);
         let retry = test_cable("cable-retry", "send-1", "Review this", "session-8");
-        assert_eq!(registry.submit_cable(&retry).unwrap(), cable);
+        assert_eq!(store.handle().submit_cable(&retry).unwrap(), cable);
         assert_eq!(
             registry.find_cable("007", "send-1").unwrap(),
             Some(cable.clone())
         );
         assert_eq!(registry.get_cable("cable-1").unwrap(), Some(cable));
+        assert_eq!(registry.get_cable("cable-retry").unwrap(), None);
 
         let conflict = test_cable("cable-2", "send-1", "Different body", "session-8");
         assert_eq!(
@@ -3485,10 +3471,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn cable_inbox_and_delivery_updates_follow_session_and_expiry() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn cable_inbox_and_delivery_updates_follow_session_and_expiry(store: &dyn Store) {
+        let registry = store.handle();
         let cable = test_cable("cable-1", "send-1", "Review this", "session-8");
         registry.submit_cable(&cable).unwrap();
 
@@ -3516,7 +3500,10 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        let listed = registry.held_cables(10, Some(1_700_000_100.0)).unwrap();
+        let listed = store
+            .handle()
+            .held_cables(10, Some(1_700_000_100.0))
+            .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0], held);
         assert!(
@@ -3560,12 +3547,16 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        assert_eq!(
+            registry
+                .update_cable_delivery("cable-9", "008", None, CableState::Acked, None)
+                .unwrap(),
+            None
+        );
     }
 
-    #[test]
-    fn cable_quotas_are_atomic_persisted_and_share_the_registry_format() {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+    fn cable_quotas_are_atomic_and_shared(store: &dyn Store) {
+        let registry = store.handle();
         let buckets = [("sender:007", 1.0, 2), ("scope:operation:G", 1.0, 1)];
 
         assert!(registry.take_cable_quotas(&buckets, 100.0).unwrap());
@@ -3581,6 +3572,245 @@ mod tests {
                 .unwrap()
         );
         assert!(registry.take_cable_quotas(&buckets, 101.0).unwrap());
+        assert!(!store.handle().take_cable_quotas(&buckets, 101.0).unwrap());
+        assert_eq!(
+            registry
+                .take_cable_quotas(&[("a", 1.0, 1), ("a", 1.0, 1)], 1.0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    fn access_tokens_are_shared_by_registries_and_revocation_is_immediate(store: &dyn Store) {
+        let issuer = store.handle();
+        let verifier = store.handle();
+        let record = access_token(unix_time().unwrap());
+        issuer.store_access_token(&record).unwrap();
+        assert_eq!(
+            issuer.store_access_token(&record).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+
+        let shared = verifier
+            .find_access_token(record.digest())
+            .unwrap()
+            .unwrap();
+        assert_eq!(shared.token_id(), record.token_id());
+        assert_eq!(shared.digest(), record.digest());
+        assert_eq!(shared.person_id(), record.person_id());
+        assert!((shared.issued_at() - record.issued_at()).abs() < 1e-6);
+        assert!((shared.expires_at() - record.expires_at()).abs() < 1e-6);
+        assert_eq!(shared.revoked_at(), record.revoked_at());
+        assert!(issuer.revoke_access_token(record.token_id()).unwrap());
+        assert!(
+            verifier
+                .find_access_token(record.digest())
+                .unwrap()
+                .is_none()
+        );
+        assert!(!verifier.revoke_access_token(record.token_id()).unwrap());
+        assert!(verifier.revoke_access_token("not-a-uuid").is_err());
+    }
+
+    // The file Registry's own layout: what other tools find on disk.
+
+    #[test]
+    fn station_check_ins_follow_the_registry_record_contract() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
+        let mut info = BTreeMap::new();
+        info.insert("station_count".to_owned(), serde_json::json!(3));
+        info.insert("station".to_owned(), serde_json::json!("forged"));
+
+        registry.check_in("Stätion/one", info).unwrap();
+
+        let path = root.path().join("stations/Stätion_one.json");
+        let stored: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(stored["station"], "Stätion/one");
+        assert_eq!(stored["station_count"], 3);
+        assert!(stored["seen"].as_f64().unwrap() > 0.0);
+        assert!(stored.get("info").is_none());
+    }
+
+    #[test]
+    fn site_registry_records_are_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<StationRecord>();
+        assert_send_sync::<HeadquartersLease>();
+    }
+
+    #[test]
+    fn site_listing_skips_stale_and_malformed_records() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("stations");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("stale.json"),
+            r#"{"station":"stale","seen":0}"#,
+        )
+        .unwrap();
+        fs::write(directory.join("malformed.json"), b"not json").unwrap();
+        let registry = FileRegistry::open(root.path());
+        registry.check_in("fresh", BTreeMap::new()).unwrap();
+
+        let stations = registry.stations(DEFAULT_LEASE).unwrap();
+
+        assert_eq!(stations.len(), 1);
+        assert_eq!(stations[0].station(), "fresh");
+    }
+
+    #[test]
+    fn an_expired_headquarters_lease_is_filed_before_the_next_election() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("headquarters");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("lease.json"),
+            r#"{"station":"old-station","expires":0}"#,
+        )
+        .unwrap();
+        let registry = FileRegistry::open(root.path());
+
+        assert!(registry.elect("new/station", DEFAULT_LEASE).unwrap());
+
+        let lapsed: serde_json::Value =
+            serde_json::from_slice(&fs::read(directory.join("lease.lapsed.new_station")).unwrap())
+                .unwrap();
+        assert_eq!(lapsed["station"], "old-station");
+        assert_eq!(
+            registry.headquarters().unwrap().unwrap().station(),
+            "new/station"
+        );
+    }
+
+    #[test]
+    fn a_headquarters_lease_written_before_terms_reads_as_term_zero() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("headquarters");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("lease.json"),
+            r#"{"station":"old-station","expires":0}"#,
+        )
+        .unwrap();
+        let registry = FileRegistry::open(root.path());
+        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 0);
+        assert!(registry.elect("station-a", DEFAULT_LEASE).unwrap());
+        assert_eq!(registry.headquarters().unwrap().unwrap().term(), 1);
+    }
+
+    #[test]
+    fn brief_key_and_prompt_follow_the_registry_contract() {
+        let brief: Brief = serde_json::from_str(
+            r#"{"title":"  Do it  ","body":"  carefully ","id":"A / 42","source":"help desk","url":"https://example.test"}"#,
+        )
+        .unwrap();
+        assert_eq!(brief.key(), "help_desk--A_42");
+        assert_eq!(
+            brief.prompt(),
+            "Do it\n\ncarefully\n\nSource: https://example.test"
+        );
+    }
+
+    #[test]
+    fn lists_valid_new_briefs_in_registry_order_and_skips_bad_files() {
+        let root = tempfile::tempdir().unwrap();
+        let queue = root.path().join("new");
+        fs::create_dir(&queue).unwrap();
+        fs::write(queue.join("invalid.json"), b"not json").unwrap();
+        let low = r#"{"title":"low","id":"low","priority":2,"created":"2026-01-01"}"#;
+        let high_late = r#"{"title":"high late","id":"late","priority":9,"created":"2026-02-01"}"#;
+        let high_early =
+            r#"{"title":"high early","id":"early","priority":9,"created":"2026-01-01"}"#;
+        fs::write(queue.join("a.json"), low).unwrap();
+        fs::write(queue.join("b.json"), high_late).unwrap();
+        fs::write(queue.join("c.json"), high_early).unwrap();
+        let briefs = FileRegistry::open(root.path()).list_new().unwrap();
+        assert_eq!(
+            briefs
+                .iter()
+                .map(|brief| brief.title.as_str())
+                .collect::<Vec<_>>(),
+            ["high early", "high late", "low"]
+        );
+    }
+
+    #[test]
+    fn leased_claim_follows_the_registry_layout() {
+        let root = tempfile::tempdir().unwrap();
+        let queue = root.path().join("new");
+        fs::create_dir(&queue).unwrap();
+        fs::write(
+            queue.join("manual--brief-1.json"),
+            r#"{"title":"Inspect","id":"brief-1"}"#,
+        )
+        .unwrap();
+        let registry = FileRegistry::open(root.path());
+        let mut meta = BTreeMap::new();
+        meta.insert("operation".to_owned(), serde_json::json!("operation-01"));
+
+        registry
+            .claim_with_lease(None, "operation-01", DEFAULT_LEASE, meta)
+            .unwrap()
+            .unwrap();
+        assert!(!queue.join("manual--brief-1.json").exists());
+        assert!(root.path().join("claimed/manual--brief-1.json").is_file());
+        assert_eq!(
+            fs::read_to_string(root.path().join("attempts/manual--brief-1.json")).unwrap(),
+            "1"
+        );
+        let stored: serde_json::Value = serde_json::from_slice(
+            &fs::read(root.path().join("leases/manual--brief-1.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(stored["station"], "operation-01");
+        assert_eq!(stored["attempt"], 1);
+        assert_eq!(stored["meta"]["operation"], "operation-01");
+        assert!(stored.get("key").is_none());
+    }
+
+    #[test]
+    fn finish_files_the_outcome_and_transcript_beside_the_brief() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
+        registry.submit_brief(&brief("brief-1")).unwrap();
+        let claimed = registry.claim_new(None).unwrap().unwrap();
+        let outcome = serde_json::json!({"state": "done", "mission_id": "mission-1"});
+        assert!(
+            registry
+                .finish(&claimed, &outcome, true, Some(b"output"), None)
+                .unwrap()
+        );
+        let target = root.path().join("done/manual--brief-1.json");
+        assert!(target.is_file());
+        assert_eq!(fs::read(target.with_extension("log")).unwrap(), b"output");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &fs::read(target.with_file_name("manual--brief-1.outcome.json")).unwrap()
+            )
+            .unwrap(),
+            outcome
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_and_newer_versions() {
+        assert!(serde_json::from_str::<Brief>(r#"{"title":"x","typo":1}"#).is_err());
+        let brief: Brief = serde_json::from_str(r#"{"title":"x","version":2}"#).unwrap();
+        assert_eq!(
+            brief.validate().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn cable_quotas_share_the_registry_format() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
+        let buckets = [("sender:007", 1.0, 2), ("scope:operation:G", 1.0, 1)];
+        assert!(registry.take_cable_quotas(&buckets, 100.0).unwrap());
 
         let saved: serde_json::Value =
             serde_json::from_slice(&fs::read(root.path().join("cable-quotas.json")).unwrap())
@@ -3603,52 +3833,23 @@ mod tests {
                 .get("096648f6cda52c6919328146fde0d5e058d725a4d88f32c9e6a5249ccb503e3f")
                 .is_some()
         );
-        assert!(
-            !FileRegistry::open(root.path())
-                .take_cable_quotas(&buckets, 101.0)
-                .unwrap()
-        );
     }
 
     #[test]
-    fn access_tokens_are_shared_by_registries_and_revocation_is_immediate() {
+    fn access_tokens_are_stored_by_digest() {
         let root = tempfile::tempdir().unwrap();
-        let issuer = FileRegistry::open(root.path());
-        let verifier = FileRegistry::open(root.path());
-        let secret = "ai6_device_secret_0123456789abcdef";
-        let digest = Sha256::digest([b"ai6-access-token\0".as_slice(), secret.as_bytes()].concat())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        let token_id = "e747dbba-9a28-4463-a1ab-e31ed79d8991";
-        let now = unix_time().unwrap();
-        let record = crate::AccessTokenRecord::try_new(
-            token_id,
-            digest,
-            "person-007",
-            now,
-            now + 3_600.0,
-            None,
-        )
-        .unwrap();
-        issuer.store_access_token(&record).unwrap();
-
-        let shared = verifier
-            .find_access_token(record.digest())
-            .unwrap()
-            .unwrap();
-        assert_eq!(shared.token_id(), record.token_id());
-        assert_eq!(shared.digest(), record.digest());
-        assert_eq!(shared.person_id(), record.person_id());
-        assert!((shared.issued_at() - record.issued_at()).abs() < 1e-6);
-        assert!((shared.expires_at() - record.expires_at()).abs() < 1e-6);
-        assert_eq!(shared.revoked_at(), record.revoked_at());
+        let registry = FileRegistry::open(root.path());
+        let record = access_token(unix_time().unwrap());
+        registry.store_access_token(&record).unwrap();
         let stored: serde_json::Value = serde_json::from_slice(
-            &fs::read(root.path().join(format!("access-tokens/{token_id}.json"))).unwrap(),
+            &fs::read(
+                root.path()
+                    .join(format!("access-tokens/{}.json", record.token_id())),
+            )
+            .unwrap(),
         )
         .unwrap();
         assert_eq!(stored["digest"], record.digest());
-        assert_ne!(stored["digest"], secret);
         assert_eq!(
             fs::read_to_string(
                 root.path()
@@ -3656,15 +3857,7 @@ mod tests {
             )
             .unwrap()
             .trim(),
-            token_id
+            record.token_id()
         );
-        assert!(issuer.revoke_access_token(token_id).unwrap());
-        assert!(
-            verifier
-                .find_access_token(record.digest())
-                .unwrap()
-                .is_none()
-        );
-        assert!(!verifier.revoke_access_token(token_id).unwrap());
     }
 }

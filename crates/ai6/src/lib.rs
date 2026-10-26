@@ -24,6 +24,8 @@ pub use directorates::m::approvals::{
     GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement, classify,
     clearance_at_least,
 };
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+pub use directorates::m::config::{ConfigRecord, SqlConfigSource};
 pub use directorates::m::config::{
     ConfigRevision, ConfigSnapshot, ConfigSource, MemoryConfigSource, TomlConfigDir,
 };
@@ -112,6 +114,8 @@ pub use directorates::registry::sources::{
     CxReport, FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, Source, SourceBatch, SourceConfig,
     SourceItem, SourcePoll, source_brief,
 };
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+pub use directorates::registry::sql::SqlRegistry;
 pub use directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, HeadquartersLease, Lease,
     LeaseRecovery, MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,

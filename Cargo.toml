@@ -64,6 +64,11 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = "0.29"
 tempfile = "3"
+# The SQL Registry and roster: SQLite, compiled in, for one Station and for tests.
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "cache"] }
+# The SQL Registry and roster: PostgreSQL, shared by the Stations of an HA deployment. The
+# synchronous client, since Registry calls are synchronous.
+postgres = { version = "0.19.14", default-features = false }
 # SSH transport: one pure-Rust client on every OS, with the ring crypto provider.
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "3"

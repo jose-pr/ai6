@@ -14,8 +14,8 @@ use super::store::{FileRegistry, invalid_data, registry_lock, safe_component, wr
 use crate::directorates::medical::quarantine::Incident;
 
 const ALL_OPERATIONS: &str = "_all";
-const MAX_RECORD_BYTES: u64 = 16 * 1024;
-const MAX_QUARANTINES: usize = 10_000;
+pub(super) const MAX_RECORD_BYTES: u64 = 16 * 1024;
+pub(super) const MAX_QUARANTINES: usize = 10_000;
 const MAX_INCIDENTS: usize = 256;
 /// Incidents older than this are dropped; no policy window is longer in practice.
 const KEEP_INCIDENTS_SECS: f64 = 7.0 * 24.0 * 3600.0;
@@ -123,9 +123,7 @@ pub trait QuarantineStore {
 
 impl QuarantineStore for FileRegistry {
     fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine> {
-        if record.agent.trim().is_empty() || record.reason.trim().is_empty() {
-            return Err(invalid_data("a quarantine needs an Agent and a reason"));
-        }
+        validate_quarantine(record)?;
         let _lock = registry_lock(&self.root)?;
         let path = self.quarantine_path(&record.agent, record.operation.as_deref());
         if let Some(existing) = read_record(&path)? {
@@ -195,16 +193,30 @@ impl QuarantineStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(error),
         };
-        let cutoff = incident.at - KEEP_INCIDENTS_SECS;
-        history.retain(|known| known.at >= cutoff);
-        history.push(incident);
-        if history.len() > MAX_INCIDENTS {
-            history.drain(..history.len() - MAX_INCIDENTS);
-        }
+        add_incident(&mut history, incident);
         let bytes = serde_json::to_vec(&history).map_err(io::Error::other)?;
         write_atomic(&path, &bytes)?;
         Ok(history)
     }
+}
+
+/// Adds `incident` to an Agent's history, dropping incidents too old to count and the
+/// oldest past the bound.
+pub(super) fn add_incident(history: &mut Vec<Incident>, incident: Incident) {
+    let cutoff = incident.at - KEEP_INCIDENTS_SECS;
+    history.retain(|known| known.at >= cutoff);
+    history.push(incident);
+    if history.len() > MAX_INCIDENTS {
+        history.drain(..history.len() - MAX_INCIDENTS);
+    }
+}
+
+/// Checks a quarantine before it is stored.
+pub(super) fn validate_quarantine(record: &Quarantine) -> io::Result<()> {
+    if record.agent.trim().is_empty() || record.reason.trim().is_empty() {
+        return Err(invalid_data("a quarantine needs an Agent and a reason"));
+    }
+    Ok(())
 }
 
 fn read_record(path: &std::path::Path) -> io::Result<Option<Quarantine>> {
@@ -225,16 +237,15 @@ fn read_record(path: &std::path::Path) -> io::Result<Option<Quarantine>> {
 mod tests {
     use super::*;
     use crate::directorates::medical::quarantine::IncidentKind;
+    use crate::directorates::registry::suite::{Store, backend_tests};
 
-    fn registry() -> (tempfile::TempDir, FileRegistry) {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
-        (root, registry)
-    }
+    backend_tests!(
+        a_quarantine_covers_its_operation_or_all_and_release_lifts_it,
+        incidents_accumulate_per_agent_and_old_ones_are_dropped,
+    );
 
-    #[test]
-    fn a_quarantine_covers_its_operation_or_all_and_release_lifts_it() {
-        let (_root, registry) = registry();
+    fn a_quarantine_covers_its_operation_or_all_and_release_lifts_it(store: &dyn Store) {
+        let registry = store.handle();
         assert!(!registry.is_quarantined("007", Some("G")).unwrap());
         registry
             .quarantine_agent(&Quarantine::new(
@@ -270,9 +281,8 @@ mod tests {
         assert!(!registry.is_quarantined("007", Some("G")).unwrap());
     }
 
-    #[test]
-    fn incidents_accumulate_per_agent_and_old_ones_are_dropped() {
-        let (_root, registry) = registry();
+    fn incidents_accumulate_per_agent_and_old_ones_are_dropped(store: &dyn Store) {
+        let registry = store.handle();
         let incident = |at| Incident {
             kind: IncidentKind::Stall,
             at,

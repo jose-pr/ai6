@@ -22,7 +22,7 @@ use super::store::{
 };
 
 const MAX_SESSION_RECORD_BYTES: u64 = 65_536;
-const MAX_SESSIONS: usize = 100_000;
+pub(super) const MAX_SESSIONS: usize = 100_000;
 const MAX_SESSION_ID_BYTES: usize = 128;
 const MAX_EXPOSURES_PER_SESSION: usize = 32;
 /// How many recent events a Session record keeps for a hand-off.
@@ -177,7 +177,7 @@ impl SessionRecord {
 /// A Session to record, built with defaults for the optional parts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSession {
-    session_id: String,
+    pub(super) session_id: String,
     mission_id: String,
     station: String,
     provider_session_id: Option<String>,
@@ -343,7 +343,7 @@ impl From<io::Error> for SessionError {
     }
 }
 
-fn validate_session_id(id: &str) -> io::Result<()> {
+pub(super) fn validate_session_id(id: &str) -> io::Result<()> {
     let valid = !id.is_empty()
         && id.len() <= MAX_SESSION_ID_BYTES
         && !id.starts_with('.')
@@ -376,8 +376,7 @@ impl FileRegistry {
         ttl: Duration,
         now: f64,
     ) -> Result<SessionRecord, SessionError> {
-        validate_session_id(&new.session_id)?;
-        super::store::validate_station_id(&new.station)?;
+        validate_new_session(&new)?;
         let _lock = registry_lock(&self.root)?;
         let path = self.session_path(&new.session_id);
         if path.exists() {
@@ -388,25 +387,7 @@ impl FileRegistry {
         {
             return Err(io::Error::other("too many Session records").into());
         }
-        let record = SessionRecord {
-            session_id: new.session_id,
-            mission_id: new.mission_id,
-            provider_session_id: new.provider_session_id,
-            station: new.station,
-            theater: new.theater,
-            attempt: new.attempt,
-            predecessor: new.predecessor,
-            status: SessionStatus::Active,
-            parked_until: None,
-            lease_expires: now + ttl.as_secs_f64(),
-            fence: self.headquarters_term()?.max(1),
-            exposure: new.exposure,
-            launch: new.launch,
-            recent: Vec::new(),
-            checkpoint: None,
-            checkpointed_at: None,
-            lost: None,
-        };
+        let record = opened(new, ttl, now, self.headquarters_term()?);
         write_session(&path, &record)?;
         Ok(record)
     }
@@ -423,17 +404,7 @@ impl FileRegistry {
         let _lock = registry_lock(&self.root)?;
         let path = self.session_path(id);
         let mut record = read_session(&path)?.ok_or(SessionError::NotFound)?;
-        if record.status.is_closed() {
-            return Err(SessionError::Ended);
-        }
-        if record.station != station {
-            if record.leased_at(now) {
-                return Err(SessionError::HeldBy(record.station));
-            }
-            record.station = station.to_owned();
-            record.fence = self.headquarters_term()?.max(record.fence + 1);
-        }
-        record.lease_expires = now + ttl.as_secs_f64();
+        take(&mut record, station, ttl, now, || self.headquarters_term())?;
         write_session(&path, &record)?;
         Ok(record)
     }
@@ -451,50 +422,7 @@ impl FileRegistry {
         let _lock = registry_lock(&self.root)?;
         let path = self.session_path(id);
         let mut record = read_session(&path)?.ok_or(SessionError::NotFound)?;
-        if record.station != station || record.fence != fence {
-            return Err(SessionError::Stale);
-        }
-        if record.status.is_closed() {
-            return Err(SessionError::Ended);
-        }
-        if let Some(ttl) = renew {
-            record.lease_expires = now + ttl.as_secs_f64();
-        }
-        if let Some(provider) = update.provider_session_id {
-            record.provider_session_id = Some(provider);
-        }
-        if let Some(launch) = update.launch {
-            record.launch = Some(launch);
-        }
-        if let Some(recent) = update.recent {
-            let skip = recent.len().saturating_sub(MAX_RECENT_EVENTS);
-            record.recent = recent
-                .into_iter()
-                .skip(skip)
-                .map(|line| line.chars().take(MAX_RECENT_EVENT_CHARS).collect())
-                .collect();
-        }
-        if let Some((checkpoint, at)) = update.checkpoint {
-            record.checkpoint = Some(checkpoint);
-            record.checkpointed_at = Some(at);
-        }
-        for exposure in update.exposure {
-            if record.exposure.len() < MAX_EXPOSURES_PER_SESSION
-                && !record
-                    .exposure
-                    .iter()
-                    .any(|known| known.source == exposure.source)
-            {
-                record.exposure.push(exposure);
-            }
-        }
-        if let Some(status) = update.status {
-            record.status = status;
-            record.parked_until = match status {
-                SessionStatus::Parked => update.parked_until.or(record.parked_until),
-                _ => None,
-            };
-        }
+        apply_fenced(&mut record, station, fence, now, renew, update)?;
         write_session(&path, &record)?;
         Ok(record)
     }
@@ -509,19 +437,168 @@ impl FileRegistry {
         let _lock = registry_lock(&self.root)?;
         let path = self.session_path(id);
         let mut record = read_session(&path)?.ok_or(SessionError::NotFound)?;
-        if record.status.is_closed() {
-            return Err(SessionError::Ended);
-        }
-        if record.leased_at(now) {
-            return Err(SessionError::HeldBy(record.station));
-        }
-        record.status = SessionStatus::Lost;
-        record.parked_until = None;
-        record.lost = Some(reason.chars().take(MAX_RECENT_EVENT_CHARS).collect());
-        record.fence = self.headquarters_term()?.max(record.fence + 1);
+        lose(&mut record, reason, now, || self.headquarters_term())?;
         write_session(&path, &record)?;
         Ok(record)
     }
+}
+
+/// Checks the identities of a Session to record.
+pub(super) fn validate_new_session(new: &NewSession) -> io::Result<()> {
+    validate_session_id(&new.session_id)?;
+    super::store::validate_station_id(&new.station)
+}
+
+/// A new Session's record: active, held by its Station from `now`, fenced at the
+/// Headquarters `term` (at least 1).
+pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> SessionRecord {
+    SessionRecord {
+        session_id: new.session_id,
+        mission_id: new.mission_id,
+        provider_session_id: new.provider_session_id,
+        station: new.station,
+        theater: new.theater,
+        attempt: new.attempt,
+        predecessor: new.predecessor,
+        status: SessionStatus::Active,
+        parked_until: None,
+        lease_expires: now + ttl.as_secs_f64(),
+        fence: term.max(1),
+        exposure: new.exposure,
+        launch: new.launch,
+        recent: Vec::new(),
+        checkpoint: None,
+        checkpointed_at: None,
+        lost: None,
+    }
+}
+
+/// Gives `station` the lease on `record` until `now + ttl`. A lapsed lease of another
+/// Station is taken over with a fence above both its own and the Headquarters `term`.
+pub(super) fn take(
+    record: &mut SessionRecord,
+    station: &str,
+    ttl: Duration,
+    now: f64,
+    term: impl FnOnce() -> io::Result<u64>,
+) -> Result<(), SessionError> {
+    if record.status.is_closed() {
+        return Err(SessionError::Ended);
+    }
+    if record.station != station {
+        if record.leased_at(now) {
+            return Err(SessionError::HeldBy(record.station.clone()));
+        }
+        record.station = station.to_owned();
+        record.fence = term()?.max(record.fence + 1);
+    }
+    record.lease_expires = now + ttl.as_secs_f64();
+    Ok(())
+}
+
+/// Applies `update` (and a renewal) to `record` if `station` holds it with `fence`.
+pub(super) fn apply_fenced(
+    record: &mut SessionRecord,
+    station: &str,
+    fence: u64,
+    now: f64,
+    renew: Option<Duration>,
+    update: SessionUpdate,
+) -> Result<(), SessionError> {
+    if record.station != station || record.fence != fence {
+        return Err(SessionError::Stale);
+    }
+    if record.status.is_closed() {
+        return Err(SessionError::Ended);
+    }
+    if let Some(ttl) = renew {
+        record.lease_expires = now + ttl.as_secs_f64();
+    }
+    if let Some(provider) = update.provider_session_id {
+        record.provider_session_id = Some(provider);
+    }
+    if let Some(launch) = update.launch {
+        record.launch = Some(launch);
+    }
+    if let Some(recent) = update.recent {
+        let skip = recent.len().saturating_sub(MAX_RECENT_EVENTS);
+        record.recent = recent
+            .into_iter()
+            .skip(skip)
+            .map(|line| line.chars().take(MAX_RECENT_EVENT_CHARS).collect())
+            .collect();
+    }
+    if let Some((checkpoint, at)) = update.checkpoint {
+        record.checkpoint = Some(checkpoint);
+        record.checkpointed_at = Some(at);
+    }
+    for exposure in update.exposure {
+        if record.exposure.len() < MAX_EXPOSURES_PER_SESSION
+            && !record
+                .exposure
+                .iter()
+                .any(|known| known.source == exposure.source)
+        {
+            record.exposure.push(exposure);
+        }
+    }
+    if let Some(status) = update.status {
+        record.status = status;
+        record.parked_until = match status {
+            SessionStatus::Parked => update.parked_until.or(record.parked_until),
+            _ => None,
+        };
+    }
+    Ok(())
+}
+
+/// Marks `record` lost for `reason` once its lease lapsed, moving its fence past the
+/// holder's and the Headquarters `term`.
+pub(super) fn lose(
+    record: &mut SessionRecord,
+    reason: &str,
+    now: f64,
+    term: impl FnOnce() -> io::Result<u64>,
+) -> Result<(), SessionError> {
+    if record.status.is_closed() {
+        return Err(SessionError::Ended);
+    }
+    if record.leased_at(now) {
+        return Err(SessionError::HeldBy(record.station.clone()));
+    }
+    record.status = SessionStatus::Lost;
+    record.parked_until = None;
+    record.lost = Some(reason.chars().take(MAX_RECENT_EVENT_CHARS).collect());
+    record.fence = term()?.max(record.fence + 1);
+    Ok(())
+}
+
+/// Every exposure of `records` (one Mission's Sessions, in ID order), earliest first, one
+/// entry per source.
+pub(super) fn merged_exposure(records: impl IntoIterator<Item = SessionRecord>) -> Vec<Exposure> {
+    let mut merged: Vec<Exposure> = Vec::new();
+    for record in records {
+        for exposure in record.exposure {
+            match merged
+                .iter_mut()
+                .find(|known| known.source == exposure.source)
+            {
+                Some(known) => known.at = known.at.min(exposure.at),
+                None => merged.push(exposure),
+            }
+        }
+    }
+    merged.sort_by(|left, right| left.at.total_cmp(&right.at));
+    merged
+}
+
+/// The highest attempt among `records`.
+pub(super) fn latest(records: impl IntoIterator<Item = SessionRecord>) -> Option<SessionRecord> {
+    records.into_iter().max_by(|left, right| {
+        left.attempt
+            .cmp(&right.attempt)
+            .then(left.lease_expires.total_cmp(&right.lease_expires))
+    })
 }
 
 /// Agent Session records with their fenced leases.
@@ -618,24 +695,11 @@ impl SessionStore for FileRegistry {
     }
 
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
-        let mut merged: Vec<Exposure> = Vec::new();
-        for record in self
-            .sessions()?
-            .into_iter()
-            .filter(|record| record.mission_id == mission_id)
-        {
-            for exposure in record.exposure {
-                match merged
-                    .iter_mut()
-                    .find(|known| known.source == exposure.source)
-                {
-                    Some(known) => known.at = known.at.min(exposure.at),
-                    None => merged.push(exposure),
-                }
-            }
-        }
-        merged.sort_by(|left, right| left.at.total_cmp(&right.at));
-        Ok(merged)
+        Ok(merged_exposure(
+            self.sessions()?
+                .into_iter()
+                .filter(|record| record.mission_id == mission_id),
+        ))
     }
 
     fn sessions(&self) -> io::Result<Vec<SessionRecord>> {
@@ -701,36 +765,37 @@ impl SessionStore for FileRegistry {
     }
 
     fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>> {
-        Ok(self
-            .sessions()?
-            .into_iter()
-            .filter(|record| record.mission_id == mission_id)
-            .max_by(|left, right| {
-                left.attempt
-                    .cmp(&right.attempt)
-                    .then(left.lease_expires.total_cmp(&right.lease_expires))
-            }))
+        Ok(latest(
+            self.sessions()?
+                .into_iter()
+                .filter(|record| record.mission_id == mission_id),
+        ))
     }
 }
 
 fn read_session(path: &std::path::Path) -> io::Result<Option<SessionRecord>> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
+    match fs::read(path) {
+        Ok(bytes) => parse_session(&bytes).map(Some),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Reads a stored Session record, refusing one out of bounds.
+pub(super) fn parse_session(bytes: &[u8]) -> io::Result<SessionRecord> {
     if bytes.len() as u64 > MAX_SESSION_RECORD_BYTES {
         return Err(invalid_data("Session record exceeds the size limit"));
     }
-    let record: SessionRecord = serde_json::from_slice(&bytes)
+    let record: SessionRecord = serde_json::from_slice(bytes)
         .map_err(|error| invalid_data(format!("invalid Session record: {error}")))?;
     if !record.lease_expires.is_finite() || record.attempt == 0 {
         return Err(invalid_data("invalid Session record"));
     }
-    Ok(Some(record))
+    Ok(record)
 }
 
-fn write_session(path: &std::path::Path, record: &SessionRecord) -> io::Result<()> {
+/// The stored form of a Session record, within the size limit.
+pub(super) fn session_json(record: &SessionRecord) -> io::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(record).map_err(io::Error::other)?;
     if bytes.len() as u64 > MAX_SESSION_RECORD_BYTES {
         return Err(io::Error::new(
@@ -738,32 +803,42 @@ fn write_session(path: &std::path::Path, record: &SessionRecord) -> io::Result<(
             "Session record exceeds the size limit",
         ));
     }
-    write_atomic(path, &bytes)
+    Ok(bytes)
+}
+
+fn write_session(path: &std::path::Path, record: &SessionRecord) -> io::Result<()> {
+    write_atomic(path, &session_json(record)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::directorates::registry::backend::*;
     use crate::directorates::registry::store::DEFAULT_LEASE;
+    use crate::directorates::registry::suite::{Store, backend_tests};
+
+    backend_tests!(
+        two_stations_sharing_a_registry_see_the_same_record,
+        a_later_attempt_links_to_its_predecessor,
+        a_stale_fencing_token_is_refused,
+        a_live_lease_cannot_be_taken_but_the_holder_renews_it,
+        the_fencing_token_follows_the_headquarters_term_and_only_grows,
+        status_changes_are_fenced_and_an_ended_session_is_closed,
+        only_a_lapsed_session_is_lost_and_its_holder_is_fenced_out,
+        the_holder_records_launch_recent_events_and_checkpoints_within_bounds,
+        the_latest_session_is_the_highest_attempt,
+        unsafe_ids_are_rejected_before_touching_the_filesystem,
+    );
 
     const NOW: f64 = 1_800_000_000.0;
     const TTL: Duration = Duration::from_secs(60);
-
-    fn registry() -> (tempfile::TempDir, FileRegistry) {
-        let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
-        (root, registry)
-    }
 
     fn new_session() -> NewSession {
         NewSession::new("s-1", "mission-1", "station-a").with_theater("local")
     }
 
-    #[test]
-    fn two_stations_sharing_a_registry_see_the_same_record() {
-        let (root, first) = registry();
-        let second = FileRegistry::open(root.path());
+    fn two_stations_sharing_a_registry_see_the_same_record(store: &dyn Store) {
+        let first = store.handle();
+        let second = store.handle();
         let opened = first
             .open_session_at(new_session().with_provider_session("provider-1"), TTL, NOW)
             .unwrap();
@@ -781,9 +856,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn a_later_attempt_links_to_its_predecessor() {
-        let (_root, registry) = registry();
+    fn a_later_attempt_links_to_its_predecessor(store: &dyn Store) {
+        let registry = store.handle();
         registry.open_session_at(new_session(), TTL, NOW).unwrap();
         let next = registry
             .open_session_at(
@@ -799,9 +873,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_stale_fencing_token_is_refused() {
-        let (_root, registry) = registry();
+    fn a_stale_fencing_token_is_refused(store: &dyn Store) {
+        let registry = store.handle();
         let first = registry.open_session_at(new_session(), TTL, NOW).unwrap();
 
         // The first holder stops renewing; the second takes the lapsed lease.
@@ -834,9 +907,8 @@ mod tests {
         assert_eq!(written.provider_session_id.as_deref(), Some("late-write"));
     }
 
-    #[test]
-    fn a_live_lease_cannot_be_taken_but_the_holder_renews_it() {
-        let (_root, registry) = registry();
+    fn a_live_lease_cannot_be_taken_but_the_holder_renews_it(store: &dyn Store) {
+        let registry = store.handle();
         let opened = registry.open_session_at(new_session(), TTL, NOW).unwrap();
         assert!(matches!(
             registry.take_session_at("s-1", "station-b", TTL, NOW + 30.0),
@@ -858,9 +930,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_fencing_token_follows_the_headquarters_term_and_only_grows() {
-        let (_root, registry) = registry();
+    fn the_fencing_token_follows_the_headquarters_term_and_only_grows(store: &dyn Store) {
+        let registry = store.handle();
         registry.elect("hq-a", DEFAULT_LEASE).unwrap();
         let first = registry.open_session_at(new_session(), TTL, NOW).unwrap();
         assert_eq!(
@@ -879,9 +950,8 @@ mod tests {
         assert!(again.fence > taken.fence);
     }
 
-    #[test]
-    fn status_changes_are_fenced_and_an_ended_session_is_closed() {
-        let (_root, registry) = registry();
+    fn status_changes_are_fenced_and_an_ended_session_is_closed(store: &dyn Store) {
+        let registry = store.handle();
         let opened = registry.open_session_at(new_session(), TTL, NOW).unwrap();
         let parked = registry
             .write_fenced(
@@ -935,9 +1005,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn only_a_lapsed_session_is_lost_and_its_holder_is_fenced_out() {
-        let (_root, registry) = registry();
+    fn only_a_lapsed_session_is_lost_and_its_holder_is_fenced_out(store: &dyn Store) {
+        let registry = store.handle();
         let opened = registry.open_session_at(new_session(), TTL, NOW).unwrap();
         assert!(matches!(
             registry.lose_session_at("s-1", "gone dark", NOW + 30.0),
@@ -974,9 +1043,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn the_holder_records_launch_recent_events_and_checkpoints_within_bounds() {
-        let (_root, registry) = registry();
+    fn the_holder_records_launch_recent_events_and_checkpoints_within_bounds(store: &dyn Store) {
+        let registry = store.handle();
         let launch = SessionLaunch::new("claude", "pty", "/srv/work")
             .with_model(Some("sonnet".to_owned()), None)
             .with_mode(ExecutionMode::Field)
@@ -1020,9 +1088,8 @@ mod tests {
         assert_eq!(registry.session("s-1").unwrap().unwrap(), written);
     }
 
-    #[test]
-    fn the_latest_session_is_the_highest_attempt() {
-        let (_root, registry) = registry();
+    fn the_latest_session_is_the_highest_attempt(store: &dyn Store) {
+        let registry = store.handle();
         assert_eq!(registry.latest_session("mission-1").unwrap(), None);
         registry.open_session_at(new_session(), TTL, NOW).unwrap();
         registry
@@ -1042,7 +1109,8 @@ mod tests {
 
     #[test]
     fn records_written_before_adoption_still_load() {
-        let (_root, registry) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
         registry.open_session_at(new_session(), TTL, NOW).unwrap();
         let path = registry.session_path("s-1");
         let mut value: serde_json::Value =
@@ -1056,9 +1124,8 @@ mod tests {
         assert_eq!((record.launch, record.recent.len()), (None, 0));
     }
 
-    #[test]
-    fn unsafe_ids_are_rejected_before_touching_the_filesystem() {
-        let (_root, registry) = registry();
+    fn unsafe_ids_are_rejected_before_touching_the_filesystem(store: &dyn Store) {
+        let registry = store.handle();
         for id in ["", "../escape", "a/b", ".hidden", &"x".repeat(129)] {
             assert!(matches!(
                 registry.open_session_at(NewSession::new(id, "m", "station-a"), TTL, NOW),
