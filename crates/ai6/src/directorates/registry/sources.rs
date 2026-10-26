@@ -393,7 +393,9 @@ impl SourceStore for FileRegistry {
                 return Ok(Ingest::Finished);
             }
         }
-        if self.root.join("claimed").join(&name).exists() {
+        if self.root.join("claimed").join(&name).exists()
+            || self.root.join("held").join(&name).exists()
+        {
             return Ok(Ingest::InFlight);
         }
         let path = self.root.join("new").join(&name);

@@ -1195,7 +1195,7 @@ impl BriefStore for FileRegistry {
         brief.validate()?;
         let key = brief.key();
         let _registry_lock = registry_lock(&self.root)?;
-        for state in ["new", "claimed", "done", "failed"] {
+        for state in ["new", "held", "claimed", "done", "failed"] {
             if self.root.join(state).join(format!("{key}.json")).exists() {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
@@ -2598,7 +2598,7 @@ pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
-fn finish_locked(
+pub(super) fn finish_locked(
     root: &Path,
     brief: &Brief,
     outcome: &serde_json::Value,
@@ -2607,6 +2607,11 @@ fn finish_locked(
 ) -> io::Result<()> {
     let state = if ok { "done" } else { "failed" };
     let key = brief.key();
+    if let Err(error) = fs::remove_file(root.join("vetting").join(format!("{key}.json")))
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        return Err(error);
+    }
     let target = root.join(state).join(format!("{key}.json"));
     let outcome_path = root.join(state).join(format!("{key}.outcome.json"));
     write_atomic(

@@ -16,6 +16,7 @@ mod recovery;
 mod reload;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
+mod vetting;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -641,6 +642,7 @@ where
     #[cfg(feature = "cables-mcp")]
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
+    vetting::log_weakenings(&roster);
     let state = DaemonState {
         plugins,
         roster,
@@ -662,6 +664,7 @@ where
         stopping: Arc::new(AtomicBool::new(false)),
         event_pumps: Arc::new(Mutex::new(Vec::new())),
         clock: Clock::system(),
+        vetting: Default::default(),
         #[cfg(feature = "publisher")]
         publisher,
     };
@@ -1074,6 +1077,8 @@ struct DaemonState {
     stopping: Arc<AtomicBool>,
     event_pumps: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     clock: Clock,
+    /// What Headquarters remembers between intake rounds about the briefs it vets.
+    vetting: Arc<vetting::VettingDesk>,
 }
 
 impl DaemonState {
@@ -1295,10 +1300,17 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
     let Ok(mut leases) = state.intake.leases() else {
         return true;
     };
+    let mut vetting = vetting::Round::new(state, &briefs, &leases);
     for brief in briefs {
         let Ok(mission_id) = mission_id_for_brief(&brief) else {
             continue;
         };
+        if !matches!(
+            vetting.admit(&brief, mission_id.as_str()),
+            vetting::Admission::Place
+        ) {
+            continue;
+        }
         let (operation_id, named_agent, role_id) = match resolve_brief_assignment(state, &brief) {
             Ok(assignment) => assignment,
             Err(error) => {
@@ -5804,6 +5816,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
 
         let Json(briefs) = list_intake_briefs(State(state)).await.unwrap();
@@ -5966,6 +5979,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
 
         let response = send_cable(
@@ -6498,6 +6512,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         }
     }
 
@@ -7015,6 +7030,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
 
         schedule_queued_once(&state).await;
@@ -7140,6 +7156,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -7344,6 +7361,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -7482,6 +7500,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -7503,7 +7522,7 @@ mod tests {
 
     /// A Headquarters Station with no execution role of its own over `registry`, posting
     /// Agent 007 with `handler` to Operation G.
-    fn control_only_state(root: &Path, handler: &str) -> DaemonState {
+    pub(super) fn control_only_state(root: &Path, handler: &str) -> DaemonState {
         fs::write(root.join("operations.toml"), "[operation.G]\n").unwrap();
         fs::write(
             root.join("agents.toml"),
@@ -7533,12 +7552,13 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         }
     }
 
     /// Checks `station` in as an execution Station running `running` of `capacity` Missions
     /// with `handlers`.
-    fn worker_check_in(
+    pub(super) fn worker_check_in(
         state: &DaemonState,
         station: &str,
         (running, capacity): (usize, usize),
@@ -7664,6 +7684,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
         let result = create_mission(
             State(state.clone()),
@@ -7774,6 +7795,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
         let mission_id = MissionId::try_new("mission-lifecycle").unwrap();
         let result = create_mission(
@@ -7998,6 +8020,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(true)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
         state.sessions.lock().unwrap().insert(
             mission_id.to_string(),
@@ -8099,6 +8122,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
         let monitor = Watchdog::with_limits(
             std::time::Duration::from_secs(5),
@@ -8294,6 +8318,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
         state.sessions.lock().unwrap().insert(
             mission_id.to_string(),
@@ -8669,6 +8694,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
+            vetting: Default::default(),
         };
         let spec = SafeHouseSpec {
             operation_id: "G".to_owned(),

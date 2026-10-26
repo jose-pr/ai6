@@ -195,6 +195,9 @@ pub(super) fn poll(state: &DaemonState) -> bool {
     if roster {
         super::green_ink::log_weakenings(&current.roster);
     }
+    if roster {
+        super::vetting::log_weakenings(&current.roster);
+    }
     if loadouts {
         for weakening in current.station.credentials.weakenings() {
             eprintln!("ai6: {weakening}");

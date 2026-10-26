@@ -13,3 +13,4 @@ pub mod placement;
 pub mod recovery;
 pub mod roster;
 pub mod theaters;
+pub mod vetting;

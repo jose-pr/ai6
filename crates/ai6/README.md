@@ -122,11 +122,13 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::identity` | Validated `MissionId`, provider-issued `SessionId` and access-token records |
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
 | `ai6::directorates::m::access` | The shared `coqui-access` kinds and `coqui-roles` authorizer, AI6's scope kinds and actions, and the `access.toml` reader |
+| `ai6::directorates::m::vetting` | Vetting: deterministic checks on a brief before it is placed, and the Operation's settings for them |
 | `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
 | `ai6::directorates::registry::sessions` | Shared, fenced Session records: lease, fencing token, attempt and predecessor |
 | `ai6::directorates::registry::sleepers` | Sleepers: cron standing orders, their authorization and per-window briefs |
 | `ai6::directorates::registry::sources` | The Source kind (trackers and CI), brief ingestion, cursors and CX reports |
 | `ai6::directorates::registry::cables` | Permission-scoped Agent-to-Agent Cable relay |
+| `ai6::directorates::registry::vetting` | Held briefs and the clearances that keep vetting from holding a brief again |
 | `ai6::directorates::q` | Loadouts, Mission-scoped secret leases, MCP config and sandbox arguments |
 | `ai6::directorates::q::terminal` | Terminal and terminal-session kinds and the Session bridge |
 | `ai6::directorates::section_00::agent` | AgentHandler, AgentSession and provider-neutral events |
@@ -162,6 +164,10 @@ one is blocked, not failed), marks Sessions that read untrusted input and restri
 the default `strict` policy, and quarantines an Agent that keeps stalling, loops, blows its
 cover or overspends: its Missions stop on every Station and new work goes to the next
 qualified Agent until an operator releases it (`ai6 quarantine`).
+
+Before it places a brief, the Headquarters holder vets it under the Operation's `vetting`
+settings: a malformed brief is refused, and a duplicate, a flood past the hourly rate, spend at
+the day's limit or screened untrusted text holds it for an operator to release or refuse.
 
 The scheduler leases briefs from the file-backed Registry, uses each brief's
 `source--id` key as the Mission ID, selects an Agent by role, tags and priority among

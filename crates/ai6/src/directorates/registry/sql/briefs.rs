@@ -1,4 +1,4 @@
-//! The brief queue, Mission proposals and Source briefs in `ai6_briefs`,
+//! The brief queue, held briefs, Mission proposals and Source briefs in `ai6_briefs`,
 //! `ai6_brief_leases` and `ai6_mission_proposals`.
 
 use std::collections::BTreeMap;
@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use super::db::Tx;
 use super::{SqlRegistry, bounded_json, from_json, to_json};
+use crate::directorates::m::vetting::{FindingKind, Vetting};
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, MAX_REPORT_ATTEMPTS, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore,
@@ -16,6 +17,10 @@ use crate::directorates::registry::store::{
     Brief, BriefStore, Lease, LeaseRecovery, MAX_BRIEF_BYTES, MAX_BRIEFS,
     MAX_MISSION_PROPOSAL_BYTES, MAX_MISSION_PROPOSAL_RESULTS, MAX_MISSION_PROPOSALS,
     MissionProposal, invalid_data, lost_outcome, unix_time, validate_registry_key,
+};
+use crate::directorates::registry::vetting::{
+    Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_RECORD_BYTES, VettingStore, check_actor,
+    check_limit, merge_clearance, refused_outcome,
 };
 
 /// The brief record, without its provenance.
@@ -703,7 +708,7 @@ impl SourceStore for SqlRegistry {
             };
             match row.text(0)?.as_str() {
                 "done" | "failed" => return Ok(Ingest::Finished),
-                "claimed" => return Ok(Ingest::InFlight),
+                "claimed" | "held" => return Ok(Ingest::InFlight),
                 _ => {}
             }
             let outcome = refresh_queued(&mut brief, from_json(&row.text(1)?, "brief")?);
@@ -772,6 +777,179 @@ impl SourceStore for SqlRegistry {
                 ],
             )?;
             Ok(())
+        })
+    }
+}
+
+/// The record of a brief `operation` holds under `key`.
+fn held_in(tx: &mut Tx<'_>, operation: &str, key: &str) -> io::Result<HeldBrief> {
+    let held = match tx.query_opt(
+        "SELECT held FROM ai6_briefs WHERE key = $1 AND state = 'held'",
+        &[key.into()],
+    )? {
+        Some(row) => row.opt_text(0)?,
+        None => None,
+    };
+    match held
+        .map(|text| from_json::<HeldBrief>(&text, "held brief"))
+        .transpose()?
+    {
+        Some(held) if held.operation == operation && held.brief.key() == key => Ok(held),
+        _ => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "the Operation holds no such brief",
+        )),
+    }
+}
+
+fn clearance_in(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<Clearance>> {
+    let text = match tx.query_opt(
+        "SELECT clearance FROM ai6_briefs WHERE key = $1",
+        &[key.into()],
+    )? {
+        Some(row) => row.opt_text(0)?,
+        None => None,
+    };
+    text.map(|text| from_json(&text, "clearance")).transpose()
+}
+
+impl VettingStore for SqlRegistry {
+    fn hold_brief(
+        &self,
+        operation: &str,
+        key: &str,
+        vetting: &Vetting,
+        at: f64,
+    ) -> io::Result<Option<HeldBrief>> {
+        validate_registry_key(operation)?;
+        validate_registry_key(key)?;
+        self.write(|tx, revision| {
+            let Some(row) = tx.query_opt(
+                "SELECT brief FROM ai6_briefs WHERE key = $1 AND state = 'new'",
+                &[key.into()],
+            )?
+            else {
+                return Ok(None);
+            };
+            let held_count = tx
+                .query_opt("SELECT count(*) FROM ai6_briefs WHERE state = 'held'", &[])?
+                .map_or(Ok(0), |row| row.int(0))?;
+            if held_count >= MAX_HELD_BRIEFS as i64 {
+                return Err(invalid_data(format!(
+                    "the Registry already holds {MAX_HELD_BRIEFS} briefs"
+                )));
+            }
+            let held = HeldBrief {
+                operation: operation.to_owned(),
+                brief: from_json(&row.text(0)?, "brief")?,
+                vetting: vetting.clone(),
+                held_at: at,
+            };
+            held.validate()?;
+            let text = bounded_json(&held, MAX_HELD_RECORD_BYTES, "held brief")?;
+            tx.execute(
+                "UPDATE ai6_briefs SET state = 'held', held = $2, revision = $3 WHERE key = $1",
+                &[key.into(), text.into(), revision.into()],
+            )?;
+            Ok(Some(held))
+        })
+    }
+
+    fn held_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<HeldBrief>> {
+        validate_registry_key(operation)?;
+        check_limit(limit)?;
+        self.read(|tx| {
+            let rows = tx.query(
+                "SELECT held FROM ai6_briefs WHERE state = 'held' ORDER BY key LIMIT $1",
+                &[(MAX_HELD_BRIEFS + 1).into()],
+            )?;
+            let mut held = Vec::new();
+            for row in rows {
+                if let Some(text) = row.opt_text(0)?
+                    && let Ok(record) = serde_json::from_str::<HeldBrief>(&text)
+                    && record.validate().is_ok()
+                    && record.operation == operation
+                {
+                    held.push(record);
+                }
+            }
+            held.sort_by(|left, right| {
+                left.held_at
+                    .total_cmp(&right.held_at)
+                    .then_with(|| left.brief.key().cmp(&right.brief.key()))
+            });
+            held.truncate(limit);
+            Ok(held)
+        })
+    }
+
+    fn release_held(&self, operation: &str, key: &str, by: &str, at: f64) -> io::Result<Brief> {
+        validate_registry_key(operation)?;
+        validate_registry_key(key)?;
+        check_actor(by, "")?;
+        self.write(|tx, revision| {
+            let held = held_in(tx, operation, key)?;
+            let kinds = held.vetting.kinds().into_iter().collect::<Vec<_>>();
+            let clearance = merge_clearance(clearance_in(tx, key)?, &kinds, by, at);
+            tx.execute(
+                "UPDATE ai6_briefs SET state = 'new', held = NULL, clearance = $2, revision = $3 \
+                 WHERE key = $1",
+                &[key.into(), to_json(&clearance)?.into(), revision.into()],
+            )?;
+            Ok(held.brief)
+        })
+    }
+
+    fn refuse_held(
+        &self,
+        operation: &str,
+        key: &str,
+        by: &str,
+        reason: &str,
+        at: f64,
+    ) -> io::Result<HeldBrief> {
+        validate_registry_key(operation)?;
+        validate_registry_key(key)?;
+        check_actor(by, reason)?;
+        self.write(|tx, revision| {
+            let held = held_in(tx, operation, key)?;
+            let outcome = refused_outcome(&held, by, reason, at);
+            finish_in(tx, &held.brief, &outcome, false, None, revision)?;
+            tx.execute(
+                "UPDATE ai6_briefs SET held = NULL WHERE key = $1",
+                &[key.into()],
+            )?;
+            Ok(held)
+        })
+    }
+
+    fn clearance(&self, key: &str) -> io::Result<Option<Clearance>> {
+        validate_registry_key(key)?;
+        self.read(|tx| clearance_in(tx, key))
+    }
+
+    fn clear_brief(
+        &self,
+        key: &str,
+        kinds: &[FindingKind],
+        by: &str,
+        at: f64,
+    ) -> io::Result<Clearance> {
+        validate_registry_key(key)?;
+        check_actor(by, "")?;
+        self.write(|tx, revision| {
+            if brief_state(tx, key)?.as_deref() != Some("new") {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "no such brief is queued",
+                ));
+            }
+            let clearance = merge_clearance(clearance_in(tx, key)?, kinds, by, at);
+            tx.execute(
+                "UPDATE ai6_briefs SET clearance = $2, revision = $3 WHERE key = $1",
+                &[key.into(), to_json(&clearance)?.into(), revision.into()],
+            )?;
+            Ok(clearance)
         })
     }
 }

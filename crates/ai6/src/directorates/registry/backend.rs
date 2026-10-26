@@ -29,6 +29,7 @@ pub use super::store::{
 };
 pub use super::timeline::TimelineStore;
 pub use super::usage::UsageStore;
+pub use super::vetting::VettingStore;
 
 /// Every Registry record family. Implemented for each type that implements them all.
 pub trait RegistryBackend:
@@ -46,6 +47,7 @@ pub trait RegistryBackend:
     + SourceStore
     + TimelineStore
     + UsageStore
+    + VettingStore
     + Send
     + Sync
 {
@@ -139,6 +141,7 @@ impl<T> RegistryBackend for T where
         + SourceStore
         + TimelineStore
         + UsageStore
+        + VettingStore
         + Send
         + Sync
 {

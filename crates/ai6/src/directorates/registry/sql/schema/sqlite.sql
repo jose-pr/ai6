@@ -10,7 +10,9 @@ CREATE TABLE ai6_clock (
 );
 INSERT INTO ai6_clock (name, revision) VALUES ('registry', 0), ('config', 0);
 
--- The brief queue: state is new, claimed, done or failed.
+-- The brief queue: state is new, held, claimed, done or failed. held is the record of a
+-- brief vetting held (its Operation, the vetting and when); clearance lists the finding kinds
+-- the brief no longer stops for.
 CREATE TABLE ai6_briefs (
     key TEXT PRIMARY KEY,
     state TEXT NOT NULL,
@@ -22,6 +24,8 @@ CREATE TABLE ai6_briefs (
     reported INTEGER NOT NULL DEFAULT 0,
     provenance TEXT,
     finished_provenance TEXT,
+    held TEXT,
+    clearance TEXT,
     revision INTEGER NOT NULL
 );
 CREATE INDEX ai6_briefs_state ON ai6_briefs (state);

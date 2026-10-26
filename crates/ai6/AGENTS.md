@@ -269,6 +269,7 @@ pub struct Operation {
     pub exposure: ExposurePolicy,                 // strict unless configured
     pub quarantine: QuarantinePolicy,             // 3 stalls/loops, 2 budget stops, 1 blown cover per 24 h
     pub green_ink: GreenInkPolicy,                // strict unless configured; see Green ink
+    pub vetting: VettingPolicy,                   // every check on unless configured; see Vetting
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
     pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
@@ -1001,9 +1002,10 @@ pub trait SourceStore;       // Source cursors, ingested items, reports owed (so
 pub trait TimelineStore;     // the activity timeline (timeline.rs)
 pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
 pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
+pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
 pub trait RegistryBackend: AccountStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + QuarantineStore + SessionStore
-    + SleeperStore + SourceStore + TimelineStore + UsageStore + Send + Sync {}
+    + SleeperStore + SourceStore + TimelineStore + UsageStore + VettingStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` / `postgresql://…` → SqlRegistry;
@@ -1877,6 +1879,90 @@ never matches within a year (`0 0 30 2 *`) parses but never fires.
 makes a window fire once across Stations. Authorizations are stored under `sleepers/`. The
 Headquarters holder fires only sleepers whose stored fingerprint equals the current
 definition, using windows after the approval time and no more than a day old.
+
+## Vetting (`ai6::directorates::m::vetting`, `ai6::directorates::registry::vetting`)
+
+M's checks on a brief before it is placed. `vet` is pure; the Headquarters holder runs it on
+each queued brief not yet judged, before assignment.
+
+```rust
+pub const DEFAULT_MAX_BRIEF_BYTES: usize = 65_536;
+pub const DEFAULT_MAX_PER_HOUR: u32 = 20;              // untrusted briefs passed per Operation
+pub const DEFAULT_MAX_PER_SOURCE_PER_HOUR: u32 = 10;   // per Brief `source`
+pub const CHIEF_OF_STAFF_ROLE: &str = "chief-of-staff";
+pub const PROPOSAL_SOURCE: &str = "ai6-agent-proposal";
+
+#[non_exhaustive] pub enum FindingKind { Malformed, Duplicate, Rate, Budget, Screening, Review }
+                  // serde snake_case; ::ALL; .as_str()
+#[non_exhaustive] pub struct Finding { pub kind: FindingKind, pub detail: String /* ≤256 B, never brief text */, pub related: Option<String> }
+impl Finding { pub fn new(kind, detail) -> Self; pub fn related(self, mission_or_key) -> Self; }
+#[non_exhaustive] pub enum VettingVerdict { Pass, Hold, Refuse }   // serde snake_case
+#[non_exhaustive] pub struct Vetting { pub verdict: VettingVerdict, pub findings: Vec<Finding> /* ≤16 */ }
+impl Vetting {
+    pub fn pass() -> Self;
+    pub fn from_findings(findings: Vec<Finding>) -> Self;  // any Malformed → Refuse; any → Hold; none → Pass
+    pub fn kinds(&self) -> BTreeSet<FindingKind>;
+    pub fn summary(&self) -> String;                       // "duplicate,screening"
+}
+#[non_exhaustive] pub enum VettingScope { Untrusted /* default */, All, Off }  // serde lowercase
+#[non_exhaustive]
+pub struct VettingPolicy {   // Default: every check on
+    pub enabled: bool,                         // false: everything passes
+    pub max_brief_bytes: usize,                // Source brief: its quoted item text; else title + body
+    pub max_per_hour: Option<u32>,             // None: no limit
+    pub max_per_source_per_hour: Option<u32>,
+    pub duplicates: bool,                      // same normalized URL or title as known work
+    pub budget: bool,                          // day spend ≥ operation_cost_micro_usd_per_day
+    pub screening: VettingScope,               // tag block, bidi controls, zero-width runs, fence lines, phrases
+    pub phrases: Vec<String>,                  // added to the built-in manipulation patterns
+    pub review: VettingScope,                  // briefs a qualified chief-of-staff Agent reviews
+}
+impl VettingPolicy { pub fn off() -> Self; pub fn weakenings(&self) -> Vec<String>; }
+pub struct VettingDefinition;   // the `[operation.ID.vetting]` table; .resolve() -> Result<VettingPolicy, String>
+                                // a rate limit of 0 is no limit; `vetting = "off"` (or "on") in TOML
+#[non_exhaustive] pub struct KnownWork { pub reference: String, pub title: String, pub url: Option<String> }
+impl KnownWork { pub fn of(brief: &Brief, reference: impl Into<String>) -> Self; }
+#[non_exhaustive] #[derive(Default)]
+pub struct VettingContext {
+    pub untrusted: bool,
+    pub work: Vec<KnownWork>,                  // queued ahead, held, claimed
+    pub passed_last_hour: u32,
+    pub passed_from_source_last_hour: u32,
+    pub day_spend_micro_usd: Option<u64>,      // None: unread, never holds
+    pub day_limit_micro_usd: Option<u64>,
+    pub cleared: BTreeSet<FindingKind>,        // not reported again
+}
+pub fn is_untrusted(brief: &Brief) -> bool;    // `source:` prefix or PROPOSAL_SOURCE
+pub fn work_title(brief: &Brief) -> String;    // a Source brief's own item title, else the title
+pub fn vet(brief: &Brief, policy: &VettingPolicy, context: &VettingContext) -> Vetting;
+```
+
+Rate and screening apply to untrusted briefs only; size, duplicates and budget to every brief.
+A Source brief's quoted text counts two genuine fence lines; any other line matching
+`^\s*={3,}\s*(BEGIN|END)\b` is a forged one. Phrases are matched on lowercase words with
+invisible characters removed, so `ig\u{200B}nore previous instructions` still matches.
+
+```rust
+pub const MAX_HELD_BRIEFS: usize = 1_000;   // across the Registry; past it a brief stays queued
+pub const MAX_HELD_RESULTS: usize = 500;
+#[non_exhaustive] pub struct HeldBrief { pub operation: String, pub brief: Brief, pub vetting: Vetting, pub held_at: f64 }
+#[non_exhaustive] pub struct Clearance { pub kinds: BTreeSet<FindingKind>, pub by: String, pub at: f64 }
+
+VettingStore::hold_brief(operation, key, vetting: &Vetting, at: f64) -> io::Result<Option<HeldBrief>> // None: not queued
+VettingStore::held_briefs(operation, limit /* 1..=500 */) -> io::Result<Vec<HeldBrief>>         // oldest first
+VettingStore::release_held(operation, key, by, at) -> io::Result<Brief>     // NotFound unless that Operation holds it
+VettingStore::refuse_held(operation, key, by, reason /* ≤1024 B */, at) -> io::Result<HeldBrief>
+VettingStore::clearance(key) -> io::Result<Option<Clearance>>
+VettingStore::clear_brief(key, kinds: &[FindingKind], by, at) -> io::Result<Clearance>  // NotFound unless queued
+```
+
+A held brief is in `held/KEY.json` (SQL: state `held`, column `held`); it is never claimed,
+`submit_brief` refuses its key and Source polling treats it as in flight. `release_held`
+returns it to `new/` and clears the kinds it was held for (`vetting/KEY.json`, SQL column
+`clearance`), so the same checks do not hold it again; the clearance is kept apart from the
+brief's own JSON and dropped when the brief finishes. `refuse_held` files it as failed with
+outcome `{"state": "refused", "mission_id": KEY, "reason", "refused_by", "refused_at",
+"vetting"}`, so a Source still gets its CX report.
 
 ## Identity and handler API
 

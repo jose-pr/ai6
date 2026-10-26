@@ -18,6 +18,7 @@ use crate::directorates::m::harness::HarnessPolicy;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
+use crate::directorates::m::vetting::{VettingPolicy, policy_from_toml};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition};
@@ -199,6 +200,8 @@ pub struct Operation {
     pub quarantine: QuarantinePolicy,
     /// Which irreversible steps need a person's approval; strict unless configured.
     pub green_ink: GreenInkPolicy,
+    /// How briefs are vetted before they are placed; every check on unless configured.
+    pub vetting: VettingPolicy,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
@@ -780,6 +783,7 @@ struct OperationDefinition {
     exposure: ExposureDefinition,
     quarantine: QuarantineDefinition,
     green_ink: GreenInkDefinition,
+    vetting: Option<toml::Value>,
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
     pools: Option<Vec<String>>,
@@ -868,6 +872,8 @@ impl OperationDefinition {
             .green_ink
             .resolve()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let vetting = policy_from_toml(self.vetting.as_ref())
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         let workspace = Workspace::default();
         Ok(Operation {
             id,
@@ -927,6 +933,7 @@ impl OperationDefinition {
             exposure,
             quarantine,
             green_ink,
+            vetting,
             sources: self.sources,
             sleepers: self.sleepers,
             pools: self.pools,

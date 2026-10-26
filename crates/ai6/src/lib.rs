@@ -51,6 +51,12 @@ pub use directorates::m::theaters::{
     LOCAL_THEATER, RunnerSettings, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind,
     TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
 };
+pub use directorates::m::vetting::{
+    CHIEF_OF_STAFF_ROLE, DEFAULT_MAX_BRIEF_BYTES, DEFAULT_MAX_PER_HOUR,
+    DEFAULT_MAX_PER_SOURCE_PER_HOUR, Finding, FindingKind, KnownWork, PROPOSAL_SOURCE, Vetting,
+    VettingContext, VettingDefinition, VettingPolicy, VettingScope, VettingVerdict, is_untrusted,
+    vet, work_title,
+};
 pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_REGISTRY_DROP, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure,
     ExposureDefinition, ExposureGate, ExposurePolicy, ExposurePreset, REVIEW, Restriction,
@@ -109,7 +115,7 @@ pub use directorates::registry::approvals::{
 pub use directorates::registry::backend::{
     AccessTokenStore, AccountStore, AgentRoleStore, ApprovalStore, AuditStore, BriefStore,
     CableStore, QuarantineStore, RegistryBackend, SessionStore, SleeperStore, SourceStore,
-    StationStore, TimelineStore, UsageStore,
+    StationStore, TimelineStore, UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
     LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey, Require,
@@ -141,6 +147,9 @@ pub use directorates::registry::store::{
     LeaseRecovery, MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,
 };
 pub use directorates::registry::timeline::{MAX_TIMELINE_EVENTS, TimelineEvent};
+pub use directorates::registry::vetting::{
+    Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_RESULTS,
+};
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
     QuotaReport, TokenUsage, UsageLimit,
