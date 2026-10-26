@@ -1942,6 +1942,32 @@ A Source brief's quoted text counts two genuine fence lines; any other line matc
 `^\s*={3,}\s*(BEGIN|END)\b` is a forged one. Phrases are matched on lowercase words with
 invisible characters removed, so `ig\u{200B}nore previous instructions` still matches.
 
+The Chief of Staff review, for briefs that pass the rules when the Operation has a qualified
+`chief-of-staff` Agent and `review` applies:
+
+```rust
+pub const REVIEW_SOURCE: &str = "ai6-vetting";       // review briefs; never vetted themselves
+pub const REVIEW_DATA_KEY: &str = "vetting_review";  // Brief.data key holding the ReviewTarget
+#[non_exhaustive] pub enum ReviewTarget { Brief(String /* key */), Proposal(String /* id */) }  // serde snake_case
+impl ReviewTarget { pub fn review_id(&self) -> String; }   // "review-" + 32 hex of SHA-256: one review per target
+pub fn is_review(brief: &Brief) -> bool;
+pub fn review_target(brief: &Brief) -> Option<ReviewTarget>;
+/// role chief-of-staff, priority of the reviewed brief, data: target + exposure ["brief:source"];
+/// the brief and up to 50 other work titles quoted between markers neither contains.
+pub fn review_brief(reviewed: &Brief, target: &ReviewTarget, operation: &str, purpose: &str, work: &[KnownWork]) -> Brief;
+/// The last JSON object in the final message's last 16 KiB shaped {"verdict", "findings"?}:
+/// "clear" (no findings) → pass; "hold" → Review findings "KIND: detail" (duplicate|scope|manipulation);
+/// anything else → hold with "review-error: ...". Never admits on a bad answer.
+pub fn read_review(text: &str) -> Vetting;
+```
+
+The review Mission's ID is its brief key `ai6-vetting--review-…`. Its Station starts it with
+clearance `desk`, no Cable MCP tools (so no Cables, proposals or green ink) and, on the
+Station's own host, an empty working directory under the temporary directory instead of the
+Operation's checkout or a safe house. Its `completed` event text is read with `read_review`:
+clear → `clear_brief(key, [Review], "review:AGENT")`; otherwise `hold_brief`. A review Mission
+that ends without an applied answer holds the brief with `review-error`.
+
 ```rust
 pub const MAX_HELD_BRIEFS: usize = 1_000;   // across the Registry; past it a brief stays queued
 pub const MAX_HELD_RESULTS: usize = 500;

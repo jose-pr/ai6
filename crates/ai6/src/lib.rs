@@ -53,9 +53,10 @@ pub use directorates::m::theaters::{
 };
 pub use directorates::m::vetting::{
     CHIEF_OF_STAFF_ROLE, DEFAULT_MAX_BRIEF_BYTES, DEFAULT_MAX_PER_HOUR,
-    DEFAULT_MAX_PER_SOURCE_PER_HOUR, Finding, FindingKind, KnownWork, PROPOSAL_SOURCE, Vetting,
-    VettingContext, VettingDefinition, VettingPolicy, VettingScope, VettingVerdict, is_untrusted,
-    vet, work_title,
+    DEFAULT_MAX_PER_SOURCE_PER_HOUR, Finding, FindingKind, KnownWork, PROPOSAL_SOURCE,
+    REVIEW_DATA_KEY, REVIEW_SOURCE, ReviewTarget, Vetting, VettingContext, VettingDefinition,
+    VettingPolicy, VettingScope, VettingVerdict, is_review, is_untrusted, read_review,
+    review_brief, review_target, vet, work_title,
 };
 pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_REGISTRY_DROP, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure,

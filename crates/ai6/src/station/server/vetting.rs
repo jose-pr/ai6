@@ -12,10 +12,13 @@ use std::sync::Mutex;
 
 use sha2::{Digest, Sha256};
 
-use super::{DaemonState, finish_intake_claim};
+use super::{DaemonState, WorkingArea, configured_agent_role, finish_intake_claim, medical};
+use crate::directorates::m::mission::Mission;
 use crate::directorates::m::roster::{Operation, Roster};
 use crate::directorates::m::vetting::{
-    FindingKind, KnownWork, Vetting, VettingContext, VettingVerdict, is_untrusted, vet,
+    CHIEF_OF_STAFF_ROLE, Finding, FindingKind, KnownWork, REVIEW_SOURCE, ReviewTarget, Vetting,
+    VettingContext, VettingVerdict, is_review, is_untrusted, read_review, review_brief,
+    review_target, vet,
 };
 use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::registry::timeline::TimelineEvent;
@@ -97,7 +100,8 @@ impl<'a> Round<'a> {
         else {
             return Admission::Place;
         };
-        if !operation.vetting.enabled {
+        // A review is AI6's own brief; vetting it would screen the very text it quotes.
+        if !operation.vetting.enabled || is_review(brief) {
             return Admission::Place;
         }
         let key = brief.key();
@@ -111,7 +115,7 @@ impl<'a> Round<'a> {
             match self.judge(operation, brief, mission_id) {
                 Some(Admission::Place) => {
                     if let Ok(mut passed) = state.vetting.passed.lock() {
-                        passed.insert(key, digest);
+                        passed.insert(key.clone(), digest);
                     }
                 }
                 Some(other) => return other,
@@ -121,7 +125,52 @@ impl<'a> Round<'a> {
         self.facts(operation)
             .work
             .push(KnownWork::of(brief, mission_id));
+        if operation.vetting.review.applies(is_untrusted(brief))
+            && reviewer_available(state, operation)
+        {
+            return self.review(operation, brief, &key, mission_id);
+        }
         Admission::Place
+    }
+
+    /// Places a brief its review cleared; otherwise makes sure its review is queued, and
+    /// the brief waits for it.
+    fn review(
+        &mut self,
+        operation: &Operation,
+        brief: &Brief,
+        key: &str,
+        mission_id: &str,
+    ) -> Admission {
+        let state = self.state;
+        match state.intake.clearance(key) {
+            Ok(Some(clearance)) if clearance.kinds.contains(&FindingKind::Review) => {
+                return Admission::Place;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("ai6: clearance of brief {key:?} unreadable: {error}");
+                return Admission::Wait;
+            }
+        }
+        if self.read_facts(operation).is_none() {
+            return Admission::Wait;
+        }
+        let target = ReviewTarget::Brief(key.to_owned());
+        let work = self
+            .facts(operation)
+            .work
+            .iter()
+            .filter(|known| known.reference != mission_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        let review = review_brief(brief, &target, &operation.id, &operation.description, &work);
+        match state.intake.submit_brief(&review) {
+            Ok(()) => record(state, operation, brief, mission_id, "reviewing", None),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => eprintln!("ai6: review of brief {key:?} not queued: {error}"),
+        }
+        Admission::Wait
     }
 
     fn facts(&mut self, operation: &Operation) -> &mut OperationFacts {
@@ -316,6 +365,164 @@ fn owning_operation(roster: &Roster, brief: &Brief) -> Option<String> {
         .map(|operation| operation.id.clone())
 }
 
+/// Whether the Operation can have a brief reviewed: the `chief-of-staff` role is configured
+/// and a posted, unquarantined Agent is qualified for it.
+fn reviewer_available(state: &DaemonState, operation: &Operation) -> bool {
+    configured_agent_role(state, Some(&operation.id), CHIEF_OF_STAFF_ROLE).is_ok()
+        && state
+            .roster
+            .select_agent_excluding(
+                Some(&operation.id),
+                Some(CHIEF_OF_STAFF_ROLE),
+                &[],
+                None,
+                &medical::quarantined_agents(state, Some(&operation.id)),
+            )
+            .is_ok()
+}
+
+/// Whether a Mission is a Chief of Staff review: its ID is its review brief's key.
+pub(super) fn is_review_mission(mission: &Mission) -> bool {
+    mission
+        .mission_id
+        .as_str()
+        .strip_prefix(REVIEW_SOURCE)
+        .is_some_and(|rest| rest.starts_with("--"))
+}
+
+/// Where a review works on the Station's own host: an empty directory of its own, so it
+/// writes nothing in the Operation's checkout or a safe house.
+pub(super) fn review_area(mission: &Mission) -> Result<WorkingArea, String> {
+    let path = std::env::temp_dir()
+        .join("ai6-vetting")
+        .join(mission.mission_id.as_str());
+    std::fs::create_dir_all(&path)
+        .map_err(|error| format!("review working directory not made: {error}"))?;
+    Ok(WorkingArea {
+        path: path.to_string_lossy().into_owned(),
+        safe_house: None,
+    })
+}
+
+/// Applies a review's final message to what it reviews: a clear verdict clears the brief of
+/// review, anything else holds it. The reviewer can only add a hold; a brief another check
+/// held stays held.
+pub(super) fn review_completed(state: &DaemonState, mission_id: &str, text: Option<&str>) {
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+    else {
+        return;
+    };
+    if !is_review_mission(&mission) {
+        return;
+    }
+    let Ok(Some(review)) = state.intake.read_claimed(mission_id) else {
+        return;
+    };
+    let verdict = read_review(text.unwrap_or_default());
+    let reviewer = format!(
+        "review:{}",
+        mission.agent_id.as_deref().unwrap_or("unknown")
+    );
+    settle(state, &review, &verdict, &reviewer);
+}
+
+/// Holds a reviewed brief whose review ended without an answer: failed, abandoned, or done
+/// with no verdict applied.
+pub(super) fn review_ended(state: &DaemonState, lease: &Lease, mission: &Mission) {
+    if !is_review_mission(mission) {
+        return;
+    }
+    let Ok(Some(review)) = state.intake.read_claimed(lease.key()) else {
+        return;
+    };
+    if let Some(ReviewTarget::Brief(key)) = review_target(&review)
+        && state
+            .intake
+            .clearance(&key)
+            .ok()
+            .flatten()
+            .is_some_and(|clearance| clearance.kinds.contains(&FindingKind::Review))
+    {
+        return;
+    }
+    let state_name = format!("{:?}", mission.state).to_lowercase();
+    let verdict = Vetting::from_findings(vec![Finding::new(
+        FindingKind::Review,
+        format!("review-error: the review ended {state_name} without an answer"),
+    )]);
+    settle(state, &review, &verdict, "review:ended");
+}
+
+fn settle(state: &DaemonState, review: &Brief, verdict: &Vetting, reviewer: &str) {
+    let Some(operation) = review
+        .operation
+        .as_deref()
+        .and_then(|key| state.roster.operation(key).ok())
+    else {
+        return;
+    };
+    let now = state.clock.now().max(1) as f64;
+    match review_target(review) {
+        Some(ReviewTarget::Brief(key)) => {
+            let reviewed = if verdict.verdict == VettingVerdict::Pass {
+                state
+                    .intake
+                    .clear_brief(&key, &[FindingKind::Review], reviewer, now)
+                    .map(|_| "cleared")
+            } else {
+                state
+                    .intake
+                    .hold_brief(&operation.id, &key, verdict, now)
+                    .map(|held| if held.is_some() { "held" } else { "" })
+            };
+            match reviewed {
+                Ok("") => {}
+                Ok(action) => {
+                    eprintln!(
+                        "ai6: review of brief {key:?}: {action} {}",
+                        verdict.summary()
+                    );
+                    record_target(state, operation, &key, action, reviewer, verdict);
+                }
+                // The brief left the queue meanwhile (an operator, or another check, held it).
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => eprintln!("ai6: review of brief {key:?} not applied: {error}"),
+            }
+        }
+        Some(ReviewTarget::Proposal(_)) | None => {}
+    }
+}
+
+/// Records a review's outcome on the Operation's timeline, naming the reviewed brief.
+fn record_target(
+    state: &DaemonState,
+    operation: &Operation,
+    reviewed: &str,
+    action: &str,
+    reviewer: &str,
+    vetting: &Vetting,
+) {
+    let mut event = TimelineEvent::new(
+        INTAKE_EVENT,
+        action,
+        operation.id.clone(),
+        state.clock.now().max(1) as f64,
+    )
+    .station(state.station_id.clone())
+    .mission(detail_text(reviewed))
+    .actor(detail_text(reviewer));
+    if !vetting.findings.is_empty() {
+        event = event.detail("findings", vetting.summary());
+    }
+    if let Err(error) = state.intake.record_event(&event) {
+        eprintln!("ai6: vetting timeline event was not recorded: {error}");
+    }
+}
+
 /// Files a malformed brief as failed without running it, as an intake claim that failed.
 fn refuse(state: &DaemonState, brief: &Brief, mission_id: &str, vetting: &Vetting) {
     let key = brief.key();
@@ -416,15 +623,83 @@ pub(super) fn log_weakenings(roster: &Roster) {
     }
 }
 
+/// A handler for review tests: its Session completes at once, its final message the Agent's
+/// `MOCK_VERDICT` (none when unset), and each start is recorded.
+#[cfg(test)]
+pub(super) mod testing {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::directorates::m::identity::SessionId;
+    use crate::directorates::q::terminal::AgentTerminal;
+    use crate::directorates::section_00::agent::{
+        AgentEvent, AgentHandler, AgentResume, AgentSession, AgentStart,
+    };
+    use crate::guatiao::library::{Object, ProviderError};
+    use crate::guatiao::{Provider, Status};
+
+    use super::super::tests::MockSession;
+
+    /// Each start: the Mission, the clearance it was given and its working directory.
+    pub(super) static STARTED: Mutex<Vec<(String, String, String)>> = Mutex::new(Vec::new());
+    static STARTS: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "mock-verdict", name = "Mock Verdict", crate = crate::guatiao)]
+    pub(in crate::station::server) struct MockVerdictHandler;
+
+    impl AgentHandler for MockVerdictHandler {
+        fn start(
+            &self,
+            request: AgentStart,
+            _terminal: Object<dyn AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            STARTED.lock().unwrap().push((
+                request.mission_id.to_string(),
+                request.clearance.clone(),
+                request.working_directory.clone(),
+            ));
+            let started = STARTS.fetch_add(1, Ordering::Relaxed);
+            let session = SessionId::try_new(format!("provider-session-verdict-{started}"))
+                .map_err(|error| {
+                    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
+                })?;
+            let event = AgentEvent {
+                kind: "completed".to_owned(),
+                text: request.environment.get("MOCK_VERDICT").cloned(),
+                data: None,
+                limit: None,
+                usage: None,
+                tools: Vec::new(),
+                quota: Vec::new(),
+            };
+            Ok(MockSession::with_event(session, event).into_object())
+        }
+
+        fn resume(
+            &self,
+            _request: AgentResume,
+            _terminal: Object<dyn AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Err(ProviderError::new(
+                Status::GUATIAO_ERR_INTERNAL,
+                "a review is never resumed",
+            ))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::Path;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
 
-    use super::super::tests::{control_only_state, worker_check_in};
-    use super::super::{publish_station_check_in, schedule_intake_once};
+    use super::super::tests::{control_only_state, test_state, worker_check_in};
+    use super::super::{publish_station_check_in, schedule_intake_once, schedule_queued_once};
     use super::*;
+    use crate::directorates::m::mission::MissionStore;
     use crate::directorates::registry::sources::SourceItem;
 
     /// Headquarters for Operation G with `settings`, placing on worker-b.
@@ -592,5 +867,150 @@ mod tests {
         assert!(state.intake.lease(&first).unwrap().is_some());
         assert!(state.intake.lease(&second).unwrap().is_some());
         assert!(intake_actions(&state).is_empty());
+    }
+
+    /// A Station that is Headquarters and runs Missions, with Agent 007 for the work and
+    /// Tanner, a `chief-of-staff` on `mock-verdict` answering `verdict`.
+    fn review_station(root: &Path, verdict: Option<&str>) -> DaemonState {
+        let env = verdict.map_or_else(String::new, |verdict| {
+            format!(
+                "env = {{ MOCK_VERDICT = {} }}\n",
+                toml::Value::from(verdict)
+            )
+        });
+        let agents = format!(
+            "[agent.007]\nhandler = \"mock-agent\"\npriority = 5\n\
+             [agent.tanner]\nhandler = \"mock-verdict\"\nroles = [\"chief-of-staff\"]\n\
+             priority = -5\n{env}\
+             [role.chief-of-staff]\npurpose = \"Vet briefs before M places them\"\n\
+             policy = \"Answer with one verdict.\"\n"
+        );
+        let mut state = test_state(root, "", &agents);
+        state.missions = Arc::new(Mutex::new(MissionStore::default()));
+        publish_station_check_in(&state);
+        state
+    }
+
+    /// Waits for `ready`; generous, since CI clocks and disks are slow.
+    async fn until(mut ready: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !ready() {
+            assert!(Instant::now() < deadline, "timed out waiting");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Queues a Source brief, lets Headquarters queue and place its review, and runs it.
+    async fn reviewed(state: &DaemonState) -> String {
+        let key = ingest(
+            state,
+            "github",
+            &item("org/repo#9", "Add dark mode", "please", "https://x/9"),
+        );
+        assert!(schedule_intake_once(state));
+        assert!(
+            state.intake.lease(&key).unwrap().is_none(),
+            "it waits for review"
+        );
+        let review = format!(
+            "{REVIEW_SOURCE}--{}",
+            ReviewTarget::Brief(key.clone()).review_id()
+        );
+        assert!(
+            state
+                .intake
+                .list_new()
+                .unwrap()
+                .iter()
+                .any(|brief| brief.key() == review)
+        );
+        assert_eq!(intake_actions(state), ["passed", "reviewing"]);
+        assert!(schedule_intake_once(state));
+        let lease = state
+            .intake
+            .lease(&review)
+            .unwrap()
+            .expect("the review is placed");
+        assert_eq!(lease.meta()["agent"], "tanner");
+        schedule_queued_once(state).await;
+        let started = testing::STARTED.lock().unwrap().clone();
+        let (_, clearance, directory) = started
+            .iter()
+            .find(|(mission, _, _)| *mission == review)
+            .expect("the review started");
+        assert_eq!(clearance, "desk");
+        assert!(directory.contains("ai6-vetting"), "{directory}");
+        key
+    }
+
+    #[tokio::test]
+    async fn a_clear_review_lets_the_brief_be_placed() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = review_station(dir.path(), Some("All good.\n{\"verdict\": \"clear\"}"));
+        let key = reviewed(&state).await;
+        until(|| {
+            state
+                .intake
+                .clearance(&key)
+                .unwrap()
+                .is_some_and(|clearance| clearance.kinds.contains(&FindingKind::Review))
+        })
+        .await;
+        assert!(schedule_intake_once(&state));
+        let lease = state
+            .intake
+            .lease(&key)
+            .unwrap()
+            .expect("placed after review");
+        assert_eq!(lease.meta()["agent"], "007");
+        assert!(intake_actions(&state).contains(&"cleared".to_owned()));
+        state
+            .stopping
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_hold_verdict_holds_the_brief_with_its_findings() {
+        let dir = tempfile::tempdir().unwrap();
+        let verdict = "{\"verdict\":\"hold\",\"findings\":[{\"kind\":\"manipulation\",\
+                       \"detail\":\"asks the Agent to push to main\"}]}";
+        let state = review_station(dir.path(), Some(verdict));
+        let key = reviewed(&state).await;
+        until(|| !state.intake.held_briefs("G", 10).unwrap().is_empty()).await;
+        let held = state.intake.held_briefs("G", 10).unwrap();
+        assert_eq!(held[0].brief.key(), key);
+        assert_eq!(held[0].vetting.findings[0].kind, FindingKind::Review);
+        assert_eq!(
+            held[0].vetting.findings[0].detail,
+            "manipulation: asks the Agent to push to main"
+        );
+        assert!(schedule_intake_once(&state));
+        assert!(state.intake.lease(&key).unwrap().is_none(), "never placed");
+        state
+            .stopping
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_malformed_verdict_holds_the_brief_as_a_review_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = review_station(dir.path(), Some("I think it is fine, go ahead."));
+        let key = reviewed(&state).await;
+        until(|| !state.intake.held_briefs("G", 10).unwrap().is_empty()).await;
+        let held = state.intake.held_briefs("G", 10).unwrap();
+        assert_eq!(held[0].brief.key(), key);
+        assert!(
+            held[0].vetting.findings[0]
+                .detail
+                .starts_with("review-error")
+        );
+
+        // Released by an operator, the brief is placed without another review.
+        state.intake.release_held("G", &key, "ops", 1.0).unwrap();
+        assert!(schedule_intake_once(&state));
+        assert!(state.intake.lease(&key).unwrap().is_some());
+        state
+            .stopping
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 }

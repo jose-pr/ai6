@@ -2720,6 +2720,7 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
     if !is_terminal_state(mission.state) {
         return None;
     }
+    vetting::review_ended(state, lease, &mission);
     let outcome = serde_json::json!({
         "state": format!("{:?}", mission.state).to_lowercase(),
         "mission_id": mission.mission_id.as_str(),
@@ -3421,6 +3422,8 @@ async fn start_mission(
     let operation_id = mission.operation_id.clone();
     let requested_directory = request.working_directory.clone();
     let area_mission = mission.clone();
+    // A review reads one brief: no safe house, no Cables or proposals, desk clearance.
+    let review = vetting::is_review_mission(&mission);
     let remote_hands = plan.mode == ExecutionMode::RemoteHands;
     let (area_theater, area_root) = (theater_id.clone(), plan.root.clone());
     // An earlier attempt another Station recorded, when this Station holds none of its own.
@@ -3443,6 +3446,8 @@ async fn start_mission(
                 area_root.as_deref(),
                 &area_theater,
             )
+        } else if review {
+            vetting::review_area(&area_mission)
         } else {
             resolve_working_area(
                 &roster,
@@ -3519,36 +3524,37 @@ async fn start_mission(
     }
     let exposure = medical::open_gate(&state, &mission);
     #[cfg(feature = "cables-mcp")]
-    let mut cables_mcp = if let Some(operation_id) = mission.operation_id.as_deref() {
-        let theater = state
-            .roster
-            .operation(operation_id)
-            .ok()
-            .and_then(|operation| operation.theater.clone());
-        let endpoint = cables_mcp::Endpoint::start_with_exposure(
-            state.cables.clone(),
-            CablePrincipal::try_new(
-                agent.id.clone(),
-                operation_id.to_owned(),
-                theater,
-                state.station_id.clone(),
-                None,
-                Some(mission.mission_id.to_string()),
+    let mut cables_mcp =
+        if let Some(operation_id) = mission.operation_id.as_deref().filter(|_| !review) {
+            let theater = state
+                .roster
+                .operation(operation_id)
+                .ok()
+                .and_then(|operation| operation.theater.clone());
+            let endpoint = cables_mcp::Endpoint::start_with_exposure(
+                state.cables.clone(),
+                CablePrincipal::try_new(
+                    agent.id.clone(),
+                    operation_id.to_owned(),
+                    theater,
+                    state.station_id.clone(),
+                    None,
+                    Some(mission.mission_id.to_string()),
+                )
+                .map_err(|_| runtime_error("Cable Mission identity is invalid"))?,
+                state.intake.clone(),
+                agent.clearance == "00",
+                exposure.clone(),
             )
-            .map_err(|_| runtime_error("Cable Mission identity is invalid"))?,
-            state.intake.clone(),
-            agent.clearance == "00",
-            exposure.clone(),
-        )
-        .await
-        .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
-        endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
-        endpoint.add_environment(&mut environment);
-        initial_context.push(cables_mcp::INSTRUCTIONS.to_owned());
-        Some(endpoint)
-    } else {
-        None
-    };
+            .await
+            .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
+            endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
+            endpoint.add_environment(&mut environment);
+            initial_context.push(cables_mcp::INSTRUCTIONS.to_owned());
+            Some(endpoint)
+        } else {
+            None
+        };
     let forward = Arc::new(Mutex::new(None));
     #[cfg(feature = "cables-mcp")]
     let cable = if runner.is_some() || wrapped {
@@ -3667,7 +3673,11 @@ async fn start_mission(
         prompt: mission.prompt,
         initial_context,
         working_directory: working_directory.clone(),
-        clearance: agent.clearance,
+        clearance: if review {
+            "desk".to_owned()
+        } else {
+            agent.clearance
+        },
         environment: environment.clone(),
         model: model.clone(),
         effort: effort.clone(),
@@ -4732,6 +4742,9 @@ fn spawn_event_pump_with_monitor(
                     {
                         queue_event(&state, &mission_id, event);
                         break;
+                    }
+                    if event.kind == "completed" {
+                        vetting::review_completed(&state, &mission_id, event.text.as_deref());
                     }
                     if matches!(event.kind.as_str(), "completed" | "failed") {
                         let finished = finish_operation(&state, &mission_id, &session);
@@ -6417,7 +6430,8 @@ mod tests {
             MockSafeHouseProvider,
             MockPlainProvider,
             super::ephemeral::testing::MockMaker,
-            super::ephemeral::testing::MockDir
+            super::ephemeral::testing::MockDir,
+            super::vetting::testing::MockVerdictHandler
         ]
     );
 
@@ -7225,7 +7239,8 @@ mod tests {
                 "mock-lines",
                 "mock-pooled",
                 "mock-recorder",
-                "mock-spend"
+                "mock-spend",
+                "mock-verdict"
             ])
         );
 

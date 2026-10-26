@@ -1623,6 +1623,7 @@ sources = {{ jira = \"GUA\" }}\n",
             [
                 "analyst",
                 "case-officer",
+                "chief-of-staff",
                 "reports-officer",
                 "senior-analyst",
                 "targeter",
