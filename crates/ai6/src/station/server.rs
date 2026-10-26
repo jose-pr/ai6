@@ -11,6 +11,7 @@ mod ephemeral;
 mod green_ink;
 mod medical;
 mod recovery;
+mod reload;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
 
@@ -91,6 +92,9 @@ pub const DEFAULT_MAX_CONCURRENT_MISSIONS: usize = 4;
 /// [`StationConfig::with_resources_every`] says otherwise. The full requirements probe, which
 /// samples them too, runs every 300 seconds.
 pub const DEFAULT_RESOURCES_EVERY: Duration = Duration::from_secs(60);
+/// How often a Station asks its configuration source whether the roster or `loadouts.toml`
+/// changed, unless [`StationConfig::with_config_poll`] says otherwise.
+pub const DEFAULT_CONFIG_POLL: Duration = Duration::from_secs(5);
 const EVENT_QUEUE_LIMIT: usize = 256;
 const SCHEDULER_INTERVAL: Duration = Duration::from_millis(500);
 const SCHEDULER_RETRY_DELAY: Duration = Duration::from_secs(5);
@@ -131,9 +135,20 @@ pub struct StationConfig {
     credentials: credentials::CredentialDesk,
     headquarters_lease: Duration,
     resources_every: Duration,
+    config_poll: Duration,
 }
 
 impl StationConfig {
+    /// Asks the configuration source every `every` instead of [`DEFAULT_CONFIG_POLL`] whether
+    /// the roster or `loadouts.toml` changed, and applies a change that passes the
+    /// configuration checks without a restart. Zero stops asking: the Station runs what it
+    /// started with.
+    #[must_use]
+    pub fn with_config_poll(mut self, every: Duration) -> Self {
+        self.config_poll = every;
+        self
+    }
+
     /// Sets how long the Headquarters lease this Station holds lasts between renewals
     /// (default [`DEFAULT_LEASE`]): how long a standby control Station waits before taking
     /// over from a Headquarters that went dark. It must be positive and should span several
@@ -247,6 +262,7 @@ impl Default for StationConfig {
             credentials: credentials::CredentialDesk::default(),
             headquarters_lease: DEFAULT_LEASE,
             resources_every: DEFAULT_RESOURCES_EVERY,
+            config_poll: DEFAULT_CONFIG_POLL,
         }
     }
 }
@@ -498,12 +514,10 @@ where
         Some(source) => source,
         None => Arc::new(TomlConfigDir::new(&config_dir)),
     };
-    let roster = config_source
-        .load()
-        .map_err(|error| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("AI6 roster: {error}"))
-        })?
-        .roster;
+    let snapshot = config_source.load().map_err(|error| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("AI6 roster: {error}"))
+    })?;
+    let (revision, roster) = (snapshot.revision, snapshot.roster);
     let mut theaters = Theaters::load(&config_dir).map_err(|error| {
         io::Error::new(io::ErrorKind::InvalidData, format!("AI6 Theaters: {error}"))
     })?;
@@ -516,8 +530,9 @@ where
         })?;
     }
     config.station.theaters = theaters;
-    let loadouts = config_dir.join("loadouts.toml");
-    if !config.station.credentials.has_catalog() && loadouts.is_file() {
+    let loadouts = config_dir.join(reload::LOADOUTS_FILE);
+    let loadouts_from_file = !config.station.credentials.has_catalog();
+    if loadouts_from_file && loadouts.is_file() {
         let catalog = crate::directorates::q::LoadoutCatalog::load(&loadouts).map_err(|error| {
             io::Error::new(io::ErrorKind::InvalidData, format!("AI6 loadouts: {error}"))
         })?;
@@ -564,8 +579,16 @@ where
     #[cfg(feature = "publisher")]
     let publisher = config.publisher.take().map(Publisher::start).transpose()?;
     let roster = Arc::new(roster);
+    let live_config = Arc::new(reload::LiveConfig::new(
+        config_source,
+        &config_dir,
+        roster.clone(),
+        revision,
+        loadouts_from_file.then(|| config.station.credentials.shared_catalog()),
+    ));
     let missions = Arc::new(Mutex::new(missions));
     let sessions = Arc::new(Mutex::new(BTreeMap::new()));
+    let cable_live = live_config.clone();
     let cable_roster = roster.clone();
     let cable_missions = missions.clone();
     let cable_sessions = sessions.clone();
@@ -576,7 +599,10 @@ where
         cable_config
             .policy()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?,
-        move || cable_endpoints(&cable_roster, &cable_missions, &cable_sessions, &cable_site),
+        move || {
+            let roster = cable_live.roster().unwrap_or_else(|| cable_roster.clone());
+            cable_endpoints(&roster, &cable_missions, &cable_sessions, &cable_site)
+        },
         cable_config.channels().clone(),
     )
     .with_limits(
@@ -602,6 +628,7 @@ where
     let state = DaemonState {
         plugins,
         roster,
+        config: live_config,
         intake,
         missions,
         sessions,
@@ -688,10 +715,11 @@ where
         );
     #[cfg(feature = "publisher")]
     let app = app.route("/internal/publisher", get(publisher_health));
-    let app = app.with_state(state.clone());
+    let app = app.with_state(reload::Served(state.clone()));
     let declaring = state.clone();
-    let _ = tokio::task::spawn_blocking(move || accounts::declare(&declaring)).await;
+    let _ = tokio::task::spawn_blocking(move || reload::declare(&declaring)).await;
     let scheduler = tokio::spawn(scheduler_loop(state.clone()));
+    let reloading = reload::spawn(&state);
     #[cfg(feature = "publisher")]
     let controls = controls::spawn(&state)?;
     let stopping = state.stopping.clone();
@@ -703,6 +731,9 @@ where
         .await;
     state.stopping.store(true, Ordering::Release);
     let _ = tokio::time::timeout(Duration::from_secs(2), scheduler).await;
+    if let Some(reloading) = reloading {
+        let _ = tokio::time::timeout(Duration::from_secs(2), reloading).await;
+    }
     #[cfg(feature = "publisher")]
     if let Some(controls) = controls {
         let _ = tokio::time::timeout(Duration::from_secs(2), controls).await;
@@ -1005,7 +1036,9 @@ fn cable_error(error: CableRelayError) -> ApiErrorResponse {
 #[derive(Clone)]
 struct DaemonState {
     plugins: Arc<plugins::Plugins>,
+    /// The roster this copy of the state runs; [`DaemonState::current`] takes up a reload.
     roster: Arc<Roster>,
+    config: Arc<reload::LiveConfig>,
     intake: Arc<dyn RegistryBackend>,
     missions: Arc<Mutex<MissionStore>>,
     sessions: Arc<Mutex<BTreeMap<String, AgentOperation>>>,
@@ -1143,10 +1176,11 @@ fn reserve_existing_session_resume(
     })
 }
 
-async fn scheduler_loop(state: DaemonState) {
+async fn scheduler_loop(base: DaemonState) {
     let desk = Arc::new(SourceDesk::new());
     let mut next_station_check_in = Instant::now();
-    while !state.stopping.load(Ordering::Acquire) {
+    while !base.stopping.load(Ordering::Acquire) {
+        let state = base.current();
         // Registry calls block on files or a database: they run on the blocking pool, so a
         // slow Registry never stalls the async workers that serve Sessions.
         let check_in = Instant::now() >= next_station_check_in;
@@ -1682,6 +1716,10 @@ fn publish_station_check_in(state: &DaemonState) {
         serde_json::json!(state.resource_limits()),
     );
     info.insert("operations".to_owned(), serde_json::json!(operations));
+    info.insert(
+        "config".to_owned(),
+        serde_json::json!(state.config.status()),
+    );
     let policies: BTreeMap<String, OperationPolicy> = state
         .roster
         .operations()
@@ -5698,6 +5736,7 @@ mod tests {
         let path = queue.join("manual--brief-1.json");
         fs::write(&path, r#"{"title":"Inspect the operation","id":"brief-1"}"#).unwrap();
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(plugins::Plugins::scan(&[])),
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(root.path())),
@@ -5859,6 +5898,7 @@ mod tests {
             BTreeMap::new(),
         );
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(plugins::Plugins::scan(&[])),
             roster,
             intake: Arc::new(FileRegistry::open(dir.path().join("registry"))),
@@ -6390,6 +6430,7 @@ mod tests {
         }
 
         DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(root).unwrap()),
             intake: Arc::new(FileRegistry::open(root.join("registry"))),
@@ -6906,6 +6947,7 @@ mod tests {
                 .unwrap();
         }
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake: Arc::new(FileRegistry::open(dir.join("registry"))),
@@ -7030,6 +7072,7 @@ mod tests {
         )
         .unwrap();
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake: Arc::new(FileRegistry::open(dir.join("registry"))),
@@ -7233,6 +7276,7 @@ mod tests {
         .unwrap();
         registry.submit_brief(&brief).unwrap();
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(source.load().unwrap().roster),
             intake: registry,
@@ -7370,6 +7414,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(dir.path()).unwrap()),
             intake,
@@ -7420,6 +7465,7 @@ mod tests {
         )
         .unwrap();
         DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(root).unwrap()),
             intake: Arc::new(FileRegistry::open(root.join("registry"))),
@@ -7550,6 +7596,7 @@ mod tests {
         )
         .unwrap();
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake: Arc::new(FileRegistry::open(dir.join("registry"))),
@@ -7659,6 +7706,7 @@ mod tests {
             )
             .unwrap();
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake,
@@ -7882,6 +7930,7 @@ mod tests {
             MockSession::new(session_id.clone(), "completed").into_object(),
         ));
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
@@ -7982,6 +8031,7 @@ mod tests {
             .into_object(),
         ));
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
@@ -8176,6 +8226,7 @@ mod tests {
             .into_object(),
         ));
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
@@ -8550,6 +8601,7 @@ mod tests {
             .into_object(),
         ));
         let state = DaemonState {
+            config: Default::default(),
             plugins: Arc::new(test_plugins()),
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(scratch_registry_dir())),

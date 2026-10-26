@@ -1,18 +1,20 @@
 //! Two Stations sharing one PostgreSQL database: they elect one Headquarters, read one
-//! roster, and the survivor takes over when the Headquarters goes dark.
+//! roster, and the survivor takes over when the Headquarters goes dark. Two Stations sharing
+//! one SQLite or PostgreSQL roster take up an edit without a restart and refuse a bad one.
 //!
-//! Runs when `AI6_TEST_POSTGRES_URL` names a `postgres://` server whose user may create
-//! schemas; otherwise it says why it skipped and passes.
+//! The PostgreSQL cases run when `AI6_TEST_POSTGRES_URL` names a `postgres://` server whose
+//! user may create schemas; otherwise they say why they skipped and pass.
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ai6::directorates::m::config::{ConfigRecord, SqlConfigSource};
+use ai6::directorates::m::config::{ConfigRecord, ConfigSource, SqlConfigSource};
 use ai6::directorates::registry::sql::SqlRegistry;
-use ai6::{GONE_DARK_AFTER, HeadquartersLease, StationStore};
+use ai6::{AuditStore, GONE_DARK_AFTER, HeadquartersLease, RosterErrorKind, StationStore};
 use serde_json::json;
 
 const POSTGRES_URL_ENV: &str = "AI6_TEST_POSTGRES_URL";
@@ -79,7 +81,7 @@ struct Station {
 }
 
 impl Station {
-    fn start(name: &'static str, location: &str, root: &Path) -> Self {
+    fn start(name: &'static str, location: &str, root: &Path, extra: &[&str]) -> Self {
         let state = root.join(name);
         let config_dir = root.join("config");
         std::fs::create_dir_all(&state).unwrap();
@@ -99,6 +101,7 @@ impl Station {
             .arg("--config-dir")
             .arg(&config_dir)
             .args(["--headquarters-lease", HEADQUARTERS_LEASE_SECS])
+            .args(extra)
             .env("AI6_STATE", &state)
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
@@ -201,8 +204,8 @@ fn two_stations_on_one_database_elect_one_headquarters_share_the_roster_and_fail
         .unwrap();
 
     let mut stations = [
-        Station::start("station-a", &location, root.path()),
-        Station::start("station-b", &location, root.path()),
+        Station::start("station-a", &location, root.path(), &[]),
+        Station::start("station-b", &location, root.path(), &[]),
     ];
     let registry = SqlRegistry::open(&location).unwrap();
 
@@ -251,4 +254,141 @@ fn two_stations_on_one_database_elect_one_headquarters_share_the_roster_and_fail
         live_headquarters(&registry).filter(|lease| lease.station() == stations[survivor].name)
     });
     assert!(taken.term() > elected.term());
+}
+
+type Info = BTreeMap<String, serde_json::Value>;
+
+/// The priority Agent 007 has in what a Station published at check-in.
+fn published_priority(info: &Info) -> Option<i64> {
+    info.get("operation_policies")?["G"]["agents"]
+        .as_array()?
+        .iter()
+        .find(|agent| agent["id"] == "007")?["priority"]
+        .as_i64()
+}
+
+/// Whether both Stations' latest check-ins pass `check`.
+fn both(registry: &SqlRegistry, check: impl Fn(&Info) -> bool) -> bool {
+    let records = registry.stations(GONE_DARK_AFTER).unwrap();
+    ["station-a", "station-b"].iter().all(|name| {
+        records
+            .iter()
+            .any(|record| record.station() == *name && check(record.info()))
+    })
+}
+
+/// An Agent edited in the shared roster reaches both running Stations; an unacceptable
+/// revision written past the source's checks is refused and audited by both, which keep
+/// running the last good roster.
+fn an_agent_edit_reaches_both_stations(location: &str, write_past_the_checks: &dyn Fn()) {
+    let root = tempfile::tempdir().unwrap();
+    let roster = SqlConfigSource::open(location).unwrap();
+    roster
+        .put(ConfigRecord::Operation, "G", &json!({"roster": ["007"]}))
+        .unwrap();
+    let agent = |priority: i64| json!({"handler": "mock-agent", "priority": priority});
+    roster.put(ConfigRecord::Agent, "007", &agent(1)).unwrap();
+
+    let poll = ["--config-poll", "1"];
+    let mut stations = [
+        Station::start("station-a", location, root.path(), &poll),
+        Station::start("station-b", location, root.path(), &poll),
+    ];
+    let registry = SqlRegistry::open(location).unwrap();
+    until(root.path(), "both Stations to check in", || {
+        both(&registry, |info| published_priority(info) == Some(1)).then_some(())
+    });
+
+    let edited = roster
+        .put(ConfigRecord::Agent, "007", &agent(9))
+        .unwrap()
+        .get()
+        .to_string();
+    until(root.path(), "the edit to reach both Stations", || {
+        both(&registry, |info| {
+            published_priority(info) == Some(9) && info["config"]["revision"] == edited.as_str()
+        })
+        .then_some(())
+    });
+
+    let refused = roster
+        .put(ConfigRecord::Agent, "009", &json!({"clearance": "root"}))
+        .unwrap_err();
+    assert_eq!(refused.kind(), RosterErrorKind::Invalid, "{refused}");
+
+    write_past_the_checks();
+    until(
+        root.path(),
+        "both Stations to refuse the bad revision",
+        || {
+            both(&registry, |info| {
+                info["config"]["refused"]
+                    .as_array()
+                    .is_some_and(|reasons| !reasons.is_empty())
+            })
+            .then_some(())
+        },
+    );
+    let mut audited = registry
+        .list_audit(100)
+        .unwrap()
+        .into_iter()
+        .filter(|record| record.action == "config.refused")
+        .map(|record| record.actor)
+        .collect::<Vec<_>>();
+    audited.sort_unstable();
+    audited.dedup();
+    assert_eq!(audited, ["station:station-a", "station:station-b"]);
+    assert!(
+        both(&registry, |info| published_priority(info) == Some(9)),
+        "the last good roster keeps running"
+    );
+    for station in &mut stations {
+        assert!(
+            station.process.try_wait().unwrap().is_none(),
+            "{} keeps running",
+            station.name
+        );
+    }
+}
+
+/// Adds Agent 009 with a clearance no roster accepts, advancing the roster's revision in the
+/// same transaction, as a writer outside AI6 is told to.
+const PAST_THE_CHECKS: &str = "UPDATE ai6_clock SET revision = revision + 1 WHERE name = 'config'; \
+     INSERT INTO ai6_config_agents (id, definition, revision) \
+     SELECT '009', '{\"clearance\": \"root\"}', revision FROM ai6_clock WHERE name = 'config';";
+
+#[test]
+fn an_agent_edit_reaches_two_stations_on_sqlite_without_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ai6.db");
+    let location = format!("sqlite:{}", path.display());
+    an_agent_edit_reaches_both_stations(&location, &|| {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(&format!("BEGIN IMMEDIATE; {PAST_THE_CHECKS} COMMIT;"))
+            .unwrap();
+    });
+}
+
+#[test]
+fn an_agent_edit_reaches_two_stations_on_postgres_without_a_restart() {
+    let Some(server) = std::env::var(POSTGRES_URL_ENV)
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+    else {
+        eprintln!("skipped the two-Station PostgreSQL reload test: {POSTGRES_URL_ENV} is not set");
+        return;
+    };
+    let schema = Schema::new(&server);
+    an_agent_edit_reaches_both_stations(&schema.location(), &|| {
+        admin(
+            &server,
+            &format!(
+                "SET search_path TO {}; BEGIN; {PAST_THE_CHECKS} COMMIT;",
+                schema.name
+            ),
+        )
+        .unwrap();
+    });
 }

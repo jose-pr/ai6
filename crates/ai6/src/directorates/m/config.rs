@@ -7,13 +7,17 @@
 //! a database every Station shares. Any other store builds its roster with
 //! [`Roster::from_parts`].
 //!
+//! A source that takes changes ([`ConfigSource::put`], [`ConfigSource::remove`]) checks the
+//! roster each one leaves before keeping it; a Station polls its source and applies a new
+//! revision without a restart.
+//!
 //! Theaters are not part of it: each Station reads its own.
 
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 mod sql;
 
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
-pub use sql::{ConfigRecord, SqlConfigSource};
+pub use sql::SqlConfigSource;
 
 use std::fmt;
 use std::fs;
@@ -23,10 +27,89 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use sha2::{Digest, Sha256};
 
-use crate::directorates::m::roster::{Roster, RosterError, error};
+use crate::directorates::m::roster::{Roster, RosterError, RosterErrorKind, error, error_of};
 
 /// The files a [`TomlConfigDir`] builds its roster from.
 const ROSTER_FILES: [&str; 3] = ["operations.toml", "agents.toml", "covers.toml"];
+
+/// The kinds of record a roster is built from.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConfigRecord {
+    /// An Operation: the keys of an `[operation.<id>]` table.
+    Operation,
+    /// An Agent: the keys of an `[agent.<codename>]` table.
+    Agent,
+    /// An Agent role: the keys of a `[role.<id>]` table.
+    Role,
+    /// A cover policy: the keys of a `[cover.<name>]` table.
+    Cover,
+}
+
+impl ConfigRecord {
+    /// Every kind, in the order a roster is built.
+    pub const ALL: [Self; 4] = [Self::Operation, Self::Agent, Self::Role, Self::Cover];
+
+    /// The name of its table in the configuration files: `operation`, `agent`, `role` or
+    /// `cover`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Operation => "operation",
+            Self::Agent => "agent",
+            Self::Role => "role",
+            Self::Cover => "cover",
+        }
+    }
+
+    /// The kind whose [`name`](Self::name) is `name`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|record| record.name() == name)
+    }
+
+    /// The file of a configuration directory that holds this kind.
+    const fn file(self) -> &'static str {
+        match self {
+            Self::Operation => "operations.toml",
+            Self::Agent | Self::Role => "agents.toml",
+            Self::Cover => "covers.toml",
+        }
+    }
+}
+
+/// The records of one kind as a source holds them, at one revision.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigDefinitions {
+    /// The revision they were read at.
+    pub revision: ConfigRevision,
+    /// Each record's key and definition: a JSON object with the keys of its table in the
+    /// configuration files, ordered by key.
+    pub records: Vec<(String, serde_json::Value)>,
+}
+
+/// The configuration a Station runs, as it reports it at check-in (key `config`).
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ConfigStatus {
+    /// The [`ConfigRevision`] of the roster it runs, in decimal: a digest can pass the 2^53
+    /// a JSON number holds exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    /// Why it refused the newest roster or `loadouts.toml`, while it keeps running the last
+    /// good one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<String>,
+    /// Files changed since it started that only a restart applies, such as `theaters.toml`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs_restart: Vec<String>,
+}
+
+fn read_only() -> RosterError {
+    error_of(
+        RosterErrorKind::ReadOnly,
+        "this configuration source does not take changes",
+    )
+}
 
 /// Which state of a [`ConfigSource`] a [`ConfigSnapshot`] is: opaque, compared only for
 /// equality, and chosen by the source.
@@ -87,6 +170,65 @@ pub trait ConfigSource: Send + Sync {
         let snapshot = self.load()?;
         Ok((snapshot.revision != since).then_some(snapshot))
     }
+
+    /// The revision the source is at now, without building its roster.
+    ///
+    /// A Station compares it with the revision it runs and the last one it refused, so an
+    /// unacceptable revision is checked and reported once. The default loads the roster; a
+    /// source that can tell cheaply overrides it.
+    ///
+    /// # Errors
+    ///
+    /// As [`load`](ConfigSource::load).
+    fn revision(&self) -> Result<ConfigRevision, RosterError> {
+        self.load().map(|snapshot| snapshot.revision)
+    }
+
+    /// The records of one kind as the source holds them, for an administrator to read and
+    /// edit.
+    ///
+    /// # Errors
+    ///
+    /// [`RosterErrorKind::ReadOnly`] from a source that cannot list them (the default);
+    /// otherwise as [`load`](ConfigSource::load).
+    fn definitions(&self, record: ConfigRecord) -> Result<ConfigDefinitions, RosterError> {
+        let _ = record;
+        Err(read_only())
+    }
+
+    /// Stores one record's definition under `key`, replacing what was there, and returns the
+    /// revision the source moved to. `definition` is a JSON object with the keys of the
+    /// record's table in the configuration files.
+    ///
+    /// # Errors
+    ///
+    /// [`RosterErrorKind::ReadOnly`] from a source that takes no changes (the default);
+    /// [`RosterErrorKind::Invalid`], changing nothing, when the roster it would leave is not
+    /// acceptable; [`RosterErrorKind::Unavailable`] when the source fails.
+    fn put(
+        &self,
+        record: ConfigRecord,
+        key: &str,
+        definition: &serde_json::Value,
+    ) -> Result<ConfigRevision, RosterError> {
+        let _ = (record, key, definition);
+        Err(read_only())
+    }
+
+    /// Removes one record; `None` when there was none.
+    ///
+    /// # Errors
+    ///
+    /// As [`put`](ConfigSource::put): a removal that leaves the roster unacceptable (an Agent
+    /// another still extends, say) is refused.
+    fn remove(
+        &self,
+        record: ConfigRecord,
+        key: &str,
+    ) -> Result<Option<ConfigRevision>, RosterError> {
+        let _ = (record, key);
+        Err(read_only())
+    }
 }
 
 /// Opens the roster at `location`: `sqlite:PATH` (or `sqlite://PATH`) or a `postgres://`
@@ -138,7 +280,7 @@ fn is_sql(location: &str) -> bool {
 }
 
 /// The configuration directory: `operations.toml`, `agents.toml` and `covers.toml`, read
-/// with [`Roster::load`].
+/// with [`Roster::load`] and every Agent resolved ([`Roster::check_agents`]).
 ///
 /// Its revision is a digest of those three files' contents, so asking for changes reads
 /// them but parses nothing until one differs.
@@ -158,7 +300,7 @@ impl TomlConfigDir {
         &self.root
     }
 
-    fn revision(&self) -> Result<ConfigRevision, RosterError> {
+    fn digest(&self) -> Result<ConfigRevision, RosterError> {
         let mut digest = Sha256::new();
         for name in ROSTER_FILES {
             let path = self.root.join(name);
@@ -169,7 +311,12 @@ impl TomlConfigDir {
                     digest.update(&bytes);
                 }
                 Err(failure) if failure.kind() == io::ErrorKind::NotFound => digest.update([0]),
-                Err(failure) => return Err(error(format!("{}: {failure}", path.display()))),
+                Err(failure) => {
+                    return Err(error_of(
+                        RosterErrorKind::Unavailable,
+                        format!("{}: {failure}", path.display()),
+                    ));
+                }
             }
         }
         let digest = digest.finalize();
@@ -183,15 +330,63 @@ impl ConfigSource for TomlConfigDir {
     fn load(&self) -> Result<ConfigSnapshot, RosterError> {
         // The revision is taken before the files are parsed, so a file changed in between
         // shows up as a change on the next poll rather than being missed.
-        let revision = self.revision()?;
-        Ok(ConfigSnapshot::new(revision, Roster::load(&self.root)?))
+        let revision = self.digest()?;
+        let roster = Roster::load(&self.root)?;
+        roster.check_agents().map_err(|reason| {
+            error(format!(
+                "{}: {reason}",
+                self.root.join("agents.toml").display()
+            ))
+        })?;
+        Ok(ConfigSnapshot::new(revision, roster))
     }
 
     fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError> {
-        if self.revision()? == since {
+        if self.digest()? == since {
             return Ok(None);
         }
         self.load().map(Some)
+    }
+
+    fn revision(&self) -> Result<ConfigRevision, RosterError> {
+        self.digest()
+    }
+
+    /// The record's tables as JSON; the files themselves are edited by hand, so the
+    /// directory takes no [`put`](ConfigSource::put).
+    fn definitions(&self, record: ConfigRecord) -> Result<ConfigDefinitions, RosterError> {
+        let revision = self.digest()?;
+        let path = self.root.join(record.file());
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(failure) if failure.kind() == io::ErrorKind::NotFound => {
+                return Ok(ConfigDefinitions {
+                    revision,
+                    records: Vec::new(),
+                });
+            }
+            Err(failure) => {
+                return Err(error_of(
+                    RosterErrorKind::Unavailable,
+                    format!("{}: {failure}", path.display()),
+                ));
+            }
+        };
+        let in_file = |reason: &dyn fmt::Display| error(format!("{}: {reason}", path.display()));
+        let mut document: toml::Table = toml::from_str(&text).map_err(|reason| in_file(&reason))?;
+        let records = match document.remove(record.name()) {
+            Some(toml::Value::Table(table)) => table
+                .into_iter()
+                .map(|(key, value)| {
+                    serde_json::to_value(value)
+                        .map(|definition| (key, definition))
+                        .map_err(|reason| in_file(&reason))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            Some(_) => return Err(in_file(&format!("`{}` is not a table", record.name()))),
+            None => Vec::new(),
+        };
+        Ok(ConfigDefinitions { revision, records })
     }
 }
 
@@ -237,6 +432,11 @@ impl ConfigSource for MemoryConfigSource {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         Ok((state.0 != since.get())
             .then(|| ConfigSnapshot::new(ConfigRevision::new(state.0), state.1.clone())))
+    }
+
+    fn revision(&self) -> Result<ConfigRevision, RosterError> {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(ConfigRevision::new(state.0))
     }
 }
 

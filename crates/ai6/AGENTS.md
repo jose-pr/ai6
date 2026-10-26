@@ -39,7 +39,8 @@ node that runs them: `station::server` (daemon service and `serve*`), `station::
 --registry LOCATION` and `--config LOCATION` take a directory, `sqlite:PATH` or a
 `postgres://` URL for the Registry and the roster (defaults: `AI6_REGISTRY`, else the state
 directory; the configuration directory); `--headquarters-lease SECS` (default 60) sets
-`StationConfig::with_headquarters_lease`.
+`StationConfig::with_headquarters_lease`; `--config-poll SECS` (default 5, 0 off) sets
+`StationConfig::with_config_poll`.
 
 ## Access contracts (`ai6::directorates::m::access`)
 
@@ -293,9 +294,14 @@ pub struct Workspace {   // Default: the defaults below
 pub const DEFAULT_CHECKPOINT_SECS: u64 = 300;
 pub struct CoverIdentity { pub name: String, pub email: String }
 #[non_exhaustive]
-pub struct RosterError(String);
-impl core::fmt::Display for RosterError;
-impl core::error::Error for RosterError;
+pub struct RosterError;   // message + kind(); Display, Error
+impl RosterError { pub fn kind(&self) -> RosterErrorKind; }
+#[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RosterErrorKind {
+    Invalid,       // the configuration is not acceptable; a refused change changed nothing
+    Unavailable,   // could not be read or written (I/O, database); retrying may succeed
+    ReadOnly,      // the ConfigSource takes no put/remove
+}
 impl Roster {
     pub fn load(root: impl Into<PathBuf>) -> Result<Self, RosterError>;
     pub fn from_parts(
@@ -319,6 +325,9 @@ impl Roster {
         available_handlers: Option<&[String]>,
     ) -> Result<Agent, RosterError>;
     pub fn agents_for_operation(&self, operation_key: &str) -> Result<Vec<Agent>, RosterError>;
+    /// Resolves every global Agent (extends, clearance, budget) now instead of on first use;
+    /// an Operation's `.ai6/agents.toml` is not read.
+    pub fn check_agents(&self) -> Result<(), RosterError>;
 }
 #[must_use] #[derive(Default)]
 pub struct RosterBuilder;
@@ -374,9 +383,34 @@ pub trait ConfigSource: Send + Sync {
     fn load(&self) -> Result<ConfigSnapshot, RosterError>;
     /// Default: load and compare revisions.
     fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError>;
+    /// Default: load. Every built-in source reads only its revision.
+    fn revision(&self) -> Result<ConfigRevision, RosterError>;
+    /// The records of one kind as JSON objects, for an administrator; default ReadOnly.
+    fn definitions(&self, record: ConfigRecord) -> Result<ConfigDefinitions, RosterError>;
+    /// Store / remove one record, checking the whole roster first; default ReadOnly.
+    fn put(&self, record: ConfigRecord, key: &str, definition: &serde_json::Value)
+        -> Result<ConfigRevision, RosterError>;
+    fn remove(&self, record: ConfigRecord, key: &str)
+        -> Result<Option<ConfigRevision>, RosterError>;   // None: there was none
 }
-pub struct TomlConfigDir;   // ConfigSource; new(root), root()
-pub struct MemoryConfigSource;   // ConfigSource; new(roster), replace(&self, roster)
+#[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConfigRecord { Operation, Agent, Role, Cover }
+impl ConfigRecord {
+    pub const ALL: [Self; 4];
+    pub const fn name(self) -> &'static str;   // "operation" | "agent" | "role" | "cover"
+    pub fn from_name(name: &str) -> Option<Self>;
+}
+#[non_exhaustive] #[derive(Clone, PartialEq)]
+pub struct ConfigDefinitions { pub revision: ConfigRevision, pub records: Vec<(String, serde_json::Value)> }
+/// Check-in key `config` of every Station (serde; empty fields are omitted).
+#[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigStatus {
+    pub revision: Option<String>,    // decimal: a digest can pass 2^53
+    pub refused: Vec<String>,        // why the newest roster / loadouts.toml is refused
+    pub needs_restart: Vec<String>,  // e.g. "theaters.toml", "cables.toml"
+}
+pub struct TomlConfigDir;   // ConfigSource (+ definitions, read-only); new(root), root()
+pub struct MemoryConfigSource;   // ConfigSource (read-only); new(roster), replace(&self, roster)
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` → SqlConfigSource; anything else →
 /// TomlConfigDir. Unsupported for a SQL location without its feature.
 pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>>;
@@ -384,28 +418,36 @@ pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>>;
 pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn ConfigSource>>;
 
 // Features `sqlite` or `postgres`; also at the crate root.
-pub struct SqlConfigSource;   // ConfigSource + Debug
+pub struct SqlConfigSource;   // ConfigSource with definitions/put/remove + Debug
 impl SqlConfigSource {
     pub fn open(location: &str) -> io::Result<Self>;   // as SqlRegistry::open
     pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Self>;
-    pub fn put(&self, record: ConfigRecord, key: &str, definition: &serde_json::Value)
-        -> Result<ConfigRevision, RosterError>;
-    pub fn remove(&self, record: ConfigRecord, key: &str)
-        -> Result<Option<ConfigRevision>, RosterError>;   // None: there was none
 }
-#[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ConfigRecord { Operation, Agent, Role, Cover }
 ```
 
-A source hands out only checked rosters: an unacceptable configuration is an error. The
-shape is coqui-access-kit's `Table` (load plus a cheap `changes_since`) for one value, the
-roster. `TomlConfigDir` is `Roster::load` over `operations.toml`, `agents.toml` and
-`covers.toml`; its revision is a digest of those three files' contents, taken before they
-are parsed, so `changes_since` reads them but parses nothing while they are unchanged.
+A source hands out only checked rosters: an unacceptable configuration is an error
+(`RosterErrorKind::Invalid`; a database or file that cannot be read is `Unavailable`). The
+shape is coqui-access-kit's `Table` (load plus a cheap `changes_since`, optional put/remove)
+for one value, the roster. `TomlConfigDir` is `Roster::load` over `operations.toml`,
+`agents.toml` and `covers.toml` plus `Roster::check_agents`, so an Agent that cannot resolve
+is refused as in SQL; its revision is a digest of those three files' contents, taken before
+they are parsed, so `changes_since` reads them but parses nothing while they are unchanged;
+`definitions` converts the files' tables to JSON, and `put`/`remove` are `ReadOnly`.
 `MemoryConfigSource` starts at revision 0 and moves to the next on each `replace`. Any
 other store (a database, an HTTP API) builds its roster with `Roster::from_parts`. The
-daemon reads the roster once at start (`ServeConfig::with_config_source`; default
-`TomlConfigDir` over the configuration directory).
+daemon reads the roster at start (`ServeConfig::with_config_source`; default
+`TomlConfigDir` over the configuration directory) and polls `revision()` every
+`DEFAULT_CONFIG_POLL` (5 s; `StationConfig::with_config_poll`, `ai6 serve --config-poll`,
+0 off): a new revision is loaded and applied to requests, the scheduler and new Sessions
+(running Sessions keep theirs); one that fails with `Invalid` is refused once per revision,
+logged, audited (`config.refused`, actor and resource `station:<id>`) and reported at
+check-in (`config.refused`) while the last good roster keeps running. `loadouts.toml` is read
+again when its contents change (unless loadouts were set in code), with the same refusal
+rule, and the Station then declares its pool accounts again, withdrawing its profile of
+accounts it no longer declares. `theaters.toml` and `cables.toml` are read only at start: a
+change is logged and listed in `config.needs_restart`. Command-line and `ServeConfig`
+settings (listen address, Registry and roster locations, roles, labels, terminal, leases,
+plugins, watchdog) also apply only at start.
 
 `SqlConfigSource` keeps one table per record kind (`ai6_config_operations`, `_agents`,
 `_roles`, `_covers`): a row is a key and a JSON object with the keys of that record's
@@ -1197,8 +1239,9 @@ one-minute load average except on Windows, total and available memory; in this c
 tests every check-in repeats the process's first sample), its `resource_limits` (Registry
 settings, else the defaults), each Theater's running `sessions`,
 local Operation paths, available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
-placement policy (`operation_policies`, omitted with a log line when over 512 KiB) with
-each Station check-in every 15 seconds, alongside host and
+placement policy (`operation_policies`, omitted with a log line when over 512 KiB) and the
+configuration it runs (`config`, a `ConfigStatus`) with each Station check-in every 15
+seconds and right after it applies a reload, alongside host and
 platform metadata. `StationConfig` defaults to both `Control` and `Execution`, no
 pinned terminal and only the `local` Theater; `with_roles` replaces the role set, `with_label`
 adds a placement label, `with_theater` declares a Theater in code,
@@ -1211,7 +1254,9 @@ accounts, `with_account_homes(dir)` moves their per-Mission `CODEX_HOME`s from
 account out (default 8 days),
 `with_headquarters_lease(Duration)` sets how long the Headquarters lease lasts between
 renewals (default `DEFAULT_LEASE`, 60 s; zero makes startup fail): how long a standby
-control Station waits before taking over, and `with_terminal` pins the terminal provider. Without a pin the Station uses an available
+control Station waits before taking over, `with_config_poll(Duration)` sets how often it
+checks its roster source and `loadouts.toml` (default `DEFAULT_CONFIG_POLL`, 5 s; zero turns
+reloading off; loadouts set with `with_loadouts` are never reloaded), and `with_terminal` pins the terminal provider. Without a pin the Station uses an available
 terminal provider, preferring `DEFAULT_TERMINAL`. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
 distributed placement. Station and Agent limits count assignments in the shared Registry.
 The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID` set an
@@ -1406,6 +1451,7 @@ pub fn choose_account<'a>(strategy: PoolStrategy, candidates: &'a [AccountCandid
 
 pub trait AccountStore {
     fn declare_account(&self, account: &AccountRef, station: &str, profile: &AccountProfile) -> io::Result<()>;  // that Station's profile
+    fn withdraw_account(&self, account: &AccountRef, station: &str) -> io::Result<()>;  // drops that Station's profile only
     fn claim_account(&self, request: &AccountClaimRequest, now: f64) -> io::Result<Option<AccountState>>;
     fn release_account(&self, station: &str, mission: &str) -> io::Result<bool>;
     fn renew_account_claims(&self, station: &str, missions: &[String], ttl: Duration, now: f64) -> io::Result<()>;
@@ -2583,7 +2629,9 @@ required setting answers `PluginBuildError::ConfigurationRequired`.
   and `--normalize-digits`. Station roles default to control and execution; repeated `--role`
   values replace that default. `--label` adds a placement label. `--resources-every 60`
   sets the seconds between resource samples of each remote Theater (`0` leaves only the
-  300-second probe; `StationConfig::with_resources_every`, `DEFAULT_RESOURCES_EVERY`). Timeout values are
+  300-second probe; `StationConfig::with_resources_every`, `DEFAULT_RESOURCES_EVERY`).
+  `--config-poll 5` sets the seconds between checks of the roster source and
+  `loadouts.toml` (`0` off; `StationConfig::with_config_poll`, `DEFAULT_CONFIG_POLL`). Timeout values are
   non-negative seconds and may be fractional. `AI6_CONFIG_DIR` overrides the default
   config directory.
 - `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]`:

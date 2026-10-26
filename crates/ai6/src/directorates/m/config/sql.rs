@@ -4,67 +4,67 @@
 use std::fmt;
 use std::io;
 
-use super::{ConfigRevision, ConfigSnapshot, ConfigSource};
+use super::{ConfigDefinitions, ConfigRecord, ConfigRevision, ConfigSnapshot, ConfigSource};
 use crate::directorates::m::cover::{Covers, cover_from};
-use crate::directorates::m::roster::{RosterError, error, roster_from_definitions};
+use crate::directorates::m::roster::{
+    RosterError, RosterErrorKind, error, error_of, roster_from_definitions,
+};
 use crate::directorates::registry::sql::SqlOptions;
 use crate::directorates::registry::sql::db::{Clock, Database, Location, Tx};
 
-/// The kinds of roster record a [`SqlConfigSource`] keeps, one table each.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigRecord {
-    /// An Operation: the keys of an `[operation.<id>]` table (`ai6_config_operations`).
-    Operation,
-    /// An Agent: the keys of an `[agent.<codename>]` table (`ai6_config_agents`).
-    Agent,
-    /// An Agent role: the keys of a `[role.<id>]` table (`ai6_config_roles`).
-    Role,
-    /// A cover policy: the keys of a `[cover.<name>]` table (`ai6_config_covers`).
-    Cover,
+/// The tables of each kind: `ai6_config_operations`, `ai6_config_agents`, `ai6_config_roles`
+/// and `ai6_config_covers`.
+fn select(record: ConfigRecord) -> &'static str {
+    match record {
+        ConfigRecord::Operation => "SELECT id, definition FROM ai6_config_operations ORDER BY id",
+        ConfigRecord::Agent => "SELECT id, definition FROM ai6_config_agents ORDER BY id",
+        ConfigRecord::Role => "SELECT id, definition FROM ai6_config_roles ORDER BY id",
+        ConfigRecord::Cover => "SELECT name, definition FROM ai6_config_covers ORDER BY name",
+    }
 }
 
-impl ConfigRecord {
-    const ALL: [Self; 4] = [Self::Operation, Self::Agent, Self::Role, Self::Cover];
-
-    fn select(self) -> &'static str {
-        match self {
-            Self::Operation => "SELECT id, definition FROM ai6_config_operations ORDER BY id",
-            Self::Agent => "SELECT id, definition FROM ai6_config_agents ORDER BY id",
-            Self::Role => "SELECT id, definition FROM ai6_config_roles ORDER BY id",
-            Self::Cover => "SELECT name, definition FROM ai6_config_covers ORDER BY name",
+fn upsert(record: ConfigRecord) -> &'static str {
+    match record {
+        ConfigRecord::Operation => {
+            "INSERT INTO ai6_config_operations (id, definition, revision) VALUES ($1, $2, $3) \
+             ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
+        }
+        ConfigRecord::Agent => {
+            "INSERT INTO ai6_config_agents (id, definition, revision) VALUES ($1, $2, $3) \
+             ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
+        }
+        ConfigRecord::Role => {
+            "INSERT INTO ai6_config_roles (id, definition, revision) VALUES ($1, $2, $3) \
+             ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
+        }
+        ConfigRecord::Cover => {
+            "INSERT INTO ai6_config_covers (name, definition, revision) VALUES ($1, $2, $3) \
+             ON CONFLICT (name) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
         }
     }
+}
 
-    fn upsert(self) -> &'static str {
-        match self {
-            Self::Operation => {
-                "INSERT INTO ai6_config_operations (id, definition, revision) VALUES ($1, $2, $3) \
-                 ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-            }
-            Self::Agent => {
-                "INSERT INTO ai6_config_agents (id, definition, revision) VALUES ($1, $2, $3) \
-                 ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-            }
-            Self::Role => {
-                "INSERT INTO ai6_config_roles (id, definition, revision) VALUES ($1, $2, $3) \
-                 ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-            }
-            Self::Cover => {
-                "INSERT INTO ai6_config_covers (name, definition, revision) VALUES ($1, $2, $3) \
-                 ON CONFLICT (name) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-            }
-        }
+fn delete(record: ConfigRecord) -> &'static str {
+    match record {
+        ConfigRecord::Operation => "DELETE FROM ai6_config_operations WHERE id = $1",
+        ConfigRecord::Agent => "DELETE FROM ai6_config_agents WHERE id = $1",
+        ConfigRecord::Role => "DELETE FROM ai6_config_roles WHERE id = $1",
+        ConfigRecord::Cover => "DELETE FROM ai6_config_covers WHERE name = $1",
     }
+}
 
-    fn delete(self) -> &'static str {
-        match self {
-            Self::Operation => "DELETE FROM ai6_config_operations WHERE id = $1",
-            Self::Agent => "DELETE FROM ai6_config_agents WHERE id = $1",
-            Self::Role => "DELETE FROM ai6_config_roles WHERE id = $1",
-            Self::Cover => "DELETE FROM ai6_config_covers WHERE name = $1",
-        }
-    }
+/// The `config` row of `ai6_clock`, which every change advances.
+fn clock(tx: &mut Tx<'_>) -> io::Result<i64> {
+    tx.query_opt("SELECT revision FROM ai6_clock WHERE name = 'config'", &[])?
+        .map_or(Ok(0), |row| row.int(0))
+}
+
+/// Every row of one roster table.
+fn table(tx: &mut Tx<'_>, record: ConfigRecord) -> io::Result<Vec<(String, String)>> {
+    tx.query(select(record), &[])?
+        .into_iter()
+        .map(|row| Ok((row.text(0)?, row.text(1)?)))
+        .collect()
 }
 
 /// Every row of the roster tables, as read in one transaction.
@@ -76,31 +76,34 @@ struct Rows {
 fn rows(tx: &mut Tx<'_>) -> io::Result<Rows> {
     // The revision is read first: a write landing between the statements shows up as a
     // change on the next poll rather than being missed.
-    let revision = tx
-        .query_opt("SELECT revision FROM ai6_clock WHERE name = 'config'", &[])?
-        .map_or(Ok(0), |row| row.int(0))?;
+    let revision = clock(tx)?;
     let mut tables: [Vec<(String, String)>; 4] = Default::default();
-    for (record, table) in ConfigRecord::ALL.into_iter().zip(tables.iter_mut()) {
-        for row in tx.query(record.select(), &[])? {
-            table.push((row.text(0)?, row.text(1)?));
-        }
+    for (record, rows) in ConfigRecord::ALL.into_iter().zip(tables.iter_mut()) {
+        *rows = table(tx, record)?;
     }
     Ok(Rows { revision, tables })
 }
 
 const SOURCE: &str = "SQL configuration";
 
+fn parsed(rows: Vec<(String, String)>) -> Result<Vec<(String, serde_json::Value)>, RosterError> {
+    rows.into_iter()
+        .map(|(key, text)| {
+            serde_json::from_str::<serde_json::Value>(&text)
+                .map(|definition| (key.clone(), definition))
+                .map_err(|reason| error(format!("{SOURCE}: {key:?}: {reason}")))
+        })
+        .collect()
+}
+
+fn revision_of(number: i64) -> Result<ConfigRevision, RosterError> {
+    u64::try_from(number)
+        .map(ConfigRevision::new)
+        .map_err(|_| error(format!("{SOURCE}: invalid revision")))
+}
+
 fn roster(rows: Rows) -> Result<ConfigSnapshot, RosterError> {
-    let [operations, agents, roles, covers] = rows.tables.map(|table| {
-        table
-            .into_iter()
-            .map(|(key, text)| {
-                serde_json::from_str::<serde_json::Value>(&text)
-                    .map(|definition| (key.clone(), definition))
-                    .map_err(|reason| error(format!("{SOURCE}: {key:?}: {reason}")))
-            })
-            .collect::<Result<Vec<_>, _>>()
-    });
+    let [operations, agents, roles, covers] = rows.tables.map(parsed);
     let mut policies = Covers::default();
     for (name, definition) in covers? {
         policies.insert(
@@ -108,22 +111,21 @@ fn roster(rows: Rows) -> Result<ConfigSnapshot, RosterError> {
         );
     }
     let roster = roster_from_definitions(operations?, agents?, roles?, policies, &SOURCE)?;
-    let revision =
-        u64::try_from(rows.revision).map_err(|_| error(format!("{SOURCE}: invalid revision")))?;
-    Ok(ConfigSnapshot::new(ConfigRevision::new(revision), roster))
+    Ok(ConfigSnapshot::new(revision_of(rows.revision)?, roster))
 }
 
 fn failed(reason: io::Error) -> RosterError {
-    error(format!("{SOURCE}: {reason}"))
+    error_of(RosterErrorKind::Unavailable, format!("{SOURCE}: {reason}"))
 }
 
 /// The roster kept in a SQLite or PostgreSQL database: one table per record kind, each row a
 /// record's definition as a JSON object with the keys of its table in `operations.toml`,
 /// `agents.toml` or `covers.toml`, built into the roster with [`Roster::from_parts`](crate::Roster::from_parts).
 ///
-/// Its revision is the `config` row of `ai6_clock`, which every [`put`](Self::put) and
-/// [`remove`](Self::remove) advances; a writer outside AI6 advances it in the same
-/// transaction, or Stations do not see the change. The database can be the Registry's.
+/// Its revision is the `config` row of `ai6_clock`, which every
+/// [`put`](ConfigSource::put) and [`remove`](ConfigSource::remove) advances; a writer outside
+/// AI6 advances it in the same transaction, or Stations do not see the change. The database
+/// can be the Registry's.
 pub struct SqlConfigSource {
     db: Database,
 }
@@ -165,45 +167,6 @@ impl SqlConfigSource {
         })
     }
 
-    /// Stores one record's definition under `key`, replacing what was there, and returns the
-    /// revision the roster moved to.
-    ///
-    /// # Errors
-    ///
-    /// Refuses, changing nothing, a definition that is not a JSON object or leaves the roster
-    /// unacceptable (the checks [`Roster::from_parts`](crate::Roster::from_parts) makes); or when the database fails.
-    pub fn put(
-        &self,
-        record: ConfigRecord,
-        key: &str,
-        definition: &serde_json::Value,
-    ) -> Result<ConfigRevision, RosterError> {
-        if key.trim().is_empty() || !definition.is_object() {
-            return Err(error(format!(
-                "{SOURCE}: a {record:?} needs a key and a JSON object"
-            )));
-        }
-        let text = definition.to_string();
-        self.change(|tx, revision| {
-            Ok(tx.execute(record.upsert(), &[key.into(), text.into(), revision.into()])? > 0)
-        })?
-        .ok_or_else(|| error(format!("{SOURCE}: the {record:?} {key:?} was not stored")))
-    }
-
-    /// Removes one record; `None` when there was none.
-    ///
-    /// # Errors
-    ///
-    /// Refuses, changing nothing, a removal that leaves the roster unacceptable (an Agent
-    /// still extended by another, say); or when the database fails.
-    pub fn remove(
-        &self,
-        record: ConfigRecord,
-        key: &str,
-    ) -> Result<Option<ConfigRevision>, RosterError> {
-        self.change(|tx, _| Ok(tx.execute(record.delete(), &[key.into()])? > 0))
-    }
-
     /// Applies `change` and checks the roster it leaves, all in one transaction, which is
     /// rolled back when nothing changed or the roster is not acceptable.
     fn change(
@@ -235,17 +198,57 @@ impl ConfigSource for SqlConfigSource {
     }
 
     fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError> {
-        let revision = self
-            .db
-            .read(|tx| {
-                tx.query_opt("SELECT revision FROM ai6_clock WHERE name = 'config'", &[])?
-                    .map_or(Ok(0), |row| row.int(0))
-            })
-            .map_err(failed)?;
-        if u64::try_from(revision).ok() == Some(since.get()) {
+        if self.revision()? == since {
             return Ok(None);
         }
         self.load().map(Some)
+    }
+
+    fn revision(&self) -> Result<ConfigRevision, RosterError> {
+        revision_of(self.db.read(clock).map_err(failed)?)
+    }
+
+    fn definitions(&self, record: ConfigRecord) -> Result<ConfigDefinitions, RosterError> {
+        let (revision, rows) = self
+            .db
+            .read(|tx| Ok((clock(tx)?, table(tx, record)?)))
+            .map_err(failed)?;
+        Ok(ConfigDefinitions {
+            revision: revision_of(revision)?,
+            records: parsed(rows)?,
+        })
+    }
+
+    fn put(
+        &self,
+        record: ConfigRecord,
+        key: &str,
+        definition: &serde_json::Value,
+    ) -> Result<ConfigRevision, RosterError> {
+        if key.trim().is_empty() || !definition.is_object() {
+            return Err(error(format!(
+                "{SOURCE}: a {} needs a key and a JSON object",
+                record.name()
+            )));
+        }
+        let text = definition.to_string();
+        self.change(|tx, revision| {
+            Ok(tx.execute(upsert(record), &[key.into(), text.into(), revision.into()])? > 0)
+        })?
+        .ok_or_else(|| {
+            error_of(
+                RosterErrorKind::Unavailable,
+                format!("{SOURCE}: the {} {key:?} was not stored", record.name()),
+            )
+        })
+    }
+
+    fn remove(
+        &self,
+        record: ConfigRecord,
+        key: &str,
+    ) -> Result<Option<ConfigRevision>, RosterError> {
+        self.change(|tx, _| Ok(tx.execute(delete(record), &[key.into()])? > 0))
     }
 }
 
@@ -302,6 +305,7 @@ mod tests {
         let station_b = SqlConfigSource::open(location).unwrap();
         let seeded = station_b.changes_since(empty.revision).unwrap().unwrap();
         assert_ne!(seeded.revision, empty.revision);
+        assert_eq!(station_a.revision().unwrap(), seeded.revision);
         assert_eq!(seeded.roster.operation("G").unwrap().roster, ["007", "008"]);
         let inherited = seeded.roster.agent(Some("G"), "008").unwrap();
         assert_eq!(
@@ -324,6 +328,19 @@ mod tests {
         );
         assert!(station_a.changes_since(seeded.revision).unwrap().is_none());
         assert_eq!(station_a.load().unwrap().revision, seeded.revision);
+
+        let agents = station_a.definitions(ConfigRecord::Agent).unwrap();
+        assert_eq!(agents.revision, seeded.revision);
+        assert_eq!(
+            agents.records,
+            [
+                (
+                    "007".to_owned(),
+                    json!({"handler": "mock-agent", "roles": ["case-officer"], "priority": 5})
+                ),
+                ("008".to_owned(), json!({"extends": "007", "priority": 1})),
+            ]
+        );
 
         assert!(
             station_b
@@ -356,13 +373,16 @@ mod tests {
             (ConfigRecord::Cover, "odd", json!({"unknown": true})),
             (ConfigRecord::Agent, "011", json!("not an object")),
         ] {
-            assert!(
-                source.put(record, key, &definition).is_err(),
-                "{record:?} {key} {definition}"
+            let refused = source.put(record, key, &definition).unwrap_err();
+            assert_eq!(
+                refused.kind(),
+                RosterErrorKind::Invalid,
+                "{record:?} {key} {definition}: {refused}"
             );
         }
         let refused = source.remove(ConfigRecord::Agent, "007").unwrap_err();
         assert!(refused.to_string().contains("007"), "{refused}");
+        assert_eq!(refused.kind(), RosterErrorKind::Invalid);
         assert!(source.changes_since(good.revision).unwrap().is_none());
     }
 

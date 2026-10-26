@@ -596,12 +596,12 @@ fn sweep_homes(state: &DaemonState, claimed: &[String]) {
 
 /// Records this Station's view of each configured account in the Registry, with the
 /// Operations of its roster that may draw from the pool, so the board can show it before any
-/// Session claims it. Run when the Station starts, the only time it reads its configuration.
+/// Session claims it, and withdraws its profile of every account its configuration no longer
+/// declares. Run when the Station starts and whenever its roster or loadouts change.
 pub(super) fn declare(state: &DaemonState) {
-    let Some(catalog) = state.station.credentials.catalog() else {
-        return;
-    };
-    for pool in catalog.pools() {
+    let mut declared = std::collections::BTreeSet::new();
+    let pools = state.station.credentials.catalog().into_iter();
+    for pool in pools.flat_map(|catalog| catalog.pools()) {
         let operations: Vec<String> = state
             .roster
             .operations()
@@ -618,11 +618,12 @@ pub(super) fn declare(state: &DaemonState) {
             let Some(profile) = AccountProfile::of(pool, account.name(), operations.clone()) else {
                 continue;
             };
-            if let Err(error) = state.intake.declare_account(
-                &AccountRef::new(pool.id(), account.name()),
-                &state.station_id,
-                &profile,
-            ) {
+            let reference = AccountRef::new(pool.id(), account.name());
+            let declaring = state
+                .intake
+                .declare_account(&reference, &state.station_id, &profile);
+            declared.insert(reference);
+            if let Err(error) = declaring {
                 eprintln!(
                     "ai6: account {}/{} not declared: {error}",
                     pool.id(),
@@ -640,6 +641,25 @@ pub(super) fn declare(state: &DaemonState) {
                     account.name()
                 );
             }
+        }
+    }
+    let stale = match state.intake.accounts() {
+        Ok(accounts) => accounts
+            .into_iter()
+            .filter(|account| {
+                account.profiles.contains_key(&state.station_id)
+                    && !declared.contains(&account.account)
+            })
+            .map(|account| account.account)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            eprintln!("ai6: accounts this Station no longer declares were not withdrawn: {error}");
+            Vec::new()
+        }
+    };
+    for account in stale {
+        if let Err(error) = state.intake.withdraw_account(&account, &state.station_id) {
+            eprintln!("ai6: account {account} not withdrawn: {error}");
         }
     }
 }

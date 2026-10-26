@@ -582,6 +582,14 @@ pub trait AccountStore {
         profile: &AccountProfile,
     ) -> io::Result<()>;
 
+    /// Drops `station`'s profile of an account its configuration no longer declares, keeping
+    /// other Stations' profiles and what Sessions recorded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid name or when the Registry cannot be written.
+    fn withdraw_account(&self, account: &AccountRef, station: &str) -> io::Result<()>;
+
     /// Picks an account of the request's pool and records the claim, in one write; the
     /// Session's claims on any other account are dropped in the same write. `None` when no
     /// account has room: each is limited or at its `max_concurrent`.
@@ -720,6 +728,12 @@ impl AccountStore for FileRegistry {
     ) -> io::Result<()> {
         self.update_account(account, |state| {
             state.profiles.insert(station.to_owned(), profile.clone());
+        })
+    }
+
+    fn withdraw_account(&self, account: &AccountRef, station: &str) -> io::Result<()> {
+        self.update_account(account, |state| {
+            state.profiles.remove(station);
         })
     }
 
@@ -912,6 +926,17 @@ mod tests {
             "one per Station; a Station replaces its own"
         );
         assert_eq!(a.profile().unwrap().operations, ["G", "H", "L"]);
+
+        registry.withdraw_account(&account, "s1").unwrap();
+        let a = state(registry.as_ref(), "a");
+        assert_eq!(
+            a.profiles.keys().collect::<Vec<_>>(),
+            ["s2"],
+            "a Station withdraws only its own profile"
+        );
+        assert_eq!(a.profile().unwrap().operations, ["L"]);
+        registry.withdraw_account(&account, "s2").unwrap();
+        assert!(state(registry.as_ref(), "a").profile().is_none());
     }
 
     fn concurrent_stations_claiming_a_pool_of_one_get_one_winner(store: &dyn Store) {

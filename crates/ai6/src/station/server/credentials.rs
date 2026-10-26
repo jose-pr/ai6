@@ -83,6 +83,15 @@ impl CredentialDesk {
         self.catalog.as_deref()
     }
 
+    pub(super) fn shared_catalog(&self) -> Option<Arc<LoadoutCatalog>> {
+        self.catalog.clone()
+    }
+
+    /// Issues from `catalog` from now on; leases already issued keep their own terms.
+    pub(super) fn set_catalog(&mut self, catalog: Option<Arc<LoadoutCatalog>>) {
+        self.catalog = catalog;
+    }
+
     pub(crate) fn with_account_login(
         mut self,
         login: Arc<dyn crate::directorates::q::AccountLogin>,

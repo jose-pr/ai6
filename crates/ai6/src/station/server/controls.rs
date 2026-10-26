@@ -39,7 +39,7 @@ async fn serve(state: DaemonState, mut receiver: Receiver<ControlDelivery>) {
     while !state.stopping.load(Ordering::Acquire) {
         match tokio::time::timeout(STOP_CHECK, receiver.recv()).await {
             Ok(Some(delivery)) => {
-                let outcome = apply(&state, &delivery.control).await;
+                let outcome = apply(&state.current(), &delivery.control).await;
                 let _ = delivery.outcome.send(outcome);
             }
             Ok(None) => break,

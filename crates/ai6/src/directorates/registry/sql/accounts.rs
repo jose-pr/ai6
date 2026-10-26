@@ -80,6 +80,12 @@ impl AccountStore for SqlRegistry {
         })
     }
 
+    fn withdraw_account(&self, account: &AccountRef, station: &str) -> io::Result<()> {
+        self.update_account(account, |state| {
+            state.profiles.remove(station);
+        })
+    }
+
     fn claim_account(
         &self,
         request: &AccountClaimRequest,

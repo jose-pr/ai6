@@ -247,6 +247,10 @@ struct ServeArgs {
     /// the 300-second requirements probe.
     #[arg(long, value_parser = parse_duration, default_value = "60")]
     resources_every: Duration,
+    /// Seconds between checks of the roster source and loadouts.toml; a change that passes
+    /// the configuration checks applies without a restart. 0 keeps what the Station started with.
+    #[arg(long, value_parser = parse_duration, default_value = "5")]
+    config_poll: Duration,
 }
 
 #[derive(Debug, Subcommand)]
@@ -341,6 +345,7 @@ async fn main() -> ExitCode {
                 terminal,
                 headquarters_lease,
                 resources_every,
+                config_poll,
             } = *args;
             let publisher = match publisher_config() {
                 Ok(config) => config,
@@ -349,8 +354,9 @@ async fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let mut station_config =
-                ai6::StationConfig::default().with_resources_every(resources_every);
+            let mut station_config = ai6::StationConfig::default()
+                .with_resources_every(resources_every)
+                .with_config_poll(config_poll);
             if !role.is_empty() {
                 station_config =
                     station_config.with_roles(role.iter().filter_map(|role| match role.as_str() {

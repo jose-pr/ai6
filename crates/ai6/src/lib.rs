@@ -25,9 +25,10 @@ pub use directorates::m::approvals::{
     clearance_at_least,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
-pub use directorates::m::config::{ConfigRecord, SqlConfigSource};
+pub use directorates::m::config::SqlConfigSource;
 pub use directorates::m::config::{
-    ConfigRevision, ConfigSnapshot, ConfigSource, MemoryConfigSource, TomlConfigDir,
+    ConfigDefinitions, ConfigRecord, ConfigRevision, ConfigSnapshot, ConfigSource, ConfigStatus,
+    MemoryConfigSource, TomlConfigDir,
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
@@ -39,7 +40,7 @@ pub use directorates::m::placement::{
 };
 pub use directorates::m::roster::{
     Agent, AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS, OnLost, Operation, Roster,
-    RosterBuilder, RosterError, Workspace,
+    RosterBuilder, RosterError, RosterErrorKind, Workspace,
 };
 pub use directorates::m::theaters::{
     AgentMode, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind, EphemeralAccess,
@@ -138,8 +139,8 @@ pub use directorates::section_00::agent::{
 pub use guatiao;
 #[cfg(feature = "daemon")]
 pub use station::server::{
-    DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_RESOURCES_EVERY, DEFAULT_TERMINAL,
-    ServeConfig, StationConfig, StationRole, serve, serve_with_capacity, serve_with_config_dir,
-    serve_with_config_dir_and_capacity, serve_with_options, serve_with_plugins,
-    serve_with_plugins_and_capacity,
+    DEFAULT_CONFIG_POLL, DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_RESOURCES_EVERY,
+    DEFAULT_TERMINAL, ServeConfig, StationConfig, StationRole, serve, serve_with_capacity,
+    serve_with_config_dir, serve_with_config_dir_and_capacity, serve_with_options,
+    serve_with_plugins, serve_with_plugins_and_capacity,
 };

@@ -299,11 +299,33 @@ pub struct Roster {
 
 /// Configuration could not be read or resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RosterError(String);
+pub struct RosterError {
+    message: String,
+    kind: RosterErrorKind,
+}
+
+/// What kind of failure a [`RosterError`] is.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RosterErrorKind {
+    /// The configuration is not acceptable: the change or file is refused as it stands.
+    Invalid,
+    /// The configuration could not be read or written; trying again may succeed.
+    Unavailable,
+    /// The source does not take changes ([`ConfigSource::put`](crate::ConfigSource::put)).
+    ReadOnly,
+}
+
+impl RosterError {
+    /// What kind of failure this is.
+    pub fn kind(&self) -> RosterErrorKind {
+        self.kind
+    }
+}
 
 impl std::fmt::Display for RosterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -633,6 +655,20 @@ impl Roster {
                     tags.join(", ")
                 ))
             })
+    }
+
+    /// Resolves every global Agent, `extends` and clearance included, as a SQL roster does
+    /// when it is read: an Agent that cannot be resolved is an error here rather than missing
+    /// when it is first wanted. An Operation's trusted `.ai6/agents.toml` is not read.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first Agent that cannot be resolved.
+    pub fn check_agents(&self) -> Result<(), RosterError> {
+        for key in self.agents.keys() {
+            resolve_agent(key, &self.agents, &mut BTreeSet::new())?;
+        }
+        Ok(())
     }
 
     /// Lists the Agents posted to a registered Operation after applying its roster policy.
@@ -1213,7 +1249,14 @@ fn resolve_agent(
 }
 
 fn parse_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, RosterError> {
-    let text = fs::read_to_string(path).map_err(|e| error(format!("{}: {e}", path.display())))?;
+    let text = fs::read_to_string(path).map_err(|e| {
+        let kind = if e.kind() == std::io::ErrorKind::InvalidData {
+            RosterErrorKind::Invalid
+        } else {
+            RosterErrorKind::Unavailable
+        };
+        error_of(kind, format!("{}: {e}", path.display()))
+    })?;
     toml::from_str(&text).map_err(|e| error(format!("{}: {e}", path.display())))
 }
 
@@ -1264,7 +1307,18 @@ fn validate_clearance(clearance: &str) -> Result<(), RosterError> {
 }
 
 pub(crate) fn error(message: impl Into<String>) -> RosterError {
-    RosterError(message.into())
+    RosterError {
+        message: message.into(),
+        kind: RosterErrorKind::Invalid,
+    }
+}
+
+/// A [`RosterError`] of another kind than [`RosterErrorKind::Invalid`].
+pub(crate) fn error_of(kind: RosterErrorKind, message: impl Into<String>) -> RosterError {
+    RosterError {
+        message: message.into(),
+        kind,
+    }
 }
 
 #[cfg(test)]
