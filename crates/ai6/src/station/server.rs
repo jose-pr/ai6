@@ -10173,7 +10173,14 @@ mod tests {
         }
 
         // Station A dies: it lets go of nothing and tells the runner nothing.
-        let crashed = first.sessions.lock().unwrap().remove("mission-1").unwrap();
+        let removed = first.sessions.lock().unwrap().remove("mission-1");
+        let crashed = removed.unwrap_or_else(|| {
+            panic!(
+                "Station A dropped the Session before it crashed: Mission {:?}; events {:?}",
+                first.missions.lock().unwrap().get("mission-1"),
+                std::iter::from_fn(|| pop_event(&first, "mission-1")).collect::<Vec<_>>()
+            )
+        });
         drop(crashed);
         // A's pump may have taken a tick past the fifth before it stopped; A received that
         // one, so the replay starts after it.
