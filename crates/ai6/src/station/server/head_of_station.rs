@@ -12,6 +12,8 @@
 #[cfg(feature = "cables-mcp")]
 mod hygiene;
 #[cfg(feature = "cables-mcp")]
+mod provision;
+#[cfg(feature = "cables-mcp")]
 mod report;
 #[cfg(feature = "cables-mcp")]
 mod safe_houses;
@@ -161,6 +163,18 @@ impl Desk {
             reason,
         )?;
         serde_json::to_value(tidied).map_err(|error| error.to_string())
+    }
+
+    /// Checks a Theater against its declaration, or with `apply` runs the steps it declares.
+    /// Blocks on the Theater's transport; call from `spawn_blocking`.
+    pub(super) fn provision(
+        &self,
+        theater: &str,
+        apply: bool,
+    ) -> Result<serde_json::Value, String> {
+        let round = self.admit()?;
+        let provisioned = provision::provision_theater(&self.state, &round, theater, apply)?;
+        serde_json::to_value(provisioned).map_err(|error| error.to_string())
     }
 }
 

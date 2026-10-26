@@ -1090,8 +1090,32 @@ struct TidyArgs {
     reason: Option<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct ProvisionArgs {
+    /// The Theater, as station_report lists it.
+    theater: String,
+    /// false checks and changes nothing; true runs the steps its declaration calls for.
+    #[serde(default)]
+    apply: bool,
+}
+
 #[tool_router(router = station_router)]
 impl CableTools {
+    /// Check or fit out a Theater as its operator declared it.
+    #[tool(
+        description = "Check a Theater this Station reaches against what its operator declared (required programs, free space, the runner and its provider libraries), or with apply true run exactly the declared steps (install commands, copies of the runner) and nothing else. Each step answers ok, changed, would-change or failed with a detail. Anything the declaration does not cover is yours to report, not to change. A Theater made for one Mission, or an ephemeral template, is refused."
+    )]
+    async fn provision_theater(&self, Parameters(args): Parameters<ProvisionArgs>) -> String {
+        let Some(desk) = self.station.get().cloned() else {
+            return "The Station's tools are for a Head of Station round only".to_owned();
+        };
+        match tokio::task::spawn_blocking(move || desk.provision(&args.theater, args.apply)).await {
+            Ok(Ok(provisioned)) => provisioned.to_string(),
+            Ok(Err(reason)) => format!("Provisioning refused: {reason}"),
+            Err(_) => "Provisioning failed".to_owned(),
+        }
+    }
+
     /// Tidy a safe house this Station keeps, within the Station's limits.
     #[tool(
         description = "Tidy a safe house this Station keeps, for a Mission that is over. action caches removes its cache directories once it has been left alone for the cache age; action remove removes it at once when everything in it exists elsewhere, and otherwise asks for green ink (kind delete) and answers pending: wait for the decision, which arrives as a message, then call again to remove it. A Mission that is not over, one this Station does not keep, or any other action is refused."

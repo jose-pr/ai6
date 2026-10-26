@@ -67,7 +67,7 @@ struct TheaterState {
 pub(super) struct Limits {
     pub(super) cache_dirs: Vec<String>,
     pub(super) cache_age_secs: u64,
-    pub(super) unattended: [&'static str; 3],
+    pub(super) unattended: [&'static str; 4],
     pub(super) green_ink: [&'static str; 1],
     pub(super) never: [&'static str; 4],
 }
@@ -81,6 +81,7 @@ pub(super) fn limits(state: &DaemonState) -> Limits {
             "read everything station_report shows",
             "remove the safe house of a Mission that is over when everything in it exists elsewhere",
             "remove the cache directories named in cache_dirs from the safe house of a Mission over for at least cache_age_secs",
+            "run the provisioning steps a Theater's operator declared for it (provision_theater with apply)",
         ],
         green_ink: [
             "remove the safe house of a Mission that is over while it holds work that exists nowhere else (kind delete)",

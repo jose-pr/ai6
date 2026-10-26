@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Theater setup on a round: a Head of Station round may call `provision_theater {theater,
+  apply}` on a Theater its Station reaches. `apply = false` checks (as `ai6 theater provision
+  --check`); `apply = true` runs exactly the steps the Theater's `requires`, `provision` and
+  `runner` declare, refreshes the probe report placement reads, and audits
+  `head_of_station.provisioned` when a step changed. An ephemeral template and a Theater made
+  for one Mission are refused.
 - Safe-house hygiene within fixed limits: a Head of Station round may call
   `tidy_safe_house {mission, action, reason?}` on the kept safe house of a Mission of its
   Station that is over. `caches` removes the hygiene's cache directories once the safe house

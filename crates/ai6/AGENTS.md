@@ -2859,6 +2859,12 @@ removed?, freed_bytes, green_ink?}` with `status` `caches-removed`, `removed` or
 status. Audited with resource `station:ID`, actor `agent:CODENAME`:
 `head_of_station.caches_removed` (target `MISSION PATHS`) and `head_of_station.removed`
 (target `MISSION exported` or `MISSION approved by REQUEST`).
+`provision_theater {theater, apply = false}` runs `q::provision::provision` on a Theater this
+Station reaches with `check = !apply`, only the steps its `requires`, `provision` and
+`runner` declare; with `apply` it then probes again and records the report
+(`Transports::set_report`) and, when a step changed, audits `head_of_station.provisioned`
+(target `THEATER STEP...`). Answers `{theater, applied, steps: [ProvisionStep], fit}`. An
+ephemeral template, a Theater made for a Mission and one without a transport are refused.
 `check_approval {steps: [{kind, target}, ..]}` (at most 64) answers the harness gate without
 recording anything: a JSON array of `{kind, target, status, request_id?, message?}` with
 `status` `not_required`, `approved` (a live approval of the Mission covers the step,
