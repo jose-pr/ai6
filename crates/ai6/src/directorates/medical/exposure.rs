@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 
 /// The source of a Session whose Mission came from a Source item.
 pub const BRIEF_SOURCE: &str = "brief:source";
+/// The source of a Session whose Mission came from a brief dropped into the Registry's queue
+/// with no provenance.
+pub const BRIEF_REGISTRY_DROP: &str = "brief:registry_drop";
 /// The source of a Session that read review text written by someone else.
 pub const REVIEW: &str = "review";
 /// The Brief `data` key under which a proposal carries its parent's exposure sources.

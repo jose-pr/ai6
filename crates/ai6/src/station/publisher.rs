@@ -568,6 +568,8 @@ pub(crate) struct MissionPublication {
     pub(crate) station_id: Option<String>,
     pub(crate) theater_id: Option<String>,
     pub(crate) mode: crate::directorates::m::placement::ExecutionMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) provenance: Option<crate::directorates::registry::bona_fides::Provenance>,
 }
 
 impl SessionTelemetry {
@@ -1271,6 +1273,7 @@ mod tests {
             station_id: Some("hq".to_owned()),
             theater_id: Some("local".to_owned()),
             mode: crate::directorates::m::placement::ExecutionMode::Field,
+            provenance: None,
         });
         let terminal = TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
             Box::new(RawOutputTerminal),

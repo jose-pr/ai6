@@ -48,8 +48,9 @@ pub use directorates::m::theaters::{
     TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
 };
 pub use directorates::medical::exposure::{
-    BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure, ExposureDefinition,
-    ExposureGate, ExposurePolicy, ExposurePreset, REVIEW, Restriction, cable_source, tool_source,
+    BRIEF_EXPOSURE_KEY, BRIEF_REGISTRY_DROP, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure,
+    ExposureDefinition, ExposureGate, ExposurePolicy, ExposurePreset, REVIEW, Restriction,
+    cable_source, tool_source,
 };
 pub use directorates::medical::quarantine::{
     DEFAULT_BUDGET_STOPS, DEFAULT_STALLS, DEFAULT_WINDOW_SECS, Incident, IncidentKind,
@@ -106,6 +107,7 @@ pub use directorates::registry::backend::{
     CableStore, QuarantineStore, RegistryBackend, SessionStore, SleeperStore, SourceStore,
     StationStore, TimelineStore, UsageStore,
 };
+pub use directorates::registry::bona_fides::{Origin, Provenance, brief_digest};
 pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,
     CableError, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy,

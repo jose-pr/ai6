@@ -20,9 +20,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ai6::directorates::registry::backend::*;
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
-    Authorizer, Brief, ConfigSource, Directory, Lookup, MissionProposal, MissionUsage, Person,
-    Quarantine, StationSettings, Verdict,
+    Authorizer, Brief, ConfigSource, Directory, Lookup, MissionProposal, MissionUsage, Origin,
+    Person, Provenance, Quarantine, StationSettings, Verdict,
 };
+
+/// How a brief's provenance names the gateway as the place it was accepted.
+const GATEWAY_RECEIVER: &str = "universal-exports";
 use ai6_diptel::{
     FrameReceiver, IncomingFrame, LifecycleEvent, MissionId, OperationId, SessionId, SessionState,
     TerminalData, TerminalDirection, TerminalResize, lifecycle_frames, resize_frames,
@@ -1482,7 +1485,8 @@ async fn create_user_mission(
     }
 
     let created = utc_timestamp()?;
-    let brief = Brief {
+    let received_at = unix_timestamp()? as i64;
+    let mut brief = Brief {
         title: request.title,
         body: request.prompt,
         id: Uuid::new_v4().to_string(),
@@ -1497,7 +1501,12 @@ async fn create_user_mission(
         data: BTreeMap::new(),
         created,
         version: 1,
+        provenance: None,
     };
+    brief.provenance = Some(
+        Provenance::new(Origin::Operator, &brief, GATEWAY_RECEIVER, received_at)
+            .with_principal(actor_id.clone()),
+    );
     let mission_id = MissionId::new(brief.key()).map_err(|_| ApiError::internal())?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let audit = AuditRecord {
@@ -1676,7 +1685,7 @@ async fn approve_user_mission_proposal(
     let operation = operation_id.to_string();
     let requested_id = proposal_id.clone();
     let brief = tokio::task::spawn_blocking(move || {
-        registry.promote_mission_proposal(&operation, &requested_id)
+        registry.promote_mission_proposal(&operation, &requested_id, GATEWAY_RECEIVER)
     })
     .await
     .map_err(|_| ApiError::internal())?
@@ -3278,6 +3287,11 @@ pub struct LaunchManifest {
     /// Theater through its transport (`remote-hands`); absent from older Stations.
     #[serde(default)]
     pub mode: Option<String>,
+    /// Where the Mission's brief came from (`origin` `operator`, `source`, `sleeper`,
+    /// `proposal` or `registry_drop`, with who asked), as the Station recorded it; absent for
+    /// a Mission started directly on a Station.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<Provenance>,
 }
 
 #[derive(Deserialize)]
@@ -4843,6 +4857,7 @@ mod tests {
                     data: BTreeMap::new(),
                     created: String::new(),
                     version: 1,
+                    provenance: None,
                 },
             )
             .unwrap()
@@ -4906,6 +4921,15 @@ mod tests {
                     station_id: Some("worker".to_owned()),
                     theater_id: Some("local".to_owned()),
                     mode: Some("remote-hands".to_owned()),
+                    provenance: Some(Provenance::new(
+                        Origin::RegistryDrop,
+                        &serde_json::from_value::<Brief>(
+                            serde_json::json!({"title": "Review the requested change"}),
+                        )
+                        .unwrap(),
+                        "worker",
+                        1_792_922_400,
+                    )),
                 },
             )
             .await
@@ -5197,6 +5221,14 @@ mod tests {
         assert_eq!(queued[0].operation.as_deref(), Some("G"));
         assert_eq!(queued[0].source, "universal-exports");
         assert!(queued[0].created.ends_with('Z'));
+        let provenance = queued[0]
+            .provenance
+            .as_ref()
+            .expect("the gateway records the asker");
+        assert_eq!(provenance.origin, Origin::Operator);
+        assert_eq!(provenance.received_by, GATEWAY_RECEIVER);
+        assert!(provenance.principal.is_some());
+        assert!(provenance.matches(&queued[0]));
         assert_eq!(created["mission_id"], queued[0].key());
         assert!(!created.to_string().contains("Check operation context"));
 
@@ -5696,6 +5728,14 @@ mod tests {
         assert_eq!(mission_detail["brief"]["station_id"], "worker");
         assert_eq!(mission_detail["brief"]["theater_id"], "local");
         assert_eq!(mission_detail["brief"]["mode"], "remote-hands");
+        assert_eq!(
+            mission_detail["brief"]["provenance"]["origin"],
+            "registry_drop"
+        );
+        assert_eq!(
+            mission_detail["brief"]["provenance"]["received_by"],
+            "worker"
+        );
         assert!(
             !serde_json::to_string(&mission_detail)
                 .unwrap()

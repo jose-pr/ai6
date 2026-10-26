@@ -20,6 +20,7 @@ CREATE TABLE ai6_briefs (
     transcript BYTEA,
     report_attempts BIGINT NOT NULL DEFAULT 0,
     reported BIGINT NOT NULL DEFAULT 0,
+    provenance TEXT,
     revision BIGINT NOT NULL
 );
 CREATE INDEX ai6_briefs_state ON ai6_briefs (state);

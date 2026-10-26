@@ -14,6 +14,7 @@ use std::io;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::bona_fides::{Origin, Provenance, now_secs};
 use super::store::{
     Brief, FileRegistry, hex_digest, invalid_data, registry_lock, safe_component, unix_time,
     write_atomic,
@@ -294,6 +295,7 @@ pub fn sleeper_brief(operation: &str, name: &str, sleeper: &Sleeper, window: i64
         data,
         created: label,
         version: 1,
+        provenance: None,
     }
 }
 
@@ -341,7 +343,9 @@ pub trait SleeperStore {
     /// Returns an error when the Registry cannot be written.
     fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool>;
 
-    /// Queues the brief for one window unless it already exists in any Registry state.
+    /// Queues the brief for one window unless it already exists in any Registry state. Its
+    /// [`Provenance`] names the sleeper, its definition's fingerprint and `received_by`, the
+    /// Station that fired it.
     ///
     /// # Errors
     ///
@@ -352,7 +356,25 @@ pub trait SleeperStore {
         name: &str,
         sleeper: &Sleeper,
         window: i64,
+        received_by: &str,
     ) -> io::Result<Fire>;
+}
+
+/// The brief a sleeper queues for one window, with its provenance.
+pub(super) fn fired_brief(
+    operation: &str,
+    name: &str,
+    sleeper: &Sleeper,
+    window: i64,
+    received_by: &str,
+) -> Brief {
+    let mut brief = sleeper_brief(operation, name, sleeper, window);
+    brief.provenance = Some(
+        Provenance::new(Origin::Sleeper, &brief, received_by, now_secs())
+            .with_principal(name)
+            .with_reference(sleeper.fingerprint()),
+    );
+    brief
 }
 
 impl SleeperStore for FileRegistry {
@@ -417,8 +439,9 @@ impl SleeperStore for FileRegistry {
         name: &str,
         sleeper: &Sleeper,
         window: i64,
+        received_by: &str,
     ) -> io::Result<Fire> {
-        match self.submit_brief(&sleeper_brief(operation, name, sleeper, window)) {
+        match self.submit_brief(&fired_brief(operation, name, sleeper, window, received_by)) {
             Ok(_) => Ok(Fire::Queued),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
             Err(error) => Err(error),
@@ -547,13 +570,13 @@ mod tests {
 
         assert_eq!(
             first_hq
-                .fire_sleeper("G", "deps", &sleeper, window)
+                .fire_sleeper("G", "deps", &sleeper, window, "station-a")
                 .unwrap(),
             Fire::Queued
         );
         assert_eq!(
             second_hq
-                .fire_sleeper("G", "deps", &sleeper, window)
+                .fire_sleeper("G", "deps", &sleeper, window, "station-a")
                 .unwrap(),
             Fire::AlreadyFired
         );
@@ -562,12 +585,22 @@ mod tests {
         assert_eq!(queued[0].key(), "sleeper--G.deps.20261025T0300Z");
         assert_eq!(queued[0].role.as_deref(), Some("maintenance"));
         assert_eq!(queued[0].operation.as_deref(), Some("G"));
+        let provenance = queued[0]
+            .provenance
+            .as_ref()
+            .expect("a sleeper brief's origin");
+        assert_eq!(provenance.origin, Origin::Sleeper);
+        assert_eq!(provenance.principal.as_deref(), Some("deps"));
+        assert_eq!(
+            provenance.reference.as_deref(),
+            Some(sleeper.fingerprint().as_str())
+        );
 
         // Running and finished briefs still count as fired.
         let brief = first_hq.claim_new(None).unwrap().unwrap();
         assert_eq!(
             second_hq
-                .fire_sleeper("G", "deps", &sleeper, window)
+                .fire_sleeper("G", "deps", &sleeper, window, "station-a")
                 .unwrap(),
             Fire::AlreadyFired
         );
@@ -582,7 +615,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             second_hq
-                .fire_sleeper("G", "deps", &sleeper, window)
+                .fire_sleeper("G", "deps", &sleeper, window, "station-a")
                 .unwrap(),
             Fire::AlreadyFired
         );
@@ -591,7 +624,9 @@ mod tests {
         // The next night is a new window.
         let next = sleeper.due_window(NOW + 86_400, 0).unwrap();
         assert_eq!(
-            second_hq.fire_sleeper("G", "deps", &sleeper, next).unwrap(),
+            second_hq
+                .fire_sleeper("G", "deps", &sleeper, next, "station-a")
+                .unwrap(),
             Fire::Queued
         );
     }

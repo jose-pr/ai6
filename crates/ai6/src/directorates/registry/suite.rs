@@ -51,6 +51,10 @@ pub(crate) trait TestRegistry: RegistryBackend {
         reason: &str,
         now: f64,
     ) -> Result<SessionRecord, SessionError>;
+
+    /// Puts `record` into the queue under `key` the way an integration with write access
+    /// does: a file in `new/`, or a row, without going through the Registry's API.
+    fn drop_brief(&self, key: &str, record: &str);
 }
 
 macro_rules! clocked_sessions {
@@ -94,6 +98,10 @@ macro_rules! clocked_sessions {
                 now: f64,
             ) -> Result<SessionRecord, SessionError> {
                 <$registry>::lose_session_at(self, id, reason, now)
+            }
+
+            fn drop_brief(&self, key: &str, record: &str) {
+                <$registry>::drop_brief(self, key, record)
             }
         }
     };

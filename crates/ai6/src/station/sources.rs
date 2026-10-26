@@ -16,7 +16,7 @@ use crate::directorates::m::roster::{Operation, Roster};
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::sleepers::Fire;
 use crate::directorates::registry::sources::{
-    CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll,
+    CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
 use crate::station::plugins::Plugins;
 use guatiao::ToValue;
@@ -115,6 +115,7 @@ fn build_source(
 /// are stored, so a crash repeats work that is already idempotent.
 pub(crate) fn poll_source(
     registry: &dyn RegistryBackend,
+    station: &str,
     operation: &str,
     provider: &str,
     source: &dyn Source,
@@ -127,7 +128,7 @@ pub(crate) fn poll_source(
         .map_err(|error| format!("poll failed: {error}"))?;
     let mut summary = PollSummary::default();
     for item in &batch.items {
-        match registry.ingest_source_item(operation, provider, item) {
+        match registry.ingest_source_item(operation, provider, item, station) {
             Ok(Ingest::Queued) => summary.queued += 1,
             Ok(Ingest::Updated) => summary.updated += 1,
             Ok(Ingest::Unchanged) => summary.unchanged += 1,
@@ -277,6 +278,11 @@ fn report_one(
                 operation.id
             )
         })?;
+    if !reportable(&entry.brief, provider) {
+        return Err(format!(
+            "the brief has no provenance from source {provider}, so nothing is posted for it"
+        ));
+    }
     let source = sources
         .entry((operation.id.clone(), provider.to_owned()))
         .or_insert_with(|| build(provider, &setup.settings));
@@ -293,6 +299,7 @@ fn report_one(
 pub(crate) fn fire_due_sleepers(
     registry: &dyn RegistryBackend,
     roster: &Roster,
+    station: &str,
     now: i64,
     warned: &mut BTreeSet<String>,
 ) -> usize {
@@ -318,7 +325,7 @@ pub(crate) fn fire_due_sleepers(
             let Some(window) = sleeper.due_window(now, approval.at) else {
                 continue;
             };
-            match registry.fire_sleeper(&operation.id, name, sleeper, window) {
+            match registry.fire_sleeper(&operation.id, name, sleeper, window, station) {
                 Ok(Fire::Queued) => {
                     queued += 1;
                     eprintln!(
@@ -349,11 +356,14 @@ pub(crate) struct SourceDesk {
     next_report: Mutex<Instant>,
     next_sleepers: Mutex<Instant>,
     warned: Mutex<BTreeSet<String>>,
+    /// This Station: the provenance of the briefs it queues names it.
+    station: String,
 }
 
 impl SourceDesk {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(station: impl Into<String>) -> Self {
         Self {
+            station: station.into(),
             busy: AtomicBool::new(false),
             due: Mutex::new(BTreeMap::new()),
             next_report: Mutex::new(Instant::now()),
@@ -415,7 +425,13 @@ impl SourceDesk {
                     due.insert(key, Instant::now() + setup.interval);
                 }
                 let result = build(&setup.provider, &setup.settings).and_then(|source| {
-                    poll_source(registry, &operation.id, &setup.provider, source.as_ref())
+                    poll_source(
+                        registry,
+                        &self.station,
+                        &operation.id,
+                        &setup.provider,
+                        source.as_ref(),
+                    )
                 });
                 match result {
                     Ok(summary) if summary.queued + summary.updated > 0 => eprintln!(
@@ -456,7 +472,7 @@ impl SourceDesk {
             })
             .unwrap_or(false);
         if sleepers_due && let Ok(mut warned) = self.warned.lock() {
-            fire_due_sleepers(registry, roster, unix_seconds(), &mut warned);
+            fire_due_sleepers(registry, roster, &self.station, unix_seconds(), &mut warned);
         }
     }
 }
@@ -582,7 +598,7 @@ mod tests {
         );
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
-        let desk = SourceDesk::new();
+        let desk = SourceDesk::new("station-a");
 
         desk.run(&plugins, &roster, &registry);
         let queued = registry.list_new().unwrap();
@@ -650,7 +666,7 @@ mod tests {
         let (_dir, roster) = roster_with("overt", "{ fake = { ids = [\"report-me\"] } }");
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
-        let desk = SourceDesk::new();
+        let desk = SourceDesk::new("station-a");
         desk.run(&plugins, &roster, &registry);
         finish_all(
             &registry,
@@ -699,16 +715,22 @@ mod tests {
         let mut warned = BTreeSet::new();
 
         // Nothing fires before an operator approves this exact definition.
-        assert_eq!(fire_due_sleepers(&registry, &roster, NOW, &mut warned), 0);
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", NOW, &mut warned),
+            0
+        );
         assert_eq!(warned.len(), 1);
 
         let window = sleeper.due_window(NOW, 0).unwrap();
         registry
             .authorize_sleeper("G", "deps", &sleeper, "operator", window - 60)
             .unwrap();
-        assert_eq!(fire_due_sleepers(&registry, &roster, NOW, &mut warned), 1);
         assert_eq!(
-            fire_due_sleepers(&registry, &roster, NOW + 600, &mut warned),
+            fire_due_sleepers(&registry, &roster, "station-a", NOW, &mut warned),
+            1
+        );
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", NOW + 600, &mut warned),
             0
         );
 
@@ -716,14 +738,14 @@ mod tests {
         let takeover = FileRegistry::open(state.path());
         let mut fresh = BTreeSet::new();
         assert_eq!(
-            fire_due_sleepers(&takeover, &roster, NOW + 1200, &mut fresh),
+            fire_due_sleepers(&takeover, &roster, "station-a", NOW + 1200, &mut fresh),
             0
         );
         assert_eq!(takeover.list_new().unwrap().len(), 1);
 
         // Tomorrow's window is a new brief.
         assert_eq!(
-            fire_due_sleepers(&takeover, &roster, NOW + 86_400, &mut fresh),
+            fire_due_sleepers(&takeover, &roster, "station-a", NOW + 86_400, &mut fresh),
             1
         );
         assert_eq!(takeover.list_new().unwrap().len(), 2);
@@ -752,8 +774,14 @@ mod tests {
             .unwrap();
         let edited = write("two");
         let mut warned = BTreeSet::new();
-        assert_eq!(fire_due_sleepers(&registry, &edited, NOW, &mut warned), 0);
-        assert_eq!(fire_due_sleepers(&registry, &approved, NOW, &mut warned), 1);
+        assert_eq!(
+            fire_due_sleepers(&registry, &edited, "station-a", NOW, &mut warned),
+            0
+        );
+        assert_eq!(
+            fire_due_sleepers(&registry, &approved, "station-a", NOW, &mut warned),
+            1
+        );
     }
 
     #[test]

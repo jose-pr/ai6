@@ -1074,6 +1074,7 @@ impl CableTools {
             },
             created: String::new(),
             version: 1,
+            provenance: None,
         };
         let proposal = match MissionProposal::try_new(
             principal.operation().to_owned(),

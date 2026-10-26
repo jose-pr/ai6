@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use super::db::Tx;
 use super::{SqlRegistry, bounded_json, from_json, to_json};
+use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, MAX_REPORT_ATTEMPTS, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore,
-    is_source_key, refresh_queued, source_brief,
+    is_source_key, refresh_queued, source_brief, source_provenance,
 };
 use crate::directorates::registry::store::{
     Brief, BriefStore, Lease, LeaseRecovery, MAX_BRIEF_BYTES, MAX_BRIEFS,
@@ -17,14 +18,32 @@ use crate::directorates::registry::store::{
     MissionProposal, invalid_data, lost_outcome, unix_time, validate_registry_key,
 };
 
+/// The brief record, without its provenance.
 fn brief_json(brief: &Brief) -> io::Result<String> {
-    bounded_json(brief, MAX_BRIEF_BYTES, "brief")
+    let (record, _) = bona_fides::seal(brief)?;
+    bounded_json(&record, MAX_BRIEF_BYTES, "brief")
+}
+
+/// The `provenance` column for `brief`.
+fn provenance_json(brief: &Brief) -> io::Result<Option<String>> {
+    bona_fides::seal(brief)?
+        .1
+        .map(|provenance| to_json(&provenance))
+        .transpose()
+}
+
+/// A stored brief and its `provenance` column; a record's own `provenance` is never read.
+fn stored_brief(record: &str, provenance: Option<String>) -> io::Result<Brief> {
+    let mut brief: Brief = from_json(record, "brief")?;
+    let kept = provenance.and_then(|text| serde_json::from_str::<Provenance>(&text).ok());
+    bona_fides::unseal(&mut brief, kept);
+    Ok(brief)
 }
 
 /// The queued briefs in Registry order: priority, creation time, key.
 fn queued(tx: &mut Tx<'_>) -> io::Result<Vec<Brief>> {
     let rows = tx.query(
-        "SELECT brief FROM ai6_briefs WHERE state = 'new' LIMIT $1",
+        "SELECT brief, provenance FROM ai6_briefs WHERE state = 'new' LIMIT $1",
         &[(MAX_BRIEFS + 1).into()],
     )?;
     if rows.len() > MAX_BRIEFS {
@@ -34,7 +53,7 @@ fn queued(tx: &mut Tx<'_>) -> io::Result<Vec<Brief>> {
     }
     let mut briefs = Vec::with_capacity(rows.len());
     for row in rows {
-        if let Ok(brief) = serde_json::from_str::<Brief>(&row.text(0)?)
+        if let Ok(brief) = stored_brief(&row.text(0)?, row.opt_text(1)?)
             && brief.validate().is_ok()
         {
             briefs.push(brief);
@@ -58,10 +77,12 @@ fn brief_state(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<String>> {
 
 fn insert_brief(tx: &mut Tx<'_>, brief: &Brief, revision: i64) -> io::Result<()> {
     tx.execute(
-        "INSERT INTO ai6_briefs (key, state, brief, revision) VALUES ($1, 'new', $2, $3)",
+        "INSERT INTO ai6_briefs (key, state, brief, provenance, revision) \
+         VALUES ($1, 'new', $2, $3, $4)",
         &[
             brief.key().into(),
             brief_json(brief)?.into(),
+            provenance_json(brief)?.into(),
             revision.into(),
         ],
     )?;
@@ -166,8 +187,8 @@ fn finish_in(
         )?;
     } else {
         tx.execute(
-            "INSERT INTO ai6_briefs (key, state, brief, outcome, transcript, revision) \
-             VALUES ($1, $2, $3, $4, $5, $6) \
+            "INSERT INTO ai6_briefs (key, state, brief, outcome, transcript, revision, provenance) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
              ON CONFLICT (key) DO UPDATE SET state = excluded.state, brief = excluded.brief, \
              outcome = excluded.outcome, \
              transcript = coalesce(excluded.transcript, ai6_briefs.transcript), \
@@ -179,6 +200,7 @@ fn finish_in(
                 outcome.into(),
                 transcript.into(),
                 revision.into(),
+                provenance_json(brief)?.into(),
             ],
         )?;
     }
@@ -222,6 +244,20 @@ fn set_proposal_state(
         &[operation.into(), id.into(), state.into(), revision.into()],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+impl SqlRegistry {
+    pub(crate) fn drop_brief(&self, key: &str, record: &str) {
+        self.write(|tx, revision| {
+            tx.execute(
+                "INSERT INTO ai6_briefs (key, state, brief, revision) VALUES ($1, 'new', $2, $3)",
+                &[key.into(), record.into(), revision.into()],
+            )
+            .map(drop)
+        })
+        .unwrap();
+    }
 }
 
 impl BriefStore for SqlRegistry {
@@ -300,15 +336,31 @@ impl BriefStore for SqlRegistry {
         })
     }
 
-    fn promote_mission_proposal(&self, operation: &str, proposal_id: &str) -> io::Result<Brief> {
+    fn promote_mission_proposal(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+        received_by: &str,
+    ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
         self.write(|tx, revision| {
             let (state, proposal) = proposal(tx, operation, proposal_id)?.ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "Mission proposal does not exist")
             })?;
+            let stored = |tx: &mut Tx<'_>, key: String| -> io::Result<Option<Brief>> {
+                tx.query_opt(
+                    "SELECT brief, provenance FROM ai6_briefs WHERE key = $1",
+                    &[key.into()],
+                )?
+                .map(|row| stored_brief(&row.text(0)?, row.opt_text(1)?))
+                .transpose()
+            };
             match state.as_str() {
-                "approved" => return Ok(proposal.brief),
+                "approved" => {
+                    let key = proposal.brief.key();
+                    return Ok(stored(tx, key)?.unwrap_or(proposal.brief));
+                }
                 "rejected" => {
                     return Err(io::Error::new(
                         io::ErrorKind::AlreadyExists,
@@ -317,19 +369,23 @@ impl BriefStore for SqlRegistry {
                 }
                 _ => {}
             }
-            let brief = proposal.brief;
+            let mut brief = proposal.brief.clone();
             let key = brief.key();
             match brief_state(tx, &key)?.as_deref() {
                 Some("new") => {
-                    let row = tx
-                        .query_opt("SELECT brief FROM ai6_briefs WHERE key = $1", &[key.into()])?
-                        .ok_or_else(|| invalid_data("queued brief vanished"))?;
-                    if from_json::<Brief>(&row.text(0)?, "brief")? != brief {
+                    let queued =
+                        stored(tx, key)?.ok_or_else(|| invalid_data("queued brief vanished"))?;
+                    let record = Brief {
+                        provenance: None,
+                        ..queued.clone()
+                    };
+                    if record != brief {
                         return Err(io::Error::new(
                             io::ErrorKind::AlreadyExists,
                             "Mission proposal brief conflicts with queued intake",
                         ));
                     }
+                    brief = queued;
                 }
                 Some(_) => {
                     return Err(io::Error::new(
@@ -337,7 +393,10 @@ impl BriefStore for SqlRegistry {
                         "Mission proposal brief already exists in a terminal intake state",
                     ));
                 }
-                None => insert_brief(tx, &brief, revision)?,
+                None => {
+                    brief.provenance = Some(proposal_provenance(&proposal, received_by));
+                    insert_brief(tx, &brief, revision)?;
+                }
             }
             set_proposal_state(tx, operation, proposal_id, "approved", revision)?;
             Ok(brief)
@@ -451,13 +510,13 @@ impl BriefStore for SqlRegistry {
         validate_registry_key(key)?;
         self.read(|tx| {
             let Some(row) = tx.query_opt(
-                "SELECT brief FROM ai6_briefs WHERE key = $1 AND state = 'claimed'",
+                "SELECT brief, provenance FROM ai6_briefs WHERE key = $1 AND state = 'claimed'",
                 &[key.into()],
             )?
             else {
                 return Ok(None);
             };
-            let brief: Brief = from_json(&row.text(0)?, "claimed brief")?;
+            let brief = stored_brief(&row.text(0)?, row.opt_text(1)?)?;
             brief.validate()?;
             Ok(Some(brief))
         })
@@ -621,9 +680,11 @@ impl SourceStore for SqlRegistry {
         operation: &str,
         provider: &str,
         item: &SourceItem,
+        received_by: &str,
     ) -> io::Result<Ingest> {
         let mut brief = source_brief(operation, provider, item);
         brief.validate()?;
+        brief.provenance = Some(source_provenance(provider, item, &brief, received_by));
         let key = brief.key();
         self.write(|tx, revision| {
             let Some(row) = tx.query_opt(
@@ -642,10 +703,11 @@ impl SourceStore for SqlRegistry {
             let outcome = refresh_queued(&mut brief, from_json(&row.text(1)?, "brief")?);
             if outcome == Ingest::Updated {
                 tx.execute(
-                    "UPDATE ai6_briefs SET brief = $2, revision = $3 WHERE key = $1",
+                    "UPDATE ai6_briefs SET brief = $2, provenance = $3, revision = $4 WHERE key = $1",
                     &[
                         key.as_str().into(),
                         brief_json(&brief)?.into(),
+                        provenance_json(&brief)?.into(),
                         revision.into(),
                     ],
                 )?;
@@ -657,7 +719,7 @@ impl SourceStore for SqlRegistry {
     fn unreported_source_briefs(&self) -> io::Result<Vec<FinishedSourceBrief>> {
         self.read(|tx| {
             let rows = tx.query(
-                "SELECT key, state, brief, outcome FROM ai6_briefs \
+                "SELECT key, state, brief, outcome, provenance FROM ai6_briefs \
                  WHERE state IN ('done', 'failed') AND reported = 0 AND report_attempts < $1 \
                  AND key LIKE 'source!_%' ESCAPE '!' ORDER BY key LIMIT $2",
                 &[MAX_REPORT_ATTEMPTS.into(), (MAX_BRIEFS * 8).into()],
@@ -667,7 +729,7 @@ impl SourceStore for SqlRegistry {
                 if !is_source_key(&row.text(0)?) {
                     continue;
                 }
-                let Ok(brief) = serde_json::from_str::<Brief>(&row.text(2)?) else {
+                let Ok(brief) = stored_brief(&row.text(2)?, row.opt_text(4)?) else {
                     continue;
                 };
                 if !brief.source.starts_with(SOURCE_BRIEF_PREFIX) {

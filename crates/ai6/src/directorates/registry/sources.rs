@@ -15,9 +15,10 @@ use guatiao::{FromValue, Schema, ToValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::bona_fides::{Origin, Provenance, now_secs};
 use super::store::{
-    Brief, FileRegistry, MAX_BRIEF_BYTES, MAX_BRIEFS, hex_digest, invalid_data, registry_lock,
-    safe_component, write_atomic,
+    Brief, FileRegistry, MAX_BRIEFS, hex_digest, invalid_data, registry_lock, safe_component,
+    write_atomic,
 };
 
 /// The Brief `source` prefix that marks a brief as created from a [`Source`] provider.
@@ -173,7 +174,39 @@ pub fn source_brief(operation: &str, provider: &str, item: &SourceItem) -> Brief
         data,
         created: item.updated.clone(),
         version: 1,
+        provenance: None,
     }
+}
+
+/// The provenance of an item's brief: the provider, the item and its link, as the Station
+/// `received_by` polled them.
+pub(super) fn source_provenance(
+    provider: &str,
+    item: &SourceItem,
+    brief: &Brief,
+    received_by: &str,
+) -> Provenance {
+    Provenance::new(Origin::Source, brief, received_by, now_secs())
+        .with_principal(provider)
+        .with_reference(item.id.clone())
+        .with_item_url(item.url.clone())
+}
+
+/// Whether a finished brief may be reported to `provider`: the Registry kept a Source
+/// provenance for it naming that provider and the item its data names. A brief dropped into
+/// the queue with a `source:` name has none, so nothing is posted on its behalf.
+pub fn reportable(brief: &Brief, provider: &str) -> bool {
+    let item = brief
+        .data
+        .get("source")
+        .and_then(|source| source.get("item"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(&brief.id);
+    brief.provenance.as_ref().is_some_and(|provenance| {
+        provenance.origin == Origin::Source
+            && provenance.principal.as_deref() == Some(provider)
+            && provenance.reference.as_deref() == Some(item)
+    })
 }
 
 /// Wraps an item's own words so an Agent reads them as data, not as instructions.
@@ -282,7 +315,8 @@ pub trait SourceStore {
     fn set_source_cursor(&self, operation: &str, provider: &str, cursor: &str) -> io::Result<()>;
 
     /// Queues the item as a brief, updates the queued brief when the item changed, and
-    /// leaves a claimed or finished brief alone.
+    /// leaves a claimed or finished brief alone. The brief's [`Provenance`] names the provider
+    /// and item, and `received_by`, the Station that polled it.
     ///
     /// # Errors
     ///
@@ -292,9 +326,11 @@ pub trait SourceStore {
         operation: &str,
         provider: &str,
         item: &SourceItem,
+        received_by: &str,
     ) -> io::Result<Ingest>;
 
-    /// Lists finished source briefs whose outcome has not reached the source yet.
+    /// Lists finished source briefs whose outcome has not reached the source yet, each with
+    /// the provenance the Registry kept for it.
     ///
     /// A brief whose report failed `MAX_REPORT_ATTEMPTS` times is no longer listed.
     ///
@@ -341,9 +377,11 @@ impl SourceStore for FileRegistry {
         operation: &str,
         provider: &str,
         item: &SourceItem,
+        received_by: &str,
     ) -> io::Result<Ingest> {
         let mut brief = source_brief(operation, provider, item);
         brief.validate()?;
+        brief.provenance = Some(source_provenance(provider, item, &brief, received_by));
         let name = format!("{}.json", brief.key());
         let _lock = registry_lock(&self.root)?;
         for state in ["done", "failed"] {
@@ -368,11 +406,7 @@ impl SourceStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ingest::Queued,
             Err(error) => return Err(error),
         };
-        let bytes = serde_json::to_vec_pretty(&brief).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_BRIEF_BYTES {
-            return Err(invalid_data("brief exceeds the size limit"));
-        }
-        write_atomic(&path, &bytes)?;
+        self.write_brief(&path, &brief)?;
         Ok(outcome)
     }
 
@@ -402,12 +436,13 @@ impl SourceStore for FileRegistry {
                 let Ok(bytes) = fs::read(directory.join(&name)) else {
                     continue;
                 };
-                let Ok(brief) = serde_json::from_slice::<Brief>(&bytes) else {
+                let Ok(mut brief) = serde_json::from_slice::<Brief>(&bytes) else {
                     continue;
                 };
                 if !brief.source.starts_with(SOURCE_BRIEF_PREFIX) {
                     continue;
                 }
+                self.attach_provenance(&mut brief);
                 let outcome = fs::read(directory.join(format!("{key}.outcome.json")))
                     .ok()
                     .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -475,17 +510,21 @@ mod tests {
         let registry = store.handle();
         let first = item("o/r#1", "It fails.", "2026-01-01T00:00:00Z");
         assert_eq!(
-            registry.ingest_source_item("G", "github", &first).unwrap(),
+            registry
+                .ingest_source_item("G", "github", &first, "station-a")
+                .unwrap(),
             Ingest::Queued
         );
         assert_eq!(
-            registry.ingest_source_item("G", "github", &first).unwrap(),
+            registry
+                .ingest_source_item("G", "github", &first, "station-a")
+                .unwrap(),
             Ingest::Unchanged
         );
         let changed = item("o/r#1", "It fails on macOS.", "2026-01-02T00:00:00Z");
         assert_eq!(
             registry
-                .ingest_source_item("G", "github", &changed)
+                .ingest_source_item("G", "github", &changed, "station-a")
                 .unwrap(),
             Ingest::Updated
         );
@@ -494,17 +533,34 @@ mod tests {
         assert_eq!(queued[0].key(), "source_github--o_r_1");
         assert_eq!(queued[0].created, "2026-01-01T00:00:00Z");
         assert!(queued[0].body.contains("It fails on macOS."));
+        let provenance = queued[0]
+            .provenance
+            .as_ref()
+            .expect("a Source brief's origin");
+        assert_eq!(provenance.origin, Origin::Source);
+        assert_eq!(provenance.principal.as_deref(), Some("github"));
+        assert_eq!(provenance.reference.as_deref(), Some("o/r#1"));
+        assert_eq!(
+            provenance.item_url.as_deref(),
+            Some("https://example.invalid/1")
+        );
+        assert_eq!(provenance.received_by, "station-a");
+        assert!(provenance.matches(&queued[0]), "the update re-recorded it");
+        assert!(reportable(&queued[0], "github"));
+        assert!(!reportable(&queued[0], "jira"));
     }
 
     fn a_claimed_or_finished_item_is_never_queued_again(store: &dyn Store) {
         let registry = store.handle();
         let first = item("o/r#2", "Broken.", "2026-01-01T00:00:00Z");
-        registry.ingest_source_item("G", "github", &first).unwrap();
+        registry
+            .ingest_source_item("G", "github", &first, "station-a")
+            .unwrap();
         let brief = registry.claim_new(None).unwrap().unwrap();
         let changed = item("o/r#2", "Broken, more.", "2026-01-02T00:00:00Z");
         assert_eq!(
             registry
-                .ingest_source_item("G", "github", &changed)
+                .ingest_source_item("G", "github", &changed, "station-a")
                 .unwrap(),
             Ingest::InFlight
         );
@@ -519,7 +575,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             registry
-                .ingest_source_item("G", "github", &changed)
+                .ingest_source_item("G", "github", &changed, "station-a")
                 .unwrap(),
             Ingest::Finished
         );
@@ -584,7 +640,7 @@ mod tests {
     fn finished_source_briefs_are_listed_until_reported(store: &dyn Store) {
         let registry = store.handle();
         registry
-            .ingest_source_item("G", "github", &item("o/r#5", "x", "t"))
+            .ingest_source_item("G", "github", &item("o/r#5", "x", "t"), "station-a")
             .unwrap();
         let manual = Brief {
             title: "manual".to_owned(),
@@ -601,6 +657,7 @@ mod tests {
             data: BTreeMap::new(),
             created: String::new(),
             version: 1,
+            provenance: None,
         };
         registry.submit_brief(&manual).unwrap();
         while let Some(brief) = registry.claim_new(None).unwrap() {
@@ -624,7 +681,7 @@ mod tests {
     fn a_failing_report_is_retried_a_bounded_number_of_times(store: &dyn Store) {
         let registry = store.handle();
         registry
-            .ingest_source_item("G", "github", &item("o/r#6", "x", "t"))
+            .ingest_source_item("G", "github", &item("o/r#6", "x", "t"), "station-a")
             .unwrap();
         let brief = registry.claim_new(None).unwrap().unwrap();
         registry

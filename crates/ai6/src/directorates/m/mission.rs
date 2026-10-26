@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::placement::ExecutionMode;
 use crate::directorates::q::safehouse::SafeHouseReport;
+use crate::directorates::registry::bona_fides::Provenance;
 use crate::{MissionId, SessionId};
 
 /// Lifecycle state for a Mission.
@@ -75,6 +76,10 @@ pub struct Mission {
     /// Session that proposed it); every Session of the Mission starts exposed by it.
     #[serde(default)]
     pub exposure: Vec<String>,
+    /// Where the Mission's brief came from, as AI6 recorded it where the brief entered;
+    /// `None` for a Mission started directly on the Station rather than from the queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<Provenance>,
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -206,6 +211,7 @@ impl MissionStore {
             parked_until: None,
             blocked_reason: None,
             exposure: Vec::new(),
+            provenance: None,
         };
         let mut next = self.missions.clone();
         next.insert(key, mission.clone());
@@ -346,6 +352,23 @@ impl MissionStore {
         if mission.exposure.len() == before {
             return Ok(());
         }
+        mission.revision += 1;
+        self.commit(next)
+    }
+
+    /// Records where the Mission's brief came from. The first record stands: a later
+    /// attempt at the same Mission keeps it.
+    pub fn record_provenance(
+        &mut self,
+        mission_id: &str,
+        provenance: Provenance,
+    ) -> Result<(), MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.provenance.is_some() {
+            return Ok(());
+        }
+        mission.provenance = Some(provenance);
         mission.revision += 1;
         self.commit(next)
     }

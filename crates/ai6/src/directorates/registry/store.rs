@@ -16,12 +16,14 @@ use sha2::{Digest, Sha256};
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::m::roster::AgentRole;
+use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::cables::{Cable, CableError, CableState};
 use crate::directorates::registry::timeline::{TimelineEvent, record_event_locked};
 
 const BRIEF_VERSION: u32 = 1;
 pub(super) const MAX_BRIEF_BYTES: u64 = 1_048_576;
 pub(super) const MAX_BRIEFS: usize = 1_000;
+const MAX_PROVENANCE_BYTES: u64 = 16_384;
 pub(super) const MAX_STATION_RECORD_BYTES: u64 = 1_048_576;
 pub(super) const MAX_STATIONS: usize = 1_000;
 pub(super) const MAX_STATION_SETTINGS_BYTES: u64 = 4_096;
@@ -86,6 +88,11 @@ pub struct Brief {
     /// Brief contract version.
     #[serde(default = "default_version")]
     pub version: u32,
+    /// Where the brief came from, as AI6 recorded it where it entered. The Registry keeps it
+    /// apart from the record and never reads this field from a stored brief; `None` from the
+    /// Registry means it holds none, and the brief was dropped into the queue by hand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<Provenance>,
 }
 
 impl Brief {
@@ -213,6 +220,8 @@ impl MissionProposal {
         brief.operation = Some(operation_id.clone());
         brief.source = "ai6-agent-proposal".to_owned();
         brief.id = id.clone();
+        // Set when an approval promotes it, from this record's authenticated proposer.
+        brief.provenance = None;
         Ok(Self {
             id,
             operation_id,
@@ -232,6 +241,7 @@ impl MissionProposal {
         if self.brief.operation.as_deref() != Some(self.operation_id.as_str())
             || self.brief.source != "ai6-agent-proposal"
             || self.brief.id != self.id
+            || self.brief.provenance.is_some()
             || !self.created_at.is_finite()
             || self.created_at < 0.0
         {
@@ -605,6 +615,56 @@ impl FileRegistry {
         &self.root
     }
 
+    #[cfg(test)]
+    pub(crate) fn drop_brief(&self, key: &str, record: &str) {
+        let queue = self.root.join("new");
+        fs::create_dir_all(&queue).unwrap();
+        fs::write(queue.join(format!("{key}.json")), record).unwrap();
+    }
+
+    fn provenance_path(&self, key: &str) -> PathBuf {
+        self.root.join("provenance").join(format!("{key}.json"))
+    }
+
+    /// Keeps a brief's provenance beside the queue, or removes a stale one when it has none.
+    pub(super) fn keep_provenance(
+        &self,
+        key: &str,
+        provenance: Option<&Provenance>,
+    ) -> io::Result<()> {
+        let path = self.provenance_path(key);
+        match provenance {
+            Some(provenance) => write_atomic(
+                &path,
+                &serde_json::to_vec_pretty(provenance).map_err(io::Error::other)?,
+            ),
+            None => match fs::remove_file(path) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+                _ => Ok(()),
+            },
+        }
+    }
+
+    /// Sets `brief.provenance` from what the Registry keeps for it, if anything.
+    pub(super) fn attach_provenance(&self, brief: &mut Brief) {
+        let kept = fs::read(self.provenance_path(&brief.key()))
+            .ok()
+            .filter(|bytes| bytes.len() as u64 <= MAX_PROVENANCE_BYTES)
+            .and_then(|bytes| serde_json::from_slice::<Provenance>(&bytes).ok());
+        bona_fides::unseal(brief, kept);
+    }
+
+    /// Writes a brief record without its provenance, which goes beside it.
+    pub(super) fn write_brief(&self, path: &Path, brief: &Brief) -> io::Result<()> {
+        let (record, provenance) = bona_fides::seal(brief)?;
+        let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_BRIEF_BYTES {
+            return Err(invalid_data("brief exceeds the size limit"));
+        }
+        self.keep_provenance(&brief.key(), provenance.as_ref())?;
+        write_atomic(path, &bytes)
+    }
+
     fn station_settings_path(&self, station: &str) -> PathBuf {
         let digest = hex_digest(&Sha256::digest(station.as_bytes()));
         self.root
@@ -665,8 +725,16 @@ pub trait BriefStore {
         limit: usize,
     ) -> io::Result<Vec<MissionProposal>>;
 
-    /// Authorizes one pending Mission proposal and promotes its brief to the runnable queue. Repeating an approval after a partial failure or successful promotion is safe.
-    fn promote_mission_proposal(&self, operation: &str, proposal_id: &str) -> io::Result<Brief>;
+    /// Authorizes one pending Mission proposal and promotes its brief to the runnable queue,
+    /// recording `received_by` (the Station or gateway that approved it) in the brief's
+    /// [`Provenance`]. Repeating an approval after a partial failure or successful promotion
+    /// is safe.
+    fn promote_mission_proposal(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+        received_by: &str,
+    ) -> io::Result<Brief>;
 
     /// Rejects one pending Mission proposal without exposing it to scheduler intake.
     /// Repeating the rejection is safe; an approved proposal cannot be rejected.
@@ -680,7 +748,8 @@ pub trait BriefStore {
     /// Invalid records are skipped; nothing is claimed or moved.
     fn list_new(&self) -> io::Result<Vec<Brief>>;
 
-    /// Submits one validated brief to the shared queue.
+    /// Submits one validated brief to the shared queue, keeping its [`Provenance`] apart from
+    /// the record. A brief submitted with none is treated like one dropped into the queue.
     ///
     /// A key already present in any Registry state is never overwritten.
     fn submit_brief(&self, brief: &Brief) -> io::Result<()>;
@@ -911,7 +980,12 @@ impl BriefStore for FileRegistry {
         Ok(proposals)
     }
 
-    fn promote_mission_proposal(&self, operation: &str, proposal_id: &str) -> io::Result<Brief> {
+    fn promote_mission_proposal(
+        &self,
+        operation: &str,
+        proposal_id: &str,
+        received_by: &str,
+    ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
         let _registry_lock = registry_lock(&self.root)?;
@@ -929,7 +1003,11 @@ impl BriefStore for FileRegistry {
             .join(format!("{proposal_id}.json"));
         if !pending.is_file() {
             return match read_mission_proposal(&approved) {
-                Ok(proposal) => Ok(proposal.brief),
+                Ok(proposal) => {
+                    let mut brief = proposal.brief;
+                    self.attach_provenance(&mut brief);
+                    Ok(brief)
+                }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
                     let rejected = self
                         .root
@@ -955,7 +1033,7 @@ impl BriefStore for FileRegistry {
                 "Mission proposal path does not match its identity",
             ));
         }
-        let brief = proposal.brief.clone();
+        let mut brief = proposal.brief.clone();
         let key = brief.key();
         for state in ["claimed", "done", "failed"] {
             if self.root.join(state).join(format!("{key}.json")).exists() {
@@ -970,20 +1048,16 @@ impl BriefStore for FileRegistry {
             let bytes = fs::read(&queued)?;
             let existing: Brief =
                 serde_json::from_slice(&bytes).map_err(|error| invalid_data(error.to_string()))?;
-            if existing != brief {
+            if existing.provenance.is_some() || existing != brief {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
                     "Mission proposal brief conflicts with queued intake",
                 ));
             }
+            self.attach_provenance(&mut brief);
         } else {
-            let bytes = serde_json::to_vec_pretty(&brief).map_err(io::Error::other)?;
-            if bytes.len() as u64 > MAX_BRIEF_BYTES {
-                return Err(invalid_data(
-                    "Mission proposal brief exceeds the size limit",
-                ));
-            }
-            write_atomic(&queued, &bytes)?;
+            brief.provenance = Some(proposal_provenance(&proposal, received_by));
+            self.write_brief(&queued, &brief)?;
         }
         let approved_parent = approved
             .parent()
@@ -1086,10 +1160,11 @@ impl BriefStore for FileRegistry {
             let Ok(bytes) = fs::read(&path) else {
                 continue;
             };
-            let Ok(brief) = serde_json::from_slice::<Brief>(&bytes) else {
+            let Ok(mut brief) = serde_json::from_slice::<Brief>(&bytes) else {
                 continue;
             };
             if brief.validate().is_ok() {
+                self.attach_provenance(&mut brief);
                 briefs.push(brief);
             }
         }
@@ -1115,13 +1190,7 @@ impl BriefStore for FileRegistry {
                 ));
             }
         }
-        let bytes = serde_json::to_vec_pretty(brief).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_BRIEF_BYTES {
-            return Err(invalid_data("brief exceeds the size limit"));
-        }
-        let path = self.root.join("new").join(format!("{key}.json"));
-        write_atomic(&path, &bytes)?;
-        Ok(())
+        self.write_brief(&self.root.join("new").join(format!("{key}.json")), brief)
     }
 
     fn claim_new(&self, key: Option<&str>) -> io::Result<Option<Brief>> {
@@ -1249,8 +1318,9 @@ impl BriefStore for FileRegistry {
         if bytes.len() as u64 > MAX_BRIEF_BYTES {
             return Err(invalid_data("claimed brief exceeds the size limit"));
         }
-        let brief = serde_json::from_slice::<Brief>(&bytes).map_err(io::Error::other)?;
+        let mut brief = serde_json::from_slice::<Brief>(&bytes).map_err(io::Error::other)?;
         brief.validate()?;
+        self.attach_provenance(&mut brief);
         Ok(Some(brief))
     }
 
@@ -2537,9 +2607,10 @@ fn finish_locked(
     if source.is_file() {
         fs::rename(source, &target)?;
     } else {
+        let (record, _) = bona_fides::seal(brief)?;
         write_atomic(
             &target,
-            &serde_json::to_vec_pretty(brief).map_err(io::Error::other)?,
+            &serde_json::to_vec_pretty(&record).map_err(io::Error::other)?,
         )?;
     }
     remove_lease(root, &key)
@@ -2809,6 +2880,7 @@ mod tests {
                 data: BTreeMap::new(),
                 created: String::new(),
                 version: 1,
+                provenance: None,
             },
         )
         .unwrap()
@@ -3150,13 +3222,27 @@ mod tests {
         registry.submit_mission_proposal(&rejected).unwrap();
 
         let promoted = registry
-            .promote_mission_proposal("operation-a", &approved.id)
+            .promote_mission_proposal("operation-a", &approved.id, "station-a")
             .unwrap();
 
-        assert_eq!(promoted, approved.brief);
+        let provenance = promoted
+            .provenance
+            .clone()
+            .expect("an approval records its origin");
+        assert_eq!(provenance.origin, bona_fides::Origin::Proposal);
+        assert_eq!(provenance.principal.as_deref(), Some("coordinator"));
+        assert_eq!(provenance.reference.as_deref(), Some("provider-session"));
+        assert_eq!(provenance.received_by, "station-a");
+        assert_eq!(
+            Brief {
+                provenance: None,
+                ..promoted.clone()
+            },
+            approved.brief
+        );
         assert_eq!(
             registry
-                .promote_mission_proposal("operation-a", &approved.id)
+                .promote_mission_proposal("operation-a", &approved.id, "station-a")
                 .unwrap(),
             promoted
         );
@@ -3185,7 +3271,7 @@ mod tests {
         assert_eq!(registry.list_new().unwrap().len(), 1);
         assert_eq!(
             registry
-                .promote_mission_proposal("operation-a", &rejected.id)
+                .promote_mission_proposal("operation-a", &rejected.id, "station-a")
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::AlreadyExists
@@ -3199,7 +3285,7 @@ mod tests {
         );
         assert_eq!(
             registry
-                .promote_mission_proposal("operation-a", "proposal-unknown")
+                .promote_mission_proposal("operation-a", "proposal-unknown", "station-a")
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::NotFound
@@ -3223,6 +3309,7 @@ mod tests {
             data: BTreeMap::new(),
             created: String::new(),
             version: 1,
+            provenance: None,
         };
 
         registry.submit_brief(&brief).unwrap();
@@ -3344,7 +3431,7 @@ mod tests {
     fn finish_requires_the_current_station_and_files_the_outcome(store: &dyn Store) {
         let registry = store.handle();
         registry
-            .ingest_source_item("G", "github", &source_item("o/r#1"))
+            .ingest_source_item("G", "github", &source_item("o/r#1"), "station-a")
             .unwrap();
         let brief = registry.list_new().unwrap().remove(0);
         registry
@@ -3403,7 +3490,7 @@ mod tests {
         ] {
             let registry = store.handle();
             registry
-                .ingest_source_item("G", "github", &source_item(id))
+                .ingest_source_item("G", "github", &source_item(id), "station-a")
                 .unwrap();
             let lease = registry
                 .claim_with_lease(None, "operation-01", DEFAULT_LEASE, BTreeMap::new())

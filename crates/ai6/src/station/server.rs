@@ -1,6 +1,7 @@
 //! Local daemon HTTP service.
 
 mod accounts;
+mod bona_fides;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
 #[cfg(feature = "publisher")]
@@ -1177,7 +1178,7 @@ fn reserve_existing_session_resume(
 }
 
 async fn scheduler_loop(base: DaemonState) {
-    let desk = Arc::new(SourceDesk::new());
+    let desk = Arc::new(SourceDesk::new(base.station_id.clone()));
     let mut next_station_check_in = Instant::now();
     while !base.stopping.load(Ordering::Acquire) {
         let state = base.current();
@@ -2601,7 +2602,8 @@ fn create_intake_mission(
         .map_err(|error| format!("could not create Mission from brief: {error:?}"))?;
     missions
         .expose(mission_id.as_str(), &medical::brief_exposure(brief))
-        .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))
+        .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))?;
+    bona_fides::record_origin(state, &mut missions, mission_id.as_str(), brief)
 }
 
 fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), String> {
@@ -3614,6 +3616,7 @@ async fn start_mission(
             station_id: Some(state.station_id.clone()),
             theater_id: Some(theater_id.clone()),
             mode: plan.mode,
+            provenance: mission.provenance.clone(),
         });
     }
     let start_request = AgentStart {
@@ -4121,6 +4124,7 @@ async fn resume_mission(
                 station_id: Some(state.station_id.clone()),
                 theater_id: session_theater(&state, Some(operation_id)).ok(),
                 mode: resume_mode,
+                provenance: mission.provenance.clone(),
             });
             telemetry.bind(session_id.clone());
             telemetry
@@ -8742,7 +8746,12 @@ mod tests {
             author: Some("reporter".to_owned()),
             updated: "2026-10-26T00:00:00Z".to_owned(),
         };
-        let brief = crate::source_brief("G", "github", &item);
+        let mut brief = crate::source_brief("G", "github", &item);
+        brief.provenance = Some(
+            crate::Provenance::new(crate::Origin::Source, &brief, "test", 1)
+                .with_principal("github")
+                .with_reference(item.id.clone()),
+        );
         create_intake_mission(
             &state,
             &brief,
@@ -8849,6 +8858,7 @@ mod tests {
             data: BTreeMap::new(),
             created: String::new(),
             version: 1,
+            provenance: None,
         };
         assert!(medical::brief_exposure(&brief).is_empty());
         brief.data.insert(
@@ -8879,6 +8889,7 @@ mod tests {
             data: BTreeMap::new(),
             created: String::new(),
             version: 1,
+            provenance: None,
         }
     }
 

@@ -14,7 +14,7 @@ use crate::directorates::registry::quarantine::{
     add_incident, validate_quarantine,
 };
 use crate::directorates::registry::sleepers::{
-    Fire, Sleeper, SleeperAuthorization, SleeperStore, sleeper_brief,
+    Fire, Sleeper, SleeperAuthorization, SleeperStore, fired_brief,
 };
 use crate::directorates::registry::store::{
     AccessTokenStore, AgentRoleStore, AuditRecord, AuditStore, BriefStore, CableStore,
@@ -729,8 +729,9 @@ impl SleeperStore for SqlRegistry {
         name: &str,
         sleeper: &Sleeper,
         window: i64,
+        received_by: &str,
     ) -> io::Result<Fire> {
-        match self.submit_brief(&sleeper_brief(operation, name, sleeper, window)) {
+        match self.submit_brief(&fired_brief(operation, name, sleeper, window, received_by)) {
             Ok(()) => Ok(Fire::Queued),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
             Err(error) => Err(error),

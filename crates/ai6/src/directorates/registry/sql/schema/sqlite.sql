@@ -20,6 +20,7 @@ CREATE TABLE ai6_briefs (
     transcript BLOB,
     report_attempts INTEGER NOT NULL DEFAULT 0,
     reported INTEGER NOT NULL DEFAULT 0,
+    provenance TEXT,
     revision INTEGER NOT NULL
 );
 CREATE INDEX ai6_briefs_state ON ai6_briefs (state);
