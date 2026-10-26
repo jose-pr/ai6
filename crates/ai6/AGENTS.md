@@ -51,8 +51,8 @@ The access kinds, their models and the first-match role authorizer belong to the
 `Verdict`, `Person`, `AuthorizationRequest`, `AuthorizationDecision`, `AccountInfo`,
 `AccountPut`, `PutOutcome`, `Waiting`, `Description`, `KIND_PREFIX`, `Role`, `Rule`,
 `RolePolicy`, `RolePolicyError`, `RoleAuthorizer` and `RoleAuthorizerBuilder`. The Guatiao
-kinds are `coqui_authenticator`, `coqui_directory`, `coqui_authorizer` and `coqui_accounts`;
-the old `lineupmux_*` names are gone, so a provider built for any host loads here.
+kinds are `coqui_authenticator`, `coqui_directory`, `coqui_authorizer` and `coqui_accounts`,
+so a provider built for them for any host loads here.
 `Attempt::headers` is an ordered `Vec<(String, String)>`.
 
 What AI6 adds:
@@ -914,6 +914,7 @@ impl Resources {
 }
 impl StationFacts {
     /// `load` = Missions already leased to the Station; silent for longer than `window` = unhealthy.
+    /// A key the check-in lacks claims nothing: no roles, capacity 0, no Theaters.
     pub fn from_record(record: &StationRecord, now: f64, window: Duration, load: usize) -> Self;
 }
 #[non_exhaustive]
@@ -958,7 +959,7 @@ Station's `limits` against its `resources`, then per Theater: not
 `station_labels` (matched as globs against the Station's labels overlaid by the Theater's)
 and the Operation's checkout (on the Station's own host in field mode; on any other Theater,
 or in remote-hands mode, the Operation must be bound to the Theater or the Theater must set a
-`workdir`). Choices are pushed in the old order (Stations by `occupied()`, deciding Station,
+`workdir`). Choices are pushed in a base order (Stations by `occupied()`, deciding Station,
 ID; `local` Theater first; Agent priority) and then stable-sorted by `score` (ascending for
 `Spread`, descending for `Pack`). `score` = occupied/capacity + `cpu_busy` + `memory_used`
 (of the Theater's resources, the Station's for `local` access) + the Theater's `sessions`
@@ -1087,8 +1088,8 @@ pub fn weakenings(location: &str) -> Vec<String>;
 `require` or `disable`, `Unsupported` without the feature or for a schema newer than this
 build (the version is in `ai6_schema`), and with the database's error (its cause included,
 such as which certificate check failed) when it cannot be reached; a PostgreSQL location
-connects at once. Writes also refuse, `Unsupported`, once a newer `ai6` has migrated the
-database, so an old Station stops writing while it can still read.
+connects at once. Writes also refuse, `Unsupported`, while the database's schema version is
+newer than this build's.
 
 TLS: `sslmode=verify-full` is the default: TLS (rustls, ring), with the server's certificate
 checked against the platform's roots (`rustls-native-certs`), or, as libpq does, only
@@ -1317,8 +1318,8 @@ reads the validated current value; `set_station_settings(station, settings)` per
 under a collision-resistant Station-specific file and the shared Registry lock. A daemon
 uses the live value for new Mission admission and scheduling; absent settings retain its
 startup default, and unreadable settings fail closed. Existing provider Sessions are not
-stopped when the limit is lowered. A settings file written before resource limits existed
-reads with the default `ResourceLimits`; any other backend must store all four fields.
+stopped when the limit is lowered. Every backend stores all four fields; a record missing one
+is invalid.
 
 `put_agent_role(operation, role)`, `list_agent_roles(operation)`, `agent_role(operation,
 key)` and `remove_agent_role(operation, role_id)` manage validated, bounded role
@@ -1333,7 +1334,7 @@ claimed brief. `recover` returns `Requeued`, `Failed`, or `None` when another St
 changed the lease. `finish` returns `true` once the outcome is filed and `false` when the
 caller's lease was lost. In the file Registry lease expiration uses each Station's wall-clock
 Unix seconds, so shared Stations need synchronized clocks; `SqlRegistry` uses the database's
-clock instead. Station liveness and Headquarters election use the same versioned file
+clock instead. Station liveness and Headquarters election use the same file
 layout and `.ai6-registry.lock` (in a SQL Registry, its tables and clock row); the
 scheduler does not yet use election for distributed placement.
 
@@ -1357,8 +1358,7 @@ acquires or renews the lease and `false` when another Station still holds it. An
 record moves to `headquarters/lease.lapsed.<station>` before the new lease is written.
 `headquarters` returns the current record even when its lease has expired.
 `HeadquartersLease::term() -> u64` is the election term: it grows by one whenever a
-different Station takes the lease, is unchanged by the holder renewing it, and reads as 0 in
-a lease written before terms existed. Headquarters
+different Station takes the lease and is unchanged by the holder renewing it. Headquarters
 leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating Stations
 need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`,
 the host's `resources` (sysinfo: CPU count, CPU percent from the second sample on, the
@@ -1433,8 +1433,8 @@ pub const MAX_RECENT_EVENT_CHARS: usize = 300;
     pub parked_until: Option<f64>,           // Unix seconds
     pub lease_expires: f64,
     pub fence: u64,                          // fencing token of the current lease
-    pub exposure: Vec<Exposure>,             // untrusted input read; only grows; default empty
-    pub launch: Option<SessionLaunch>,       // absent in older records
+    pub exposure: Vec<Exposure>,             // untrusted input read; only grows
+    pub launch: Option<SessionLaunch>,       // how the harness was launched, to re-attach to it
     pub recent: Vec<String>,                 // last events seen, oldest first, bounded as above
     pub checkpoint: Option<SafeHouseCheckpoint>, pub checkpointed_at: Option<f64>,
     pub lost: Option<String>,                // why, with SessionStatus::Lost
@@ -1480,7 +1480,7 @@ wall-clock Unix seconds, so Stations need synchronized clocks. The daemon record
 when it starts, takes the lease again to resume it, mirrors Mission state into the record,
 renews its leases with the Station check-in, and closes and abandons a Mission whose token
 is refused. The daemon's launch record keeps the lease and fence in `missions.json`
-(`session`); records without one still load. It also writes the Session's launch, its recent
+(`session`, `None` until the Session is recorded). It also writes the Session's launch, its recent
 events (at most every 15 seconds) and, when the Operation sets
 `workspace.checkpoint_remote`, a safe-house checkpoint every `checkpoint_secs`.
 
@@ -2019,7 +2019,7 @@ pub struct Sleeper {
 }
 impl Sleeper {
     pub fn validate(&self) -> Result<(), String>;   // also refuses a `stations` entry that is no Station ID
-    pub fn fingerprint(&self) -> String;   // SHA-256 over every set field; unset stations/each_station leave it as before
+    pub fn fingerprint(&self) -> String;   // SHA-256 over every field; any edit changes it
     pub fn due_window(&self, now: i64, authorized_at: i64) -> Option<i64>;
 }
 pub struct SleeperAuthorization { pub fingerprint: String, pub authorized_by: String, pub at: i64 }
@@ -2275,8 +2275,7 @@ pub fn server_config(identity: &Identity, trust: &Trust, policy: &Policy)
 ```
 
 `Fingerprint` (a `PeerId`) is the SHA-256 of the certificate, printed `sha256:<hex>` and read in
-any spelling (`sha256:HEX`, bare hex, colon pairs, the grouped base32 earlier versions
-printed). `Identity`, `Trust` (`Pinned`, `Ca`, `PinnedOrCa`, `AnyWithKeyProof`), `CaPolicy`,
+any spelling (`sha256:HEX`, bare hex, colon pairs, grouped base32). `Identity`, `Trust` (`Pinned`, `Ca`, `PinnedOrCa`, `AnyWithKeyProof`), `CaPolicy`,
 `Policy`, `TrustStore`, `WaitingEntry` and the rest are re-exported from those crates; their
 API headers describe them. `open_identity` stores the certificate and private key in
 `identity.pem` (Unix mode `0600`). `Policy::strict()` is the default: TLS 1.3, SHA-2 pins;
@@ -2287,9 +2286,9 @@ has proved its key, recorded under `peers/waiting` with the address it came from
 bounded per source address, in total, and by how often one peer is written down again (the
 policy's `waiting_per_source`, `waiting_total` and `waiting_rerecord_secs`). An operator lists
 them with `ai6 peer waiting` (fingerprint and source address) and accepts one with
-`ai6 peer accept <fingerprint>`. A store and an identity written by an earlier version load
-as they are. The default AI6 state location can be overridden with `AI6_STATE` or `AI6_HOME`.
-`AccessTokenRecord` is the versioned device-token metadata value. It holds the
+`ai6 peer accept <fingerprint>`. The default AI6 state location can be overridden with
+`AI6_STATE` or `AI6_HOME`.
+`AccessTokenRecord` is the device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
 expiry and optional revocation times; its debug output redacts the digest.
 `AccessTokenStore` (`store_access_token`, `find_access_token`, `revoke_access_token`);
@@ -2535,8 +2534,8 @@ recipients, idempotency_key, id, created_at, expires_at)` creates the required f
 builder methods add the optional Theater, Mission, Session, conversation and reply
 identities. `Cable::try_new(draft)` validates a complete envelope. Bodies are limited to
 16 KiB UTF-8, expiry must be later than creation and no more than 24 hours later, and
-recipient `(agent, session_id)` pairs must be unique. Serde uses the version-1 Registry
-field names and rejects missing, unknown or invalid fields. `Debug` redacts Cable bodies.
+recipient `(agent, session_id)` pairs must be unique. Serde uses the Registry's field names
+and rejects missing, unknown or invalid fields. `Debug` redacts Cable bodies.
 `with_recipient_state(agent, session_id, state)` returns a new Cable for a permitted
 delivery transition, `None` for a recipient not in the audience, or `CableError` for an
 invalid transition. The relay must derive sender identity from the authenticated Agent
@@ -2758,7 +2757,7 @@ and increments a revision for changes. Repeating the current state is a no-op an
 increment the revision. `MissionState` serializes as `queued`, `working`, `blocked`,
 `stalled`, `parked`, `quarantined`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy
 violation when the Operation uses `on_blown = "fail"`. `parked` means a provider usage limit
-paused the work: `Mission.parked_until` (Unix seconds, default `None` in older records) is
+paused the work: `Mission.parked_until` (Unix seconds, `None` unless parked) is
 when it resumes. `MissionStore::park(id, until)` parks a `Working`, `Blocked`, `Stalled` or
 already parked Mission (parking again moves the time; `transition` refuses `Parked` because
 it needs a time); `due_parked(now)` lists parked Missions at or past their time;
@@ -2786,12 +2785,13 @@ also writes a `mission`/`waiting` timeline event once per new reason.
 returns this value as its optional `cover` field beside `safe_house`. `Mission.role_id`
 stores the canonical configured Agent role independently of `agent_id` and provider
 `session_ids`; selected handler/model/effort settings persist for reattachment.
-`MissionStore::open(path)` persists a versioned JSON snapshot atomically after
+`MissionStore::open(path)` persists a JSON snapshot atomically after
 each mutation. The daemon opens `missions.json` under `safehouse::state_dir()`; this is
 runtime Mission state, separate from the durable Registry. The snapshot
 stores non-secret handler, terminal, work-directory, model and effort settings for each
 started Mission (the terminal is the one the Station chose at start), including the cover policy, starting commit and identity; environment values
-are never persisted. The snapshot format is version 3. On startup, `Working` Missions
+are never persisted. The snapshot format is version 1; any other version is refused. On
+startup, `Working` Missions
 become `Blocked` and the scheduler retries reattachment through the same provider Session ID.
 The daemon's loopback
 `/internal/missions` routes expose Mission state to local control components; Universal Exports
@@ -3052,9 +3052,7 @@ daemon's `WatchdogConfig`. A local Operation whose `workspace` names a safe-hous
 (or whose path is a Git checkout, which selects `git`) gets an isolated safe house under
 AI6's state directory. Untouched ones are removed when the Mission ends; ones holding
 changes are kept and included in the Mission report. `workspace.isolate = false` works in
-the Operation's directory instead. The earlier Operation keys `repos`, `safe_houses`,
-`branch` and `base` are refused at load time with a message naming the `workspace` field
-that replaced them.
+the Operation's directory instead. An unknown Operation key is refused at load time.
 A Mission whose Operation is bound to a Theater that only a transport reaches runs on the
 Station in remote-hands mode: the harness starts in `<state>/remote-hands/<mission>` (kept
 when the Mission ends), has no safe house and so no cover check, and acts on the Theater

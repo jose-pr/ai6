@@ -54,8 +54,7 @@ Two providers ship: `git` (a worktree on its own branch; commits are audited) an
 
 Providers are loaded by the Station that runs the Session (`ai6 serve --plugin-path`). A
 provider that keeps no history makes the Mission's cover report say it was **not
-checkable** instead of passing. The earlier keys `repos`, `safe_houses`, `branch` and
-`base` are no longer accepted; loading fails and names the `workspace` field to use.
+checkable** instead of passing.
 
 ## Cover
 

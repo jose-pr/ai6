@@ -122,8 +122,8 @@ Headquarters lease lasts 60 seconds between renewals; `--headquarters-lease SECS
 long a standby control Station waits before taking over from one that went dark.
 
 In a SQL Registry each kind of record has its own table, created on first use; a database
-written by a newer `ai6` is refused, and a Station that a newer `ai6` has since migrated
-past stops writing. Every write first takes the Registry's row in `ai6_clock`, so writers
+whose schema version is newer than the Station knows is refused, when it is opened and on
+every write. Every write first takes the Registry's row in `ai6_clock`, so writers
 queue as they do on the directory's lock, and leases, the Headquarters term and Session
 fencing behave the same on every backend. A Station that stalls inside a write (a paused
 VM, a half-open connection) loses its session after a quarter of the Headquarters lease,
@@ -269,14 +269,14 @@ it, and a failed step's output is withheld from the round (`ai6 theater provisio
 With the `station-tls` feature, each Station has a persistent certificate:
 `ai6 identity` prints its fingerprint (`sha256:` and 64 hex digits), `ai6 peer waiting` lists
 peers a listener refused together with the address each came from, and
-`ai6 peer accept FINGERPRINT` pins one. Any spelling of a fingerprint is read, including the
-grouped base32 earlier versions printed.
+`ai6 peer accept FINGERPRINT` pins one. Any spelling of a fingerprint is read, grouped base32
+included.
 
 Stations speak the `ai6-station/1` protocol over mutual TLS with the strict policy by default
 (TLS 1.3, SHA-2 pins). A peer is listed as waiting only after it has proved it holds its key,
 and the list is bounded per source address, in total, and by how often one peer from one
-address is written down again. A Station's `identity.pem` and `peers/` directory from an
-earlier version are read as they are. The mechanism is the shared
+address is written down again. A Station keeps its identity in `identity.pem` and its peers
+under `peers/`, in its state directory. The mechanism is the shared
 [coqui-peer-tls](https://boriken-dev.github.io/coqui-peer-tls/) crate.
 
 ## Provider libraries: pins and publishers

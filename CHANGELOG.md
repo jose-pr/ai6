@@ -143,7 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `mission.brief.released` and `mission.brief.refused`), `ai6ctl held-briefs
   list|release|refuse`, and Moneypenny's Administration has a Held briefs tab that shows the
   findings and the brief's text only on request; both show invisible characters by code
-  (`<U+200B>`, `<tags: ...>`). Administration now also appears for an account whose only
+  (`<U+200B>`, `<tags: ...>`). Administration appears for an account whose only
   administrative permission is `mission.create`.
 - Live configuration: a Station checks its roster source and `loadouts.toml` every 5 seconds
   (`ai6 serve --config-poll`, `StationConfig::with_config_poll`, 0 off) and applies a change
@@ -153,7 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   declares the pool accounts again and withdraws the ones gone
   (`AccountStore::withdraw_account`). Changes to `theaters.toml` and `cables.toml` are
   reported as needing a restart. Each Station publishes a `ConfigStatus` (`config`) the
-  board shows. `ConfigSource` gains `revision`, `definitions`, `put` and `remove`;
+  board shows. `ConfigSource` has `revision`, `definitions`, `put` and `remove`;
   `RosterError::kind` tells an invalid configuration from an unavailable or read-only
   source; a configuration directory resolves every Agent when it loads
   (`Roster::check_agents`). Universal Exports serves roster administration from
@@ -187,9 +187,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   pin set named with `--plugin-pins` must exist. The field runner, `ai6 theater provision`
   and Universal Exports (`AI6_EXPORTS_PLUGIN_PINS`, `AI6_EXPORTS_PLUGIN_PROFILE`) check
   their provider libraries the same way.
-- Harness project settings: a harness no longer loads the configuration its working
-  directory carries (settings, hooks, skills, subagents, commands, project `CLAUDE.md`, MCP
-  servers, Codex's `.codex/` layer) unless the Operation allows it
+- Harness project settings: a harness loads the configuration its working directory carries
+  (settings, hooks, skills, subagents, commands, project `CLAUDE.md`, MCP servers, Codex's
+  `.codex/` layer) only when the Operation allows it
   (`[operation.ID.harness] project_settings = "ignore" | "pinned" | "load"`, default
   `ignore`). Claude Code runs with `--setting-sources user --strict-mcp-config` and Codex
   with the working directory marked an untrusted project; AI6's own green ink hook and MCP
@@ -210,7 +210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   file and SQL Registries); Codex accounts are logged in to a per-Mission `CODEX_HOME`.
   Claude Code `rate_limit_event`s and Codex `account/rateLimits/updated` notifications are
   kept per account (`AgentEvent::quota`), as are the tokens used each day. `on_limit`
-  gains `rotate`, the new default: a limited account is skipped until its reset, and the
+  takes `rotate`, the default: a limited account is skipped until its reset, and the
   Session moves to another account (the same Claude Session, or a new Codex attempt with
   a hand-off). Intake keeps a brief queued while no account of its pools has headroom.
   Universal Exports serves the pool board (`GET /v1/user/operations/{id}/pools`,
@@ -264,7 +264,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Session lost with its Station. A runner that restarts ends the Sessions it lost with a
   `lost` event, which the Station handles the same way. A Station re-attaching after a
   restart or an adoption backs off between tries (`reattach_delay`: 5 s doubling to a
-  minute) instead of retrying every 5 seconds forever, and gives the Session up once its
+  minute), and gives the Session up once its
   tries have failed for `lost_after_secs` and a probe fails. A retry on the same Theater
   ends the lost runner Session first, and a retry working where the lost attempt did is
   told so in its hand-off.
@@ -283,7 +283,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   running Mission's safe house every `checkpoint_secs` (default 300) as a commit holding
   its uncommitted work, under the Operation's cover, pushed to the Mission's branch without
   touching the Agent's worktree; a later attempt's safe house starts from it. The safe-house
-  kind gains the optional `checkpoint` slot and `SafeHouseSpec.checkpoint`
+  kind has the optional `checkpoint` slot and `SafeHouseSpec.checkpoint`
   (`CheckpointSpec`, `SafeHouseCheckpoint`), which the `git` provider implements.
 - Attempt history: `GET /v1/missions` and the Mission detail list each attempt
   (`universal_exports::MissionAttempt`: Station, Theater, status, why it was lost and its
@@ -364,14 +364,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (refs are resolved in the repository the command acts on), git aliases, `heads/`/`tags/`
   destinations, the repository's push configuration (`remote.NAME.push`, `push.default`,
   `push.followTags`, the branch's push remote, `-c` overrides), `--tags` beside refspecs,
-  `--no-dry-run`, and `gh api` merges (`ai6::classify` now takes an
+  `--no-dry-run`, and `gh api` merges (`ai6::classify` takes an
   `ai6::directorates::m::approvals::Repository`). Pushes always name their remote, merges
   name `-R OWNER/REPO`, and any destination with a pattern character is protected. A `git`
   or `gh` it cannot place, an unknown ref, `xargs` arguments and `gh api` calls that move refs
   or releases are held. The Station gates every remote-hands `theater_run` command itself; a
   gated Codex thread runs with `approvalPolicy = "untrusted"` and input to a running command
   is declined; the Claude hook carries the Cable URL in its own arguments; `ai6 green-ink
-  gate` denies input it cannot read; a start or resume request can no longer set
+  gate` denies input it cannot read; a start or resume request cannot set
   `AI6_GREEN_INK_GATE`, and a roster value is logged as a weakening.
 - Green ink secrets take `targets` (globs on the approval's target), and an approval unlocks
   one lease on any Station, ever (`Approval::spent_at`, `ApprovalStore::spend_approval`). A
@@ -394,7 +394,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   A retry queues the Mission as a new attempt, optionally for another qualified Agent
   (`MissionStore::retry`). `ai6ctl mission cancel|retry|resume` and `ai6ctl session
   interrupt` wait for the outcome; Moneypenny offers the controls in each Mission card's
-  menu with the reason any is unavailable. DipTel gains the `queued` and `abandoned`
+  menu with the reason any is unavailable. DipTel has the `queued` and `abandoned`
   states, and board Sessions carry `updated_at`, so a client finds a Mission's current
   Session.
 - An Operation activity timeline. `GET /v1/user/operations/{operation_id}/timeline`
@@ -410,14 +410,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Theaters: a Station reads `theaters.toml` (`[theater.<id>]` with `access = "local"` or an
   `ssh` host, plus labels), always reaches its own host as the implicit `local` Theater and
   publishes its Theaters at check-in. A Session's launch record carries `station_id` and
-  `theater_id` separately (older records still load). `GET /v1/stations` lists each
+  `theater_id` separately. `GET /v1/stations` lists each
   Station's Theaters, and Moneypenny shows them and the Station and Theater of each Session.
 - Transports. A Station reaches a Theater through a transport, a new provider kind
   (`ai6_transport`, `ai6::directorates::q::transport`) with optional, capability-gated
   operations: open a terminal, run a command, read, write and list files, and forward a port
   from the host back to the Station. Each transport declares its `Capabilities`
   (`terminal`, `run`, `files`, `forward`, `os`, `arch`); a contract suite beside the kind
-  checks any transport against what it declares. Theaters gain `agents` (`auto`, `local` or
+  checks any transport against what it declares. Theaters declare `agents` (`auto`, `local` or
   `remote-hands`), `egress` (`direct`, a proxy, `station` or `none`), `harnesses`, `workdir`
   and `access = { transport = { provider, config } }` for any other transport provider.
   Stations publish each Theater's capabilities and declared facts, and `GET /v1/stations`
@@ -435,7 +435,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   is refused, naming the key to pin, unless `trust_on_first_use = true`, which the Station
   logs and `GET /v1/stations` reports as a weakening. Keys stay in files: only a key path is
   configured, and a passphrase-protected key is refused.
-- Remote-hands mode. Placement now chooses field mode (the harness runs on the Theater) or
+- Remote-hands mode. Placement chooses field mode (the harness runs on the Theater) or
   remote-hands mode (the harness runs on the Station and acts on the Theater through its
   transport) from the Theater's capabilities and its `agents` and `egress` settings, and
   every rejection names the missing capability. In remote-hands mode the harness's own shell
@@ -460,8 +460,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `setsid`, with its output spooled to a file, so a dropped link costs only time and the
   Station reads on from the last byte it took once the transport reconnects. Its Cable
   endpoint reaches the harness through a reverse forward.
-- Placement is now M's decision (`ai6::directorates::m::placement`, extracted from the
-  Station scheduler). It filters by Station role, health, capacity, labels, checkout, Theater
+- Placement is M's decision (`ai6::directorates::m::placement`). It filters by Station role, health, capacity, labels, checkout, Theater
   and available handler, orders by load then Agent priority, and gives a reason for every
   rejection. An Operation may list the Stations allowed to run it (`stations = [..]`); a
   Mission's brief may narrow the list but never widen it. Stations also publish their
@@ -469,18 +468,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Universal Exports `GET /v1/user/operations/{id}/placement-preview` (needs `mission.read`)
   returns the eligible Station, Theater and Agent choices and the reason for each rejection,
   and Moneypenny's Stations view has a placement preview panel.
-- Recovery. Every Session now has a record in the shared Registry (`sessions/`): AI6 Session
+- Recovery. Every Session has a record in the shared Registry (`sessions/`): AI6 Session
   ID, provider Session ID, Station, Theater, attempt and predecessor, status. A Station acts
   on a Session only while it holds the record's lease and presents its fencing token, which
-  is drawn from the new Headquarters election term (`HeadquartersLease::term`) and always
+  is drawn from the Headquarters election term (`HeadquartersLease::term`) and always
   grows; a stale token is refused and the Station closes its harness and abandons the
-  Mission. Records and leases from before this change still load. Moving a Session to
-  another Station or Theater is not implemented.
+  Mission. Moving a Session to another Station or Theater is not implemented.
 - Provider usage limits. The Claude and Codex handlers report a usage or rate limit, with
   its reset time when given, as an `AgentEvent` of kind `limit` (`AgentEvent::limit`,
   `UsageLimit`, `LIMIT_EVENT`). The Mission becomes `parked` with `parked_until` and the same
   provider Session resumes when the quota resets (also across a daemon restart). An
-  Operation sets `on_limit = "wait"` (default) or `"backup"` (post the next qualified Agent
+  Operation sets `on_limit = "rotate"` (default), `"wait"` or `"backup"` (post the next qualified Agent
   on another handler as a new attempt in the same safe house) and `limit_fallback_secs`
   (default 1800, used when no reset time is reported). `parked` is a Session state in
   `ai6-diptel`, the gateway and Moneypenny.
@@ -593,10 +591,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `examples/config`, the documentation site with the Rust API reference, public API
   snapshots, and test, docs and release workflows.
 
-### Changed
-
 - The Station's scheduler makes its Registry calls (check-in, lease renewals, election,
-  intake) on Tokio's blocking pool, so a slow Registry no longer stalls the async workers.
+  intake) on Tokio's blocking pool, so a slow Registry does not stall the async workers.
 - The Registry's operations are traits, one per record family (`BriefStore`,
   `StationStore`, `AccessTokenStore`, `CableStore`, `AuditStore`, `AgentRoleStore`,
   `ApprovalStore`, `QuarantineStore`, `SessionStore`, `SleeperStore`, `SourceStore`,
@@ -604,24 +600,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   them, and calling them on it needs `use ai6::directorates::registry::backend::*`. The
   Station, its Cable relay and `universal_exports::Gateway::{with_registry, with_access}`
   take `Arc<dyn RegistryBackend>`; `ServeConfig::with_registry` sets the Station's.
-  `submit_brief`, `submit_mission_proposal` and `record_audit` return `()` and `finish`
-  returns whether it filed the outcome, rather than file paths.
+  `submit_brief`, `submit_mission_proposal` and `record_audit` return `()`, and `finish`
+  returns whether it filed the outcome.
 - A Station's roster comes from a `ConfigSource` (`load`, `changes_since` with a
   `ConfigRevision`): `TomlConfigDir` (the configuration directory, the default) or
   `MemoryConfigSource`, chosen with `ServeConfig::with_config_source`.
   `Roster::from_parts` and `Roster::builder` build a roster from typed records, with
   `Operation::new`, `Operation::validate`, `Agent::new`, `AgentRole::new`, `Cover::new`
-  and its `with_*` settings, and `Covers::insert`.
-- The detached wrapper passes a harness's environment through a FIFO instead of an `env`
-  file, so nothing it carries is written on the Theater.
-- The project is renamed from coagent to AI6.
-- The Python packages are replaced by the Rust workspace; Python is no longer needed at
-  runtime.
-- Projects are configured as Operations in `operations.toml` (formerly `stations.toml`);
-  Agents and roles in `agents.toml`. A Station is now the node running the daemon.
-
-- The guatiao pin moved to the revision the shared crates use.
-- The `daemon` feature also brings `ureq`, `subtle` and `futures-util` (the runner's client,
+  and its `with_*` settings, and `Covers::insert`. Projects are configured as Operations in
+  `operations.toml`, Agents and roles in `agents.toml`.
+- The detached wrapper passes a harness's environment through a FIFO, so nothing it
+  carries is written on the Theater.
+- The `daemon` feature brings `ureq`, `subtle` and `futures-util` (the runner's client,
   token checks and Cable relay); `publisher` adds only `url` and `ai6-diptel` on top of it.
 - `AgentStart`, `AgentResume`, `AgentMessage`, `AgentEvent`, `UsageLimit` and `TokenUsage`
   are serde `Serialize` and `Deserialize`.
@@ -629,99 +619,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   given, so the `claude` and `codex` handlers load without one.
 - The `ssh` transport has the host listen again for its open reverse forwards, on the same
   ports, when it reconnects.
-- Breaking, access kinds. The kinds are `coqui_authenticator`, `coqui_directory`,
-  `coqui_authorizer` and `coqui_accounts` (they were `lineupmux_*`), so providers built for
-  any host load here. `Attempt::headers` is an ordered `Vec<(String, String)>` instead of a
-  map. `ai6::RoleAuthorizer::from_toml` and `load` are `ai6::role_authorizer_from_toml` and
-  `load_role_authorizer`; `RoleAuthorizerConfig` and `RoleAuthorizerProvider` are gone. The
-  `access.toml` format is unchanged. The `coqui_roles` provider replaces `ai6_roles` and takes
-  `scope_kinds`, `roles` and `rules` instead of `policy_toml`.
-- Breaking, provider ids and configuration. Pass `--plugin-path` to the directory of the
-  `coqui-access` plugin libraries and change the ids and configs:
-  - `ai6_auth_local` is `coqui_access_local`: `{"path": P}` is
-    `{"source": {"file": {"path": P}}}`. The `[[accounts]]` file is unchanged.
-  - `ai6_auth_key` is `coqui_access_key`: `{"path": P}` is
-    `{"source": {"file": {"path": P}}, "prefix": "ai6_"}` (the prefix keeps issued keys
-    working; new keys use it too). Every `hash` in the `[[keys]]` file gets a `sha256:` label
-    (`sha256:<hex>`); a bare digest is refused.
-  - `ai6_auth_peer` is `coqui_access_peer`: `{"path": P}` is `{"source": {"file": {"path": P}}}`.
-    The `[[peers]]` file is unchanged and its `certificate` may stay in any fingerprint spelling.
-  - `ai6_auth_ldap` is `coqui_access_ldap` and `ai6_auth_proxy` is `coqui_access_proxy`; their
-    configs are unchanged.
-- Breaking, Station TLS. `ai6::station::identity` is built on `coqui-peer-tls`: `StationIdentity`
-  is `Identity`, `StationFingerprint` is `Fingerprint`, `PeerTrustStore` is `TrustStore`,
-  `TlsTrust` is `Trust`, and `client_config`/`server_config` take a `Policy` and return
-  `Built<..>`; none is re-exported at the crate root. Handshakes are TLS 1.3 only unless the
-  policy allows 1.2. Fingerprints print as `sha256:<hex>`; every earlier spelling is still read.
-  An `identity.pem` and a `peers/` store from before load unchanged.
-
-### Removed
-
-- The crates `ai6-access-key`, `ai6-access-ldap`, `ai6-access-local`, `ai6-access-peer` and
-  `ai6-access-proxy`; the `coqui-access` plugin libraries replace them.
-- The Python packages `coagent-00`, `coagent-i` and `coagent-m`, their commands and their
-  `COAGENT_*` environment variables, and the `q/` placeholder.
-
-### Fixed
-
-- Harnesses start on a Windows Station: the `pty` provider answers the cursor position query
-  ConPTY sends before a program's first output (and holds it until answered), and removes it
-  from the output. The Claude Code and Codex handlers open their terminal 32767 columns wide
-  and read it with the new `ai6::directorates::q::terminal::JsonLines`, which removes the
-  mode and title sequences ConPTY writes and rejoins a line it broke at the terminal's width.
-- Codex answer-only and assistant threads start only after a tool check: every enabled Codex
-  feature but four (`ai6_agent_codex::KEPT_FEATURES`) is switched off, as are agents
-  (`agents.enabled`) and the skills catalog, and `codex debug prompt-input` must show exactly
-  the thread's MCP tools, else the thread is refused; `AI6_CODEX_TOOL_CHECK=warn` in the
-  Agent's environment starts it with a `weakened` event and a weakening on the Station's log.
-  Codex 0.164 offered such threads `functions.exec` (a JavaScript runtime with
-  `apply_patch` and `view_image`), computer-use and collaboration tools,
-  `request_user_input` and `clock.sleep`, and ignores `features.unified_exec = false`. On
-  Codex 0.164 Moneypenny is refused: it offers MCP tools only inside `functions.exec`.
-- The Codex tool check renders the offered tools on every start and reuses only the feature
-  list, keyed also by `CODEX_HOME`, the home directories and `PATH`; it refuses output it
-  cannot read exactly (no `message` item, anything after the array, a feature line that is not
-  `name stage state`).
+- Access details: `Attempt::headers` is an ordered `Vec<(String, String)>`;
+  `ai6::role_authorizer_from_toml` and `load_role_authorizer` read `access.toml`; the
+  `coqui_roles` provider takes `scope_kinds`, `roles` and `rules`. `coqui_access_local`,
+  `coqui_access_key` and `coqui_access_peer` are configured with
+  `{"source": {"file": {"path": P}}}` over an `[[accounts]]`, `[[keys]]` or `[[peers]]` file;
+  a key's `hash` is labelled (`sha256:<hex>`), the key `prefix` is configurable, and a peer's
+  `certificate` may be in any fingerprint spelling.
+- Station TLS details: `ai6::station::identity` re-exports `coqui-peer-tls`'s `Identity`,
+  `Fingerprint`, `TrustStore` and `Trust` (none at the crate root); `client_config` and
+  `server_config` take a `Policy` and return `Built<..>`. Handshakes are TLS 1.3 only unless
+  the policy allows 1.2. Fingerprints print as `sha256:<hex>` and are read in any spelling.
+- Harnesses start on a Windows Station: the `pty` provider answers ConPTY's cursor position
+  query (`ESC[6n`) and removes it from the output, on Windows only, from a thread of its own.
+  The Claude Code and Codex handlers open their terminal 32767 columns wide and read it with
+  `ai6::directorates::q::terminal::JsonLines`, which removes ConPTY's mode and title
+  sequences, bounds OSC and CSI parsing, and rejoins a line ConPTY broke at the terminal's
+  width.
+- Codex answer-only and assistant threads start only after a tool check. Every enabled Codex
+  feature but `ai6_agent_codex::KEPT_FEATURES` is switched off, as are agents
+  (`agents.enabled`) and the skills catalog. `codex debug prompt-input` is rendered on every
+  start and must show exactly the thread's MCP tools, else the thread is refused, as is output
+  it cannot read exactly. The feature list is reused, keyed by the executable, its version,
+  the settings, the mode, `CODEX_HOME`, the home directories and `PATH`.
+  `AI6_CODEX_TOOL_CHECK=warn` in the Agent's environment starts the thread with a `weakened`
+  event. Codex 0.164 offers MCP tools only inside `functions.exec`, so Moneypenny is refused
+  on it.
 - A restricted Session (answer-only, assistant) that uses a tool outside its MCP servers is
-  ended with a `failed` event naming it, in both handlers, backing up the flags and the tool
-  check.
+  ended with a `failed` event naming the tool, in both handlers.
 - The Codex handler declines a green ink approval read from a line the terminal rebuilt
   (`StreamLine::Json::rebuilt`) or with no earlier `item/started` for the same item and
   command, and records why as a `declined` event.
 - A review refuses to start when the Operation's own `.ai6/agents.toml` sets `PATH`,
   `CODEX_HOME`, a `*_BASE_URL` or `AI6_CODEX_TOOL_CHECK` differently from the global roster.
-- The terminal reader ends an unterminated OSC at the line break and a CSI at the first byte
-  it cannot hold (or after 64 bytes), and parses a held broken line again only when its
-  brackets close. The `pty` provider answers cursor queries only on Windows, from a thread
-  of their own. `AssistantJob` carries the conversation recap apart (`recap`), and a resume
-  gets only the standing context.
-- A resumed Claude Code Session keeps its instructions once its recorded prompt is gone (after
-  compaction): `AgentResume` carries `initial_context` (the Agent's context, its role's
-  purpose and policy, Moneypenny's instructions), passed again as `--append-system-prompt`.
-  Moneypenny's harness works in the
-  same directory each time her conversation resumes on a Station, since Claude Code finds a
-  Session only from the directory that recorded it; she was started afresh before.
-- Codex answer-only (Chief of Staff) and assistant threads also run with command execution,
+- `AgentResume` carries `initial_context` (the Agent's context, its role's purpose and policy,
+  Moneypenny's instructions), passed to Claude Code again as `--append-system-prompt` for a
+  Session whose recorded prompt was compacted away. `AssistantJob` carries the conversation
+  recap apart (`recap`), and a resume does not get it. Moneypenny's harness works in the same
+  directory each time her conversation resumes on a Station, since Claude Code finds a Session
+  only from the directory that recorded it.
+- Codex answer-only (Chief of Staff) and assistant threads run with command execution,
   local image attachment, web search, sub-agents and app connectors switched off
   (`features.shell_tool`, `features.unified_exec`, `tools.view_image`, `web_search`,
-  `features.multi_agent`, `features.apps`): the read-only sandbox alone still let Codex's shell
-  read anything the Station's user can.
+  `features.multi_agent`, `features.apps`) as well as in the read-only sandbox, which alone
+  would let Codex's shell read anything the Station's user can.
 - Moneypenny's tool token is bound to the Station that runs her harness and reused for later
-  messages to it, so a running harness no longer loses its tools after eight messages, and a
-  harness left on a Station the conversation moved away from loses them at once (its Station
-  closes it when its accept is refused). A person holds at most two conversations with a
-  harness or an answer pending (`with_live_conversations_per_person`); views are at most
-  64 KiB, conversations and people have byte budgets (`with_memory_limits`) and `ready` sends
-  the newest 100 entries; an accepted answer silent for 10 minutes is given up
-  (`with_answer_deadline`). Proposals refuse hidden characters, and the app shows any in a
-  request as `<U+XXXX>`.
-- The Headquarters Station places a brief on the facts of the Station that would run it:
-  a brief naming no Agent is no longer failed when the Headquarters Station lacks a handler
-  another Station has (the Agent is chosen per Station from that Station's handlers), and
-  the Headquarters Station's own capacity no longer holds back work for others while a
-  Station's published capacity and running Sessions now count.
-- Terminal input queued at Universal Exports reaches the Session again: the gateway named
-  the input's Operation in `x-ai6-station-id` while Stations read `x-ai6-operation-id`, so
-  every input was dropped.
+  messages to it, and a harness left on a Station the conversation moved away from loses its
+  tools at once (its Station closes it when its accept is refused). A person holds at most
+  two conversations with a harness or an answer pending
+  (`with_live_conversations_per_person`); views are at most 64 KiB, conversations and people
+  have byte budgets (`with_memory_limits`) and `ready` sends the newest 100 entries; an
+  accepted answer silent for 10 minutes is given up (`with_answer_deadline`). Proposals
+  refuse hidden characters, and the app shows any in a request as `<U+XXXX>`.
+- The Headquarters Station places a brief on the facts of the Station that would run it: a
+  brief naming no Agent gets one chosen per Station from that Station's handlers, and a
+  Station's published capacity and running Sessions count, not the Headquarters Station's
+  own.
 
 [Unreleased]: https://github.com/jose-pr/ai6/commits/main

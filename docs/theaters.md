@@ -356,8 +356,7 @@ resources sample (`resources`, with `sampled_at`) and the Sessions running there
 tooltip says what is missing.
 
 A Session records the Station that supervises it, the Theater it works on and the mode
-(`station_id`, `theater_id`, `mode`); Moneypenny shows them on the Mission detail. Records
-written before this was tracked lack them and still load, as field mode.
+(`station_id`, `theater_id`, `mode`); Moneypenny shows them on the Mission detail.
 
 An Operation's `theater` binds it to one Theater by ID. See
 [Placement](stations.md#placement) for how the Station, Theater and Agent are chosen and how

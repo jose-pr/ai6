@@ -11,7 +11,7 @@
 //! database's clock, read in the transaction that writes them, so the Stations' own clocks
 //! do not decide who holds a lease.
 //!
-//! The schema is created on first use and versioned; a database written by a newer `ai6`
+//! The schema, version 1, is created on first use; a database whose schema version is newer
 //! is refused, when it is opened and on every write. Secrets are never stored: access
 //! tokens are kept by digest, and credentials stay in Q's secret backends.
 //!
