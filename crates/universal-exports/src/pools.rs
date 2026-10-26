@@ -185,7 +185,9 @@ mod tests {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs_f64();
+            .as_secs_f64()
+            // Whole seconds: serde_json does not round-trip every f64 exactly.
+            .floor();
         let pool = AccountPool::new("team", "claude")
             .account(
                 Account::new("alpha", AccountKind::ClaudeOauthToken)

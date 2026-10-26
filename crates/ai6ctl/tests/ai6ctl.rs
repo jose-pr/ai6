@@ -529,7 +529,8 @@ async fn pools_lists_an_operations_accounts_and_their_quota() {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_secs_f64();
+        .as_secs_f64()
+        .floor();
     for name in ["alpha", "beta"] {
         let account = ai6::AccountRef::new("team", name);
         let profile =
