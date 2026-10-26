@@ -15,6 +15,7 @@ use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
     TokenUsage, UsageLimit,
 };
+use ai6::directorates::section_00::gate::GATE_PROGRAM_ENV;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
@@ -87,6 +88,7 @@ impl AgentHandler for ClaudeHandler {
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
         add_mcp(&mut argv, &request.environment);
+        add_gate(&mut argv, &request.environment);
         let session = spawn(
             terminal,
             argv,
@@ -124,6 +126,7 @@ impl AgentHandler for ClaudeHandler {
         }
         add_budget(&mut argv, request.max_cost_micro_usd);
         add_mcp(&mut argv, &request.environment);
+        add_gate(&mut argv, &request.environment);
         let session = spawn(
             terminal,
             argv,
@@ -181,6 +184,48 @@ fn add_mcp(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
     if !servers.is_empty() {
         let config = json!({ "mcpServers": servers });
         argv.extend(["--mcp-config".to_owned(), config.to_string()]);
+    }
+}
+
+/// The Claude Code settings that hold a shell command taking a governed step until green ink
+/// covers it: a `PreToolUse` hook on the shell tools running `PROGRAM green-ink gate`. A hook
+/// that fails to run blocks the command (`onFailure`, Claude Code 2.1.295 or later), and hooks
+/// stay on whatever the project's settings say.
+fn gate_settings(program: &str) -> Value {
+    json!({
+        "disableAllHooks": false,
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "Bash|PowerShell",
+                "hooks": [{
+                    "type": "command",
+                    "command": program,
+                    "args": ["green-ink", "gate"],
+                    "timeout": 60,
+                    "onFailure": "block"
+                }]
+            }]
+        }
+    })
+}
+
+/// Adds the green ink gate when the Session has a Station to ask (its Cable endpoint). The
+/// gate is the `ai6` program hosting this handler, or the one `AI6_GREEN_INK_GATE` names.
+fn add_gate(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
+    if !has_endpoint(environment, "AI6_CABLE_MCP") {
+        return;
+    }
+    let program = environment
+        .get(GATE_PROGRAM_ENV)
+        .filter(|program| !program.trim().is_empty())
+        .cloned()
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned())
+        });
+    if let Some(program) = program {
+        argv.extend(["--settings".to_owned(), gate_settings(&program).to_string()]);
     }
 }
 
@@ -1228,6 +1273,121 @@ mod tests {
         // A variadic flag is closed by the next flag, so no value runs on into another.
         assert!(position("--disallowedTools") < position("--allowedTools"));
         assert!(position("--allowedTools") < position("--mcp-config"));
+    }
+
+    fn cable_environment() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            (
+                "AI6_CABLE_MCP_URL".to_owned(),
+                "http://127.0.0.1:43210/mcp".to_owned(),
+            ),
+            ("AI6_CABLE_MCP_TOKEN".to_owned(), "cable-token".to_owned()),
+        ])
+    }
+
+    /// The hook as the Claude Code hooks reference describes a `PreToolUse` command hook: a
+    /// regex matcher over tool names, exec form `command` + `args`, `timeout` in seconds.
+    #[test]
+    fn a_session_with_a_station_gets_the_green_ink_hook_in_its_settings() {
+        let mut environment = cable_environment();
+        environment.insert(GATE_PROGRAM_ENV.to_owned(), "/opt/ai6/bin/ai6".to_owned());
+        let mut argv = vec!["claude".to_owned()];
+        add_gate(&mut argv, &environment);
+
+        assert_eq!(argv[1], "--settings");
+        let settings: Value = serde_json::from_str(&argv[2]).unwrap();
+        assert_eq!(settings["disableAllHooks"], false);
+        let entry = &settings["hooks"]["PreToolUse"][0];
+        let matcher = entry["matcher"].as_str().unwrap();
+        for tool in ["Bash", "PowerShell"] {
+            assert!(matcher.split('|').any(|name| name == tool), "{tool}");
+        }
+        let hook = &entry["hooks"][0];
+        assert_eq!(hook["type"], "command");
+        assert_eq!(hook["command"], "/opt/ai6/bin/ai6");
+        assert_eq!(hook["args"], json!(["green-ink", "gate"]));
+        assert_eq!(hook["onFailure"], "block");
+        assert!(hook["timeout"].as_u64().unwrap() >= 30);
+        assert!(
+            !argv[2].contains("cable-token"),
+            "the hook reads the token from its environment"
+        );
+
+        // Unnamed, the gate is the program hosting the handler.
+        let mut argv = vec!["claude".to_owned()];
+        add_gate(&mut argv, &cable_environment());
+        let settings: Value = serde_json::from_str(&argv[2]).unwrap();
+        assert_eq!(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            std::env::current_exe().unwrap().to_string_lossy().as_ref()
+        );
+
+        // Without a Station to ask there is no gate.
+        let mut argv = vec!["claude".to_owned()];
+        add_gate(&mut argv, &BTreeMap::new());
+        assert_eq!(argv, ["claude"]);
+    }
+
+    #[test]
+    fn start_and_resume_both_pass_the_gate() {
+        let mut environment = cable_environment();
+        environment.insert(
+            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
+            "claude-gate-session".to_owned(),
+        );
+        let terminal = ProcessTerminal::new();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-gate-fixture".to_owned(),
+        })
+        .unwrap();
+        let working_directory = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let started = handler
+            .start(
+                AgentStart {
+                    mission_id: "mission-gate".parse().unwrap(),
+                    agent_id: "007".to_owned(),
+                    prompt: "push when approved".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: working_directory.clone(),
+                    clearance: "field".to_owned(),
+                    environment: environment.clone(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&started);
+        started.close().unwrap();
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-gate".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-gate-session").unwrap(),
+                    message: Some("approved".to_owned()),
+                    working_directory,
+                    environment,
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&resumed);
+        resumed.close().unwrap();
+        for spec in terminal.specs.lock().unwrap().iter() {
+            let position = spec
+                .argv
+                .iter()
+                .position(|argument| argument == "--settings")
+                .expect("the gate is passed");
+            assert!(spec.argv[position + 1].contains("green-ink"));
+        }
     }
 
     #[test]

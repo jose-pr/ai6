@@ -6,8 +6,9 @@
 ai6::guatiao::providers!(CodexHandler);
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::m::identity::SessionId;
@@ -16,6 +17,7 @@ use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
     TokenUsage, UsageLimit,
 };
+use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use serde_json::{Value, json};
@@ -62,46 +64,8 @@ impl AgentHandler for CodexHandler {
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
-        let process = spawn(
-            terminal,
-            &self.config.executable,
-            &request.working_directory,
-            &request.environment,
-        )?;
-        let mut session = CodexSession::new(process, request.effort);
-        session.request(
-            "initialize",
-            json!({
-                "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
-                "capabilities": {}
-            }),
-            Duration::from_secs(20),
-        )?;
-        session.notify("initialized", json!({}))?;
-        let mut params = json!({ "cwd": request.working_directory });
-        if is_remote_hands(&request.environment) {
-            restrict_to_remote_hands(&mut params);
-        }
-        if let Some(model) = request.model {
-            params["model"] = json!(model);
-        }
-        if !request.initial_context.is_empty() {
-            params["developerInstructions"] = json!(request.initial_context.join("\n\n"));
-        }
-        let response = session.request("thread/start", params, Duration::from_secs(30))?;
-        let thread_id = response
-            .pointer("/thread/id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| refuse(Status::GUATIAO_ERR_BAD_VALUE, "Codex omitted thread ID"))?
-            .to_string();
-        session.thread_id = Some(
-            SessionId::try_from(thread_id)
-                .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?,
-        );
-        session.send_message(AgentMessage {
-            text: request.prompt,
-        })?;
-        Ok(session.into_object())
+        let gate = station_gate(&request.environment);
+        self.start_gated(request, terminal, gate)
     }
 
     fn resume(
@@ -115,7 +79,8 @@ impl AgentHandler for CodexHandler {
             &request.working_directory,
             &request.environment,
         )?;
-        let mut session = CodexSession::new(process, request.effort);
+        let mut session = CodexSession::new(process, request.effort)
+            .with_gate(station_gate(&request.environment));
         session.request(
             "initialize",
             json!({
@@ -165,8 +130,72 @@ impl AgentHandler for CodexHandler {
     }
 }
 
+impl CodexHandler {
+    /// Starts a thread whose command approvals `gate` answers.
+    fn start_gated(
+        &self,
+        request: AgentStart,
+        terminal: Object<dyn AgentTerminal>,
+        gate: Gate,
+    ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
+        let process = spawn(
+            terminal,
+            &self.config.executable,
+            &request.working_directory,
+            &request.environment,
+        )?;
+        let mut session = CodexSession::new(process, request.effort).with_gate(gate);
+        session.request(
+            "initialize",
+            json!({
+                "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
+                "capabilities": {}
+            }),
+            Duration::from_secs(20),
+        )?;
+        session.notify("initialized", json!({}))?;
+        let mut params = json!({ "cwd": request.working_directory });
+        if is_remote_hands(&request.environment) {
+            restrict_to_remote_hands(&mut params);
+        }
+        if let Some(model) = request.model {
+            params["model"] = json!(model);
+        }
+        if !request.initial_context.is_empty() {
+            params["developerInstructions"] = json!(request.initial_context.join("\n\n"));
+        }
+        let response = session.request("thread/start", params, Duration::from_secs(30))?;
+        let thread_id = response
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| refuse(Status::GUATIAO_ERR_BAD_VALUE, "Codex omitted thread ID"))?
+            .to_string();
+        session.thread_id = Some(
+            SessionId::try_from(thread_id)
+                .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?,
+        );
+        session.send_message(AgentMessage {
+            text: request.prompt,
+        })?;
+        Ok(session.into_object())
+    }
+}
+
+/// Decides whether a command Codex asks to run may go ahead, given its working directory.
+type Gate = Arc<dyn Fn(&str, Option<&Path>) -> GateVerdict + Send + Sync>;
+
+/// The green ink gate asking the Session's Station through its Cable endpoint. A Session with
+/// no endpoint cannot ask for green ink at all, so it has no gate, as with Claude Code.
+fn station_gate(environment: &std::collections::BTreeMap<String, String>) -> Gate {
+    match GateClient::from_environment(environment) {
+        Some(client) => Arc::new(move |command, cwd| gate(command, cwd, Some(&client))),
+        None => Arc::new(|_, _| GateVerdict::Allow),
+    }
+}
+
 struct CodexSession {
     terminal: Object<dyn TerminalSession>,
+    gate: Gate,
     output: Mutex<Vec<u8>>,
     events: Mutex<VecDeque<AgentEvent>>,
     thread_id: Option<SessionId>,
@@ -180,6 +209,7 @@ impl CodexSession {
     fn new(terminal: Object<dyn TerminalSession>, effort: Option<String>) -> Self {
         Self {
             terminal,
+            gate: Arc::new(|_, _| GateVerdict::Allow),
             output: Mutex::new(Vec::new()),
             events: Mutex::new(VecDeque::new()),
             thread_id: None,
@@ -187,6 +217,11 @@ impl CodexSession {
             effort,
             exhausted: Mutex::new(None),
         }
+    }
+
+    fn with_gate(mut self, gate: Gate) -> Self {
+        self.gate = gate;
+        self
     }
 
     fn request(
@@ -210,10 +245,12 @@ impl CodexSession {
                 continue;
             };
             let message: Value = serde_json::from_slice(&line).map_err(internal)?;
-            if message.get("id").and_then(Value::as_u64) == Some(id) {
-                if message.get("method").and_then(Value::as_str) == Some(method) {
-                    continue;
-                }
+            let ours = message.get("id").and_then(Value::as_u64) == Some(id);
+            if ours && message.get("method").and_then(Value::as_str) == Some(method) {
+                continue;
+            }
+            // A server request carries its own id, which may equal ours; it has a method.
+            if ours && message.get("method").is_none() {
                 if let Some(error) = message.get("error") {
                     return Err(refuse(Status::GUATIAO_ERR_INTERNAL, error));
                 }
@@ -279,12 +316,56 @@ impl CodexSession {
     }
 
     fn collect_event(&self, message: Value) -> Result<(), ProviderError> {
+        if let Some(id) = message.get("id")
+            && message.get("method").and_then(Value::as_str) == Some(COMMAND_APPROVAL)
+        {
+            self.answer_command_approval(id, message.get("params").unwrap_or(&Value::Null))?;
+        }
         if let Some(exhausted) = exhausted_window(&message) {
             *lock(&self.exhausted)? = Some(exhausted);
         }
         let hint = lock(&self.exhausted)?.clone();
         if let Some(event) = decode_event(&message, hint.as_ref()) {
             lock(&self.events)?.push_back(event);
+        }
+        Ok(())
+    }
+}
+
+/// The app-server's request to approve a command before it runs.
+const COMMAND_APPROVAL: &str = "item/commandExecution/requestApproval";
+
+impl CodexSession {
+    /// Answers a command approval with the green ink gate: `accept` unless the gate holds the
+    /// command, then `decline`, and the reason is steered into the running turn so the Agent
+    /// knows to ask for green ink. Input to a running command is accepted.
+    fn answer_command_approval(&self, id: &Value, params: &Value) -> Result<(), ProviderError> {
+        let command = params
+            .get("command")
+            .and_then(Value::as_str)
+            .filter(|_| params.get("kind").and_then(Value::as_str) != Some("writeStdin"));
+        let cwd = params.get("cwd").and_then(Value::as_str).map(Path::new);
+        let verdict = command.map_or(GateVerdict::Allow, |command| (self.gate)(command, cwd));
+        let decision = match verdict {
+            GateVerdict::Allow => "accept",
+            GateVerdict::Hold(_) => "decline",
+        };
+        self.write_line(&json!({ "id": id, "result": { "decision": decision } }))?;
+        if let GateVerdict::Hold(reason) = verdict
+            && let (Some(thread), Some(turn)) = (
+                params.get("threadId").and_then(Value::as_str),
+                params.get("turnId").and_then(Value::as_str),
+            )
+        {
+            self.write_line(&json!({
+                "id": self.request_id.fetch_add(1, Ordering::Relaxed) + 1,
+                "method": "turn/steer",
+                "params": {
+                    "threadId": thread,
+                    "expectedTurnId": turn,
+                    "input": [{ "type": "text", "text": reason }]
+                }
+            }))?;
         }
         Ok(())
     }
@@ -710,9 +791,77 @@ mod tests {
         let thread_id = std::env::var("CODEX_FIXTURE_THREAD_ID").unwrap();
         let stdout = std::io::stdout();
         let mut stdout = stdout.lock();
+        // A turn whose text is `run: COMMAND` asks the client to approve COMMAND, as the
+        // app-server does before running a command, and reports the decision it receives.
+        let mut asked = 900_u64;
+        let mut pending = None;
         for line in std::io::stdin().lock().lines() {
             let message: Value = serde_json::from_str(&line.unwrap()).unwrap();
             let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+            if pending.is_some() && message.get("id").and_then(Value::as_u64) == pending {
+                pending = None;
+                let decision = message
+                    .pointer("/result/decision")
+                    .and_then(Value::as_str)
+                    .unwrap_or("none");
+                let delta = format!("decision: {decision}");
+                writeln!(
+                    stdout,
+                    "{}",
+                    json!({"method":"item/agentMessage/delta","params":{"delta":delta}})
+                )
+                .unwrap();
+                if decision == "accept" {
+                    writeln!(stdout, "{}", json!({"method":"turn/completed","params":{}})).unwrap();
+                }
+                stdout.flush().unwrap();
+                continue;
+            }
+            if method == "turn/steer" {
+                assert_eq!(
+                    message.pointer("/params/expectedTurnId"),
+                    Some(&json!("turn-7"))
+                );
+                let text = message
+                    .pointer("/params/input/0/text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let delta = format!("steered: {text}");
+                writeln!(
+                    stdout,
+                    "{}",
+                    json!({"method":"item/agentMessage/delta","params":{"delta":delta}})
+                )
+                .unwrap();
+                writeln!(stdout, "{}", json!({"method":"turn/completed","params":{}})).unwrap();
+                stdout.flush().unwrap();
+                continue;
+            }
+            if method == "turn/start"
+                && let Some(command) = message
+                    .pointer("/params/input/0/text")
+                    .and_then(Value::as_str)
+                    .and_then(|text| text.strip_prefix("run: "))
+            {
+                asked += 1;
+                pending = Some(asked);
+                writeln!(
+                    stdout,
+                    "{}",
+                    json!({
+                        "id": asked,
+                        "method": "item/commandExecution/requestApproval",
+                        "params": {
+                            "threadId": thread_id, "turnId": "turn-7", "itemId": "item-1",
+                            "startedAtMs": 1_790_000_000_000_u64, "command": command,
+                            "cwd": "/work", "kind": "command"
+                        }
+                    })
+                )
+                .unwrap();
+                stdout.flush().unwrap();
+                continue;
+            }
             if let Some(id) = message.get("id") {
                 match method {
                     "initialize" => {
@@ -836,6 +985,104 @@ mod tests {
         assert_eq!(specs.len(), 2);
         assert_eq!(specs[0].argv, ["codex-process-fixture", "app-server"]);
         assert_eq!(specs[1].argv, ["codex-process-fixture", "app-server"]);
+    }
+
+    /// A gate that holds every governed step until an approval in `approved` covers it, as
+    /// the Station answers through `check_approval`.
+    fn approvals_gate(approved: Arc<Mutex<Vec<ai6::ActionScope>>>) -> Gate {
+        Arc::new(
+            move |command, _cwd| match ai6::classify(command, &|_| None) {
+                Err(reason) => GateVerdict::Hold(reason),
+                Ok(steps) => {
+                    let approved = approved.lock().unwrap();
+                    match steps
+                        .iter()
+                        .find(|step| !approved.iter().any(|approval| approval.covers(step)))
+                    {
+                        None => GateVerdict::Allow,
+                        Some(step) => GateVerdict::Hold(format!(
+                            "call request_approval with kind {} and target {}",
+                            step.kind, step.target
+                        )),
+                    }
+                }
+            },
+        )
+    }
+
+    fn texts_until_completed(session: &Object<dyn AgentSession>) -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut texts = Vec::new();
+        while Instant::now() < deadline {
+            if let Some(event) = session.next_event(1_000).unwrap() {
+                if event.kind == "completed" {
+                    return texts;
+                }
+                texts.extend(event.text);
+            }
+        }
+        panic!("fake Codex did not complete the turn: {texts:?}")
+    }
+
+    #[test]
+    fn a_governed_command_is_declined_until_green_ink_covers_it() {
+        let approved = Arc::new(Mutex::new(Vec::new()));
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-gate-fixture".to_owned(),
+        })
+        .unwrap();
+        let session = handler
+            .start_gated(
+                AgentStart {
+                    mission_id: "mission-gate".parse().unwrap(),
+                    agent_id: "007".to_owned(),
+                    prompt: "run: git push origin main".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: std::env::current_dir()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    clearance: "field".to_owned(),
+                    environment: BTreeMap::from([(
+                        "CODEX_FIXTURE_THREAD_ID".to_owned(),
+                        "codex-gate-thread".to_owned(),
+                    )]),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                },
+                ProcessTerminal::new().into_object(),
+                approvals_gate(approved.clone()),
+            )
+            .unwrap();
+
+        let declined = texts_until_completed(&session);
+        assert_eq!(declined[0], "decision: decline", "{declined:?}");
+        assert!(
+            declined[1].starts_with("steered: ")
+                && declined[1].contains("request_approval")
+                && declined[1].contains("origin:refs/heads/main"),
+            "the Agent is told why: {declined:?}"
+        );
+
+        approved
+            .lock()
+            .unwrap()
+            .push(ai6::ActionScope::try_new("push", "origin:main").unwrap());
+        session
+            .send_message(AgentMessage {
+                text: "run: git push origin main".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(texts_until_completed(&session), ["decision: accept"]);
+
+        session
+            .send_message(AgentMessage {
+                text: "run: cargo test --workspace".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(texts_until_completed(&session), ["decision: accept"]);
+        session.close().unwrap();
     }
 
     struct EofTerminalSession;

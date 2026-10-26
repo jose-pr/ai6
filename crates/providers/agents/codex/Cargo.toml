@@ -14,7 +14,7 @@ exclude = [".*", "*.local.*"]
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-ai6 = { path = "../../../ai6", default-features = false }
+ai6 = { path = "../../../ai6", default-features = false, features = ["gate"] }
 serde_json.workspace = true
 
 [dev-dependencies]
