@@ -106,6 +106,23 @@ pub struct TokenUsage {
     pub cumulative: bool,
 }
 
+/// How much of one provider quota window the Session's account has used, as the provider
+/// reported it. A handler attaches one per window to the event that carried the report.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[map(crate = ::guatiao)]
+pub struct QuotaReport {
+    /// The window (`five_hour`, `weekly`, ...) as the provider names it, or its position
+    /// (`primary`, `secondary`) when it gives no name.
+    pub window: String,
+    /// Thousandths of the window used, when the provider reports a figure.
+    pub used_permille: Option<u16>,
+    /// When the window resets, as Unix seconds, when the provider says.
+    pub resets_at: Option<i64>,
+    /// The provider's verdict for the window (`allowed`, `allowed_warning`, `rejected`), when
+    /// it reports one.
+    pub status: Option<String>,
+}
+
 /// One provider event returned to the daemon.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[map(crate = ::guatiao)]
@@ -122,6 +139,9 @@ pub struct AgentEvent {
     pub usage: Option<TokenUsage>,
     /// Names of the tools the event calls, as the harness names them (`WebFetch`).
     pub tools: Vec<String>,
+    /// Quota windows the provider reported with this event.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quota: Vec<QuotaReport>,
 }
 
 /// Starts or resumes the configured Agent implementation.

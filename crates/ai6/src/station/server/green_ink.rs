@@ -172,6 +172,7 @@ impl Desk {
                 limit: None,
                 usage: None,
                 tools: Vec::new(),
+                quota: Vec::new(),
             },
         );
         hold(state, &asked.mission);
@@ -548,6 +549,7 @@ fn told(state: &DaemonState, approval: &Approval, now: f64) {
             limit: None,
             usage: None,
             tools: Vec::new(),
+            quota: Vec::new(),
         },
     );
 }

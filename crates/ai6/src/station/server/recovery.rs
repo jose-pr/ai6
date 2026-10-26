@@ -225,6 +225,7 @@ pub(super) fn give_up(
             data: None,
             limit: None,
             usage: None,
+            quota: Vec::new(),
             tools: Vec::new(),
         },
     );
@@ -1446,6 +1447,7 @@ mod tests {
             limit: None,
             usage: None,
             tools: tools.iter().map(|tool| (*tool).to_owned()).collect(),
+            quota: Vec::new(),
         };
         let mut notes = Notes::default();
         notes.record(&event("text", Some("  editing\n the   parser "), &[]));

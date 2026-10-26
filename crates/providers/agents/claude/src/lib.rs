@@ -13,7 +13,7 @@ use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    TokenUsage, UsageLimit,
+    QuotaReport, TokenUsage, UsageLimit,
 };
 use ai6::directorates::section_00::gate::GATE_PROGRAM_ENV;
 use ai6::guatiao::library::{Object, ProviderError};
@@ -502,6 +502,7 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
         limit: None,
         usage: None,
         tools: Vec::new(),
+        quota: Vec::new(),
     }
 }
 
@@ -556,6 +557,38 @@ fn decode_limit(value: &Value) -> Option<(UsageLimit, Option<String>)> {
     }
 }
 
+/// The quota a `rate_limit_event` reports, whatever its status: the window
+/// (`rateLimitType`), the status, `resetsAt`, and `utilization` as thousandths when it is a
+/// fraction between 0 and 1.
+fn decode_quota(value: &Value) -> Vec<QuotaReport> {
+    if value.get("type").and_then(Value::as_str) != Some("rate_limit_event") {
+        return Vec::new();
+    }
+    let Some(info) = value.get("rate_limit_info") else {
+        return Vec::new();
+    };
+    vec![QuotaReport {
+        window: info
+            .get("rateLimitType")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned(),
+        used_permille: info
+            .get("utilization")
+            .and_then(Value::as_f64)
+            .filter(|fraction| (0.0..=1.0).contains(fraction))
+            .map(|fraction| (fraction * 1000.0).round() as u16),
+        resets_at: info
+            .get("resetsAt")
+            .and_then(Value::as_i64)
+            .map(unix_seconds),
+        status: info
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    }]
+}
+
 /// A Unix timestamp that may be in seconds or milliseconds.
 fn unix_seconds(value: i64) -> i64 {
     if value > 100_000_000_000 {
@@ -578,6 +611,7 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
             limit: Some(limit),
             usage: decode_usage(value),
             tools: Vec::new(),
+            quota: decode_quota(value),
         });
     }
     let tools = decode_tools(value);
@@ -605,6 +639,7 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
         limit: None,
         usage: decode_usage(value),
         tools,
+        quota: decode_quota(value),
     })
 }
 
@@ -1158,6 +1193,64 @@ mod tests {
                 resets_at: Some(1_790_000_000),
                 window: Some("five_hour".to_owned()),
             })
+        );
+    }
+
+    #[test]
+    fn every_rate_limit_event_reports_its_window_as_quota() {
+        let rejected = json!({
+            "type": "rate_limit_event",
+            "session_id": "claude-session-7",
+            "rate_limit_info": {
+                "status": "rejected",
+                "resetsAt": 1_790_000_000,
+                "rateLimitType": "five_hour"
+            }
+        });
+        assert_eq!(
+            decode_event(&rejected, b"{}".to_vec()).unwrap().quota,
+            [QuotaReport {
+                window: "five_hour".to_owned(),
+                used_permille: None,
+                resets_at: Some(1_790_000_000),
+                status: Some("rejected".to_owned()),
+            }]
+        );
+        let warning = json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": { "status": "allowed_warning", "resetsAt": 1_790_000_000 }
+        });
+        let quota = decode_event(&warning, b"{}".to_vec()).unwrap().quota;
+        assert_eq!(quota[0].window, "unknown");
+        assert_eq!(quota[0].status.as_deref(), Some("allowed_warning"));
+        // `utilization` is in the SDK's published SDKRateLimitInfo type; only a fraction is
+        // taken, since its scale is not documented there.
+        let measured = json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed",
+                "rateLimitType": "seven_day",
+                "utilization": 0.25
+            }
+        });
+        assert_eq!(
+            decode_event(&measured, b"{}".to_vec()).unwrap().quota[0].used_permille,
+            Some(250)
+        );
+        let percent = json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": { "status": "allowed", "utilization": 25 }
+        });
+        assert_eq!(
+            decode_event(&percent, b"{}".to_vec()).unwrap().quota[0].used_permille,
+            None
+        );
+        let result = json!({ "type": "result", "result": "done" });
+        assert!(
+            decode_event(&result, b"{}".to_vec())
+                .unwrap()
+                .quota
+                .is_empty()
         );
     }
 

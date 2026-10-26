@@ -132,6 +132,7 @@ mod tests {
             limit: None,
             usage: None,
             tools: Vec::new(),
+            quota: Vec::new(),
         }
     }
 

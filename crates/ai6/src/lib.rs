@@ -133,7 +133,7 @@ pub use directorates::registry::store::{
 pub use directorates::registry::timeline::{MAX_TIMELINE_EVENTS, TimelineEvent};
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    TokenUsage, UsageLimit,
+    QuotaReport, TokenUsage, UsageLimit,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

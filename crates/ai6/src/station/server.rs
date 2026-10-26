@@ -4592,6 +4592,7 @@ fn spawn_event_pump_with_monitor(
                     notes.record(&event);
                     notes.write_if_due(&state, &mission_id);
                     medical::expose_by_tools(&state, &exposure, &event);
+                    accounts::observe_quota(&state, &mission_id, &event.quota);
                     medical::sync_exposure(&state, &mission_id, &exposure, &mut announced);
                     if let Some(reported) = &event.usage
                         && let Some(recorded) =
@@ -4652,6 +4653,7 @@ fn spawn_event_pump_with_monitor(
                         limit: None,
                         usage: None,
                         tools: Vec::new(),
+                        quota: Vec::new(),
                     };
                     let finished = finish_operation(&state, &mission_id, &session);
                     publish_finished_event(&state, &mission_id, event, finished);
@@ -4685,6 +4687,7 @@ fn spawn_event_pump_with_monitor(
                             limit: None,
                             usage: None,
                             tools: Vec::new(),
+                            quota: Vec::new(),
                         },
                     );
                 }
@@ -4705,6 +4708,7 @@ fn spawn_event_pump_with_monitor(
                     limit: None,
                     usage: None,
                     tools: Vec::new(),
+                    quota: Vec::new(),
                 };
                 apply_event_state(&state, &mission_id, &event);
                 queue_event(&state, &mission_id, event);
@@ -4741,6 +4745,7 @@ fn spawn_event_pump_with_monitor(
                     limit: None,
                     usage: None,
                     tools: Vec::new(),
+                    quota: Vec::new(),
                 };
                 gate.close();
                 apply_event_state(&state, &mission_id, &event);
@@ -5578,6 +5583,7 @@ mod tests {
             limit: None,
             usage: None,
             tools: Vec::new(),
+            quota: Vec::new(),
         };
         let finished = FinishOutcome {
             cover_blown: true,
@@ -5602,6 +5608,7 @@ mod tests {
             limit: None,
             usage: None,
             tools: Vec::new(),
+            quota: Vec::new(),
         };
         let finished = FinishOutcome {
             cover_blown: true,
@@ -5962,6 +5969,7 @@ mod tests {
                     limit: None,
                     usage: None,
                     tools: Vec::new(),
+                    quota: Vec::new(),
                 },
             )
         }
@@ -6005,6 +6013,7 @@ mod tests {
                     }),
                     usage: None,
                     tools: Vec::new(),
+                    quota: Vec::new(),
                 },
             )
             .into_object())
@@ -6062,6 +6071,7 @@ mod tests {
                             cumulative: true,
                         }),
                         tools: Vec::new(),
+                        quota: Vec::new(),
                     }
                 })
                 .collect::<VecDeque<_>>();
@@ -6074,6 +6084,7 @@ mod tests {
                     limit: None,
                     usage: None,
                     tools: tools.split(',').map(str::to_owned).collect(),
+                    quota: Vec::new(),
                 });
             }
             let session_id = SessionId::try_new("provider-session-spend")
@@ -10152,6 +10163,7 @@ mod tests {
                 limit: None,
                 usage: None,
                 tools: Vec::new(),
+                quota: Vec::new(),
             }))
         }
 
@@ -10502,6 +10514,7 @@ mod tests {
                 limit: None,
                 usage: None,
                 tools: Vec::new(),
+                quota: Vec::new(),
             };
             loop {
                 let mut pending = self.pending.lock().unwrap();

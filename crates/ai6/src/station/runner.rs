@@ -553,6 +553,7 @@ fn event(kind: &str, text: &str) -> AgentEvent {
         limit: None,
         usage: None,
         tools: Vec::new(),
+        quota: Vec::new(),
     }
 }
 

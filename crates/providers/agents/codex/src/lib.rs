@@ -15,7 +15,7 @@ use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    TokenUsage, UsageLimit,
+    QuotaReport, TokenUsage, UsageLimit,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::guatiao::library::{Object, ProviderError};
@@ -398,6 +398,41 @@ impl CodexSession {
     }
 }
 
+/// The name of a Codex quota window by its length, else its position.
+fn window_name(window: &Value, position: &str) -> String {
+    match window.get("windowDurationMins").and_then(Value::as_i64) {
+        Some(300) => "five_hour".to_owned(),
+        Some(10_080) => "weekly".to_owned(),
+        _ => position.to_owned(),
+    }
+}
+
+/// Every quota window an `account/rateLimits/updated` notification reports: `usedPercent`
+/// as thousandths, `resetsAt` in Unix seconds.
+fn decode_quota(message: &Value) -> Vec<QuotaReport> {
+    if message.get("method").and_then(Value::as_str) != Some("account/rateLimits/updated") {
+        return Vec::new();
+    }
+    let Some(limits) = message.pointer("/params/rateLimits") else {
+        return Vec::new();
+    };
+    ["primary", "secondary"]
+        .iter()
+        .filter_map(|position| {
+            let window = limits.get(position).filter(|window| window.is_object())?;
+            Some(QuotaReport {
+                window: window_name(window, position),
+                used_permille: window
+                    .get("usedPercent")
+                    .and_then(Value::as_f64)
+                    .map(|percent| (percent * 10.0).round().clamp(0.0, 1000.0) as u16),
+                resets_at: window.get("resetsAt").and_then(Value::as_i64),
+                status: None,
+            })
+        })
+        .collect()
+}
+
 /// The quota window an `account/rateLimits/updated` notification reports as used up.
 ///
 /// The usage-limit error that follows does not always repeat the reset time, so the session
@@ -414,8 +449,7 @@ fn exhausted_window(message: &Value) -> Option<UsageLimit> {
             (window.get("usedPercent")?.as_f64()? >= 100.0).then(|| UsageLimit {
                 resets_at: window.get("resetsAt").and_then(Value::as_i64),
                 window: match window.get("windowDurationMins").and_then(Value::as_i64) {
-                    Some(300) => Some("five_hour".to_owned()),
-                    Some(10_080) => Some("weekly".to_owned()),
+                    Some(300 | 10_080) => Some(window_name(window, "")),
                     _ => None,
                 },
             })
@@ -518,6 +552,7 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
             limit: Some(limit),
             usage: None,
             tools: Vec::new(),
+            quota: Vec::new(),
         });
     }
     let kind = match method {
@@ -538,6 +573,7 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
         limit: None,
         usage: decode_usage(message),
         tools: decode_tools(message),
+        quota: decode_quota(message),
     })
 }
 
@@ -1451,6 +1487,49 @@ mod tests {
                 .resets_at,
             None
         );
+    }
+
+    #[test]
+    fn every_rate_limit_snapshot_reports_its_windows_as_quota() {
+        let snapshot = json!({
+            "method": "account/rateLimits/updated",
+            "params": { "rateLimits": {
+                "primary": { "usedPercent": 42.5, "windowDurationMins": 300, "resetsAt": 1_790_000_000 },
+                "secondary": { "usedPercent": 40.0, "windowDurationMins": 10_080, "resetsAt": 1_790_500_000 }
+            } }
+        });
+        let event = decode_event(&snapshot, None).unwrap();
+        assert_eq!(event.kind, "account/rateLimits/updated");
+        assert_eq!(
+            event.quota,
+            [
+                QuotaReport {
+                    window: "five_hour".to_owned(),
+                    used_permille: Some(425),
+                    resets_at: Some(1_790_000_000),
+                    status: None,
+                },
+                QuotaReport {
+                    window: "weekly".to_owned(),
+                    used_permille: Some(400),
+                    resets_at: Some(1_790_500_000),
+                    status: None,
+                },
+            ]
+        );
+        let partial = json!({
+            "method": "account/rateLimits/updated",
+            "params": { "rateLimits": { "primary": { "usedPercent": 99.0, "resetsAt": 1 } } }
+        });
+        let quota = decode_event(&partial, None).unwrap().quota;
+        assert_eq!(quota.len(), 1);
+        assert_eq!(
+            quota[0].window, "primary",
+            "an unnamed window keeps its position"
+        );
+        assert_eq!(quota[0].used_permille, Some(990));
+        let other = json!({ "method": "turn/completed", "params": {} });
+        assert!(decode_event(&other, None).unwrap().quota.is_empty());
     }
 
     #[test]

@@ -22,10 +22,11 @@ use crate::directorates::q::{
     SecretLeaseRequest, choose_pools,
 };
 use crate::directorates::registry::accounts::{
-    AccountClaimRequest, AccountProfile, AccountRef, AccountState, choose_account,
+    AccountClaimRequest, AccountProfile, AccountRef, AccountState, QuotaWindow, choose_account,
 };
 use crate::directorates::registry::store::DEFAULT_LEASE;
 use crate::directorates::registry::timeline::TimelineEvent;
+use crate::directorates::section_00::agent::QuotaReport;
 
 use super::DaemonState;
 
@@ -505,6 +506,36 @@ pub(super) fn record_usage(state: &DaemonState, mission_id: &str, tokens: u64) {
     }
 }
 
+/// Records the quota windows a provider reported on the account `mission_id`'s Session holds.
+pub(super) fn observe_quota(state: &DaemonState, mission_id: &str, reports: &[QuotaReport]) {
+    if reports.is_empty() {
+        return;
+    }
+    let Some(account) = held(state, mission_id) else {
+        return;
+    };
+    let now = state.clock.now() as f64;
+    let windows: Vec<QuotaWindow> = reports
+        .iter()
+        .map(|report| {
+            let mut window = QuotaWindow::new(&report.window, now);
+            if let Some(used) = report.used_permille {
+                window = window.used_permille(used);
+            }
+            if let Some(at) = report.resets_at {
+                window = window.resets_at(at as f64);
+            }
+            if let Some(status) = &report.status {
+                window = window.status(status);
+            }
+            window
+        })
+        .collect();
+    if let Err(error) = state.intake.report_quota(&account, &windows) {
+        eprintln!("ai6: quota of account {account} not recorded: {error}");
+    }
+}
+
 /// What happens to a Session whose account hit a provider limit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Rotation {
@@ -693,7 +724,8 @@ pub(super) mod testing {
     use crate::directorates::m::identity::SessionId;
     use crate::directorates::q::terminal::AgentTerminal;
     use crate::directorates::section_00::agent::{
-        AgentEvent, AgentHandler, AgentResume, AgentSession, AgentStart, LIMIT_EVENT, UsageLimit,
+        AgentEvent, AgentHandler, AgentResume, AgentSession, AgentStart, LIMIT_EVENT, QuotaReport,
+        TokenUsage, UsageLimit,
     };
     use crate::guatiao::library::{Object, ProviderError};
     use crate::guatiao::{Provider, Status};
@@ -743,8 +775,21 @@ pub(super) mod testing {
                 resets_at: Some(POOLED_RESET),
                 window: Some("five_hour".to_owned()),
             }),
-            usage: None,
+            usage: (!limited).then_some(TokenUsage {
+                input: 100,
+                output: 20,
+                cache_read: 0,
+                cache_write: 0,
+                cost_micro_usd: 0,
+                cumulative: true,
+            }),
             tools: Vec::new(),
+            quota: vec![QuotaReport {
+                window: "five_hour".to_owned(),
+                used_permille: Some(if limited { 1000 } else { 300 }),
+                resets_at: Some(POOLED_RESET),
+                status: None,
+            }],
         }
     }
 
@@ -1014,6 +1059,19 @@ secret = "env-gamma"
         until_released(&state).await;
         let alpha = account(&state, "team", "alpha");
         assert_eq!(alpha.last_used, Some(START as f64));
+        assert_eq!(
+            alpha.windows.len(),
+            1,
+            "the provider's quota report is kept"
+        );
+        assert_eq!(alpha.windows[0].name, "five_hour");
+        assert_eq!(alpha.windows[0].used_permille, Some(300));
+        assert_eq!(alpha.windows[0].resets_at, Some(POOLED_RESET as f64));
+        assert_eq!(
+            alpha.tokens_on_day(START),
+            120,
+            "the Session's tokens count for it"
+        );
         assert_eq!(
             alpha.profile.unwrap().operations,
             ["G"],

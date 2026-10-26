@@ -182,6 +182,7 @@ fn announce(
             limit: None,
             usage: None,
             tools: Vec::new(),
+            quota: Vec::new(),
         },
     );
     let record = AuditRecord {
@@ -286,6 +287,7 @@ pub(super) fn sync_exposure(
                 limit: None,
                 usage: None,
                 tools: Vec::new(),
+                quota: Vec::new(),
             },
         );
     }
@@ -557,6 +559,7 @@ fn stop_for_quarantine(state: &DaemonState, mission: &Mission, records: &[Quaran
             limit: None,
             usage: None,
             tools: Vec::new(),
+            quota: Vec::new(),
         },
     );
 }
