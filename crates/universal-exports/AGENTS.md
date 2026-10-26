@@ -368,16 +368,25 @@ impl AssistantConfig {
     pub fn with_token_ttl(self, ttl: Duration) -> Self;          // at least 60 s
     pub fn with_answer_timeout(self, timeout: Duration) -> Self;
     pub fn with_tool_calls_per_minute(self, calls: u32) -> Self;
+    pub fn with_answer_deadline(self, deadline: Duration) -> Self;
+    pub fn with_live_conversations_per_person(self, conversations: usize) -> Self; // at least 1
+    pub fn with_memory_limits(self, per_conversation: usize, per_person: usize) -> Self;
 }
 impl Gateway { pub fn with_assistant(self, config: AssistantConfig) -> Self; }
 ```
 
 Defaults: 20 conversations a person and 2,000 in all (oldest idle one dropped first), each
-kept until untouched for 7 days with its newest 500 entries; tool tokens accepted for one
-hour (8 kept per conversation); a Station has 60 seconds to take up a message; 120 tool calls
-a conversation per minute. Conversations live in the gateway's memory only and are lost when
-it restarts (the provider Session on the Station survives, but the app shows a new
-conversation).
+kept until untouched for 7 days with its newest 500 entries and at most 1 MiB of them (4 MiB a
+person: the person's oldest views are emptied first, then their oldest entries dropped;
+`with_memory_limits` takes at least 64 KiB a conversation); tool tokens accepted for one hour;
+a Station has 60 seconds to take up a message, and an accepted message is given up (an
+`error` entry, `busy` false) after 10 minutes without a report from its Station; 120 tool
+calls a conversation per minute; 2 conversations a person with a harness running or an answer
+pending. Past that last bound, a new message closes the person's least recently used idle
+harness (a `close` job to its Station, and the conversation's tokens withdrawn); when every
+other one is answering, the message is refused with `busy_elsewhere`. Conversations live in the
+gateway's memory only and are lost when it restarts (the provider Session on the Station
+survives, but the app shows a new conversation).
 
 The model runs on a Station, as the roster Agent named here (see `ai6::AssistantJob`), not in
 the gateway. Each message from the app is queued as an `AssistantJob` for the conversation's
@@ -388,7 +397,12 @@ carries the message (prefixed with `[App page: view=… operation_id=…]` from 
 `view`, `operation_id`, `mission_id`, `station_id`, `session_id`, each a short identifier;
 anything else in the page is dropped), Moneypenny's instructions and the field dictionary
 (`docs/organization.md`) as context, a recap of the conversation's last 8 KiB, the provider
-Session to resume, and a fresh random MCP token bound to the person and the conversation.
+Session to resume, and an MCP token bound to the person, the conversation and the Station the
+job is placed on. The token is set when the job is placed: the conversation's token for that
+Station is reused while more than 10 minutes of it remain (so a running harness keeps the
+token it started with), otherwise a new random one is made; placing the job on another
+Station withdraws every token the conversation holds for any other. A Station is served its
+`close` jobs before messages; the `accepted` answer to a close is taken as is.
 
 Her tools are served on `POST /v1/moneypenny/mcp` (MCP Streamable HTTP, protocol
 `2025-06-18`, `2025-03-26` or `2024-11-05`; one JSON response per request, `202` for
@@ -404,7 +418,7 @@ runs, and identifiers are percent-encoded into paths. Results are JSON inside
 `mission_proposals`, `missions`, `placement_preview`, `pools`, `profile`, `quarantines`,
 `roster`, `station_settings`, `timeline`; all read only.
 
-Write tools only propose: `propose_class_authorization` (approval.class), `propose_held_brief_decision`
+Write tools only propose (an input whose text holds a character AI6 vetting counts as invisible is refused, `INVALID_INPUT`): `propose_class_authorization` (approval.class), `propose_held_brief_decision`
 (release or refuse; mission.create), `propose_mission` (mission.create),
 `propose_mission_control` (cancel, retry, resume, interrupt; mission.control; the proposal ID
 is the idempotency key), `propose_mission_proposal_decision` (mission.create),
@@ -438,7 +452,7 @@ fields refused): `{"version": 1, "title"?, "blocks": [1..=24]}`, each block tagg
 `tool` one of the `propose_*` tools, `title`, `fixed` (object), `fields` 1..=20 `{name, label,
 type: text|number|boolean|choice|json, value?, choices?}`; `choices` exactly for `choice`, no
 name both fixed and a field). Scalars are text (≤ 512 bytes, no control characters), finite
-numbers, booleans or null; the whole view ≤ 256 KiB. A view outside it answers `isError`
+numbers, booleans or null; the whole view ≤ 64 KiB. A view outside it answers `isError`
 "View refused: REASON" and nothing reaches the app; a valid one becomes a `view` entry with
 `data: {"id": "view-<hex>", "view"}`. The app's `{"type":"submit","view":ID,"values":{…}}`
 fills the form's tool from `fixed` plus the values of its own fields (a `json` field's text is
@@ -657,7 +671,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/station/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with `x-ai6-operation-id`, `x-ai6-mission-id` and `x-ai6-session-id` headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
 | `GET /v1/station/controls/next?station=<id>&wait_ms=<n>` | Bearer-authenticated long poll for that Station's next control (`wait_ms` default 1000, capped at 25000); `200` with one `application/vnd.ai6.guatiao` control value frame on channel 4 (the receiver builds the schema from any control) and the control becomes `delivered`, or `204`. Stations share one credential, so `station` is the caller's own word. |
 | `POST /v1/station/controls/{control_id}/result` | Bearer-authenticated outcome `{"station","outcome":"applied"\|"rejected","state"?,"reason"?}`; `state` is a Mission state name, `reason` is cut to 512 characters without control characters. `204`; `404` unknown, `403` another Station's control, `409` already finished. |
-| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"role":"person"|"moneypenny"|"tools"|"error"|"proposal"|"view","text","at","data"?,"code":"unauthorized"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"busy"}`; a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"page"?:{…}}` (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}` and `{"type":"submit","view":ID,"values":{…}}`; the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
+| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"role":"person"|"moneypenny"|"tools"|"error"|"proposal"|"view","text","at","data"?,"code":"unauthorized"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"earlier","busy"}` (the newest 100 entries within 512 KiB; `earlier` counts those left out); a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"page"?:{…}}` (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}` and `{"type":"submit","view":ID,"values":{…}}`; the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most 25,000). |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `failed`, `limit` and a `closed` while answering become `error` entries. |

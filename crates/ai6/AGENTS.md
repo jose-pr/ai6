@@ -2620,9 +2620,12 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // And `answer_only: bool` (serde default false), set for a Chief of Staff review: the harness
 // only reads and answers. Claude Code: `--restricted --tools= --disallowedTools <all of its own,
 // web, sub-agent and mcp__*> --setting-sources user --strict-mcp-config --mcp-config
-// {"mcpServers":{}}`, and no AI6 servers or gate. Codex: `-c mcp_servers={}`, the project
-// marked untrusted, thread `sandbox: "read-only"`, `approvalPolicy: "never"`, `config:
-// {"web_search": "disabled"}`, and no gate.
+// {"mcpServers":{}}`, and no AI6 servers or gate. Codex: `-c mcp_servers={}` plus `-c` for
+// `features.shell_tool=false`, `features.unified_exec=false`, `tools.view_image=false`,
+// `web_search="disabled"`, `features.multi_agent=false`, `features.apps=false` (no command
+// execution, image reading, web, sub-agents or connectors), the project marked untrusted,
+// thread `sandbox: "read-only"`, `approvalPolicy: "never"`, `config: {"web_search":
+// "disabled"}`, and no gate.
 // And `assistant: Option<AssistantMode>` (serde default None), set for Moneypenny: wins over
 // `answer_only` and is built from the mode's parts below.
 pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
@@ -2639,8 +2642,9 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool; } // denied, or l
 // Skill tools, no mcp__> --allowedTools mcp__<name>,… --setting-sources user
 // --strict-mcp-config --mcp-config {"mcpServers":{<name>:{"type":"http","url":"${P_URL}",
 // "headers":{"Authorization":"Bearer ${P_TOKEN}"}}}}`, no gate. Codex: `-c mcp_servers=
-// {<name>={url="…",bearer_token_env_var="P_TOKEN"}}` (replacing the user's servers), the
-// project untrusted, and the answer-only thread policy. Both refuse to start (UNSUPPORTED) with
+// {<name>={url="…",bearer_token_env_var="P_TOKEN"}}` (replacing the user's servers), the same
+// `-c` settings that switch its built-in tools off as answer-only, the project untrusted, and
+// the answer-only thread policy. Both refuse to start (UNSUPPORTED) with
 // interpreters, skills or a network reaching more than the servers, and (BAD_VALUE) when the
 // environment lacks a server's URL or token; tokens never reach a command line.
 ```
@@ -3147,7 +3151,9 @@ harness is closed and resumed with the new token. A harness idle for ten minutes
 the next job resumes its provider Session (the job's `session_id`, else the one the desk
 remembers), or starts afresh with the job's context when that fails. Handler events `text`,
 `tool`, `completed`, `failed` and `limit` are reported; a closed harness reports `closed` with
-the reason (`idle`, `the Station is stopping`, …). An assistant Session is not a Mission: no
+the reason (`idle`, `the Station is stopping`, …). When Universal Exports refuses a job's
+`accepted` report with 403, 404 or 409 (the job moved to another Station or was given up), the
+desk closes the harness it started for that conversation. An assistant Session is not a Mission: no
 Operation, safe house, Cable endpoint, board entry or usage ledger record.
 
 ## Safe houses (`ai6::directorates::q::safehouse`, `ai6::station::safehouse`)

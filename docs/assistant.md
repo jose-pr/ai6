@@ -38,9 +38,13 @@ She is started in the handlers' **assistant mode**: no built-in tool at all (no 
 files, no web), only the user's own harness settings, and exactly one MCP server, Universal
 Exports' Moneypenny endpoint. Claude Code gets `--restricted`, `--tools=`, its own tools
 denied by name, `--setting-sources user`, and `--strict-mcp-config` with only that server,
-whose tools it may call without asking. Codex cannot switch its shell off, so it runs in the
-read-only sandbox (no writes, no network) with approvals off, web search off, and its MCP
-servers replaced by that one server.
+whose tools it may call without asking. Codex gets its command execution switched off
+(`features.shell_tool = false`, `features.unified_exec = false`), local image attachment off
+(`tools.view_image = false`), web search, sub-agents and app connectors off, its MCP servers
+replaced by that one server, and, as a second line, the read-only sandbox (no writes, no
+network) with approvals off. These are the names the Codex configuration reference gives;
+run a Codex release that knows them, since a release that ignored them would leave its shell
+on, reading whatever the Station's user can read.
 
 The mode is built from parts (MCP servers, interpreters, skills, network policy) so later
 releases can widen it; today a handler refuses to start an assistant that asks for an
@@ -48,9 +52,13 @@ interpreter, a skill or a network beyond its MCP server.
 
 ## Her tools
 
-Universal Exports serves her tools on `/v1/moneypenny/mcp`. A message's job carries a fresh
-random token bound to the person and the conversation; the Station hands it to the harness in
-its environment (never on a command line) and never sees the person's own credentials.
+Universal Exports serves her tools on `/v1/moneypenny/mcp`. A message's job carries a random
+token bound to the person, the conversation and the Station that runs it; the Station hands
+it to the harness in its environment (never on a command line) and never sees the person's
+own credentials. Later messages to the same Station carry the same token while it lasts, so a
+running harness keeps working; when the conversation moves to another Station, the old
+Station's token stops working, and a Station whose job moved on closes the harness it
+started.
 
 Every tool is a request to the same Universal Exports routes the app uses, made with the
 person's access token. She can therefore read exactly what the person can, and nothing more:
@@ -90,7 +98,9 @@ Moneypenny changes nothing herself. Her write tools only propose:
 
 A proposal shows in the chat with the exact request, a summary and the permission it needs,
 and **Confirm** and **Cancel**. If the person lacks that permission, there is no proposal at
-all: she is told she cannot. Only the person, in the app session the proposal was made in,
+all: she is told she cannot. A proposal whose text holds a character that renders as nothing
+(a direction control, a zero-width or tag character) is refused, and the app shows any such
+character in a request as `<U+XXXX>`, so what is confirmed is what is seen. Only the person, in the app session the proposal was made in,
 can confirm it, within an hour; she has no way to. A confirmed proposal is first recorded in
 the audit log (`moneypenny.confirmed`: who, which conversation and proposal, which request),
 then sent through the same route as the app's own request, with its usual checks and its own
@@ -143,3 +153,6 @@ reopening one shows what was said. One message is answered at a time.
 | Tool token lifetime | 1 hour | `AssistantConfig::with_token_ttl` |
 | Time for a Station to take a message | 60 seconds | `AssistantConfig::with_answer_timeout` |
 | Tool calls per conversation | 120 a minute | `AssistantConfig::with_tool_calls_per_minute` |
+| Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `AssistantConfig::with_live_conversations_per_person` |
+| How long an answer may go without word from its Station | 10 minutes, then it is given up | `AssistantConfig::with_answer_deadline` |
+| Memory kept | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `AssistantConfig::with_memory_limits` |

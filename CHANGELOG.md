@@ -664,6 +664,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Codex answer-only (Chief of Staff) and assistant threads also run with command execution,
+  local image attachment, web search, sub-agents and app connectors switched off
+  (`features.shell_tool`, `features.unified_exec`, `tools.view_image`, `web_search`,
+  `features.multi_agent`, `features.apps`): the read-only sandbox alone still let Codex's shell
+  read anything the Station's user can.
+- Moneypenny's tool token is bound to the Station that runs her harness and reused for later
+  messages to it, so a running harness no longer loses its tools after eight messages, and a
+  harness left on a Station the conversation moved away from loses them at once (its Station
+  closes it when its accept is refused). A person holds at most two conversations with a
+  harness or an answer pending (`with_live_conversations_per_person`); views are at most
+  64 KiB, conversations and people have byte budgets (`with_memory_limits`) and `ready` sends
+  the newest 100 entries; an accepted answer silent for 10 minutes is given up
+  (`with_answer_deadline`). Proposals refuse hidden characters, and the app shows any in a
+  request as `<U+XXXX>`.
 - The Headquarters Station places a brief on the facts of the Station that would run it:
   a brief naming no Agent is no longer failed when the Headquarters Station lacks a handler
   another Station has (the Agent is chosen per Station from that Station's handlers), and

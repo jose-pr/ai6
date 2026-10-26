@@ -145,10 +145,14 @@ a `review-unavailable` finding. The review Mission:
 Answer-only is the `answer_only` field of the handler's start request. Claude Code gets
 `--restricted` (2.1.248 or later), `--tools=` (no built-in tool), `--disallowedTools` naming
 its shell, file, web, sub-agent and every MCP tool, `--setting-sources user` and
-`--strict-mcp-config` with an empty `--mcp-config`. Codex gets a thread in the `read-only`
-sandbox with approval policy `never` and `web_search = "disabled"`, with the user's MCP
-servers replaced by none and the working directory's project layer skipped. A harness too
-old for one of these refuses to start, which ends the review without an answer.
+`--strict-mcp-config` with an empty `--mcp-config`. Codex gets its command execution off
+(`features.shell_tool = false`, `features.unified_exec = false`), local image attachment off
+(`tools.view_image = false`), web search, sub-agents and app connectors off, the user's MCP
+servers replaced by none and the working directory's project layer skipped, and its thread in
+the `read-only` sandbox with approval policy `never`. The read-only sandbox alone would still
+let Codex's shell read anything the Station's user can, so run a Codex release that knows
+these settings. A Claude Code too old for one of its flags refuses to start, which ends the
+review without an answer.
 
 It ends with one JSON object: `{"verdict": "clear"}`, or `{"verdict": "hold", "findings":
 [{"kind": "duplicate" | "scope" | "manipulation", "detail": "..."}]}`. A clear verdict lets
