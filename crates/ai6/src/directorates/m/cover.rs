@@ -82,6 +82,90 @@ pub struct Cover {
 }
 
 impl Cover {
+    /// A cover that hides everything: no Agent author, no attribution trailer, no model
+    /// name, no footer and no announcement. The `with_*` methods loosen or add to it.
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            agent_author: false,
+            trailers: Vec::new(),
+            suggest: String::new(),
+            model: false,
+            footer: String::new(),
+            forbidden: Vec::new(),
+            announce: false,
+        }
+    }
+
+    /// Whether commits may carry the Agent as author instead of the Operation's cover
+    /// identity.
+    #[must_use]
+    pub fn with_agent_author(mut self, allowed: bool) -> Self {
+        self.agent_author = allowed;
+        self
+    }
+
+    /// The attribution trailers allowed, by key (`Assisted-by`); `*` allows any.
+    #[must_use]
+    pub fn with_trailers(mut self, trailers: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.trailers = trailers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The line each commit message is asked to end with; `{agent}` and `{model}` are
+    /// filled in.
+    #[must_use]
+    pub fn with_suggestion(mut self, line: impl Into<String>) -> Self {
+        self.suggest = line.into();
+        self
+    }
+
+    /// Whether the work may name the model.
+    #[must_use]
+    pub fn with_model(mut self, allowed: bool) -> Self {
+        self.model = allowed;
+        self
+    }
+
+    /// The text every commit message must end with.
+    #[must_use]
+    pub fn with_footer(mut self, footer: impl Into<String>) -> Self {
+        self.footer = footer.into();
+        self
+    }
+
+    /// Whether the work may say it was generated (`generated with`, a robot emoji).
+    #[must_use]
+    pub fn with_announce(mut self, allowed: bool) -> Self {
+        self.announce = allowed;
+        self
+    }
+
+    /// Adds patterns no commit message may contain, matched without regard to case.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the cover when a pattern is not a valid regular expression.
+    pub fn with_forbidden(
+        mut self,
+        patterns: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Result<Self, CoverError> {
+        for pattern in patterns {
+            let compiled = RegexBuilder::new(pattern.as_ref())
+                .case_insensitive(true)
+                .build()
+                .map_err(|error| {
+                    CoverError(format!(
+                        "cover {:?}: invalid forbid pattern: {error}",
+                        self.name
+                    ))
+                })?;
+            self.forbidden.push(compiled);
+        }
+        Ok(self)
+    }
+
     /// Returns the cover's name.
     pub fn name(&self) -> &str {
         &self.name
@@ -302,12 +386,16 @@ impl Covers {
     pub fn parse_toml(source: &str) -> Result<Self, CoverError> {
         let document: CoversDocument = toml::from_str(source)
             .map_err(|error| CoverError(format!("invalid cover policy: {error}")))?;
-        let mut covers = Self::default().covers;
+        let mut covers = Self::default();
         for (name, definition) in document.cover {
-            let cover = definition.resolve(name.clone())?;
-            covers.insert(name, cover);
+            covers.insert(definition.resolve(name)?);
         }
-        Ok(Self { covers })
+        Ok(covers)
+    }
+
+    /// Adds a cover policy, returning the one it replaces with the same name.
+    pub fn insert(&mut self, cover: Cover) -> Option<Cover> {
+        self.covers.insert(cover.name.clone(), cover)
     }
 
     /// Finds a named cover policy.
@@ -375,29 +463,14 @@ struct CoverDefinition {
 
 impl CoverDefinition {
     fn resolve(self, name: String) -> Result<Cover, CoverError> {
-        let forbidden = self
-            .forbid
-            .into_iter()
-            .map(|pattern| {
-                RegexBuilder::new(&pattern)
-                    .case_insensitive(true)
-                    .build()
-                    .map_err(|error| {
-                        CoverError(format!("cover {name:?}: invalid forbid pattern: {error}"))
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Cover {
-            name,
-            description: self.description,
-            agent_author: self.agent_author,
-            trailers: self.trailers,
-            suggest: self.suggest,
-            model: self.model,
-            footer: self.footer,
-            forbidden,
-            announce: self.announce,
-        })
+        Cover::new(name, self.description)
+            .with_agent_author(self.agent_author)
+            .with_trailers(self.trailers)
+            .with_suggestion(self.suggest)
+            .with_model(self.model)
+            .with_footer(self.footer)
+            .with_announce(self.announce)
+            .with_forbidden(self.forbid)
     }
 }
 

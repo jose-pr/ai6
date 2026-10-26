@@ -1,8 +1,9 @@
 //! Registered Operations and the Agents posted to them.
 //!
-//! Global configuration lives in `operations.toml` and `agents.toml`. A Operation's
-//! `.ai6/agents.toml` is considered only after that Operation is found in the global
-//! registry.
+//! A [`Roster`] comes from `operations.toml` and `agents.toml` ([`Roster::load`]) or from
+//! typed records built in code ([`Roster::from_parts`], [`Roster::builder`]). Either way, an
+//! Operation's `.ai6/agents.toml` is considered only after that Operation is found in the
+//! roster.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -61,6 +62,33 @@ pub struct Agent {
     pub max_concurrent: Option<usize>,
 }
 
+impl Agent {
+    /// An Agent with every setting at the default a configuration file gives it: no
+    /// handler or roles, clearance `field`, priority 0 and no limits beyond the daemon's.
+    ///
+    /// Set its public fields, then add it to a [`Roster`]. An Agent built in code inherits
+    /// nothing: it is complete as given.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            description: String::new(),
+            aliases: Vec::new(),
+            handler: None,
+            model: None,
+            effort: None,
+            roles: Vec::new(),
+            tags: Vec::new(),
+            clearance: "field".to_owned(),
+            priority: 0,
+            context: String::new(),
+            env: BTreeMap::new(),
+            limits: WatchdogOverrides::default(),
+            budget: Budget::default(),
+            max_concurrent: None,
+        }
+    }
+}
+
 /// A job an Agent can be qualified for: its purpose and the policy it works under.
 ///
 /// A role carries no model settings. The Agent (codename) holds its harness, model and
@@ -78,6 +106,20 @@ pub struct AgentRole {
 }
 
 impl AgentRole {
+    /// A role with this identifier, purpose and policy; check it with
+    /// [`AgentRole::validate`].
+    pub fn new(
+        id: impl Into<String>,
+        purpose: impl Into<String>,
+        policy: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            purpose: purpose.into(),
+            policy: policy.into(),
+        }
+    }
+
     /// Validates a role configuration before it is persisted or used to start a Mission.
     pub fn validate(&self) -> Result<(), RosterError> {
         if !valid_role_id(&self.id) {
@@ -175,6 +217,22 @@ pub struct Workspace {
 /// Seconds between safe-house checkpoints when an Operation does not say.
 pub const DEFAULT_CHECKPOINT_SECS: u64 = 300;
 
+impl Default for Workspace {
+    /// Isolated copies from `HEAD` on branch `{id}-{slug}`, checkpointed nowhere, every
+    /// [`DEFAULT_CHECKPOINT_SECS`].
+    fn default() -> Self {
+        Self {
+            provider: None,
+            source: None,
+            base: "HEAD".to_owned(),
+            branch: "{id}-{slug}".to_owned(),
+            isolate: true,
+            checkpoint_remote: None,
+            checkpoint_secs: DEFAULT_CHECKPOINT_SECS,
+        }
+    }
+}
+
 /// What happens to a Mission whose Session is lost with its Station (`on_lost`).
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
@@ -214,7 +272,7 @@ pub struct CoverIdentity {
 #[derive(Debug, Clone, Default)]
 pub struct Roster {
     operations: BTreeMap<String, Operation>,
-    agents: BTreeMap<String, AgentDefinition>,
+    agents: BTreeMap<String, AgentEntry>,
     roles: BTreeMap<String, AgentRole>,
     #[cfg_attr(
         not(feature = "daemon"),
@@ -235,6 +293,68 @@ impl std::fmt::Display for RosterError {
 
 impl std::error::Error for RosterError {}
 
+/// One Agent of a [`Roster`]: as a configuration file defines it, where unset settings come
+/// from the Agent it extends, or complete as built in code.
+#[derive(Debug, Clone)]
+enum AgentEntry {
+    Defined(AgentDefinition),
+    Built(Agent),
+}
+
+impl AgentEntry {
+    fn aliases(&self) -> &[String] {
+        match self {
+            Self::Defined(definition) => &definition.aliases,
+            Self::Built(agent) => &agent.aliases,
+        }
+    }
+}
+
+/// Collects the typed records of a [`Roster`]; [`RosterBuilder::build`] checks them.
+#[derive(Debug, Clone, Default)]
+#[must_use]
+pub struct RosterBuilder {
+    operations: Vec<Operation>,
+    agents: Vec<Agent>,
+    roles: Vec<AgentRole>,
+    covers: Covers,
+}
+
+impl RosterBuilder {
+    /// Registers an Operation.
+    pub fn operation(mut self, operation: Operation) -> Self {
+        self.operations.push(operation);
+        self
+    }
+
+    /// Adds an Agent.
+    pub fn agent(mut self, agent: Agent) -> Self {
+        self.agents.push(agent);
+        self
+    }
+
+    /// Adds an Agent role.
+    pub fn role(mut self, role: AgentRole) -> Self {
+        self.roles.push(role);
+        self
+    }
+
+    /// Adds a cover policy, replacing a built-in or earlier one with the same name.
+    pub fn cover(mut self, cover: Cover) -> Self {
+        self.covers.insert(cover);
+        self
+    }
+
+    /// The roster of these records, checked as [`Roster::from_parts`] checks them.
+    ///
+    /// # Errors
+    ///
+    /// As [`Roster::from_parts`].
+    pub fn build(self) -> Result<Roster, RosterError> {
+        Roster::from_parts(self.operations, self.agents, self.roles, self.covers)
+    }
+}
+
 impl Roster {
     /// Loads global `operations.toml` and `agents.toml` from a configuration directory.
     /// Missing files mean an empty registry; invalid files fail closed.
@@ -250,17 +370,9 @@ impl Roster {
             let document: OperationsDocument = parse_file(&operation_file)?;
             for (id, definition) in document.operation {
                 let operation = definition.resolve(id, &operation_file)?;
-                for key in operation.name.iter().chain(std::iter::once(&operation.id)) {
-                    if roster.operations.values().any(|other| {
-                        other.id == *key || other.name.as_deref() == Some(key.as_str())
-                    }) {
-                        return Err(error(format!(
-                            "{}: Operation key {key:?} is already registered",
-                            operation_file.display()
-                        )));
-                    }
-                }
-                roster.operations.insert(operation.id.clone(), operation);
+                roster
+                    .register(operation)
+                    .map_err(|reason| error(format!("{}: {reason}", operation_file.display())))?;
             }
         }
         let agents_file = root.join(AGENTS_FILE);
@@ -274,7 +386,11 @@ impl Roster {
                     ))
                 })?;
             }
-            roster.agents = document.agent;
+            roster.agents = document
+                .agent
+                .into_iter()
+                .map(|(id, definition)| (id, AgentEntry::Defined(definition)))
+                .collect();
             for (id, definition) in document.role {
                 roster
                     .roles
@@ -282,6 +398,73 @@ impl Roster {
             }
         }
         Ok(roster)
+    }
+
+    /// Builds a roster from typed records, with no configuration files: the way in for
+    /// configuration kept anywhere else.
+    ///
+    /// Each Operation and role is checked as a configuration file is; each Agent's codename
+    /// and clearance are checked here rather than when it is first resolved. `covers` holds
+    /// the cover policies, built-in ones included ([`Covers::default`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first record that is not acceptable, or an Operation key,
+    /// Agent codename or role ID given twice.
+    pub fn from_parts(
+        operations: impl IntoIterator<Item = Operation>,
+        agents: impl IntoIterator<Item = Agent>,
+        roles: impl IntoIterator<Item = AgentRole>,
+        covers: Covers,
+    ) -> Result<Self, RosterError> {
+        let mut roster = Self {
+            covers,
+            ..Self::default()
+        };
+        for operation in operations {
+            operation.validate()?;
+            roster.register(operation)?;
+        }
+        for agent in agents {
+            validate_codename(&agent.id)?;
+            validate_clearance(&agent.clearance)
+                .map_err(|reason| error(format!("Agent {:?}: {reason}", agent.id)))?;
+            let id = agent.id.clone();
+            if roster.agents.contains_key(&id) {
+                return Err(error(format!("Agent {id:?} is given twice")));
+            }
+            roster.agents.insert(id, AgentEntry::Built(agent));
+        }
+        for role in roles {
+            role.validate()?;
+            if roster.roles.contains_key(&role.id) {
+                return Err(error(format!("Agent role {:?} is given twice", role.id)));
+            }
+            roster.roles.insert(role.id.clone(), role);
+        }
+        Ok(roster)
+    }
+
+    /// Starts a roster from typed records; see [`Roster::from_parts`].
+    pub fn builder() -> RosterBuilder {
+        RosterBuilder::default()
+    }
+
+    /// Adds an Operation whose codename and project name are both still unused.
+    fn register(&mut self, operation: Operation) -> Result<(), RosterError> {
+        for key in operation.name.iter().chain(std::iter::once(&operation.id)) {
+            if self
+                .operations
+                .values()
+                .any(|other| other.id == *key || other.name.as_deref() == Some(key.as_str()))
+            {
+                return Err(error(format!(
+                    "Operation key {key:?} is already registered"
+                )));
+            }
+        }
+        self.operations.insert(operation.id.clone(), operation);
+        Ok(())
     }
 
     #[cfg_attr(
@@ -336,7 +519,12 @@ impl Roster {
             && path.exists()
         {
             let local = parse_operation_agents(&path)?;
-            definitions.extend(local.agent);
+            definitions.extend(
+                local
+                    .agent
+                    .into_iter()
+                    .map(|(id, definition)| (id, AgentEntry::Defined(definition))),
+            );
         }
         let agent = resolve_agent(agent_key, &definitions, &mut BTreeSet::new())?;
         if let Some(operation) = operation {
@@ -592,21 +780,34 @@ impl OperationDefinition {
 impl OperationDefinition {
     fn resolve(self, id: String, source: &Path) -> Result<Operation, RosterError> {
         self.refuse_replaced_keys(&id, source)?;
+        let in_file = |reason: RosterError| error(format!("{}: {reason}", source.display()));
+        let operation = self.into_operation(id).map_err(in_file)?;
+        operation.validate().map_err(in_file)?;
+        Ok(operation)
+    }
+
+    /// The Operation these settings describe, with every unset key at its default.
+    fn into_operation(self, id: String) -> Result<Operation, RosterError> {
         let path = self.path.map(|path| expand_path(&path));
         let config = self.config.map(|path| expand_path(&path));
-        let budget = self.budget.resolve().map_err(|message| {
-            error(format!("{}: Operation {id:?}: {message}", source.display()))
-        })?;
-        let exposure = self.exposure.resolve().map_err(|message| {
-            error(format!("{}: Operation {id:?}: {message}", source.display()))
-        })?;
-        let quarantine = self.quarantine.resolve().map_err(|message| {
-            error(format!("{}: Operation {id:?}: {message}", source.display()))
-        })?;
-        let green_ink = self.green_ink.resolve().map_err(|message| {
-            error(format!("{}: Operation {id:?}: {message}", source.display()))
-        })?;
-        let operation = Operation {
+        let budget = self
+            .budget
+            .resolve()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let exposure = self
+            .exposure
+            .resolve()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let quarantine = self
+            .quarantine
+            .resolve()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let green_ink = self
+            .green_ink
+            .resolve()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let workspace = Workspace::default();
+        Ok(Operation {
             id,
             name: self.name,
             description: self.description,
@@ -624,12 +825,12 @@ impl OperationDefinition {
                 provider: self.workspace.provider,
                 source: self.workspace.source.map(|path| expand_path(&path)),
                 base: if self.workspace.base.is_empty() {
-                    "HEAD".to_owned()
+                    workspace.base
                 } else {
                     self.workspace.base
                 },
                 branch: if self.workspace.branch.is_empty() {
-                    "{id}-{slug}".to_owned()
+                    workspace.branch
                 } else {
                     self.workspace.branch
                 },
@@ -638,7 +839,7 @@ impl OperationDefinition {
                 checkpoint_secs: self
                     .workspace
                     .checkpoint_secs
-                    .unwrap_or(DEFAULT_CHECKPOINT_SECS),
+                    .unwrap_or(workspace.checkpoint_secs),
             },
             station_labels: self.station_labels,
             stations: self.stations,
@@ -664,95 +865,95 @@ impl OperationDefinition {
             green_ink,
             sources: self.sources,
             sleepers: self.sleepers,
-        };
-        for (name, sleeper) in &operation.sleepers {
+        })
+    }
+}
+
+impl Operation {
+    /// An Operation with every setting at the default a configuration file gives it: no
+    /// path, clearance `field`, the `covert` cover, strict exposure and green ink.
+    ///
+    /// Set its public fields, then check it with [`Operation::validate`] or build a
+    /// [`Roster`] from it.
+    pub fn new(id: impl Into<String>) -> Self {
+        OperationDefinition::default()
+            .into_operation(id.into())
+            .expect("the default Operation settings resolve")
+    }
+
+    /// Checks the settings a configuration file is checked for: Sleeper names and
+    /// schedules, Station IDs, clearance, workspace, `on_blown`, checkpoint and limit
+    /// intervals and the cover identity.
+    ///
+    /// # Errors
+    ///
+    /// Names the Operation and the first setting that is not acceptable.
+    pub fn validate(&self) -> Result<(), RosterError> {
+        let id = &self.id;
+        for (name, sleeper) in &self.sleepers {
             let valid_name = !name.is_empty()
                 && name
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
             if !valid_name {
                 return Err(error(format!(
-                    "{}: Operation {:?}: sleeper name {name:?} may use only letters, digits, '-' and '_'",
-                    source.display(),
-                    operation.id
+                    "Operation {id:?}: sleeper name {name:?} may use only letters, digits, '-' and '_'"
                 )));
             }
-            sleeper.validate().map_err(|e| {
-                error(format!(
-                    "{}: Operation {:?}: sleeper {name:?}: {e}",
-                    source.display(),
-                    operation.id
-                ))
-            })?;
+            sleeper
+                .validate()
+                .map_err(|e| error(format!("Operation {id:?}: sleeper {name:?}: {e}")))?;
         }
-        if let Some(station) = operation
+        if let Some(station) = self
             .stations
             .iter()
             .find(|station| validate_station_id(station).is_err())
         {
             return Err(error(format!(
-                "{}: Operation {:?}: stations entry {station:?} is not a valid Station ID",
-                source.display(),
-                operation.id
+                "Operation {id:?}: stations entry {station:?} is not a valid Station ID"
             )));
         }
-        validate_clearance(&operation.clearance).map_err(|e| {
-            error(format!(
-                "{}: Operation {:?}: {e}",
-                source.display(),
-                operation.id
-            ))
-        })?;
-        if operation
+        validate_clearance(&self.clearance).map_err(|e| error(format!("Operation {id:?}: {e}")))?;
+        if self
             .workspace
             .provider
             .as_deref()
             .is_some_and(|provider| provider.trim().is_empty())
         {
             return Err(error(format!(
-                "{}: Operation {:?}: workspace.provider must not be empty",
-                source.display(),
-                operation.id
+                "Operation {id:?}: workspace.provider must not be empty"
             )));
         }
-        if !matches!(operation.on_blown.as_str(), "flag" | "fail") {
+        if !matches!(self.on_blown.as_str(), "flag" | "fail") {
             return Err(error(format!(
-                "{}: Operation {:?}: on_blown must be flag or fail",
-                source.display(),
-                operation.id
+                "Operation {id:?}: on_blown must be flag or fail"
             )));
         }
-        if operation.workspace.checkpoint_secs == 0
-            || operation
+        if self.workspace.checkpoint_secs == 0
+            || self
                 .workspace
                 .checkpoint_remote
                 .as_deref()
                 .is_some_and(|remote| remote.trim().is_empty())
         {
             return Err(error(format!(
-                "{}: Operation {:?}: workspace.checkpoint_secs must be greater than zero and \
-                 workspace.checkpoint_remote must not be empty",
-                source.display(),
-                operation.id
+                "Operation {id:?}: workspace.checkpoint_secs must be greater than zero and \
+                 workspace.checkpoint_remote must not be empty"
             )));
         }
-        if operation.limit_fallback_secs == 0 {
+        if self.limit_fallback_secs == 0 {
             return Err(error(format!(
-                "{}: Operation {:?}: limit_fallback_secs must be greater than zero",
-                source.display(),
-                operation.id
+                "Operation {id:?}: limit_fallback_secs must be greater than zero"
             )));
         }
-        if let Some(identity) = &operation.cover_identity
+        if let Some(identity) = &self.cover_identity
             && (identity.name.trim().is_empty() || identity.email.trim().is_empty())
         {
             return Err(error(format!(
-                "{}: Operation {:?}: cover_identity needs name and email",
-                source.display(),
-                operation.id
+                "Operation {id:?}: cover_identity needs name and email"
             )));
         }
-        Ok(operation)
+        Ok(())
     }
 }
 
@@ -817,7 +1018,7 @@ fn valid_role_text(value: &str, limit: usize) -> bool {
 
 fn resolve_agent(
     key: &str,
-    definitions: &BTreeMap<String, AgentDefinition>,
+    definitions: &BTreeMap<String, AgentEntry>,
     seen: &mut BTreeSet<String>,
 ) -> Result<Agent, RosterError> {
     let id = if definitions.contains_key(key) {
@@ -825,7 +1026,7 @@ fn resolve_agent(
     } else {
         let mut matches = definitions
             .iter()
-            .filter(|(_, value)| value.aliases.iter().any(|alias| alias == key))
+            .filter(|(_, value)| value.aliases().iter().any(|alias| alias == key))
             .map(|(id, _)| id.clone());
         let id = matches
             .next()
@@ -835,15 +1036,17 @@ fn resolve_agent(
         }
         id
     };
-    if id.trim().is_empty() || id.trim() != id || id.chars().any(char::is_control) {
-        return Err(error(
-            "Agent codename must be non-empty and contain no control characters",
-        ));
-    }
+    validate_codename(&id)?;
     if !seen.insert(id.clone()) {
         return Err(error(format!("Agent inheritance cycle at {id:?}")));
     }
-    let definition = &definitions[&id];
+    let definition = match &definitions[&id] {
+        AgentEntry::Built(agent) => {
+            seen.remove(&id);
+            return Ok(agent.clone());
+        }
+        AgentEntry::Defined(definition) => definition,
+    };
     let base = definition
         .extends
         .as_deref()
@@ -956,6 +1159,15 @@ fn expand_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+fn validate_codename(id: &str) -> Result<(), RosterError> {
+    if id.trim().is_empty() || id.trim() != id || id.chars().any(char::is_control) {
+        return Err(error(
+            "Agent codename must be non-empty and contain no control characters",
+        ));
+    }
+    Ok(())
+}
+
 fn clearance_rank(clearance: &str) -> Result<usize, RosterError> {
     CLEARANCES
         .iter()
@@ -967,7 +1179,7 @@ fn validate_clearance(clearance: &str) -> Result<(), RosterError> {
     clearance_rank(clearance).map(|_| ())
 }
 
-fn error(message: impl Into<String>) -> RosterError {
+pub(crate) fn error(message: impl Into<String>) -> RosterError {
     RosterError(message.into())
 }
 
@@ -1017,6 +1229,88 @@ mod tests {
 
         directory.write("operations.toml", "[operation.G]\nstations = [\"\"]\n");
         assert!(Roster::load(&directory.0).is_err());
+    }
+
+    #[test]
+    fn records_built_in_code_default_as_configuration_files_do() {
+        let directory = TestDirectory::new();
+        directory.write("operations.toml", "[operation.G]\n");
+        directory.write("agents.toml", "[agent.007]\n");
+        let from_files = Roster::load(&directory.0).unwrap();
+        let built = Roster::builder()
+            .operation(Operation::new("G"))
+            .agent(Agent::new("007"))
+            .build()
+            .unwrap();
+        assert_eq!(built.operation("G"), from_files.operation("G"));
+        assert_eq!(built.agent(None, "007"), from_files.agent(None, "007"));
+        assert_eq!(built.cover("covert").unwrap().name(), "covert");
+    }
+
+    #[test]
+    fn records_built_in_code_are_checked_like_configuration_files() {
+        let mut blown = Operation::new("G");
+        blown.on_blown = "shrug".to_owned();
+        let refused = Roster::builder().operation(blown).build().unwrap_err();
+        assert_eq!(
+            refused.to_string(),
+            "Operation \"G\": on_blown must be flag or fail"
+        );
+
+        let mut named = Operation::new("G");
+        named.name = Some("H".to_owned());
+        assert!(
+            Roster::builder()
+                .operation(named)
+                .operation(Operation::new("H"))
+                .build()
+                .is_err(),
+            "a project name may not reuse another Operation's codename"
+        );
+
+        let mut cleared = Agent::new("007");
+        cleared.clearance = "cosmic".to_owned();
+        assert!(Roster::builder().agent(cleared).build().is_err());
+        assert!(
+            Roster::builder()
+                .agent(Agent::new("007"))
+                .agent(Agent::new("007"))
+                .build()
+                .is_err()
+        );
+        assert!(
+            Roster::builder()
+                .role(AgentRole::new("case officer", "Runs Missions.", "Report."))
+                .build()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn an_operation_checkout_may_extend_an_agent_built_in_code() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "project/.ai6/agents.toml",
+            "[agent.008]\nextends = \"007\"\nmodel = \"local-model\"\n",
+        );
+        let mut operation = Operation::new("G");
+        operation.path = Some(directory.0.join("project"));
+        let mut agent = Agent::new("007");
+        agent.handler = Some("claude".to_owned());
+        agent.roles = vec!["plan".to_owned()];
+        let roster = Roster::builder()
+            .operation(operation)
+            .agent(agent)
+            .cover(Cover::new("plain", "Says nothing."))
+            .build()
+            .unwrap();
+
+        let local = roster.agent(Some("G"), "008").unwrap();
+        assert_eq!(local.handler.as_deref(), Some("claude"));
+        assert_eq!(local.model.as_deref(), Some("local-model"));
+        assert_eq!(local.roles, ["plan"]);
+        assert!(roster.agent(None, "008").is_err());
+        assert_eq!(roster.cover("plain").unwrap().name(), "plain");
     }
 
     #[test]

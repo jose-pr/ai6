@@ -30,6 +30,7 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use crate::directorates::m::approvals::GREEN_INK_REASON;
+use crate::directorates::m::config::{ConfigSource, TomlConfigDir};
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::identity::MAX_ID_BYTES;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, parked_until};
@@ -199,6 +200,7 @@ pub struct ServeConfig {
     address: SocketAddr,
     plugin_paths: Vec<PathBuf>,
     config_dir: Option<PathBuf>,
+    config_source: Option<Arc<dyn ConfigSource>>,
     registry: Option<Arc<dyn RegistryBackend>>,
     station_id: Option<String>,
     station: StationConfig,
@@ -215,6 +217,7 @@ impl ServeConfig {
             address,
             plugin_paths: Vec::new(),
             config_dir: None,
+            config_source: None,
             registry: None,
             station_id: None,
             station: StationConfig::default(),
@@ -231,9 +234,18 @@ impl ServeConfig {
         self
     }
 
-    /// Sets the directory containing `operations.toml` and `agents.toml`.
+    /// Sets the configuration directory. The Station reads its Theaters, loadouts and Cable
+    /// settings there, and its roster (`operations.toml`, `agents.toml`, `covers.toml`)
+    /// unless [`ServeConfig::with_config_source`] names another source.
     pub fn with_config_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.config_dir = Some(path.into());
+        self
+    }
+
+    /// Sets where the roster comes from instead of the configuration directory's TOML files.
+    #[must_use]
+    pub fn with_config_source(mut self, source: Arc<dyn ConfigSource>) -> Self {
+        self.config_source = Some(source);
         self
     }
 
@@ -419,9 +431,16 @@ where
             )
         })?,
     };
-    let roster = Roster::load(&config_dir).map_err(|error| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("AI6 roster: {error}"))
-    })?;
+    let config_source: Arc<dyn ConfigSource> = match config.config_source.take() {
+        Some(source) => source,
+        None => Arc::new(TomlConfigDir::new(&config_dir)),
+    };
+    let roster = config_source
+        .load()
+        .map_err(|error| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("AI6 roster: {error}"))
+        })?
+        .roster;
     let mut theaters = Theaters::load(&config_dir).map_err(|error| {
         io::Error::new(io::ErrorKind::InvalidData, format!("AI6 Theaters: {error}"))
     })?;
@@ -5241,6 +5260,7 @@ mod tests {
 
         assert_eq!(event.kind, "completed");
     }
+    use crate::directorates::m::config::MemoryConfigSource;
     use crate::directorates::m::limits::RESET_GRACE_SECS;
     use crate::directorates::q::safehouse::{
         ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseSession,
@@ -6773,6 +6793,99 @@ mod tests {
             let _ = event_pump.await;
         }
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_roster_built_in_code_and_any_registry_backend_run_a_brief_to_its_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        let checkout = dir.path().join("checkout");
+        fs::create_dir_all(&checkout).unwrap();
+        let mut operation = roster::Operation::new("G");
+        operation.path = Some(checkout);
+        operation.max_concurrent = Some(1);
+        let mut agent = roster::Agent::new("007");
+        agent.handler = Some("mock-agent".to_owned());
+        let source = MemoryConfigSource::new(
+            Roster::builder()
+                .operation(operation)
+                .agent(agent)
+                .build()
+                .unwrap(),
+        );
+        // No configuration file exists anywhere: the roster is the source's.
+        assert!(!dir.path().join("operations.toml").exists());
+        let registry: Arc<dyn RegistryBackend> =
+            Arc::new(FileRegistry::open(dir.path().join("registry")));
+        let brief: Brief = serde_json::from_value(serde_json::json!({
+            "title": "Inspect the operation", "id": "brief-1", "source": "manual",
+            "operation": "G", "agent": "007"
+        }))
+        .unwrap();
+        registry.submit_brief(&brief).unwrap();
+        let state = DaemonState {
+            plugins: Arc::new(test_plugins()),
+            roster: Arc::new(source.load().unwrap().roster),
+            intake: registry,
+            missions: Arc::new(Mutex::new(MissionStore::default())),
+            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            cables: no_op_cables(),
+            station_id: "test".to_owned(),
+            station: StationConfig::default().with_terminal("mock-terminal"),
+            transports: no_transports(),
+            #[cfg(feature = "publisher")]
+            publisher: None,
+            starting: Arc::new(Mutex::new(BTreeSet::new())),
+            max_concurrent_missions: DEFAULT_MAX_CONCURRENT_MISSIONS,
+            watchdog: WatchdogConfig::default(),
+            retry_after: Arc::new(Mutex::new(BTreeMap::new())),
+            startup_recovery: Arc::new(Mutex::new(BTreeSet::new())),
+            events: Arc::new(Mutex::new(BTreeMap::new())),
+            event_ready: Arc::new(Notify::new()),
+            stopping: Arc::new(AtomicBool::new(false)),
+            event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
+        };
+
+        publish_station_check_in(&state);
+        assert_eq!(
+            state.intake.stations(DEFAULT_LEASE).unwrap()[0].info()["operations"],
+            serde_json::json!(["G"])
+        );
+        schedule_intake_once(&state);
+        let mission_id = brief.key();
+        let lease = state.intake.lease(&mission_id).unwrap().unwrap();
+        assert_eq!(lease.meta()["agent"], "007");
+        schedule_queued_once(&state).await;
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let session = state.intake.latest_session(&mission_id).unwrap().unwrap();
+        assert_eq!(
+            session.provider_session_id.as_deref(),
+            Some("provider-session-007")
+        );
+
+        {
+            let mut missions = state.missions.lock().unwrap();
+            missions
+                .transition(&mission_id, MissionState::Working)
+                .unwrap();
+            missions
+                .transition(&mission_id, MissionState::Done)
+                .unwrap();
+        }
+        schedule_intake_once(&state);
+        assert!(state.intake.lease(&mission_id).unwrap().is_none());
+        assert!(
+            dir.path()
+                .join("registry/done")
+                .join(format!("{mission_id}.json"))
+                .is_file()
+        );
+
+        state.stopping.store(true, Ordering::Release);
+        let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
+        for event_pump in event_pumps {
+            let _ = event_pump.await;
+        }
     }
 
     #[test]

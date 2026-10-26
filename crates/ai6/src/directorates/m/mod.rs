@@ -1,7 +1,9 @@
-//! M: policy, authorization, the roster, cover, placement, recovery and the Mission lifecycle.
+//! M: policy, authorization, the roster and where it comes from, cover, placement, recovery
+//! and the Mission lifecycle.
 
 pub mod access;
 pub mod approvals;
+pub mod config;
 pub mod cover;
 pub mod identity;
 pub mod limits;
