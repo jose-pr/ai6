@@ -157,9 +157,11 @@ pub struct AgentResume {
     #[serde(default)]
     pub assistant: Option<AssistantMode>,
     /// The standing part of [`AgentStart::initial_context`] (the Agent's context, its role's
-    /// purpose and policy, an assistant's instructions), for a harness that does not keep
-    /// its start-up context in the Session it resumes. Claude Code gets it again as
-    /// `--append-system-prompt`; Codex keeps a thread's instructions and ignores it.
+    /// purpose and policy, an assistant's instructions; never a recap of the conversation the
+    /// Session already holds), for a harness that may not keep its start-up context in the
+    /// Session it resumes. Claude Code gets it again as `--append-system-prompt`, which it
+    /// uses once the recorded prompt is gone (a compacted Session); Codex keeps a thread's
+    /// instructions and ignores it.
     #[serde(default)]
     pub initial_context: Vec<String>,
 }

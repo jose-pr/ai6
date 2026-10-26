@@ -219,6 +219,7 @@ impl Desk {
             agent_id: agent_id.to_owned(),
             message: String::new(),
             context: Vec::new(),
+            recap: None,
             // Never accepted anywhere: a close starts no harness.
             mcp_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
             token_expires_at: now() + 60.0,
@@ -416,10 +417,8 @@ impl Assistant {
                 .store
                 .owned(conversation_id, person_id)
                 .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
-            let mut context = guide::context();
-            if let Some(recap) = recap(conversation) {
-                context.push(recap);
-            }
+            let context = guide::context();
+            let recap = recap(conversation);
             let mut parts = std::mem::take(&mut conversation.notes);
             parts.push(message.to_owned());
             let job = AssistantJob {
@@ -428,6 +427,7 @@ impl Assistant {
                 agent_id: self.config.agent_id.clone(),
                 message: cut(&parts.join("\n\n"), MAX_ASSISTANT_MESSAGE_BYTES),
                 context,
+                recap,
                 // Set when the job is placed: the token is bound to its Station.
                 mcp_token: String::new(),
                 token_expires_at: 0.0,

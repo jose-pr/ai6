@@ -288,11 +288,14 @@ impl Desk {
             .into_iter()
             .collect();
         initial_context.extend(job.context.iter().cloned());
+        // A resumed harness has the conversation; only one started afresh is given its recap.
+        let mut fresh_context = initial_context.clone();
+        fresh_context.extend(job.recap.iter().cloned());
         let start = AgentStart {
             mission_id: mission_id.clone(),
             agent_id: agent.id.clone(),
             prompt: job.message.clone(),
-            initial_context: initial_context.clone(),
+            initial_context: fresh_context,
             working_directory: area.clone(),
             clearance: "desk".to_owned(),
             environment: environment.clone(),
@@ -950,6 +953,7 @@ mod tests {
             agent_id: "moneypenny".to_owned(),
             message: message.to_owned(),
             context: vec!["You are Moneypenny.".to_owned()],
+            recap: Some("Earlier in this conversation: hello.".to_owned()),
             mcp_token: "conversation-token-".repeat(3),
             token_expires_at: unix_now() + 3_600.0,
             session_id: None,
@@ -1004,7 +1008,12 @@ mod tests {
         );
         assert_eq!(
             start.initial_context,
-            ["You serve the operator.", "You are Moneypenny."]
+            [
+                "You serve the operator.",
+                "You are Moneypenny.",
+                "Earlier in this conversation: hello."
+            ],
+            "a harness started afresh gets the recap"
         );
         assert_eq!(
             start
@@ -1083,7 +1092,7 @@ mod tests {
         assert_eq!(
             resume.initial_context,
             ["You serve the operator.", "You are Moneypenny."],
-            "the instructions come again, for a harness that does not keep them"
+            "the instructions come again, never the recap of a conversation it has"
         );
         assert!(Path::new(&resume.working_directory).is_dir());
     }

@@ -129,7 +129,9 @@ impl AgentHandler for ClaudeHandler {
             "--resume".to_string(),
             request.session_id.to_string(),
         ];
-        // Claude Code keeps no `--append-system-prompt` in the Session it records.
+        // Claude Code 2.1.310 reuses the system prompt it recorded with the Session
+        // (`--system-prompt-snapshot`, on by default) until the Session is compacted; after
+        // that, or with the snapshot off, it builds the prompt from this launch's flags.
         if !request.initial_context.is_empty() {
             argv.extend([
                 "--append-system-prompt".to_string(),

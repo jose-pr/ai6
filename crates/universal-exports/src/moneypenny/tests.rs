@@ -473,9 +473,16 @@ async fn which_stations_are_busy_is_answered_through_the_board_tool() {
     assert_eq!(second.session_id.as_deref(), Some("provider-assistant-1"));
     assert!(
         second
+            .recap
+            .as_deref()
+            .is_some_and(|recap| recap.contains("Which Stations are busy?")),
+        "the recap travels apart from the standing context"
+    );
+    assert!(
+        second
             .context
             .iter()
-            .any(|item| item.contains("Which Stations are busy?"))
+            .all(|item| !item.contains("Which Stations are busy?"))
     );
     assert_eq!(
         second.mcp_token, job.mcp_token,

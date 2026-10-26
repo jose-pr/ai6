@@ -140,13 +140,17 @@ pub struct AssistantJob {
     pub agent_id: String,
     /// What the person wrote, or what the app reports on the person's behalf.
     pub message: String,
-    /// Context a harness started for this job is given before the message, and a resumed one
-    /// again where the harness does not keep it ([`AgentResume::initial_context`]); unused
-    /// when the conversation's harness is running.
+    /// The assistant's standing context (her instructions, the field dictionary): given to a
+    /// harness started for this job before the message, and to a resumed one again
+    /// ([`AgentResume::initial_context`]); unused when the conversation's harness is running.
     ///
     /// [`AgentResume::initial_context`]: crate::directorates::section_00::agent::AgentResume::initial_context
     #[serde(default)]
     pub context: Vec<String>,
+    /// A recap of the conversation so far, for a harness that starts afresh; a resumed one
+    /// has the conversation already and is not given it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recap: Option<String>,
     /// The bearer token of the conversation's MCP endpoint, bound to the person and the
     /// conversation. Never logged.
     pub mcp_token: String,
@@ -191,7 +195,9 @@ impl AssistantJob {
         {
             return Err("message is empty or too long".to_owned());
         }
-        if self.context.iter().map(String::len).sum::<usize>() > MAX_ASSISTANT_CONTEXT_BYTES {
+        let recap = self.recap.as_ref().map_or(0, String::len);
+        if self.context.iter().map(String::len).sum::<usize>() + recap > MAX_ASSISTANT_CONTEXT_BYTES
+        {
             return Err("context is too long".to_owned());
         }
         if !(32..=512).contains(&self.mcp_token.len())
@@ -217,6 +223,7 @@ impl fmt::Debug for AssistantJob {
             .field("agent_id", &self.agent_id)
             .field("message_bytes", &self.message.len())
             .field("context_items", &self.context.len())
+            .field("recap_bytes", &self.recap.as_ref().map(String::len))
             .field("mcp_token", &"[REDACTED]")
             .field("token_expires_at", &self.token_expires_at)
             .field("session_id", &self.session_id)
@@ -297,6 +304,7 @@ mod tests {
             agent_id: "moneypenny".to_owned(),
             message: "Which Stations are busy?".to_owned(),
             context: vec!["You are Moneypenny.".to_owned()],
+            recap: None,
             mcp_token: "t".repeat(43),
             token_expires_at: 1_800_000_000.0,
             session_id: None,
