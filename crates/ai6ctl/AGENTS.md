@@ -25,6 +25,11 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
 - `ai6ctl agent-roles --operation <OPERATION_ID>` lists role purpose, policy and whether
   the Operation overrides the Station definition (`agent.read` on that Operation). The
   Operation ID is encoded as one URL path segment.
+- `ai6ctl pools --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/pools`
+  as tab-separated `POOL ACCOUNT KIND SESSIONS WINDOWS LIMITED_UNTIL_UNIX TOKENS_TODAY`:
+  `SESSIONS` is `active/max_concurrent` (or the count without a limit), `WINDOWS`
+  `name=42.5%` per window (`name=?` without a figure) or `-`, `LIMITED_UNTIL_UNIX` `-`
+  unless in the future. A refusal names `pool.read`.
 - `ai6ctl missions [--operation <ID>]` lists visible Missions and Session counts.
 - `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission and its provider
   Sessions; `--operation` disambiguates a Mission ID used by several Operations.

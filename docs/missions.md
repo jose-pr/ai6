@@ -362,7 +362,15 @@ and an operator can resume a parked Mission early with the ordinary resume reque
 
 An Operation chooses the response with `on_limit` ([settings](operations.md#provider-limits)):
 
-- `wait` (the default) parks as above.
+- `rotate` (the default) first marks the Session's [pool account](agents.md#account-pools)
+  limited until the reset and frees it. When another account of the Agent's pools has
+  headroom, a Session whose history goes with it (Claude Code on an environment
+  credential) is parked only until the next scheduler pass and resumed, same provider
+  Session, on that account; a Codex or `config-dir` Session is queued again as a new attempt,
+  told it continues an earlier one, and starts on the other account. The timeline records
+  `account` / `limited` with the account, the reset and what happens next. A Session with no
+  pool account, or whose pools have no account with headroom, parks as for `wait`.
+- `wait` parks as above.
 - `backup` posts the next qualified Agent, as [Organization](organization.md) describes,
   among those whose handler differs from the limited one. The Mission is queued again for
   that Agent as a **new attempt** (a new Session record whose predecessor is the limited
@@ -371,6 +379,14 @@ An Operation chooses the response with `on_limit` ([settings](operations.md#prov
 
 The Moneypenny board shows `parked` as a Session state, and the stream of Mission events
 carries the `limit` event.
+
+The Headquarters Station also keeps a brief **queued** while every account of the pools its
+Agent would draw from is limited or at its `max_concurrent`, instead of starting a Session
+that cannot run. The reason ("no account with headroom in pools …", with the first reset
+when every account is limited) is recorded once on the Operation's timeline (`account` /
+`waiting`), and the brief is placed on the first pass after an account frees up.
+Moneypenny's **Account pools** view and `ai6ctl pools --operation <id>` show each account's
+Sessions, quota used, limit and tokens today (`pool.read`).
 
 ### Budgets, exposure and quarantine
 

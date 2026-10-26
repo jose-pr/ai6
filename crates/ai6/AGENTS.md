@@ -224,6 +224,7 @@ pub struct Agent {
     pub limits: WatchdogOverrides,
     pub budget: Budget,                           // layered over the Operation's
     pub max_concurrent: Option<usize>,
+    pub pool: Option<String>,                     // pins one account pool; inherited through `extends`
 }
 impl Agent {
     /// The defaults a file gives `[agent.ID]`: clearance "field", priority 0, nothing else.
@@ -256,7 +257,7 @@ pub struct Operation {
     pub cover: String,
     pub cover_identity: Option<CoverIdentity>,
     pub on_blown: String,
-    pub on_limit: OnLimit,                        // Wait (default) or Backup; see Provider limits
+    pub on_limit: OnLimit,                        // Rotate (default), Wait or Backup; see Provider limits
     pub limit_fallback_secs: u64,                 // park time when a limit has no reset time; default 1800
     pub on_lost: OnLost,                          // Retry (default) or Fail; see Recovery
     pub placement: PlacementStrategy,             // Spread (default) or Pack; see Placement
@@ -267,6 +268,7 @@ pub struct Operation {
     pub green_ink: GreenInkPolicy,                // strict unless configured; see Green ink
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
+    pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
 }
 impl Operation {
     /// The defaults a file gives `[operation.ID]`: clearance "field", cover "covert",
@@ -826,6 +828,10 @@ pub struct PlacementRejection { pub station: Option<String>, pub theater: Option
 pub struct Placement { pub choices: Vec<PlacementChoice>, pub rejections: Vec<PlacementRejection> }
 impl Placement { pub fn best(&self) -> Option<&PlacementChoice>; }
 pub fn place(policy: &OperationPolicy, request: &PlacementRequest, stations: &[StationFacts]) -> Placement;
+/// Rules `agent` out everywhere while no account of its `pools` has room: "no account with
+/// headroom in pools a, b; the first limit resets at T (Unix seconds)" (`frees_at`), else
+/// "…; each account is limited or at its max_concurrent". Intake keeps the brief queued.
+pub fn no_account_headroom(agent: &str, pools: &[String], frees_at: Option<f64>) -> PlacementRejection;
 ```
 
 `place` returns every eligible (Station, Theater, Agent) choice, best first, and one
@@ -866,17 +872,23 @@ requested Agent, no handler configured, role or tag mismatch) have no `station`.
 ```rust
 pub const DEFAULT_LIMIT_FALLBACK_SECS: u64 = 1800;
 pub const RESET_GRACE_SECS: i64 = 15;
-#[non_exhaustive] pub enum OnLimit { Wait /* default */, Backup }   // serde: "wait" | "backup"
+#[non_exhaustive] pub enum OnLimit { Rotate /* default */, Wait, Backup }   // serde: "rotate" | "wait" | "backup"
 impl OnLimit { pub fn as_str(self) -> &'static str }
 pub fn parked_until(now: i64, resets_at: Option<i64>, fallback_secs: u64) -> i64
 ```
 
 `parked_until` honours a reset time in the future plus `RESET_GRACE_SECS`; a missing or
 already-past one waits `fallback_secs` so a limit that outlives its stated reset cannot
-loop. An Operation sets `on_limit = "wait" | "backup"` and `limit_fallback_secs` (above
-zero) in `operations.toml`; an unknown value or zero fails the roster load. `Wait` parks the
-Mission and resumes the same provider Session; `Backup` posts the next qualified Agent
-whose handler differs from the limited one as a new attempt, and parks when none exists.
+loop. An Operation sets `on_limit = "rotate" | "wait" | "backup"` and `limit_fallback_secs`
+(above zero) in `operations.toml`; an unknown value or zero fails the roster load. Whatever
+the policy, the Session's pool account is marked limited until the reset (or
+`fallback_secs` from now) and freed. `Rotate`, when another account of the Agent's pools has
+room, parks the Mission until now so the next scheduler pass resumes the same provider
+Session on another account (an account kind that `carries_session`), or queues the Mission
+again for the same Agent as a new attempt (Codex and `config-dir` kinds); otherwise it waits.
+`Wait` parks the Mission and resumes the same provider Session; `Backup` posts the next
+qualified Agent whose handler differs from the limited one as a new attempt, and parks when
+none exists.
 
 ## Registry backend (`ai6::directorates::registry::backend`)
 
@@ -898,7 +910,8 @@ pub trait SleeperStore;      // Sleeper authorizations and fired windows (sleepe
 pub trait SourceStore;       // Source cursors, ingested items, reports owed (sources.rs)
 pub trait TimelineStore;     // the activity timeline (timeline.rs)
 pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
-pub trait RegistryBackend: BriefStore + StationStore + AccessTokenStore + CableStore
+pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
+pub trait RegistryBackend: AccountStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + QuarantineStore + SessionStore
     + SleeperStore + SourceStore + TimelineStore + UsageStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
@@ -1191,6 +1204,9 @@ pinned terminal and only the `local` Theater; `with_roles` replaces the role set
 adds a placement label, `with_theater` declares a Theater in code,
 `with_loadouts(LoadoutCatalog)` replaces `loadouts.toml`,
 `with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets`,
+`with_account_login(impl AccountLogin + 'static)` replaces `CommandLogin` for Codex pool
+accounts, `with_account_homes(dir)` moves their per-Mission `CODEX_HOME`s from
+`<state>/accounts`,
 `with_headquarters_lease(Duration)` sets how long the Headquarters lease lasts between
 renewals (default `DEFAULT_LEASE`, 60 s; zero makes startup fail): how long a standby
 control Station waits before taking over, and `with_terminal` pins the terminal provider. Without a pin the Station uses an available
@@ -1243,14 +1259,16 @@ pub const MAX_RECENT_EVENT_CHARS: usize = 300;
     pub recent: Vec<String>,                 // last events seen, oldest first, bounded as above
     pub checkpoint: Option<SafeHouseCheckpoint>, pub checkpointed_at: Option<f64>,
     pub lost: Option<String>,                // why, with SessionStatus::Lost
+    pub account: Option<AccountRef>,         // the pool account it runs on, when pooled
 }
 impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }   // false once closed
 pub struct NewSession   // NewSession::new(session_id, mission_id, station)
                         //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
-                        //   .with_exposure(Vec<Exposure>) .with_launch(SessionLaunch)
+                        //   .with_exposure(Vec<Exposure>) .with_launch(SessionLaunch) .with_account(AccountRef)
 pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStatus) .parked_until(f64)
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
                           //   .launch(SessionLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
+                          //   .account(AccountRef)
 #[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, HeldBy(String), Stale, Io(io::Error) }
 
 pub trait SessionStore {
@@ -1348,6 +1366,65 @@ impl Quarantine { pub fn new(agent, operation, reason, by, at) -> Self;
 A quarantined sender's Cables are accepted but held (`CableState::Held`) until an
 authorized release, whatever the receiver's inbound mode. `Roster::select_agent_excluding`
 is `select_agent` that also skips the named Agents; the Station passes the quarantined ones.
+
+## Pool accounts (`ai6::directorates::registry::accounts`)
+
+The shared state of every account of every pool: who uses it, its provider quota, until when
+it is limited and the tokens used per day. One record per account (`accounts/<pool>/<account>.json`
+in a `FileRegistry`, a row of `ai6_accounts` in a `SqlRegistry`), bounded to 256 KiB.
+
+```rust
+pub const UNKNOWN_USE_PERMILLE: u16 = 500;   // what an unreported account counts as
+pub struct AccountRef { pub pool: String, pub account: String }   // Display "pool/account"; serde
+impl AccountRef { pub fn new(pool, account) -> Self }
+#[non_exhaustive] pub struct AccountClaim { pub station: String, pub mission: String, pub since: f64, pub expires: f64 }
+#[non_exhaustive] pub struct QuotaWindow { pub name: String, pub used_permille: Option<u16>,
+    pub resets_at: Option<f64>, pub status: Option<String>, pub observed_at: f64 }
+impl QuotaWindow { pub fn new(name, observed_at: f64) -> Self; .used_permille(u16) .resets_at(f64) .status(s);
+    pub fn use_at(&self, now: f64) -> u16 }   // 0 once reset; UNKNOWN_USE_PERMILLE when no figure
+#[non_exhaustive] pub struct AccountProfile { pub handler: String, pub kind: String,
+    pub operations: Vec<String>, pub priority: i64, pub max_concurrent: Option<usize>,
+    pub labels: BTreeMap<String, String> }   // never a secret name or directory
+impl AccountProfile { pub fn of(pool: &AccountPool, account: &str, operations: Vec<String>) -> Option<Self> }
+#[non_exhaustive] pub struct AccountState { pub account: AccountRef, pub profile: Option<AccountProfile>,
+    pub active: Vec<AccountClaim>, pub windows: Vec<QuotaWindow>, pub limited_until: Option<f64>,
+    pub last_used: Option<f64>, pub daily_tokens: BTreeMap<String /* YYYY-MM-DD UTC */, u64> }
+impl AccountState { pub fn new(AccountRef) -> Self; pub fn live_claims(&self, now) -> impl Iterator<Item = &AccountClaim>;
+    pub fn is_limited(&self, now) -> bool; pub fn highest_use(&self, now) -> u16; pub fn tokens_on_day(&self, now: i64) -> u64 }
+pub struct AccountCandidate { pub account: String, pub priority: i64, pub max_concurrent: Option<usize> }
+pub struct AccountClaimRequest;   // ::new(&AccountPool, station, mission, ttl) .prefer(account) .excluding(account) .only(account)
+impl AccountClaimRequest { pub fn pool(&self) -> &str; pub fn candidates(&self) -> &[AccountCandidate] }
+pub fn choose_account<'a>(strategy: PoolStrategy, candidates: &'a [AccountCandidate],
+    states: &BTreeMap<String, AccountState>, prefer: Option<&str>, now: f64) -> Option<&'a AccountCandidate>;
+
+pub trait AccountStore {
+    fn declare_account(&self, account: &AccountRef, profile: &AccountProfile) -> io::Result<()>;
+    fn claim_account(&self, request: &AccountClaimRequest, now: f64) -> io::Result<Option<AccountState>>;
+    fn release_account(&self, station: &str, mission: &str) -> io::Result<bool>;
+    fn renew_account_claims(&self, station: &str, missions: &[String], ttl: Duration, now: f64) -> io::Result<()>;
+    fn report_quota(&self, account: &AccountRef, windows: &[QuotaWindow]) -> io::Result<()>;   // replaces windows by name; 8 kept
+    fn limit_account(&self, account: &AccountRef, until: f64) -> io::Result<()>;               // a later limit is kept
+    fn record_account_usage(&self, account: &AccountRef, tokens: u64, now: i64) -> io::Result<()>;  // 8 days kept
+    fn accounts(&self) -> io::Result<Vec<AccountState>>;                                        // by pool, account
+}
+```
+
+`claim_account` reads the candidates, drops lapsed claims and any earlier claim of the same
+Station and Mission, picks with `choose_account` and records the claim, all under the
+Registry lock or in one SQL write transaction: two Stations racing for the last place of an
+account get one winner. An account has room when it is not limited at `now` and has fewer
+live claims than its `max_concurrent`; `prefer` wins whenever it has room. Then `Headroom`
+takes the lowest `highest_use`, then fewest live claims, then the oldest `last_used`, then
+the highest priority, then the name; `RoundRobin` the oldest `last_used`; `Priority` the
+highest priority. `None` when no account has room. `renew_account_claims` extends the
+Station's claims for the listed Missions to `now + ttl` and drops its others; a claim nobody
+renews lapses, so a dark Station's accounts free up. Names are 1-64 letters, digits, `.`,
+`_` or `-`, starting with a letter or digit.
+
+The Station claims with a TTL of `DEFAULT_LEASE`, renews at each check-in, releases with the
+Session's leases, records quota from `AgentEvent::quota` and adds each usage delta's tokens.
+Each Station declares its configured accounts at start with the Operations of its roster that
+may draw from each pool.
 
 ## Green ink (`ai6::directorates::m::approvals`, `ai6::directorates::registry::approvals`)
 
@@ -1711,6 +1788,7 @@ impl QError {
     pub const fn line(&self) -> Option<usize>;
     pub const fn column(&self) -> Option<usize>;
     pub const fn offset(&self) -> Option<usize>;
+    pub fn reason(&self) -> Option<&str>;      // a pool or account and the setting at fault; never input
 }
 pub struct Loadout;
 impl Loadout {
@@ -1718,7 +1796,46 @@ impl Loadout {
     pub fn sandbox_name(&self) -> Option<&str>;
     pub fn mcp_names(&self) -> &[String];
     pub fn secret_names(&self) -> &[String];
+    /// Declares only the account's secret (agent "pool:<id>/<name>"), so a broker leases it
+    /// alone; None for a config-dir account.
+    pub fn for_account(pool: &AccountPool, account: &Account) -> Option<Self>;
 }
+#[non_exhaustive] pub enum AccountKind { ClaudeOauthToken, AnthropicApiKey, AnthropicAuthToken,
+    OpenaiApiKey, CodexAccessToken, ConfigDir }   // as_str()/parse(): "claude-oauth-token", …, "config-dir"
+impl AccountKind {
+    pub fn env(self) -> Option<&'static str>;          // CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN
+    pub fn login_flag(self) -> Option<&'static str>;   // --with-api-key, --with-access-token
+    pub fn reads_secret(self) -> bool;                 // all but ConfigDir
+    pub fn carries_session(self) -> bool;              // the env kinds: a Session may move accounts
+}
+pub const CREDENTIAL_VARIABLES: &[&str];   // every provider credential variable a pooled Session is stripped of
+#[non_exhaustive] pub enum PoolStrategy { Headroom /* default */, RoundRobin, Priority }   // "headroom" | "round_robin" | "priority"
+pub struct Account;   // Account::new(name, kind) .secret(name) .dir(path) .env(var) .priority(i64) .max_concurrent(n) .label(k, v)
+impl Account { pub fn name(&self) -> &str; pub fn kind(&self) -> AccountKind;
+    pub fn secret_name(&self) -> Option<&str>;        // `secret`, else the account's name; None for ConfigDir
+    pub fn login_dir(&self) -> Option<&Path>; pub fn priority_value(&self) -> i64;
+    pub fn concurrency(&self) -> Option<usize>; pub fn labels(&self) -> &BTreeMap<String, String>;
+    pub fn variable(&self, handler: &str) -> Option<String>;   // env, else the kind's, else CLAUDE_CONFIG_DIR/CODEX_HOME
+    pub fn weakening(&self, pool: &str) -> Option<String> }    // ConfigDir and the Codex login kinds
+pub struct AccountPool;   // AccountPool::new(id, handler) .operations(globs) .strategy(s) .account(a) .login_command(argv)
+impl AccountPool { pub fn id(&self) -> &str; pub fn handler(&self) -> &str;
+    pub fn operation_globs(&self) -> &[String]; pub fn balancing(&self) -> PoolStrategy;
+    pub fn accounts(&self) -> impl Iterator<Item = &Account>; pub fn get(&self, name: &str) -> Option<&Account>;
+    pub fn login(&self) -> &[String];                  // default ["codex"]
+    pub fn admits(&self, operation: Option<&str>) -> bool;
+    pub fn validate(&self) -> Result<(), String> }
+pub enum PoolChoice<'a> { Unpooled, Pools(Vec<&'a AccountPool>), Refused(String) }
+/// The three-way rule: a pool is usable when it serves `handler`, its globs admit
+/// `operation`, and `allowed` (the Operation's `pools`; None = every pool) names it;
+/// `pinned` (the Agent's `pool`) narrows to one. Refused names each pool and why.
+pub fn choose_pools<'a>(pools: impl IntoIterator<Item = &'a AccountPool>, handler: Option<&str>,
+    operation: Option<&str>, allowed: Option<&[String]>, pinned: Option<&str>) -> PoolChoice<'a>;
+pub trait AccountLogin: Send + Sync {
+    fn login(&self, pool: &AccountPool, account: &Account, home: &Path, credential: &str) -> Result<(), String>;
+}
+/// Runs `<login_command> login <flag>` with CODEX_HOME=home and the credential plus a newline
+/// on stdin, output discarded; killed after the timeout (default 60 s).
+#[derive(Default)] pub struct CommandLogin;   // .with_timeout(Duration)
 pub struct SandboxProfile;
 impl SandboxProfile {
     pub fn name(&self) -> &str;
@@ -1733,9 +1850,12 @@ impl McpServer {
     pub fn command(&self) -> &[String];
     pub fn deny(&self) -> &[String];
 }
-pub struct LoadoutCatalog;
+pub struct LoadoutCatalog;   // Default: empty
 impl LoadoutCatalog {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, QError>;
+    pub fn with_pool(self, pool: AccountPool) -> Result<Self, QError>;   // validates; replaces the same ID
+    pub fn pools(&self) -> impl Iterator<Item = &AccountPool>;
+    pub fn pool(&self, id: &str) -> Option<&AccountPool>;
     pub fn for_agent(&self, agent: &str) -> Result<&Loadout, QError>;
     pub fn sandbox_for(&self, loadout: &Loadout) -> Option<&SandboxProfile>;
     pub fn servers_for(&self, loadout: &Loadout) -> Result<Vec<&McpServer>, QError>;
@@ -1743,7 +1863,7 @@ impl LoadoutCatalog {
     pub fn sandboxes(&self) -> impl Iterator<Item = &SandboxProfile>;
     pub fn mcp_servers(&self) -> impl Iterator<Item = &McpServer>;
     pub fn secret(&self, name: &str) -> SecretDefinition;   // its [secret.<name>], or every default
-    pub fn secrets(&self) -> Vec<SecretDefinition>;         // every name a loadout or table names
+    pub fn secrets(&self) -> Vec<SecretDefinition>;         // every name a loadout, table or pool account names
 }
 impl FromStr for LoadoutCatalog { type Err = QError; }
 pub struct SecretDefinition;
@@ -1760,9 +1880,11 @@ impl SecretDefinition {
 impl SecretSource { pub fn weakening(&self) -> Option<String>; }          // Some for Env: local harnesses inherit it
 ```
 
-Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]` and
+Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]`,
 `[secret.<name>]` (`env`, `green_ink`, `kinds` and `targets` (globs, only with `green_ink`), `from = { env = "…" }
-| { file = "…" }`; never a value) TOML tables. Parsing is bounded to one MiB, denies unknown
+| { file = "…" }`; never a value) and `[pool.<id>]` (`handler`, `operations`, `strategy`,
+`login_command`, accounts `[pool.<id>.account.<name>]` with `kind`, `secret`, `dir`, `env`,
+`priority`, `max_concurrent`, `labels`) TOML tables; a document needs a loadout or a pool. Parsing is bounded to one MiB, denies unknown
 fields and invalid or duplicate names, and validates references before returning a catalog.
 Errors distinguish I/O, size, encoding, TOML syntax and schema failures; diagnostics expose
 source positions but never document contents. The catalog is inert: it does not expand
@@ -1963,9 +2085,13 @@ pub const LIMIT_EVENT: &str = "limit";
 pub struct UsageLimit { pub resets_at: Option<i64> /* Unix seconds */, pub window: Option<String> }
 pub struct TokenUsage { pub input: u64, pub output: u64, pub cache_read: u64, pub cache_write: u64,
                         pub cost_micro_usd: u64, pub cumulative: bool }
+pub struct QuotaReport { pub window: String /* five_hour, weekly, … or primary/secondary */,
+                         pub used_permille: Option<u16>, pub resets_at: Option<i64>,
+                         pub status: Option<String> /* allowed, allowed_warning, rejected */ }
 pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Option<Vec<u8>>,
                         pub limit: Option<UsageLimit>, pub usage: Option<TokenUsage>,
-                        pub tools: Vec<String> }
+                        pub tools: Vec<String>,
+                        pub quota: Vec<QuotaReport> /* serde default: empty */ }
 // AgentStart and AgentResume carry `max_cost_micro_usd: Option<u64>`: a spend ceiling a
 // harness may enforce itself (Claude Code gets `--max-budget-usd`); AI6 enforces budgets anyway.
 ```
@@ -2200,6 +2326,18 @@ failed start or resume, and when a later issue for the Mission replaces them. Ea
 `credential`/`leased` timeline event (`secrets` = names, `approval` = request ID). Values are
 never written: the launch record and publication carry variable names only, the detached
 wrapper passes the environment through a FIFO, and a runner keeps it in memory.
+Pool accounts: when the Agent's handler has pools (`choose_pools` with the Operation's
+`pools` and the Agent's `pool`), the issue first removes `CREDENTIAL_VARIABLES` and every
+account's variable from the environment, claims an account (`AccountStore::claim_account`,
+preferring the Mission's last Session's account; a resume of a Codex or `config-dir` Session
+claims only that account) and hands it over: an env kind as a leased value, a Codex login
+kind by `AccountLogin` into `<homes>/<mission>/<pool>--<account>` (with a `config.toml`
+setting `cli_auth_credentials_store = "file"`; only when the harness runs on the Station's
+own host), `config-dir` as its directory. A refused pool, no account with room or a failed
+hand-over fails the start with the reason. The Session record carries the account; the
+claim is released with the leases, renewed at each check-in, and homes of Missions that are
+over are removed then. `account`/`claimed`, `account`/`limited` and `account`/`waiting`
+timeline events carry names only.
 On graceful shutdown, event workers interrupt and close active Sessions and move Working
 Missions to Blocked while preserving their safe houses; a Session on a runner is left
 running and its Mission stays Working, so the next start re-attaches to it (see Field

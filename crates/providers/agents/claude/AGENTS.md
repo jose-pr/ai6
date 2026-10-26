@@ -31,6 +31,14 @@ local clock time ("resets 3pm") leaves `resets_at` as `None` rather than guessin
 Seconds and milliseconds are both accepted. Other `rate_limit_event` statuses pass through
 unchanged. These shapes come from recorded protocol fixtures, not from a live account.
 
+Every `rate_limit_event`, whatever its status, also sets `AgentEvent::quota` to one
+`QuotaReport`: `window` from `rateLimitType` (`unknown` when absent), `status`, `resets_at`
+from `resetsAt`, and `used_permille` from `utilization` only when it is a fraction between 0
+and 1. `utilization` is in the published `SDKRateLimitInfo` type of
+`@anthropic-ai/claude-agent-sdk` (0.3.310) without a documented scale and has not been seen
+from a live account, so another scale leaves `used_permille` as `None`. Other events carry
+no quota.
+
 A `result` event also carries `AgentEvent::usage`: its `usage` block (`input_tokens`,
 `output_tokens`, `cache_creation_input_tokens` as cache writes, `cache_read_input_tokens`) and
 `total_cost_usd` in micro-dollars, marked `cumulative`. Whether `usage` is per turn or per

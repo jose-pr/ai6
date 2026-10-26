@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Account pools: provider accounts shared by every Station and balanced by the quota they
+  have left. `loadouts.toml` declares `[pool.<id>]` (handler, `operations` globs, strategy
+  `headroom`, `round_robin` or `priority`) and its accounts (kind `claude-oauth-token`,
+  `anthropic-api-key`, `anthropic-auth-token`, `openai-api-key`, `codex-access-token` or
+  `config-dir`; the loadout secret or directory; `priority`, `max_concurrent`); an
+  Operation's `pools` and an Agent's `pool` narrow which may be used. Each Session gets one
+  account's credential and no other, claimed in one Registry write (`AccountStore`, on the
+  file and SQL Registries); Codex accounts are logged in to a per-Mission `CODEX_HOME`.
+  Claude Code `rate_limit_event`s and Codex `account/rateLimits/updated` notifications are
+  kept per account (`AgentEvent::quota`), as are the tokens used each day. `on_limit`
+  gains `rotate`, the new default: a limited account is skipped until its reset, and the
+  Session moves to another account (the same Claude Session, or a new Codex attempt with
+  a hand-off). Intake keeps a brief queued while no account of its pools has headroom.
+  Universal Exports serves the pool board (`GET /v1/user/operations/{id}/pools`,
+  `pool.read`), shown by `ai6ctl pools` and Moneypenny's Account pools view.
+
 - A SQL Registry and roster, so the Stations of an HA deployment need no shared
   filesystem. `SqlRegistry` (features `sqlite` and `postgres`) keeps every Registry record
   family in SQLite or PostgreSQL, one table each, with the file Registry's guarantees:

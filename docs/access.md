@@ -34,7 +34,9 @@ With no `source` they live in memory and are gone at exit.
 `operation:<id>` or `theater:<id>`; the first rule that matches decides, and no match denies.
 The actions Universal Exports checks are `agent.configure`, `agent.read`, `approval.class`,
 `approval.decide`, `audit.read`, `mission.control`, `mission.create`, `mission.read`,
-`session.input`, `session.read`, `station.configure` and `station.read`. `mission.control`
+`pool.read`, `session.input`, `session.read`, `station.configure` and `station.read`.
+`pool.read` shows the [account pools](agents.md#account-pools) an Operation may draw from,
+never a credential. `mission.control`
 (cancel, retry, resume and interrupt a Mission) is separate from `session.input`: typing into
 a Session does not grant stopping it. `approval.decide` signs or refuses an Agent's request
 for [green ink](missions.md#green-ink) and `approval.class` manages class authorisations;

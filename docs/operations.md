@@ -78,13 +78,15 @@ decides what happens to the Mission:
 
 ```toml
 [operation.G]
-on_limit = "wait"          # or "backup"
+on_limit = "rotate"        # or "wait" or "backup"
 limit_fallback_secs = 1800 # how long to park when the provider gives no reset time
+pools = ["claude-team"]    # the account pools its Missions may draw from; default: every pool
 ```
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `on_limit` | `wait` | `wait` parks the Mission and resumes the same provider Session when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new attempt in the same safe house, and parks only when there is none |
+| `on_limit` | `rotate` | `rotate` moves the Session to another account of its [pools](agents.md#account-pools) that has headroom: a Claude Session on an environment credential resumes the same provider Session there; a Codex or `config-dir` Session, whose history stays with its account, is tried again as a new attempt with a hand-off. Without a pooled account to move to it waits. `wait` parks the Mission and resumes the same provider Session when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new attempt in the same safe house, and parks only when there is none |
+| `pools` | every pool | The account pools whose own `operations` admit this Operation that its Missions may use; an empty list uses none |
 | `limit_fallback_secs` | `1800` | Seconds to park when the provider reports no reset time (or one already past). Must be above zero |
 
 Both are overridable per Operation and an unknown `on_limit` value fails the load. See

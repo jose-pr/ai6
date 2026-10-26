@@ -26,6 +26,10 @@ carries a `codexErrorInfo` naming a usage or rate limit. The reset time is the e
 last reported as used up (`account/rateLimits/updated` with `usedPercent` of 100 or more;
 a 300-minute window is `five_hour`, a 10,080-minute one `weekly`). These shapes come from
 recorded protocol fixtures, not from a live account.
+Every `account/rateLimits/updated` notification also sets `AgentEvent::quota` to one
+`QuotaReport` per window present (`primary`, `secondary`): `window` named as above, else
+by its position; `used_permille` from `usedPercent` (times ten, clamped to 0-1000);
+`resets_at` from `resetsAt`; no `status`.
 A `thread/tokenUsage/updated` notification carries `AgentEvent::usage` from
 `params.tokenUsage.last` (the latest model request; the thread total survives a resume, so it
 is not used): `inputTokens` minus `cachedInputTokens` as input, the cached ones as cache reads,

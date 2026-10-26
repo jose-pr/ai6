@@ -136,7 +136,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/station/attach-grants` | Issue a read or write token within M's Station grant. |
 | `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token. |
 | `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the Registry. |
-| `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `mission.control`, `approval.decide`, `approval.class`, `session.read`, `session.input`, `audit.read`, `agent.read` and `agent.configure` actions by authorized Operation. |
+| `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `mission.control`, `approval.decide`, `approval.class`, `session.read`, `session.input`, `audit.read`, `agent.read`, `agent.configure` and `pool.read` actions by authorized Operation. |
 | `GET` | `/v1/user/operations/{operation_id}/green-ink` | Require `approval.decide`; list the steps Agents wait to take, oldest first. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/approve` | Require `approval.decide`; sign the step as the caller for `expires_in_secs` (default one hour) with an optional `note`. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/reject` | Require `approval.decide`; refuse the step, with an optional `reason` the Agent is told. |
@@ -147,6 +147,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}` | Require `mission.read`; return the control's status: `queued`, `delivered`, `applied`, `rejected` or `expired`, with the Mission state and reason the Station reported. |
 | `GET` | `/v1/user/audit?operation_id=<id>&limit=<n>` | Return up to 500 newest metadata-only audit records authorized by `audit.read` for each Operation. |
 | `GET` | `/v1/user/operations/{operation_id}/timeline?cursor=<c>&mission=<id>&limit=<n>` | Require `audit.read`; return one newest-first page (default 50, at most 200) of the Operation's lifecycle transitions, control outcomes, Cables sent, Sleeper authorizations and audit records, correlated by Station, Mission and Session, with `next_cursor` for the older page. |
+| `GET` | `/v1/user/operations/{operation_id}/pools` | Require `pool.read`; return the pool accounts the Operation may draw from, with the Sessions using each, quota windows, limited-until and tokens today; never a credential. |
 | `GET` | `/v1/user/operations/{operation_id}/agent-roles` | Require `agent.read`; return the Headquarters Station role catalog merged with this Operation's validated overrides. Each role has `operation_override` to identify whether it replaces the Station definition. |
 | `PUT` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; validate and store a role purpose and policy in the shared Registry. |
 | `DELETE` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; remove the Operation override, fall back to the Station definition and record a metadata-only audit event. |

@@ -60,6 +60,7 @@ ai6ctl class-authorizations list --operation G
 | `health` | `GET /health` |
 | `stations`, `station <STATION_ID>` | Station health, HQS status, capacity, roles, authorized Operations, and the host's CPU, load and memory with their sample time (`unknown` when not reported) |
 | `agent-roles --operation <ID>` | Role purpose and policy visible with `agent.read` |
+| `pools --operation <ID>` | Pool accounts the Operation may draw from: Sessions, quota used, limited until and tokens today (`pool.read`) |
 | `missions [--operation <ID>]` | Visible Missions and their Session counts |
 | `mission <MISSION_ID> [--operation <ID>]` | One Mission and its provider Sessions; `--operation` disambiguates a repeated ID |
 | `sessions [--operation <ID>] [--mission <ID>] [--state <STATE>]` | Authorized provider Sessions, filtered |

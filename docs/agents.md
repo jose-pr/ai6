@@ -198,6 +198,78 @@ Credentials already on a Theater outside these leases (a git credential helper, 
 agent, a CLI login) are reported as weakenings; see [Fitting a Theater
 out](theaters.md#fitting-a-theater-out).
 
+### Account pools
+
+Several provider accounts can be shared by every Station, each Session drawing one, so
+work spreads over the quota that is left and a limit on one account does not stop the
+others. Pools are declared beside the loadouts, in `loadouts.toml`:
+
+```toml
+[pool.claude-team]
+handler = "claude"              # the AgentHandler whose Sessions draw from it
+operations = ["ai6-*"]          # globs on Operation IDs; default: every Operation
+strategy = "headroom"           # or "round_robin" or "priority"
+
+[pool.claude-team.account.alice]
+kind = "claude-oauth-token"     # from `claude setup-token`
+secret = "alice-token"          # a [secret.<name>]; default: the account's name
+max_concurrent = 2              # Sessions at once, across every Station; default: no limit
+priority = 1                    # ties, and the priority strategy; default 0
+
+[pool.claude-team.account.bob]
+kind = "config-dir"             # an existing login, for a plan that issues no token
+dir = "/srv/logins/bob/.claude"
+
+[pool.codex-team]
+handler = "codex"
+login_command = ["codex"]       # the program that logs Codex accounts in; default codex
+
+[pool.codex-team.account.carol]
+kind = "openai-api-key"
+```
+
+| `kind` | The harness reads it as |
+| --- | --- |
+| `claude-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+| `anthropic-auth-token` | `ANTHROPIC_AUTH_TOKEN` |
+| `openai-api-key`, `codex-access-token` | a `CODEX_HOME` the Station makes for the Mission and logs in with `codex login --with-api-key` or `--with-access-token`, the value on standard input |
+| `config-dir` | `dir` as `CLAUDE_CONFIG_DIR` (handler `claude`) or `CODEX_HOME` (`codex`) |
+
+`env = "VAR"` puts the value (or directory) in another variable; a handler other than
+`claude` or `codex` needs it for `config-dir`. Each account's secret is an ordinary loadout
+secret: it is leased from the same backend, never written to the Registry, the safe house or
+the timeline.
+
+- **Who may draw from a pool**: its `handler` must be the Agent's, its `operations` must admit
+  the Operation, and the Operation's `pools` (default: every pool) must name it. An Agent may
+  pin one with `pool = "<id>"`. An Agent whose handler has pools, none of which may be used,
+  does not start, and the reason names each pool and why; an Agent whose handler has no pool
+  keeps its loadout alone.
+- **One account per Session**: the Station removes every provider credential variable from the
+  Session's environment (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`,
+  `CODEX_HOME` and every account's `env`), then claims an account in the Registry and hands its
+  credential over. The claim is one Registry write, so two Stations never both take the last
+  place of an account. A resumed Session keeps its account while it has room.
+- **Balancing**: `headroom` skips accounts that are limited or at `max_concurrent`, then
+  takes the one whose most used quota window is lowest (an account whose provider has
+  reported nothing counts as half used; a window past its reset counts as unused), then the
+  one with fewest Sessions, then the least recently used, then the highest priority.
+  `round_robin` takes the least recently used and `priority` the highest priority with room.
+- **Claims and usage**: a claim is released when the Session ends, fails or is fenced out,
+  and lapses with the Station's Session leases when the Station goes dark. The tokens each
+  Session uses count toward its account's day, and the quota windows Claude Code and Codex
+  report are kept per account.
+- **Weakenings**, logged at start: a `config-dir` account hands the harness a login kept on
+  disk; a Codex login kind writes its login to a `CODEX_HOME` under the Station's state
+  directory (mode `0700`, with `cli_auth_credentials_store = "file"` so it stays there),
+  kept while the Mission may resume its thread and removed once the Mission is over. That
+  home is on the Station, so the harness must run on the Station's own host.
+
+Claude Code and Codex each also read a login of the host's user when no credential is
+given; pooled Sessions always get one.
+
 ## Commands
 
 Run `ai6 serve --help` to configure a Station and `ai6ctl --help` for the operator
