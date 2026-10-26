@@ -1,0 +1,415 @@
+//! Promotion at Headquarters: M puts Agents up for a higher clearance and carries out the
+//! promotions a person signs.
+//!
+//! Each round, for every Agent posted to an Operation, M reads its record there. When it
+//! meets the Operation's promotion step, M files a green ink request of kind `clearance`
+//! (target `AGENT:CLEARANCE@OPERATION`) on the Agent's behalf: Mission `promotion-AGENT`,
+//! Session `m`. Filing again finds the same request, so there is one per step until the
+//! record meets the step's Mission count once more. A request a person approved becomes a
+//! clearance grant; the approval is then spent, so revoking the grant is final. A
+//! quarantine takes away a raised grant: the Agent goes back to its configured clearance and
+//! must earn the step again. Nothing here raises a clearance without a person's signature.
+
+use super::{DaemonState, agents, medical};
+use crate::directorates::m::approvals::ActionScope;
+use crate::directorates::m::promotion::CLEARANCE_KIND;
+use crate::directorates::m::roster::{Operation, Retirement};
+use crate::directorates::registry::agent_records::NO_OPERATION;
+use crate::directorates::registry::approvals::{
+    ApprovalRequest, ApprovalStatus, Decision, EXPIRY_SIGNER,
+};
+use crate::directorates::registry::clearance::ClearanceGrant;
+use crate::directorates::registry::store::AuditRecord;
+use crate::directorates::registry::timeline::TimelineEvent;
+use crate::{MissionId, SessionId};
+
+/// The Session M files promotion requests under.
+pub(super) const PROMOTION_SESSION: &str = "m";
+const TIMELINE_KIND: &str = "clearance";
+
+/// The Mission a promotion request for `agent` is filed under.
+pub(super) fn promotion_mission(agent: &str) -> String {
+    format!("promotion-{agent}")
+}
+
+/// The green ink target of a request to raise `agent` to `clearance` in `operation`.
+pub(super) fn promotion_target(agent: &str, clearance: &str, operation: &str) -> String {
+    format!("{agent}:{clearance}@{operation}")
+}
+
+/// One promotion round over every Operation of the roster. Runs on the Headquarters Station.
+pub(super) fn round(state: &DaemonState) {
+    let records = match state.intake.agent_records() {
+        Ok(records) => records,
+        Err(error) => {
+            eprintln!("ai6: Agent records unreadable; no promotion round: {error}");
+            return;
+        }
+    };
+    for operation in state.roster.operations() {
+        let posted = state.roster.agents_for_operation(&operation.id);
+        for agent in posted.unwrap_or_default() {
+            let record = records.iter().find(|record| record.agent == agent.id);
+            consider(state, operation, &agent, record);
+        }
+    }
+}
+
+fn consider(
+    state: &DaemonState,
+    operation: &Operation,
+    agent: &crate::directorates::m::roster::Agent,
+    record: Option<&crate::directorates::registry::agent_records::AgentRecord>,
+) {
+    let Some(grant) = agents::grant_of(state, &operation.id, &agent.id) else {
+        return;
+    };
+    let now = state.clock.now();
+    if medical::is_quarantined(state, &agent.id, Some(&operation.id)) {
+        if let Some(grant) = grant.filter(ClearanceGrant::raises) {
+            take_back(state, &grant, "the Agent was quarantined");
+        }
+        return;
+    }
+    // An operator's lower grant is a decision M does not argue with.
+    if grant
+        .as_ref()
+        .is_some_and(|grant| !grant.raises() && grant.is_live(now as f64))
+        || agent.retirement(now) != Retirement::Serving
+    {
+        return;
+    }
+    let Some(record) = record else {
+        return;
+    };
+    let current = agent.effective_clearance(operation, grant.as_ref(), now);
+    let Some(promotion) = operation.promotion.due(
+        &current,
+        &operation.clearance,
+        &record.in_operation(&operation.id),
+        &record.in_operation(NO_OPERATION),
+        now as f64,
+    ) else {
+        return;
+    };
+    let target = promotion_target(&agent.id, &promotion.to, &operation.id);
+    let request = match promotion_request(state, operation, &agent.id, &target, &promotion) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("ai6: promotion of Agent {:?} not filed: {error}", agent.id);
+            return;
+        }
+    };
+    match state.intake.request_approval(&request) {
+        Ok(ApprovalStatus::Pending(stored)) => {
+            if stored.requested_at == request.requested_at {
+                eprintln!(
+                    "ai6: Agent {:?} put up for {} in {:?}: green ink {}",
+                    agent.id, promotion.to, operation.id, stored.id
+                );
+                record_event(state, &stored, "requested", "m");
+                audit(state, "agent.promotion.requested", "m", &stored, now as f64);
+            }
+        }
+        Ok(ApprovalStatus::Decided(approval)) => {
+            let signed_by_a_person = approval.decision == Decision::Approved
+                && approval.request.session.as_str() == PROMOTION_SESSION
+                && approval.request.scope.kind == CLEARANCE_KIND
+                && approval.request.scope.target == target
+                && approval.signer != EXPIRY_SIGNER
+                && !approval.signer.starts_with("class:");
+            if !signed_by_a_person || !approval.is_live(now as f64) || approval.spent_at.is_some() {
+                return;
+            }
+            raise(
+                state,
+                &approval.request,
+                &promotion.to,
+                &approval.signer,
+                grant,
+            );
+        }
+        Err(error) => eprintln!("ai6: promotion of Agent {:?} not filed: {error}", agent.id),
+    }
+}
+
+fn promotion_request(
+    state: &DaemonState,
+    operation: &Operation,
+    agent: &str,
+    target: &str,
+    promotion: &crate::directorates::m::promotion::Promotion,
+) -> std::io::Result<ApprovalRequest> {
+    let invalid = |_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid identity");
+    let request = ApprovalRequest::try_new(
+        operation.id.clone(),
+        MissionId::try_new(promotion_mission(agent)).map_err(invalid)?,
+        SessionId::try_new(PROMOTION_SESSION).map_err(invalid)?,
+        agent,
+        ActionScope::try_new(CLEARANCE_KIND, target)?,
+        promotion.reason.clone(),
+        &format!("{target}#{}", promotion.round),
+    )?;
+    Ok(request.expiring(state.clock.now() as f64, operation.green_ink.request_ttl()))
+}
+
+/// Writes the grant a signed request earned, then spends the approval so it raises once.
+fn raise(
+    state: &DaemonState,
+    request: &ApprovalRequest,
+    clearance: &str,
+    signer: &str,
+    current: Option<ClearanceGrant>,
+) {
+    let now = state.clock.now() as f64;
+    let already = current
+        .as_ref()
+        .is_some_and(|grant| grant.approval.as_deref() == Some(request.id.as_str()));
+    if !already {
+        let grant = ClearanceGrant::raise(
+            request.agent.clone(),
+            request.operation.clone(),
+            clearance,
+            request.id.clone(),
+            signer,
+            now,
+        )
+        .because(request.reason.clone());
+        if let Err(error) = state.intake.put_clearance_grant(&grant) {
+            eprintln!(
+                "ai6: clearance of Agent {:?} not raised: {error}",
+                request.agent
+            );
+            return;
+        }
+        eprintln!(
+            "ai6: Agent {:?} raised to {clearance} in {:?}, signed by {signer}",
+            request.agent, request.operation
+        );
+        record_event(state, request, "raised", signer);
+        audit(state, "agent.clearance.raised", signer, request, now);
+    }
+    if let Err(error) = state
+        .intake
+        .spend_approval(&request.operation, &request.id, now)
+    {
+        eprintln!(
+            "ai6: promotion approval {:?} not marked spent: {error}",
+            request.id
+        );
+    }
+}
+
+/// Removes a raised grant, and withdraws its approval while that is still live.
+fn take_back(state: &DaemonState, grant: &ClearanceGrant, why: &str) {
+    let by = format!("station:{}", state.station_id);
+    let now = state.clock.now() as f64;
+    match state
+        .intake
+        .remove_clearance_grant(&grant.operation, &grant.agent)
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!(
+                "ai6: raised clearance of Agent {:?} not taken back: {error}",
+                grant.agent
+            );
+            return;
+        }
+    }
+    if let Some(approval) = &grant.approval {
+        let _ = state
+            .intake
+            .revoke_approval(&grant.operation, approval, &by, now);
+    }
+    eprintln!(
+        "ai6: Agent {:?} back at its configured clearance in {:?}: {why}",
+        grant.agent, grant.operation
+    );
+    let record = AuditRecord {
+        id: format!("agent.clearance.revoked-{}", uuid::Uuid::new_v4().simple()),
+        actor: by,
+        action: "agent.clearance.revoked".to_owned(),
+        operation: grant.operation.clone(),
+        resource: None,
+        target: format!("{} {}", grant.agent, grant.clearance),
+        at: now,
+    };
+    if let Err(error) = state.intake.record_audit(&record) {
+        eprintln!("ai6: clearance audit record was not written: {error}");
+    }
+}
+
+fn record_event(state: &DaemonState, request: &ApprovalRequest, action: &str, actor: &str) {
+    let event = TimelineEvent::new(
+        TIMELINE_KIND,
+        action,
+        &request.operation,
+        state.clock.now() as f64,
+    )
+    .actor(actor)
+    .detail("agent", &request.agent)
+    .detail("target", &request.scope.target)
+    .detail("request", &request.id);
+    if let Err(error) = state.intake.record_event(&event) {
+        eprintln!("ai6: clearance timeline event was not written: {error}");
+    }
+}
+
+fn audit(state: &DaemonState, action: &str, actor: &str, request: &ApprovalRequest, at: f64) {
+    let record = AuditRecord {
+        id: format!("{action}-{}", uuid::Uuid::new_v4().simple()),
+        actor: actor.to_owned(),
+        action: action.to_owned(),
+        operation: request.operation.clone(),
+        resource: None,
+        target: format!("{} {}", request.id, request.scope.target),
+        at,
+    };
+    if let Err(error) = state.intake.record_audit(&record) {
+        eprintln!("ai6: clearance audit record {action} was not written: {error}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::test_state;
+    use super::super::{DaemonState, agents, medical};
+    use crate::directorates::registry::agent_records::{AgentOutcome, AgentOutcomeReport};
+    use crate::directorates::registry::approvals::Ruling;
+    use crate::directorates::registry::clearance::ClearanceGrant;
+
+    const SETTINGS: &str = "clearance = \"00\"\n[operation.L]\nclearance = \"00\"\n";
+    const AGENTS: &str = "[agent.007]\nhandler = \"mock-agent\"\nclearance = \"desk\"\n";
+
+    fn done(state: &DaemonState, missions: u32) {
+        let now = state.clock.now() as f64;
+        for mission in 0..missions {
+            state
+                .intake
+                .record_agent_outcome(&AgentOutcomeReport::new(
+                    "007",
+                    Some("G".to_owned()),
+                    AgentOutcome::Done,
+                    format!("m-{mission}#3"),
+                    now - 100.0,
+                ))
+                .unwrap();
+        }
+    }
+
+    fn clearance_in(state: &DaemonState, operation: &str) -> String {
+        agents::effective(state, Some(operation), "007")
+            .unwrap()
+            .clearance
+    }
+
+    fn pending(state: &DaemonState) -> Vec<String> {
+        state
+            .intake
+            .pending_approvals("G", state.clock.now() as f64)
+            .unwrap()
+            .into_iter()
+            .map(|request| request.scope.target)
+            .collect()
+    }
+
+    #[test]
+    fn a_record_that_meets_the_step_files_one_request_and_only_a_signature_raises() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), SETTINGS, AGENTS);
+        done(&state, 9);
+        super::round(&state);
+        assert!(pending(&state).is_empty(), "nine Missions are not enough");
+
+        done(&state, 10);
+        super::round(&state);
+        super::round(&state);
+        assert_eq!(pending(&state), ["007:field@G"], "one request, filed once");
+        assert_eq!(clearance_in(&state, "G"), "desk", "nothing is automatic");
+
+        let now = state.clock.now() as f64;
+        let request = state.intake.pending_approvals("G", now).unwrap().remove(0);
+        assert_eq!(request.mission.as_str(), "promotion-007");
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request.id,
+                &Ruling::approve("alice", now, now + 3600.0),
+            )
+            .unwrap();
+        super::round(&state);
+        let grant = state.intake.clearance_grant("G", "007").unwrap().unwrap();
+        assert_eq!(
+            (grant.clearance.as_str(), grant.signer.as_str()),
+            ("field", "alice")
+        );
+        assert_eq!(clearance_in(&state, "G"), "field");
+        assert_eq!(clearance_in(&state, "L"), "desk", "in that Operation only");
+
+        // Revoking returns the configured clearance, and the spent approval raises nothing.
+        state.intake.remove_clearance_grant("G", "007").unwrap();
+        super::round(&state);
+        assert_eq!(clearance_in(&state, "G"), "desk");
+        assert!(state.intake.clearance_grant("G", "007").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_quarantine_takes_a_raise_back_and_a_lower_grant_holds() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), SETTINGS, AGENTS);
+        let now = state.clock.now() as f64;
+        state
+            .intake
+            .put_clearance_grant(&ClearanceGrant::raise(
+                "007",
+                "G",
+                "00",
+                "green-ink-x",
+                "alice",
+                now,
+            ))
+            .unwrap();
+        assert_eq!(clearance_in(&state, "G"), "00");
+        medical::quarantine_agent(&state, "007", Some("G"), "looping", "operator");
+        super::round(&state);
+        assert!(state.intake.clearance_grant("G", "007").unwrap().is_none());
+        assert!(state.intake.release_quarantine("007", Some("G")).unwrap());
+        assert_eq!(clearance_in(&state, "G"), "desk");
+
+        // An operator's lower grant only lowers, and M files no promotion past it.
+        let fresh = tempfile::tempdir().unwrap();
+        let state = test_state(
+            fresh.path(),
+            SETTINGS,
+            &AGENTS.replace("\"desk\"", "\"field\""),
+        );
+        state
+            .intake
+            .put_clearance_grant(&ClearanceGrant::lower("007", "L", "desk", "bob", now))
+            .unwrap();
+        assert_eq!(clearance_in(&state, "L"), "desk");
+        assert_eq!(clearance_in(&state, "G"), "field");
+        state
+            .intake
+            .put_clearance_grant(&ClearanceGrant::lower("007", "G", "00", "bob", now))
+            .unwrap();
+        assert_eq!(
+            clearance_in(&state, "G"),
+            "field",
+            "a lower grant never raises"
+        );
+        done(&state, 30);
+        super::round(&state);
+        assert!(pending(&state).is_empty());
+        state.intake.remove_clearance_grant("G", "007").unwrap();
+        super::round(&state);
+        assert_eq!(
+            pending(&state),
+            ["007:00@G"],
+            "without it, the record earns 00"
+        );
+    }
+}

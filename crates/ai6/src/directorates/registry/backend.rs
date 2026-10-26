@@ -21,6 +21,7 @@ use super::store::{FileRegistry, default_registry_dir};
 pub use super::accounts::AccountStore;
 pub use super::agent_records::AgentRecordStore;
 pub use super::approvals::ApprovalStore;
+pub use super::clearance::ClearanceStore;
 pub use super::quarantine::QuarantineStore;
 pub use super::sessions::SessionStore;
 pub use super::sleepers::SleeperStore;
@@ -43,6 +44,7 @@ pub trait RegistryBackend:
     + AuditStore
     + AgentRoleStore
     + ApprovalStore
+    + ClearanceStore
     + QuarantineStore
     + SessionStore
     + SleeperStore
@@ -138,6 +140,7 @@ impl<T> RegistryBackend for T where
         + AuditStore
         + AgentRoleStore
         + ApprovalStore
+        + ClearanceStore
         + QuarantineStore
         + SessionStore
         + SleeperStore

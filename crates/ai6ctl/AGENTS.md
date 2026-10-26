@@ -27,8 +27,16 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
   GREEN_INK_REJECTED LAST_MISSION_UNIX MODEL RETIREMENT` (one header line): counts in that
   Operation, `QUARANTINED` adding quarantines of every Operation, `LAST_MISSION_UNIX` `-`
   before any, `MODEL` the current occupant (`default` for the handler's own, `-` before any
-  record), `RETIREMENT` `status:YYYY-MM-DD` (`retiring`, `desk_duty`, `retired`) or `-`. A
-  refusal names `agent.read`.
+  record), `RETIREMENT` `status:YYYY-MM-DD` (`retiring`, `desk_duty`, `retired`) or `-`,
+  `CLEARANCE` the clearance it works at there (`field(configured:desk)` when a grant moved it,
+  `-` unknown) and `PROMOTION` `REQUEST_ID:AGENT:CLEARANCE@OPERATION` while M's promotion
+  request waits for green ink, else `-`. A refusal names `agent.read`.
+- `ai6ctl agents lower <AGENT> <CLEARANCE> --reason <TEXT> [--expires-in-secs N] --operation
+  <ID>` puts `.../agents/{agent}/clearance` and prints `AGENT: held at CLEARANCE in ID`;
+  `ai6ctl agents restore <AGENT> --operation <ID>` deletes it and prints `AGENT: grant to
+  CLEARANCE removed; configured clearance applies in ID` (404, no grant, exits 1). Both need
+  `agent.configure`. Raising a clearance is signing M's promotion request with `ai6ctl
+  green-ink approve` (which then also needs `agent.configure`).
 - `ai6ctl agent-roles --operation <OPERATION_ID>` lists role purpose, policy and whether
   the Operation overrides the Station definition (`agent.read` on that Operation). The
   Operation ID is encoded as one URL path segment.

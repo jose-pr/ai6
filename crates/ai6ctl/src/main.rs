@@ -45,8 +45,10 @@ enum Command {
     /// (needs agent.read on the Operation).
     Agents {
         /// AI6 Operation ID.
-        #[arg(long)]
-        operation: String,
+        #[arg(long, global = true)]
+        operation: Option<String>,
+        #[command(subcommand)]
+        command: Option<AgentCommand>,
     },
     /// List Agent roles available to one Operation.
     AgentRoles {
@@ -119,6 +121,30 @@ enum Command {
         operation: Option<String>,
         #[command(subcommand)]
         command: Option<PoolCommand>,
+    },
+}
+
+/// Changes to an Agent's clearance in an Operation (need agent.configure; audited). Raising
+/// one takes green ink on M's promotion request instead.
+#[derive(Debug, Subcommand)]
+enum AgentCommand {
+    /// Hold an Agent at a clearance or below in the Operation.
+    Lower {
+        /// The Agent codename.
+        agent: String,
+        /// `desk`, `field` or `00`.
+        clearance: String,
+        /// Why, for the record.
+        #[arg(long)]
+        reason: String,
+        /// Seconds it lasts; until restored when omitted.
+        #[arg(long)]
+        expires_in_secs: Option<u64>,
+    },
+    /// Remove the Agent's grant in the Operation, returning it to its configured clearance.
+    Restore {
+        /// The Agent codename.
+        agent: String,
     },
 }
 
@@ -491,17 +517,66 @@ async fn run() -> Result<(), String> {
                 station_row(station, board.headquarters_station.as_deref())
             );
         }
-        Command::Agents { operation } => {
+        Command::Agents { operation, command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let request = operation_request(
-                &client,
-                &server,
-                &token,
-                Method::GET,
-                &[&operation, "agents"],
-            )?;
-            let agents: Vec<AgentView> = send(request, "agent.read", "Agent list").await?;
-            print_agents(&agents);
+            let operation = operation.ok_or("pass --operation")?;
+            match command {
+                None => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::GET,
+                        &[&operation, "agents"],
+                    )?;
+                    let agents: Vec<AgentView> = send(request, "agent.read", "Agent list").await?;
+                    print_agents(&agents);
+                }
+                Some(AgentCommand::Lower {
+                    agent,
+                    clearance,
+                    reason,
+                    expires_in_secs,
+                }) => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::PUT,
+                        &[&operation, "agents", &agent, "clearance"],
+                    )?
+                    .json(&serde_json::json!({
+                        "clearance": clearance,
+                        "reason": reason,
+                        "expires_in_secs": expires_in_secs,
+                    }));
+                    let grant: ClearanceGrant =
+                        send(request, "agent.configure", "clearance grant").await?;
+                    println!(
+                        "{}: held at {} in {}",
+                        plain(&grant.agent),
+                        plain(&grant.clearance),
+                        plain(&operation)
+                    );
+                }
+                Some(AgentCommand::Restore { agent }) => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::DELETE,
+                        &[&operation, "agents", &agent, "clearance"],
+                    )?;
+                    let grant: ClearanceGrant =
+                        send(request, "agent.configure", "clearance grant").await?;
+                    println!(
+                        "{}: grant to {} removed; configured clearance applies in {}",
+                        plain(&grant.agent),
+                        plain(&grant.clearance),
+                        plain(&operation)
+                    );
+                }
+            }
         }
         Command::AgentRoles { operation } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -1151,6 +1226,16 @@ struct AgentView {
     #[serde(default)]
     model_history: Vec<ModelTenure>,
     retirement: Option<RetirementNotice>,
+    clearance: Option<String>,
+    configured_clearance: Option<String>,
+    promotion: Option<WaitingStep>,
+}
+
+/// An Agent's clearance grant in an Operation.
+#[derive(Debug, Deserialize)]
+struct ClearanceGrant {
+    agent: String,
+    clearance: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1179,12 +1264,19 @@ struct ModelTenure {
 
 fn print_agents(agents: &[AgentView]) {
     println!(
-        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT"
+        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION"
     );
     for view in agents {
         let tally = &view.operation;
+        let clearance = match (&view.clearance, &view.configured_clearance) {
+            (Some(clearance), Some(configured)) if clearance != configured => {
+                format!("{}(configured:{})", plain(clearance), plain(configured))
+            }
+            (Some(clearance), _) => plain(clearance),
+            (None, _) => "-".to_owned(),
+        };
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             plain(&view.agent),
             view.posted,
             tally.done,
@@ -1202,6 +1294,10 @@ fn print_agents(agents: &[AgentView]) {
             }),
             view.retirement.as_ref().map_or("-".to_owned(), |notice| {
                 format!("{}:{}", plain(&notice.status), plain(&notice.retire_on))
+            }),
+            clearance,
+            view.promotion.as_ref().map_or("-".to_owned(), |request| {
+                format!("{}:{}", plain(&request.id), plain(&request.scope.target))
             }),
         );
     }

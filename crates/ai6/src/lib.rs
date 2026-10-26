@@ -42,6 +42,11 @@ pub use directorates::m::placement::{
     PlacementStrategy, ResourceLimits, Resources, StationFacts, execution_mode, fitness,
     harness_verdict, place,
 };
+pub use directorates::m::promotion::{
+    CLEARANCE_KIND, DEFAULT_00_MAX_FAILURE_RATE, DEFAULT_00_MISSIONS, DEFAULT_00_QUIET_DAYS,
+    DEFAULT_FIELD_MISSIONS, DEFAULT_FIELD_QUIET_DAYS, Promotion, PromotionDefinition,
+    PromotionPolicy, PromotionStep,
+};
 pub use directorates::m::roster::{
     Agent, AgentQuery, AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS,
     DEFAULT_RETIRE_WARNING_DAYS, OnLost, OnRetire, Operation, Retirement, Roster, RosterBuilder,
@@ -119,8 +124,8 @@ pub use directorates::registry::approvals::{
 };
 pub use directorates::registry::backend::{
     AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore, AuditStore,
-    BriefStore, CableStore, QuarantineStore, RegistryBackend, SessionStore, SleeperStore,
-    SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
+    BriefStore, CableStore, ClearanceStore, QuarantineStore, RegistryBackend, SessionStore,
+    SleeperStore, SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
     LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey, Require,
@@ -133,6 +138,7 @@ pub use directorates::registry::cables::{
     CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_BODY_BYTES,
     MAX_CABLE_FANOUT, MAX_CABLE_TTL,
 };
+pub use directorates::registry::clearance::ClearanceGrant;
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
     MAX_RECENT_EVENT_CHARS, MAX_RECENT_EVENTS, NewSession, SessionError, SessionLaunch,

@@ -639,10 +639,55 @@ async fn agents_lists_each_agents_record_in_the_operation() {
     assert_eq!(
         printed,
         [
-            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT",
-            "007\tfalse\t2\t0\t0\t0\t1\t0\t0\t0\t1000\topus\t-",
+            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION",
+            "007\tfalse\t2\t0\t0\t0\t1\t0\t0\t0\t1000\topus\t-\t-\t-",
         ]
     );
+    let lowered = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &[
+                "agents",
+                "lower",
+                "007",
+                "desk",
+                "--reason",
+                "under review",
+                "--operation",
+                "operation-01",
+            ],
+        )
+        .await,
+    );
+    assert_eq!(lowered, ["007: held at desk in operation-01"]);
+    let grant = registry
+        .clearance_grant("operation-01", "007")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (grant.signer.as_str(), grant.reason.as_deref()),
+        ("viewer-007", Some("under review"))
+    );
+    let restored = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &["agents", "restore", "007", "--operation", "operation-01"],
+        )
+        .await,
+    );
+    assert_eq!(
+        restored,
+        ["007: grant to desk removed; configured clearance applies in operation-01"]
+    );
+    let missing = ai6ctl(
+        server.clone(),
+        Some(token.clone()),
+        &["agents", "restore", "007", "--operation", "operation-01"],
+    )
+    .await;
+    assert!(!missing.status.success());
     let _ = shutdown.send(());
 }
 

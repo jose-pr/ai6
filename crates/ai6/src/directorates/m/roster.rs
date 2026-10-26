@@ -17,12 +17,14 @@ use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::harness::HarnessPolicy;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::m::placement::PlacementStrategy;
+use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
 use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
 use crate::directorates::m::vetting::{VettingPolicy, policy_from_toml};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition, utc_day};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
+use crate::directorates::registry::clearance::ClearanceGrant;
 use crate::directorates::registry::sleepers::Sleeper;
 use crate::directorates::registry::store::validate_station_id;
 
@@ -155,11 +157,30 @@ impl Agent {
         self.retirement(now) == Retirement::Retired
     }
 
-    /// The clearance it works at in `operation` at `now`: its configured clearance, never
-    /// above the Operation's, and `desk` once retired.
-    pub fn effective_clearance(&self, operation: &Operation, now: i64) -> String {
+    /// The clearance it works at in `operation` at `now`: its configured clearance, or the
+    /// grant's, never above the Operation's, and `desk` once retired.
+    ///
+    /// A live grant that names its green ink request (a raise) replaces the configured
+    /// clearance; any other live grant only lowers it. A grant for another Agent or Operation
+    /// is ignored.
+    pub fn effective_clearance(
+        &self,
+        operation: &Operation,
+        grant: Option<&ClearanceGrant>,
+        now: i64,
+    ) -> String {
         let rank = |clearance: &str| clearance_rank(clearance).unwrap_or(0);
-        let mut effective = rank(&self.clearance).min(rank(&operation.clearance));
+        let mut effective = rank(&self.clearance);
+        if let Some(grant) = grant.filter(|grant| {
+            grant.agent == self.id && grant.operation == operation.id && grant.is_live(now as f64)
+        }) {
+            effective = if grant.raises() {
+                rank(&grant.clearance)
+            } else {
+                effective.min(rank(&grant.clearance))
+            };
+        }
+        effective = effective.min(rank(&operation.clearance));
         if matches!(
             self.retirement(now),
             Retirement::DeskDuty | Retirement::Retired
@@ -316,6 +337,8 @@ pub struct Operation {
     /// Whether a harness may load the settings its working directory carries; `ignore`
     /// unless configured.
     pub harness: HarnessPolicy,
+    /// When M asks a person to raise an Agent's clearance here.
+    pub promotion: PromotionPolicy,
 }
 
 /// How an Operation's Missions get their working directory (`workspace = { .. }`).
@@ -977,6 +1000,7 @@ struct OperationDefinition {
     sleepers: BTreeMap<String, Sleeper>,
     pools: Option<Vec<String>>,
     harness: HarnessPolicy,
+    promotion: PromotionDefinition,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1063,6 +1087,10 @@ impl OperationDefinition {
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         let vetting = policy_from_toml(self.vetting.as_ref())
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let promotion = self
+            .promotion
+            .resolve()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         let workspace = Workspace::default();
         Ok(Operation {
             id,
@@ -1127,6 +1155,7 @@ impl OperationDefinition {
             sleepers: self.sleepers,
             pools: self.pools,
             harness: self.harness,
+            promotion,
         })
     }
 }
@@ -1883,7 +1912,7 @@ sources = {{ jira = \"GUA\" }}\n",
 
         let long_before = RETIRE_DAY - 20 * DAY;
         assert_eq!(desk.retirement(long_before), Retirement::Serving);
-        assert_eq!(desk.effective_clearance(operation, long_before), "00");
+        assert_eq!(desk.effective_clearance(operation, None, long_before), "00");
         let warned = RETIRE_DAY - 10 * DAY;
         assert_eq!(desk.retirement(warned), Retirement::Retiring);
         assert_eq!(
@@ -1892,11 +1921,11 @@ sources = {{ jira = \"GUA\" }}\n",
             "3-day window"
         );
         assert_eq!(retired.retirement(RETIRE_DAY - DAY), Retirement::Retiring);
-        assert_eq!(desk.effective_clearance(operation, warned), "00");
+        assert_eq!(desk.effective_clearance(operation, None, warned), "00");
 
         let after = RETIRE_DAY + 60;
         assert_eq!(desk.retirement(after), Retirement::DeskDuty);
-        assert_eq!(desk.effective_clearance(operation, after), "desk");
+        assert_eq!(desk.effective_clearance(operation, None, after), "desk");
         assert_eq!(retired.retirement(after), Retirement::Retired);
 
         let query = AgentQuery::new()
@@ -1942,6 +1971,47 @@ sources = {{ jira = \"GUA\" }}\n",
         let mut built = Agent::new("007");
         built.retire_on = Some("tomorrow".to_owned());
         assert!(Roster::builder().agent(built).build().is_err());
+    }
+
+    #[test]
+    fn a_grant_raises_within_the_operations_ceiling_and_a_lower_one_only_lowers() {
+        let mut operation = Operation::new("G");
+        operation.clearance = "field".to_owned();
+        let mut agent = Agent::new("007");
+        agent.clearance = "desk".to_owned();
+        let raise =
+            |clearance: &str| ClearanceGrant::raise("007", "G", clearance, "gi-1", "m", 10.0);
+        assert_eq!(agent.effective_clearance(&operation, None, 20), "desk");
+        assert_eq!(
+            agent.effective_clearance(&operation, Some(&raise("field")), 20),
+            "field"
+        );
+        assert_eq!(
+            agent.effective_clearance(&operation, Some(&raise("00")), 20),
+            "field",
+            "never above the Operation's clearance"
+        );
+        let elsewhere = ClearanceGrant::raise("007", "L", "field", "gi-2", "m", 10.0);
+        assert_eq!(
+            agent.effective_clearance(&operation, Some(&elsewhere), 20),
+            "desk"
+        );
+        let lapsed = raise("field").expiring(15.0);
+        assert_eq!(
+            agent.effective_clearance(&operation, Some(&lapsed), 20),
+            "desk"
+        );
+
+        agent.clearance = "field".to_owned();
+        let lower = |clearance: &str| ClearanceGrant::lower("007", "G", clearance, "ops", 10.0);
+        assert_eq!(
+            agent.effective_clearance(&operation, Some(&lower("desk")), 20),
+            "desk"
+        );
+        assert_eq!(
+            agent.effective_clearance(&operation, Some(&lower("00")), 20),
+            "field"
+        );
     }
 
     #[test]

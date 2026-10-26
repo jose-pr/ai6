@@ -3,24 +3,36 @@
 //!
 //! Records come from the Registry, where Stations count each Mission's outcome and each
 //! incident. The Agents posted to the Operation come from the Headquarters Station's
-//! check-in, so an Agent with no record yet is listed too. Reading needs `agent.read` on the
-//! Operation.
+//! check-in, so an Agent with no record yet is listed too, with the clearance it works at
+//! there. Reading needs `agent.read` on the Operation.
+//!
+//! A person with `agent.configure` may lower an Agent's clearance in the Operation or remove
+//! its grant, returning it to its configured clearance; raising one is never done here: it
+//! takes a green ink approval of M's promotion request. Each change is audited first.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use ai6::directorates::registry::backend::*;
-use ai6::{AgentRecord, AgentTally, ModelTenure, NO_OPERATION};
+use ai6::{
+    AgentRecord, AgentTally, ApprovalRequest, AuditRecord, CLEARANCE_KIND, ClearanceGrant,
+    ModelTenure, NO_OPERATION,
+};
 use ai6_diptel::OperationId;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
+use crate::green_ink::MAX_GRANT;
 use crate::{
-    ApiError, Gateway, authorize_operation_action, bearer, ensure_operation_registered,
-    resolve_user,
+    ApiError, Gateway, GatewayError, authorize_operation_action, bearer,
+    ensure_operation_registered, resolve_user, unix_timestamp,
 };
+
+const CLEARANCES: [&str; 3] = ["desk", "field", "00"];
+const MAX_REASON_CHARS: usize = 512;
 
 /// One Agent of an Operation and its record there.
 #[non_exhaustive]
@@ -42,6 +54,14 @@ pub struct AgentView {
     pub model_history: Vec<ModelTenure>,
     /// Its retirement, from the Headquarters Station's check-in, once it is near or due.
     pub retirement: Option<RetirementNotice>,
+    /// The clearance it works at in this Operation, from the Headquarters Station's check-in.
+    pub clearance: Option<String>,
+    /// Its configured clearance, from the same check-in.
+    pub configured_clearance: Option<String>,
+    /// Its clearance grant in this Operation, raised by green ink or lowered by a person.
+    pub grant: Option<ClearanceGrant>,
+    /// M's promotion request for it waiting for green ink, if any.
+    pub promotion: Option<ApprovalRequest>,
 }
 
 /// An Agent whose `retire_on` date is near or has come.
@@ -75,6 +95,10 @@ impl AgentView {
                 .map(|record| record.model_history.clone())
                 .unwrap_or_default(),
             retirement: None,
+            clearance: None,
+            configured_clearance: None,
+            grant: None,
+            promotion: None,
         }
     }
 }
@@ -113,6 +137,22 @@ impl Headquarters {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The clearance the Agent works at in `operation` and its configured one.
+    fn clearance(&self, operation: &str, agent: &str) -> (Option<String>, Option<String>) {
+        let entry = self
+            .0
+            .get("agent_clearances")
+            .and_then(|operations| operations.get(operation))
+            .and_then(|agents| agents.get(agent));
+        let field = |name: &str| {
+            entry
+                .and_then(|entry| entry.get(name))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        (field("clearance"), field("configured"))
     }
 
     /// The Agent's retirement notice, if the check-in lists one.
@@ -159,14 +199,198 @@ pub(crate) async fn list(
                 );
             }
         }
+        let grants = registry
+            .clearance_grants(&operation)
+            .map_err(|_| ApiError::internal())?;
+        let promotions = registry
+            .pending_approvals(&operation, unix_timestamp()?)
+            .map_err(|_| ApiError::internal())?
+            .into_iter()
+            .filter(|request| request.scope.kind == CLEARANCE_KIND)
+            .collect::<Vec<_>>();
         for view in views.values_mut() {
             view.retirement = headquarters.retirement(&view.agent);
+            (view.clearance, view.configured_clearance) =
+                headquarters.clearance(&operation, &view.agent);
+            view.grant = grants
+                .iter()
+                .find(|grant| grant.agent == view.agent)
+                .cloned();
+            view.promotion = promotions
+                .iter()
+                .find(|request| request.agent == view.agent)
+                .cloned();
         }
         Ok::<_, ApiError>(views.into_values().collect::<Vec<_>>())
     })
     .await
     .map_err(|_| ApiError::internal())??;
     Ok(Json(views))
+}
+
+/// The body of `PUT .../agents/{agent}/clearance`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LowerClearance {
+    /// `desk`, `field` or `00`: the most the Agent may work at.
+    clearance: String,
+    /// Why, 1 to 512 characters.
+    reason: String,
+    /// Seconds it lasts; until removed when omitted.
+    expires_in_secs: Option<u64>,
+}
+
+fn valid_agent(agent: &str) -> Result<(), ApiError> {
+    if agent.is_empty()
+        || agent.len() > 128
+        || !agent
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        return Err(ApiError::bad_request());
+    }
+    Ok(())
+}
+
+async fn audit(
+    registry: std::sync::Arc<dyn RegistryBackend>,
+    actor: String,
+    action: &'static str,
+    operation: String,
+    target: String,
+    at: f64,
+) -> Result<(), ApiError> {
+    let record = AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor,
+        action: action.to_owned(),
+        operation,
+        resource: None,
+        target,
+        at,
+    };
+    tokio::task::spawn_blocking(move || registry.record_audit(&record))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())
+}
+
+/// Withdraws the approval a replaced or removed grant was raised by, while it is live.
+fn withdraw_raise(
+    registry: &dyn RegistryBackend,
+    previous: Option<&ClearanceGrant>,
+    by: &str,
+    at: f64,
+) {
+    if let Some(grant) = previous
+        && let Some(approval) = grant.approval.as_deref()
+    {
+        // Best effort: M applies an approval once, so the removed grant stays removed either way.
+        let _ = registry.revoke_approval(&grant.operation, approval, by, at);
+    }
+}
+
+/// `PUT /v1/user/operations/{operation_id}/agents/{agent}/clearance`: holds the Agent at the
+/// given clearance or below in the Operation, replacing any grant it had there.
+pub(crate) async fn lower(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, agent)): Path<(String, String)>,
+    Json(request): Json<LowerClearance>,
+) -> Result<Json<ClearanceGrant>, ApiError> {
+    valid_agent(&agent)?;
+    let reason = request.reason.trim().to_owned();
+    if !CLEARANCES.contains(&request.clearance.as_str())
+        || reason.is_empty()
+        || reason.chars().count() > MAX_REASON_CHARS
+        || reason.chars().any(char::is_control)
+        || request
+            .expires_in_secs
+            .is_some_and(|secs| secs == 0 || secs > MAX_GRANT.as_secs())
+    {
+        return Err(ApiError::bad_request());
+    }
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.configure").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    ensure_operation_registered(&registry, &operation_id).await?;
+    let now = unix_timestamp()?;
+    let mut grant = ClearanceGrant::lower(
+        agent.clone(),
+        operation_id.to_string(),
+        request.clearance.clone(),
+        person.id.clone(),
+        now,
+    )
+    .because(reason);
+    if let Some(secs) = request.expires_in_secs {
+        grant = grant.expiring(now + secs as f64);
+    }
+    // Audited first: a change that cannot be recorded is not made.
+    audit(
+        registry.clone(),
+        person.id.clone(),
+        "agent.clearance.lowered",
+        operation_id.to_string(),
+        format!("{agent} {}", request.clearance),
+        now,
+    )
+    .await?;
+    let stored = grant.clone();
+    tokio::task::spawn_blocking(move || {
+        let previous = registry.clearance_grant(&stored.operation, &stored.agent)?;
+        registry.put_clearance_grant(&stored)?;
+        withdraw_raise(registry.as_ref(), previous.as_ref(), &person.id, now);
+        Ok::<_, std::io::Error>(())
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    Ok(Json(grant))
+}
+
+/// `DELETE /v1/user/operations/{operation_id}/agents/{agent}/clearance`: removes the Agent's
+/// grant there, so it works at its configured clearance; a raise is withdrawn for good.
+pub(crate) async fn restore(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, agent)): Path<(String, String)>,
+) -> Result<Json<ClearanceGrant>, ApiError> {
+    valid_agent(&agent)?;
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.configure").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    ensure_operation_registered(&registry, &operation_id).await?;
+    let now = unix_timestamp()?;
+    let store = registry.clone();
+    let (operation, name) = (operation_id.to_string(), agent.clone());
+    let current = tokio::task::spawn_blocking(move || store.clearance_grant(&operation, &name))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
+    audit(
+        registry.clone(),
+        person.id.clone(),
+        "agent.clearance.revoked",
+        operation_id.to_string(),
+        format!("{agent} {}", current.clearance),
+        now,
+    )
+    .await?;
+    let (operation, name) = (operation_id.to_string(), agent);
+    let removed = tokio::task::spawn_blocking(move || {
+        let removed = registry.remove_clearance_grant(&operation, &name)?;
+        withdraw_raise(registry.as_ref(), removed.as_ref(), &person.id, now);
+        Ok::<_, std::io::Error>(removed)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
+    Ok(Json(removed))
 }
 
 #[cfg(test)]
@@ -273,5 +497,175 @@ mod tests {
         assert_eq!(views[1]["operation"]["done"], 0);
         assert_eq!(views[0]["retirement"]["status"], "retiring");
         assert_eq!(views[1]["retirement"], serde_json::Value::Null);
+    }
+
+    /// Operator 007 may configure G's Agents and sign green ink; viewer 007 may only sign.
+    const CONFIGURERS: &str = r#"
+        [role.configurer]
+        actions = ["agent.read", "agent.configure", "approval.decide", "mission.read"]
+
+        [role.signer]
+        actions = ["approval.decide", "mission.read"]
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "operation:G"
+        role = "configurer"
+
+        [[rule]]
+        subject = "person:viewer-007"
+        scope = "operation:G"
+        role = "signer"
+    "#;
+
+    async fn call(
+        method: reqwest::Method,
+        url: String,
+        token: &str,
+        body: Option<serde_json::Value>,
+    ) -> reqwest::Response {
+        let mut request = reqwest::Client::new()
+            .request(method, url)
+            .bearer_auth(token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        request.send().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_promotion_needs_agent_configure_to_sign_and_a_person_may_only_lower() {
+        let served = served_with(CONFIGURERS).await;
+        served
+            .registry
+            .check_in(
+                "hq",
+                BTreeMap::from([
+                    (
+                        "operation_policies".to_owned(),
+                        serde_json::json!({"G": {"operation": "G", "agents": [{"id": "007"}]}}),
+                    ),
+                    (
+                        "agent_clearances".to_owned(),
+                        serde_json::json!({"G": {"007": {"clearance": "desk", "configured": "desk"}}}),
+                    ),
+                ]),
+            )
+            .unwrap();
+        let now = crate::unix_timestamp().ok().unwrap();
+        let request = ai6::ApprovalRequest::try_new(
+            "G",
+            ai6::MissionId::try_new("promotion-007").unwrap(),
+            ai6::SessionId::try_new("m").unwrap(),
+            "007",
+            ai6::ActionScope::try_new("clearance", "007:field@G").unwrap(),
+            "10 Missions done",
+            "007:field@G#1",
+        )
+        .unwrap()
+        .expiring(now, std::time::Duration::from_secs(3600));
+        served.registry.request_approval(&request).unwrap();
+
+        let views: serde_json::Value = agents(&served.base, &served.operator)
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(views[0]["clearance"], "desk");
+        assert_eq!(views[0]["promotion"]["id"], request.id.as_str());
+
+        let approve = format!(
+            "{}/v1/user/operations/G/green-ink/{}/approve",
+            served.base, request.id
+        );
+        let refused = call(
+            reqwest::Method::POST,
+            approve.clone(),
+            &served.viewer,
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(
+            refused.status(),
+            StatusCode::FORBIDDEN,
+            "approval.decide alone"
+        );
+        let signed = call(
+            reqwest::Method::POST,
+            approve,
+            &served.operator,
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(signed.status(), StatusCode::OK);
+
+        let clearance = format!("{}/v1/user/operations/G/agents/007/clearance", served.base);
+        let lower = serde_json::json!({"clearance": "desk", "reason": "rewriting history"});
+        let refused = call(
+            reqwest::Method::PUT,
+            clearance.clone(),
+            &served.viewer,
+            Some(lower.clone()),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+        let bad = call(
+            reqwest::Method::PUT,
+            clearance.clone(),
+            &served.operator,
+            Some(serde_json::json!({"clearance": "cosmic", "reason": "x"})),
+        )
+        .await;
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+        let lowered = call(
+            reqwest::Method::PUT,
+            clearance.clone(),
+            &served.operator,
+            Some(lower),
+        )
+        .await;
+        assert_eq!(lowered.status(), StatusCode::OK);
+        let grant = served
+            .registry
+            .clearance_grant("G", "007")
+            .unwrap()
+            .unwrap();
+        assert!(!grant.raises(), "a person's grant only lowers");
+        assert_eq!(grant.signer, "operator-007");
+
+        let removed = call(
+            reqwest::Method::DELETE,
+            clearance.clone(),
+            &served.operator,
+            None,
+        )
+        .await;
+        assert_eq!(removed.status(), StatusCode::OK);
+        assert!(
+            served
+                .registry
+                .clearance_grant("G", "007")
+                .unwrap()
+                .is_none()
+        );
+        let again = call(reqwest::Method::DELETE, clearance, &served.operator, None).await;
+        assert_eq!(again.status(), StatusCode::NOT_FOUND);
+        let actions: Vec<_> = served
+            .registry
+            .list_audit(20)
+            .unwrap()
+            .into_iter()
+            .map(|record| record.action)
+            .collect();
+        for action in [
+            "agent.clearance.lowered",
+            "agent.clearance.revoked",
+            "green_ink.approved",
+        ] {
+            assert!(
+                actions.contains(&action.to_owned()),
+                "{action}: {actions:?}"
+            );
+        }
     }
 }

@@ -1119,6 +1119,10 @@ impl Gateway {
                 get(agents::list),
             )
             .route(
+                "/v1/user/operations/{operation_id}/agents/{agent}/clearance",
+                axum::routing::put(agents::lower).delete(agents::restore),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/quarantine",
                 get(list_user_quarantines),
             )

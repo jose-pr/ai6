@@ -238,8 +238,10 @@ impl Agent {
     /// Serving | Retiring (within the warning window) | DeskDuty | Retired, judged by UTC day.
     pub fn retirement(&self, now: i64) -> Retirement;
     pub fn is_retired(&self, now: i64) -> bool;   // Retired only; DeskDuty still works
-    /// Configured clearance, capped by the Operation's; "desk" once its date has come.
-    pub fn effective_clearance(&self, operation: &Operation, now: i64) -> String;
+    /// Configured clearance, or a live grant's: a raise (grant.approval set) replaces it, any
+    /// other grant only lowers it; capped by the Operation's; "desk" once its date has come.
+    pub fn effective_clearance(&self, operation: &Operation, grant: Option<&ClearanceGrant>,
+                               now: i64) -> String;
 }
 #[non_exhaustive] pub enum OnRetire { Desk /* default */, Retired }      // snake_case; as_str()
 #[non_exhaustive] pub enum Retirement { Serving, Retiring, DeskDuty, Retired } // as_str(): serving | retiring | desk_duty | retired
@@ -293,6 +295,7 @@ pub struct Operation {
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
     pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
     pub harness: HarnessPolicy,                   // [operation.ID.harness]; ignore unless configured
+    pub promotion: PromotionPolicy,               // [operation.ID.promotion]; see Promotion below
 }
 impl Operation {
     /// The defaults a file gives `[operation.ID]`: clearance "field", cover "covert",
@@ -1014,6 +1017,7 @@ pub trait CableStore;        // Cables, their delivery state and send quotas (st
 pub trait AuditStore;        // audit records (store.rs)
 pub trait AgentRoleStore;    // the per-Operation Agent-role overlay (store.rs)
 pub trait AgentRecordStore;  // Agent track records (agent_records.rs)
+pub trait ClearanceStore;    // clearance grants per Agent and Operation (clearance.rs)
 pub trait ApprovalStore;     // green ink and class authorisations (approvals.rs)
 pub trait QuarantineStore;   // quarantines and incidents (quarantine.rs)
 pub trait SessionStore;      // Session records and fenced leases (sessions.rs)
@@ -1024,7 +1028,7 @@ pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
 pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
 pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
 pub trait RegistryBackend: AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
-    + AuditStore + AgentRoleStore + ApprovalStore + QuarantineStore + SessionStore
+    + AuditStore + AgentRoleStore + ApprovalStore + ClearanceStore + QuarantineStore + SessionStore
     + SleeperStore + SourceStore + TimelineStore + UsageStore + VettingStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
@@ -1537,6 +1541,58 @@ impl Quarantine { pub fn new(agent, operation, reason, by, at) -> Self;
 A quarantined sender's Cables are accepted but held (`CableState::Held`) until an
 authorized release, whatever the receiver's inbound mode. `AgentQuery::excluding`
 skips the named Agents; the Station passes the quarantined ones.
+
+## Promotion and clearance grants (`ai6::directorates::m::promotion`, `ai6::directorates::registry::clearance`)
+
+Autonomy is earned per Operation and signed by a person. M (the Headquarters Station, each
+check-in round) reads each posted Agent's record; when it meets the next step it files a
+green ink request of kind `clearance`, target `AGENT:CLEARANCE@OPERATION`, Mission
+`promotion-AGENT`, Session `m`, idempotency key `TARGET#ROUND`. A person's approval (never a
+class authorisation or an expiry) becomes a raising `ClearanceGrant`, then the approval is
+spent, so it raises once. A quarantine in the Operation removes a raised grant and revokes
+its approval. A live lower grant (a person's) stops M filing promotions for that Agent.
+
+```rust
+pub const CLEARANCE_KIND: &str = "clearance";
+#[non_exhaustive] pub struct PromotionStep { pub missions: u64 /* 0 turns it off */,
+    pub max_failure_rate: Option<f64> /* at most; (failed+blown)/(done+failed+blown) */,
+    pub quiet_days: u64, pub quiet_on: Vec<AgentOutcome> }
+impl PromotionStep { pub fn after(missions: u64) -> Self;
+    pub fn shortfall(&self, tally: &AgentTally, everywhere: &AgentTally, now: f64) -> Option<String> }
+#[non_exhaustive] pub struct PromotionPolicy { pub field: PromotionStep /* desk -> field */,
+                                               pub double_o: PromotionStep /* field -> 00 */ }
+// Default: field 10 Missions, quiet 30 days on blown + quarantined;
+//          00 25 Missions, max_failure_rate 0.1, quiet 60 days on every incident.
+impl PromotionPolicy { pub fn due(&self, current: &str, ceiling: &str, tally: &AgentTally,
+                                  everywhere: &AgentTally, now: f64) -> Option<Promotion> }
+#[non_exhaustive] pub struct Promotion { pub from: String, pub to: String,
+    pub round: u64 /* done / missions: a refused step is asked again when it grows */, pub reason: String }
+pub struct PromotionDefinition;   // [operation.ID.promotion.field] / ["00"]: missions,
+                                  // max_failure_rate (0..=1), quiet_days, quiet_on = ["blown", ...]
+
+#[non_exhaustive] pub struct ClearanceGrant { pub agent: String, pub operation: String,
+    pub clearance: String, pub signer: String, pub at: f64, pub expires_at: Option<f64>,
+    pub approval: Option<String> /* the green ink request that raised it; None: only lowers */,
+    pub reason: Option<String> }
+impl ClearanceGrant {
+    pub fn raise(agent, operation, clearance, approval, signer, at) -> Self;
+    pub fn lower(agent, operation, clearance, signer, at) -> Self;
+    pub fn expiring(self, at: f64) -> Self; pub fn because(self, reason) -> Self;
+    pub fn raises(&self) -> bool; pub fn is_live(&self, now: f64) -> bool;
+    pub fn validate(&self) -> io::Result<()>;   // Registry-key agent and operation, known clearance
+}
+pub trait ClearanceStore {
+    // FileRegistry: clearance-grants/<operation>/<agent>.json; SQL: ai6_clearance_grants
+    fn put_clearance_grant(&self, grant: &ClearanceGrant) -> io::Result<()>   // replaces; 10,000 at most
+    fn clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>>
+    fn clearance_grants(&self, operation: &str) -> io::Result<Vec<ClearanceGrant>>
+    fn remove_clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>>
+}
+```
+
+The Station works an Agent at its effective clearance (start, resume, green ink, class
+authorisations, Agent records); a grant it cannot read counts as one holding it at `desk`.
+Each check-in carries `agent_clearances`: `{OPERATION: {AGENT: {clearance, configured}}}`.
 
 ## Agent records (`ai6::directorates::registry::agent_records`)
 

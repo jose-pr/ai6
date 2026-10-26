@@ -13,6 +13,7 @@ pub mod approvals;
 pub mod backend;
 pub mod bona_fides;
 pub mod cables;
+pub mod clearance;
 pub mod quarantine;
 pub mod sessions;
 pub mod sleepers;

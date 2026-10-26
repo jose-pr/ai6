@@ -83,7 +83,9 @@ is unavailable. Closing a Session view never sends a control.
 
 Before an irreversible step (a push to a protected branch or tag, a merge, a release, a
 deletion, a change of clearance) an Agent asks for green ink: a person's recorded approval
-of exactly that step. It calls `request_approval` on its Session's AI6 tool endpoint with
+of exactly that step. (M files the `clearance` requests itself, to promote an Agent; see
+[Track record and promotion](agents.md#track-record-and-promotion).) It calls
+`request_approval` on its Session's AI6 tool endpoint with
 the `kind` of step, its `target` (for a push, `REMOTE:REF` such as
 `origin:refs/heads/main`), a `reason` and a retry key, and is answered at once:
 

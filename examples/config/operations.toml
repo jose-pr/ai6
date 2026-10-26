@@ -20,3 +20,14 @@ stalls = 3
 budget_stops = 2
 blown = true
 window_hours = 24
+
+# M asks for green ink to raise an Agent's clearance here once its record meets a step; a
+# person signs it. These are the defaults; missions = 0 turns a step off.
+[operation.G.promotion.field]
+missions = 10
+quiet_days = 30
+
+[operation.G.promotion."00"]
+missions = 25
+max_failure_rate = 0.1
+quiet_days = 60

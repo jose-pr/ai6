@@ -6,6 +6,7 @@ use super::{DaemonState, medical};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::roster::{Agent, AgentQuery, Retirement, Roster, RosterError};
 use crate::directorates::registry::agent_records::{AgentOutcome, AgentOutcomeReport};
+use crate::directorates::registry::clearance::ClearanceGrant;
 
 /// The highest-priority Agent posted to `operation` for `role` and `tags` whose handler is
 /// among `handlers` (any when `None`), passing over quarantined and retired Agents and those
@@ -32,6 +33,9 @@ pub(super) fn select(
 }
 
 /// The Agent as it works in `operation` now: configured, with the clearance it holds there.
+///
+/// A grant that cannot be read counts as one holding the Agent at `desk`: a clearance that
+/// cannot be shown is not assumed.
 pub(super) fn effective(
     state: &DaemonState,
     operation: Option<&str>,
@@ -40,9 +44,38 @@ pub(super) fn effective(
     let mut agent = state.roster.agent(operation, key)?;
     if let Some(operation) = operation {
         let operation = state.roster.operation(operation)?;
-        agent.clearance = agent.effective_clearance(operation, state.clock.now());
+        let now = state.clock.now();
+        let grant = grant_of(state, &operation.id, &agent.id).unwrap_or_else(|| {
+            Some(ClearanceGrant::lower(
+                agent.id.clone(),
+                operation.id.clone(),
+                "desk",
+                format!("station:{}", state.station_id),
+                now as f64,
+            ))
+        });
+        agent.clearance = agent.effective_clearance(operation, grant.as_ref(), now);
     }
     Ok(agent)
+}
+
+/// The Agent's grant in `operation`; `None` (logged) when it cannot be read. A codename that
+/// is not a Registry key has no grant.
+pub(super) fn grant_of(
+    state: &DaemonState,
+    operation: &str,
+    agent: &str,
+) -> Option<Option<ClearanceGrant>> {
+    match state.intake.clearance_grant(operation, agent) {
+        Ok(grant) => Some(grant),
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => Some(None),
+        Err(error) => {
+            eprintln!(
+                "ai6: clearance grant of Agent {agent:?} in {operation:?} unreadable: {error}"
+            );
+            None
+        }
+    }
 }
 
 /// Why `agent` may take no new work now, when it is retired.
@@ -119,6 +152,33 @@ pub(super) fn retirements(roster: &Roster, now: i64) -> Vec<serde_json::Value> {
             })
         })
         .collect()
+}
+
+/// The clearance each posted Agent works at in each Operation now, beside its configured
+/// one, for the check-in: `{OPERATION: {AGENT: {clearance, configured}}}`.
+pub(super) fn clearances(state: &DaemonState) -> serde_json::Value {
+    let now = state.clock.now();
+    let mut operations = serde_json::Map::new();
+    for operation in state.roster.operations() {
+        let grants = state
+            .intake
+            .clearance_grants(&operation.id)
+            .unwrap_or_default();
+        let posted = state.roster.agents_for_operation(&operation.id);
+        let mut agents = serde_json::Map::new();
+        for agent in posted.unwrap_or_default() {
+            let grant = grants.iter().find(|grant| grant.agent == agent.id);
+            agents.insert(
+                agent.id.clone(),
+                serde_json::json!({
+                    "clearance": agent.effective_clearance(operation, grant, now),
+                    "configured": agent.clearance,
+                }),
+            );
+        }
+        operations.insert(operation.id.clone(), serde_json::Value::Object(agents));
+    }
+    serde_json::Value::Object(operations)
 }
 
 /// Logs each Agent whose retirement is due or near at `now`.

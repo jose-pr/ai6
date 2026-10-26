@@ -199,6 +199,40 @@ An Operation refuses an Agent above its clearance or outside its roster. M retai
 authorization authority; Agent role policy is guidance only. Q Branch controls which
 credentials are issued.
 
+### Track record and promotion
+
+Every Station counts each Agent's outcomes in its **record**: Missions done, failed, blown,
+abandoned and stalled, and the incidents charged to it (quarantines, budget stops, green ink
+refused), per Operation and per clearance, with the models that occupied the codename.
+Moneypenny's Agents view and `ai6ctl agents --operation ID` show it (`agent.read`).
+
+Autonomy is earned per Operation and signed by a person. When an Agent's record in an
+Operation meets the next step, M files a [green ink](missions.md#green-ink) request of kind
+`clearance` for it, `007:field@G` for example, under Mission `promotion-007`; nothing is
+raised until a person with `approval.decide` **and** `agent.configure` approves it. The
+approval becomes a clearance grant in that Operation only, never above the Operation's own
+clearance, and is spent: revoking the grant is final. A refused or expired request is asked
+again once the record has as many Missions more.
+
+```toml
+[operation.G.promotion.field]      # desk -> field; these are the defaults
+missions = 10                      # Missions done in G; 0 turns the step off
+quiet_days = 30
+quiet_on = ["blown", "quarantined"]
+
+[operation.G.promotion."00"]       # field -> 00
+missions = 25
+max_failure_rate = 0.1             # failed and blown, at most, of done + failed + blown
+quiet_days = 60
+quiet_on = ["blown", "stalled", "quarantined", "budget_stop", "green_ink_rejected"]
+```
+
+Lowering trust needs no green ink. A person with `agent.configure` may hold an Agent at a
+lower clearance in an Operation (Moneypenny, `ai6ctl agents lower`), which only ever lowers
+it, and may remove the grant to return it to its configured clearance (`ai6ctl agents
+restore`). A quarantine takes back a raised grant. While a person's lower grant stands, M
+files no promotion for that Agent there.
+
 Clearance is enforced at the harness as well as by policy. The Claude handler passes Claude
 Code a `PreToolUse` hook (through `--settings`) that runs `ai6 green-ink gate` before each
 `Bash` or `PowerShell` call, and the Codex handler answers Codex's command approval requests

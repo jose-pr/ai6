@@ -13,6 +13,7 @@ mod ephemeral;
 mod green_ink;
 mod harness;
 mod medical;
+mod promotion;
 mod recovery;
 mod reload;
 #[cfg(feature = "cables-mcp")]
@@ -1233,6 +1234,10 @@ async fn scheduler_loop(base: DaemonState) {
         let is_headquarters = tokio::task::spawn_blocking(move || schedule_intake_once(&intake))
             .await
             .unwrap_or_default();
+        if is_headquarters && check_in {
+            let promoting = state.clone();
+            let _ = tokio::task::spawn_blocking(move || promotion::round(&promoting)).await;
+        }
         if is_headquarters && SourceDesk::has_work(&state.roster) && desk.begin() {
             let (desk, plugins, roster, registry) = (
                 desk.clone(),
@@ -1754,6 +1759,7 @@ fn publish_station_check_in(state: &DaemonState) {
         "retirements".to_owned(),
         serde_json::json!(agents::retirements(&state.roster, state.clock.now())),
     );
+    info.insert("agent_clearances".to_owned(), agents::clearances(state));
     info.insert(
         "config".to_owned(),
         serde_json::json!(state.config.status()),

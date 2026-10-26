@@ -4,7 +4,8 @@
 //! Decisions are written to the shared Registry; the Station holding the Mission reads them
 //! and tells the Agent. The signer is always the authenticated person, never request text.
 //! Deciding needs `approval.decide` on the Operation; class authorisations need
-//! `approval.class`. Neither is implied by `mission.create` or `mission.control`. Each change
+//! `approval.class`, and approving a promotion (kind `clearance`) also `agent.configure`.
+//! Neither is implied by `mission.create` or `mission.control`. Each change
 //! is audited with the step it concerns, never the Agent's reason.
 
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use std::time::Duration;
 
 use ai6::directorates::registry::backend::*;
 use ai6::{
-    Approval, ApprovalRequest, ApprovalStatus, AuditRecord, ClassAuthorization,
+    Approval, ApprovalRequest, ApprovalStatus, AuditRecord, CLEARANCE_KIND, ClassAuthorization,
     DEFAULT_APPROVAL_TTL, Decision, Ruling,
 };
 use ai6_diptel::OperationId;
@@ -197,6 +198,16 @@ pub(crate) async fn approve(
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "approval.decide").await?;
     let now = unix_timestamp()?;
+    // Approving a promotion raises an Agent's clearance: it also takes `agent.configure`.
+    let store = registry.clone();
+    let (operation_key, id) = (operation.to_string(), request_id.clone());
+    let status = tokio::task::spawn_blocking(move || store.approval(&operation_key, &id, now))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(registry_error)?;
+    if status.is_some_and(|status| status.request().scope.kind == CLEARANCE_KIND) {
+        authorize_operation_action(&gateway, person.clone(), &operation, "agent.configure").await?;
+    }
     let mut ruling = Ruling::approve(person.id.clone(), now, now + lasts);
     if let Some(note) = note {
         ruling = ruling.with_note(note);
