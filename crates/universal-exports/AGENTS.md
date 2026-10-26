@@ -180,6 +180,8 @@ pub struct BoardStation {
                                            // omitted when the Station did not report it
     pub head_of_station: Option<ai6::StationReport>, // its Head of Station's latest report
                                            // (summary, typed findings); omitted until one is filed
+                                           // and unless the viewer has `station.read` on
+                                           // `station:ID` (it covers every Operation there)
 }
 
 #[non_exhaustive]
@@ -555,7 +557,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/user/attach-grants` | Requires a user bearer; checks `session.read` or `session.input` at the registered Operation before issuing an attach token. |
 | `POST /v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Requires `mission.control` (`session.input` is not enough). Body `{"action", "agent"?, "message"?, "session_id"?, "idempotency_key"}`, unknown fields refused; `agent` only with `retry`, `message` (1 byte to 16 KiB, not blank) only with `resume`. Audits, queues the control (see Operator controls) and returns `202` with a `ControlStatus`; a repeated key returns `200`. |
 | `GET /v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}` | Requires `mission.read`; returns the control's `ControlStatus`, `404` for an unknown control or one of another Mission. |
-| `POST /v1/user/operations/{operation_id}/missions` | Requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared Registry; returns the queued Mission ID. The body may carry `stations` to limit the Mission to those Stations (it can only narrow the Operation's list). |
+| `POST /v1/user/operations/{operation_id}/missions` | Requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared Registry; returns the queued Mission ID. The body may carry `stations` to limit the Mission to those Stations (it can only narrow the Operation's list). A `role` that `ai6::is_head_of_station_role` accepts is `400`: only an authorized Sleeper queues a Head of Station round. |
 | `GET /v1/auth/session` | Validates a user bearer and reports its token ID, person ID and expiry. |
 | `POST /v1/station/sessions` | Bearer-authenticated registration request with `operation_id`, `mission_id`, `session_id`, and optional sanitized Mission brief metadata. |
 | `POST /v1/station/sessions/{session_id}/lifecycle/{sequence}` | Bearer-authenticated JSON lifecycle update with Station, Mission ID and state. |

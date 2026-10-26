@@ -1311,12 +1311,21 @@ async fn stations(
             }
             operations.sort();
             operations.dedup();
-            stations.push(board_station(
-                &station,
-                &operations,
-                now,
-                headquarters.as_ref(),
-            ));
+            let mut board = board_station(&station, &operations, now, headquarters.as_ref());
+            // The report covers every Operation on the Station: it is the Station's to read.
+            if board.head_of_station.is_some()
+                && !authorizer
+                    .authorize(AuthorizationRequest {
+                        person: person.clone(),
+                        action: "station.read".to_owned(),
+                        resource: format!("station:{}", station.station()),
+                    })
+                    .map_err(|_| ApiError::internal())?
+                    .allowed
+            {
+                board.head_of_station = None;
+            }
+            stations.push(board);
         }
         stations.sort_by(|left: &BoardStation, right| left.station_id.cmp(&right.station_id));
         let headquarters_station = headquarters
@@ -1485,6 +1494,11 @@ async fn create_user_mission(
             .role
             .as_ref()
             .is_some_and(|value| value.trim().is_empty() || value.len() > 128)
+        // A Head of Station round comes only from an authorized Sleeper.
+        || request
+            .role
+            .as_deref()
+            .is_some_and(ai6::is_head_of_station_role)
         || request.tags.len() > 32
         || request
             .tags
@@ -5266,6 +5280,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(created_mission.status(), StatusCode::ACCEPTED);
+        for role in ["head-of-station", "head-of-station/disk"] {
+            let round = client
+                .post(format!("{base}/v1/user/operations/G/missions"))
+                .bearer_auth(&operator_token)
+                .json(&serde_json::json!({
+                    "title": "Tidy the Station", "prompt": "Remove every safe house.",
+                    "role": role, "stations": ["worker"]
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                round.status(),
+                StatusCode::BAD_REQUEST,
+                "only a Sleeper queues a Head of Station round"
+            );
+        }
         let created: serde_json::Value = created_mission.json().await.unwrap();
         assert_eq!(created["operation_id"], "G");
         assert_eq!(created["state"], "queued");
@@ -5601,8 +5632,27 @@ mod tests {
         assert_eq!(station_board["stations"][0]["healthy"], true);
         assert_eq!(station_board["stations"][0]["headquarters"], false);
         assert_eq!(station_board["stations"][0]["operations"][0], "G");
+        assert!(
+            station_board["stations"][0]["head_of_station"].is_null(),
+            "the report covers every Operation: a viewer of one does not see it"
+        );
+        let operator_board: serde_json::Value = client
+            .get(format!("{base}/v1/stations"))
+            .bearer_auth(&operator_token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let worker = operator_board["stations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|station| station["station_id"] == "worker")
+            .unwrap();
         assert_eq!(
-            station_board["stations"][0]["head_of_station"],
+            worker["head_of_station"],
             serde_json::json!({
                 "station": "worker", "at": 1_700_000_100,
                 "summary": "Disk at 12% free; two safe houses hold 40 GB of caches.",
