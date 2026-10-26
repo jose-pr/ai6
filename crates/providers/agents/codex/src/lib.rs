@@ -269,6 +269,8 @@ struct CodexSession {
     restricted: Option<Vec<String>>,
     /// Set once a restricted thread used a tool it may not, and was ended.
     tripped: AtomicBool,
+    /// The command of each command execution item the thread started, by item id.
+    started: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl CodexSession {
@@ -284,6 +286,7 @@ impl CodexSession {
             exhausted: Mutex::new(None),
             restricted: None,
             tripped: AtomicBool::new(false),
+            started: Mutex::default(),
         }
     }
 
@@ -359,7 +362,12 @@ impl CodexSession {
                 ));
             }
             // Anything but JSON is the harness's own diagnostics, which a reply never is.
-            let Some(StreamLine::Json { value: message, .. }) = self.read_line(remaining)? else {
+            let Some(StreamLine::Json {
+                value: message,
+                rebuilt,
+                ..
+            }) = self.read_line(remaining)?
+            else {
                 continue;
             };
             let ours = message.get("id").and_then(Value::as_u64) == Some(id);
@@ -376,7 +384,7 @@ impl CodexSession {
             if message.get("method").is_none() {
                 continue;
             }
-            self.collect_event(message)?;
+            self.collect_event(message, rebuilt)?;
         }
     }
 
@@ -428,7 +436,9 @@ impl CodexSession {
         }
     }
 
-    fn collect_event(&self, message: Value) -> Result<(), ProviderError> {
+    /// Takes one message from the app server; `rebuilt` says its line was not read as written
+    /// ([`StreamLine::Json`]).
+    fn collect_event(&self, message: Value, rebuilt: bool) -> Result<(), ProviderError> {
         if self.tripped.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -440,7 +450,21 @@ impl CodexSession {
         if let Some(id) = message.get("id")
             && message.get("method").and_then(Value::as_str) == Some(COMMAND_APPROVAL)
         {
-            self.answer_command_approval(id, message.get("params").unwrap_or(&Value::Null))?;
+            self.answer_command_approval(
+                id,
+                message.get("params").unwrap_or(&Value::Null),
+                rebuilt,
+            )?;
+        }
+        if message.get("method").and_then(Value::as_str) == Some("item/started")
+            && let Some(item) = message.pointer("/params/item")
+            && item.get("type").and_then(Value::as_str) == Some("commandExecution")
+            && let (Some(id), Some(command)) = (
+                item.get("id").and_then(Value::as_str),
+                item.get("command").and_then(Value::as_str),
+            )
+        {
+            lock(&self.started)?.insert(id.to_owned(), command.to_owned());
         }
         if let Some(exhausted) = exhausted_window(&message) {
             *lock(&self.exhausted)? = Some(exhausted);
@@ -506,18 +530,58 @@ fn forbidden_use(message: &Value, servers: &[String]) -> Option<String> {
 impl CodexSession {
     /// Answers a command approval with the green ink gate: `accept` unless the gate holds the
     /// command, then `decline`, and the reason is steered into the running turn so the Agent
-    /// knows to ask for green ink. With a gate, input to a running command and a request that
-    /// names no command are declined: the gate cannot see what they run. Without one (no Cable
+    /// knows to ask for green ink. With a gate, these are declined without asking it: input to
+    /// a running command and a request that names no command (the gate cannot see what they
+    /// run), a request whose line was rebuilt from a terminal's rendering (`rebuilt`: its
+    /// command may not be what Codex wrote), and one with no command execution item started
+    /// earlier under its item id with the same command. A decline the gate did not decide is
+    /// also logged and queued as an event of kind `declined`. Without a gate (no Cable
     /// endpoint) everything is accepted.
-    fn answer_command_approval(&self, id: &Value, params: &Value) -> Result<(), ProviderError> {
+    /// A hold the gate did not decide: logged, and queued as a `declined` event.
+    fn declined(&self, reason: &str) -> Result<GateVerdict, ProviderError> {
+        eprintln!("ai6: {reason}");
+        lock(&self.events)?.push_back(AgentEvent {
+            kind: "declined".to_owned(),
+            text: Some(reason.to_owned()),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+            quota: Vec::new(),
+        });
+        Ok(GateVerdict::Hold(reason.to_owned()))
+    }
+
+    fn answer_command_approval(
+        &self,
+        id: &Value,
+        params: &Value,
+        rebuilt: bool,
+    ) -> Result<(), ProviderError> {
         let command = params.get("command").and_then(Value::as_str);
         let cwd = params.get("cwd").and_then(Value::as_str).map(Path::new);
+        let item = params.get("itemId").and_then(Value::as_str);
+        let started = match item {
+            Some(item) => lock(&self.started)?.get(item).cloned(),
+            None => None,
+        };
+        let unseen = |command: &str| started.as_deref() != Some(command);
         let verdict = match (
             &self.gate,
             params.get("kind").and_then(Value::as_str),
             command,
         ) {
             (None, _, _) => GateVerdict::Allow,
+            (Some(_), _, _) if rebuilt => self.declined(
+                "Green ink: this approval request reached AI6 rebuilt from a terminal's \
+                 rendering (a line it broke, or a control inside it), so its command may not be \
+                 what was asked; it is declined. Run the command again.",
+            )?,
+            (Some(_), kind, Some(command)) if kind != Some("writeStdin") && unseen(command) => self
+                .declined(
+                    "Green ink: this approval request names a command no command execution \
+                     item started with before it; it is declined. Run the command again.",
+                )?,
             (Some(_), Some("writeStdin"), _) => GateVerdict::Hold(
                 "Green ink: input to a running command is declined, because the gate cannot see \
                  what it runs; run the command with all its arguments instead."
@@ -762,25 +826,26 @@ impl AgentSession for CodexSession {
         if let Some(event) = lock(&self.events)?.pop_front() {
             return Ok(Some(event));
         }
-        let message = match self.read_line(Duration::from_millis(timeout_ms.max(0) as u64))? {
-            None => return Ok(None),
-            Some(StreamLine::Json { value, .. }) => value,
-            Some(StreamLine::Text(text)) => {
-                return Ok(Some(AgentEvent {
-                    kind: "output".to_owned(),
-                    text: Some(text),
-                    data: None,
-                    limit: None,
-                    usage: None,
-                    tools: Vec::new(),
-                    quota: Vec::new(),
-                }));
-            }
-        };
+        let (message, rebuilt) =
+            match self.read_line(Duration::from_millis(timeout_ms.max(0) as u64))? {
+                None => return Ok(None),
+                Some(StreamLine::Json { value, rebuilt, .. }) => (value, rebuilt),
+                Some(StreamLine::Text(text)) => {
+                    return Ok(Some(AgentEvent {
+                        kind: "output".to_owned(),
+                        text: Some(text),
+                        data: None,
+                        limit: None,
+                        usage: None,
+                        tools: Vec::new(),
+                        quota: Vec::new(),
+                    }));
+                }
+            };
         if message.get("method").is_none() {
             return Ok(None);
         }
-        self.collect_event(message)?;
+        self.collect_event(message, rebuilt)?;
         Ok(lock(&self.events)?.pop_front())
     }
 
@@ -1336,6 +1401,16 @@ mod tests {
             {
                 asked += 1;
                 pending = Some(asked);
+                // The command execution item the approval is for starts first, as Codex's
+                // app server announces an item before asking about it.
+                writeln!(
+                    stdout,
+                    "{}",
+                    json!({"method":"item/started","params":{"item":{
+                        "type":"commandExecution","id":"item-1","command":command
+                    }}})
+                )
+                .unwrap();
                 writeln!(
                     stdout,
                     "{}",
@@ -1647,6 +1722,99 @@ mod tests {
             assert!(declined[1].contains(why), "{text}: {declined:?}");
         }
         session.close().unwrap();
+    }
+
+    /// What a gated session answers to `stream`: the decision written back, and the events.
+    fn answered(stream: &[u8]) -> (Value, Vec<AgentEvent>) {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let session = CodexSession::new(
+            ResumeTerminalSession {
+                input: Mutex::new(stream.to_vec()),
+                writes: writes.clone(),
+                killed: Arc::new(AtomicBool::new(false)),
+            }
+            .into_object(),
+            None,
+        )
+        .with_gate(approvals_gate(Arc::new(Mutex::new(Vec::new()))));
+        let mut events = Vec::new();
+        while let Some(event) = session.next_event(20).unwrap() {
+            events.push(event);
+        }
+        while let Ok(Some(event)) = session.next_event(20) {
+            events.push(event);
+        }
+        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+        let decision = written
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|message| message.pointer("/result/decision").is_some())
+            .expect("the approval was answered");
+        (decision["result"]["decision"].clone(), events)
+    }
+
+    fn started(command: &str) -> String {
+        json!({"method":"item/started","params":{"item":{
+            "type":"commandExecution","id":"item-1","command":command}}})
+        .to_string()
+    }
+
+    fn approval(command: &str) -> String {
+        json!({"id": 901, "method": COMMAND_APPROVAL, "params": {
+            "threadId": "t", "turnId": "u", "itemId": "item-1",
+            "command": command, "cwd": "/work", "kind": "command"}})
+        .to_string()
+    }
+
+    #[test]
+    fn an_approval_is_declined_unless_read_as_written_after_its_item_started() {
+        let declined_event = |events: &[AgentEvent]| {
+            events
+                .iter()
+                .find(|event| event.kind == "declined")
+                .and_then(|event| event.text.clone())
+        };
+        let whole = format!(
+            "{}\r\n{}\r\n",
+            started("cargo test"),
+            approval("cargo test")
+        );
+        let (decision, events) = answered(whole.as_bytes());
+        assert_eq!(decision, "accept", "{events:?}");
+
+        let (decision, events) = answered(format!("{}\r\n", approval("cargo test")).as_bytes());
+        assert_eq!(decision, "decline");
+        assert!(
+            declined_event(&events)
+                .unwrap()
+                .contains("no command execution item")
+        );
+
+        let other = format!(
+            "{}\r\n{}\r\n",
+            started("cargo build"),
+            approval("cargo test")
+        );
+        assert_eq!(answered(other.as_bytes()).0, "decline", "another command");
+
+        let line = approval("cargo test");
+        let (head, tail) = line.split_at(line.find("cargo").unwrap());
+        let broken = format!(
+            "{}\r\n{head}\r\n\x1b[23;80H{tail}\r\n",
+            started("cargo test")
+        );
+        let (decision, events) = answered(broken.as_bytes());
+        assert_eq!(decision, "decline", "a line the terminal broke");
+        assert!(declined_event(&events).unwrap().contains("rebuilt"));
+
+        let inside = format!("{}\r\n{head}\x1b[?25l{tail}\r\n", started("cargo test"));
+        assert_eq!(
+            answered(inside.as_bytes()).0,
+            "decline",
+            "a control other than colour inside the line"
+        );
+        let colour = format!("{}\r\n{head}\x1b[0m{tail}\r\n", started("cargo test"));
+        assert_eq!(answered(colour.as_bytes()).0, "accept", "colour alone");
     }
 
     #[test]
