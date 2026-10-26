@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::directorates::m::identity::{MissionId, SessionId};
+use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::registry::cables::{Cable, CableError, CableState};
 use crate::directorates::registry::timeline::{TimelineEvent, record_event_locked};
@@ -365,6 +366,8 @@ pub struct StationRecord {
 pub struct StationSettings {
     pub(super) station: String,
     pub(super) max_concurrent_missions: usize,
+    #[serde(flatten)]
+    pub(super) resource_limits: ResourceLimits,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -372,10 +375,16 @@ pub struct StationSettings {
 struct StationSettingsFile {
     station: String,
     max_concurrent_missions: usize,
+    /// Absent from settings written before resource limits existed.
+    #[serde(default)]
+    min_free_memory_mb: Option<u64>,
+    #[serde(default)]
+    max_cpu_percent: Option<u32>,
 }
 
 impl StationSettings {
-    /// Creates settings with a Mission capacity from 1 through 1,024.
+    /// Creates settings with a Mission capacity from 1 through 1,024 and the default
+    /// [`ResourceLimits`].
     pub fn try_new(station: impl Into<String>, max_concurrent_missions: usize) -> io::Result<Self> {
         let station = station.into();
         validate_station_id(&station)?;
@@ -388,7 +397,26 @@ impl StationSettings {
         Ok(Self {
             station,
             max_concurrent_missions,
+            resource_limits: ResourceLimits::default(),
         })
+    }
+
+    /// Replaces when the Station and its Theaters are too short of resources for new
+    /// Missions. `max_cpu_percent` above 100 is refused: no CPU is busier than that.
+    pub fn with_resource_limits(mut self, limits: ResourceLimits) -> io::Result<Self> {
+        if limits.max_cpu_percent > 100 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Station max_cpu_percent must be between 0 and 100",
+            ));
+        }
+        self.resource_limits = limits;
+        Ok(self)
+    }
+
+    /// Returns when the Station and its Theaters take no new Missions.
+    pub fn resource_limits(&self) -> ResourceLimits {
+        self.resource_limits
     }
 
     /// Returns the Station identity this setting belongs to.
@@ -1540,7 +1568,15 @@ impl StationStore for FileRegistry {
         if record.station != station {
             return Err(invalid_data("Station settings identity does not match"));
         }
+        let defaults = ResourceLimits::default();
+        let limits = ResourceLimits::new(
+            record
+                .min_free_memory_mb
+                .unwrap_or(defaults.min_free_memory_mb),
+            record.max_cpu_percent.unwrap_or(defaults.max_cpu_percent),
+        );
         StationSettings::try_new(record.station, record.max_concurrent_missions)
+            .and_then(|settings| settings.with_resource_limits(limits))
             .map(Some)
             .map_err(|_| invalid_data("Station settings are invalid"))
     }
@@ -1550,6 +1586,8 @@ impl StationStore for FileRegistry {
         let record = StationSettingsFile {
             station: settings.station.clone(),
             max_concurrent_missions: settings.max_concurrent_missions,
+            min_free_memory_mb: Some(settings.resource_limits.min_free_memory_mb),
+            max_cpu_percent: Some(settings.resource_limits.max_cpu_percent),
         };
         let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
         if bytes.len() as u64 > MAX_STATION_SETTINGS_BYTES {
@@ -2244,7 +2282,8 @@ pub(super) fn check_in_record(
 /// Checks settings before they are stored for `station`.
 pub(super) fn check_settings(station: &str, settings: &StationSettings) -> io::Result<()> {
     validate_station_id(station)?;
-    StationSettings::try_new(settings.station.clone(), settings.max_concurrent_missions)?;
+    StationSettings::try_new(settings.station.clone(), settings.max_concurrent_missions)?
+        .with_resource_limits(settings.resource_limits)?;
     if station != settings.station {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -2963,6 +3002,35 @@ mod tests {
         assert!(StationSettings::try_new("station/a", 0).is_err());
         assert!(StationSettings::try_new("station/a", MAX_STATION_MISSION_CAPACITY + 1).is_err());
         assert!(registry.set_station_settings("station?a", &first).is_err());
+
+        // Resource limits default, persist, and read as defaults from an older record.
+        assert_eq!(first.resource_limits(), ResourceLimits::default());
+        let loose = first
+            .clone()
+            .with_resource_limits(ResourceLimits::new(0, 100))
+            .unwrap();
+        registry.set_station_settings("station/a", &loose).unwrap();
+        assert_eq!(
+            registry
+                .station_settings("station/a")
+                .unwrap()
+                .unwrap()
+                .resource_limits(),
+            ResourceLimits::new(0, 100)
+        );
+        assert!(
+            first
+                .with_resource_limits(ResourceLimits::new(0, 101))
+                .is_err()
+        );
+        fs::write(
+            registry.station_settings_path("station/b"),
+            br#"{"station":"station/b","max_concurrent_missions":3}"#,
+        )
+        .unwrap();
+        let older = registry.station_settings("station/b").unwrap().unwrap();
+        assert_eq!(older.max_concurrent_missions(), 3);
+        assert_eq!(older.resource_limits(), ResourceLimits::default());
     }
 
     fn queued_briefs_list_by_priority_creation_time_and_key(store: &dyn Store) {

@@ -64,10 +64,18 @@ fn sampler() -> &'static Mutex<Sampler> {
 /// Samples the host now. The first sample, and one taken sooner than sysinfo can measure
 /// after the previous, has no CPU percent.
 pub(crate) fn sample() -> Resources {
-    match sampler().lock() {
-        Ok(mut sampler) => sampler.sample(),
-        Err(_) => Resources::default(),
+    let Ok(mut sampler) = sampler().lock() else {
+        return Resources::default();
+    };
+    // In this crate's tests every check-in repeats the process's first sample, so where
+    // placement puts work among test Stations on one host never turns on the load of the
+    // machine running them.
+    if cfg!(test)
+        && let Some(first) = &sampler.last
+    {
+        return first.clone();
     }
+    sampler.sample()
 }
 
 /// The last sample taken, for the Station's own host as its `local` Theater.

@@ -106,6 +106,22 @@ on_lost = "retry" # or "fail"
 
 An unknown value fails the load. See [Station loss](missions.md#station-loss-adoption).
 
+## Spreading or packing work
+
+Among the Stations and Theaters that pass placement's checks, an Operation's Missions go to
+the least-loaded place by default, or fill the busiest place that still has room:
+
+```toml
+[operation.G]
+placement = "pack" # or "spread"
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `placement` | `spread` | `spread` takes the lowest load score first, sharing work out; `pack` takes the highest, keeping other Stations and Theaters free. See [Placement](stations.md#placement) for the score |
+
+An unknown value fails the load.
+
 ## Budgets, exposure and quarantine
 
 Three optional tables set how [Medical](medical.md) treats the Operation's Agents. None sets

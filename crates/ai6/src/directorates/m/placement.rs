@@ -6,8 +6,14 @@
 //! (Station, Theater, Agent) choice, best first, and one reason for every rejection, so
 //! "why did or didn't it run there" can be answered before anything launches.
 //!
-//! Order is the least-loaded Station first (the deciding Station wins a tie, then Station
-//! ID), the `local` Theater before others, then the Agent with the highest priority.
+//! A Station or Theater short of memory or CPU ([`ResourceLimits`]) is ruled out like any
+//! other. Each remaining (Station, Theater) gets a load score from 0 (idle) to 4, the sum of
+//! four shares that each run 0 to 1: Missions held against capacity, CPU busy, memory in
+//! use, and the Station's Sessions on that Theater against capacity. A figure that was not
+//! reported adds nothing. [`PlacementStrategy::Spread`] puts the lowest score first,
+//! [`PlacementStrategy::Pack`] the highest. Equal scores keep the order without scores: the
+//! least-loaded Station first (the deciding Station wins a tie, then Station ID), the `local`
+//! Theater before others, then the Agent with the highest priority.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -43,6 +49,31 @@ pub struct OperationPolicy {
     /// The Agents posted to the Operation.
     #[serde(default)]
     pub agents: Vec<AgentFacts>,
+    /// Whether its Missions go where there is most room or fill busy places first.
+    #[serde(default)]
+    pub placement: PlacementStrategy,
+}
+
+/// How placement orders the places that pass (Operation key `placement`).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlacementStrategy {
+    /// The least-loaded place first, to share work out.
+    #[default]
+    Spread,
+    /// The busiest place that still passes first, to keep others free.
+    Pack,
+}
+
+impl PlacementStrategy {
+    /// The name used in configuration and on the wire.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Spread => "spread",
+            Self::Pack => "pack",
+        }
+    }
 }
 
 /// The part of an Agent that placement looks at.
@@ -87,6 +118,7 @@ impl OperationPolicy {
             theater: None,
             checkout: false,
             agents: Vec::new(),
+            placement: PlacementStrategy::Spread,
         }
     }
 
@@ -105,6 +137,7 @@ impl OperationPolicy {
             theater: operation.theater.clone(),
             checkout: operation.path.is_some(),
             agents,
+            placement: operation.placement,
         })
     }
 }
@@ -159,6 +192,75 @@ impl Resources {
     }
 }
 
+/// The default floor of free memory, in MiB, below which a Station or Theater takes no new
+/// Missions.
+pub const DEFAULT_MIN_FREE_MEMORY_MB: u64 = 512;
+/// The default CPU percent above which a Station or Theater takes no new Missions.
+pub const DEFAULT_MAX_CPU_PERCENT: u32 = 95;
+
+/// When a Station, and each Theater it reaches, is too short of resources to take new
+/// Missions. A figure that was not reported never rejects: a Theater's CPU percent, which
+/// the probe does not measure, never does.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceLimits {
+    /// Rejects when less memory than this, in MiB, is available; 0 never rejects.
+    #[serde(default = "default_min_free_memory_mb")]
+    pub min_free_memory_mb: u64,
+    /// Rejects when the CPU is busier than this percent; 100 never rejects.
+    #[serde(default = "default_max_cpu_percent")]
+    pub max_cpu_percent: u32,
+}
+
+fn default_min_free_memory_mb() -> u64 {
+    DEFAULT_MIN_FREE_MEMORY_MB
+}
+
+fn default_max_cpu_percent() -> u32 {
+    DEFAULT_MAX_CPU_PERCENT
+}
+
+impl Default for ResourceLimits {
+    /// [`DEFAULT_MIN_FREE_MEMORY_MB`] and [`DEFAULT_MAX_CPU_PERCENT`].
+    fn default() -> Self {
+        Self {
+            min_free_memory_mb: DEFAULT_MIN_FREE_MEMORY_MB,
+            max_cpu_percent: DEFAULT_MAX_CPU_PERCENT,
+        }
+    }
+}
+
+impl ResourceLimits {
+    /// Limits with the given floor of free memory, in MiB, and ceiling of CPU percent.
+    pub fn new(min_free_memory_mb: u64, max_cpu_percent: u32) -> Self {
+        Self {
+            min_free_memory_mb,
+            max_cpu_percent,
+        }
+    }
+
+    /// Why `resources` rule out new work, if they do.
+    pub fn rejection(&self, resources: &Resources) -> Option<String> {
+        if let Some(available) = resources.memory_available_mb
+            && available < self.min_free_memory_mb
+        {
+            return Some(format!(
+                "it has {available} MiB of memory free, below min_free_memory_mb = {}",
+                self.min_free_memory_mb
+            ));
+        }
+        if let Some(percent) = resources.cpu_percent
+            && percent > f64::from(self.max_cpu_percent)
+        {
+            return Some(format!(
+                "its CPU is {percent:.0}% busy, above max_cpu_percent = {}",
+                self.max_cpu_percent
+            ));
+        }
+        None
+    }
+}
+
 /// What a Station last checked in, reduced to what placement needs.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +277,9 @@ pub struct StationFacts {
     pub capacity: usize,
     /// Missions already leased to it.
     pub load: usize,
+    /// Sessions it reported running, including those no brief lease accounts for.
+    #[serde(default)]
+    pub running: usize,
     /// Its labels.
     pub labels: BTreeMap<String, String>,
     /// Operations whose checkout it has.
@@ -186,15 +291,23 @@ pub struct StationFacts {
     /// Its host's CPU and memory; `None` from a Station that did not report them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resources: Option<Resources>,
+    /// When it and its Theaters are too short of resources for new Missions.
+    #[serde(default)]
+    pub limits: ResourceLimits,
 }
 
 impl StationFacts {
+    /// How many Missions it holds: its leases or its running Sessions, whichever is more.
+    pub fn occupied(&self) -> usize {
+        self.load.max(self.running)
+    }
+
     /// Reads a Registry check-in. `load` is how many Missions are already leased to the
     /// Station; a Station silent for longer than `window` is unhealthy.
     ///
     /// Check-ins written before Stations reported a key fall back to the permissive
-    /// reading: execution role, capacity one, own host only, handlers and resources
-    /// unknown.
+    /// reading: execution role, capacity one, nothing running, own host only, handlers and
+    /// resources unknown, default resource limits.
     pub fn from_record(record: &StationRecord, now: f64, window: Duration, load: usize) -> Self {
         let info = record.info();
         let strings = |key: &str| {
@@ -234,6 +347,11 @@ impl StationFacts {
                 .and_then(|capacity| usize::try_from(capacity).ok())
                 .unwrap_or(1),
             load,
+            running: info
+                .get("running")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|running| usize::try_from(running).ok())
+                .unwrap_or_default(),
             labels,
             checkouts: strings("operations").unwrap_or_default(),
             handlers: strings("handlers"),
@@ -241,6 +359,10 @@ impl StationFacts {
             resources: info
                 .get("resources")
                 .and_then(|value| serde_json::from_value(value.clone()).ok()),
+            limits: info
+                .get("resource_limits")
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+                .unwrap_or_default(),
         }
     }
 }
@@ -291,7 +413,7 @@ impl ExecutionMode {
 
 /// One place a Mission may run.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlacementChoice {
     /// The Station that would supervise the Session.
     pub station: String,
@@ -304,7 +426,13 @@ pub struct PlacementChoice {
     /// Whether the harness would run on the Theater or act on it from the Station.
     #[serde(default)]
     pub mode: ExecutionMode,
+    /// How loaded the Station and Theater are, 0 (idle) to 4; see the module docs.
+    #[serde(default)]
+    pub score: f64,
 }
+
+// The score is a finite sum of finite shares.
+impl Eq for PlacementChoice {}
 
 /// One thing that was ruled out, and why. Absent fields mean the reason applies to every
 /// Station, Theater or Agent beneath it.
@@ -350,11 +478,16 @@ pub fn place(
     let mut stations: Vec<&StationFacts> = stations.iter().collect();
     let deciding = request.deciding_station.as_deref();
     stations.sort_by(|a, b| {
-        (a.load, Some(a.station.as_str()) != deciding, &a.station).cmp(&(
-            b.load,
-            Some(b.station.as_str()) != deciding,
-            &b.station,
-        ))
+        (
+            a.occupied(),
+            Some(a.station.as_str()) != deciding,
+            &a.station,
+        )
+            .cmp(&(
+                b.occupied(),
+                Some(b.station.as_str()) != deciding,
+                &b.station,
+            ))
     });
 
     for station in stations {
@@ -400,6 +533,7 @@ pub fn place(
                     continue;
                 }
             };
+            let score = load_score(station, theater);
             for agent in &usable {
                 let handler = agent.handler.as_deref().unwrap_or_default();
                 if let Err(reason) = harness_verdict(theater, mode, handler) {
@@ -417,11 +551,42 @@ pub fn place(
                     agent: agent.id.clone(),
                     handler: agent.handler.clone(),
                     mode,
+                    score,
                 });
             }
         }
     }
+    // Stable sorts: equal scores keep the order the loops above produced.
+    match policy.placement {
+        PlacementStrategy::Spread => placement
+            .choices
+            .sort_by(|a, b| a.score.total_cmp(&b.score)),
+        PlacementStrategy::Pack => placement
+            .choices
+            .sort_by(|a, b| b.score.total_cmp(&a.score)),
+    }
     placement
+}
+
+/// How loaded running on `theater` through `station` is, 0 (idle) to 4: Missions held
+/// against capacity, CPU busy, memory in use, and the Station's Sessions on the Theater
+/// against capacity, each 0 to 1. A Theater on the Station's own host is judged by the
+/// Station's sample. A figure that was not reported adds nothing.
+fn load_score(station: &StationFacts, theater: &TheaterSummary) -> f64 {
+    let capacity = station.capacity.max(1) as f64;
+    let held = (station.occupied() as f64 / capacity).min(1.0);
+    let sessions = (theater.sessions as f64 / capacity).min(1.0);
+    let resources = if theater.access == TheaterKind::Local {
+        station.resources.as_ref().or(theater.resources.as_ref())
+    } else {
+        theater.resources.as_ref()
+    };
+    let cpu = resources.and_then(Resources::cpu_busy).unwrap_or_default();
+    let memory = resources
+        .and_then(Resources::memory_used)
+        .unwrap_or_default();
+    // Thousandths keep the score readable and equal loads equal.
+    ((held + cpu + memory + sessions) * 1000.0).round() / 1000.0
 }
 
 /// The posted Agents the Mission may use, best first. The others are rejected once,
@@ -502,13 +667,17 @@ fn station_rejection(
     if station.capacity == 0 {
         return Some("it accepts no Missions (capacity 0)".to_owned());
     }
-    if station.load >= station.capacity {
+    if station.occupied() >= station.capacity {
         return Some(format!(
             "it is at capacity ({} of {} Missions)",
-            station.load, station.capacity
+            station.occupied(),
+            station.capacity
         ));
     }
-    None
+    station
+        .resources
+        .as_ref()
+        .and_then(|resources| station.limits.rejection(resources))
 }
 
 /// How a Session would run on `theater`, or the reason it may not.
@@ -527,6 +696,15 @@ fn theater_verdict(
     }
     let mode = execution_mode(theater)?;
     fitness(theater)?;
+    // The Station's own host was judged with the Station.
+    if theater.access != TheaterKind::Local
+        && let Some(reason) = theater
+            .resources
+            .as_ref()
+            .and_then(|resources| station.limits.rejection(resources))
+    {
+        return Err(reason);
+    }
     // The Theater's own labels win over the Station's, so a Theater can refine them.
     let mut labels = station.labels.clone();
     labels.extend(theater.labels.clone());
@@ -772,11 +950,13 @@ mod tests {
             roles: vec!["execution".to_owned()],
             capacity: 2,
             load,
+            running: 0,
             labels: BTreeMap::from([("station".to_owned(), id.to_owned())]),
             checkouts: vec!["G".to_owned()],
             handlers: Some(vec!["claude".to_owned(), "codex".to_owned()]),
             theaters: vec![TheaterSummary::local()],
             resources: None,
+            limits: ResourceLimits::default(),
         }
     }
 
@@ -1515,6 +1695,145 @@ mod tests {
         assert_eq!(
             reasons(&placement, "dev-1"),
             ["labels do not satisfy station_labels: station=build-* (has \"dev-1\")"]
+        );
+    }
+
+    fn sampled(cpu_percent: f64, total_mb: u64, available_mb: u64) -> Resources {
+        Resources {
+            cpus: Some(8.0),
+            cpu_percent: Some(cpu_percent),
+            load_1m: None,
+            memory_total_mb: Some(total_mb),
+            memory_available_mb: Some(available_mb),
+            sampled_at: 1_700_000_000,
+        }
+    }
+
+    fn first_station(placement: &Placement) -> &str {
+        placement.best().map(|c| c.station.as_str()).unwrap()
+    }
+
+    #[test]
+    fn a_busy_station_loses_under_spread_and_wins_under_pack() {
+        let mut busy = station("busy", 1);
+        busy.resources = Some(sampled(80.0, 16_384, 4_096));
+        let mut idle = station("idle", 0);
+        idle.resources = Some(sampled(5.0, 16_384, 15_000));
+        let stations = [busy, idle];
+
+        let spread = place(&policy(), &PlacementRequest::default(), &stations);
+        assert_eq!(first_station(&spread), "idle");
+        let scores: Vec<_> = spread.choices.iter().map(|c| c.score).collect();
+        assert!(
+            scores.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{scores:?}"
+        );
+        // busy: half its capacity held, 80% CPU, 75% memory used.
+        let busy_score = spread.choices.last().unwrap().score;
+        assert!((2.0..=2.1).contains(&busy_score), "{busy_score}");
+
+        let mut pack = policy();
+        pack.placement = PlacementStrategy::Pack;
+        let packed = place(&pack, &PlacementRequest::default(), &stations);
+        assert_eq!(first_station(&packed), "busy");
+        assert_eq!(packed.choices.len(), spread.choices.len());
+        assert!(packed.rejections.is_empty());
+    }
+
+    #[test]
+    fn stations_short_of_memory_or_cpu_are_rejected_with_the_reason() {
+        let mut short = station("short", 0);
+        short.resources = Some(sampled(10.0, 8_192, 300));
+        let mut hot = station("hot", 0);
+        hot.resources = Some(sampled(99.0, 8_192, 6_000));
+        let mut loose = station("loose", 0);
+        loose.resources = Some(sampled(99.0, 8_192, 300));
+        loose.limits = ResourceLimits::new(0, 100);
+        let placement = place(
+            &policy(),
+            &PlacementRequest::default(),
+            &[short, hot, loose],
+        );
+        assert_eq!(
+            reasons(&placement, "short"),
+            ["it has 300 MiB of memory free, below min_free_memory_mb = 512"]
+        );
+        assert_eq!(
+            reasons(&placement, "hot"),
+            ["its CPU is 99% busy, above max_cpu_percent = 95"]
+        );
+        assert!(
+            placement.choices.iter().all(|c| c.station == "loose"),
+            "a Station's own limits can be loosened"
+        );
+    }
+
+    #[test]
+    fn a_theater_short_of_memory_is_rejected_and_its_sessions_count_against_it() {
+        let runs_there = |id: &str| {
+            let mut theater = remote(
+                id,
+                Some(Capabilities {
+                    run: true,
+                    ..Capabilities::default()
+                }),
+            );
+            theater.runner = true;
+            theater.workdir = Some("/srv/work".to_owned());
+            theater
+        };
+        let mut small = runs_there("small");
+        small.resources = Some(Resources {
+            memory_total_mb: Some(256),
+            memory_available_mb: Some(200),
+            ..Resources::default()
+        });
+        // "busy" sorts before "free", so only its Session puts it second.
+        let mut busy = runs_there("busy");
+        busy.sessions = 1;
+        let free = runs_there("free");
+        let mut station = station("a", 0);
+        station.theaters = vec![small, busy, free];
+        let mut policy = policy();
+        policy.checkout = false;
+        policy.agents.truncate(1);
+
+        let placement = place(&policy, &PlacementRequest::default(), &[station]);
+        assert!(placement.rejections.iter().any(|r| {
+            r.theater.as_deref() == Some("small")
+                && r.reason == "it has 200 MiB of memory free, below min_free_memory_mb = 512"
+        }));
+        let order: Vec<_> = placement
+            .choices
+            .iter()
+            .map(|c| c.theater.as_str())
+            .collect();
+        assert_eq!(order, ["free", "busy"]);
+    }
+
+    #[test]
+    fn stations_that_report_no_resources_are_ordered_as_before_and_running_counts() {
+        let mut quiet = station("quiet", 0);
+        quiet.running = 2;
+        let placement = place(
+            &policy(),
+            &PlacementRequest::default(),
+            &[quiet, station("b", 1), station("c", 0)],
+        );
+        let order: Vec<_> = placement
+            .choices
+            .iter()
+            .map(|c| (c.station.as_str(), c.score))
+            .collect();
+        assert_eq!(
+            order,
+            [("c", 0.0), ("c", 0.0), ("b", 0.5), ("b", 0.5)],
+            "lease ratio only"
+        );
+        assert_eq!(
+            reasons(&placement, "quiet"),
+            ["it is at capacity (2 of 2 Missions)"],
+            "Sessions it reported running fill it even without leases"
         );
     }
 }

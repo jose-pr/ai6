@@ -259,6 +259,7 @@ pub struct Operation {
     pub on_limit: OnLimit,                        // Wait (default) or Backup; see Provider limits
     pub limit_fallback_secs: u64,                 // park time when a limit has no reset time; default 1800
     pub on_lost: OnLost,                          // Retry (default) or Fail; see Recovery
+    pub placement: PlacementStrategy,             // Spread (default) or Pack; see Placement
     pub budget: Budget,                           // no limit unless configured
     pub exposure: ExposurePolicy,                 // strict unless configured
     pub quarantine: QuarantinePolicy,             // 3 stalls/loops, 2 budget stops, 1 blown cover per 24 h
@@ -525,6 +526,7 @@ pub struct TheaterSummary {                  // what a Station publishes; no use
     pub made_for: Option<String>,            // the Mission an ephemeral Theater was made for
     pub resources: Option<Resources>,        // `local`: the Station's sample; else the newer of the
                                              // resources-only sample and the report's
+    pub sessions: usize,                     // the Station's running Sessions there; omitted when 0
 }
 impl TheaterSummary { pub fn local() -> Self; }
 pub fn is_sha256_pin(pin: &str) -> bool;    // "sha256:" and 64 hex digits
@@ -749,6 +751,19 @@ pub struct OperationPolicy {
     pub theater: Option<String>,      // bound Theater, if any
     pub checkout: bool,               // the Operation has a local checkout the Station must hold
     pub agents: Vec<AgentFacts>,
+    pub placement: PlacementStrategy, // serde default Spread
+}
+#[non_exhaustive]
+pub enum PlacementStrategy { Spread, Pack }   // default Spread; serde/as_str "spread" | "pack"
+pub const DEFAULT_MIN_FREE_MEMORY_MB: u64;    // 512
+pub const DEFAULT_MAX_CPU_PERCENT: u32;       // 95
+#[non_exhaustive]
+pub struct ResourceLimits { pub min_free_memory_mb: u64, pub max_cpu_percent: u32 } // Default: the two consts
+impl ResourceLimits {
+    pub fn new(min_free_memory_mb: u64, max_cpu_percent: u32) -> Self;
+    /// "it has N MiB of memory free, below min_free_memory_mb = M" or
+    /// "its CPU is N% busy, above max_cpu_percent = M"; an unreported figure never rejects.
+    pub fn rejection(&self, resources: &Resources) -> Option<String>;
 }
 impl OperationPolicy {
     pub fn new(operation: impl Into<String>) -> Self;
@@ -762,7 +777,10 @@ pub struct StationFacts {
     pub capacity: usize, pub load: usize, pub labels: BTreeMap<String, String>,
     pub checkouts: Vec<String>, pub handlers: Option<Vec<String>>, pub theaters: Vec<TheaterSummary>,
     pub resources: Option<Resources>,   // None from a Station that did not report them
+    pub running: usize,                 // its published `running`; 0 when absent
+    pub limits: ResourceLimits,         // its published `resource_limits`; default when absent
 }
+impl StationFacts { pub fn occupied(&self) -> usize; }  // max(load, running): what capacity is judged on
 /// A host's or Theater's CPU and memory; an unreported value is None, never guessed.
 /// `Eq` holds because every value is finite (JSON has no NaN; the samplers drop them).
 #[non_exhaustive]
@@ -790,7 +808,8 @@ pub struct PlacementRequest {
     pub deciding_station: Option<String>, // wins a tie on load
 }
 #[non_exhaustive]
-pub struct PlacementChoice { pub station: String, pub theater: String, pub agent: String, pub handler: Option<String>, pub mode: ExecutionMode }
+pub struct PlacementChoice { pub station: String, pub theater: String, pub agent: String, pub handler: Option<String>, pub mode: ExecutionMode,
+    pub score: f64 }                  // 0-4, thousandths; serde default 0; Eq holds (always finite)
 #[non_exhaustive]
 pub enum ExecutionMode { Field, RemoteHands }   // default Field; as_str() -> "field" | "remote-hands"
 /// How a Session would run on `theater`, or the capability that is missing.
@@ -811,13 +830,19 @@ pub fn place(policy: &OperationPolicy, request: &PlacementRequest, stations: &[S
 `place` returns every eligible (Station, Theater, Agent) choice, best first, and one
 rejection for everything ruled out; the `reason` is a sentence an operator can act on.
 Checks, in order: the Operation's `stations` list, the Mission's `stations`, the `execution`
-role, health (a check-in no older than `DEFAULT_LEASE`), capacity, then per Theater: not
+role, health (a check-in no older than `DEFAULT_LEASE`), capacity (`occupied()`), the
+Station's `limits` against its `resources`, then per Theater: not
 `made_for` a Mission, the Operation's `theater` binding, reachability and capabilities
-(`execution_mode`), `fitness`,
+(`execution_mode`), `fitness`, the Station's `limits` against the Theater's `resources`
+(not for `local` access, judged with the Station),
 `station_labels` (matched as globs against the Station's labels overlaid by the Theater's)
 and the Operation's checkout (on the Station's own host in field mode; on any other Theater,
 or in remote-hands mode, the Operation must be bound to the Theater or the Theater must set a
-`workdir`).
+`workdir`). Choices are pushed in the old order (Stations by `occupied()`, deciding Station,
+ID; `local` Theater first; Agent priority) and then stable-sorted by `score` (ascending for
+`Spread`, descending for `Pack`). `score` = occupied/capacity + `cpu_busy` + `memory_used`
+(of the Theater's resources, the Station's for `local` access) + the Theater's `sessions`
+/capacity, each capped at 1; an unreported figure adds 0.
 
 `execution_mode` is field mode when the harness can run on the Theater and reach the
 provider's API (`egress` not `none`; `forward` for `station`), and `agents` is not
@@ -996,9 +1021,12 @@ pub struct AuditRecord {
     pub at: f64,
 }
 
-pub struct StationSettings { /* validated settings for one Station */ }
+pub struct StationSettings { /* validated settings for one Station */ }  // Serialize: station,
+                                         // max_concurrent_missions, min_free_memory_mb, max_cpu_percent
 impl StationSettings {
-    pub fn try_new(station: impl Into<String>, max_concurrent_missions: usize) -> io::Result<Self>;
+    pub fn try_new(station: impl Into<String>, max_concurrent_missions: usize) -> io::Result<Self>; // default ResourceLimits
+    pub fn with_resource_limits(self, limits: ResourceLimits) -> io::Result<Self>; // max_cpu_percent > 100 refused
+    pub fn resource_limits(&self) -> ResourceLimits;
     pub fn station(&self) -> &str;
     pub fn max_concurrent_missions(&self) -> usize;
 }
@@ -1106,7 +1134,8 @@ reads the validated current value; `set_station_settings(station, settings)` per
 under a collision-resistant Station-specific file and the shared Registry lock. A daemon
 uses the live value for new Mission admission and scheduling; absent settings retain its
 startup default, and unreadable settings fail closed. Existing provider Sessions are not
-stopped when the limit is lowered.
+stopped when the limit is lowered. A settings file written before resource limits existed
+reads with the default `ResourceLimits`; any other backend must store all four fields.
 
 `put_agent_role(operation, role)`, `list_agent_roles(operation)`, `agent_role(operation,
 key)` and `remove_agent_role(operation, role_id)` manage validated, bounded role
@@ -1150,7 +1179,9 @@ a lease written before terms existed. Headquarters
 leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating Stations
 need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`,
 the host's `resources` (sysinfo: CPU count, CPU percent from the second sample on, the
-one-minute load average except on Windows, total and available memory),
+one-minute load average except on Windows, total and available memory; in this crate's own
+tests every check-in repeats the process's first sample), its `resource_limits` (Registry
+settings, else the defaults), each Theater's running `sessions`,
 local Operation paths, available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
 placement policy (`operation_policies`, omitted with a log line when over 512 KiB) with
 each Station check-in every 15 seconds, alongside host and
@@ -1168,7 +1199,12 @@ The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID
 explicit identity.
 `Brief::key()` and `Brief::prompt()` expose the key and prompt fields used by Registry intake.
 `Brief.stations` (default empty) limits a Mission to those Stations; it can only narrow the
-Operation's `stations` list. The scheduler places each brief with `placement::place`.
+Operation's `stations` list. The scheduler places each brief with `placement::place` over
+every Station's published facts: a brief naming no Agent gets `None` from
+`resolve_brief_assignment` (it only checks some unquarantined posted Agent qualifies) and
+`place` picks the Agent per Station from that Station's `handlers`; quarantined Agents are
+dropped from the policy first; the first choice whose Agent and Operation are within
+`max_concurrent` is taken. The Headquarters Station's own capacity plays no part.
 
 ## Session records (`ai6::directorates::registry::sessions`)
 

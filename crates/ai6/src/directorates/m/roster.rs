@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::directorates::m::approvals::{GreenInkDefinition, GreenInkPolicy};
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
+use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition};
@@ -178,6 +179,9 @@ pub struct Operation {
     pub limit_fallback_secs: u64,
     /// Response when a Session is lost with its Station and no other Station can adopt it.
     pub on_lost: OnLost,
+    /// Whether Missions go to the least-loaded place (`spread`, the default) or fill the
+    /// busiest place that still has room (`pack`).
+    pub placement: PlacementStrategy,
     /// Spending limits for this Operation's Missions; none is set unless configured.
     pub budget: Budget,
     /// What a Session may do once it has read untrusted input; strict unless configured.
@@ -719,6 +723,7 @@ struct OperationDefinition {
     on_limit: OnLimit,
     limit_fallback_secs: Option<u64>,
     on_lost: OnLost,
+    placement: PlacementStrategy,
     budget: BudgetDefinition,
     exposure: ExposureDefinition,
     quarantine: QuarantineDefinition,
@@ -859,6 +864,7 @@ impl OperationDefinition {
                 .limit_fallback_secs
                 .unwrap_or(DEFAULT_LIMIT_FALLBACK_SECS),
             on_lost: self.on_lost,
+            placement: self.placement,
             budget,
             exposure,
             quarantine,
@@ -1559,11 +1565,16 @@ sources = {{ jira = \"GUA\" }}\n",
         let directory = TestDirectory::new();
         directory.write(
             "operations.toml",
-            "[operation.A]\n[operation.B]\non_lost = \"fail\"\nworkspace = { checkpoint_remote = \"origin\", checkpoint_secs = 60 }\n",
+            "[operation.A]\n[operation.B]\non_lost = \"fail\"\nplacement = \"pack\"\nworkspace = { checkpoint_remote = \"origin\", checkpoint_secs = 60 }\n",
         );
         let roster = Roster::load(&directory.0).unwrap();
         let defaults = roster.operation("A").unwrap();
         assert_eq!(defaults.on_lost, OnLost::Retry);
+        assert_eq!(defaults.placement, PlacementStrategy::Spread);
+        assert_eq!(
+            roster.operation("B").unwrap().placement,
+            PlacementStrategy::Pack
+        );
         assert_eq!(defaults.workspace.checkpoint_remote, None);
         assert_eq!(defaults.workspace.checkpoint_secs, DEFAULT_CHECKPOINT_SECS);
         let set = roster.operation("B").unwrap();
@@ -1573,6 +1584,7 @@ sources = {{ jira = \"GUA\" }}\n",
 
         for invalid in [
             "on_lost = \"ignore\"",
+            "placement = \"random\"",
             "workspace = { checkpoint_secs = 0 }",
             "workspace = { checkpoint_remote = \" \" }",
         ] {

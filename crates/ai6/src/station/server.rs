@@ -38,7 +38,8 @@ use crate::directorates::m::mission::{
     LaunchManifest, Mission, MissionError, MissionState, MissionStore, SessionHold,
 };
 use crate::directorates::m::placement::{
-    self, ExecutionMode, OperationPolicy, PlacementRequest, StationFacts,
+    self, ExecutionMode, OperationPolicy, PlacementChoice, PlacementRequest, ResourceLimits,
+    StationFacts,
 };
 use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
@@ -1005,6 +1006,15 @@ impl DaemonState {
             }
         }
     }
+
+    /// When this Station and its Theaters take no new Missions: its Registry settings, else
+    /// the defaults.
+    fn resource_limits(&self) -> ResourceLimits {
+        match self.intake.station_settings(&self.station_id) {
+            Ok(Some(settings)) => settings.resource_limits(),
+            _ => ResourceLimits::default(),
+        }
+    }
 }
 
 struct StartReservation {
@@ -1206,7 +1216,7 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         let Ok(mission_id) = mission_id_for_brief(&brief) else {
             continue;
         };
-        let (operation_id, agent_id, role_id) = match resolve_brief_assignment(state, &brief) {
+        let (operation_id, named_agent, role_id) = match resolve_brief_assignment(state, &brief) {
             Ok(assignment) => assignment,
             Err(error) => {
                 let meta = BTreeMap::from([(
@@ -1228,10 +1238,17 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
                 continue;
             }
         };
-        if !has_assignment_capacity(state, &operation_id, &agent_id) {
-            continue;
-        }
-        let Some(execution_station) = place_brief(state, &brief, &operation_id, &agent_id, &leases)
+        let Some(PlacementChoice {
+            station: execution_station,
+            agent: agent_id,
+            ..
+        }) = place_brief(
+            state,
+            &brief,
+            &operation_id,
+            (named_agent.as_deref(), role_id.as_deref()),
+            &leases,
+        )
         else {
             continue;
         };
@@ -1602,6 +1619,10 @@ fn publish_station_check_in(state: &DaemonState) {
         "resources".to_owned(),
         serde_json::json!(crate::station::resources::sample()),
     );
+    info.insert(
+        "resource_limits".to_owned(),
+        serde_json::json!(state.resource_limits()),
+    );
     info.insert("operations".to_owned(), serde_json::json!(operations));
     let policies: BTreeMap<String, OperationPolicy> = state
         .roster
@@ -1626,13 +1647,35 @@ fn publish_station_check_in(state: &DaemonState) {
         "handlers".to_owned(),
         serde_json::json!(available_handlers(state)),
     );
-    info.insert(
-        "theaters".to_owned(),
-        serde_json::json!(state.transports.summaries(station_terminal(state).is_ok())),
-    );
+    let mut theaters = state.transports.summaries(station_terminal(state).is_ok());
+    let running = sessions_by_theater(state);
+    for theater in &mut theaters {
+        theater.sessions = running.get(&theater.id).copied().unwrap_or_default();
+    }
+    info.insert("theaters".to_owned(), serde_json::json!(theaters));
     if let Err(error) = state.intake.check_in(&state.station_id, info) {
         eprintln!("ai6: Station check-in failed: {error}");
     }
+}
+
+/// How many of this Station's running Sessions are on each Theater, from their Registry
+/// records.
+fn sessions_by_theater(state: &DaemonState) -> BTreeMap<String, usize> {
+    let running = state
+        .sessions
+        .lock()
+        .map(|sessions| sessions.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let mut counts = BTreeMap::new();
+    for mission_id in running {
+        let theater = session_hold(state, &mission_id)
+            .and_then(|hold| state.intake.session(&hold.id).ok().flatten())
+            .and_then(|record| record.theater);
+        if let Some(theater) = theater {
+            *counts.entry(theater).or_default() += 1;
+        }
+    }
+    counts
 }
 
 /// The Theater an Operation's Sessions run in when that Theater is this Station's own host:
@@ -2122,6 +2165,9 @@ impl Clock {
     }
 }
 
+/// Whether the Operation's and the Agent's `max_concurrent` leave room for one more Mission,
+/// counting this Station's active Missions and every Station's leases. The capacity of the
+/// Station that would run it is placement's to judge, from what that Station published.
 fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &str) -> bool {
     let Ok(starting) = state.starting.lock() else {
         return false;
@@ -2134,9 +2180,6 @@ fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &s
         .cloned()
         .chain(sessions.keys().cloned())
         .collect();
-    if active_ids.len() >= state.mission_capacity() {
-        return false;
-    }
     drop(sessions);
     drop(starting);
 
@@ -2220,15 +2263,23 @@ fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &s
     })
 }
 
-/// Chooses the execution Station for a brief with M's placement; the Agent is already fixed.
+/// Chooses the Station and Agent for a brief with M's placement, judged on what each Station
+/// published: its capacity and running Sessions, handlers, Theaters and resources. `agent` is
+/// the Agent the brief names; without one, each Station is offered the posted Agents its own
+/// handlers can run, quarantined ones left out. The best choice whose Agent and Operation
+/// still have room is taken; `None` leaves the brief queued.
 fn place_brief(
     state: &DaemonState,
     brief: &Brief,
     operation_id: &str,
-    agent_id: &str,
+    (agent, role): (Option<&str>, Option<&str>),
     leases: &[Lease],
-) -> Option<String> {
-    let policy = OperationPolicy::from_roster(&state.roster, operation_id).ok()?;
+) -> Option<PlacementChoice> {
+    let mut policy = OperationPolicy::from_roster(&state.roster, operation_id).ok()?;
+    let quarantined = medical::quarantined_agents(state, Some(operation_id));
+    policy
+        .agents
+        .retain(|candidate| !quarantined.contains(&candidate.id));
     let records = state.intake.stations(Duration::MAX).ok()?;
     let now = unix_now();
     let stations: Vec<StationFacts> = records
@@ -2243,13 +2294,20 @@ fn place_brief(
         .collect();
     let request = PlacementRequest {
         stations: brief.stations.clone(),
-        agent: Some(agent_id.to_owned()),
+        agent: agent.map(str::to_owned),
+        role: role.map(str::to_owned),
+        // A named Agent is taken as named; tags choose among the posted ones.
+        tags: if agent.is_some() {
+            Vec::new()
+        } else {
+            brief.tags.clone()
+        },
         deciding_station: Some(state.station_id.clone()),
-        ..PlacementRequest::default()
     };
     placement::place(&policy, &request, &stations)
-        .best()
-        .map(|choice| choice.station.clone())
+        .choices
+        .into_iter()
+        .find(|choice| has_assignment_capacity(state, operation_id, &choice.agent))
 }
 
 fn mission_id_for_brief(brief: &Brief) -> Result<MissionId, String> {
@@ -2267,10 +2325,13 @@ fn mission_id_for_brief(brief: &Brief) -> Result<MissionId, String> {
         .map_err(|error| format!("brief identity cannot become a Mission ID: {error}"))
 }
 
+/// The brief's Operation, the Agent it names and its role. A brief that names no Agent gets
+/// `None`: placement picks one per Station from that Station's handlers, so here it is only
+/// checked that some posted, unquarantined Agent qualifies, wherever it can run.
 fn resolve_brief_assignment(
     state: &DaemonState,
     brief: &Brief,
-) -> Result<(String, String, Option<String>), String> {
+) -> Result<(String, Option<String>, Option<String>), String> {
     let station_key = brief
         .operation
         .as_deref()
@@ -2284,27 +2345,17 @@ fn resolve_brief_assignment(
         .as_deref()
         .map(|key| configured_agent_role(state, Some(&operation.id), key))
         .transpose()?;
-    let agent = if let Some(agent_key) = brief.agent.as_deref() {
-        let agent = state
-            .roster
-            .agent(Some(&operation.id), agent_key)
-            .map_err(|error| error.to_string())?;
-        if medical::is_quarantined(state, &agent.id, Some(&operation.id)) {
-            return Err(format!("Agent {:?} is quarantined", agent.id));
-        }
-        agent
-    } else {
-        state
-            .roster
-            .select_agent_excluding(
-                Some(&operation.id),
-                brief.role.as_deref(),
-                &brief.tags,
-                Some(&available_handlers(state)),
-                &medical::quarantined_agents(state, Some(&operation.id)),
-            )
-            .map_err(|error| error.to_string())?
+    let Some(agent_key) = brief.agent.as_deref() else {
+        brief_agent(state, brief, &operation.id, None)?;
+        return Ok((operation.id.clone(), None, role.map(|role| role.id)));
     };
+    let agent = state
+        .roster
+        .agent(Some(&operation.id), agent_key)
+        .map_err(|error| error.to_string())?;
+    if medical::is_quarantined(state, &agent.id, Some(&operation.id)) {
+        return Err(format!("Agent {:?} is quarantined", agent.id));
+    }
     if let Some(role) = &role
         && !agent.roles.iter().any(|capability| {
             role.id == *capability
@@ -2318,7 +2369,32 @@ fn resolve_brief_assignment(
             agent.id, role.id
         ));
     }
-    Ok((operation.id.clone(), agent.id, role.map(|role| role.id)))
+    Ok((
+        operation.id.clone(),
+        Some(agent.id),
+        role.map(|role| role.id),
+    ))
+}
+
+/// The posted, unquarantined Agent that best fits the brief's role and tags among those whose
+/// handler is one of `handlers`, or any handler when `None`.
+fn brief_agent(
+    state: &DaemonState,
+    brief: &Brief,
+    operation_id: &str,
+    handlers: Option<&[String]>,
+) -> Result<String, String> {
+    state
+        .roster
+        .select_agent_excluding(
+            Some(operation_id),
+            brief.role.as_deref(),
+            &brief.tags,
+            handlers,
+            &medical::quarantined_agents(state, Some(operation_id)),
+        )
+        .map(|agent| agent.id)
+        .map_err(|error| error.to_string())
 }
 
 fn station_terminal(state: &DaemonState) -> Result<String, String> {
@@ -2457,7 +2533,19 @@ fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), Strin
                 .map_err(|error| error.to_string())?;
             Ok((operation.id.clone(), agent.id, role_id))
         }
-        _ => resolve_brief_assignment(state, &brief),
+        // A lease without an assignment: this Station runs it, so its own handlers decide.
+        _ => resolve_brief_assignment(state, &brief).and_then(|(operation_id, agent, role_id)| {
+            let agent = match agent {
+                Some(agent) => agent,
+                None => brief_agent(
+                    state,
+                    &brief,
+                    &operation_id,
+                    Some(&available_handlers(state)),
+                )?,
+            };
+            Ok((operation_id, agent, role_id))
+        }),
     }?;
     let (operation_id, agent_id, role_id) = assignment;
     create_intake_mission(state, &brief, &mission_id, operation_id, agent_id, role_id)
@@ -7101,6 +7189,124 @@ mod tests {
         assert!(state.missions.lock().unwrap().list().is_empty());
     }
 
+    /// A Headquarters Station with no execution role of its own over `registry`, posting
+    /// Agent 007 with `handler` to Operation G.
+    fn control_only_state(root: &Path, handler: &str) -> DaemonState {
+        fs::write(root.join("operations.toml"), "[operation.G]\n").unwrap();
+        fs::write(
+            root.join("agents.toml"),
+            format!("[agent.007]\nhandler = {handler:?}\n"),
+        )
+        .unwrap();
+        DaemonState {
+            plugins: Arc::new(test_plugins()),
+            roster: Arc::new(Roster::load(root).unwrap()),
+            intake: Arc::new(FileRegistry::open(root.join("registry"))),
+            missions: Arc::new(Mutex::new(MissionStore::default())),
+            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            cables: no_op_cables(),
+            station_id: "hq".to_owned(),
+            station: StationConfig::default().with_roles([StationRole::Control]),
+            transports: no_transports(),
+            #[cfg(feature = "publisher")]
+            publisher: None,
+            starting: Arc::new(Mutex::new(BTreeSet::new())),
+            max_concurrent_missions: DEFAULT_MAX_CONCURRENT_MISSIONS,
+            watchdog: WatchdogConfig::default(),
+            retry_after: Arc::new(Mutex::new(BTreeMap::new())),
+            startup_recovery: Arc::new(Mutex::new(BTreeSet::new())),
+            events: Arc::new(Mutex::new(BTreeMap::new())),
+            event_ready: Arc::new(Notify::new()),
+            stopping: Arc::new(AtomicBool::new(false)),
+            event_pumps: Arc::new(Mutex::new(Vec::new())),
+            clock: Clock::system(),
+        }
+    }
+
+    /// Checks `station` in as an execution Station running `running` of `capacity` Missions
+    /// with `handlers`.
+    fn worker_check_in(
+        state: &DaemonState,
+        station: &str,
+        (running, capacity): (usize, usize),
+        handlers: &[&str],
+    ) {
+        state
+            .intake
+            .check_in(
+                station,
+                BTreeMap::from([
+                    ("roles".to_owned(), serde_json::json!(["execution"])),
+                    ("capacity".to_owned(), serde_json::json!(capacity)),
+                    ("running".to_owned(), serde_json::json!(running)),
+                    ("handlers".to_owned(), serde_json::json!(handlers)),
+                ]),
+            )
+            .unwrap();
+    }
+
+    fn queue_brief(state: &DaemonState, id: &str, agent: Option<&str>) -> String {
+        let mut brief = serde_json::json!({
+            "title": format!("Work {id}"), "id": id, "source": "manual", "operation": "G"
+        });
+        if let Some(agent) = agent {
+            brief["agent"] = serde_json::json!(agent);
+        }
+        let brief: Brief = serde_json::from_value(brief).unwrap();
+        state.intake.submit_brief(&brief).unwrap();
+        brief.key()
+    }
+
+    #[test]
+    fn headquarters_places_a_brief_where_its_agents_handler_is_not_on_headquarters() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = control_only_state(dir.path(), "remote-harness");
+        publish_station_check_in(&state);
+        worker_check_in(&state, "worker-b", (0, 2), &["remote-harness"]);
+        let key = queue_brief(&state, "elsewhere", None);
+
+        assert!(schedule_intake_once(&state));
+        let lease = state
+            .intake
+            .lease(&key)
+            .unwrap()
+            .expect("the brief is placed rather than failed for want of a local handler");
+        assert_eq!(lease.station(), "worker-b");
+        assert_eq!(lease.meta()["agent"], "007");
+    }
+
+    #[test]
+    fn headquarters_judges_the_target_stations_published_capacity_not_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = control_only_state(dir.path(), "mock-agent");
+        // Headquarters itself is full; that says nothing about the Stations it places on.
+        state.max_concurrent_missions = 1;
+        state
+            .starting
+            .lock()
+            .unwrap()
+            .insert("starting-at-hq".to_owned());
+        publish_station_check_in(&state);
+        worker_check_in(&state, "worker-a", (1, 1), &["mock-agent"]);
+        worker_check_in(&state, "worker-b", (0, 1), &["mock-agent"]);
+        let first = queue_brief(&state, "first", Some("007"));
+
+        assert!(schedule_intake_once(&state));
+        assert_eq!(
+            state.intake.lease(&first).unwrap().unwrap().station(),
+            "worker-b",
+            "worker-a published that it runs as many Sessions as it may"
+        );
+
+        let second = queue_brief(&state, "second", Some("007"));
+        assert!(schedule_intake_once(&state));
+        assert!(
+            state.intake.lease(&second).unwrap().is_none(),
+            "every Station is at its published capacity"
+        );
+        assert_eq!(state.intake.list_new().unwrap().len(), 1);
+    }
+
     fn require<T>(result: Result<T, ApiErrorResponse>, message: &str) -> T {
         match result {
             Ok(value) => value,
@@ -8399,6 +8605,20 @@ mod tests {
         }
     }
 
+    /// The Agent placement gives a case-officer brief, judged on this Station's check-in.
+    fn placed_agent(state: &DaemonState) -> String {
+        publish_station_check_in(state);
+        place_brief(
+            state,
+            &case_officer_brief(),
+            "G",
+            (None, Some("case-officer")),
+            &[],
+        )
+        .expect("a place for the brief")
+        .agent
+    }
+
     pub(super) fn mission_state(state: &DaemonState, mission_id: &str) -> Mission {
         state
             .missions
@@ -8416,12 +8636,7 @@ mod tests {
         let state = test_state(root.path(), "", QUARANTINE_AGENTS);
         start_mission_one(&state).await;
         start_mission_by_id(&state, "mission-2").await;
-        assert_eq!(
-            resolve_brief_assignment(&state, &case_officer_brief())
-                .unwrap()
-                .1,
-            "007"
-        );
+        assert_eq!(placed_agent(&state), "007");
 
         for _ in 0..2 {
             medical::report_incident(&state, "mission-1", IncidentKind::Stall);
@@ -8466,12 +8681,7 @@ mod tests {
         );
 
         // New work for the role goes to the backup, and a started Mission is refused.
-        assert_eq!(
-            resolve_brief_assignment(&state, &case_officer_brief())
-                .unwrap()
-                .1,
-            "008"
-        );
+        assert_eq!(placed_agent(&state), "008");
         let refused = start_mission(
             State(state.clone()),
             axum::extract::Path("mission-1".to_owned()),
@@ -8497,12 +8707,7 @@ mod tests {
             assert_eq!(mission.state, MissionState::Queued, "{id}");
             assert_eq!(mission.agent_id.as_deref(), Some("008"), "{id}");
         }
-        assert_eq!(
-            resolve_brief_assignment(&state, &case_officer_brief())
-                .unwrap()
-                .1,
-            "007"
-        );
+        assert_eq!(placed_agent(&state), "007");
     }
 
     #[tokio::test]

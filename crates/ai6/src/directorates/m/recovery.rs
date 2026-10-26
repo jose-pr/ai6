@@ -123,11 +123,13 @@ mod tests {
             roles: vec!["execution".to_owned()],
             capacity: 2,
             load: 0,
+            running: 0,
             labels: BTreeMap::new(),
             checkouts: Vec::new(),
             handlers: Some(vec!["claude".to_owned()]),
             theaters,
             resources: None,
+            limits: Default::default(),
         }
     }
 

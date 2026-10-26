@@ -50,7 +50,8 @@ combinations that pass these checks:
 | Mission `stations` | the brief narrows to Stations and this one is not among them. A Mission can only narrow the Operation's list, never widen it |
 | Role | the Station has no `execution` role |
 | Health | its last check-in is older than 45 seconds (gone dark; `GONE_DARK_AFTER`) |
-| Capacity | its capacity is 0, or it already holds that many leased Missions |
+| Capacity | its capacity is 0, or it already holds that many Missions: its leases or the Sessions it reported running, whichever is more |
+| Resources | it reported less free memory than `min_free_memory_mb` (default 512) or a CPU busier than `max_cpu_percent` (default 95). The same limits rule out a Theater by its own sample. A figure that was not reported never rules anything out |
 | Theater binding | the Operation's `theater` names a different Theater |
 | Theater reachable | the Station cannot reach the Theater now (no transport provider, or the last contact failed), or has not reported what its transport can do |
 | Theater capabilities | neither mode below is possible: field mode needs a route to the provider's API and either a runner on the Theater (reached with `run` on another host), `terminal` and `files` on the Station's own host, or, for the detached wrapper on another host, `run`, `files`, a POSIX host and a declared harness; remote-hands mode needs the transport's `run`. `agents = "local"` or `"remote-hands"` allows only that mode, and the reason names the missing capability |
@@ -60,9 +61,23 @@ combinations that pass these checks:
 | Checkout | in field mode on the Station's own host, the Operation has a local `path` and the Station does not hold it. On another host, and in remote-hands mode, the checkout is on the Theater, so the Operation must be bound to the Theater or the Theater must set a `workdir` |
 | Handler | the Agent's handler is not available on the Station, so the next qualified Agent is the backup. A Station that did not report its handlers is not excluded |
 
-Among what remains, the least-loaded Station comes first (the deciding Station wins a tie,
-then Station ID), the `local` Theater before other Theaters, then the Agent with the
-highest priority. There is no scoring beyond that. Each choice also says its mode:
+Each (Station, Theater) that remains gets a load **score** from 0 (idle) to 4, the sum of
+four shares from 0 to 1: the Missions the Station holds against its capacity, how busy the
+CPU is (the CPU percent, or for a Theater the load average per CPU), the memory in use, and
+the Station's Sessions on that Theater against its capacity. A Theater on the Station's own
+host is judged by the Station's sample. A figure that was not reported adds nothing, so a
+Station that reports no resources scores on its Missions alone. The Operation's `placement`
+decides the order: `spread` (the default) puts the lowest score first, `pack` the highest
+(see [Operations](operations.md#spreading-or-packing-work)). Equal scores keep the order
+without scores: the least-loaded Station first (the deciding Station wins a tie, then Station
+ID), the `local` Theater before other Theaters, then the Agent with the highest priority.
+
+The Headquarters Station judges each Station on what that Station published, never on its
+own: a brief that names no Agent is offered, on each Station, the posted Agents whose handler
+that Station has (so a handler the Headquarters Station lacks is no obstacle), and a Station
+at its published capacity is passed over. The first choice whose Agent and Operation are
+within their `max_concurrent` is taken; when there is none, the brief waits. Each choice also
+says its mode:
 `field` runs the harness on the Theater, `remote-hands` runs it on the Station and acts on the
 Theater through its transport (see [Theaters](theaters.md#two-ways-to-work-on-a-theater)).
 
@@ -131,7 +146,10 @@ embedding the Station can pass another store with `ServeConfig::with_registry`.
 
 Operators granted `station.configure` can change a Station's maximum concurrent Missions
 (1–1,024) in Moneypenny's Administration view; the change applies to new Missions and is
-audited. `GET /v1/stations` on Universal Exports returns the signed-in user's authorized
+audited. The same settings hold the Station's resource limits, `min_free_memory_mb` (default
+512; 0 never rules it out) and `max_cpu_percent` (default 95; 100 never does), set through
+`PUT /v1/user/stations/{id}/settings`; the Station publishes them at check-in and placement
+applies them to the Station and each Theater it reaches. `GET /v1/stations` on Universal Exports returns the signed-in user's authorized
 view of Station health, roles, capacity, the Operations each Station serves, the Theaters
 each Station reaches and the current Headquarters Station; host and process details are
 omitted.

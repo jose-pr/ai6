@@ -1880,14 +1880,21 @@ struct UserStationAccess {
 struct StationSettingsResponse {
     station_id: String,
     max_concurrent_missions: usize,
+    min_free_memory_mb: u64,
+    max_cpu_percent: u32,
     configured: bool,
     execution_enabled: bool,
 }
 
+/// A settings change; an absent resource limit keeps its current value.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UpdateStationSettings {
     max_concurrent_missions: usize,
+    #[serde(default)]
+    min_free_memory_mb: Option<u64>,
+    #[serde(default)]
+    max_cpu_percent: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -2329,8 +2336,12 @@ async fn get_user_station_settings(
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
-    let (max_concurrent_missions, configured) = match settings {
-        Some(settings) => (settings.max_concurrent_missions(), true),
+    let (max_concurrent_missions, limits, configured) = match settings {
+        Some(settings) => (
+            settings.max_concurrent_missions(),
+            settings.resource_limits(),
+            true,
+        ),
         None => (
             station
                 .info()
@@ -2338,12 +2349,15 @@ async fn get_user_station_settings(
                 .and_then(serde_json::Value::as_u64)
                 .and_then(|value| usize::try_from(value).ok())
                 .unwrap_or_default(),
+            ai6::ResourceLimits::default(),
             false,
         ),
     };
     Ok(Json(StationSettingsResponse {
         station_id,
         max_concurrent_missions,
+        min_free_memory_mb: limits.min_free_memory_mb,
+        max_cpu_percent: limits.max_cpu_percent,
         configured,
         execution_enabled,
     }))
@@ -2377,17 +2391,36 @@ async fn put_user_station_settings(
     }
     let station = station_id.clone();
     let write_registry = registry.clone();
-    tokio::task::spawn_blocking(move || write_registry.set_station_settings(&station, &settings))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|_| ApiError::bad_request())?;
+    let mut changed = vec!["max_concurrent_missions"];
+    if request.min_free_memory_mb.is_some() {
+        changed.push("min_free_memory_mb");
+    }
+    if request.max_cpu_percent.is_some() {
+        changed.push("max_cpu_percent");
+    }
+    tokio::task::spawn_blocking(move || {
+        let current = write_registry
+            .station_settings(&station)?
+            .map(|settings| settings.resource_limits())
+            .unwrap_or_default();
+        let limits = ai6::ResourceLimits::new(
+            request
+                .min_free_memory_mb
+                .unwrap_or(current.min_free_memory_mb),
+            request.max_cpu_percent.unwrap_or(current.max_cpu_percent),
+        );
+        write_registry.set_station_settings(&station, &settings.with_resource_limits(limits)?)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::bad_request())?;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
         actor: person.id,
         action: "station.settings.update".to_owned(),
         operation: String::new(),
         resource: Some(format!("station:{station_id}")),
-        target: "max_concurrent_missions".to_owned(),
+        target: changed.join(", "),
         at: unix_timestamp()?,
     };
     tokio::task::spawn_blocking(move || registry.record_audit(&audit))
@@ -4975,6 +5008,66 @@ mod tests {
         let updated_settings: serde_json::Value = updated_settings.json().await.unwrap();
         assert_eq!(updated_settings["max_concurrent_missions"], 8);
         assert_eq!(updated_settings["configured"], true);
+        assert_eq!(
+            (
+                &updated_settings["min_free_memory_mb"],
+                &updated_settings["max_cpu_percent"]
+            ),
+            (&serde_json::json!(512), &serde_json::json!(95)),
+            "resource limits start at their defaults"
+        );
+        let put_settings = |body: serde_json::Value| {
+            client
+                .put(format!("{base}/v1/user/stations/worker/settings"))
+                .bearer_auth(&operator_token)
+                .json(&body)
+                .send()
+        };
+        assert_eq!(
+            put_settings(serde_json::json!({"max_concurrent_missions": 8, "max_cpu_percent": 101}))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            put_settings(
+                serde_json::json!({"max_concurrent_missions": 8, "min_free_memory_mb": 0})
+            )
+            .await
+            .unwrap()
+            .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            put_settings(serde_json::json!({"max_concurrent_missions": 6, "max_cpu_percent": 100}))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        let loosened: serde_json::Value = client
+            .get(format!("{base}/v1/user/stations/worker/settings"))
+            .bearer_auth(&operator_token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                &loosened["max_concurrent_missions"],
+                &loosened["min_free_memory_mb"],
+                &loosened["max_cpu_percent"]
+            ),
+            (
+                &serde_json::json!(6),
+                &serde_json::json!(0),
+                &serde_json::json!(100)
+            ),
+            "a limit left out keeps the value set before"
+        );
         let station_audit = client
             .get(format!("{base}/v1/user/audit?station_id=worker"))
             .bearer_auth(&operator_token)
@@ -5345,8 +5438,9 @@ mod tests {
             preview["choices"],
             serde_json::json!([{
                 "station": "worker", "theater": "local", "agent": "007", "handler": "claude",
-                "mode": "field"
-            }])
+                "mode": "field", "score": 0.5
+            }]),
+            "the worker holds one lease of its capacity of two and reported no resources"
         );
         let rejections = preview["rejections"].as_array().unwrap();
         assert!(rejections.iter().any(|r| {

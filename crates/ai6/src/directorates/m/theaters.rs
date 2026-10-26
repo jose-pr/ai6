@@ -567,6 +567,7 @@ impl Theater {
             report: None,
             made_for: None,
             resources: None,
+            sessions: 0,
         }
     }
 
@@ -796,6 +797,13 @@ pub struct TheaterSummary {
     /// else the Station's probe of it. Absent until a sample succeeds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resources: Option<crate::directorates::m::placement::Resources>,
+    /// Sessions the Station is running on the Theater.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub sessions: usize,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 impl TheaterSummary {
