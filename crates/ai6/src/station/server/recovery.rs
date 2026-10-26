@@ -211,14 +211,11 @@ pub(super) fn give_up(
         lose_held(state, hold, reason);
     }
     let to = hand_back(state, mission_id);
-    if let Ok(mut missions) = state.missions.lock()
-        && let Err(error) = missions.transition(mission_id, to)
-    {
-        eprintln!("ai6: Mission {mission_id:?} could not be marked {to:?}: {error:?}");
-    }
     if let Some(hold) = &hold {
         super::agents::count_lost(state, mission_id, hold.attempt);
     }
+    // The loss is counted and its reason queued before the Mission ends, so whoever sees it
+    // ended also sees why.
     queue_event(
         state,
         mission_id,
@@ -232,6 +229,11 @@ pub(super) fn give_up(
             tools: Vec::new(),
         },
     );
+    if let Ok(mut missions) = state.missions.lock()
+        && let Err(error) = missions.transition(mission_id, to)
+    {
+        eprintln!("ai6: Mission {mission_id:?} could not be marked {to:?}: {error:?}");
+    }
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = operation.and_then(|operation| operation.telemetry)
         && let Some(name) = super::lifecycle_name(to)
