@@ -21,6 +21,7 @@ const _agents = [
       'blown': 0,
       'abandoned': 0,
       'stalled': 2,
+      'lost': 1,
       'quarantined': 0,
       'budget_stops': 0,
       'green_ink_rejected': 0,
@@ -60,6 +61,7 @@ const _agents = [
     'model_history': [],
     'clearance': 'desk',
     'configured_clearance': 'desk',
+    'grant_unreadable': true,
   },
 ];
 
@@ -133,7 +135,14 @@ void main() {
         requests.map((request) => request.url.path),
         contains('/v1/user/operations/G/agents'),
       );
-      expect(find.text('12 done · 1 failed · 2 stalled'), findsOneWidget);
+      expect(
+        find.text('12 done · 1 failed · 2 stalled · 1 lost'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Clearance grant unreadable: Stations work it at desk'),
+        findsOneWidget,
+      );
       expect(find.text('1 quarantined in every Operation'), findsOneWidget);
       expect(
         find.textContaining('Model sonnet since 2028-08-'),

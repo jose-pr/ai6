@@ -16,6 +16,7 @@ class AgentTallySummary {
     this.blown = 0,
     this.abandoned = 0,
     this.stalled = 0,
+    this.lost = 0,
     this.quarantined = 0,
     this.budgetStops = 0,
     this.greenInkRejected = 0,
@@ -26,6 +27,9 @@ class AgentTallySummary {
   final int blown;
   final int abandoned;
   final int stalled;
+
+  /// Sessions lost with their Station or runner: not the Agent's failures.
+  final int lost;
   final int quarantined;
   final int budgetStops;
   final int greenInkRejected;
@@ -38,6 +42,7 @@ class AgentTallySummary {
           blown: json['blown'] as int? ?? 0,
           abandoned: json['abandoned'] as int? ?? 0,
           stalled: json['stalled'] as int? ?? 0,
+          lost: json['lost'] as int? ?? 0,
           quarantined: json['quarantined'] as int? ?? 0,
           budgetStops: json['budget_stops'] as int? ?? 0,
           greenInkRejected: json['green_ink_rejected'] as int? ?? 0,
@@ -51,6 +56,8 @@ class AgentTallySummary {
       if (blown > 0) '$blown blown',
       if (abandoned > 0) '$abandoned abandoned',
       if (stalled > 0) '$stalled stalled',
+      if (lost > 0) '$lost lost',
+
       if (quarantined > 0) '$quarantined quarantined',
       if (budgetStops > 0) '$budgetStops budget stops',
       if (greenInkRejected > 0) '$greenInkRejected green ink refused',
@@ -147,6 +154,7 @@ class AgentSummary {
     this.retirement,
     this.grant,
     this.promotion,
+    this.grantUnreadable = false,
   });
 
   final String agent;
@@ -175,6 +183,9 @@ class AgentSummary {
 
   /// The clearance a waiting promotion request asks for.
   final String? promotion;
+
+  /// Its grant could not be read; Stations work it at `desk`.
+  final bool grantUnreadable;
 
   factory AgentSummary.fromJson(Map<String, dynamic> json) {
     final history = json['model_history'] as List<dynamic>? ?? const [];
@@ -210,6 +221,7 @@ class AgentSummary {
         ),
         _ => null,
       },
+      grantUnreadable: json['grant_unreadable'] as bool? ?? false,
       // The target names `AGENT:CLEARANCE@OPERATION`.
       promotion: target == null
           ? null
@@ -487,6 +499,14 @@ class _AgentTile extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(retirement.label),
                   ],
+                ),
+              ),
+            if (agent.grantUnreadable)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'Clearance grant unreadable: Stations work it at desk',
+                  style: TextStyle(color: theme.colorScheme.error),
                 ),
               ),
             if (agent.grant case final grant?)
