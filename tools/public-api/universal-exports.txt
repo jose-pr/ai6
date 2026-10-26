@@ -61,6 +61,7 @@ pub universal_exports::BoardStation::capacity: usize
 pub universal_exports::BoardStation::headquarters: bool
 pub universal_exports::BoardStation::healthy: bool
 pub universal_exports::BoardStation::operations: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::BoardStation::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub universal_exports::BoardStation::roles: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardStation::running: usize
 pub universal_exports::BoardStation::seen: f64
@@ -79,6 +80,8 @@ pub universal_exports::BoardTheater::made_for: core::option::Option<alloc::strin
 pub universal_exports::BoardTheater::provider: core::option::Option<alloc::string::String>
 pub universal_exports::BoardTheater::report: core::option::Option<ai6::directorates::q::provision::ProbeReport>
 pub universal_exports::BoardTheater::requires: core::option::Option<ai6::directorates::q::provision::Requirements>
+pub universal_exports::BoardTheater::resources: core::option::Option<ai6::directorates::m::placement::Resources>
+pub universal_exports::BoardTheater::sessions: usize
 pub universal_exports::BoardTheater::unavailable: core::option::Option<alloc::string::String>
 pub universal_exports::BoardTheater::weakened: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardTheater::workdir: core::option::Option<alloc::string::String>

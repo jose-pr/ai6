@@ -341,6 +341,11 @@ pub ai6::directorates::m::placement::ExecutionMode::Field
 pub ai6::directorates::m::placement::ExecutionMode::RemoteHands
 impl ai6::directorates::m::placement::ExecutionMode
 pub fn ai6::directorates::m::placement::ExecutionMode::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::directorates::m::placement::PlacementStrategy
+pub ai6::directorates::m::placement::PlacementStrategy::Pack
+pub ai6::directorates::m::placement::PlacementStrategy::Spread
+impl ai6::directorates::m::placement::PlacementStrategy
+pub fn ai6::directorates::m::placement::PlacementStrategy::as_str(self) -> &'static str
 #[non_exhaustive] pub struct ai6::directorates::m::placement::AgentFacts
 pub ai6::directorates::m::placement::AgentFacts::handler: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::AgentFacts::id: alloc::string::String
@@ -353,6 +358,7 @@ pub fn ai6::directorates::m::placement::AgentFacts::from(&ai6::directorates::m::
 pub ai6::directorates::m::placement::OperationPolicy::agents: alloc::vec::Vec<ai6::directorates::m::placement::AgentFacts>
 pub ai6::directorates::m::placement::OperationPolicy::checkout: bool
 pub ai6::directorates::m::placement::OperationPolicy::operation: alloc::string::String
+pub ai6::directorates::m::placement::OperationPolicy::placement: ai6::directorates::m::placement::PlacementStrategy
 pub ai6::directorates::m::placement::OperationPolicy::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::m::placement::OperationPolicy::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::placement::OperationPolicy::theater: core::option::Option<alloc::string::String>
@@ -368,8 +374,10 @@ pub fn ai6::directorates::m::placement::Placement::best(&self) -> core::option::
 pub ai6::directorates::m::placement::PlacementChoice::agent: alloc::string::String
 pub ai6::directorates::m::placement::PlacementChoice::handler: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::PlacementChoice::mode: ai6::directorates::m::placement::ExecutionMode
+pub ai6::directorates::m::placement::PlacementChoice::score: f64
 pub ai6::directorates::m::placement::PlacementChoice::station: alloc::string::String
 pub ai6::directorates::m::placement::PlacementChoice::theater: alloc::string::String
+impl core::cmp::Eq for ai6::directorates::m::placement::PlacementChoice
 #[non_exhaustive] pub struct ai6::directorates::m::placement::PlacementRejection
 pub ai6::directorates::m::placement::PlacementRejection::agent: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::PlacementRejection::reason: alloc::string::String
@@ -381,19 +389,44 @@ pub ai6::directorates::m::placement::PlacementRequest::deciding_station: core::o
 pub ai6::directorates::m::placement::PlacementRequest::role: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::PlacementRequest::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::placement::PlacementRequest::tags: alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::placement::ResourceLimits
+pub ai6::directorates::m::placement::ResourceLimits::max_cpu_percent: u32
+pub ai6::directorates::m::placement::ResourceLimits::min_free_memory_mb: u64
+impl ai6::directorates::m::placement::ResourceLimits
+pub fn ai6::directorates::m::placement::ResourceLimits::new(u64, u32) -> Self
+pub fn ai6::directorates::m::placement::ResourceLimits::rejection(&self, &ai6::directorates::m::placement::Resources) -> core::option::Option<alloc::string::String>
+impl core::default::Default for ai6::directorates::m::placement::ResourceLimits
+pub fn ai6::directorates::m::placement::ResourceLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::placement::Resources
+pub ai6::directorates::m::placement::Resources::cpu_percent: core::option::Option<f64>
+pub ai6::directorates::m::placement::Resources::cpus: core::option::Option<f64>
+pub ai6::directorates::m::placement::Resources::load_1m: core::option::Option<f64>
+pub ai6::directorates::m::placement::Resources::memory_available_mb: core::option::Option<u64>
+pub ai6::directorates::m::placement::Resources::memory_total_mb: core::option::Option<u64>
+pub ai6::directorates::m::placement::Resources::sampled_at: u64
+impl ai6::directorates::m::placement::Resources
+pub fn ai6::directorates::m::placement::Resources::cpu_busy(&self) -> core::option::Option<f64>
+pub fn ai6::directorates::m::placement::Resources::memory_used(&self) -> core::option::Option<f64>
+impl core::cmp::Eq for ai6::directorates::m::placement::Resources
 #[non_exhaustive] pub struct ai6::directorates::m::placement::StationFacts
 pub ai6::directorates::m::placement::StationFacts::capacity: usize
 pub ai6::directorates::m::placement::StationFacts::checkouts: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::placement::StationFacts::handlers: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::m::placement::StationFacts::healthy: bool
 pub ai6::directorates::m::placement::StationFacts::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::m::placement::StationFacts::limits: ai6::directorates::m::placement::ResourceLimits
 pub ai6::directorates::m::placement::StationFacts::load: usize
+pub ai6::directorates::m::placement::StationFacts::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub ai6::directorates::m::placement::StationFacts::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::StationFacts::running: usize
 pub ai6::directorates::m::placement::StationFacts::silent_for: u64
 pub ai6::directorates::m::placement::StationFacts::station: alloc::string::String
 pub ai6::directorates::m::placement::StationFacts::theaters: alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
 impl ai6::directorates::m::placement::StationFacts
 pub fn ai6::directorates::m::placement::StationFacts::from_record(&ai6::directorates::registry::store::StationRecord, f64, core::time::Duration, usize) -> Self
+pub fn ai6::directorates::m::placement::StationFacts::occupied(&self) -> usize
+pub const ai6::directorates::m::placement::DEFAULT_MAX_CPU_PERCENT: u32
+pub const ai6::directorates::m::placement::DEFAULT_MIN_FREE_MEMORY_MB: u64
 pub fn ai6::directorates::m::placement::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
 pub fn ai6::directorates::m::placement::fitness(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::placement::harness_verdict(&ai6::directorates::m::theaters::TheaterSummary, ai6::directorates::m::placement::ExecutionMode, &str) -> core::result::Result<(), alloc::string::String>
@@ -451,6 +484,7 @@ pub ai6::directorates::m::roster::Operation::on_blown: alloc::string::String
 pub ai6::directorates::m::roster::Operation::on_limit: ai6::directorates::m::limits::OnLimit
 pub ai6::directorates::m::roster::Operation::on_lost: ai6::directorates::m::roster::OnLost
 pub ai6::directorates::m::roster::Operation::path: core::option::Option<std::path::PathBuf>
+pub ai6::directorates::m::roster::Operation::placement: ai6::directorates::m::placement::PlacementStrategy
 pub ai6::directorates::m::roster::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
 pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
@@ -611,7 +645,9 @@ pub ai6::directorates::m::theaters::TheaterSummary::made_for: core::option::Opti
 pub ai6::directorates::m::theaters::TheaterSummary::provider: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::theaters::TheaterSummary::report: core::option::Option<ai6::directorates::q::provision::ProbeReport>
 pub ai6::directorates::m::theaters::TheaterSummary::requires: core::option::Option<ai6::directorates::q::provision::Requirements>
+pub ai6::directorates::m::theaters::TheaterSummary::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub ai6::directorates::m::theaters::TheaterSummary::runner: bool
+pub ai6::directorates::m::theaters::TheaterSummary::sessions: usize
 pub ai6::directorates::m::theaters::TheaterSummary::unavailable: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::theaters::TheaterSummary::weakened: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::theaters::TheaterSummary::workdir: core::option::Option<alloc::string::String>
@@ -874,6 +910,7 @@ pub ai6::directorates::q::provision::ProbeReport::error: core::option::Option<al
 pub ai6::directorates::q::provision::ProbeReport::found: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::q::provision::ProbeReport::free_mb: core::option::Option<u64>
 pub ai6::directorates::q::provision::ProbeReport::os: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::provision::ProbeReport::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub ai6::directorates::q::provision::ProbeReport::unmet: alloc::vec::Vec<ai6::directorates::q::provision::Unmet>
 impl ai6::directorates::q::provision::ProbeReport
 pub fn ai6::directorates::q::provision::ProbeReport::failed(impl core::convert::Into<alloc::string::String>) -> Self
@@ -928,6 +965,7 @@ impl core::fmt::Display for ai6::directorates::q::provision::Unmet
 pub fn ai6::directorates::q::provision::Unmet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const ai6::directorates::q::provision::DEFAULT_INSTALL_TIMEOUT_SECS: u64
 pub fn ai6::directorates::q::provision::probe(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities, core::option::Option<&ai6::directorates::q::provision::Requirements>, core::option::Option<&str>) -> ai6::directorates::q::provision::ProbeReport
+pub fn ai6::directorates::q::provision::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
 pub fn ai6::directorates::q::provision::provision(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::m::theaters::Theater, bool) -> alloc::vec::Vec<ai6::directorates::q::provision::ProvisionStep>
 pub mod ai6::directorates::q::safehouse
 pub struct ai6::directorates::q::safehouse::Change
@@ -2461,8 +2499,10 @@ pub fn ai6::directorates::registry::store::StationRecord::station(&self) -> &str
 #[non_exhaustive] pub struct ai6::directorates::registry::store::StationSettings
 impl ai6::directorates::registry::store::StationSettings
 pub fn ai6::directorates::registry::store::StationSettings::max_concurrent_missions(&self) -> usize
+pub fn ai6::directorates::registry::store::StationSettings::resource_limits(&self) -> ai6::directorates::m::placement::ResourceLimits
 pub fn ai6::directorates::registry::store::StationSettings::station(&self) -> &str
 pub fn ai6::directorates::registry::store::StationSettings::try_new(impl core::convert::Into<alloc::string::String>, usize) -> core::io::error::Result<Self>
+pub fn ai6::directorates::registry::store::StationSettings::with_resource_limits(self, ai6::directorates::m::placement::ResourceLimits) -> core::io::error::Result<Self>
 pub const ai6::directorates::registry::store::DEFAULT_LEASE: core::time::Duration
 pub const ai6::directorates::registry::store::GONE_DARK_AFTER: core::time::Duration
 pub const ai6::directorates::registry::store::MAX_STATION_MISSION_CAPACITY: usize
@@ -2896,6 +2936,7 @@ impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_loadouts(self, ai6::directorates::q::LoadoutCatalog) -> Self
+pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_secret_backend(self, impl ai6::SecretBackend + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -2904,6 +2945,7 @@ impl core::default::Default for ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::default() -> Self
 pub const ai6::station::server::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::station::server::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
+pub const ai6::station::server::DEFAULT_RESOURCES_EVERY: core::time::Duration
 pub const ai6::station::server::DEFAULT_TERMINAL: &str
 pub async fn ai6::station::server::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_capacity<F>(core::net::socket_addr::SocketAddr, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
@@ -3023,6 +3065,11 @@ pub ai6::LeaseRecovery::Requeued
 #[non_exhaustive] pub enum ai6::OnLost
 pub ai6::OnLost::Fail
 pub ai6::OnLost::Retry
+#[non_exhaustive] pub enum ai6::PlacementStrategy
+pub ai6::PlacementStrategy::Pack
+pub ai6::PlacementStrategy::Spread
+impl ai6::directorates::m::placement::PlacementStrategy
+pub fn ai6::directorates::m::placement::PlacementStrategy::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::QErrorKind
 pub ai6::QErrorKind::InvalidUtf8
 pub ai6::QErrorKind::Io
@@ -3836,6 +3883,7 @@ pub ai6::Operation::on_blown: alloc::string::String
 pub ai6::Operation::on_limit: ai6::directorates::m::limits::OnLimit
 pub ai6::Operation::on_lost: ai6::directorates::m::roster::OnLost
 pub ai6::Operation::path: core::option::Option<std::path::PathBuf>
+pub ai6::Operation::placement: ai6::directorates::m::placement::PlacementStrategy
 pub ai6::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
 pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
@@ -3853,6 +3901,7 @@ pub fn ai6::directorates::m::roster::Operation::safe_house_provider(&self) -> co
 pub ai6::OperationPolicy::agents: alloc::vec::Vec<ai6::directorates::m::placement::AgentFacts>
 pub ai6::OperationPolicy::checkout: bool
 pub ai6::OperationPolicy::operation: alloc::string::String
+pub ai6::OperationPolicy::placement: ai6::directorates::m::placement::PlacementStrategy
 pub ai6::OperationPolicy::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::OperationPolicy::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::OperationPolicy::theater: core::option::Option<alloc::string::String>
@@ -3875,8 +3924,10 @@ pub fn ai6::directorates::m::placement::Placement::best(&self) -> core::option::
 pub ai6::PlacementChoice::agent: alloc::string::String
 pub ai6::PlacementChoice::handler: core::option::Option<alloc::string::String>
 pub ai6::PlacementChoice::mode: ai6::directorates::m::placement::ExecutionMode
+pub ai6::PlacementChoice::score: f64
 pub ai6::PlacementChoice::station: alloc::string::String
 pub ai6::PlacementChoice::theater: alloc::string::String
+impl core::cmp::Eq for ai6::directorates::m::placement::PlacementChoice
 #[non_exhaustive] pub struct ai6::PlacementRejection
 pub ai6::PlacementRejection::agent: core::option::Option<alloc::string::String>
 pub ai6::PlacementRejection::reason: alloc::string::String
@@ -3895,6 +3946,7 @@ pub ai6::ProbeReport::error: core::option::Option<alloc::string::String>
 pub ai6::ProbeReport::found: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::ProbeReport::free_mb: core::option::Option<u64>
 pub ai6::ProbeReport::os: core::option::Option<alloc::string::String>
+pub ai6::ProbeReport::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub ai6::ProbeReport::unmet: alloc::vec::Vec<ai6::directorates::q::provision::Unmet>
 impl ai6::directorates::q::provision::ProbeReport
 pub fn ai6::directorates::q::provision::ProbeReport::failed(impl core::convert::Into<alloc::string::String>) -> Self
@@ -3977,6 +4029,25 @@ pub fn ai6::directorates::q::provision::Requirements::with_disk_mb(self, u64) ->
 pub fn ai6::directorates::q::provision::Requirements::with_harness(self, ai6::directorates::q::provision::RequiredProgram) -> Self
 pub fn ai6::directorates::q::provision::Requirements::with_os(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::q::provision::Requirements::with_tool(self, ai6::directorates::q::provision::RequiredProgram) -> Self
+#[non_exhaustive] pub struct ai6::ResourceLimits
+pub ai6::ResourceLimits::max_cpu_percent: u32
+pub ai6::ResourceLimits::min_free_memory_mb: u64
+impl ai6::directorates::m::placement::ResourceLimits
+pub fn ai6::directorates::m::placement::ResourceLimits::new(u64, u32) -> Self
+pub fn ai6::directorates::m::placement::ResourceLimits::rejection(&self, &ai6::directorates::m::placement::Resources) -> core::option::Option<alloc::string::String>
+impl core::default::Default for ai6::directorates::m::placement::ResourceLimits
+pub fn ai6::directorates::m::placement::ResourceLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::Resources
+pub ai6::Resources::cpu_percent: core::option::Option<f64>
+pub ai6::Resources::cpus: core::option::Option<f64>
+pub ai6::Resources::load_1m: core::option::Option<f64>
+pub ai6::Resources::memory_available_mb: core::option::Option<u64>
+pub ai6::Resources::memory_total_mb: core::option::Option<u64>
+pub ai6::Resources::sampled_at: u64
+impl ai6::directorates::m::placement::Resources
+pub fn ai6::directorates::m::placement::Resources::cpu_busy(&self) -> core::option::Option<f64>
+pub fn ai6::directorates::m::placement::Resources::memory_used(&self) -> core::option::Option<f64>
+impl core::cmp::Eq for ai6::directorates::m::placement::Resources
 pub struct ai6::Revocation
 pub ai6::Revocation::at: f64
 pub ai6::Revocation::by: alloc::string::String
@@ -4386,6 +4457,7 @@ impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_loadouts(self, ai6::directorates::q::LoadoutCatalog) -> Self
+pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_secret_backend(self, impl ai6::SecretBackend + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -4398,13 +4470,17 @@ pub ai6::StationFacts::checkouts: alloc::vec::Vec<alloc::string::String>
 pub ai6::StationFacts::handlers: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::StationFacts::healthy: bool
 pub ai6::StationFacts::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::StationFacts::limits: ai6::directorates::m::placement::ResourceLimits
 pub ai6::StationFacts::load: usize
+pub ai6::StationFacts::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub ai6::StationFacts::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::StationFacts::running: usize
 pub ai6::StationFacts::silent_for: u64
 pub ai6::StationFacts::station: alloc::string::String
 pub ai6::StationFacts::theaters: alloc::vec::Vec<ai6::directorates::m::theaters::TheaterSummary>
 impl ai6::directorates::m::placement::StationFacts
 pub fn ai6::directorates::m::placement::StationFacts::from_record(&ai6::directorates::registry::store::StationRecord, f64, core::time::Duration, usize) -> Self
+pub fn ai6::directorates::m::placement::StationFacts::occupied(&self) -> usize
 #[non_exhaustive] pub struct ai6::StationRecord
 impl ai6::directorates::registry::store::StationRecord
 pub fn ai6::directorates::registry::store::StationRecord::info(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
@@ -4420,8 +4496,10 @@ pub fn ai6::StationSecrets::revoke(&self, &str) -> core::result::Result<(), ai6:
 #[non_exhaustive] pub struct ai6::StationSettings
 impl ai6::directorates::registry::store::StationSettings
 pub fn ai6::directorates::registry::store::StationSettings::max_concurrent_missions(&self) -> usize
+pub fn ai6::directorates::registry::store::StationSettings::resource_limits(&self) -> ai6::directorates::m::placement::ResourceLimits
 pub fn ai6::directorates::registry::store::StationSettings::station(&self) -> &str
 pub fn ai6::directorates::registry::store::StationSettings::try_new(impl core::convert::Into<alloc::string::String>, usize) -> core::io::error::Result<Self>
+pub fn ai6::directorates::registry::store::StationSettings::with_resource_limits(self, ai6::directorates::m::placement::ResourceLimits) -> core::io::error::Result<Self>
 pub struct ai6::TerminalBridge
 impl ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>
@@ -4481,7 +4559,9 @@ pub ai6::TheaterSummary::made_for: core::option::Option<alloc::string::String>
 pub ai6::TheaterSummary::provider: core::option::Option<alloc::string::String>
 pub ai6::TheaterSummary::report: core::option::Option<ai6::directorates::q::provision::ProbeReport>
 pub ai6::TheaterSummary::requires: core::option::Option<ai6::directorates::q::provision::Requirements>
+pub ai6::TheaterSummary::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub ai6::TheaterSummary::runner: bool
+pub ai6::TheaterSummary::sessions: usize
 pub ai6::TheaterSummary::unavailable: core::option::Option<alloc::string::String>
 pub ai6::TheaterSummary::weakened: alloc::vec::Vec<alloc::string::String>
 pub ai6::TheaterSummary::workdir: core::option::Option<alloc::string::String>
@@ -4644,10 +4724,13 @@ pub const ai6::DEFAULT_LINE_HISTORY: usize
 pub const ai6::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::DEFAULT_LOOP_MIN_LINES: usize
 pub const ai6::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
+pub const ai6::DEFAULT_MAX_CPU_PERCENT: u32
 pub const ai6::DEFAULT_MAX_OUTPUT: u64
+pub const ai6::DEFAULT_MIN_FREE_MEMORY_MB: u64
 pub const ai6::DEFAULT_PROTECTED: [&str; 4]
 pub const ai6::DEFAULT_READ_LIMIT: u64
 pub const ai6::DEFAULT_REQUEST_TTL: core::time::Duration
+pub const ai6::DEFAULT_RESOURCES_EVERY: core::time::Duration
 pub const ai6::DEFAULT_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::DEFAULT_STALLS: u32
 pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
@@ -5152,6 +5235,7 @@ pub fn ai6::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
 pub fn ai6::load_role_authorizer(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::micro_usd(f64) -> u64
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
+pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
 pub fn ai6::role_authorizer() -> coqui_roles::RoleAuthorizerBuilder
 pub fn ai6::role_authorizer_from_toml(&str) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
 pub async fn ai6::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
