@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Safe-house hygiene within fixed limits: a Head of Station round may call
+  `tidy_safe_house {mission, action, reason?}` on the kept safe house of a Mission of its
+  Station that is over. `caches` removes the hygiene's cache directories once the safe house
+  has been left alone for the cache age; `remove` discards it at once when its provider shows
+  everything exists elsewhere, and otherwise files a green ink request (kind `delete`, target
+  `safe house MISSION on Station ID`) that a person must decide even when the Operation's
+  policy would let the Agent delete unattended (`green_ink::Desk::request_always`); a later
+  call spends the round's live approval on that one removal. A Mission that is not over, one
+  the Station does not keep, and any other action are refused. Removals are audited
+  (`head_of_station.caches_removed`, `head_of_station.removed`, resource `station:ID`) and
+  record `kept = false`. `ai6 serve --safe-house-cache NAME` (repeatable) and
+  `--safe-house-cache-age SECS` set the hygiene.
 - Head of Station tools: a round (a Mission of role `head-of-station` whose leased brief names
   its Station alone) gets `station_report` and `file_report` on its Cable endpoint; no other
   Session lists them, and each call checks again that the round is live. `station_report`

@@ -301,6 +301,14 @@ struct ServeArgs {
     /// the configuration checks applies without a restart. 0 keeps what the Station started with.
     #[arg(long, value_parser = parse_duration, default_value = "5")]
     config_poll: Duration,
+    /// A directory name the Head of Station may remove from the safe house of a Mission that
+    /// is over, as a rebuildable cache; repeat for each. Replaces the default list (target,
+    /// node_modules, .dart_tool).
+    #[arg(long = "safe-house-cache", value_name = "NAME")]
+    safe_house_caches: Vec<String>,
+    /// Seconds the safe house of a Mission that is over is left alone before its caches may go.
+    #[arg(long, value_parser = parse_duration, default_value = "604800")]
+    safe_house_cache_age: Duration,
 }
 
 #[derive(Debug, Subcommand)]
@@ -436,7 +444,20 @@ async fn main() -> ExitCode {
                 headquarters_lease,
                 resources_every,
                 config_poll,
+                safe_house_caches,
+                safe_house_cache_age,
             } = *args;
+            let mut hygiene = ai6::station::safehouse::SafeHouseHygiene::default()
+                .with_cache_age(safe_house_cache_age);
+            if !safe_house_caches.is_empty() {
+                hygiene = match hygiene.with_caches(safe_house_caches) {
+                    Ok(hygiene) => hygiene,
+                    Err(error) => {
+                        eprintln!("ai6: --safe-house-cache: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+            }
             let publisher = match publisher_config() {
                 Ok(config) => config,
                 Err(error) => {
@@ -446,7 +467,8 @@ async fn main() -> ExitCode {
             };
             let mut station_config = ai6::StationConfig::default()
                 .with_resources_every(resources_every)
-                .with_config_poll(config_poll);
+                .with_config_poll(config_poll)
+                .with_safe_house_hygiene(hygiene);
             if !role.is_empty() {
                 station_config =
                     station_config.with_roles(role.iter().filter_map(|role| match role.as_str() {

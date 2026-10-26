@@ -10,6 +10,8 @@
 //! code, never in the prompt.
 
 #[cfg(feature = "cables-mcp")]
+mod hygiene;
+#[cfg(feature = "cables-mcp")]
 mod report;
 #[cfg(feature = "cables-mcp")]
 mod safe_houses;
@@ -132,6 +134,33 @@ impl Desk {
     /// This Station's ID.
     pub(super) fn station(&self) -> &str {
         &self.state.station_id
+    }
+
+    /// Applies `action` (`caches` or `remove`) to the safe house of `target`, within the
+    /// limits [`hygiene`] fixes. `session` is the round's provider Session, which a green ink
+    /// request names; `exposed` keeps that request from class authorisations. Blocks; call
+    /// from `spawn_blocking`.
+    pub(super) fn tidy(
+        &self,
+        (session, exposed): (&str, bool),
+        target: &str,
+        action: &str,
+        reason: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        let round = self.admit()?;
+        let action = action.parse()?;
+        let tidied = hygiene::tidy(
+            &self.state,
+            &hygiene::Round {
+                mission: &round,
+                session,
+                exposed,
+            },
+            target,
+            action,
+            reason,
+        )?;
+        serde_json::to_value(tidied).map_err(|error| error.to_string())
     }
 }
 

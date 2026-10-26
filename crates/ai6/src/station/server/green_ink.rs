@@ -87,6 +87,21 @@ impl Desk {
     /// A message the Agent may read: the step is out of bounds, the Agent may not ask, or the
     /// Registry could not be written.
     pub(super) fn request(&self, asked: Asked) -> Result<Answer, String> {
+        self.ask(asked, false)
+    }
+
+    /// As [`Desk::request`], except that a step the Operation's policy would let the Agent
+    /// take without asking still waits for a person: for what the Station itself never does
+    /// unattended, whatever the policy says.
+    ///
+    /// # Errors
+    ///
+    /// As [`Desk::request`].
+    pub(super) fn request_always(&self, asked: Asked) -> Result<Answer, String> {
+        self.ask(asked, true)
+    }
+
+    fn ask(&self, asked: Asked, always: bool) -> Result<Answer, String> {
         let state = &self.state;
         let now = state.clock.now() as f64;
         let operation = state
@@ -105,6 +120,7 @@ impl Desk {
         let scope = ActionScope::try_new(&asked.kind, &asked.target).map_err(|e| e.to_string())?;
         let policy = &operation.green_ink;
         match policy.requirement(&clearance, &scope) {
+            Requirement::NotRequired if always => {}
             Requirement::NotRequired => {
                 return Ok(Answer {
                     request_id: None,

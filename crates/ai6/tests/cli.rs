@@ -105,6 +105,30 @@ fn harness_pin_prints_the_manifest_and_its_pin() {
 }
 
 #[test]
+fn a_safe_house_cache_that_is_not_a_plain_directory_name_stops_the_station() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = ai6()
+        .args([
+            "serve",
+            "--listen",
+            "127.0.0.1:0",
+            "--safe-house-cache",
+            "../outside",
+        ])
+        .env("AI6_STATE", directory.path())
+        .env("AI6_CONFIG_DIR", directory.path())
+        .env("AI6_REGISTRY", directory.path().join("registry"))
+        .output()
+        .expect("the AI6 command should start");
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        error.contains("--safe-house-cache") && error.contains("../outside"),
+        "{error}"
+    );
+}
+
+#[test]
 fn negative_watchdog_timeout_is_an_invalid_invocation() {
     let output = ai6()
         .args(["serve", "--stall-timeout", "-1"])

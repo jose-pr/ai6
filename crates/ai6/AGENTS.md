@@ -2842,6 +2842,23 @@ by the Mission and its Agent) in the logbook, records a `head_of_station`/`repor
 event, and sends it as a Cable to channel `heads-of-station` (`HEAD_OF_STATION_CHANNEL`) when
 the Cable policy allows; it answers `{filed, at, cable}` where `cable` says `sent to N
 recipients` or why not (an exposed Session sends none).
+`tidy_safe_house {mission, action, reason?}` acts on the kept safe house of a Mission of this
+Station that is over (terminal and no Session here; otherwise refused, as is a Mission this
+Station does not keep, the round itself, or an action other than `caches` and `remove`), after
+its provider re-attaches to it. `caches` removes the outermost directories the hygiene names
+once the safe house has been left alone for the cache age (else refused). `remove` discards
+it through the provider when `exports()` shows everything exists elsewhere; otherwise (work
+no remote holds, uncommitted changes, or a provider that cannot tell) it asks for green ink
+with `Desk::request_always`: kind `delete`, target `safe house MISSION on Station ID`, the
+round's Mission and Session, idempotency key the target, so the Operation's `unattended`
+policy never skips the person (a class authorisation may approve; an exposed round's request
+always goes to a person). A pending request blocks the round as any green ink does; the next
+call after an approval finds the live, unspent approval of the round, spends it and
+discards. A removal records `kept = false` on the Mission. Answers `{mission, status,
+removed?, freed_bytes, green_ink?}` with `status` `caches-removed`, `removed` or the green ink
+status. Audited with resource `station:ID`, actor `agent:CODENAME`:
+`head_of_station.caches_removed` (target `MISSION PATHS`) and `head_of_station.removed`
+(target `MISSION exported` or `MISSION approved by REQUEST`).
 `check_approval {steps: [{kind, target}, ..]}` (at most 64) answers the harness gate without
 recording anything: a JSON array of `{kind, target, status, request_id?, message?}` with
 `status` `not_required`, `approved` (a live approval of the Mission covers the step,
@@ -3185,7 +3202,10 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
   sets the seconds between resource samples of each remote Theater (`0` leaves only the
   300-second probe; `StationConfig::with_resources_every`, `DEFAULT_RESOURCES_EVERY`).
   `--config-poll 5` sets the seconds between checks of the roster source and
-  `loadouts.toml` (`0` off; `StationConfig::with_config_poll`, `DEFAULT_CONFIG_POLL`). Timeout values are
+  `loadouts.toml` (`0` off; `StationConfig::with_config_poll`, `DEFAULT_CONFIG_POLL`).
+  `--safe-house-cache NAME` (repeatable, replacing `DEFAULT_CACHE_DIRS`) and
+  `--safe-house-cache-age 604800` set `StationConfig::with_safe_house_hygiene`; an invalid
+  name exits 1. Timeout values are
   non-negative seconds and may be fractional. `AI6_CONFIG_DIR` overrides the default
   config directory.
 - `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--plugin-pins PATH] [--plugin-profile P] [--terminal ID] [--detach]`:

@@ -1080,8 +1080,49 @@ struct FileReportArgs {
     findings: Vec<FindingArgs>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct TidyArgs {
+    /// The Mission whose safe house to tidy, as station_report lists it.
+    mission: String,
+    /// `caches` removes its cache directories; `remove` removes the safe house.
+    action: String,
+    /// Why, for the operator who decides when the removal needs green ink.
+    reason: Option<String>,
+}
+
 #[tool_router(router = station_router)]
 impl CableTools {
+    /// Tidy a safe house this Station keeps, within the Station's limits.
+    #[tool(
+        description = "Tidy a safe house this Station keeps, for a Mission that is over. action caches removes its cache directories once it has been left alone for the cache age; action remove removes it at once when everything in it exists elsewhere, and otherwise asks for green ink (kind delete) and answers pending: wait for the decision, which arrives as a message, then call again to remove it. A Mission that is not over, one this Station does not keep, or any other action is refused."
+    )]
+    async fn tidy_safe_house(&self, Parameters(args): Parameters<TidyArgs>) -> String {
+        let Some(desk) = self.station.get().cloned() else {
+            return "The Station's tools are for a Head of Station round only".to_owned();
+        };
+        let Ok(principal) = self.principal() else {
+            return "Station tools identity is unavailable".to_owned();
+        };
+        let Some(session) = principal.session_id().map(str::to_owned) else {
+            return "Station tools require a bound provider Session".to_owned();
+        };
+        let exposed = self.exposure.restricts(Restriction::Approvals);
+        match tokio::task::spawn_blocking(move || {
+            desk.tidy(
+                (&session, exposed),
+                &args.mission,
+                &args.action,
+                args.reason,
+            )
+        })
+        .await
+        {
+            Ok(Ok(tidied)) => tidied.to_string(),
+            Ok(Err(reason)) => format!("Tidy refused: {reason}"),
+            Err(_) => "Tidy failed".to_owned(),
+        }
+    }
+
     /// This Station's state, for its Head of Station.
     #[tool(
         description = "Read this Station's state: capacity and the Missions not over, free disk space under its state directory, resources, each Theater it reaches and whether a Session could run there, every safe house it keeps with its Mission's state, age, size, cache directories and whether its work exists elsewhere, provider libraries loaded without a pin, and the limits on what you may do here unattended. No secrets."

@@ -64,7 +64,7 @@ ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
           [--registry LOCATION] [--config LOCATION] [--headquarters-lease SECS]
           [--station ID] [--role control|execution]... [--label KEY=VALUE]...
           [--terminal ID] [--max-concurrent-missions N] [--resources-every SECS]
-          [--config-poll SECS]
+          [--config-poll SECS] [--safe-house-cache NAME]... [--safe-house-cache-age SECS]
           [watchdog options]
 ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--plugin-pins PATH]
           [--plugin-profile strict|report|off] [--terminal ID] [--detach]
@@ -94,7 +94,10 @@ ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
   database timeouts are derived from it. `--config-poll` (default 5 seconds, `0` off) is how
   often the Station checks its roster and `loadouts.toml` and applies a change that passes
   the configuration checks without a restart; a refused one is audited and the last good
-  configuration keeps running.
+  configuration keeps running. `--safe-house-cache NAME` (repeatable; default `target`,
+  `node_modules`, `.dart_tool`) names the directories a Head of Station may remove from the
+  safe house of a Mission that is over, once it has been left alone for
+  `--safe-house-cache-age` seconds (default 604800, 7 days).
 - `ai6 runner serve` runs the field runner on a Theater: it supervises harnesses there for
   Stations, spooling their events under its state directory (default `runner` in AI6's state
   directory) and serving them on a token-protected loopback port. `--detach` starts it in
