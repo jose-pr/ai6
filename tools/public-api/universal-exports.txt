@@ -49,6 +49,7 @@ pub universal_exports::BoardAccount::labels: alloc::collections::btree::map::BTr
 pub universal_exports::BoardAccount::last_used: core::option::Option<f64>
 pub universal_exports::BoardAccount::limited_until: core::option::Option<f64>
 pub universal_exports::BoardAccount::max_concurrent: core::option::Option<usize>
+pub universal_exports::BoardAccount::other_sessions: usize
 pub universal_exports::BoardAccount::pool: alloc::string::String
 pub universal_exports::BoardAccount::priority: i64
 pub universal_exports::BoardAccount::tokens_today: u64

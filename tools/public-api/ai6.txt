@@ -1490,14 +1490,17 @@ pub ai6::directorates::registry::accounts::AccountCandidate::priority: i64
 #[non_exhaustive] pub struct ai6::directorates::registry::accounts::AccountClaim
 pub ai6::directorates::registry::accounts::AccountClaim::expires: f64
 pub ai6::directorates::registry::accounts::AccountClaim::mission: alloc::string::String
+pub ai6::directorates::registry::accounts::AccountClaim::operation: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::accounts::AccountClaim::since: f64
 pub ai6::directorates::registry::accounts::AccountClaim::station: alloc::string::String
 pub struct ai6::directorates::registry::accounts::AccountClaimRequest
 impl ai6::directorates::registry::accounts::AccountClaimRequest
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::candidates(&self) -> &[ai6::directorates::registry::accounts::AccountCandidate]
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::excluding(self, &str) -> Self
+pub fn ai6::directorates::registry::accounts::AccountClaimRequest::in_use(self) -> Self
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::new(&ai6::AccountPool, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::time::Duration) -> Self
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::only(self, &str) -> Self
+pub fn ai6::directorates::registry::accounts::AccountClaimRequest::operation(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::pool(&self) -> &str
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::prefer(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::accounts::AccountProfile
@@ -1522,13 +1525,14 @@ pub ai6::directorates::registry::accounts::AccountState::active: alloc::vec::Vec
 pub ai6::directorates::registry::accounts::AccountState::daily_tokens: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
 pub ai6::directorates::registry::accounts::AccountState::last_used: core::option::Option<f64>
 pub ai6::directorates::registry::accounts::AccountState::limited_until: core::option::Option<f64>
-pub ai6::directorates::registry::accounts::AccountState::profile: core::option::Option<ai6::directorates::registry::accounts::AccountProfile>
+pub ai6::directorates::registry::accounts::AccountState::profiles: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountProfile>
 pub ai6::directorates::registry::accounts::AccountState::windows: alloc::vec::Vec<ai6::directorates::registry::accounts::QuotaWindow>
 impl ai6::directorates::registry::accounts::AccountState
 pub fn ai6::directorates::registry::accounts::AccountState::highest_use(&self, f64) -> u16
 pub fn ai6::directorates::registry::accounts::AccountState::is_limited(&self, f64) -> bool
 pub fn ai6::directorates::registry::accounts::AccountState::live_claims(&self, f64) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::registry::accounts::AccountClaim>
 pub fn ai6::directorates::registry::accounts::AccountState::new(ai6::directorates::registry::accounts::AccountRef) -> Self
+pub fn ai6::directorates::registry::accounts::AccountState::profile(&self) -> core::option::Option<ai6::directorates::registry::accounts::AccountProfile>
 pub fn ai6::directorates::registry::accounts::AccountState::tokens_on_day(&self, i64) -> u64
 #[non_exhaustive] pub struct ai6::directorates::registry::accounts::QuotaWindow
 pub ai6::directorates::registry::accounts::QuotaWindow::name: alloc::string::String
@@ -1546,7 +1550,8 @@ pub const ai6::directorates::registry::accounts::UNKNOWN_USE_PERMILLE: u16
 pub trait ai6::directorates::registry::accounts::AccountStore
 pub fn ai6::directorates::registry::accounts::AccountStore::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::accounts::AccountStore::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::accounts::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::accounts::AccountStore::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::accounts::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::accounts::AccountStore::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::accounts::AccountStore::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::accounts::AccountStore::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -1555,7 +1560,8 @@ pub fn ai6::directorates::registry::accounts::AccountStore::report_quota(&self, 
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -1564,7 +1570,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::report_quota(&self, &ai6::
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -1704,7 +1711,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&sel
 pub trait ai6::directorates::registry::backend::AccountStore
 pub fn ai6::directorates::registry::backend::AccountStore::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::backend::AccountStore::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::backend::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::AccountStore::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::AccountStore::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::AccountStore::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::AccountStore::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -1713,7 +1721,8 @@ pub fn ai6::directorates::registry::backend::AccountStore::report_quota(&self, &
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -1722,7 +1731,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::report_quota(&self, &ai6::
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -2454,7 +2464,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::open_with(&str, &ai6::dire
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -2593,7 +2604,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::root(&self) -> &std::pa
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -3165,6 +3177,7 @@ pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates:
 #[non_exhaustive] pub struct ai6::station::server::StationConfig
 impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_account_homes(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::station::server::StationConfig::with_account_limit_horizon(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_account_login(self, impl ai6::AccountLogin + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
@@ -3460,14 +3473,17 @@ pub ai6::AccountCandidate::priority: i64
 #[non_exhaustive] pub struct ai6::AccountClaim
 pub ai6::AccountClaim::expires: f64
 pub ai6::AccountClaim::mission: alloc::string::String
+pub ai6::AccountClaim::operation: core::option::Option<alloc::string::String>
 pub ai6::AccountClaim::since: f64
 pub ai6::AccountClaim::station: alloc::string::String
 pub struct ai6::AccountClaimRequest
 impl ai6::directorates::registry::accounts::AccountClaimRequest
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::candidates(&self) -> &[ai6::directorates::registry::accounts::AccountCandidate]
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::excluding(self, &str) -> Self
+pub fn ai6::directorates::registry::accounts::AccountClaimRequest::in_use(self) -> Self
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::new(&ai6::AccountPool, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::time::Duration) -> Self
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::only(self, &str) -> Self
+pub fn ai6::directorates::registry::accounts::AccountClaimRequest::operation(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::pool(&self) -> &str
 pub fn ai6::directorates::registry::accounts::AccountClaimRequest::prefer(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::AccountPool
@@ -3508,13 +3524,14 @@ pub ai6::AccountState::active: alloc::vec::Vec<ai6::directorates::registry::acco
 pub ai6::AccountState::daily_tokens: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
 pub ai6::AccountState::last_used: core::option::Option<f64>
 pub ai6::AccountState::limited_until: core::option::Option<f64>
-pub ai6::AccountState::profile: core::option::Option<ai6::directorates::registry::accounts::AccountProfile>
+pub ai6::AccountState::profiles: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountProfile>
 pub ai6::AccountState::windows: alloc::vec::Vec<ai6::directorates::registry::accounts::QuotaWindow>
 impl ai6::directorates::registry::accounts::AccountState
 pub fn ai6::directorates::registry::accounts::AccountState::highest_use(&self, f64) -> u16
 pub fn ai6::directorates::registry::accounts::AccountState::is_limited(&self, f64) -> bool
 pub fn ai6::directorates::registry::accounts::AccountState::live_claims(&self, f64) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::registry::accounts::AccountClaim>
 pub fn ai6::directorates::registry::accounts::AccountState::new(ai6::directorates::registry::accounts::AccountRef) -> Self
+pub fn ai6::directorates::registry::accounts::AccountState::profile(&self) -> core::option::Option<ai6::directorates::registry::accounts::AccountProfile>
 pub fn ai6::directorates::registry::accounts::AccountState::tokens_on_day(&self, i64) -> u64
 #[non_exhaustive] pub struct ai6::ActionScope
 pub ai6::ActionScope::kind: alloc::string::String
@@ -3983,7 +4000,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::root(&self) -> &std::pa
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -4732,7 +4750,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::open_with(&str, &ai6::dire
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -4850,6 +4869,7 @@ pub fn ai6::directorates::m::theaters::SshAccess::with_user(self, impl core::con
 #[non_exhaustive] pub struct ai6::StationConfig
 impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_account_homes(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::station::server::StationConfig::with_account_limit_horizon(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_account_login(self, impl ai6::AccountLogin + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
@@ -5174,7 +5194,8 @@ pub fn ai6::CommandLogin::login(&self, &ai6::AccountPool, &ai6::Account, &std::p
 pub trait ai6::AccountStore
 pub fn ai6::AccountStore::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::AccountStore::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::AccountStore::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::AccountStore::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::AccountStore::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::AccountStore::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -5183,7 +5204,8 @@ pub fn ai6::AccountStore::report_quota(&self, &ai6::directorates::registry::acco
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
@@ -5192,7 +5214,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::report_quota(&self, &ai6::
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
-pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::limit_account(&self, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::record_account_usage(&self, &ai6::directorates::registry::accounts::AccountRef, u64, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::release_account(&self, &str, &str) -> core::io::error::Result<bool>
