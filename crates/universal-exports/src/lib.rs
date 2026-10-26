@@ -1698,8 +1698,18 @@ async fn approve_user_mission_proposal(
     ensure_operation_registered(&registry, &operation_id).await?;
     let operation = operation_id.to_string();
     let requested_id = proposal_id.clone();
+    let approver = person.id.clone();
+    let now = unix_timestamp()?;
     let brief = tokio::task::spawn_blocking(move || {
-        registry.promote_mission_proposal(&operation, &requested_id, GATEWAY_RECEIVER)
+        let brief =
+            registry.promote_mission_proposal(&operation, &requested_id, GATEWAY_RECEIVER)?;
+        // The operator saw the proposal's vetting: only a malformed brief is stopped again.
+        let cleared = ai6::FindingKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != ai6::FindingKind::Malformed)
+            .collect::<Vec<_>>();
+        let _ = registry.clear_brief(&brief.key(), &cleared, &approver, now);
+        Ok::<_, std::io::Error>(brief)
     })
     .await
     .map_err(|_| ApiError::internal())?
@@ -5326,6 +5336,13 @@ mod tests {
                 .len(),
             2
         );
+        let cleared = FileRegistry::open(directory.path())
+            .clearance(approved["mission_id"].as_str().unwrap())
+            .unwrap()
+            .expect("an operator's approval clears the promoted brief");
+        assert!(cleared.kinds.contains(&ai6::FindingKind::Screening));
+        assert!(!cleared.kinds.contains(&ai6::FindingKind::Malformed));
+        assert_eq!(cleared.by, "operator-007");
         let rejected = client
             .post(format!(
                 "{base}/v1/user/operations/G/mission-proposals/{rejection_proposal_id}/reject"

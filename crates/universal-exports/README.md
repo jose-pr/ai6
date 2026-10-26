@@ -157,8 +157,8 @@ All `/v1/station/` paths require the Station bearer credential.
 | `DELETE` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; remove the Operation override, fall back to the Station definition and record a metadata-only audit event. |
 | `POST` | `/v1/user/attach-grants` | Issue a Session attach token only when `session.read` or `session.input` is allowed at that Station. |
 | `POST` | `/v1/user/operations/{operation_id}/missions` | Require `mission.create` for the Operation and atomically enqueue the bounded title and explicit brief in the shared Registry. |
-| `GET` | `/v1/user/operations/{operation_id}/mission-proposals` | Require `mission.create`; list bounded pending Agent proposals for review in that Operation. |
-| `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve` | Require `mission.create`; record the approving operator and promote the proposal into scheduler-visible intake. |
+| `GET` | `/v1/user/operations/{operation_id}/mission-proposals` | Require `mission.create`; list bounded pending Agent proposals for review in that Operation, each with its `vetting` once M has vetted it. |
+| `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve` | Require `mission.create`; record the approving operator and promote the proposal into scheduler-visible intake, cleared of every vetting finding but `malformed`. |
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/reject` | Require `mission.create`; record the rejecting operator and file the proposal outside runnable intake. |
 | `GET` | `/v1/user/operations/{operation_id}/held-briefs` | Require `mission.create`; list the briefs vetting held, with what it found. |
 | `POST` | `/v1/user/operations/{operation_id}/held-briefs/{key}/release` | Require `mission.create`; return the brief to the queue, cleared of the kinds it was held for. |
