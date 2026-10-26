@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    QuotaReport, TokenUsage, UsageLimit,
+    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
+    LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
 };
 use ai6::directorates::section_00::gate::GATE_PROGRAM_ENV;
 use ai6::guatiao::library::{Object, ProviderError};
@@ -92,7 +92,12 @@ impl AgentHandler for ClaudeHandler {
             project_mcp: request.project_mcp,
             answer_only: request.answer_only,
         };
-        add_settings(&mut argv, &request.environment, mode);
+        add_settings(
+            &mut argv,
+            &request.environment,
+            mode,
+            request.assistant.as_ref(),
+        )?;
         let session = spawn(
             terminal,
             argv,
@@ -134,7 +139,12 @@ impl AgentHandler for ClaudeHandler {
             project_mcp: request.project_mcp,
             answer_only: request.answer_only,
         };
-        add_settings(&mut argv, &request.environment, mode);
+        add_settings(
+            &mut argv,
+            &request.environment,
+            mode,
+            request.assistant.as_ref(),
+        )?;
         let session = spawn(
             terminal,
             argv,
@@ -170,16 +180,87 @@ struct Mode {
     answer_only: bool,
 }
 
-/// Adds the settings flags: answer-only ([`add_answer_only`]), or the project settings AI6
-/// allowed, the Station's MCP servers and the green ink gate.
-fn add_settings(argv: &mut Vec<String>, environment: &BTreeMap<String, String>, mode: Mode) {
-    if mode.answer_only {
+/// Every built-in tool an assistant Session is denied by name, besides `--tools=` turning the
+/// built-in ones off. Unlike [`ANSWER_ONLY_DENIED`] it leaves MCP tools alone: the assistant's
+/// servers are how it works.
+const ASSISTANT_DENIED: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,\
+                                Grep,LS,WebFetch,WebSearch,Task,Agent,TodoWrite,Skill";
+
+/// Adds the settings flags: assistant ([`add_assistant`]), answer-only ([`add_answer_only`]),
+/// or the project settings AI6 allowed, the Station's MCP servers and the green ink gate.
+fn add_settings(
+    argv: &mut Vec<String>,
+    environment: &BTreeMap<String, String>,
+    mode: Mode,
+    assistant: Option<&AssistantMode>,
+) -> Result<(), ProviderError> {
+    if let Some(assistant) = assistant {
+        add_assistant(argv, environment, assistant)?;
+    } else if mode.answer_only {
         add_answer_only(argv);
     } else {
         add_project_settings(argv, mode.project_settings, mode.project_mcp);
         add_mcp(argv, environment);
         add_gate(argv, environment);
     }
+    Ok(())
+}
+
+/// An assistant Session, built from its mode's parts: answer-only's restrictions
+/// (`--restricted`, no built-in tool, only the user's settings) with exactly the mode's MCP
+/// servers connected (`--strict-mcp-config`) and their tools allowed without a prompt
+/// (`--allowedTools mcp__<name>`); a print-mode run denies any other tool it would have to ask
+/// for. Interpreters and skills are refused until this handler can confine them: refusing
+/// fails closed, where ignoring would start a Session the Station did not ask for.
+fn add_assistant(
+    argv: &mut Vec<String>,
+    environment: &BTreeMap<String, String>,
+    mode: &AssistantMode,
+) -> Result<(), ProviderError> {
+    mode.validate()
+        .map_err(|reason| refuse(Status::GUATIAO_ERR_BAD_VALUE, reason))?;
+    if !mode.interpreters.is_empty() || !mode.skills.is_empty() {
+        return Err(refuse(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "this Claude Code handler runs no interpreter or skill for an assistant",
+        ));
+    }
+    // WebFetch and WebSearch stay denied, so the only network the Session has is its servers.
+    if !mode.network.reaches_nothing() {
+        return Err(refuse(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "this Claude Code handler gives an assistant no network beyond its MCP servers",
+        ));
+    }
+    let mut servers = serde_json::Map::new();
+    let mut allowed = Vec::new();
+    for server in &mode.mcp_servers {
+        if !has_endpoint(environment, &server.env_prefix) {
+            return Err(refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                format!(
+                    "the environment carries no URL and token for MCP server {:?}",
+                    server.name
+                ),
+            ));
+        }
+        servers.insert(server.name.clone(), http_server(&server.env_prefix));
+        allowed.push(format!("mcp__{}", server.name));
+    }
+    argv.extend([
+        "--restricted".to_owned(),
+        "--tools=".to_owned(),
+        "--disallowedTools".to_owned(),
+        ASSISTANT_DENIED.to_owned(),
+        "--allowedTools".to_owned(),
+        allowed.join(","),
+        "--setting-sources".to_owned(),
+        "user".to_owned(),
+        "--strict-mcp-config".to_owned(),
+        "--mcp-config".to_owned(),
+        json!({ "mcpServers": servers }).to_string(),
+    ]);
+    Ok(())
 }
 
 /// A Session that only reads its prompt and answers: `--restricted` (Claude Code 2.1.248 or
@@ -972,6 +1053,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -1000,6 +1082,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -1147,6 +1230,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.into_object(),
             )
@@ -1214,6 +1298,7 @@ mod tests {
                 project_settings: false,
                 project_mcp: false,
                 answer_only: false,
+                assistant: None,
             },
             terminal.into_object(),
         ) {
@@ -1548,6 +1633,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -1568,6 +1654,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -1617,6 +1704,7 @@ mod tests {
             project_settings,
             project_mcp,
             answer_only,
+            assistant: None,
         };
         for mode in [
             (false, false, false),
@@ -1644,6 +1732,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -1692,6 +1781,155 @@ mod tests {
             "settings without .mcp.json keep only AI6's servers: {pinned:?}"
         );
         assert!(shut_out(resumed), "{resumed:?}");
+    }
+
+    fn assistant_environment() -> BTreeMap<String, String> {
+        let mut environment = cable_environment();
+        environment.insert(
+            "AI6_MONEYPENNY_MCP_URL".to_owned(),
+            "https://exports.example/v1/moneypenny/mcp".to_owned(),
+        );
+        environment.insert(
+            "AI6_MONEYPENNY_MCP_TOKEN".to_owned(),
+            "conversation-token".to_owned(),
+        );
+        environment.insert(
+            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
+            "claude-assistant-session".to_owned(),
+        );
+        environment
+    }
+
+    /// `--tools ""` removes every built-in tool and does not touch MCP tools;
+    /// `--disallowedTools` with a bare name removes that tool; `--allowedTools` lets a tool run
+    /// without a prompt; `--strict-mcp-config` keeps only `--mcp-config`'s servers;
+    /// `--restricted` removes command tools and WebFetch and loads only managed settings and
+    /// `--settings` (Claude Code CLI reference, code.claude.com/docs/en/cli-reference,
+    /// read 2026-10-26).
+    #[test]
+    fn an_assistant_has_only_its_mcp_servers_and_no_built_in_tool_on_start_and_resume() {
+        let environment = assistant_environment();
+        let terminal = ProcessTerminal::new();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-assistant-fixture".to_owned(),
+        })
+        .unwrap();
+        let working_directory = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let started = handler
+            .start(
+                AgentStart {
+                    mission_id: "assistant-conversation".parse().unwrap(),
+                    agent_id: "moneypenny".to_owned(),
+                    prompt: "Which Stations are busy?".to_owned(),
+                    initial_context: vec!["You are Moneypenny.".to_owned()],
+                    working_directory: working_directory.clone(),
+                    clearance: "desk".to_owned(),
+                    environment: environment.clone(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: true,
+                    project_mcp: true,
+                    answer_only: false,
+                    assistant: Some(AssistantMode::moneypenny()),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&started);
+        started.close().unwrap();
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "assistant-conversation".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-assistant-session").unwrap(),
+                    message: Some("And now?".to_owned()),
+                    working_directory,
+                    environment,
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: true,
+                    project_mcp: true,
+                    answer_only: false,
+                    assistant: Some(AssistantMode::moneypenny()),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&resumed);
+        resumed.close().unwrap();
+        let specs = terminal.specs.lock().unwrap();
+        assert_eq!(specs.len(), 2);
+        for spec in specs.iter() {
+            let argv = &spec.argv;
+            let after = |flag: &str| {
+                let position = argv.iter().position(|a| a == flag).unwrap_or_else(|| {
+                    panic!("{flag} missing from {argv:?}");
+                });
+                argv[position + 1].clone()
+            };
+            assert!(argv.iter().any(|a| a == "--restricted"), "{argv:?}");
+            assert!(argv.iter().any(|a| a == "--tools="), "{argv:?}");
+            assert!(argv.iter().any(|a| a == "--strict-mcp-config"), "{argv:?}");
+            assert_eq!(after("--setting-sources"), "user");
+            assert_eq!(after("--disallowedTools"), ASSISTANT_DENIED);
+            assert!(!ASSISTANT_DENIED.contains("mcp__"));
+            assert_eq!(after("--allowedTools"), "mcp__moneypenny");
+            let servers: Value = serde_json::from_str(&after("--mcp-config")).unwrap();
+            assert_eq!(
+                servers,
+                json!({"mcpServers": {"moneypenny": {
+                    "type": "http",
+                    "url": "${AI6_MONEYPENNY_MCP_URL}",
+                    "headers": {"Authorization": "Bearer ${AI6_MONEYPENNY_MCP_TOKEN}"}
+                }}}),
+                "only Moneypenny's server, the Cable server of the environment left out"
+            );
+            assert_eq!(
+                argv.iter().filter(|a| *a == "--mcp-config").count(),
+                1,
+                "{argv:?}"
+            );
+            assert!(!argv.iter().any(|a| a == "--settings"), "no gate to pass");
+            assert!(
+                !argv.iter().any(|a| a.contains("conversation-token")),
+                "the token stays in the environment"
+            );
+        }
+    }
+
+    #[test]
+    fn an_assistant_mode_the_handler_cannot_confine_is_refused() {
+        let environment = assistant_environment();
+        let mut interpreters = AssistantMode::moneypenny();
+        interpreters.interpreters.push("python3".to_owned());
+        let mut open = AssistantMode::moneypenny();
+        open.network.policy = "open".to_owned();
+        let mut hosts = AssistantMode::moneypenny();
+        hosts.network.allowed_hosts.push("example.com".to_owned());
+        for mode in [interpreters, open, hosts] {
+            let mut argv = Vec::new();
+            assert!(add_assistant(&mut argv, &environment, &mode).is_err());
+            assert!(argv.is_empty());
+        }
+        let mut argv = Vec::new();
+        let denied = AssistantMode {
+            network: ai6::AssistantNetwork {
+                policy: "denied".to_owned(),
+                allowed_hosts: Vec::new(),
+            },
+            ..AssistantMode::moneypenny()
+        };
+        assert!(add_assistant(&mut argv, &environment, &denied).is_ok());
+        let mut argv = Vec::new();
+        assert!(
+            add_assistant(&mut argv, &BTreeMap::new(), &AssistantMode::moneypenny()).is_err(),
+            "no endpoint in the environment"
+        );
     }
 
     #[test]

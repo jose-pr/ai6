@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, READ_TIMED_OUT, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    QuotaReport, TokenUsage, UsageLimit,
+    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
+    LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::guatiao::library::{Object, ProviderError};
@@ -80,10 +80,12 @@ impl AgentHandler for CodexHandler {
             &request.environment,
             Mode {
                 project_settings: request.project_settings,
-                answer_only: request.answer_only,
+                answer_only: request.answer_only || request.assistant.is_some(),
+                assistant: request.assistant.as_ref(),
             },
         )?;
-        let gate = station_gate(&request.environment).filter(|_| !request.answer_only);
+        let gate = station_gate(&request.environment)
+            .filter(|_| !(request.answer_only || request.assistant.is_some()));
         let mut session = CodexSession::new(process, request.effort).with_gate(gate);
         session.request(
             "initialize",
@@ -99,7 +101,11 @@ impl AgentHandler for CodexHandler {
             params["model"] = json!(model);
         }
         params["cwd"] = json!(request.working_directory);
-        set_approval_policy(&mut params, &request.environment, request.answer_only);
+        set_approval_policy(
+            &mut params,
+            &request.environment,
+            request.answer_only || request.assistant.is_some(),
+        );
         let response = match session.request("thread/resume", params, Duration::from_secs(30)) {
             Ok(response) => response,
             Err(error) => {
@@ -147,10 +153,11 @@ impl CodexHandler {
             &request.environment,
             Mode {
                 project_settings: request.project_settings,
-                answer_only: request.answer_only,
+                answer_only: request.answer_only || request.assistant.is_some(),
+                assistant: request.assistant.as_ref(),
             },
         )?;
-        let gate = gate.filter(|_| !request.answer_only);
+        let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
         let mut session = CodexSession::new(process, request.effort).with_gate(gate);
         session.request(
             "initialize",
@@ -162,7 +169,11 @@ impl CodexHandler {
         )?;
         session.notify("initialized", json!({}))?;
         let mut params = json!({ "cwd": request.working_directory });
-        set_approval_policy(&mut params, &request.environment, request.answer_only);
+        set_approval_policy(
+            &mut params,
+            &request.environment,
+            request.answer_only || request.assistant.is_some(),
+        );
         if let Some(model) = request.model {
             params["model"] = json!(model);
         }
@@ -647,9 +658,11 @@ impl AgentSession for CodexSession {
 
 /// What AI6 decided about the thread's settings.
 #[derive(Clone, Copy)]
-struct Mode {
+struct Mode<'a> {
     project_settings: bool,
+    /// Set for answer-only and assistant threads alike: both run read-only and never ask.
     answer_only: bool,
+    assistant: Option<&'a AssistantMode>,
 }
 
 fn spawn(
@@ -657,9 +670,11 @@ fn spawn(
     executable: &str,
     cwd: &str,
     environment: &std::collections::BTreeMap<String, String>,
-    mode: Mode,
+    mode: Mode<'_>,
 ) -> Result<Object<dyn TerminalSession>, ProviderError> {
-    let mut argv = if mode.answer_only {
+    let mut argv = if let Some(assistant) = mode.assistant {
+        assistant_argv(executable, environment, assistant)?
+    } else if mode.answer_only {
         answer_only_argv(executable)
     } else {
         app_server_argv(executable, environment)
@@ -710,6 +725,63 @@ fn answer_only_argv(executable: &str) -> Vec<String> {
         "-c".to_owned(),
         "mcp_servers={}".to_owned(),
     ]
+}
+
+/// The app server of an assistant thread, built from its mode's parts: `mcp_servers` set to
+/// one inline table holding exactly the mode's servers, which replaces the user's servers for
+/// this process, each with its URL and the name of the variable holding its bearer token. The
+/// thread itself runs as an answer-only one ([`restrict_to_answer_only`]): Codex's shell
+/// cannot be switched off, so the read-only sandbox, which Codex gives no network, and web
+/// search off are what keep it to its servers. Interpreters, skills and any network beyond
+/// the servers are refused until this handler can confine them.
+fn assistant_argv(
+    executable: &str,
+    environment: &std::collections::BTreeMap<String, String>,
+    mode: &AssistantMode,
+) -> Result<Vec<String>, ProviderError> {
+    mode.validate()
+        .map_err(|reason| refuse(Status::GUATIAO_ERR_BAD_VALUE, reason))?;
+    if !mode.interpreters.is_empty() || !mode.skills.is_empty() {
+        return Err(refuse(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "this Codex handler runs no interpreter or skill for an assistant",
+        ));
+    }
+    if !mode.network.reaches_nothing() {
+        return Err(refuse(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "this Codex handler gives an assistant no network beyond its MCP servers",
+        ));
+    }
+    let mut servers = Vec::new();
+    for server in &mode.mcp_servers {
+        let prefix = &server.env_prefix;
+        let (Some(url), true) = (
+            environment.get(&format!("{prefix}_URL")),
+            environment.contains_key(&format!("{prefix}_TOKEN")),
+        ) else {
+            return Err(refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                format!(
+                    "the environment carries no URL and token for MCP server {:?}",
+                    server.name
+                ),
+            ));
+        };
+        // A JSON string is a valid TOML basic string.
+        let url = serde_json::to_string(url).map_err(internal)?;
+        let token = serde_json::to_string(&format!("{prefix}_TOKEN")).map_err(internal)?;
+        servers.push(format!(
+            "{}={{url={url},bearer_token_env_var={token}}}",
+            server.name
+        ));
+    }
+    Ok(vec![
+        executable.to_owned(),
+        "app-server".to_owned(),
+        "-c".to_owned(),
+        format!("mcp_servers={{{}}}", servers.join(",")),
+    ])
 }
 
 /// Marks the working directory an untrusted project for this process, so Codex skips its
@@ -1001,6 +1073,21 @@ mod tests {
                         stdout.flush().unwrap();
                     }
                     "thread/start" | "thread/resume" => {
+                        // Reports the thread's policy as text, for tests that check it.
+                        if std::env::var_os("CODEX_FIXTURE_SHOW_POLICY").is_some() {
+                            let policy = json!({
+                                "sandbox": message.pointer("/params/sandbox"),
+                                "approvalPolicy": message.pointer("/params/approvalPolicy"),
+                                "config": message.pointer("/params/config"),
+                            });
+                            writeln!(
+                                stdout,
+                                "{}",
+                                json!({"method":"item/agentMessage/delta",
+                                       "params":{"delta":format!("policy: {policy}")}})
+                            )
+                            .unwrap();
+                        }
                         writeln!(
                             stdout,
                             "{}",
@@ -1078,6 +1165,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -1107,6 +1195,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.clone().into_object(),
             )
@@ -1221,6 +1310,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 ProcessTerminal::new().into_object(),
                 approvals_gate(approved.clone()),
@@ -1438,6 +1528,7 @@ mod tests {
                     project_settings: false,
                     project_mcp: false,
                     answer_only: false,
+                    assistant: None,
                 },
                 terminal.into_object(),
             )
@@ -1511,6 +1602,7 @@ mod tests {
                 project_settings: false,
                 project_mcp: false,
                 answer_only: false,
+                assistant: None,
             },
             terminal.into_object(),
         );
@@ -1709,6 +1801,149 @@ mod tests {
         assert_eq!(
             parsed["projects"]["C:\\safe houses\\m.1"]["trust_level"].as_str(),
             Some("untrusted")
+        );
+    }
+
+    /// `mcp_servers.<name>.url` and `bearer_token_env_var` are Codex's streamable HTTP server
+    /// keys, and `sandbox`, `approvalPolicy` and `config` are `thread/start` and
+    /// `thread/resume` parameters, as the app-server schema this handler already speaks has
+    /// them.
+    #[test]
+    fn an_assistant_thread_has_only_its_mcp_servers_read_only_on_start_and_resume() {
+        let terminal = ProcessTerminal::new();
+        let session_id = SessionId::try_new("codex-assistant-thread").unwrap();
+        let environment = BTreeMap::from([
+            ("CODEX_FIXTURE_THREAD_ID".to_owned(), session_id.to_string()),
+            ("CODEX_FIXTURE_SHOW_POLICY".to_owned(), "1".to_owned()),
+            (
+                "AI6_MONEYPENNY_MCP_URL".to_owned(),
+                "https://exports.example/v1/moneypenny/mcp".to_owned(),
+            ),
+            (
+                "AI6_MONEYPENNY_MCP_TOKEN".to_owned(),
+                "conversation-token".to_owned(),
+            ),
+            (
+                "AI6_CABLE_MCP_URL".to_owned(),
+                "http://127.0.0.1:1/mcp".to_owned(),
+            ),
+            ("AI6_CABLE_MCP_TOKEN".to_owned(), "cable-token".to_owned()),
+        ]);
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-assistant-fixture".to_owned(),
+        })
+        .unwrap();
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let started = handler
+            .start(
+                AgentStart {
+                    mission_id: "assistant-conversation".parse().unwrap(),
+                    agent_id: "moneypenny".to_owned(),
+                    prompt: "Which Stations are busy?".to_owned(),
+                    initial_context: vec!["You are Moneypenny.".to_owned()],
+                    working_directory: cwd.clone(),
+                    clearance: "desk".to_owned(),
+                    environment: environment.clone(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: true,
+                    project_mcp: true,
+                    answer_only: false,
+                    assistant: Some(AssistantMode::moneypenny()),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        let started_events = read_to_completion(&started);
+        started.close().unwrap();
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "assistant-conversation".parse().unwrap(),
+                    session_id,
+                    message: Some("And now?".to_owned()),
+                    working_directory: cwd.clone(),
+                    environment,
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: true,
+                    project_mcp: true,
+                    answer_only: false,
+                    assistant: Some(AssistantMode::moneypenny()),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        let resumed_events = read_to_completion(&resumed);
+        resumed.close().unwrap();
+        for events in [started_events, resumed_events] {
+            let policy = events
+                .iter()
+                .find_map(|event| event.text.as_deref()?.strip_prefix("policy: "))
+                .expect("the thread's policy was reported");
+            let policy: Value = serde_json::from_str(policy).unwrap();
+            assert_eq!(policy["sandbox"], "read-only");
+            assert_eq!(policy["approvalPolicy"], "never");
+            assert_eq!(policy["config"]["web_search"], "disabled");
+        }
+        let specs = terminal.specs.lock().unwrap();
+        assert_eq!(specs.len(), 2);
+        let expected = [
+            vec![
+                "codex-assistant-fixture".to_owned(),
+                "app-server".to_owned(),
+                "-c".to_owned(),
+                "mcp_servers={moneypenny={url=\"https://exports.example/v1/moneypenny/mcp\",\
+                 bearer_token_env_var=\"AI6_MONEYPENNY_MCP_TOKEN\"}}"
+                    .to_owned(),
+            ],
+            untrusted_project(&cwd).to_vec(),
+        ]
+        .concat();
+        assert_eq!(
+            specs[0].argv, expected,
+            "only Moneypenny's server, no Cables"
+        );
+        assert_eq!(specs[1].argv, expected, "and so on resume");
+        let (key, value) = expected[3].split_once('=').unwrap();
+        let parsed: toml::Table = toml::from_str(&format!("{key} = {value}")).unwrap();
+        let servers = parsed["mcp_servers"].as_table().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(
+            servers["moneypenny"]["bearer_token_env_var"].as_str(),
+            Some("AI6_MONEYPENNY_MCP_TOKEN")
+        );
+        assert!(specs.iter().all(|spec| {
+            spec.argv
+                .iter()
+                .all(|argument| !argument.contains("conversation-token"))
+        }));
+    }
+
+    #[test]
+    fn an_assistant_mode_the_codex_handler_cannot_confine_is_refused() {
+        let environment = BTreeMap::from([
+            (
+                "AI6_MONEYPENNY_MCP_URL".to_owned(),
+                "https://exports.example/v1/moneypenny/mcp".to_owned(),
+            ),
+            ("AI6_MONEYPENNY_MCP_TOKEN".to_owned(), "token".to_owned()),
+        ]);
+        let mut skills = AssistantMode::moneypenny();
+        skills.skills.push("pdf".to_owned());
+        let mut open = AssistantMode::moneypenny();
+        open.network.policy = "open".to_owned();
+        for mode in [skills, open] {
+            assert!(assistant_argv("codex", &environment, &mode).is_err());
+        }
+        assert!(
+            assistant_argv("codex", &BTreeMap::new(), &AssistantMode::moneypenny()).is_err(),
+            "no endpoint in the environment"
         );
     }
 

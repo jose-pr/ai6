@@ -48,6 +48,77 @@ pub struct AgentStart {
     /// harness has one. AI6 asks for it for a Chief of Staff review, which reads untrusted text.
     #[serde(default)]
     pub answer_only: bool,
+    /// Set when the Session is Moneypenny, the operator's assistant: as [`answer_only`], no
+    /// built-in tool, no settings of the working directory and no web, except for what the
+    /// mode allows, which is only the MCP servers it names. Takes precedence over
+    /// `answer_only`.
+    ///
+    /// [`answer_only`]: AgentStart::answer_only
+    #[serde(default)]
+    pub assistant: Option<AssistantMode>,
+}
+
+/// What an assistant Session may use besides answering: its parts, so a handler builds the
+/// harness's settings from them rather than from one fixed set.
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct AssistantMode {
+    /// The MCP servers the harness connects to and may call every tool of, and no other.
+    pub mcp_servers: Vec<McpServerRef>,
+    /// Interpreters the harness may run inside its own sandbox (`python3`); empty means no
+    /// shell at all. A handler that cannot confine them refuses to start.
+    #[serde(default)]
+    pub interpreters: Vec<String>,
+    /// Skills the harness may load, by name; empty means none. A handler that cannot limit
+    /// skills to a list refuses a non-empty one.
+    #[serde(default)]
+    pub skills: Vec<String>,
+    /// What the harness's own web tools and its interpreters may reach besides the MCP
+    /// servers, which are always reachable.
+    #[serde(default)]
+    pub network: AssistantNetwork,
+}
+
+/// The assistant's network policy. `limited` with no hosts, the default, reaches nothing
+/// but its MCP servers.
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct AssistantNetwork {
+    /// `limited` (only `allowed_hosts`), `denied` (nothing) or `open` (anything; a weakening).
+    pub policy: String,
+    /// Host names a `limited` policy reaches; ignored otherwise.
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
+}
+
+impl Default for AssistantNetwork {
+    fn default() -> Self {
+        Self {
+            policy: "limited".to_owned(),
+            allowed_hosts: Vec::new(),
+        }
+    }
+}
+
+impl AssistantNetwork {
+    /// Whether the policy reaches nothing besides the MCP servers: `denied`, or `limited`
+    /// with no host.
+    pub fn reaches_nothing(&self) -> bool {
+        self.policy == "denied" || (self.policy == "limited" && self.allowed_hosts.is_empty())
+    }
+}
+
+/// An MCP server an assistant Session connects to, found in its environment: the URL in
+/// `<env_prefix>_URL` and the bearer token in `<env_prefix>_TOKEN`, so the token never
+/// appears in a command line.
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct McpServerRef {
+    /// The name the harness knows the server by (`moneypenny`); its tools are
+    /// `mcp__<name>__<tool>` in Claude Code.
+    pub name: String,
+    /// The prefix of the two environment variables (`AI6_MONEYPENNY_MCP`).
+    pub env_prefix: String,
 }
 
 /// How AI6 resumes a provider-issued Session.
@@ -82,6 +153,9 @@ pub struct AgentResume {
     /// Whether the Session only reads and answers, as [`AgentStart::answer_only`] started it.
     #[serde(default)]
     pub answer_only: bool,
+    /// The assistant mode, as [`AgentStart::assistant`]; decided again on every resume.
+    #[serde(default)]
+    pub assistant: Option<AssistantMode>,
 }
 
 /// A message AI6 sends to an already running Agent Session.

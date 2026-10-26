@@ -167,8 +167,15 @@ pub use directorates::registry::vetting::{
     Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_PER_OPERATION, MAX_HELD_RESULTS,
 };
 pub use directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-    QuotaReport, TokenUsage, UsageLimit,
+    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
+    AssistantNetwork, LIMIT_EVENT, McpServerRef, QuotaReport, TokenUsage, UsageLimit,
+};
+pub use directorates::section_00::assistant::{
+    ASSISTANT_MCP_ENV_PREFIX, ASSISTANT_MCP_PATH, ASSISTANT_MCP_SERVER, ASSISTANT_MCP_TOKEN_ENV,
+    ASSISTANT_MCP_URL_ENV, AssistantEvent, AssistantJob, AssistantReport, EVENT_ACCEPTED,
+    EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_LIMIT, EVENT_REJECTED, EVENT_TEXT,
+    EVENT_TOOL, MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENT_BYTES, MAX_ASSISTANT_EVENTS,
+    MAX_ASSISTANT_MESSAGE_BYTES,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

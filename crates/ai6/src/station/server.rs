@@ -3775,6 +3775,7 @@ async fn start_mission(
         project_settings,
         project_mcp,
         answer_only: review,
+        assistant: None,
     };
     let attachment = runner_key.clone().map(|key| RunnerAttachment {
         key,
@@ -4444,6 +4445,7 @@ async fn resume_mission(
         project_settings,
         project_mcp,
         answer_only: review,
+        assistant: None,
     };
     let attachment = runner.as_ref().map(|_| RunnerAttachment {
         key: reattach.as_ref().map_or_else(
