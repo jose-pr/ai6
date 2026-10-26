@@ -210,6 +210,11 @@ fn raise(
             );
             record_event(state, request, "raised", signer);
             audit(state, "agent.clearance.raised", signer, request, now);
+            // A quarantine stored after this write removes the raise itself; one stored
+            // between this round's check and the write is caught here.
+            if medical::is_quarantined(state, &request.agent, Some(&request.operation)) {
+                take_back(state, &grant, "the Agent was quarantined");
+            }
         }
         Ok(false) => eprintln!(
             "ai6: Agent {:?} not raised in {:?}: its clearance grant changed meanwhile",
@@ -493,6 +498,31 @@ mod tests {
                     .for_occupant(None, "desk"),
             )
             .unwrap();
+        assert_eq!(clearance_in(&state, "G"), "desk");
+    }
+
+    #[test]
+    fn a_quarantine_stored_between_the_check_and_the_raise_still_takes_it_back() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), SETTINGS, AGENTS);
+        done(&state, 10);
+        super::round(&state);
+        let now = state.clock.now() as f64;
+        let request = state.intake.pending_approvals("G", now).unwrap().remove(0);
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request.id,
+                &Ruling::approve("alice", now, now + 3600.0),
+            )
+            .unwrap();
+        // The round found 007 free; the quarantine lands before the raise is written.
+        medical::quarantine_agent(&state, "007", Some("G"), "looping", "operator");
+        let agent = state.roster.agent(Some("G"), "007").unwrap();
+        super::raise(&state, &request, "field", "alice", &agent, None);
+        assert!(state.intake.clearance_grant("G", "007").unwrap().is_none());
+        assert!(state.intake.release_quarantine("007", Some("G")).unwrap());
         assert_eq!(clearance_in(&state, "G"), "desk");
     }
 
