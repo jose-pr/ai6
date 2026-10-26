@@ -2495,8 +2495,24 @@ pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(bytes)?;
     temporary.as_file().sync_all()?;
-    temporary.persist(path).map_err(|error| error.error)?;
-    Ok(())
+    // Windows refuses to replace a file while a reader has it open ("Access is denied");
+    // readers hold it only for a read, so the rename is tried again for a short while.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut delay = Duration::from_millis(5);
+    loop {
+        match temporary.persist(path) {
+            Ok(_) => return Ok(()),
+            Err(error)
+                if error.error.kind() == io::ErrorKind::PermissionDenied
+                    && Instant::now() < deadline =>
+            {
+                temporary = error.file;
+                thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_millis(100));
+            }
+            Err(error) => return Err(error.error),
+        }
+    }
 }
 
 fn finish_locked(
@@ -3024,6 +3040,27 @@ mod tests {
                 .with_resource_limits(ResourceLimits::new(0, 101))
                 .is_err()
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_atomic_write_waits_for_a_reader_that_holds_the_file_without_sharing_it() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("record.json");
+        fs::write(&path, b"old").unwrap();
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
+            drop(reader);
+        });
+        write_atomic(&path, b"new").unwrap();
+        release.join().unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
     }
 
     #[test]
