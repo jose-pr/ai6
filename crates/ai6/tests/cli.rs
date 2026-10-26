@@ -202,7 +202,7 @@ fn sleepers_are_listed_authorized_and_revoked() {
 
 #[test]
 fn identity_and_peers_work_on_a_state_directory_with_the_source_address_shown() {
-    use ai6::station::identity::{Fingerprint, Identity, TrustStore, TrustStoreExt};
+    use ai6::station::identity::{Identity, PeerId, TrustStore, TrustStoreExt};
 
     let state = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
@@ -220,7 +220,7 @@ fn identity_and_peers_work_on_a_state_directory_with_the_source_address_shown() 
     let (ok, shown) = run(&["identity"]);
     assert!(ok);
     assert!(shown.starts_with("sha256:"), "{shown}");
-    let own = shown.trim().parse::<Fingerprint>().unwrap();
+    let own = shown.trim().parse::<PeerId>().unwrap();
     assert_eq!(run(&["identity"]).1, shown, "the identity is kept");
     assert_eq!(
         Identity::read(&state.path().join("identity.pem"))

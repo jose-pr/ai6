@@ -627,9 +627,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a key's `hash` is labelled (`sha256:<hex>`), the key `prefix` is configurable, and a peer's
   `certificate` may be in any fingerprint spelling.
 - Station TLS details: `ai6::station::identity` re-exports `coqui-peer-tls`'s `Identity`,
-  `Fingerprint`, `TrustStore` and `Trust` (none at the crate root); `client_config` and
+  `PeerId`, `TrustStore` and `Trust` (none at the crate root); `client_config` and
   `server_config` take a `Policy` and return `Built<..>`. Handshakes are TLS 1.3 only unless
-  the policy allows 1.2. Fingerprints print as `sha256:<hex>` and are read in any spelling.
+  the policy allows 1.2. Peer ids print as `sha256:<hex>` and are read in any spelling.
 - Harnesses start on a Windows Station: the `pty` provider answers ConPTY's cursor position
   query (`ESC[6n`) and removes it from the output, on Windows only, from a thread of its own.
   The Claude Code and Codex handlers open their terminal 32767 columns wide and read it with

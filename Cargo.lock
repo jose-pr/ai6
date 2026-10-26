@@ -55,15 +55,15 @@ dependencies = [
  "ai6-diptel",
  "axum",
  "clap",
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=756310a6600a30fb1ddbe1b00e719da6396e81be)",
  "coqui-access-key-plugin",
  "coqui-access-ldap-plugin",
  "coqui-access-local-plugin",
  "coqui-access-peer-plugin",
  "coqui-access-proxy-plugin",
- "coqui-peer",
- "coqui-peer-tls",
- "coqui-roles",
+ "coqui-peer 0.1.0 (git+https://github.com/Boriken-Dev/coqui-peer?rev=b3aa9bdb5a5534ede66d6fc2122604e72409d93f)",
+ "coqui-peer-tls 0.1.0 (git+https://github.com/Boriken-Dev/coqui-peer-tls?rev=81c1fec13d75d9b4adca150940f4e88f7916b587)",
+ "coqui-roles 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=756310a6600a30fb1ddbe1b00e719da6396e81be)",
  "coqui-roles-plugin",
  "fs2",
  "futures-util",
@@ -699,6 +699,14 @@ dependencies = [
 [[package]]
 name = "coqui-access"
 version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=756310a6600a30fb1ddbe1b00e719da6396e81be#756310a6600a30fb1ddbe1b00e719da6396e81be"
+dependencies = [
+ "guatiao",
+]
+
+[[package]]
+name = "coqui-access"
+version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
  "guatiao",
@@ -709,7 +717,7 @@ name = "coqui-access-key"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-kit",
  "serde",
 ]
@@ -719,7 +727,7 @@ name = "coqui-access-key-plugin"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-key",
  "coqui-access-kit",
  "coqui-access-plugin-support",
@@ -741,7 +749,7 @@ name = "coqui-access-ldap"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "ldap3",
  "rustls",
 ]
@@ -751,7 +759,7 @@ name = "coqui-access-ldap-plugin"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-ldap",
 ]
 
@@ -760,7 +768,7 @@ name = "coqui-access-local"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-kit",
  "serde",
 ]
@@ -770,7 +778,7 @@ name = "coqui-access-local-plugin"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-kit",
  "coqui-access-local",
  "coqui-access-plugin-support",
@@ -781,9 +789,9 @@ name = "coqui-access-peer"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-kit",
- "coqui-peer-tls",
+ "coqui-peer-tls 0.1.0 (git+https://github.com/Boriken-Dev/coqui-peer-tls?rev=d940fac026a7e93db153ff4584aee130f2a6b882)",
  "serde",
 ]
 
@@ -792,7 +800,7 @@ name = "coqui-access-peer-plugin"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-kit",
  "coqui-access-peer",
  "coqui-access-plugin-support",
@@ -803,7 +811,7 @@ name = "coqui-access-plugin-support"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-kit",
  "serde",
  "toml",
@@ -814,7 +822,7 @@ name = "coqui-access-proxy"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
 ]
 
 [[package]]
@@ -822,8 +830,22 @@ name = "coqui-access-proxy-plugin"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
  "coqui-access-proxy",
+]
+
+[[package]]
+name = "coqui-peer"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-peer?rev=b3aa9bdb5a5534ede66d6fc2122604e72409d93f#b3aa9bdb5a5534ede66d6fc2122604e72409d93f"
+dependencies = [
+ "data-encoding",
+ "serde",
+ "sha1 0.11.0",
+ "sha2",
+ "subtle",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -832,11 +854,25 @@ version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-peer?rev=d01b6907859029fad23e5d97398146a03c313ffe#d01b6907859029fad23e5d97398146a03c313ffe"
 dependencies = [
  "data-encoding",
- "serde",
  "sha1 0.11.0",
  "sha2",
  "subtle",
+]
+
+[[package]]
+name = "coqui-peer-tls"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-peer-tls?rev=81c1fec13d75d9b4adca150940f4e88f7916b587#81c1fec13d75d9b4adca150940f4e88f7916b587"
+dependencies = [
+ "coqui-peer 0.1.0 (git+https://github.com/Boriken-Dev/coqui-peer?rev=b3aa9bdb5a5534ede66d6fc2122604e72409d93f)",
+ "data-encoding",
+ "globset",
+ "rcgen",
+ "rustls",
+ "time",
  "tokio",
+ "tokio-rustls",
+ "x509-parser",
 ]
 
 [[package]]
@@ -844,14 +880,17 @@ name = "coqui-peer-tls"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-peer-tls?rev=d940fac026a7e93db153ff4584aee130f2a6b882#d940fac026a7e93db153ff4584aee130f2a6b882"
 dependencies = [
- "coqui-peer",
+ "coqui-peer 0.1.0 (git+https://github.com/Boriken-Dev/coqui-peer?rev=d01b6907859029fad23e5d97398146a03c313ffe)",
  "data-encoding",
- "globset",
- "rcgen",
  "rustls",
- "tokio",
- "tokio-rustls",
- "x509-parser",
+]
+
+[[package]]
+name = "coqui-roles"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=756310a6600a30fb1ddbe1b00e719da6396e81be#756310a6600a30fb1ddbe1b00e719da6396e81be"
+dependencies = [
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=756310a6600a30fb1ddbe1b00e719da6396e81be)",
 ]
 
 [[package]]
@@ -859,7 +898,7 @@ name = "coqui-roles"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
 ]
 
 [[package]]
@@ -867,8 +906,8 @@ name = "coqui-roles-plugin"
 version = "0.1.0"
 source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d#d5146346951ec011a7332f04fff9e4863635152d"
 dependencies = [
- "coqui-access",
- "coqui-roles",
+ "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
+ "coqui-roles 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=d5146346951ec011a7332f04fff9e4863635152d)",
 ]
 
 [[package]]

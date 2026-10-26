@@ -2,16 +2,17 @@
 //!
 //! A Station's identity, the peers it trusts and the TLS configurations that use them come
 //! from `coqui-peer-tls` and `coqui-peer`; this module fixes where AI6 keeps them and the
-//! protocol it speaks. A peer is named by its [`Fingerprint`], printed `sha256:<hex>` and
-//! read in any spelling `coqui-peer` knows, grouped base32 included. Every setting that decides what a handshake accepts is a [`Policy`]: callers
-//! pass [`Policy::strict`] (TLS 1.3, SHA-2 pins) unless an operator chose otherwise.
+//! protocol it speaks. A peer is named by its [`PeerId`], printed `sha256:<hex>` and read in
+//! any spelling `coqui-peer` knows, grouped base32 included. Every setting that decides what a
+//! handshake accepts is a [`Policy`]: callers pass [`Policy::strict`] (TLS 1.3, SHA-2 pins)
+//! unless an operator chose otherwise.
 
 use std::fmt;
 use std::path::Path;
 
 pub use coqui_peer::{Digest, WaitingEntry, WaitingLimits};
 pub use coqui_peer_tls::{
-    Built, CaPolicy, Fingerprint, Identity, PeerIdentity, Pins, Policy, Trust, TrustStore,
+    Built, CaPolicy, Identity, PeerId, PeerIdentity, Pins, Policy, Trust, TrustStore,
     TrustStoreExt, Weakening,
 };
 use coqui_peer_tls::{PeerError, client_config_with, server_config_with};
@@ -101,7 +102,7 @@ pub fn trust_peers(store: TrustStore) -> Trust {
 /// digest that `server` uses.
 pub fn client_config(
     identity: &Identity,
-    server: &Fingerprint,
+    server: &PeerId,
     policy: &Policy,
 ) -> Result<Built<ClientConfig>, StationIdentityError> {
     let trust = Trust::Pinned(Pins::fixed([*server]));
@@ -184,20 +185,17 @@ mod tests {
         let identity = Identity::generate().unwrap();
         let fingerprint = identity.fingerprint();
         let grouped = fingerprint.to_base32_grouped();
-        assert_eq!(grouped.parse::<Fingerprint>().unwrap(), fingerprint);
+        assert_eq!(grouped.parse::<PeerId>().unwrap(), fingerprint);
         assert_eq!(
-            grouped.replace('-', "").parse::<Fingerprint>().unwrap(),
+            grouped.replace('-', "").parse::<PeerId>().unwrap(),
             fingerprint
         );
+        assert_eq!(fingerprint.hex().parse::<PeerId>().unwrap(), fingerprint);
         assert_eq!(
-            fingerprint.hex().parse::<Fingerprint>().unwrap(),
+            fingerprint.to_string().parse::<PeerId>().unwrap(),
             fingerprint
         );
-        assert_eq!(
-            fingerprint.to_string().parse::<Fingerprint>().unwrap(),
-            fingerprint
-        );
-        assert!("not-a-station-id".parse::<Fingerprint>().is_err());
+        assert!("not-a-station-id".parse::<PeerId>().is_err());
     }
 
     #[test]
@@ -303,7 +301,7 @@ mod tests {
     async fn handshake(
         server: ServerConfig,
         client: ClientConfig,
-    ) -> Result<(Fingerprint, Fingerprint, Option<Vec<u8>>), PeerError> {
+    ) -> Result<(PeerId, PeerId, Option<Vec<u8>>), PeerError> {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = Arc::new(server);

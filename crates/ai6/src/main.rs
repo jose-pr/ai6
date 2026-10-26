@@ -1025,7 +1025,7 @@ fn peer_command(command: PeerCommand) -> Result<String, String> {
     match command {
         PeerCommand::Accept { id } => {
             let id = id
-                .parse::<identity::Fingerprint>()
+                .parse::<identity::PeerId>()
                 .map_err(|error| error.to_string())?;
             peers.accept(&id).map_err(|error| error.to_string())?;
             Ok(format!("Accepted station {id}\n"))

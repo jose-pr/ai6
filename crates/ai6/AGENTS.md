@@ -2268,14 +2268,15 @@ pub const IDENTITY_FILE: &str = "identity.pem";
 pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError>;
 pub fn open_peers(state_dir: &Path, policy: &Policy) -> Result<TrustStore, StationIdentityError>;
 pub fn trust_peers(store: TrustStore) -> Trust;
-pub fn client_config(identity: &Identity, server: &Fingerprint, policy: &Policy)
+pub fn client_config(identity: &Identity, server: &PeerId, policy: &Policy)
     -> Result<Built<ClientConfig>, StationIdentityError>;
 pub fn server_config(identity: &Identity, trust: &Trust, policy: &Policy)
     -> Result<Built<ServerConfig>, StationIdentityError>;
 ```
 
-`Fingerprint` (a `PeerId`) is the SHA-256 of the certificate, printed `sha256:<hex>` and read in
-any spelling (`sha256:HEX`, bare hex, colon pairs, grouped base32). `Identity`, `Trust` (`Pinned`, `Ca`, `PinnedOrCa`, `AnyWithKeyProof`), `CaPolicy`,
+A `PeerId` is the SHA-256 of the certificate, printed `sha256:<hex>` and read in any spelling
+(`sha256:HEX`, bare hex, colon pairs, grouped base32). `Identity`, `Trust` (`Pinned`, `Ca`,
+`PinnedOrCa`, `AnyWithKeyProof`), `CaPolicy`,
 `Policy`, `TrustStore`, `WaitingEntry` and the rest are re-exported from those crates; their
 API headers describe them. `open_identity` stores the certificate and private key in
 `identity.pem` (Unix mode `0600`). `Policy::strict()` is the default: TLS 1.3, SHA-2 pins;
