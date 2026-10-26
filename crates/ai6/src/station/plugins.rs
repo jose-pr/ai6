@@ -1206,10 +1206,40 @@ mod tests {
 
     fn sign(pair: &ring::signature::Ed25519KeyPair, library: &Path) {
         use sha2::{Digest, Sha256};
-        let digest = Sha256::digest(std::fs::read(library).unwrap());
+        let digest: [u8; 32] = Sha256::digest(std::fs::read(library).unwrap()).into();
+        let file = library.file_name().unwrap().to_str().unwrap();
+        let message = crate::directorates::registry::bona_fides::publisher_message(file, &digest);
         let mut signature = library.as_os_str().to_owned();
         signature.push(".sig");
-        std::fs::write(signature, pair.sign(&digest).as_ref()).unwrap();
+        std::fs::write(signature, pair.sign(&message).as_ref()).unwrap();
+    }
+
+    #[test]
+    fn a_signed_library_renamed_into_another_providers_slot_is_refused() {
+        let (directory, library, bytes) = one_library();
+        let (pair, key) = publisher();
+        sign(&pair, &library);
+        // The same bytes and signature, put where another provider's library goes.
+        let other = format!("other.{DLL_EXTENSION}");
+        let slot = scratch();
+        std::fs::write(slot.path().join(&other), &bytes).unwrap();
+        let mut signature = library.as_os_str().to_owned();
+        signature.push(".sig");
+        std::fs::copy(signature, slot.path().join(format!("{other}.sig"))).unwrap();
+        drop(directory);
+        let verified = scratch();
+        let policy = PluginPolicy::new(
+            Some(PinSet::new().with_library(LibraryPin::publisher(other, key))),
+            verified.path(),
+        );
+        let plugins = Plugins::scan_with(&[slot.path().to_path_buf()], &policy);
+        assert!(!has_roles(&plugins), "{:?}", plugins.scan_summary());
+        assert!(
+            plugins.scan_summary().refused[0]
+                .contains(&format!("publisher {key}: the signature does not verify")),
+            "{:?}",
+            plugins.scan_summary()
+        );
     }
 
     #[test]

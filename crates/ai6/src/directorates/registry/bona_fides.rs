@@ -272,7 +272,7 @@ impl core::str::FromStr for PluginProfile {
 }
 
 /// Checks a publisher's Ed25519 signature: `(key, message, signature)`, true when it verifies.
-pub type SignatureCheck = dyn Fn(&PublisherKey, &[u8], &[u8]) -> bool;
+pub type SignatureCheck<'a> = dyn Fn(&PublisherKey, &[u8], &[u8]) -> bool + 'a;
 
 /// An Ed25519 publisher key, written `ed25519:` and 64 hexadecimal digits.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -348,8 +348,8 @@ pub enum Require {
 
 /// One library a Station accepts: by its digest, by its publisher's signature, or both.
 ///
-/// A publisher signs the 32-byte SHA-256 of the library with Ed25519 and ships the 64-byte
-/// signature beside it as `FILE.sig`.
+/// A publisher signs [`publisher_message`] for the library's file name and SHA-256 with
+/// Ed25519 and ships the 64-byte signature beside it as `FILE.sig`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -436,7 +436,7 @@ impl LibraryPin {
         bytes: &[u8],
         digest: &[u8; 32],
         signature: Option<&[u8]>,
-        verify: &SignatureCheck,
+        verify: &SignatureCheck<'_>,
     ) -> Result<String, String> {
         let pinned = self.pin.map(|pin| {
             let found = pin.digest().of(bytes);
@@ -451,7 +451,13 @@ impl LibraryPin {
                 "publisher {publisher}: no signature file {}.sig",
                 self.file
             )),
-            Some(signature) if verify(&publisher, digest, signature) => {
+            Some(signature)
+                if verify(
+                    &publisher,
+                    &publisher_message(&self.file, digest),
+                    signature,
+                ) =>
+            {
                 Ok(format!("publisher {publisher}"))
             }
             Some(_) => Err(format!(
@@ -594,13 +600,13 @@ impl PinSet {
 
     /// What the pin set says about the library `file` with these `bytes` and the detached
     /// `signature` found beside it. `verify(key, message, signature)` checks an Ed25519
-    /// signature; the message a publisher signs is the library's 32-byte SHA-256.
+    /// signature; the message a publisher signs is [`publisher_message`].
     pub fn check(
         &self,
         file: &str,
         bytes: &[u8],
         signature: Option<&[u8]>,
-        verify: &SignatureCheck,
+        verify: &SignatureCheck<'_>,
     ) -> PinCheck {
         let digest: [u8; 32] = Sha256::digest(bytes).into();
         let mut reasons = Vec::new();
@@ -616,6 +622,23 @@ impl PinSet {
             PinCheck::Refused(reasons.join("; "))
         }
     }
+}
+
+/// Tags the message a publisher signs, so a signature over it means nothing else.
+pub const PUBLISHER_MESSAGE_TAG: &[u8] = b"ai6-provider-library-v1\0";
+
+/// What a publisher signs for the library `file` whose SHA-256 is `digest`:
+/// [`PUBLISHER_MESSAGE_TAG`], the file name, a NUL, then the 32 digest bytes. The name binds
+/// the signature to the slot it was made for, so a library signed as one provider cannot be
+/// renamed into another's; a file name holds no NUL, so the framing is unambiguous.
+pub fn publisher_message(file: &str, digest: &[u8; 32]) -> Vec<u8> {
+    let mut message =
+        Vec::with_capacity(PUBLISHER_MESSAGE_TAG.len() + file.len() + 1 + digest.len());
+    message.extend_from_slice(PUBLISHER_MESSAGE_TAG);
+    message.extend_from_slice(file.as_bytes());
+    message.push(0);
+    message.extend_from_slice(digest);
+    message
 }
 
 /// The `sha256:HEX` pin of a library's bytes, as [`LibraryPin::digest`] takes it.
@@ -837,7 +860,13 @@ mod tests {
         let bytes = b"library bytes";
         let other = b"other bytes";
         let key = PublisherKey::from_bytes([7; 32]);
-        let signed = |_: &PublisherKey, _: &[u8], signature: &[u8]| signature == b"good";
+        let digest: [u8; 32] = Sha256::digest(bytes).into();
+        // A fake verifier: "good" signs the framed message for b.so or c.so, nothing else.
+        let signed = |_: &PublisherKey, message: &[u8], signature: &[u8]| {
+            signature == b"good"
+                && (message == publisher_message("b.so", &digest)
+                    || message == publisher_message("c.so", &digest))
+        };
         let pins = PinSet::new()
             .with_library(LibraryPin::digest("a.so", library_pin(bytes)))
             .with_library(LibraryPin::publisher("b.so", key))
