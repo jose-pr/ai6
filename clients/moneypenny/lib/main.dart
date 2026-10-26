@@ -199,6 +199,14 @@ class MissionBoard extends ChangeNotifier {
             running: 2,
             capacity: 4,
             operations: ['G'],
+            resources: HostResources(
+              sampledAt: 1_798_000_000,
+              cpus: 8,
+              cpuPercent: 20,
+              load1m: 1.2,
+              memoryTotalMb: 16384,
+              memoryAvailableMb: 10240,
+            ),
             theaters: [
               TheaterSummary(id: 'local', access: 'local'),
               TheaterSummary(
@@ -313,6 +321,7 @@ class MissionBoard extends ChangeNotifier {
             station: 'station-control-01',
             theater: 'local',
             agent: '007',
+            score: 1.03,
           ),
         ],
         rejections: [
@@ -1191,6 +1200,7 @@ class StationSummary {
     required this.capacity,
     required this.operations,
     this.theaters = const [],
+    this.resources,
   });
 
   final String stationId;
@@ -1202,6 +1212,9 @@ class StationSummary {
   final int capacity;
   final List<String> operations;
   final List<TheaterSummary> theaters;
+
+  /// The host's CPUs, load and memory; `null` from a Station that does not report them.
+  final HostResources? resources;
 
   factory StationSummary.fromJson(Map<String, dynamic> json) => StationSummary(
     stationId: json['station_id'] as String,
@@ -1217,6 +1230,9 @@ class StationSummary {
           (theater) => TheaterSummary.fromJson(theater as Map<String, dynamic>),
         )
         .toList(growable: false),
+    resources: json['resources'] == null
+        ? null
+        : HostResources.fromJson(json['resources'] as Map<String, dynamic>),
   );
 }
 
@@ -1269,6 +1285,71 @@ class TheaterCapabilities {
   }
 }
 
+/// A Station host's or Theater's CPUs, load and memory as last sampled. A figure that was
+/// not reported is `null` and shows as unknown.
+class HostResources {
+  const HostResources({
+    required this.sampledAt,
+    this.cpus,
+    this.cpuPercent,
+    this.load1m,
+    this.memoryTotalMb,
+    this.memoryAvailableMb,
+  });
+
+  final double? cpus;
+  final double? cpuPercent;
+  final double? load1m;
+  final int? memoryTotalMb;
+  final int? memoryAvailableMb;
+
+  /// When it was sampled, as Unix seconds.
+  final int sampledAt;
+
+  factory HostResources.fromJson(Map<String, dynamic> json) => HostResources(
+    cpus: (json['cpus'] as num?)?.toDouble(),
+    cpuPercent: (json['cpu_percent'] as num?)?.toDouble(),
+    load1m: (json['load_1m'] as num?)?.toDouble(),
+    memoryTotalMb: json['memory_total_mb'] as int?,
+    memoryAvailableMb: json['memory_available_mb'] as int?,
+    sampledAt: json['sampled_at'] as int? ?? 0,
+  );
+
+  static String _number(double value) => value == value.roundToDouble()
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(1);
+
+  static String _size(int mb) =>
+      mb < 1024 ? '$mb MiB' : '${(mb / 1024).toStringAsFixed(1)} GiB';
+
+  /// When it was sampled, as local `HH:MM:SS`.
+  String get sampledTime {
+    final at = DateTime.fromMillisecondsSinceEpoch(
+      sampledAt * 1000,
+      isUtc: true,
+    ).toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${two(at.hour)}:${two(at.minute)}:${two(at.second)}';
+  }
+
+  /// `8 CPUs · 23% busy · load 1.20 · 9.1 GiB free of 15.5 GiB · sampled 14:05:03`.
+  String get description {
+    final memory = switch ((memoryAvailableMb, memoryTotalMb)) {
+      (final int free, final int total) =>
+        '${_size(free)} free of ${_size(total)}',
+      (null, final int total) => 'free memory unknown of ${_size(total)}',
+      _ => 'memory unknown',
+    };
+    return [
+      cpus == null ? 'CPUs unknown' : '${_number(cpus!)} CPUs',
+      cpuPercent == null ? 'CPU busy unknown' : '${_number(cpuPercent!)}% busy',
+      load1m == null ? 'load unknown' : 'load ${load1m!.toStringAsFixed(2)}',
+      memory,
+      'sampled $sampledTime',
+    ].join(' · ');
+  }
+}
+
 /// A host or sandbox a Station reaches through a transport (`local`, `ssh` or another
 /// provider), with what that transport can do there.
 class TheaterSummary {
@@ -1287,6 +1368,8 @@ class TheaterSummary {
     this.requires,
     this.report,
     this.madeFor,
+    this.resources,
+    this.sessions = 0,
   });
 
   final String id;
@@ -1319,6 +1402,12 @@ class TheaterSummary {
   /// The Mission an ephemeral Theater was made for.
   final String? madeFor;
 
+  /// Its CPUs, load and memory as last sampled; `null` until a sample succeeds.
+  final HostResources? resources;
+
+  /// Sessions the Station is running there.
+  final int sessions;
+
   /// The Theater declares requirements that are unchecked or unmet.
   bool get unfit => requires != null && (report == null || !report!.fit);
 
@@ -1350,6 +1439,10 @@ class TheaterSummary {
         ? null
         : TheaterReport.fromJson(json['report'] as Map<String, dynamic>),
     madeFor: json['made_for'] as String?,
+    resources: json['resources'] == null
+        ? null
+        : HostResources.fromJson(json['resources'] as Map<String, dynamic>),
+    sessions: json['sessions'] as int? ?? 0,
   );
 
   String get description {
@@ -1361,6 +1454,8 @@ class TheaterSummary {
       if (access == 'ephemeral') 'a fresh Theater is made for each Mission',
       if (madeFor != null) 'made for Mission $madeFor',
       if (unavailable != null) 'unreachable: $unavailable',
+      resources?.description ?? 'resources unknown',
+      if (sessions > 0) '$sessions running',
       if (capabilities != null) capabilities!.description,
       ...?capabilities?.notes,
       'agents $agents · egress $egress',
@@ -1452,6 +1547,7 @@ class PlacementChoice {
     required this.theater,
     required this.agent,
     this.mode = 'field',
+    this.score,
   });
 
   final String station;
@@ -1462,17 +1558,23 @@ class PlacementChoice {
   /// acts on the Theater through the transport.
   final String mode;
 
+  /// How loaded the Station and Theater are, 0 (idle) to 4; `spread` prefers the lowest,
+  /// `pack` the highest. `null` from a gateway that does not score.
+  final double? score;
+
   factory PlacementChoice.fromJson(Map<String, dynamic> json) =>
       PlacementChoice(
         station: json['station'] as String,
         theater: json['theater'] as String,
         agent: json['agent'] as String,
         mode: json['mode'] as String? ?? 'field',
+        score: (json['score'] as num?)?.toDouble(),
       );
 
   String get description =>
       '$station \u00b7 $theater \u00b7 $agent'
-      '${mode == 'field' ? '' : ' \u00b7 $mode'}';
+      '${mode == 'field' ? '' : ' \u00b7 $mode'}'
+      '${score == null ? '' : ' \u00b7 score ${score!.toStringAsFixed(2)}'}';
 }
 
 class PlacementRejection {
@@ -3674,6 +3776,11 @@ class _StationCard extends StatelessWidget {
           Text(
             '${station.healthy ? 'Healthy' : 'Not reporting'} · '
             '${station.running}/${station.capacity} sessions',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            station.resources?.description ?? 'Resources unknown',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           if (station.theaters.isNotEmpty) ...[

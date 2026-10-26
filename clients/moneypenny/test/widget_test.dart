@@ -20,6 +20,14 @@ String stationBoardResponse() => jsonEncode({
       'running': 2,
       'capacity': 4,
       'operations': ['operation-alpha'],
+      'resources': {
+        'cpus': 8.0,
+        'cpu_percent': 25.0,
+        'load_1m': 1.5,
+        'memory_total_mb': 16384,
+        'memory_available_mb': 12288,
+        'sampled_at': 1000,
+      },
       'theaters': [
         {'id': 'local', 'access': 'local', 'labels': {}},
         {
@@ -37,6 +45,13 @@ String stationBoardResponse() => jsonEncode({
           },
           'agents': 'remote-hands',
           'egress': 'none',
+          'resources': {
+            'cpus': 1.5,
+            'load_1m': 0.5,
+            'memory_total_mb': 256,
+            'sampled_at': 1010,
+          },
+          'sessions': 1,
         },
         {
           'id': 'lab',
@@ -767,6 +782,7 @@ void main() {
                   'agent': '007',
                   'handler': 'claude',
                   'mode': 'field',
+                  'score': 1.25,
                 },
                 {
                   'station': 'station-alpha',
@@ -877,11 +893,21 @@ void main() {
     expect(find.text('HQS'), findsOneWidget);
     expect(find.text('station-alpha'), findsOneWidget);
     expect(find.textContaining('2/4 sessions'), findsOneWidget);
+    expect(
+      find.text(
+        '8 CPUs \u00b7 25% busy \u00b7 load 1.50 \u00b7 12.0 GiB free of 16.0 GiB '
+        '\u00b7 sampled ${const HostResources(sampledAt: 1000).sampledTime}',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Theater local'), findsOneWidget);
     expect(find.text('Theater build-box'), findsOneWidget);
     expect(
       find.byTooltip(
         'ssh build.example.net \u00b7 os=linux\n'
+        '1.5 CPUs \u00b7 CPU busy unknown \u00b7 load 0.50 \u00b7 free memory unknown '
+        'of 256 MiB \u00b7 sampled ${const HostResources(sampledAt: 1010).sampledTime}\n'
+        '1 running\n'
         'terminal, run, files \u00b7 linux/x86_64\n'
         'agents remote-hands \u00b7 egress none',
       ),
@@ -891,6 +917,7 @@ void main() {
     expect(
       find.byTooltip(
         'local\n'
+        'resources unknown\n'
         'agents auto \u00b7 egress direct\n'
         'requires claude>=2.1, git\n'
         'unmet: claude>=2.1: not installed\n'
@@ -903,6 +930,7 @@ void main() {
       find.byTooltip(
         'ephemeral ephemeral-container\n'
         'a fresh Theater is made for each Mission\n'
+        'resources unknown\n'
         'agents remote-hands · egress direct',
       ),
       findsOneWidget,
@@ -911,13 +939,17 @@ void main() {
       find.byTooltip(
         'transport container\n'
         'made for Mission mission-007\n'
+        'resources unknown\n'
         'agents remote-hands · egress direct',
       ),
       findsOneWidget,
     );
     await tester.tap(find.text('Preview placement'));
     await tester.pumpAndSettle();
-    expect(find.text('station-alpha \u00b7 local \u00b7 007'), findsOneWidget);
+    expect(
+      find.text('station-alpha \u00b7 local \u00b7 007 \u00b7 score 1.25'),
+      findsOneWidget,
+    );
     expect(
       find.text(
         'station-alpha \u00b7 build-box \u00b7 007 \u00b7 remote-hands',
