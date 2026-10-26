@@ -9,10 +9,14 @@
 //! Session. What the harness says is reported back as [`AssistantReport`]s.
 //!
 //! An assistant Session is not a Mission: it has no Operation, no safe house and no Cable
-//! endpoint, works in an empty directory of its own that goes when the harness closes, and
-//! is never on the board.
+//! endpoint, and is never on the board. It works in a directory of its own, named for its
+//! conversation inside one the desk made readable by the Station's user only: the same
+//! directory each time the conversation's harness starts, because Claude Code finds a Session
+//! to resume only from the directory it was recorded in. The directory goes when the harness
+//! closes.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -43,7 +47,7 @@ pub(super) const MAX_LIVE: usize = 4;
 const TOKEN_MARGIN_SECS: f64 = 120.0;
 /// How long one read of a harness's events waits, so a message never waits long for the lock.
 const READ_SLICE_MS: i64 = 250;
-/// The prefix of an assistant's working directory.
+/// The prefix of the directory that holds the assistants' working directories.
 const AREA_PREFIX: &str = "ai6-assistant-";
 /// How long Universal Exports holds a job poll open.
 const JOB_WAIT_MS: u64 = 1_000;
@@ -155,6 +159,8 @@ pub(super) struct Desk {
     max_live: usize,
     live: Arc<Mutex<BTreeMap<String, Live>>>,
     known: Arc<Mutex<BTreeMap<String, String>>>,
+    /// Where the conversations' working directories go, made at the first start.
+    areas: Mutex<Option<PathBuf>>,
 }
 
 impl Desk {
@@ -173,6 +179,7 @@ impl Desk {
             max_live: MAX_LIVE,
             live: Arc::default(),
             known: Arc::default(),
+            areas: Mutex::default(),
         }
     }
 
@@ -227,7 +234,16 @@ impl Desk {
             }
             // Its token is about to expire: the harness starts again with the job's.
             self.close(&job.conversation_id);
-            self.wait_closed(&job.conversation_id).await;
+        }
+        // A harness that has stopped may still be removing the directory the next one uses.
+        self.wait_closed(&job.conversation_id).await;
+        if self
+            .live
+            .lock()
+            .map_err(|_| "assistant lock failed")?
+            .contains_key(&job.conversation_id)
+        {
+            return Err("the conversation's previous harness is still closing".to_owned());
         }
         self.begin(job).await
     }
@@ -253,7 +269,7 @@ impl Desk {
         if live >= self.max_live {
             return Err("this Station runs as many assistant Sessions as it may".to_owned());
         }
-        let area = new_area()?;
+        let area = self.area(&job.conversation_id)?;
         // As a Chief of Staff review, the harness keeps only what reaches its model.
         let mut environment = vetting::review_environment(&agent.env);
         environment.insert(ASSISTANT_MCP_URL_ENV.to_owned(), self.mcp_url.clone());
@@ -276,7 +292,7 @@ impl Desk {
             mission_id: mission_id.clone(),
             agent_id: agent.id.clone(),
             prompt: job.message.clone(),
-            initial_context,
+            initial_context: initial_context.clone(),
             working_directory: area.clone(),
             clearance: "desk".to_owned(),
             environment: environment.clone(),
@@ -303,6 +319,7 @@ impl Desk {
                 project_mcp: false,
                 answer_only: false,
                 assistant: Some(AssistantMode::moneypenny()),
+                initial_context,
             });
         let harness = self.harness.clone();
         let started = tokio::task::spawn_blocking(move || {
@@ -403,6 +420,22 @@ impl Desk {
 
     fn known_session(&self, conversation: &str) -> Option<String> {
         self.known.lock().ok()?.get(conversation).cloned()
+    }
+
+    /// The conversation's working directory, made empty-if-new; the same path on every start.
+    fn area(&self, conversation: &str) -> Result<String, String> {
+        let mut areas = self
+            .areas
+            .lock()
+            .map_err(|_| "assistant lock failed".to_owned())?;
+        let root = match &*areas {
+            Some(root) => root.clone(),
+            None => areas.insert(new_root()?).clone(),
+        };
+        let area = root.join(conversation_digest(conversation));
+        std::fs::create_dir_all(&area)
+            .map_err(|error| format!("assistant working directory not made: {error}"))?;
+        Ok(area.to_string_lossy().into_owned())
     }
 }
 
@@ -548,24 +581,41 @@ fn conversation_digest(conversation: &str) -> String {
         .collect()
 }
 
-/// A new empty directory, named at random and readable by the Station's user only.
-fn new_area() -> Result<String, String> {
-    let path = tempfile::Builder::new()
+impl Drop for Desk {
+    /// Removes the directory of working directories once its harnesses have removed theirs; a
+    /// harness still closing leaves it behind.
+    fn drop(&mut self) {
+        if let Ok(mut areas) = self.areas.lock()
+            && let Some(root) = areas.take()
+        {
+            let _ = std::fs::remove_dir(root);
+        }
+    }
+}
+
+/// A new empty directory under the temporary directory, named at random and readable by the
+/// Station's user only, for the conversations' working directories.
+fn new_root() -> Result<PathBuf, String> {
+    Ok(tempfile::Builder::new()
         .prefix(AREA_PREFIX)
         .tempdir()
         .map_err(|error| format!("assistant working directory not made: {error}"))?
-        .keep();
-    Ok(path.to_string_lossy().into_owned())
+        .keep())
 }
 
-/// Removes a directory [`new_area`] made, and nothing else.
+/// Removes a conversation's directory [`Desk::area`] made, and nothing else.
 fn remove_area(path: &str) {
-    let path = std::path::Path::new(path);
-    let made_here = path.parent() == Some(std::env::temp_dir().as_path())
+    let path = Path::new(path);
+    let root = path.parent();
+    let made_here = root.and_then(Path::parent) == Some(std::env::temp_dir().as_path())
+        && root
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(AREA_PREFIX))
         && path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with(AREA_PREFIX));
+            .is_some_and(|name| name.len() == 32 && name.bytes().all(|b| b.is_ascii_hexdigit()));
     if made_here && let Err(error) = std::fs::remove_dir_all(path) {
         eprintln!(
             "ai6: assistant working directory {} not removed: {error}",
@@ -860,6 +910,15 @@ mod tests {
         _root: tempfile::TempDir,
     }
 
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.desk.close_all();
+            if let Some(areas) = self.desk.areas.lock().unwrap().take() {
+                let _ = std::fs::remove_dir_all(areas);
+            }
+        }
+    }
+
     fn fixture(resumable: bool, idle: Duration) -> Fixture {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);
@@ -1017,6 +1076,33 @@ mod tests {
         assert_eq!(resume.session_id.as_str(), "provider-assistant-1");
         assert_eq!(resume.message.as_deref(), Some("second"));
         assert_eq!(resume.assistant, Some(AssistantMode::moneypenny()));
+        assert_eq!(
+            resume.working_directory, asked.starts[0].working_directory,
+            "Claude Code resumes a Session only from the directory that recorded it"
+        );
+        assert_eq!(
+            resume.initial_context,
+            ["You serve the operator.", "You are Moneypenny."],
+            "the instructions come again, for a harness that does not keep them"
+        );
+        assert!(Path::new(&resume.working_directory).is_dir());
+    }
+
+    #[tokio::test]
+    async fn each_conversation_has_its_own_directory() {
+        let fixture = fixture(true, IDLE);
+        fixture.desk.handle(job("c-a", "one")).await;
+        fixture.desk.handle(job("c-b", "two")).await;
+        until(|| fixture.asked.lock().unwrap().starts.len() == 2).await;
+        let asked = fixture.asked.lock().unwrap();
+        let (a, b) = (
+            Path::new(&asked.starts[0].working_directory),
+            Path::new(&asked.starts[1].working_directory),
+        );
+        assert_ne!(a, b);
+        assert_eq!(a.parent(), b.parent());
+        drop(asked);
+        fixture.desk.close_all();
     }
 
     #[tokio::test]

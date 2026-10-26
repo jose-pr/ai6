@@ -156,6 +156,12 @@ pub struct AgentResume {
     /// The assistant mode, as [`AgentStart::assistant`]; decided again on every resume.
     #[serde(default)]
     pub assistant: Option<AssistantMode>,
+    /// The standing part of [`AgentStart::initial_context`] (the Agent's context, its role's
+    /// purpose and policy, an assistant's instructions), for a harness that does not keep
+    /// its start-up context in the Session it resumes. Claude Code gets it again as
+    /// `--append-system-prompt`; Codex keeps a thread's instructions and ignores it.
+    #[serde(default)]
+    pub initial_context: Vec<String>,
 }
 
 /// A message AI6 sends to an already running Agent Session.

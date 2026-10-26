@@ -127,6 +127,13 @@ impl AgentHandler for ClaudeHandler {
             "--resume".to_string(),
             request.session_id.to_string(),
         ];
+        // Claude Code keeps no `--append-system-prompt` in the Session it records.
+        if !request.initial_context.is_empty() {
+            argv.extend([
+                "--append-system-prompt".to_string(),
+                request.initial_context.join("\n\n"),
+            ]);
+        }
         if let Some(model) = request.model {
             argv.extend(["--model".to_string(), model]);
         }
@@ -1083,6 +1090,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    initial_context: Vec::new(),
                 },
                 terminal.clone().into_object(),
             )
@@ -1231,6 +1239,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    initial_context: Vec::new(),
                 },
                 terminal.into_object(),
             )
@@ -1299,6 +1308,7 @@ mod tests {
                 project_mcp: false,
                 answer_only: false,
                 assistant: None,
+                initial_context: Vec::new(),
             },
             terminal.into_object(),
         ) {
@@ -1655,6 +1665,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    initial_context: Vec::new(),
                 },
                 terminal.clone().into_object(),
             )
@@ -1733,6 +1744,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    initial_context: Vec::new(),
                 },
                 terminal.clone().into_object(),
             )
@@ -1856,6 +1868,7 @@ mod tests {
                     project_mcp: true,
                     answer_only: false,
                     assistant: Some(AssistantMode::moneypenny()),
+                    initial_context: vec!["You are Moneypenny.".to_owned()],
                 },
                 terminal.clone().into_object(),
             )
@@ -1895,6 +1908,11 @@ mod tests {
                 "{argv:?}"
             );
             assert!(!argv.iter().any(|a| a == "--settings"), "no gate to pass");
+            assert_eq!(
+                after("--append-system-prompt"),
+                "You are Moneypenny.",
+                "the instructions on start and on resume"
+            );
             assert!(
                 !argv.iter().any(|a| a.contains("conversation-token")),
                 "the token stays in the environment"

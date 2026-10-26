@@ -140,8 +140,11 @@ pub struct AssistantJob {
     pub agent_id: String,
     /// What the person wrote, or what the app reports on the person's behalf.
     pub message: String,
-    /// Context a harness started for this job is given before the message; unused when the
-    /// conversation's harness is running or resumed.
+    /// Context a harness started for this job is given before the message, and a resumed one
+    /// again where the harness does not keep it ([`AgentResume::initial_context`]); unused
+    /// when the conversation's harness is running.
+    ///
+    /// [`AgentResume::initial_context`]: crate::directorates::section_00::agent::AgentResume::initial_context
     #[serde(default)]
     pub context: Vec<String>,
     /// The bearer token of the conversation's MCP endpoint, bound to the person and the

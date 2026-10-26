@@ -2608,6 +2608,21 @@ fn available_handlers(state: &DaemonState) -> Vec<String> {
         .collect()
 }
 
+/// The part of a Session's start-up context that holds for its whole life: the Agent's own
+/// context, then its role's purpose and policy. A resume passes it again
+/// ([`AgentResume::initial_context`]).
+fn standing_context(agent_context: &str, role: Option<&AgentRole>) -> Vec<String> {
+    let mut context = Vec::new();
+    if !agent_context.trim().is_empty() {
+        context.push(agent_context.to_owned());
+    }
+    if let Some(role) = role {
+        context.push(format!("Role purpose: {}", role.purpose));
+        context.push(format!("Role policy: {}", role.policy));
+    }
+    context
+}
+
 fn configured_agent_role(
     state: &DaemonState,
     operation_id: Option<&str>,
@@ -3526,14 +3541,7 @@ async fn start_mission(
         area.safe_house.as_ref(),
     )
     .map_err(configuration_error)?;
-    let mut initial_context = vec![agent.context.clone()]
-        .into_iter()
-        .filter(|context| !context.trim().is_empty())
-        .collect::<Vec<_>>();
-    if let Some(role) = &role {
-        initial_context.push(format!("Role purpose: {}", role.purpose));
-        initial_context.push(format!("Role policy: {}", role.policy));
-    }
+    let mut initial_context = standing_context(&agent.context, role.as_ref());
     let (worker, worker_mission) = (state.clone(), mission.clone());
     let round = tokio::task::spawn_blocking(move || {
         head_of_station::round_context(&worker, &worker_mission)
@@ -4454,6 +4462,17 @@ async fn resume_mission(
         project_mcp,
         answer_only: review,
         assistant: None,
+        // A role removed since the start leaves only the Agent's context.
+        initial_context: standing_context(
+            &resume_agent.context,
+            mission
+                .role_id
+                .as_deref()
+                .and_then(|key| {
+                    configured_agent_role(&state, mission.operation_id.as_deref(), key).ok()
+                })
+                .as_ref(),
+        ),
     };
     let attachment = runner.as_ref().map(|_| RunnerAttachment {
         key: reattach.as_ref().map_or_else(

@@ -1222,6 +1222,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    initial_context: Vec::new(),
                 },
                 terminal.clone().into_object(),
             )
@@ -1555,6 +1556,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    initial_context: Vec::new(),
                 },
                 terminal.into_object(),
             )
@@ -1629,6 +1631,7 @@ mod tests {
                 project_mcp: false,
                 answer_only: false,
                 assistant: None,
+                initial_context: Vec::new(),
             },
             terminal.into_object(),
         );
@@ -1901,6 +1904,7 @@ mod tests {
                     project_mcp: true,
                     answer_only: false,
                     assistant: Some(AssistantMode::moneypenny()),
+                    initial_context: Vec::new(),
                 },
                 terminal.clone().into_object(),
             )
