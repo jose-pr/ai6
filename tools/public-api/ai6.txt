@@ -253,15 +253,30 @@ pub ai6::directorates::m::harness::ProjectSettings::Pinned
 impl ai6::directorates::m::harness::ProjectSettings
 pub const fn ai6::directorates::m::harness::ProjectSettings::as_str(self) -> &'static str
 #[non_exhaustive] pub struct ai6::directorates::m::harness::HarnessPolicy
-pub ai6::directorates::m::harness::HarnessPolicy::pins: alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_peer::id::PeerId>
+pub ai6::directorates::m::harness::HarnessPolicy::pin: core::option::Option<coqui_peer::id::PeerId>
 pub ai6::directorates::m::harness::HarnessPolicy::project_settings: ai6::directorates::m::harness::ProjectSettings
 impl ai6::directorates::m::harness::HarnessPolicy
-pub fn ai6::directorates::m::harness::HarnessPolicy::check(&self, &std::path::Path) -> core::result::Result<(), alloc::string::String>
-pub fn ai6::directorates::m::harness::HarnessPolicy::pinned(impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, coqui_peer::id::PeerId)>) -> Self
+pub fn ai6::directorates::m::harness::HarnessPolicy::decide(&self, &std::path::Path) -> ai6::directorates::m::harness::ProjectDecision
+pub fn ai6::directorates::m::harness::HarnessPolicy::pinned(coqui_peer::id::PeerId) -> Self
 pub fn ai6::directorates::m::harness::HarnessPolicy::validate(&self) -> core::result::Result<(), alloc::string::String>
-pub fn ai6::directorates::m::harness::HarnessPolicy::weakening(&self) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::harness::HarnessPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::harness::HarnessPolicy::with(ai6::directorates::m::harness::ProjectSettings) -> Self
-pub const ai6::directorates::m::harness::PROJECT_SETTINGS_FILES: [&str; 5]
+#[non_exhaustive] pub struct ai6::directorates::m::harness::ProjectDecision
+pub ai6::directorates::m::harness::ProjectDecision::load: bool
+pub ai6::directorates::m::harness::ProjectDecision::manifest: core::option::Option<coqui_peer::id::PeerId>
+pub ai6::directorates::m::harness::ProjectDecision::mcp: bool
+pub ai6::directorates::m::harness::ProjectDecision::refused: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::harness::ProjectManifest
+pub ai6::directorates::m::harness::ProjectManifest::files: alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_peer::id::PeerId>
+impl ai6::directorates::m::harness::ProjectManifest
+pub fn ai6::directorates::m::harness::ProjectManifest::digest(&self) -> coqui_peer::id::PeerId
+pub fn ai6::directorates::m::harness::ProjectManifest::digest_with(&self, coqui_peer::id::Digest) -> coqui_peer::id::PeerId
+pub fn ai6::directorates::m::harness::ProjectManifest::read(&std::path::Path) -> core::result::Result<Self, alloc::string::String>
+pub const ai6::directorates::m::harness::MAX_MANIFEST_BYTES: u64
+pub const ai6::directorates::m::harness::MAX_MANIFEST_FILES: usize
+pub const ai6::directorates::m::harness::MAX_MANIFEST_FILE_BYTES: u64
+pub const ai6::directorates::m::harness::PROJECT_DIRECTORIES: [&str; 2]
+pub const ai6::directorates::m::harness::PROJECT_FILES: [&str; 1]
 pub mod ai6::directorates::m::identity
 pub struct ai6::directorates::m::identity::AccessTokenRecord
 impl ai6::directorates::m::identity::AccessTokenRecord
@@ -2125,7 +2140,7 @@ pub fn ai6::directorates::registry::bona_fides::LibraryPin::with_publisher(self,
 pub ai6::directorates::registry::bona_fides::PinSet::libraries: alloc::vec::Vec<ai6::directorates::registry::bona_fides::LibraryPin>
 pub ai6::directorates::registry::bona_fides::PinSet::profile: core::option::Option<ai6::directorates::registry::bona_fides::PluginProfile>
 impl ai6::directorates::registry::bona_fides::PinSet
-pub fn ai6::directorates::registry::bona_fides::PinSet::check(&self, &str, &[u8], core::option::Option<&[u8]>, &ai6::directorates::registry::bona_fides::SignatureCheck) -> ai6::directorates::registry::bona_fides::PinCheck
+pub fn ai6::directorates::registry::bona_fides::PinSet::check(&self, &str, &[u8], core::option::Option<&[u8]>, &ai6::directorates::registry::bona_fides::SignatureCheck<'_>) -> ai6::directorates::registry::bona_fides::PinCheck
 pub fn ai6::directorates::registry::bona_fides::PinSet::from_toml(&str) -> core::result::Result<Self, alloc::string::String>
 pub fn ai6::directorates::registry::bona_fides::PinSet::load(&std::path::Path) -> core::io::error::Result<core::option::Option<Self>>
 pub fn ai6::directorates::registry::bona_fides::PinSet::new() -> Self
@@ -2163,9 +2178,11 @@ impl serde_core::ser::Serialize for ai6::directorates::registry::bona_fides::Pub
 pub fn ai6::directorates::registry::bona_fides::PublisherKey::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::directorates::registry::bona_fides::PublisherKey
 pub fn ai6::directorates::registry::bona_fides::PublisherKey::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
-pub fn ai6::directorates::registry::bona_fides::brief_digest(&str, &str) -> alloc::string::String
+pub const ai6::directorates::registry::bona_fides::PUBLISHER_MESSAGE_TAG: &[u8]
 pub fn ai6::directorates::registry::bona_fides::library_pin(&[u8]) -> coqui_peer::id::PeerId
-pub type ai6::directorates::registry::bona_fides::SignatureCheck = dyn core::ops::function::Fn(&ai6::directorates::registry::bona_fides::PublisherKey, &[u8], &[u8]) -> bool
+pub fn ai6::directorates::registry::bona_fides::publisher_message(&str, &[u8; 32]) -> alloc::vec::Vec<u8>
+pub fn ai6::directorates::registry::bona_fides::record_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
+pub type ai6::directorates::registry::bona_fides::SignatureCheck<'a> = (dyn core::ops::function::Fn(&ai6::directorates::registry::bona_fides::PublisherKey, &[u8], &[u8]) -> bool + 'a)
 pub mod ai6::directorates::registry::cables
 #[non_exhaustive] pub enum ai6::directorates::registry::cables::CableAction
 pub ai6::directorates::registry::cables::CableAction::Discover
@@ -3100,6 +3117,7 @@ pub ai6::directorates::section_00::agent::AgentResume::max_cost_micro_usd: core:
 pub ai6::directorates::section_00::agent::AgentResume::message: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::section_00::agent::AgentResume::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentResume::project_mcp: bool
 pub ai6::directorates::section_00::agent::AgentResume::project_settings: bool
 pub ai6::directorates::section_00::agent::AgentResume::session_id: ai6::directorates::m::identity::SessionId
 pub ai6::directorates::section_00::agent::AgentResume::working_directory: alloc::string::String
@@ -3112,6 +3130,7 @@ pub ai6::directorates::section_00::agent::AgentStart::initial_context: alloc::ve
 pub ai6::directorates::section_00::agent::AgentStart::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::directorates::section_00::agent::AgentStart::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::section_00::agent::AgentStart::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentStart::project_mcp: bool
 pub ai6::directorates::section_00::agent::AgentStart::project_settings: bool
 pub ai6::directorates::section_00::agent::AgentStart::prompt: alloc::string::String
 pub ai6::directorates::section_00::agent::AgentStart::working_directory: alloc::string::String
@@ -3242,6 +3261,7 @@ pub ai6::station::plugins::LibraryCheck::path: alloc::string::String
 pub ai6::station::plugins::LibraryCheck::verdict: alloc::string::String
 pub struct ai6::station::plugins::PluginPolicy
 impl ai6::station::plugins::PluginPolicy
+pub fn ai6::station::plugins::PluginPolicy::load(core::option::Option<&std::path::Path>, core::option::Option<&std::path::Path>, core::option::Option<ai6::directorates::registry::bona_fides::PluginProfile>, impl core::convert::Into<std::path::PathBuf>) -> core::io::error::Result<Self>
 pub fn ai6::station::plugins::PluginPolicy::new(core::option::Option<ai6::directorates::registry::bona_fides::PinSet>, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::plugins::PluginPolicy::pins(&self) -> &ai6::directorates::registry::bona_fides::PinSet
 pub fn ai6::station::plugins::PluginPolicy::profile(&self) -> ai6::directorates::registry::bona_fides::PluginProfile
@@ -3307,6 +3327,7 @@ impl ai6::station::runner::RunnerConfig
 pub fn ai6::station::runner::RunnerConfig::new(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::runner::RunnerConfig::with_listen(self, core::net::socket_addr::SocketAddr) -> Self
 pub fn ai6::station::runner::RunnerConfig::with_plugin_paths(self, impl core::iter::traits::collect::IntoIterator<Item = std::path::PathBuf>) -> Self
+pub fn ai6::station::runner::RunnerConfig::with_plugin_policy(self, ai6::station::plugins::PluginPolicy) -> Self
 pub fn ai6::station::runner::RunnerConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::station::runner::RunnerInfo
 pub ai6::station::runner::RunnerInfo::pid: u32
@@ -3814,6 +3835,7 @@ pub ai6::AgentResume::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::AgentResume::message: core::option::Option<alloc::string::String>
 pub ai6::AgentResume::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::AgentResume::model: core::option::Option<alloc::string::String>
+pub ai6::AgentResume::project_mcp: bool
 pub ai6::AgentResume::project_settings: bool
 pub ai6::AgentResume::session_id: ai6::directorates::m::identity::SessionId
 pub ai6::AgentResume::working_directory: alloc::string::String
@@ -3833,6 +3855,7 @@ pub ai6::AgentStart::initial_context: alloc::vec::Vec<alloc::string::String>
 pub ai6::AgentStart::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::AgentStart::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::AgentStart::model: core::option::Option<alloc::string::String>
+pub ai6::AgentStart::project_mcp: bool
 pub ai6::AgentStart::project_settings: bool
 pub ai6::AgentStart::prompt: alloc::string::String
 pub ai6::AgentStart::working_directory: alloc::string::String
@@ -4371,13 +4394,13 @@ pub fn ai6::directorates::m::approvals::GreenInkPolicy::eq(&self, &Self) -> bool
 impl core::default::Default for ai6::directorates::m::approvals::GreenInkPolicy
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::default() -> Self
 #[non_exhaustive] pub struct ai6::HarnessPolicy
-pub ai6::HarnessPolicy::pins: alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_peer::id::PeerId>
+pub ai6::HarnessPolicy::pin: core::option::Option<coqui_peer::id::PeerId>
 pub ai6::HarnessPolicy::project_settings: ai6::directorates::m::harness::ProjectSettings
 impl ai6::directorates::m::harness::HarnessPolicy
-pub fn ai6::directorates::m::harness::HarnessPolicy::check(&self, &std::path::Path) -> core::result::Result<(), alloc::string::String>
-pub fn ai6::directorates::m::harness::HarnessPolicy::pinned(impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, coqui_peer::id::PeerId)>) -> Self
+pub fn ai6::directorates::m::harness::HarnessPolicy::decide(&self, &std::path::Path) -> ai6::directorates::m::harness::ProjectDecision
+pub fn ai6::directorates::m::harness::HarnessPolicy::pinned(coqui_peer::id::PeerId) -> Self
 pub fn ai6::directorates::m::harness::HarnessPolicy::validate(&self) -> core::result::Result<(), alloc::string::String>
-pub fn ai6::directorates::m::harness::HarnessPolicy::weakening(&self) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::harness::HarnessPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::harness::HarnessPolicy::with(ai6::directorates::m::harness::ProjectSettings) -> Self
 #[non_exhaustive] pub struct ai6::HeadquartersLease
 impl ai6::directorates::registry::store::HeadquartersLease
@@ -4566,7 +4589,7 @@ pub ai6::Output::truncated: bool
 pub ai6::PinSet::libraries: alloc::vec::Vec<ai6::directorates::registry::bona_fides::LibraryPin>
 pub ai6::PinSet::profile: core::option::Option<ai6::directorates::registry::bona_fides::PluginProfile>
 impl ai6::directorates::registry::bona_fides::PinSet
-pub fn ai6::directorates::registry::bona_fides::PinSet::check(&self, &str, &[u8], core::option::Option<&[u8]>, &ai6::directorates::registry::bona_fides::SignatureCheck) -> ai6::directorates::registry::bona_fides::PinCheck
+pub fn ai6::directorates::registry::bona_fides::PinSet::check(&self, &str, &[u8], core::option::Option<&[u8]>, &ai6::directorates::registry::bona_fides::SignatureCheck<'_>) -> ai6::directorates::registry::bona_fides::PinCheck
 pub fn ai6::directorates::registry::bona_fides::PinSet::from_toml(&str) -> core::result::Result<Self, alloc::string::String>
 pub fn ai6::directorates::registry::bona_fides::PinSet::load(&std::path::Path) -> core::io::error::Result<core::option::Option<Self>>
 pub fn ai6::directorates::registry::bona_fides::PinSet::new() -> Self
@@ -4610,6 +4633,17 @@ pub ai6::ProbeReport::unmet: alloc::vec::Vec<ai6::directorates::q::provision::Un
 impl ai6::directorates::q::provision::ProbeReport
 pub fn ai6::directorates::q::provision::ProbeReport::failed(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::q::provision::ProbeReport::is_fit(&self) -> bool
+#[non_exhaustive] pub struct ai6::ProjectDecision
+pub ai6::ProjectDecision::load: bool
+pub ai6::ProjectDecision::manifest: core::option::Option<coqui_peer::id::PeerId>
+pub ai6::ProjectDecision::mcp: bool
+pub ai6::ProjectDecision::refused: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::ProjectManifest
+pub ai6::ProjectManifest::files: alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_peer::id::PeerId>
+impl ai6::directorates::m::harness::ProjectManifest
+pub fn ai6::directorates::m::harness::ProjectManifest::digest(&self) -> coqui_peer::id::PeerId
+pub fn ai6::directorates::m::harness::ProjectManifest::digest_with(&self, coqui_peer::id::Digest) -> coqui_peer::id::PeerId
+pub fn ai6::directorates::m::harness::ProjectManifest::read(&std::path::Path) -> core::result::Result<Self, alloc::string::String>
 #[non_exhaustive] pub struct ai6::Provenance
 pub ai6::Provenance::digest: alloc::string::String
 pub ai6::Provenance::item_url: core::option::Option<alloc::string::String>
@@ -5483,12 +5517,16 @@ pub const ai6::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::MAX_CABLE_TTL: f64
 pub const ai6::MAX_LOADOUT_BYTES: usize
+pub const ai6::MAX_MANIFEST_BYTES: u64
+pub const ai6::MAX_MANIFEST_FILES: usize
+pub const ai6::MAX_MANIFEST_FILE_BYTES: u64
 pub const ai6::MAX_RECENT_EVENTS: usize
 pub const ai6::MAX_RECENT_EVENT_CHARS: usize
 pub const ai6::MAX_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::MAX_STATION_MISSION_CAPACITY: usize
 pub const ai6::MAX_TIMELINE_EVENTS: usize
-pub const ai6::PROJECT_SETTINGS_FILES: [&str; 5]
+pub const ai6::PROJECT_DIRECTORIES: [&str; 2]
+pub const ai6::PROJECT_FILES: [&str; 1]
 pub const ai6::READ_TIMED_OUT: i64
 pub const ai6::REVIEW: &str
 pub const ai6::SCOPE_KINDS: [&str; 4]
@@ -6014,7 +6052,6 @@ impl ai6::directorates::registry::usage::UsageStore for ai6::directorates::regis
 pub fn ai6::directorates::registry::store::FileRegistry::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
 pub fn ai6::directorates::registry::store::FileRegistry::operation_cost_on_day(&self, core::option::Option<&str>, i64) -> core::io::error::Result<u64>
 pub fn ai6::directorates::registry::store::FileRegistry::record_usage(&self, core::option::Option<&str>, &str, &str, &ai6::directorates::medical::usage::UsageTotals, i64) -> core::io::error::Result<ai6::directorates::medical::usage::MissionUsage>
-pub fn ai6::brief_digest(&str, &str) -> alloc::string::String
 pub fn ai6::cable_source(&str) -> alloc::string::String
 pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
 pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
@@ -6032,6 +6069,7 @@ pub fn ai6::load_role_authorizer(impl core::convert::AsRef<std::path::Path>) -> 
 pub fn ai6::micro_usd(f64) -> u64
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
+pub fn ai6::record_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
 pub fn ai6::role_authorizer() -> coqui_roles::RoleAuthorizerBuilder
 pub fn ai6::role_authorizer_from_toml(&str) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
 pub async fn ai6::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
@@ -6045,4 +6083,4 @@ pub fn ai6::source_brief(&str, &str, &ai6::directorates::registry::sources::Sour
 pub fn ai6::tool_source(&str) -> alloc::string::String
 pub fn ai6::unsupported(&str) -> guatiao::library::kind::ProviderError
 pub fn ai6::utc_day(i64) -> alloc::string::String
-pub type ai6::SignatureCheck = dyn core::ops::function::Fn(&ai6::directorates::registry::bona_fides::PublisherKey, &[u8], &[u8]) -> bool
+pub type ai6::SignatureCheck<'a> = (dyn core::ops::function::Fn(&ai6::directorates::registry::bona_fides::PublisherKey, &[u8], &[u8]) -> bool + 'a)
