@@ -32,6 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   long the Headquarters lease lasts between renewals, and so how long a standby control
   Station waits before taking over (default 60 seconds).
 
+- Load balancing. Stations publish their host's CPUs, CPU percent, load and memory at every
+  check-in (`resources`, sysinfo), and each Theater reports its own from the probe: `nproc`,
+  the load average and `/proc/meminfo`, narrowed by a cgroup v2 container's `cpu.max` and
+  `memory.max`, or `sysctl` on macOS, sampled every 60 seconds between full probes
+  (`ai6 serve --resources-every`). Placement rules out a Station or Theater with less free
+  memory than `min_free_memory_mb` (default 512) or a CPU busier than `max_cpu_percent`
+  (default 95), both Station settings in the Registry
+  (`PUT /v1/user/stations/{id}/settings`), and scores the rest on Missions held against
+  capacity, CPU, memory and Sessions on the Theater; an Operation's `placement = "spread"`
+  (default) or `"pack"` orders them. The board, placement previews, Moneypenny and
+  `ai6ctl stations` show the figures, their sample time and each choice's score
+  (`ai6::Resources`, `ResourceLimits`, `PlacementStrategy`, `probe_resources`).
 - Recovery when a Station goes dark. Once its brief lease and its Session's lease lapse, the
   Headquarters Station hands the brief to a live Station that reaches the same Theater's
   field runner, which takes the Session lease (fenced) and re-attaches, replaying the events
@@ -428,6 +440,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Headquarters Station places a brief on the facts of the Station that would run it:
+  a brief naming no Agent is no longer failed when the Headquarters Station lacks a handler
+  another Station has (the Agent is chosen per Station from that Station's handlers), and
+  the Headquarters Station's own capacity no longer holds back work for others while a
+  Station's published capacity and running Sessions now count.
 - Terminal input queued at Universal Exports reaches the Session again: the gateway named
   the input's Operation in `x-ai6-station-id` while Stations read `x-ai6-operation-id`, so
   every input was dropped.
