@@ -11,7 +11,7 @@ pub use tools::{KEPT_FEATURES, TOOL_CHECK_ENV};
 
 use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -95,7 +95,8 @@ impl AgentHandler for CodexHandler {
             .filter(|_| !(request.answer_only || request.assistant.is_some()));
         let mut session = CodexSession::new(process, request.effort)
             .with_gate(gate)
-            .with_weakening(weakening);
+            .with_weakening(weakening)
+            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
         session.request(
             "initialize",
             json!({
@@ -170,7 +171,8 @@ impl CodexHandler {
         let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
         let mut session = CodexSession::new(process, request.effort)
             .with_gate(gate)
-            .with_weakening(weakening);
+            .with_weakening(weakening)
+            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
         session.request(
             "initialize",
             json!({
@@ -206,6 +208,20 @@ impl CodexHandler {
             text: request.prompt,
         })?;
         Ok(session.into_object())
+    }
+}
+
+/// The MCP servers a restricted (answer-only or assistant) thread may call, `None` for a thread
+/// that is not restricted.
+fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<Vec<String>> {
+    match assistant {
+        Some(mode) => Some(
+            mode.mcp_servers
+                .iter()
+                .map(|server| server.name.clone())
+                .collect(),
+        ),
+        None => answer_only.then(Vec::new),
     }
 }
 
@@ -249,6 +265,10 @@ struct CodexSession {
     effort: Option<String>,
     /// The latest quota window the account reported as used up.
     exhausted: Mutex<Option<UsageLimit>>,
+    /// For a restricted (answer-only or assistant) thread, the MCP servers it may call.
+    restricted: Option<Vec<String>>,
+    /// Set once a restricted thread used a tool it may not, and was ended.
+    tripped: AtomicBool,
 }
 
 impl CodexSession {
@@ -262,7 +282,38 @@ impl CodexSession {
             request_id: AtomicU64::new(0),
             effort,
             exhausted: Mutex::new(None),
+            restricted: None,
+            tripped: AtomicBool::new(false),
         }
+    }
+
+    /// Restricts the thread to the tools of `servers`: any other tool it uses ends it.
+    fn restricted_to(mut self, servers: Option<Vec<String>>) -> Self {
+        self.restricted = servers;
+        self
+    }
+
+    /// Ends a restricted thread that used `what`: the tool check confirmed before the start
+    /// what Codex said it would offer, and this is the backstop for what it offered anyway.
+    fn trip(&self, what: &str) -> Result<(), ProviderError> {
+        if self.tripped.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        let reason = format!(
+            "the restricted Codex thread used {what}, which it may not use; the Session was ended"
+        );
+        eprintln!("ai6: {reason}");
+        let _ = self.terminal.kill();
+        lock(&self.events)?.push_back(AgentEvent {
+            kind: "failed".to_owned(),
+            text: Some(reason),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+            quota: Vec::new(),
+        });
+        Ok(())
     }
 
     fn with_gate(mut self, gate: Option<Gate>) -> Self {
@@ -378,6 +429,14 @@ impl CodexSession {
     }
 
     fn collect_event(&self, message: Value) -> Result<(), ProviderError> {
+        if self.tripped.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if let Some(servers) = &self.restricted
+            && let Some(what) = forbidden_use(&message, servers)
+        {
+            return self.trip(&what);
+        }
         if let Some(id) = message.get("id")
             && message.get("method").and_then(Value::as_str) == Some(COMMAND_APPROVAL)
         {
@@ -396,6 +455,53 @@ impl CodexSession {
 
 /// The app-server's request to approve a command before it runs.
 const COMMAND_APPROVAL: &str = "item/commandExecution/requestApproval";
+
+/// Thread items a restricted thread may produce besides calls to its own MCP servers: what it
+/// is told and says, its reasoning and plan, and the thread's own bookkeeping.
+const RESTRICTED_ITEMS: [&str; 7] = [
+    "userMessage",
+    "agentMessage",
+    "reasoning",
+    "plan",
+    "contextCompaction",
+    "enteredReviewMode",
+    "exitedReviewMode",
+];
+
+/// What `message` shows a restricted thread doing that it may not, for a thread whose only
+/// tools are those of `servers`: any request from the server but token refresh and
+/// attestation (approvals, tool calls, questions, elicitation), or an `item/started` or
+/// `item/completed` of any other kind than [`RESTRICTED_ITEMS`] or an MCP call to one of
+/// `servers`.
+fn forbidden_use(message: &Value, servers: &[String]) -> Option<String> {
+    let method = message.get("method")?.as_str()?;
+    if message.get("id").is_some() {
+        return (!matches!(
+            method,
+            "account/chatgptAuthTokens/refresh" | "attestation/generate"
+        ))
+        .then(|| format!("a {method:?} request"));
+    }
+    if !matches!(method, "item/started" | "item/completed") {
+        return None;
+    }
+    let item = message.pointer("/params/item");
+    let field = |name: &str| {
+        item.and_then(|item| item.get(name))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+    };
+    match field("type") {
+        kind if RESTRICTED_ITEMS.contains(&kind) => None,
+        "mcpToolCall" if servers.iter().any(|server| server == field("server")) => None,
+        "mcpToolCall" => Some(format!(
+            "the tool {:?} of MCP server {:?}",
+            field("tool"),
+            field("server")
+        )),
+        kind => Some(format!("a {kind:?} item")),
+    }
+}
 
 impl CodexSession {
     /// Answers a command approval with the green ink gate: `accept` unless the gate holds the
@@ -937,7 +1043,6 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
     use std::sync::mpsc::{self, Receiver};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -1198,6 +1303,25 @@ mod tests {
                 .pointer("/params/input/0/text")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            // `item: TYPE [SERVER]` starts a thread item of that type, as a turn using a tool.
+            if method == "turn/start"
+                && let Some(item) = text.strip_prefix("item: ")
+            {
+                let mut parts = item.split(' ');
+                let kind = parts.next().unwrap_or_default();
+                let server = parts.next().unwrap_or_default();
+                for line in [
+                    json!({"method":"item/started","params":{"item":{
+                        "type": kind, "id": "item-9", "server": server, "tool": "board"
+                    }}}),
+                    json!({"method":"item/agentMessage/delta","params":{"delta":"after"}}),
+                    json!({"method":"turn/completed","params":{}}),
+                ] {
+                    writeln!(stdout, "{line}").unwrap();
+                }
+                stdout.flush().unwrap();
+                continue;
+            }
             let asks = if let Some(command) = text.strip_prefix("run: ") {
                 Some(("command", json!(command)))
             } else if text.starts_with("stdin: ") {
@@ -2381,6 +2505,82 @@ mod tests {
         assert_eq!(first.kind, "weakened");
         assert!(first.text.unwrap().contains("not a feature"));
         session.close().unwrap();
+    }
+
+    /// Events until the Session ends (`completed` or `failed`), at most five seconds.
+    fn until_end(session: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut events = Vec::new();
+        while Instant::now() < deadline {
+            match session.next_event(200) {
+                Ok(Some(event)) => {
+                    let end = matches!(event.kind.as_str(), "completed" | "failed");
+                    events.push(event);
+                    if end {
+                        break;
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => break,
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn a_restricted_thread_that_uses_a_tool_is_ended() {
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-trip-fixture".to_owned(),
+        })
+        .unwrap();
+        for item in [
+            "commandExecution",
+            "fileChange",
+            "webSearch",
+            "mcpToolCall other",
+        ] {
+            let mut start = answer_only_start(BTreeMap::new());
+            start.prompt = format!("item: {item}");
+            let session = handler
+                .start(start, ProcessTerminal::new().into_object())
+                .unwrap();
+            let events = until_end(&session);
+            let last = events.last().expect("the Session ended");
+            assert_eq!(last.kind, "failed", "{item}: {events:?}");
+            let reason = last.text.as_deref().unwrap_or_default();
+            assert!(reason.contains("restricted Codex thread used"), "{reason}");
+            assert!(
+                !events
+                    .iter()
+                    .any(|event| event.text.as_deref() == Some("after")),
+                "nothing after the tool use is read: {events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_restricted_thread_may_call_its_own_servers_and_talk() {
+        assert_eq!(
+            forbidden_use(
+                &json!({"method":"item/started","params":{"item":{
+                    "type":"mcpToolCall","server":"moneypenny","tool":"board"}}}),
+                &["moneypenny".to_owned()]
+            ),
+            None
+        );
+        for kind in ["agentMessage", "reasoning", "userMessage"] {
+            let message = json!({"method":"item/completed","params":{"item":{"type":kind}}});
+            assert_eq!(forbidden_use(&message, &[]), None, "{kind}");
+        }
+        let unknown = json!({"method":"item/started","params":{"item":{"type":"hologram"}}});
+        assert!(
+            forbidden_use(&unknown, &[]).is_some(),
+            "an unknown item is a tool"
+        );
+        let question = json!({"id": 4, "method": "item/tool/requestUserInput", "params": {}});
+        assert!(forbidden_use(&question, &[]).is_some());
+        let refresh = json!({"id": 5, "method": "account/chatgptAuthTokens/refresh"});
+        assert_eq!(forbidden_use(&refresh, &[]), None, "plumbing is not a tool");
     }
 
     #[test]

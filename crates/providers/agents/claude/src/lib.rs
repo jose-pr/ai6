@@ -106,7 +106,8 @@ impl AgentHandler for ClaudeHandler {
             &request.working_directory,
             &request.environment,
         )?;
-        let operation = ClaudeSession::new(session, None);
+        let operation = ClaudeSession::new(session, None)
+            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
         operation.send(&request.prompt)?;
         Ok(operation.into_object())
     }
@@ -162,7 +163,8 @@ impl AgentHandler for ClaudeHandler {
             &request.working_directory,
             &request.environment,
         )?;
-        let operation = ClaudeSession::new(session, Some(expected_session_id));
+        let operation = ClaudeSession::new(session, Some(expected_session_id))
+            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
         if let Err(error) = operation.prime_session_id(std::time::Duration::from_secs(30)) {
             let _ = operation.close();
             return Err(error);
@@ -182,6 +184,20 @@ const OWN_TOOLS: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,
 /// built-in ones off: Claude's own tools, its web and sub-agent tools, and any MCP tool.
 const ANSWER_ONLY_DENIED: &str = "Bash,PowerShell,Edit,MultiEdit,Write,NotebookEdit,Read,Glob,\
                                   Grep,LS,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*";
+
+/// The MCP servers a restricted (answer-only or assistant) Session may call, `None` for a
+/// Session that is not restricted.
+fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<Vec<String>> {
+    match assistant {
+        Some(mode) => Some(
+            mode.mcp_servers
+                .iter()
+                .map(|server| server.name.clone())
+                .collect(),
+        ),
+        None => answer_only.then(Vec::new),
+    }
+}
 
 /// What AI6 decided about the Session's settings.
 #[derive(Clone, Copy)]
@@ -440,6 +456,11 @@ struct ClaudeSession {
     expected_session_id: Option<SessionId>,
     eof: AtomicBool,
     eof_reported: AtomicBool,
+    /// For a restricted (answer-only or assistant) Session, the MCP servers it may call.
+    restricted: Option<Vec<String>>,
+    /// Set once a restricted Session called a tool it may not, and was ended: nothing it
+    /// wrote after that is read.
+    tripped: AtomicBool,
 }
 
 impl ClaudeSession {
@@ -452,7 +473,44 @@ impl ClaudeSession {
             expected_session_id,
             eof: AtomicBool::new(false),
             eof_reported: AtomicBool::new(false),
+            restricted: None,
+            tripped: AtomicBool::new(false),
         }
+    }
+
+    /// Restricts the Session to the tools of `servers`: calling any other tool ends it.
+    fn restricted_to(mut self, servers: Option<Vec<String>>) -> Self {
+        self.restricted = servers;
+        self
+    }
+
+    /// The `failed` event that ends a restricted Session whose `seen` event calls a tool outside
+    /// its servers (`mcp__<server>__<tool>`), after closing it; `None` when it calls none.
+    /// The flags it was started with are meant to make this impossible; this backs them up.
+    fn tripped(&self, seen: &AgentEvent) -> Option<AgentEvent> {
+        let servers = self.restricted.as_ref()?;
+        let forbidden = seen
+            .tools
+            .iter()
+            .filter(|tool| {
+                !servers
+                    .iter()
+                    .any(|server| tool.starts_with(&format!("mcp__{server}__")))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if forbidden.is_empty() {
+            return None;
+        }
+        let reason = format!(
+            "the restricted Claude Code Session called {}, which it may not use; the Session \
+             was ended",
+            forbidden.join(", ")
+        );
+        eprintln!("ai6: {reason}");
+        let _ = self.terminal.kill();
+        self.tripped.store(true, Ordering::Release);
+        Some(event("failed", Some(reason)))
     }
 
     fn send(&self, text: &str) -> Result<(), ProviderError> {
@@ -492,6 +550,9 @@ impl ClaudeSession {
     }
 
     fn read_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
+        if self.tripped.load(Ordering::Acquire) {
+            return Ok(None);
+        }
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
         let line = loop {
@@ -560,6 +621,9 @@ impl ClaudeSession {
             *lock(&self.session_id)? = Some(session_id);
         }
         if let Some(event) = decode_event(&value, line.clone()) {
+            if let Some(ended) = self.tripped(&event) {
+                return Ok(Some(ended));
+            }
             return Ok(Some(event));
         }
         if value.get("type").and_then(Value::as_str) == Some("user") {
@@ -1341,6 +1405,82 @@ mod tests {
             ]
         );
         assert_eq!(spec.lock().unwrap().as_ref().unwrap().cols, STREAM_COLS);
+    }
+
+    #[test]
+    fn a_restricted_session_that_calls_a_tool_is_ended() {
+        let call = |tool: &str| {
+            format!(
+                "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"tool_use\",\
+                 \"name\":\"{tool}\"}}]}}}}\n"
+            )
+        };
+        for (answer_only, assistant, tool, ends) in [
+            (true, None, "Bash", true),
+            (true, None, "mcp__moneypenny__board", true),
+            (
+                false,
+                Some(AssistantMode::moneypenny()),
+                "mcp__moneypenny__board",
+                false,
+            ),
+            (
+                false,
+                Some(AssistantMode::moneypenny()),
+                "mcp__other__read",
+                true,
+            ),
+            (false, None, "Bash", false),
+        ] {
+            let mut input =
+                b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-1\"}\n".to_vec();
+            input.extend_from_slice(call(tool).as_bytes());
+            input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
+            let handler = ClaudeHandler::try_from(ClaudeConfig {
+                executable: "claude-test".to_owned(),
+            })
+            .unwrap();
+            let session = handler
+                .resume(
+                    AgentResume {
+                        mission_id: "mission-42".parse().unwrap(),
+                        session_id: SessionId::try_new("s-1").unwrap(),
+                        message: None,
+                        working_directory: "C:\\station\\mission-42".to_owned(),
+                        environment: assistant_environment(),
+                        model: None,
+                        effort: None,
+                        max_cost_micro_usd: None,
+                        project_settings: false,
+                        project_mcp: false,
+                        answer_only,
+                        assistant,
+                        initial_context: Vec::new(),
+                    },
+                    ResumeTerminal {
+                        spec: Arc::new(Mutex::new(None)),
+                        input,
+                        writes: Arc::new(Mutex::new(Vec::new())),
+                    }
+                    .into_object(),
+                )
+                .unwrap();
+            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+                .map(|event| (event.kind, event.text))
+                .collect::<Vec<_>>();
+            if ends {
+                assert_eq!(kinds.len(), 2, "{tool}: {kinds:?}");
+                assert_eq!(kinds[1].0, "failed");
+                let reason = kinds[1].1.as_deref().unwrap();
+                assert!(reason.contains(tool), "{reason}");
+            } else {
+                assert_eq!(
+                    kinds.last().map(|(kind, _)| kind.as_str()),
+                    Some("completed"),
+                    "{tool}: {kinds:?}"
+                );
+            }
+        }
     }
 
     #[test]
