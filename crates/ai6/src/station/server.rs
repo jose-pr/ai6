@@ -9300,8 +9300,18 @@ mod tests {
         );
         let link = RunnerLink::local(runner_dir.clone(), PathBuf::from("unused"));
         let at_crash = link.status(&key).unwrap().unwrap().last;
-        tokio::time::sleep(DRIP_INTERVAL * 10).await;
-        let unattended = link.status(&key).unwrap().unwrap();
+        // Polled, not slept: a loaded runner drips far slower than DRIP_INTERVAL.
+        let unattended = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let status = link.status(&key).unwrap().unwrap();
+                if status.ended || status.last >= at_crash + 5 {
+                    return status;
+                }
+                tokio::time::sleep(DRIP_INTERVAL).await;
+            }
+        })
+        .await
+        .expect("the runner spools on without a Station");
         assert!(
             !unattended.ended,
             "the harness keeps running without a Station"
