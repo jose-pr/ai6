@@ -383,6 +383,20 @@ impl<'a> Round<'a> {
                     continue;
                 }
             };
+            if pending.is_empty() {
+                continue;
+            }
+            // Read once a round, so a clean proposal no class covers costs nothing more.
+            let promotable =
+                state
+                    .intake
+                    .class_authorizations(&operation.id)
+                    .is_ok_and(|classes| {
+                        classes.iter().any(|class| {
+                            class.is_live(self.now)
+                                && class.kinds.iter().any(|kind| kind == PROPOSAL_KIND)
+                        })
+                    });
             for proposal in pending {
                 let vetting = match proposal.vetting.clone() {
                     Some(vetting) => vetting,
@@ -391,7 +405,7 @@ impl<'a> Round<'a> {
                         None => continue,
                     },
                 };
-                if vetting.verdict == VettingVerdict::Pass {
+                if promotable && vetting.verdict == VettingVerdict::Pass {
                     promote_by_class(state, operation, &proposal);
                 }
             }
