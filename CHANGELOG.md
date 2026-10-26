@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A SQL Registry and roster, so the Stations of an HA deployment need no shared
+  filesystem. `SqlRegistry` (features `sqlite` and `postgres`) keeps every Registry record
+  family in SQLite or PostgreSQL, one table each, with the file Registry's guarantees:
+  every write takes the Registry's clock row first, so claims, leases, the Headquarters
+  term and Session fencing behave the same. `SqlConfigSource` keeps the roster as one row
+  per Operation, Agent, role and cover (the keys of its TOML table as JSON), built with
+  `Roster::from_parts`; `put` and `remove` refuse a change that leaves the roster
+  invalid, and its revision says what changed. Tables are created on first use and
+  versioned. `ai6 serve --registry LOCATION` and `--config LOCATION` take a directory,
+  `sqlite:PATH` or a `postgres://` URL, as does `AI6_REGISTRY` for the `ai6` command and
+  Universal Exports (`registry::backend::{open, from_environment}`, `config::open`).
+  PostgreSQL connections are made without TLS.
+- `ai6 serve --headquarters-lease SECS` (`StationConfig::with_headquarters_lease`) sets how
+  long the Headquarters lease lasts between renewals, and so how long a standby control
+  Station waits before taking over (default 60 seconds).
+
 - Recovery when a Station goes dark. Once its brief lease and its Session's lease lapse, the
   Headquarters Station hands the brief to a live Station that reaches the same Theater's
   field runner, which takes the Session lease (fenced) and re-attaches, replaying the events

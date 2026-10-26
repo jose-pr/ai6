@@ -218,14 +218,16 @@ Registry keeps the newest 10,000 activity events.
 ## File-backed intake
 
 The Registry defaults to the platform AI6 state directory and can be overridden
-with `AI6_REGISTRY`. Briefs in `new/` are claimed atomically and filed under `claimed/`,
-then `done/` or `failed/`. The stable brief identity combines its source and external
-record ID. User-supplied integrations can write validated brief JSON into `new/` or call
-the Universal Exports API.
+with `AI6_REGISTRY` or `ai6 serve --registry`, which also take a SQLite or PostgreSQL
+database ([Stations](stations.md#shared-registry)). In a directory, briefs in `new/` are
+claimed atomically and filed under `claimed/`, then `done/` or `failed/`; in a database
+the same states are rows of `ai6_briefs`. The stable brief identity combines its source
+and external record ID. User-supplied integrations can write validated brief JSON into a
+directory Registry's `new/` or call the Universal Exports API.
 
-SQLite/PostgreSQL Registry backends and distributed Registry placement are not currently
-implemented. A Session runs on its Station's host, or, for a Theater reached only through a
-transport, on the Station in remote-hands mode (see [Theaters](theaters.md)).
+Distributed Registry placement is not implemented. A Session runs on its Station's host,
+or, for a Theater reached only through a transport, on the Station in remote-hands mode
+(see [Theaters](theaters.md)).
 
 ## Recovery
 

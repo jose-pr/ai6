@@ -12,11 +12,15 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
 | `gate` | The green ink gate's client of a Station (`section_00::gate`), for agent providers; part of `daemon`. | No |
 | `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS (`coqui-peer-tls`). | No |
+| `sqlite` | `SqlRegistry` and `SqlConfigSource` in a SQLite file. | No |
+| `postgres` | `SqlRegistry` and `SqlConfigSource` in PostgreSQL, shared by the Stations of an HA deployment. | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
 MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, serde, toml, fs2, sha2, lru and zeroize.
 `daemon` adds Axum, Tokio, Guatiao provider loading, `ureq`, `subtle` and `futures-util`,
-`publisher` adds `url`, and `station-tls` adds `coqui-peer-tls`, `coqui-peer` and rustls. `cli` adds clap and Tokio signal support. The crate builds as a
+`publisher` adds `url`, and `station-tls` adds `coqui-peer-tls`, `coqui-peer` and rustls.
+`sqlite` adds `rusqlite` with SQLite compiled in (a C compiler at build time); `postgres`
+adds the synchronous `postgres` client and Tokio. `cli` adds clap and Tokio signal support. The crate builds as a
 Rust library and contains no `unsafe` code. `cables-mcp` adds RMCP's Streamable HTTP
 server, JSON Schema support, constant-time bearer checks and per-Session tokens; the
 default feature set remains dependency-light.
@@ -31,7 +35,11 @@ node that runs them: `station::server` (daemon service and `serve*`), `station::
 (provider host), `station::safehouse` (opens a Mission's safe house through a provider),
 `station::runner` (the field runner), `station::publisher` (`publisher` feature) and
 `station::identity` (`station-tls` feature). The command exposes `ai6 serve`,
-`ai6 runner serve|call`, `ai6 identity` and `ai6 peer waiting|accept`.
+`ai6 runner serve|call`, `ai6 identity` and `ai6 peer waiting|accept`. `ai6 serve
+--registry LOCATION` and `--config LOCATION` take a directory, `sqlite:PATH` or a
+`postgres://` URL for the Registry and the roster (defaults: `AI6_REGISTRY`, else the state
+directory; the configuration directory); `--headquarters-lease SECS` (default 60) sets
+`StationConfig::with_headquarters_lease`.
 
 ## Access contracts (`ai6::directorates::m::access`)
 
@@ -365,6 +373,21 @@ pub trait ConfigSource: Send + Sync {
 }
 pub struct TomlConfigDir;   // ConfigSource; new(root), root()
 pub struct MemoryConfigSource;   // ConfigSource; new(roster), replace(&self, roster)
+/// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` → SqlConfigSource; anything else →
+/// TomlConfigDir. Unsupported for a SQL location without its feature.
+pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>>;
+
+// Features `sqlite` or `postgres`; also at the crate root.
+pub struct SqlConfigSource;   // ConfigSource + Debug
+impl SqlConfigSource {
+    pub fn open(location: &str) -> io::Result<Self>;   // as SqlRegistry::open
+    pub fn put(&self, record: ConfigRecord, key: &str, definition: &serde_json::Value)
+        -> Result<ConfigRevision, RosterError>;
+    pub fn remove(&self, record: ConfigRecord, key: &str)
+        -> Result<Option<ConfigRevision>, RosterError>;   // None: there was none
+}
+#[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ConfigRecord { Operation, Agent, Role, Cover }
 ```
 
 A source hands out only checked rosters: an unacceptable configuration is an error. The
@@ -376,6 +399,19 @@ are parsed, so `changes_since` reads them but parses nothing while they are unch
 other store (a database, an HTTP API) builds its roster with `Roster::from_parts`. The
 daemon reads the roster once at start (`ServeConfig::with_config_source`; default
 `TomlConfigDir` over the configuration directory).
+
+`SqlConfigSource` keeps one table per record kind (`ai6_config_operations`, `_agents`,
+`_roles`, `_covers`): a row is a key and a JSON object with the keys of that record's
+table in `operations.toml`, `agents.toml` or `covers.toml` (`deny_unknown_fields` as
+there). `load` parses each with the file loader's types and checks, resolves Agents'
+`extends` among the rows, adds the cover rows over the built-in covers and builds the roster
+with `Roster::from_parts`; an Operation's trusted `.ai6/agents.toml` still applies on top.
+The revision is the `config` row of `ai6_clock`, read before the rows; `changes_since` reads
+only it. `put` and `remove` change one record and check the whole roster in the same
+transaction, refusing (and rolling back) a change that leaves it unacceptable, such as
+removing an Agent another extends; each change advances the revision. A writer that edits
+the tables directly must advance that row in the same transaction, or Stations do not see
+the change. The database may be the Registry's.
 
 ## Theaters (`ai6::directorates::m::theaters`)
 
@@ -815,16 +851,65 @@ pub trait RegistryBackend: BriefStore + StationStore + AccessTokenStore + CableS
     + AuditStore + AgentRoleStore + ApprovalStore + QuarantineStore + SessionStore
     + SleeperStore + SourceStore + TimelineStore + UsageStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
+
+/// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` / `postgresql://…` → SqlRegistry;
+/// anything else → FileRegistry (a directory, not touched until used).
+pub fn open(location: &str) -> io::Result<Arc<dyn RegistryBackend>>;
+/// `open(AI6_REGISTRY)`, else the directory `AI6_HOME/registry` or the platform state dir.
+pub fn from_environment() -> io::Result<Arc<dyn RegistryBackend>>;
 ```
 
 Every trait is re-exported at the crate root. The methods are synchronous; async callers run
 them on a blocking thread. Calls through `dyn RegistryBackend` need no import; calling them
-on a `FileRegistry` value needs the family trait in scope
+on a `FileRegistry` or `SqlRegistry` value needs the family trait in scope
 (`use ai6::directorates::registry::backend::*`). The sections below give each family's
-methods under the module that defines it. `FileRegistry` is the only implementation: one
-directory every Station shares. The daemon takes `Arc<dyn RegistryBackend>` through
-`ServeConfig::with_registry` (default `FileRegistry::from_environment()`), Universal Exports
-through `Gateway::with_registry`, and `CableRelay::new` takes one too.
+methods under the module that defines it. `FileRegistry` keeps them in one directory every
+Station shares; `SqlRegistry` (features `sqlite`, `postgres`) in a database. A SQL location
+without its feature is `Unsupported`. The daemon takes `Arc<dyn RegistryBackend>` through
+`ServeConfig::with_registry` (default `backend::from_environment()`), Universal Exports
+through `Gateway::with_registry` (its command uses `from_environment()`), and
+`CableRelay::new` takes one too; the `ai6 quarantine` and `ai6 sleeper` commands open
+`from_environment()`.
+
+## SQL Registry (`ai6::directorates::registry::sql`, features `sqlite` or `postgres`)
+
+```rust
+#[derive(Debug)]
+pub struct SqlRegistry;   // every Registry family; also at the crate root
+impl SqlRegistry {
+    /// `sqlite:PATH` or `sqlite://PATH` (a SQLite file), or a `postgres://` /
+    /// `postgresql://` URL whose parameters pass to the server, such as
+    /// `options=-c%20search_path%3Dai6` for a schema. Creates or upgrades the tables.
+    pub fn open(location: &str) -> io::Result<Self>;
+}
+```
+
+`open` fails `InvalidInput` for another location, `Unsupported` without the feature or for
+a schema newer than this build (the version is in `ai6_schema`), and with the database's
+error when it cannot be reached; a PostgreSQL location connects at once. Each record family
+has its own table (`ai6_briefs`, `ai6_brief_leases`, `ai6_headquarters`, `ai6_sessions`,
+`ai6_approvals` and so on), holding the record as JSON text in the file Registry's shape
+beside the columns a lookup needs, and a `revision` column. Every write transaction first
+advances its row of `ai6_clock` (`registry`): that row lock serializes writers across
+Stations as the directory lock does, so claims, brief leases, the Headquarters election and
+term, and Session fencing keep the file Registry's guarantees, and its new value is the
+revision stamped on each row written. SQLite runs writes as `BEGIN IMMEDIATE` with a 30 s
+busy timeout and WAL; PostgreSQL runs `READ COMMITTED` and serializes concurrent schema
+migrations with an advisory lock. Leases expire on each Station's wall clock, as in the
+file Registry. A unique violation maps to `AlreadyExists`, a lost PostgreSQL connection to
+`ConnectionAborted`; the next call reconnects. PostgreSQL connections are made without TLS
+(`sslmode=require` fails). The synchronous client cannot run on a thread driving async
+tasks, so from such a thread a call runs on a scoped thread instead: calling from an async
+handler is safe, if blocking. One connection per handle; calls on one handle are serialized.
+
+Where the stores differ: keys are stored as given rather than as file-safe names, so two
+quarantine or usage keys that differ only in characters a file name cannot hold stay
+apart; a finished brief has one state (`finish` of a brief that was never claimed moves it
+out of the queue); submitting a proposal already approved or rejected is answered as a
+repeat rather than queued again; a lapsed Headquarters lease is replaced in place, with no
+`lease.lapsed.*` record; the transcript `finish` files is kept in `ai6_briefs.transcript`.
+Bearer secrets are never stored: access tokens are kept by digest, credentials stay in Q's
+secret backends.
 
 ## Registry store (`ai6::directorates::registry::store`)
 
@@ -998,8 +1083,10 @@ platform metadata. `StationConfig` defaults to both `Control` and `Execution`, n
 pinned terminal and only the `local` Theater; `with_roles` replaces the role set, `with_label`
 adds a placement label, `with_theater` declares a Theater in code,
 `with_loadouts(LoadoutCatalog)` replaces `loadouts.toml`,
-`with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets` and
-`with_terminal` pins the terminal provider. Without a pin the Station uses an available
+`with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets`,
+`with_headquarters_lease(Duration)` sets how long the Headquarters lease lasts between
+renewals (default `DEFAULT_LEASE`, 60 s; zero makes startup fail): how long a standby
+control Station waits before taking over, and `with_terminal` pins the terminal provider. Without a pin the Station uses an available
 terminal provider, preferring `DEFAULT_TERMINAL`. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
 distributed placement. Station and Agent limits count assignments in the shared Registry.
 The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID` set an

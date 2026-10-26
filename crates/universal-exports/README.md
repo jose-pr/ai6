@@ -189,8 +189,9 @@ user attach grants apply `session.read` or `session.input` to the exact register
 Session tuple. A missing policy rule denies access. Provider calls run on Tokio's
 blocking pool. `Gateway::with_registry` enables M-issued access tokens but leaves
 user login and authorization endpoints unavailable. The `universal-exports` command accepts
-provider IDs and an access-policy path to enable user access; it uses the file Registry
-selected by `AI6_REGISTRY` (Rust Universal Exports does not yet support the SQL Registry URL).
+provider IDs and an access-policy path to enable user access; it uses the Registry
+selected by `AI6_REGISTRY`: a directory, `sqlite:PATH` or a `postgres://` URL
+(`ai6::directorates::registry::backend::from_environment`).
 
 A control goes to the Station holding the Mission's latest Session record, else the one
 holding its brief's lease, else the Headquarters Station, passing over Stations gone dark;
@@ -246,7 +247,7 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
 | `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None |
-| `AI6_REGISTRY` | Shared file Registry used for issued access-token records; SQL URLs are not supported by this Rust gateway yet. | AI6 state Registry |
+| `AI6_REGISTRY` | Shared Registry used for issued access-token records: a directory, `sqlite:PATH` or a `postgres://` URL. | AI6 state Registry |
 
 ## Exit status
 

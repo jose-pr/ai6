@@ -35,6 +35,13 @@ pwsh -File tools/public-api.ps1 -Mode check
 The Flutter app needs the isolated Flutter `main` SDK described in
 `clients/moneypenny/README.md`, because native desktop windowing is not in stable Flutter.
 
+The Registry test suite runs every case on the file Registry and SQLite. With
+`AI6_TEST_POSTGRES_URL` set to a `postgres://` server whose user may create schemas, it
+also runs them on PostgreSQL (one schema per case, dropped afterwards), as do the SQL
+roster tests and `crates/ai6/tests/ha.rs` (two `ai6 serve` Stations failing over); unset,
+they pass without running and `cargo test -- --nocapture` prints how many were skipped.
+Building the `sqlite` feature compiles SQLite, so it needs a C compiler.
+
 ## Rules
 
 - Work and infrastructure are separate: Operation → Mission → Session is the work;
@@ -62,7 +69,7 @@ The Flutter app needs the isolated Flutter `main` SDK described in
 - MPL-2.0. Outside contributors sign `CLA.md`.
 - A harness on a remote Theater runs under the field runner (`ai6 runner`) or the
   Station's detached wrapper over the transport; remote safe houses, cross-Station adoption
-  of a running Session and SQL/federated Registry placement are not implemented, so do not
+  of a running Session and federated Registry placement are not implemented, so do not
   describe them as available.
 
 ## CI and release

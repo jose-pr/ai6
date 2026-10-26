@@ -206,10 +206,22 @@ else (a database, an HTTP API, its own code): it builds the roster from typed re
 `ConfigSource` to `ServeConfig::with_config_source`. Records built this way get the same
 checks as the files; an invalid configuration stops the Station rather than half-loading.
 
+`ai6 serve --config LOCATION` names the source: a configuration directory, or, for
+Stations that share one roster without a shared filesystem, `sqlite:PATH` or a
+`postgres://` URL. In a database each Operation, Agent, role and cover is a row of its own
+table (`ai6_config_operations`, `ai6_config_agents`, `ai6_config_roles`,
+`ai6_config_covers`): its key and a JSON object with the keys its table has in the files,
+so `[operation.G]` with `roster = ["007"]` is the row `G` holding `{"roster": ["007"]}`.
+The rows get the files' checks, `extends` included; an Operation's own `.ai6/agents.toml`
+still applies. `SqlConfigSource::put` and `remove` change one record and refuse a change
+that would leave the roster invalid. Each change moves the roster to its next revision
+(the `config` row of `ai6_clock`); a tool that edits the tables directly advances that row
+in the same transaction.
+
 A source reports a revision and whether it has changed since one, so a Station can tell
 cheaply when to reload. Today a Station reads its roster once, at start. Theaters are not
 part of it: each Station reads its own `theaters.toml`, along with its loadouts and Cable
-settings, from the configuration directory.
+settings, from the configuration directory (`--config-dir`).
 
 Missions and provider Sessions are visible in the Moneypenny app and through `ai6ctl`. The Mission ID identifies
 the work; the provider-issued Session ID identifies one resumable agent run. See

@@ -349,7 +349,7 @@ pub struct Gateway { /* shared, bounded state */ }
 
 impl Gateway {
     pub fn new(config: GatewayConfig) -> Self;
-    /// Any Registry store: `Arc::new(ai6::FileRegistry::from_environment()?)` is the command's.
+    /// Any Registry store; the command passes `ai6::directorates::registry::backend::from_environment()?`.
     pub fn with_registry(config: GatewayConfig, registry: Arc<dyn ai6::RegistryBackend>) -> Self;
     pub fn with_access(
         config: GatewayConfig,

@@ -75,7 +75,7 @@ flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release \
 ```text
 ai6 serve [--listen ADDRESS] [--config-dir PATH] [--plugin-path PATH]...
           [--station ID] [--role control|execution]... [--label KEY=VALUE]...
-          [--terminal ID]
+          [--terminal ID] [--registry LOCATION] [--config LOCATION]
 ai6 identity
 ai6 peer waiting
 ai6 peer accept FINGERPRINT
@@ -131,7 +131,7 @@ transport (`local`, `ssh`). The directorates (M, the Registry, Q Branch, 00 Sect
 Station runs their decisions; Universal Exports is the only public door. See
 [Architecture](https://jose-pr.github.io/ai6/architecture/) and
 [Organization](https://jose-pr.github.io/ai6/organization/). Field mode on a remote Theater and
-a SQL Registry are not implemented yet.
+TLS to a PostgreSQL Registry are not implemented yet.
 
 ```toml
 [operation.G]

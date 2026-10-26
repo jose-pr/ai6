@@ -81,17 +81,35 @@ an available provider, preferring `pty`; `ai6 serve --terminal ID` pins one. See
 
 ## Shared Registry
 
-Stations sharing a file Registry (`AI6_REGISTRY`) coordinate check-ins, leases and
-Headquarters election. Lease expiry uses wall-clock time, so Stations need synchronized
-clocks. Check-ins expire after 45 seconds; a Station whose check-ins lapse has *gone dark*
-and its leased briefs are recovered by the Headquarters Station: a Session a runner still
-supervises is adopted by another Station, any other is lost and tried again
-([Recovery](missions.md#recovery)). The Registry is file-backed; a SQL
-backend is not supported. Stations and Universal Exports reach it only through the
-`RegistryBackend` traits (one per kind of record: briefs, Stations, Sessions, Cables,
-approvals and so on), and the shared directory (`FileRegistry`) is the one store that
-implements them; a program embedding the Station can pass another with
-`ServeConfig::with_registry`.
+Stations sharing a Registry coordinate check-ins, leases and Headquarters election. The
+Registry is a directory every Station mounts, a SQLite file for a single Station, or a
+PostgreSQL database for Stations that share no filesystem. `ai6 serve --registry LOCATION`
+names it: a directory, `sqlite:PATH` or a `postgres://` URL; without it the Station uses
+`AI6_REGISTRY` (read the same way, also by the `ai6` command and Universal Exports), else
+the state directory.
+
+```console
+ai6 serve --registry "postgres://ai6@db.internal/ai6" --config "postgres://ai6@db.internal/ai6"
+```
+
+Lease expiry uses wall-clock time, so Stations need synchronized clocks. Check-ins expire
+after 45 seconds; a Station whose check-ins lapse has *gone dark* and its leased briefs are
+recovered by the Headquarters Station: a Session a runner still supervises is adopted by
+another Station, any other is lost and tried again ([Recovery](missions.md#recovery)). The
+Headquarters lease lasts 60 seconds between renewals; `--headquarters-lease SECS` sets how
+long a standby control Station waits before taking over from one that went dark.
+
+In a SQL Registry each kind of record has its own table, created on first use; a database
+written by a newer `ai6` is refused. Every write first takes the Registry's row in
+`ai6_clock`, so writers queue as they do on the directory's lock, and leases, the
+Headquarters term and Session fencing behave the same on every backend. PostgreSQL
+connections are made without TLS: keep the database on a trusted network. No secret is
+stored there: access tokens are kept by digest, and credentials stay with Q.
+
+Stations and Universal Exports reach the Registry only through the `RegistryBackend`
+traits (one per kind of record: briefs, Stations, Sessions, Cables, approvals and so on),
+which the directory (`FileRegistry`) and the database (`SqlRegistry`) implement; a program
+embedding the Station can pass another store with `ServeConfig::with_registry`.
 
 ## Capacity and visibility
 

@@ -42,6 +42,8 @@ cargo add ai6 --git https://github.com/jose-pr/ai6
 | `publisher` | Bounded publication of lifecycle events and raw terminal bytes to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
 | `station-tls` | Persistent Station certificate identities and pinned-peer or CA mutual TLS, on `coqui-peer-tls`. | No |
+| `sqlite` | The Registry and roster in a SQLite file (`SqlRegistry`, `SqlConfigSource`). | No |
+| `postgres` | The Registry and roster in PostgreSQL, shared by the Stations of an HA deployment. | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
 ## Quick start
@@ -58,6 +60,7 @@ and `Tanner`.
 
 ```console
 ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
+          [--registry LOCATION] [--config LOCATION] [--headquarters-lease SECS]
           [--station ID] [--role control|execution]... [--label KEY=VALUE]...
           [--terminal ID] [--max-concurrent-missions N] [watchdog options]
 ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--terminal ID] [--detach]
@@ -74,7 +77,10 @@ ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
   preferring `pty`; `--terminal` pins one. Agents and handlers do not choose it. `--role` and `--label` configure placement;
   both roles are on by default. Watchdog defaults are set with `--stall-timeout`,
   `--loop-timeout`, `--loop-min-lines`, `--blocked-after`, `--max-runtime`, `--history`
-  and `--normalize-digits` (seconds may be fractional).
+  and `--normalize-digits` (seconds may be fractional). `--registry` and `--config` take
+  a directory, `sqlite:PATH` or a `postgres://` URL: Stations sharing a PostgreSQL
+  Registry and roster need no shared filesystem. `--headquarters-lease` (default 60
+  seconds) is how long a standby control Station waits before taking over.
 - `ai6 runner serve` runs the field runner on a Theater: it supervises harnesses there for
   Stations, spooling their events under its state directory (default `runner` in AI6's state
   directory) and serving them on a token-protected loopback port. `--detach` starts it in
