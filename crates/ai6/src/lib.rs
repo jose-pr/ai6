@@ -82,20 +82,28 @@ pub use directorates::q::transport::{
     TransportConfig, TransportForward, WriteSpec, describe, is_unsupported, unsupported,
 };
 pub use directorates::q::{
+    Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin,
+    PoolChoice, PoolStrategy, choose_pools,
+};
+pub use directorates::q::{
     DEFAULT_SECRET_LEASE_TTL, Loadout, LoadoutCatalog, MAX_LOADOUT_BYTES, MAX_SECRET_LEASE_TTL,
     McpServer, QError, QErrorKind, SandboxError, SandboxProfile, SandboxRequest, SecretBackend,
     SecretBackendFailure, SecretBroker, SecretDefinition, SecretError, SecretLease,
     SecretLeaseRequest, SecretRequest, SecretSource, SecretValue, StationSecrets,
     claude_mcp_config,
 };
+pub use directorates::registry::accounts::{
+    AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,
+    QuotaWindow, UNKNOWN_USE_PERMILLE, choose_account,
+};
 pub use directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,
     Revocation, Ruling,
 };
 pub use directorates::registry::backend::{
-    AccessTokenStore, AgentRoleStore, ApprovalStore, AuditStore, BriefStore, CableStore,
-    QuarantineStore, RegistryBackend, SessionStore, SleeperStore, SourceStore, StationStore,
-    TimelineStore, UsageStore,
+    AccessTokenStore, AccountStore, AgentRoleStore, ApprovalStore, AuditStore, BriefStore,
+    CableStore, QuarantineStore, RegistryBackend, SessionStore, SleeperStore, SourceStore,
+    StationStore, TimelineStore, UsageStore,
 };
 pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,

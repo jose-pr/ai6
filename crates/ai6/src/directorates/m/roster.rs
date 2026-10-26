@@ -63,6 +63,8 @@ pub struct Agent {
     pub budget: Budget,
     /// Optional concurrent operation limit.
     pub max_concurrent: Option<usize>,
+    /// The one account pool this Agent's Sessions draw from, when it is pinned to one.
+    pub pool: Option<String>,
 }
 
 impl Agent {
@@ -88,6 +90,7 @@ impl Agent {
             limits: WatchdogOverrides::default(),
             budget: Budget::default(),
             max_concurrent: None,
+            pool: None,
         }
     }
 }
@@ -199,6 +202,9 @@ pub struct Operation {
     pub sources: toml::Table,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
     pub sleepers: BTreeMap<String, Sleeper>,
+    /// The account pools its Missions may draw from; `None` (the default) is every pool
+    /// whose own `operations` admit the Operation.
+    pub pools: Option<Vec<String>>,
 }
 
 /// How an Operation's Missions get their working directory (`workspace = { .. }`).
@@ -736,6 +742,7 @@ struct OperationDefinition {
     green_ink: GreenInkDefinition,
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
+    pools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -878,6 +885,7 @@ impl OperationDefinition {
             green_ink,
             sources: self.sources,
             sleepers: self.sleepers,
+            pools: self.pools,
         })
     }
 }
@@ -993,6 +1001,7 @@ struct AgentDefinition {
     limits: WatchdogOverrides,
     budget: BudgetDefinition,
     max_concurrent: Option<usize>,
+    pool: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1193,6 +1202,10 @@ fn resolve_agent(
         max_concurrent: definition
             .max_concurrent
             .or_else(|| base.as_ref().and_then(|agent| agent.max_concurrent)),
+        pool: definition
+            .pool
+            .clone()
+            .or_else(|| base.as_ref().and_then(|agent| agent.pool.clone())),
     };
     validate_clearance(&agent.clearance)?;
     seen.remove(&agent.id);
@@ -1300,6 +1313,30 @@ mod tests {
 
         directory.write("operations.toml", "[operation.G]\nstations = [\"\"]\n");
         assert!(Roster::load(&directory.0).is_err());
+    }
+
+    #[test]
+    fn an_operation_may_list_its_pools_and_an_agent_may_pin_one_it_passes_on() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "operations.toml",
+            "[operation.G]\npools = [\"claude-team\"]\n[operation.H]\n",
+        );
+        directory.write(
+            "agents.toml",
+            "[agent.007]\npool = \"claude-team\"\n[agent.008]\nextends = \"007\"\n[agent.009]\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        assert_eq!(
+            roster.operation("G").unwrap().pools.as_deref(),
+            Some(&["claude-team".to_owned()][..])
+        );
+        assert_eq!(roster.operation("H").unwrap().pools, None, "every pool");
+        assert_eq!(
+            roster.agent(None, "008").unwrap().pool.as_deref(),
+            Some("claude-team")
+        );
+        assert_eq!(roster.agent(None, "009").unwrap().pool, None);
     }
 
     #[test]

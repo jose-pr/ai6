@@ -1,6 +1,7 @@
 //! Q Branch execution resources: validated loadouts, secret leases and terminals.
 
 mod mcp;
+mod pools;
 mod sandbox;
 mod secrets;
 
@@ -11,6 +12,10 @@ pub mod terminal;
 pub mod transport;
 
 pub use mcp::claude_mcp_config;
+pub use pools::{
+    Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin,
+    PoolChoice, PoolStrategy, choose_pools,
+};
 pub use sandbox::{SandboxError, SandboxRequest};
 pub use secrets::{
     DEFAULT_SECRET_LEASE_TTL, MAX_SECRET_LEASE_TTL, SecretBackend, SecretBackendFailure,
@@ -54,6 +59,7 @@ pub struct QError {
     line: Option<usize>,
     column: Option<usize>,
     offset: Option<usize>,
+    reason: Option<String>,
     source: Option<io::Error>,
 }
 
@@ -65,8 +71,20 @@ impl QError {
             line: None,
             column: None,
             offset: None,
+            reason: None,
             source: None,
         }
+    }
+
+    fn because(mut self, reason: impl Into<String>) -> Self {
+        self.reason = Some(reason.into());
+        self
+    }
+
+    /// What is wrong, when the check can say without echoing the input: a pool or account
+    /// name and the setting at fault.
+    pub fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
     }
 
     fn at(mut self, source: &str, offset: usize) -> Self {
@@ -134,6 +152,9 @@ impl std::fmt::Display for QError {
         if let (Some(line), Some(column)) = (self.line, self.column) {
             write!(f, ":{line}:{column}")?;
         }
+        if let Some(reason) = &self.reason {
+            write!(f, ": {reason}")?;
+        }
         Ok(())
     }
 }
@@ -174,6 +195,17 @@ impl Loadout {
     /// Returns secret reference names, never their values.
     pub fn secret_names(&self) -> &[String] {
         &self.secrets
+    }
+
+    /// The loadout that declares only a pool account's secret, so a broker leases it and
+    /// nothing else; `None` for an account that reads no secret.
+    pub fn for_account(pool: &AccountPool, account: &Account) -> Option<Self> {
+        Some(Self {
+            agent: format!("pool:{}/{}", pool.id(), account.name()),
+            sandbox: None,
+            mcp: Vec::new(),
+            secrets: vec![account.secret_name()?.to_owned()],
+        })
     }
 }
 
@@ -354,16 +386,40 @@ impl SecretDefinition {
     }
 }
 
-/// Validated loadouts and the named policies they reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Validated loadouts, the named policies they reference, and the account pools.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoadoutCatalog {
     loadouts: BTreeMap<String, Loadout>,
     sandboxes: BTreeMap<String, SandboxProfile>,
     servers: BTreeMap<String, McpServer>,
     secrets: BTreeMap<String, SecretDefinition>,
+    pools: BTreeMap<String, AccountPool>,
 }
 
 impl LoadoutCatalog {
+    /// Adds an account pool, replacing one with the same ID; the way in for pools built in
+    /// code. Its accounts' secrets are defined as an unnamed `[secret.<name>]` is.
+    ///
+    /// # Errors
+    ///
+    /// A [`QErrorKind::Schema`] error whose [`QError::reason`] names what is wrong.
+    pub fn with_pool(mut self, pool: AccountPool) -> Result<Self, QError> {
+        pool.validate()
+            .map_err(|reason| QError::new(QErrorKind::Schema, None).because(reason))?;
+        self.pools.insert(pool.id().to_owned(), pool);
+        Ok(self)
+    }
+
+    /// The account pools in ID order.
+    pub fn pools(&self) -> impl Iterator<Item = &AccountPool> {
+        self.pools.values()
+    }
+
+    /// The pool `id`.
+    pub fn pool(&self, id: &str) -> Option<&AccountPool> {
+        self.pools.get(id)
+    }
+
     /// Reads and validates a UTF-8 TOML loadout file, bounded to one MiB.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, QError> {
         let path = path.as_ref();
@@ -443,13 +499,20 @@ impl LoadoutCatalog {
             .unwrap_or_else(|| SecretDefinition::new(name))
     }
 
-    /// The definition of every secret any loadout names, in stable name order.
+    /// The definition of every secret any loadout or pool account names, in stable name
+    /// order.
     pub fn secrets(&self) -> Vec<SecretDefinition> {
-        let names: std::collections::BTreeSet<&String> = self
+        let names: std::collections::BTreeSet<&str> = self
             .loadouts
             .values()
-            .flat_map(|loadout| &loadout.secrets)
-            .chain(self.secrets.keys())
+            .flat_map(|loadout| loadout.secrets.iter().map(String::as_str))
+            .chain(self.secrets.keys().map(String::as_str))
+            .chain(
+                self.pools
+                    .values()
+                    .flat_map(AccountPool::accounts)
+                    .filter_map(Account::secret_name),
+            )
             .collect();
         names.into_iter().map(|name| self.secret(name)).collect()
     }
@@ -475,6 +538,77 @@ struct Document {
     mcp: BTreeMap<String, RawMcpServer>,
     #[serde(default)]
     secret: BTreeMap<String, RawSecret>,
+    #[serde(default)]
+    pool: BTreeMap<String, RawPool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPool {
+    handler: String,
+    #[serde(default)]
+    operations: Vec<String>,
+    strategy: Option<String>,
+    login_command: Option<Vec<String>>,
+    #[serde(default)]
+    account: BTreeMap<String, RawAccount>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAccount {
+    kind: String,
+    secret: Option<String>,
+    dir: Option<String>,
+    env: Option<String>,
+    #[serde(default)]
+    priority: i64,
+    max_concurrent: Option<usize>,
+    #[serde(default)]
+    labels: BTreeMap<String, String>,
+}
+
+impl RawPool {
+    fn into_pool(self, id: String) -> Result<AccountPool, String> {
+        let mut pool = AccountPool::new(&id, self.handler).operations(self.operations);
+        if let Some(strategy) = self.strategy {
+            pool = pool.strategy(PoolStrategy::parse(&strategy).ok_or_else(|| {
+                format!(
+                    "pool {id:?}: strategy {strategy:?} is not headroom, round_robin or priority"
+                )
+            })?);
+        }
+        if let Some(command) = self.login_command {
+            pool = pool.login_command(command);
+        }
+        for (name, raw) in self.account {
+            let kind = AccountKind::parse(&raw.kind).ok_or_else(|| {
+                format!(
+                    "pool {id:?} account {name:?}: kind {:?} is unknown",
+                    raw.kind
+                )
+            })?;
+            let mut account = Account::new(&name, kind).priority(raw.priority);
+            if let Some(secret) = raw.secret {
+                account = account.secret(secret);
+            }
+            if let Some(dir) = raw.dir {
+                account = account.dir(PathBuf::from(dir));
+            }
+            if let Some(env) = raw.env {
+                account = account.env(env);
+            }
+            if let Some(limit) = raw.max_concurrent {
+                account = account.max_concurrent(limit);
+            }
+            for (key, value) in raw.labels {
+                account = account.label(key, value);
+            }
+            pool = pool.account(account);
+        }
+        pool.validate()?;
+        Ok(pool)
+    }
 }
 
 #[derive(Deserialize)]
@@ -554,8 +688,16 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
             failure
         })?;
 
-    if document.loadout.is_empty() {
-        return Err(QError::new(QErrorKind::Schema, path));
+    if document.loadout.is_empty() && document.pool.is_empty() {
+        return Err(QError::new(QErrorKind::Schema, path)
+            .because("declare at least one [loadout.<agent>] or [pool.<id>]"));
+    }
+    let mut pools = BTreeMap::new();
+    for (id, raw) in document.pool {
+        let pool = raw
+            .into_pool(id.clone())
+            .map_err(|reason| QError::new(QErrorKind::Schema, path.clone()).because(reason))?;
+        pools.insert(id, pool);
     }
     let mut loadouts = BTreeMap::new();
     for (name, raw) in document.loadout {
@@ -672,6 +814,7 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
         sandboxes,
         servers,
         secrets,
+        pools,
     })
 }
 
@@ -903,6 +1046,89 @@ green_ink = true
                 .green_ink_weakening()
                 .unwrap()
                 .contains("any target")
+        );
+    }
+
+    #[test]
+    fn pools_load_with_their_accounts_and_secrets_and_errors_name_the_setting() {
+        let catalog = LoadoutCatalog::from_str(
+            r#"
+[pool.claude-team]
+handler = "claude"
+operations = ["ai6-*"]
+strategy = "round_robin"
+
+[pool.claude-team.account.alice]
+kind = "claude-oauth-token"
+secret = "alice-token"
+priority = 2
+max_concurrent = 1
+labels = { plan = "max" }
+
+[pool.claude-team.account.bob]
+kind = "config-dir"
+dir = "/logins/bob"
+
+[pool.codex-team]
+handler = "codex"
+login_command = ["/opt/codex/bin/codex"]
+
+[pool.codex-team.account.carol]
+kind = "openai-api-key"
+"#,
+        )
+        .unwrap();
+        let team = catalog.pool("claude-team").unwrap();
+        assert_eq!(team.handler(), "claude");
+        assert_eq!(team.operation_globs(), ["ai6-*"]);
+        assert_eq!(team.balancing(), super::PoolStrategy::RoundRobin);
+        let alice = team.get("alice").unwrap();
+        assert_eq!(alice.kind(), super::AccountKind::ClaudeOauthToken);
+        assert_eq!(alice.secret_name(), Some("alice-token"));
+        assert_eq!((alice.priority_value(), alice.concurrency()), (2, Some(1)));
+        assert_eq!(alice.labels()["plan"], "max");
+        assert_eq!(
+            team.get("bob").unwrap().login_dir(),
+            Some(std::path::Path::new("/logins/bob"))
+        );
+        assert_eq!(
+            catalog.pool("codex-team").unwrap().login(),
+            ["/opt/codex/bin/codex"]
+        );
+        // Account secrets are served like loadout secrets.
+        let names: Vec<_> = catalog
+            .secrets()
+            .iter()
+            .map(|definition| definition.name().to_owned())
+            .collect();
+        assert_eq!(names, ["alice-token", "carol"]);
+
+        for (bad, expected) in [
+            ("[pool.p]\nhandler = \"claude\"\n", "has no accounts"),
+            (
+                "[pool.p]\nhandler = \"claude\"\n[pool.p.account.a]\nkind = \"password\"\n",
+                "kind \"password\" is unknown",
+            ),
+            (
+                "[pool.p]\nhandler = \"claude\"\nstrategy = \"random\"\n[pool.p.account.a]\nkind = \"anthropic-api-key\"\n",
+                "strategy \"random\"",
+            ),
+        ] {
+            let error = LoadoutCatalog::from_str(bad).unwrap_err();
+            assert_eq!(error.kind(), QErrorKind::Schema);
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+        assert!(
+            LoadoutCatalog::from_str("[pool.p]\nhandler = \"claude\"\nvalue = 1\n").is_err(),
+            "unknown keys are refused"
+        );
+        assert!(
+            LoadoutCatalog::default()
+                .with_pool(super::AccountPool::new("p", "claude"))
+                .unwrap_err()
+                .reason()
+                .unwrap()
+                .contains("has no accounts")
         );
     }
 

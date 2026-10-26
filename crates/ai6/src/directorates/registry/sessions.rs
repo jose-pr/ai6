@@ -17,6 +17,8 @@ use crate::directorates::m::placement::ExecutionMode;
 use crate::directorates::medical::exposure::Exposure;
 use crate::directorates::q::safehouse::SafeHouseCheckpoint;
 
+use super::accounts::AccountRef;
+
 use super::store::{
     FileRegistry, invalid_data, read_headquarters, registry_lock, unix_time, write_atomic,
 };
@@ -165,6 +167,10 @@ pub struct SessionRecord {
     /// Why the Session was lost; set only with [`SessionStatus::Lost`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lost: Option<String>,
+    /// The pool account whose credential the Session runs on, when its Agent draws from a
+    /// pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<AccountRef>,
 }
 
 impl SessionRecord {
@@ -186,6 +192,7 @@ pub struct NewSession {
     predecessor: Option<String>,
     exposure: Vec<Exposure>,
     launch: Option<SessionLaunch>,
+    account: Option<AccountRef>,
 }
 
 impl NewSession {
@@ -205,7 +212,14 @@ impl NewSession {
             predecessor: None,
             exposure: Vec::new(),
             launch: None,
+            account: None,
         }
+    }
+
+    /// Records the pool account the Session runs on.
+    pub fn with_account(mut self, account: AccountRef) -> Self {
+        self.account = Some(account);
+        self
     }
 
     /// Records how the harness was launched.
@@ -250,9 +264,16 @@ pub struct SessionUpdate {
     launch: Option<SessionLaunch>,
     recent: Option<Vec<String>>,
     checkpoint: Option<(SafeHouseCheckpoint, f64)>,
+    account: Option<AccountRef>,
 }
 
 impl SessionUpdate {
+    /// Records the pool account the Session runs on now, replacing the one recorded.
+    pub fn account(mut self, account: AccountRef) -> Self {
+        self.account = Some(account);
+        self
+    }
+
     /// Records how the harness was launched, replacing what was recorded.
     pub fn launch(mut self, launch: SessionLaunch) -> Self {
         self.launch = Some(launch);
@@ -470,6 +491,7 @@ pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> Ses
         checkpoint: None,
         checkpointed_at: None,
         lost: None,
+        account: new.account,
     }
 }
 
@@ -519,6 +541,9 @@ pub(super) fn apply_fenced(
     }
     if let Some(launch) = update.launch {
         record.launch = Some(launch);
+    }
+    if let Some(account) = update.account {
+        record.account = Some(account);
     }
     if let Some(recent) = update.recent {
         let skip = recent.len().saturating_sub(MAX_RECENT_EVENTS);

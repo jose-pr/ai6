@@ -182,6 +182,15 @@ CREATE TABLE ai6_timeline (
 CREATE INDEX ai6_timeline_order ON ai6_timeline (at_micros, id);
 CREATE INDEX ai6_timeline_operation ON ai6_timeline (operation, at_micros, id);
 
+-- Pool accounts: claims, quota windows and daily tokens, one row per account.
+CREATE TABLE ai6_accounts (
+    pool TEXT NOT NULL,
+    account TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (pool, account)
+);
+
 -- operation is '' for usage outside any Operation.
 CREATE TABLE ai6_usage (
     operation TEXT NOT NULL,

@@ -21,6 +21,7 @@
 //! the certificate; `disable`: no TLS) and `password_file=PATH`. [`weakenings`] names what
 //! a location gives up; [`redact`] hides its password for messages.
 
+mod accounts;
 mod approvals;
 mod briefs;
 pub(crate) mod db;
