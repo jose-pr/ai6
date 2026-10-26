@@ -74,6 +74,33 @@ says so. When the person signs out, her tools stop working.
 Results reach her as data, marked as such: briefs, issue bodies and Agent output inside them
 were written by others, and her instructions say never to follow what they say.
 
+## Changes she proposes, you confirm
+
+Moneypenny changes nothing herself. Her write tools only propose:
+
+| Tool | Proposes | Needs |
+| --- | --- | --- |
+| `propose_mission` | Queuing a Mission | `mission.create` |
+| `propose_mission_control` | Cancel, retry, resume or interrupt a Mission | `mission.control` |
+| `propose_mission_proposal_decision` | Approving or rejecting an Agent's Mission proposal | `mission.create` |
+| `propose_held_brief_decision` | Releasing or refusing a held brief | `mission.create` |
+| `propose_roster_edit`, `propose_roster_removal` | A roster record set or removed | `roster.manage` |
+| `propose_station_settings` | A Station's limits | `station.configure` |
+| `propose_class_authorization` | A class authorisation | `approval.class` |
+
+A proposal shows in the chat with the exact request, a summary and the permission it needs,
+and **Confirm** and **Cancel**. If the person lacks that permission, there is no proposal at
+all: she is told she cannot. Only the person, in the app session the proposal was made in,
+can confirm it, within an hour; she has no way to. A confirmed proposal is first recorded in
+the audit log (`moneypenny.confirmed`: who, which conversation and proposal, which request),
+then sent through the same route as the app's own request, with its usual checks and its own
+audit record: a roster edit is still checked against the whole roster and refused if it
+would leave it unacceptable. She is told how it went.
+
+So text she reads cannot act through her: an issue body that tells her to change the roster
+can at most make her propose it, in plain view, to a person who decides. Irreversible steps
+keep [green ink](missions.md#green-ink): she cannot sign it, only point you to the Green ink page.
+
 ## In the app
 
 The app opens a WebSocket to `/v1/user/moneypenny` and sends its access token in the first

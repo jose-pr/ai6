@@ -404,6 +404,29 @@ runs, and identifiers are percent-encoded into paths. Results are JSON inside
 `mission_proposals`, `missions`, `placement_preview`, `pools`, `profile`, `quarantines`,
 `roster`, `station_settings`, `timeline`; all read only.
 
+Write tools only propose: `propose_class_authorization` (approval.class), `propose_held_brief_decision`
+(release or refuse; mission.create), `propose_mission` (mission.create),
+`propose_mission_control` (cancel, retry, resume, interrupt; mission.control; the proposal ID
+is the idempotency key), `propose_mission_proposal_decision` (mission.create),
+`propose_roster_edit` and `propose_roster_removal` (roster.manage on `config:roster`),
+`propose_station_settings` (station.configure on `station:<id>`). Each checks its input and
+the person's permission through the Authorizer first: without it the tool answers "Refused"
+and records nothing. Otherwise it records a proposal (ID `proposal-<hex>`, the exact method,
+path and body, a summary, the permission it needs) and shows it as a `proposal` entry; the
+model is told nothing changed. There is no tool to confirm and none to sign green ink. The
+app sends `{"type":"confirm","proposal":ID}` or `{"type":"cancel","proposal":ID}`; a confirm
+is taken only from a socket signed in with the access token the proposal was made under
+(`forbidden` otherwise), for a `pending` proposal (`conflict` otherwise) less than an hour
+old (then `expired`). It records the audit event `moneypenny.confirmed` (actor the person;
+the Operation, or resource `config:roster` / `station:<id>`; target `CONVERSATION PROPOSAL
+TOOL PATH`) and only then sends the request through the gateway's own route as the person,
+which validates and audits as for the app; a confirmation that cannot be audited does not
+run. The proposal becomes `done` or `failed` with AI6's answer, sent as
+`{"type":"proposal","proposal":{id,tool,summary,request,needs,status,result}}`, and
+Moneypenny is told (`[App: the person confirmed …]`) at once when she is idle, else with the
+next message; a cancellation is told with the next message. 32 proposals are kept per
+conversation.
+
 ## Gateway state
 
 ```rust
@@ -616,7 +639,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/station/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with `x-ai6-operation-id`, `x-ai6-mission-id` and `x-ai6-session-id` headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
 | `GET /v1/station/controls/next?station=<id>&wait_ms=<n>` | Bearer-authenticated long poll for that Station's next control (`wait_ms` default 1000, capped at 25000); `200` with one `application/vnd.ai6.guatiao` control value frame on channel 4 (the receiver builds the schema from any control) and the control becomes `delivered`, or `204`. Stations share one credential, so `station` is the caller's own word. |
 | `POST /v1/station/controls/{control_id}/result` | Bearer-authenticated outcome `{"station","outcome":"applied"\|"rejected","state"?,"reason"?}`; `state` is a Mission state name, `reason` is cut to 512 characters without control characters. `204`; `404` unknown, `403` another Station's control, `409` already finished. |
-| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"busy"}`; a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"page"?:{…}}` (`error` `busy` while one is answered, `unauthorized` once the token ended) and `{"type":"new"}`; the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error","text","at"}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
+| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"busy"}`; a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"page"?:{…}}` (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}` and `{"type":"cancel","proposal":ID}`; the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most 25,000). |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `failed`, `limit` and a `closed` while answering become `error` entries. |

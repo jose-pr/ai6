@@ -82,7 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   network beyond them are refused for now). Her tools are served on `/v1/moneypenny/mcp` to a
   token bound to the person and the conversation, and each runs through the gateway's own
   routes as that person, so a refusal there is a refusal for her; results are wrapped as
-  data. `Gateway::with_assistant` and `AssistantConfig` are the library form.
+  data. `Gateway::with_assistant` and `AssistantConfig` are the library form. Her
+  `propose_*` tools (Missions, Mission controls, proposals, held briefs, roster edits, Station
+  settings, class authorisations) only record a proposal the person confirms or cancels in
+  the app, and only when the person holds the permission; a confirm from the session it was
+  proposed in is audited (`moneypenny.confirmed`) and then sent through the usual route.
 - Vetting: before M places a brief, the Headquarters holder runs deterministic checks under
   the Operation's `[operation.ID.vetting]` settings (`vetting = "off"` turns them off, a
   reported weakening). A malformed brief (no visible title, text past `max_brief_bytes`,
