@@ -6,6 +6,7 @@
 //! Deciding needs `approval.decide` on the Operation; class authorisations need
 //! `approval.class`. Neither is implied by `mission.create` or `mission.control`.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use ai6::directorates::registry::backend::*;
@@ -107,7 +108,7 @@ async fn authorized(
     headers: &HeaderMap,
     operation_id: String,
     action: &'static str,
-) -> Result<(ai6::Person, OperationId, ai6::FileRegistry), ApiError> {
+) -> Result<(ai6::Person, OperationId, Arc<dyn RegistryBackend>), ApiError> {
     let person = resolve_user(gateway, bearer(headers)?).await?;
     let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
     authorize_operation_action(gateway, person.clone(), &operation, action).await?;
@@ -117,7 +118,7 @@ async fn authorized(
 }
 
 async fn audit(
-    registry: ai6::FileRegistry,
+    registry: Arc<dyn RegistryBackend>,
     actor: String,
     action: &'static str,
     operation: &OperationId,
@@ -213,7 +214,7 @@ pub(crate) async fn reject(
 }
 
 async fn decide(
-    registry: ai6::FileRegistry,
+    registry: Arc<dyn RegistryBackend>,
     person: ai6::Person,
     operation: OperationId,
     request_id: String,

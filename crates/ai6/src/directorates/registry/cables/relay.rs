@@ -11,7 +11,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::directorates::registry::backend::*;
-use crate::directorates::registry::store::FileRegistry;
 
 use super::{
     Cable, CableDraft, CableError, CableRecipient, CableScope, CableState, CableTarget,
@@ -599,7 +598,7 @@ type EndpointKey = (String, String, Option<String>, Option<String>);
 
 /// Authorizes sends and receives, snapshots broadcast audiences and stores accepted Cables.
 pub struct CableRelay {
-    registry: Arc<FileRegistry>,
+    registry: Arc<dyn RegistryBackend>,
     policy: RwLock<CablePolicy>,
     endpoints: Arc<EndpointSource>,
     channels: BTreeMap<String, BTreeSet<String>>,
@@ -616,7 +615,7 @@ pub struct CableRelay {
 impl CableRelay {
     /// Creates a relay over the file Registry and an authoritative Agent directory.
     pub fn new(
-        registry: Arc<FileRegistry>,
+        registry: Arc<dyn RegistryBackend>,
         policy: CablePolicy,
         endpoints: impl Fn() -> Vec<CableEndpoint> + Send + Sync + 'static,
         channels: BTreeMap<String, BTreeSet<String>>,
@@ -1437,6 +1436,7 @@ fn new_cable_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::registry::store::FileRegistry;
 
     fn principal(agent: &str, operation: &str) -> CablePrincipal {
         CablePrincipal::try_new(
@@ -1480,7 +1480,7 @@ mod tests {
     }
 
     fn relay(
-        registry: Arc<FileRegistry>,
+        registry: Arc<dyn RegistryBackend>,
         policy: CablePolicy,
         endpoints: Vec<CableEndpoint>,
     ) -> CableRelay {

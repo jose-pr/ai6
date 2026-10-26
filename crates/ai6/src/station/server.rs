@@ -199,6 +199,7 @@ pub struct ServeConfig {
     address: SocketAddr,
     plugin_paths: Vec<PathBuf>,
     config_dir: Option<PathBuf>,
+    registry: Option<Arc<dyn RegistryBackend>>,
     station_id: Option<String>,
     station: StationConfig,
     max_concurrent_missions: usize,
@@ -214,6 +215,7 @@ impl ServeConfig {
             address,
             plugin_paths: Vec::new(),
             config_dir: None,
+            registry: None,
             station_id: None,
             station: StationConfig::default(),
             max_concurrent_missions: DEFAULT_MAX_CONCURRENT_MISSIONS,
@@ -232,6 +234,14 @@ impl ServeConfig {
     /// Sets the directory containing `operations.toml` and `agents.toml`.
     pub fn with_config_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.config_dir = Some(path.into());
+        self
+    }
+
+    /// Sets the shared Registry. Without one, the daemon opens the [`FileRegistry`] that
+    /// `AI6_REGISTRY`, `AI6_HOME` or the platform state directory names.
+    #[must_use]
+    pub fn with_registry(mut self, registry: Arc<dyn RegistryBackend>) -> Self {
+        self.registry = Some(registry);
         self
     }
 
@@ -463,13 +473,15 @@ where
         .map_err(io::Error::other)?
         .join("missions.json");
     let mut missions = MissionStore::open(mission_store)?;
-    let intake = FileRegistry::from_environment()?;
+    let intake: Arc<dyn RegistryBackend> = match config.registry.take() {
+        Some(registry) => registry,
+        None => Arc::new(FileRegistry::from_environment()?),
+    };
     let startup_recovery = recover_startup_missions(&mut missions)?;
     let listener = TcpListener::bind(config.address).await?;
     #[cfg(feature = "publisher")]
     let publisher = config.publisher.take().map(Publisher::start).transpose()?;
     let roster = Arc::new(roster);
-    let intake = Arc::new(intake);
     let missions = Arc::new(Mutex::new(missions));
     let sessions = Arc::new(Mutex::new(BTreeMap::new()));
     let cable_roster = roster.clone();
@@ -907,7 +919,7 @@ fn cable_error(error: CableRelayError) -> ApiErrorResponse {
 struct DaemonState {
     plugins: Arc<plugins::Plugins>,
     roster: Arc<Roster>,
-    intake: Arc<FileRegistry>,
+    intake: Arc<dyn RegistryBackend>,
     missions: Arc<Mutex<MissionStore>>,
     sessions: Arc<Mutex<BTreeMap<String, AgentOperation>>>,
     cables: Arc<CableRelay>,
@@ -1063,7 +1075,7 @@ async fn scheduler_loop(state: DaemonState) {
             );
             // Provider calls block on the network, so they never run on an async worker.
             tokio::task::spawn_blocking(move || {
-                desk.run(&plugins, &roster, &registry);
+                desk.run(&plugins, &roster, registry.as_ref());
                 desk.end();
             });
         }
@@ -6128,7 +6140,7 @@ mod tests {
         assert_eq!(record.fence, hold.fence);
 
         // Another Station opening the same Registry sees the same record.
-        let other = FileRegistry::open(state.intake.root());
+        let other = FileRegistry::open(root.path().join("registry"));
         assert_eq!(other.session(&hold.id).unwrap().unwrap().station, "test");
 
         // Finishing the Mission closes the record.
@@ -6156,8 +6168,7 @@ mod tests {
 
         // The lease lapsed while this Station was paused and another Station took it.
         let later = unix_now() + 3_600.0;
-        let taken = state
-            .intake
+        let taken = FileRegistry::open(root.path().join("registry"))
             .take_session_at(&hold.id, "other-station", DEFAULT_LEASE, later)
             .unwrap();
         assert!(taken.fence > hold.fence);

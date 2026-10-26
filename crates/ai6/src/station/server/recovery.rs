@@ -17,7 +17,6 @@ use crate::directorates::m::placement::{OperationPolicy, PlacementRequest, Stati
 use crate::directorates::m::recovery::adopter;
 use crate::directorates::m::roster::OnLost;
 use crate::directorates::q::safehouse::{CheckpointSpec, SafeHouseCheckpoint};
-use crate::directorates::registry::backend::*;
 use crate::directorates::registry::sessions::{
     MAX_RECENT_EVENT_CHARS, MAX_RECENT_EVENTS, SessionError, SessionLaunch, SessionRecord,
     SessionStatus, SessionUpdate,
@@ -558,6 +557,7 @@ mod tests {
     use super::*;
     use crate::directorates::m::mission::MissionStore;
     use crate::directorates::m::theaters::{Theater, TheaterAccess, Theaters};
+    use crate::directorates::registry::backend::*;
     use crate::directorates::registry::store::{Brief, FileRegistry};
     use crate::station::runner::client::RunnerLink;
     use crate::station::transports::Transports;
@@ -589,7 +589,7 @@ mod tests {
     }
 
     /// Queues a brief for Agent 007 of Operation G and answers its Mission ID.
-    fn submit(registry: &FileRegistry, id: &str) -> String {
+    fn submit(registry: &dyn RegistryBackend, id: &str) -> String {
         let brief: Brief = serde_json::from_value(serde_json::json!({
             "title": "say every tick",
             "id": id,
@@ -664,7 +664,7 @@ mod tests {
             agents,
             Some(field),
         );
-        let mission_id = submit(&a.intake, &format!("adopt-{}", std::process::id()));
+        let mission_id = submit(a.intake.as_ref(), &format!("adopt-{}", std::process::id()));
 
         // Station A is Headquarters, places the brief on itself and starts the harness.
         publish_station_check_in(&a);
@@ -776,7 +776,7 @@ mod tests {
             "[agent.007]\nhandler = \"mock-recorder\"\n",
             None,
         );
-        let mission_id = submit(&a.intake, &format!("retry-{}", std::process::id()));
+        let mission_id = submit(a.intake.as_ref(), &format!("retry-{}", std::process::id()));
         publish_station_check_in(&a);
         publish_station_check_in(&b);
         assert!(schedule_intake_once(&a));

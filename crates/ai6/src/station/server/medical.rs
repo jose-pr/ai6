@@ -12,7 +12,6 @@ use crate::directorates::medical::quarantine::{Incident, IncidentKind};
 use crate::directorates::medical::usage::{
     Budget, BudgetBreach, BudgetLevel, BudgetScope, MissionUsage, UsageTotals, UsageTracker,
 };
-use crate::directorates::registry::backend::*;
 use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::sessions::SessionUpdate;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;

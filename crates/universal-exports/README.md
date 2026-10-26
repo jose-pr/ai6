@@ -35,6 +35,7 @@ service command.
 ## Quick start
 
 ```rust
+use std::sync::Arc;
 use std::time::Duration;
 use universal_exports::{Gateway, GatewayConfig, GatewayLimits};
 use ai6::FileRegistry;
@@ -47,7 +48,7 @@ let config = GatewayConfig::new(
     Duration::from_secs(30),
 )?;
 let registry = FileRegistry::from_environment()?;
-let _app = Gateway::with_registry(config, registry).router();
+let _app = Gateway::with_registry(config, Arc::new(registry)).router();
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 

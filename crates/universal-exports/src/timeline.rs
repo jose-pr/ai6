@@ -10,7 +10,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use ai6::directorates::registry::backend::*;
 use ai6::{AuditRecord, AuthorizationRequest, TimelineEvent};
 use ai6_diptel::{MissionId, OperationId};
 use axum::Json;

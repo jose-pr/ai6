@@ -20,7 +20,6 @@ use super::{
     is_terminal_state, lifecycle_name, medical, resume_mission, session_hold, transition_mission,
 };
 use crate::directorates::m::mission::{Mission, MissionState};
-use crate::directorates::registry::backend::*;
 use crate::directorates::registry::sessions::{SessionStatus, SessionUpdate};
 use crate::station::publisher::{ControlDelivery, ControlOutcome};
 
@@ -350,6 +349,7 @@ mod tests {
     use super::super::tests::{mission_state, start_mission_by_id, test_state, wait_for_state};
     use super::super::{DEFAULT_LEASE, schedule_queued_once, unix_now};
     use super::*;
+    use crate::directorates::registry::store::FileRegistry;
 
     /// 008's mock provider issues its own Session ID and then stays quiet, working.
     const TWO_AGENTS: &str = "[agent.007]\nhandler = \"mock-agent\"\nroles = [\"case-officer\"]\n\
@@ -562,8 +562,7 @@ mod tests {
 
         // Another Station took the Session's lease: this one may not act on it.
         let hold = session_hold(&state, "mission-1").unwrap();
-        state
-            .intake
+        FileRegistry::open(root.path().join("registry"))
             .take_session_at(
                 &hold.id,
                 "other-station",

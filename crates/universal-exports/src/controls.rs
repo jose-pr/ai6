@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::registry::backend::*;
-use ai6::{AuditRecord, FileRegistry, GONE_DARK_AFTER, StationSettings};
+use ai6::{AuditRecord, GONE_DARK_AFTER, StationSettings};
 use ai6_diptel::{
     ControlAction, ControlId, MissionControl, MissionId, OperationId, SessionId, control_frames,
 };
@@ -270,7 +270,10 @@ struct Target {
 /// The Station that should act on a Mission: the one holding its latest Session record, else
 /// the one holding its brief's lease, else the Headquarters Station. A Station that has gone
 /// dark is passed over.
-fn control_target(registry: &FileRegistry, mission_id: &str) -> std::io::Result<Option<Target>> {
+fn control_target(
+    registry: &dyn RegistryBackend,
+    mission_id: &str,
+) -> std::io::Result<Option<Target>> {
     let live = registry
         .stations(GONE_DARK_AFTER)?
         .into_iter()
@@ -398,7 +401,7 @@ pub(crate) async fn request_control(
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let lookup = registry.clone();
     let wanted = mission.to_string();
-    let target = tokio::task::spawn_blocking(move || control_target(&lookup, &wanted))
+    let target = tokio::task::spawn_blocking(move || control_target(lookup.as_ref(), &wanted))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?
@@ -585,6 +588,7 @@ pub(crate) mod tests {
     use std::net::SocketAddr;
     use std::sync::Arc;
 
+    use ai6::FileRegistry;
     use ai6::guatiao::library::ProviderError;
     use ai6::{
         Attempt, Authenticator, Directory, Lookup, NewSession, Person, Verdict,
@@ -696,7 +700,7 @@ pub(crate) mod tests {
                 Duration::from_secs(30),
             )
             .unwrap(),
-            registry.clone(),
+            Arc::new(registry.clone()),
             AccessProviders::new(Arc::new(People), Arc::new(People), Arc::new(authorizer)),
         );
         for (operation, mission, session) in [
@@ -713,16 +717,18 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
         }
-        let operator = issue_access_token_record(registry.clone(), "operator-007".to_owned(), 600)
-            .await
-            .ok()
-            .unwrap()
-            .token;
-        let viewer = issue_access_token_record(registry.clone(), "viewer-007".to_owned(), 600)
-            .await
-            .ok()
-            .unwrap()
-            .token;
+        let operator =
+            issue_access_token_record(Arc::new(registry.clone()), "operator-007".to_owned(), 600)
+                .await
+                .ok()
+                .unwrap()
+                .token;
+        let viewer =
+            issue_access_token_record(Arc::new(registry.clone()), "viewer-007".to_owned(), 600)
+                .await
+                .ok()
+                .unwrap()
+                .token;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let router = gateway.router();
@@ -993,10 +999,10 @@ pub(crate) mod tests {
                 Duration::from_secs(30),
             )
             .unwrap(),
-            FileRegistry::open(empty.path()),
+            Arc::new(FileRegistry::open(empty.path())),
         );
         assert!(
-            control_target(alone.registry.as_ref().unwrap(), "mission-g")
+            control_target(alone.registry.as_deref().unwrap(), "mission-g")
                 .unwrap()
                 .is_none()
         );

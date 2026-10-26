@@ -18,8 +18,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ai6::directorates::registry::backend::*;
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
-    Authorizer, Brief, Directory, FileRegistry, Lookup, MissionProposal, MissionUsage, Person,
-    Quarantine, StationSettings, Verdict,
+    Authorizer, Brief, Directory, Lookup, MissionProposal, MissionUsage, Person, Quarantine,
+    StationSettings, Verdict,
 };
 use ai6_diptel::{
     FrameReceiver, IncomingFrame, LifecycleEvent, MissionId, OperationId, SessionId, SessionState,
@@ -384,7 +384,7 @@ pub struct Gateway {
     inner: std::sync::Arc<Mutex<Inner>>,
     input_tx: mpsc::Sender<AgentInput>,
     input_rx: std::sync::Arc<Mutex<mpsc::Receiver<AgentInput>>>,
-    registry: Option<FileRegistry>,
+    registry: Option<Arc<dyn RegistryBackend>>,
     access: Option<AccessProviders>,
     login_guard: std::sync::Arc<LoginGuard>,
     controls: Arc<std::sync::Mutex<ControlBook>>,
@@ -462,7 +462,7 @@ impl Gateway {
     }
 
     /// Creates a gateway backed by the shared Registry for user access tokens.
-    pub fn with_registry(config: GatewayConfig, registry: FileRegistry) -> Self {
+    pub fn with_registry(config: GatewayConfig, registry: Arc<dyn RegistryBackend>) -> Self {
         let mut gateway = Self::new(config);
         gateway.registry = Some(registry);
         gateway
@@ -471,7 +471,7 @@ impl Gateway {
     /// Creates a gateway backed by the shared Registry and configured user access providers.
     pub fn with_access(
         config: GatewayConfig,
-        registry: FileRegistry,
+        registry: Arc<dyn RegistryBackend>,
         access: AccessProviders,
     ) -> Self {
         let mut gateway = Self::with_registry(config, registry);
@@ -1999,7 +1999,7 @@ async fn authenticate_password(
 }
 
 async fn issue_access_token_record(
-    registry: FileRegistry,
+    registry: Arc<dyn RegistryBackend>,
     person_id: String,
     ttl_seconds: u64,
 ) -> Result<IssuedAccessToken, ApiError> {
@@ -2281,7 +2281,7 @@ async fn authorize_resource_action(
 }
 
 async fn ensure_station_registered(
-    registry: &FileRegistry,
+    registry: &Arc<dyn RegistryBackend>,
     station_id: &str,
 ) -> Result<ai6::StationRecord, ApiError> {
     let registry = registry.clone();
@@ -2394,7 +2394,7 @@ async fn put_user_station_settings(
 }
 
 async fn ensure_operation_registered(
-    registry: &FileRegistry,
+    registry: &Arc<dyn RegistryBackend>,
     operation_id: &OperationId,
 ) -> Result<(), ApiError> {
     let registry = registry.clone();
@@ -3754,7 +3754,7 @@ fn read_sequence(map: &Map) -> Result<u64, GatewayError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ai6::RoleAuthorizer;
+    use ai6::{FileRegistry, RoleAuthorizer};
     use ai6_diptel::{
         LifecycleEvent, SessionState, TerminalData, TerminalDirection, TerminalResize,
         lifecycle_frames, resize_frames, terminal_frames,
@@ -4465,7 +4465,7 @@ mod tests {
         let registry = FileRegistry::open(directory.path());
         let gateway = Gateway::with_access(
             config,
-            registry,
+            Arc::new(registry),
             AccessProviders::new(
                 Arc::new(OneAccount),
                 Arc::new(OneAccount),
@@ -4735,7 +4735,7 @@ mod tests {
                 Duration::from_secs(30),
             )
             .unwrap(),
-            registry,
+            Arc::new(registry),
             AccessProviders::new(
                 Arc::new(TestAuthenticator),
                 Arc::new(TestDirectory),
@@ -5675,7 +5675,7 @@ mod tests {
                 Duration::from_secs(30),
             )
             .unwrap(),
-            registry.clone(),
+            Arc::new(registry.clone()),
         );
         let second = Gateway::with_registry(
             GatewayConfig::new(
@@ -5686,7 +5686,7 @@ mod tests {
                 Duration::from_secs(30),
             )
             .unwrap(),
-            registry,
+            Arc::new(registry),
         );
         let listener_a = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let listener_b = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

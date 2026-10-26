@@ -99,7 +99,7 @@ async fn start_gateway() -> (String, oneshot::Sender<()>, String, tempfile::Temp
         .unwrap();
     let gateway = Gateway::with_access(
         config,
-        registry,
+        Arc::new(registry),
         AccessProviders::new(
             Arc::new(TestAuthenticator),
             Arc::new(TestDirectory),

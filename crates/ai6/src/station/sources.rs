@@ -18,7 +18,6 @@ use crate::directorates::registry::sleepers::Fire;
 use crate::directorates::registry::sources::{
     CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll,
 };
-use crate::directorates::registry::store::FileRegistry;
 use crate::station::plugins::Plugins;
 use guatiao::ToValue;
 
@@ -115,7 +114,7 @@ fn build_source(
 /// Polls one source once and queues what it found; the cursor advances after the items
 /// are stored, so a crash repeats work that is already idempotent.
 pub(crate) fn poll_source(
-    registry: &FileRegistry,
+    registry: &dyn RegistryBackend,
     operation: &str,
     provider: &str,
     source: &dyn Source,
@@ -223,7 +222,7 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
 /// `build` constructs the provider for an Operation's settings. A report that fails is
 /// retried on later passes, up to the Registry's attempt limit.
 pub(crate) fn report_finished(
-    registry: &FileRegistry,
+    registry: &dyn RegistryBackend,
     roster: &Roster,
     build: &SourceBuilder<'_>,
 ) -> usize {
@@ -292,7 +291,7 @@ fn report_one(
 /// Returns how many briefs were queued. A sleeper without an approval of its current
 /// definition is skipped and named once in `warned`.
 pub(crate) fn fire_due_sleepers(
-    registry: &FileRegistry,
+    registry: &dyn RegistryBackend,
     roster: &Roster,
     now: i64,
     warned: &mut BTreeSet<String>,
@@ -380,7 +379,7 @@ impl SourceDesk {
     }
 
     /// Polls every source that is due and posts pending reports. Blocks on the network.
-    pub(crate) fn run(&self, plugins: &Plugins, roster: &Roster, registry: &FileRegistry) {
+    pub(crate) fn run(&self, plugins: &Plugins, roster: &Roster, registry: &dyn RegistryBackend) {
         let build =
             |provider: &str, settings: &toml::Table| build_source(plugins, provider, settings);
         self.run_with(roster, registry, &build);
@@ -389,7 +388,7 @@ impl SourceDesk {
     pub(crate) fn run_with(
         &self,
         roster: &Roster,
-        registry: &FileRegistry,
+        registry: &dyn RegistryBackend,
         build: &SourceBuilder<'_>,
     ) {
         let now = Instant::now();
@@ -472,6 +471,7 @@ mod tests {
 
     use super::*;
     use crate::directorates::registry::sources::{SourceBatch, SourceItem};
+    use crate::directorates::registry::store::FileRegistry;
 
     static POSTED: Mutex<Vec<CxReport>> = Mutex::new(Vec::new());
 
@@ -567,7 +567,7 @@ mod tests {
         (dir, roster)
     }
 
-    fn finish_all(registry: &FileRegistry, ok: bool, outcome: serde_json::Value) {
+    fn finish_all(registry: &dyn RegistryBackend, ok: bool, outcome: serde_json::Value) {
         while let Some(brief) = registry.claim_new(None).unwrap() {
             registry.finish(&brief, &outcome, ok, None, None).unwrap();
         }

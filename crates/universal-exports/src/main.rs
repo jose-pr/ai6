@@ -137,8 +137,8 @@ async fn main() -> ExitCode {
         }
     };
     let gateway = match access {
-        Some(access) => Gateway::with_access(config, registry, access),
-        None => Gateway::with_registry(config, registry),
+        Some(access) => Gateway::with_access(config, Arc::new(registry), access),
+        None => Gateway::with_registry(config, Arc::new(registry)),
     };
     match gateway.serve_loopback(cli.port, shutdown_signal()).await {
         Ok(()) => ExitCode::SUCCESS,
