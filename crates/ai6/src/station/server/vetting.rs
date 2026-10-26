@@ -748,9 +748,8 @@ fn promote_by_class(
             }
         }
     }
-    let Ok(agent) = state
-        .roster
-        .agent(Some(&operation.id), &proposal.proposer_agent_id)
+    let Ok(agent) =
+        super::agents::effective(state, Some(&operation.id), &proposal.proposer_agent_id)
     else {
         return;
     };
@@ -853,16 +852,15 @@ fn review_configured(state: &DaemonState, operation: &Operation) -> bool {
 
 /// Whether a posted, unquarantined Agent is qualified to review for the Operation now.
 fn reviewer_available(state: &DaemonState, operation: &Operation) -> bool {
-    state
-        .roster
-        .select_agent_excluding(
-            Some(&operation.id),
-            Some(CHIEF_OF_STAFF_ROLE),
-            &[],
-            None,
-            &medical::quarantined_agents(state, Some(&operation.id)),
-        )
-        .is_ok()
+    super::agents::select(
+        state,
+        Some(&operation.id),
+        Some(CHIEF_OF_STAFF_ROLE),
+        &[],
+        None,
+        &[],
+    )
+    .is_ok()
 }
 
 /// Whether a Mission is a Chief of Staff review: its ID is its review brief's key and it was

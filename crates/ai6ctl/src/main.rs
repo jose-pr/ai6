@@ -1150,6 +1150,13 @@ struct AgentView {
     last_mission_at: Option<f64>,
     #[serde(default)]
     model_history: Vec<ModelTenure>,
+    retirement: Option<RetirementNotice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RetirementNotice {
+    retire_on: String,
+    status: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1172,12 +1179,12 @@ struct ModelTenure {
 
 fn print_agents(agents: &[AgentView]) {
     println!(
-        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL"
+        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT"
     );
     for view in agents {
         let tally = &view.operation;
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             plain(&view.agent),
             view.posted,
             tally.done,
@@ -1192,6 +1199,9 @@ fn print_agents(agents: &[AgentView]) {
                 .map_or_else(|| "-".to_owned(), |at| format!("{at:.0}")),
             view.model_history.last().map_or("-".to_owned(), |tenure| {
                 tenure.model.as_deref().map_or("default".to_owned(), plain)
+            }),
+            view.retirement.as_ref().map_or("-".to_owned(), |notice| {
+                format!("{}:{}", plain(&notice.status), plain(&notice.retire_on))
             }),
         );
     }

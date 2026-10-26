@@ -43,8 +43,9 @@ pub use directorates::m::placement::{
     harness_verdict, place,
 };
 pub use directorates::m::roster::{
-    Agent, AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS, OnLost, Operation, Roster,
-    RosterBuilder, RosterError, RosterErrorKind, Workspace,
+    Agent, AgentQuery, AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS,
+    DEFAULT_RETIRE_WARNING_DAYS, OnLost, OnRetire, Operation, Retirement, Roster, RosterBuilder,
+    RosterError, RosterErrorKind, Workspace,
 };
 pub use directorates::m::theaters::{
     AgentMode, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind, EphemeralAccess,

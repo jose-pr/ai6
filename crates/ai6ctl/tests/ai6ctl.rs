@@ -639,8 +639,8 @@ async fn agents_lists_each_agents_record_in_the_operation() {
     assert_eq!(
         printed,
         [
-            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL",
-            "007\tfalse\t2\t0\t0\t0\t1\t0\t0\t0\t1000\topus",
+            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT",
+            "007\tfalse\t2\t0\t0\t0\t1\t0\t0\t0\t1000\topus\t-",
         ]
     );
     let _ = shutdown.send(());

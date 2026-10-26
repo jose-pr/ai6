@@ -19,6 +19,11 @@ effort = "high"
 clearance = "field"
 roles = ["case-officer", "targeter", "analyst", "senior-analyst", "technical-officer"]
 priority = 10
+# When the model reaches end of life, from this UTC date: on_retire = "desk" (the default)
+# keeps the Agent at desk clearance, "retired" stops choosing it. Stations warn
+# retire_warning_days (default 14) before.
+# retire_on = "2027-01-31"
+# on_retire = "retired"
 
 [agent.Tanner]
 handler = "claude"

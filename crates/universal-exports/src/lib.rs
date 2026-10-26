@@ -49,7 +49,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use uuid::Uuid;
 
-pub use agents::AgentView;
+pub use agents::{AgentView, RetirementNotice};
 use controls::ControlBook;
 pub use controls::ControlStatus;
 pub use held::{HeldBriefDecision, HeldBriefEntry};

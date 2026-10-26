@@ -197,6 +197,7 @@ pub(super) fn poll(state: &DaemonState) -> bool {
     }
     if roster {
         super::vetting::log_weakenings(&current.roster);
+        super::agents::log_retirements(&current.roster, current.clock.now());
     }
     if loadouts {
         for weakening in current.station.credentials.weakenings() {

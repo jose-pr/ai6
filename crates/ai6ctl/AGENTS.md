@@ -24,9 +24,10 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
 - `ai6ctl station <STATION_ID>` prints one visible Station row (no header); exit `1` if absent.
 - `ai6ctl agents --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/agents`
   as tab-separated `AGENT POSTED DONE FAILED BLOWN ABANDONED STALLED QUARANTINED BUDGET_STOPS
-  GREEN_INK_REJECTED LAST_MISSION_UNIX MODEL` (one header line): counts in that Operation,
-  `QUARANTINED` adding quarantines of every Operation, `LAST_MISSION_UNIX` `-` before any,
-  `MODEL` the current occupant (`default` for the handler's own, `-` before any record). A
+  GREEN_INK_REJECTED LAST_MISSION_UNIX MODEL RETIREMENT` (one header line): counts in that
+  Operation, `QUARANTINED` adding quarantines of every Operation, `LAST_MISSION_UNIX` `-`
+  before any, `MODEL` the current occupant (`default` for the handler's own, `-` before any
+  record), `RETIREMENT` `status:YYYY-MM-DD` (`retiring`, `desk_duty`, `retired`) or `-`. A
   refusal names `agent.read`.
 - `ai6ctl agent-roles --operation <OPERATION_ID>` lists role purpose, policy and whether
   the Operation overrides the Station definition (`agent.read` on that Operation). The

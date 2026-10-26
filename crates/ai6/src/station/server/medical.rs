@@ -580,16 +580,15 @@ fn release_mission(state: &DaemonState, mission: &Mission) {
         return;
     };
     let handlers = super::available_handlers(state);
-    let backup = state
-        .roster
-        .select_agent_excluding(
-            mission.operation_id.as_deref(),
-            mission.role_id.as_deref(),
-            &[],
-            Some(&handlers),
-            std::slice::from_ref(&agent),
-        )
-        .map_or(agent, |backup| backup.id);
+    let backup = super::agents::select(
+        state,
+        mission.operation_id.as_deref(),
+        mission.role_id.as_deref(),
+        &[],
+        Some(&handlers),
+        std::slice::from_ref(&agent),
+    )
+    .map_or(agent, |backup| backup.id);
     let requeued = state.missions.lock().ok().is_some_and(|mut missions| {
         missions
             .requeue_for(mission.mission_id.as_str(), backup)
@@ -598,32 +597,4 @@ fn release_mission(state: &DaemonState, mission: &Mission) {
     if requeued {
         sync_session_record(state, mission.mission_id.as_str());
     }
-}
-
-/// Gives a queued Mission whose Agent is quarantined to the next qualified Agent.
-///
-/// Returns `false` when it must wait: its Agent is quarantined and no other can take it.
-pub(super) fn reassign_if_quarantined(state: &DaemonState, mission: &Mission) -> bool {
-    let Some(agent) = mission.agent_id.as_deref() else {
-        return true;
-    };
-    if !is_quarantined(state, agent, mission.operation_id.as_deref()) {
-        return true;
-    }
-    let handlers = super::available_handlers(state);
-    let excluded = quarantined_agents(state, mission.operation_id.as_deref());
-    let Ok(backup) = state.roster.select_agent_excluding(
-        mission.operation_id.as_deref(),
-        mission.role_id.as_deref(),
-        &[],
-        Some(&handlers),
-        &excluded,
-    ) else {
-        return false;
-    };
-    state.missions.lock().ok().is_some_and(|mut missions| {
-        missions
-            .reassign(mission.mission_id.as_str(), backup.id)
-            .is_ok()
-    })
 }

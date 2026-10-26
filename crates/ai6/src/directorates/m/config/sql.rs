@@ -317,7 +317,11 @@ mod tests {
         assert_eq!(
             seeded
                 .roster
-                .select_agent(Some("G"), Some("case-officer"), &[], None)
+                .select_agent(
+                    &crate::directorates::m::roster::AgentQuery::new()
+                        .operation(Some("G"))
+                        .role(Some("case-officer"))
+                )
                 .unwrap()
                 .id,
             "007"

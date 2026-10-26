@@ -93,9 +93,7 @@ impl Desk {
             .ok()
             .and_then(|missions| missions.get(&asked.mission).cloned())
             .ok_or("this Station has no such Mission")?;
-        let clearance = state
-            .roster
-            .agent(Some(&asked.operation), &asked.agent)
+        let clearance = super::agents::effective(state, Some(&asked.operation), &asked.agent)
             .map_err(|_| "the Agent is not configured for this Operation".to_owned())?
             .clearance;
         let scope = ActionScope::try_new(&asked.kind, &asked.target).map_err(|e| e.to_string())?;
@@ -248,9 +246,7 @@ impl Desk {
             .roster
             .operation(&checked.operation)
             .map_err(|_| "the Operation is not configured on this Station".to_owned())?;
-        let clearance = state
-            .roster
-            .agent(Some(&checked.operation), &checked.agent)
+        let clearance = super::agents::effective(state, Some(&checked.operation), &checked.agent)
             .map_err(|_| "the Agent is not configured for this Operation".to_owned())?
             .clearance;
         let policy = &operation.green_ink;

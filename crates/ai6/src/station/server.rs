@@ -644,6 +644,7 @@ where
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
     vetting::log_weakenings(&roster);
+    agents::log_retirements(&roster, Clock::system().now());
     let state = DaemonState {
         plugins,
         roster,
@@ -1750,6 +1751,10 @@ fn publish_station_check_in(state: &DaemonState) {
     );
     info.insert("operations".to_owned(), serde_json::json!(operations));
     info.insert(
+        "retirements".to_owned(),
+        serde_json::json!(agents::retirements(&state.roster, state.clock.now())),
+    );
+    info.insert(
         "config".to_owned(),
         serde_json::json!(state.config.status()),
     );
@@ -2411,7 +2416,7 @@ fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &s
 /// Chooses the Station and Agent for a brief with M's placement, judged on what each Station
 /// published: its capacity and running Sessions, handlers, Theaters and resources. `agent` is
 /// the Agent the brief names; without one, each Station is offered the posted Agents its own
-/// handlers can run, quarantined ones left out. The best choice whose Agent and Operation
+/// handlers can run, quarantined and retired ones left out. The best choice whose Agent and Operation
 /// still have room is taken; `None` leaves the brief queued.
 fn place_brief(
     state: &DaemonState,
@@ -2421,9 +2426,10 @@ fn place_brief(
     leases: &[Lease],
 ) -> Option<PlacementChoice> {
     let mut policy = OperationPolicy::from_roster(&state.roster, operation_id).ok()?;
-    let quarantined = medical::quarantined_agents(state, Some(operation_id));
-    let agents = &mut policy.agents;
-    agents.retain(|agent| !quarantined.contains(&agent.id));
+    let mut unavailable = medical::quarantined_agents(state, Some(operation_id));
+    unavailable.extend(agents::retired_agents(state, operation_id));
+    let posted = &mut policy.agents;
+    posted.retain(|agent| !unavailable.contains(&agent.id));
     let records = state.intake.stations(Duration::MAX).ok()?;
     let now = unix_now();
     let stations: Vec<StationFacts> = records
@@ -2497,6 +2503,9 @@ fn resolve_brief_assignment(
         .roster
         .agent(Some(&operation.id), agent_key)
         .map_err(|error| error.to_string())?;
+    if let Some(retired) = agents::retired(state, &agent) {
+        return Err(retired);
+    }
     if medical::is_quarantined(state, &agent.id, Some(&operation.id)) {
         return Err(format!("Agent {:?} is quarantined", agent.id));
     }
@@ -2528,17 +2537,16 @@ fn brief_agent(
     operation_id: &str,
     handlers: Option<&[String]>,
 ) -> Result<String, String> {
-    state
-        .roster
-        .select_agent_excluding(
-            Some(operation_id),
-            brief.role.as_deref(),
-            &brief.tags,
-            handlers,
-            &medical::quarantined_agents(state, Some(operation_id)),
-        )
-        .map(|agent| agent.id)
-        .map_err(|error| error.to_string())
+    agents::select(
+        state,
+        Some(operation_id),
+        brief.role.as_deref(),
+        &brief.tags,
+        handlers,
+        &[],
+    )
+    .map(|agent| agent.id)
+    .map_err(|error| error.to_string())
 }
 
 fn station_terminal(state: &DaemonState) -> Result<String, String> {
@@ -2802,7 +2810,7 @@ async fn schedule_queued_once(state: &DaemonState) {
             break;
         }
         let mission_id = mission.mission_id.to_string();
-        if !medical::reassign_if_quarantined(state, &mission) {
+        if !agents::reassign_if_unavailable(state, &mission) {
             continue;
         }
         let now = Instant::now();
@@ -3054,24 +3062,25 @@ async fn create_mission(
         .transpose()
         .map_err(configuration_error)?;
     let agent = if let Some(key) = request.agent_id.as_deref() {
-        Some(
-            state
-                .roster
-                .agent(operation_id.as_deref(), key)
-                .map_err(configuration_error)?,
-        )
+        let agent = state
+            .roster
+            .agent(operation_id.as_deref(), key)
+            .map_err(configuration_error)?;
+        if let Some(retired) = agents::retired(&state, &agent) {
+            return Err(configuration_error(retired));
+        }
+        Some(agent)
     } else if request.role.is_some() || !request.tags.is_empty() {
         Some(
-            state
-                .roster
-                .select_agent_excluding(
-                    operation_id.as_deref(),
-                    request.role.as_deref(),
-                    &request.tags,
-                    Some(&available_handlers(&state)),
-                    &medical::quarantined_agents(&state, operation_id.as_deref()),
-                )
-                .map_err(configuration_error)?,
+            agents::select(
+                &state,
+                operation_id.as_deref(),
+                request.role.as_deref(),
+                &request.tags,
+                Some(&available_handlers(&state)),
+                &[],
+            )
+            .map_err(configuration_error)?,
         )
     } else {
         None
@@ -3345,12 +3354,13 @@ async fn start_mission(
         .agent_id
         .as_deref()
         .ok_or_else(|| configuration_error("Mission has no assigned Agent"))?;
-    let agent = state
-        .roster
-        .agent(mission.operation_id.as_deref(), agent_id)
+    let agent = agents::effective(&state, mission.operation_id.as_deref(), agent_id)
         .map_err(configuration_error)?;
     if medical::is_quarantined(&state, &agent.id, mission.operation_id.as_deref()) {
         return Err(conflict(&format!("Agent {:?} is quarantined", agent.id)));
+    }
+    if let Some(retired) = agents::retired(&state, &agent) {
+        return Err(conflict(&retired));
     }
     let role = mission
         .role_id
@@ -4014,9 +4024,7 @@ async fn resume_mission(
         .agent_id
         .as_deref()
         .ok_or_else(|| configuration_error("Mission has no assigned Agent"))?;
-    let resume_agent = state
-        .roster
-        .agent(mission.operation_id.as_deref(), agent_id)
+    let resume_agent = agents::effective(&state, mission.operation_id.as_deref(), agent_id)
         .map_err(configuration_error)?;
     let _reservation = if state
         .sessions
@@ -5266,16 +5274,15 @@ fn backup_agent(
         .into_iter()
         .filter(|handler| handler != limited_handler)
         .collect::<Vec<_>>();
-    state
-        .roster
-        .select_agent_excluding(
-            mission.operation_id.as_deref(),
-            mission.role_id.as_deref(),
-            &[],
-            Some(&handlers),
-            &medical::quarantined_agents(state, mission.operation_id.as_deref()),
-        )
-        .ok()
+    agents::select(
+        state,
+        mission.operation_id.as_deref(),
+        mission.role_id.as_deref(),
+        &[],
+        Some(&handlers),
+        &[],
+    )
+    .ok()
 }
 
 /// Resumes parked Missions whose quota reset time has passed, on the same provider Session.
@@ -9148,7 +9155,7 @@ mod tests {
         medical::quarantine_agent(&state, "007", Some("G"), "turned", "operator");
         let mission = mission_state(&state, "mission-1");
         assert_eq!(mission.state, MissionState::Queued);
-        assert!(medical::reassign_if_quarantined(&state, &mission));
+        assert!(agents::reassign_if_unavailable(&state, &mission));
         assert_eq!(
             mission_state(&state, "mission-1").agent_id.as_deref(),
             Some("008")
@@ -9159,7 +9166,7 @@ mod tests {
         let state = test_state(alone.path(), "", "[agent.007]\nhandler = \"mock-agent\"\n");
         medical::quarantine_agent(&state, "007", None, "turned", "operator");
         let mission = mission_state(&state, "mission-1");
-        assert!(!medical::reassign_if_quarantined(&state, &mission));
+        assert!(!agents::reassign_if_unavailable(&state, &mission));
         assert_eq!(
             mission_state(&state, "mission-1").agent_id.as_deref(),
             Some("007")

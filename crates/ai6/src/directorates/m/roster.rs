@@ -21,7 +21,7 @@ use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
 use crate::directorates::m::vetting::{VettingPolicy, policy_from_toml};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
-use crate::directorates::medical::usage::{Budget, BudgetDefinition};
+use crate::directorates::medical::usage::{Budget, BudgetDefinition, utc_day};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
 use crate::directorates::registry::sleepers::Sleeper;
 use crate::directorates::registry::store::validate_station_id;
@@ -67,6 +67,107 @@ pub struct Agent {
     pub max_concurrent: Option<usize>,
     /// The one account pool this Agent's Sessions draw from, when it is pinned to one.
     pub pool: Option<String>,
+    /// The UTC date (`YYYY-MM-DD`) its model reaches end of life; from that day the Agent
+    /// goes to desk duty or retires, as `on_retire` says.
+    pub retire_on: Option<String>,
+    /// What retirement does to it.
+    pub on_retire: OnRetire,
+    /// Days before `retire_on` that the Station warns of it; `0` does not warn.
+    pub retire_warning_days: u32,
+}
+
+/// Days before an Agent's `retire_on` date that the Station warns of it, by default.
+pub const DEFAULT_RETIRE_WARNING_DAYS: u32 = 14;
+
+/// What happens to an Agent on its `retire_on` date (`on_retire`).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnRetire {
+    /// Its clearance is capped at `desk`; it is still chosen for work.
+    #[default]
+    Desk,
+    /// It is never chosen again; its running Missions finish and queued ones go to the
+    /// next qualified Agent.
+    Retired,
+}
+
+impl OnRetire {
+    /// The name used in configuration and on the wire.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Desk => "desk",
+            Self::Retired => "retired",
+        }
+    }
+}
+
+/// Where an Agent stands against its `retire_on` date.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retirement {
+    /// No date, or the date is further off than the warning window.
+    Serving,
+    /// The date is within the warning window.
+    Retiring,
+    /// The date has come and the Agent works at `desk`.
+    DeskDuty,
+    /// The date has come and the Agent is never chosen.
+    Retired,
+}
+
+impl Retirement {
+    /// The name used on the wire: `serving`, `retiring`, `desk_duty` or `retired`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Serving => "serving",
+            Self::Retiring => "retiring",
+            Self::DeskDuty => "desk_duty",
+            Self::Retired => "retired",
+        }
+    }
+}
+
+impl Agent {
+    /// Where the Agent stands against its `retire_on` date at `now` (Unix seconds, UTC
+    /// days): retired from the start of that day, retiring from `retire_warning_days`
+    /// before it.
+    pub fn retirement(&self, now: i64) -> Retirement {
+        let Some(date) = &self.retire_on else {
+            return Retirement::Serving;
+        };
+        if utc_day(now).as_str() >= date.as_str() {
+            return match self.on_retire {
+                OnRetire::Desk => Retirement::DeskDuty,
+                OnRetire::Retired => Retirement::Retired,
+            };
+        }
+        let warned = now.saturating_add(i64::from(self.retire_warning_days) * 86_400);
+        if self.retire_warning_days > 0 && utc_day(warned).as_str() >= date.as_str() {
+            Retirement::Retiring
+        } else {
+            Retirement::Serving
+        }
+    }
+
+    /// Whether the Agent is never chosen at `now`.
+    pub fn is_retired(&self, now: i64) -> bool {
+        self.retirement(now) == Retirement::Retired
+    }
+
+    /// The clearance it works at in `operation` at `now`: its configured clearance, never
+    /// above the Operation's, and `desk` once retired.
+    pub fn effective_clearance(&self, operation: &Operation, now: i64) -> String {
+        let rank = |clearance: &str| clearance_rank(clearance).unwrap_or(0);
+        let mut effective = rank(&self.clearance).min(rank(&operation.clearance));
+        if matches!(
+            self.retirement(now),
+            Retirement::DeskDuty | Retirement::Retired
+        ) {
+            effective = 0;
+        }
+        CLEARANCES[effective].to_owned()
+    }
 }
 
 impl Agent {
@@ -93,6 +194,9 @@ impl Agent {
             budget: Budget::default(),
             max_concurrent: None,
             pool: None,
+            retire_on: None,
+            on_retire: OnRetire::Desk,
+            retire_warning_days: DEFAULT_RETIRE_WARNING_DAYS,
         }
     }
 }
@@ -400,6 +504,69 @@ impl RosterBuilder {
     }
 }
 
+/// What [`Roster::select_agent`] looks for. The default asks for any Agent of the global
+/// roster, whatever its handler or retirement date.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default)]
+#[must_use]
+pub struct AgentQuery<'a> {
+    /// The Operation the Agent must be posted to; `None` is the global roster.
+    pub operation: Option<&'a str>,
+    /// The role it must be qualified for, or a qualified role name such as `analyst/deep`.
+    pub role: Option<&'a str>,
+    /// Tags it must carry, all of them.
+    pub tags: &'a [String],
+    /// The handlers that can run now; `None` takes any handler.
+    pub available_handlers: Option<&'a [String]>,
+    /// Agents to pass over, such as quarantined ones.
+    pub excluded: &'a [String],
+    /// Unix seconds to judge retirement at; `None` ignores retirement.
+    pub now: Option<i64>,
+}
+
+impl<'a> AgentQuery<'a> {
+    /// Any Agent of the global roster.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Posted to `operation`.
+    pub fn operation(mut self, operation: Option<&'a str>) -> Self {
+        self.operation = operation;
+        self
+    }
+
+    /// Qualified for `role`.
+    pub fn role(mut self, role: Option<&'a str>) -> Self {
+        self.role = role;
+        self
+    }
+
+    /// Carrying every one of `tags`.
+    pub fn tags(mut self, tags: &'a [String]) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// With a handler among `handlers`, when given.
+    pub fn handlers(mut self, handlers: Option<&'a [String]>) -> Self {
+        self.available_handlers = handlers;
+        self
+    }
+
+    /// Not one of `agents`.
+    pub fn excluding(mut self, agents: &'a [String]) -> Self {
+        self.excluded = agents;
+        self
+    }
+
+    /// Not retired at `now` (Unix seconds).
+    pub fn at(mut self, now: i64) -> Self {
+        self.now = Some(now);
+        self
+    }
+}
+
 impl Roster {
     /// Loads global `operations.toml` and `agents.toml` from a configuration directory.
     /// Missing files mean an empty registry; invalid files fail closed.
@@ -474,6 +641,7 @@ impl Roster {
             validate_codename(&agent.id)?;
             validate_clearance(&agent.clearance)
                 .map_err(|reason| error(format!("Agent {:?}: {reason}", agent.id)))?;
+            validate_retire_on(&agent)?;
             let id = agent.id.clone();
             if roster.agents.contains_key(&id) {
                 return Err(error(format!("Agent {id:?} is given twice")));
@@ -532,6 +700,11 @@ impl Roster {
                     .map(|(_, role)| role)
             })
             .ok_or_else(|| error(format!("no configured Agent role {key:?}")))
+    }
+
+    /// The codenames of the global roster's Agents, in order.
+    pub fn agent_ids(&self) -> impl Iterator<Item = &str> {
+        self.agents.keys().map(String::as_str)
     }
 
     /// Lists configured Agent roles in stable identifier order.
@@ -593,30 +766,27 @@ impl Roster {
         Ok(agent)
     }
 
-    /// Selects the highest-priority Agent satisfying a role and every requested tag.
+    /// Selects the highest-priority Agent posted to the query's Operation that is qualified
+    /// for its role and carries every tag.
     ///
-    /// With `available_handlers`, an Agent whose handler is not in the list is skipped, so
-    /// the next qualified Agent (its backup) is chosen instead.
-    pub fn select_agent(
-        &self,
-        operation_key: Option<&str>,
-        role: Option<&str>,
-        tags: &[String],
-        available_handlers: Option<&[String]>,
-    ) -> Result<Agent, RosterError> {
-        self.select_agent_excluding(operation_key, role, tags, available_handlers, &[])
-    }
-
-    /// Like [`Roster::select_agent`], skipping the Agents named in `excluded` (quarantined
-    /// ones), so the next qualified Agent is chosen instead.
-    pub fn select_agent_excluding(
-        &self,
-        operation_key: Option<&str>,
-        role: Option<&str>,
-        tags: &[String],
-        available_handlers: Option<&[String]>,
-        excluded: &[String],
-    ) -> Result<Agent, RosterError> {
+    /// An Agent whose handler is not among `available_handlers`, that is `excluded` (a
+    /// quarantined one) or that is retired at `now` is skipped, so the next qualified Agent
+    /// (its backup) is chosen instead. When only retired Agents qualify, the error names
+    /// them and their dates.
+    ///
+    /// # Errors
+    ///
+    /// No Agent qualifies, or the Operation is not registered or its checkout's
+    /// `.ai6/agents.toml` cannot be read.
+    pub fn select_agent(&self, query: &AgentQuery<'_>) -> Result<Agent, RosterError> {
+        let AgentQuery {
+            operation: operation_key,
+            role,
+            tags,
+            available_handlers,
+            excluded,
+            now,
+        } = *query;
         let mut keys: BTreeSet<String> = self.agents.keys().cloned().collect();
         if let Some(operation) = operation_key.map(|key| self.operation(key)).transpose()?
             && let Some(path) = self.operation_agent_file(operation)
@@ -627,6 +797,7 @@ impl Roster {
         }
 
         let mut candidates = BTreeMap::new();
+        let mut retired = Vec::new();
         for key in keys {
             let Ok(agent) = self.agent(operation_key, &key) else {
                 continue;
@@ -638,13 +809,24 @@ impl Roster {
                 })
             });
             let tags_match = tags.iter().all(|tag| agent.tags.contains(tag));
+            if !role_matches || !tags_match || excluded.contains(&agent.id) {
+                continue;
+            }
+            if now.is_some_and(|now| agent.is_retired(now)) {
+                retired.push(format!(
+                    "{} retired on {}",
+                    agent.id,
+                    agent.retire_on.as_deref().unwrap_or_default()
+                ));
+                continue;
+            }
             let available = available_handlers.is_none_or(|handlers| {
                 agent
                     .handler
                     .as_ref()
                     .is_some_and(|handler| handlers.contains(handler))
             });
-            if role_matches && tags_match && available && !excluded.contains(&agent.id) {
+            if available {
                 candidates.insert(agent.id.clone(), agent);
             }
         }
@@ -657,10 +839,17 @@ impl Roster {
             })
             .ok_or_else(|| {
                 let wanted = role.unwrap_or("any role");
-                error(format!(
-                    "no available Agent matches role {wanted:?} and tags {}",
-                    tags.join(", ")
-                ))
+                if retired.is_empty() {
+                    error(format!(
+                        "no available Agent matches role {wanted:?} and tags {}",
+                        tags.join(", ")
+                    ))
+                } else {
+                    error(format!(
+                        "no qualified Agent for role {wanted:?}; {}",
+                        retired.join(", ")
+                    ))
+                }
             })
     }
 
@@ -1054,6 +1243,9 @@ struct AgentDefinition {
     budget: BudgetDefinition,
     max_concurrent: Option<usize>,
     pool: Option<String>,
+    retire_on: Option<String>,
+    on_retire: Option<OnRetire>,
+    retire_warning_days: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1258,8 +1450,21 @@ fn resolve_agent(
             .pool
             .clone()
             .or_else(|| base.as_ref().and_then(|agent| agent.pool.clone())),
+        retire_on: definition
+            .retire_on
+            .clone()
+            .or_else(|| base.as_ref().and_then(|agent| agent.retire_on.clone())),
+        on_retire: definition
+            .on_retire
+            .or_else(|| base.as_ref().map(|agent| agent.on_retire))
+            .unwrap_or_default(),
+        retire_warning_days: definition
+            .retire_warning_days
+            .or_else(|| base.as_ref().map(|agent| agent.retire_warning_days))
+            .unwrap_or(DEFAULT_RETIRE_WARNING_DAYS),
     };
     validate_clearance(&agent.clearance)?;
+    validate_retire_on(&agent)?;
     seen.remove(&agent.id);
     Ok(agent)
 }
@@ -1320,6 +1525,43 @@ fn clearance_rank(clearance: &str) -> Result<usize, RosterError> {
 
 fn validate_clearance(clearance: &str) -> Result<(), RosterError> {
     clearance_rank(clearance).map(|_| ())
+}
+
+/// Checks that `retire_on`, when set, is a calendar date written `YYYY-MM-DD`.
+fn validate_retire_on(agent: &Agent) -> Result<(), RosterError> {
+    let Some(date) = &agent.retire_on else {
+        return Ok(());
+    };
+    let parts: Vec<&str> = date.split('-').collect();
+    let number = |text: &str, digits: usize| {
+        (text.len() == digits && text.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| text.parse::<u32>().ok())
+            .flatten()
+    };
+    let valid = match parts.as_slice() {
+        [year, month, day] => match (number(year, 4), number(month, 2), number(day, 2)) {
+            (Some(year), Some(month @ 1..=12), Some(day)) => {
+                let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+                let days = match month {
+                    2 if leap => 29,
+                    2 => 28,
+                    4 | 6 | 9 | 11 => 30,
+                    _ => 31,
+                };
+                (1..=days).contains(&day)
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(error(format!(
+            "Agent {:?}: retire_on {date:?} is not a date written YYYY-MM-DD",
+            agent.id
+        )))
+    }
 }
 
 pub(crate) fn error(message: impl Into<String>) -> RosterError {
@@ -1585,11 +1827,15 @@ sources = {{ jira = \"GUA\" }}\n",
         let role = roster.role("case-officer/implementation").unwrap();
         assert_eq!(role.id, "case-officer");
         let first = roster
-            .select_agent(None, Some("case-officer"), &[], None)
+            .select_agent(&AgentQuery::new().role(Some("case-officer")))
             .unwrap();
         assert_eq!(first.id, "007");
         let backup = roster
-            .select_agent(None, Some("case-officer"), &[], Some(&["codex".to_owned()]))
+            .select_agent(
+                &AgentQuery::new()
+                    .role(Some("case-officer"))
+                    .handlers(Some(&["codex".to_owned()])),
+            )
             .unwrap();
         assert_eq!(
             (backup.id.as_str(), backup.model.as_deref()),
@@ -1598,15 +1844,104 @@ sources = {{ jira = \"GUA\" }}\n",
         assert!(
             roster
                 .select_agent(
-                    None,
-                    Some("case-officer"),
-                    &[],
-                    Some(&["unavailable".to_owned()])
+                    &AgentQuery::new()
+                        .role(Some("case-officer"))
+                        .handlers(Some(&["unavailable".to_owned()]))
                 )
                 .unwrap_err()
                 .to_string()
                 .contains("no available Agent")
         );
+    }
+
+    /// 2027-01-31T00:00:00Z.
+    const RETIRE_DAY: i64 = 1_801_353_600;
+    const DAY: i64 = 86_400;
+
+    #[test]
+    fn an_agent_retires_on_its_date_to_desk_duty_or_out_of_selection() {
+        assert_eq!(utc_day(RETIRE_DAY), "2027-01-31");
+        let directory = TestDirectory::new();
+        directory.write("operations.toml", "[operation.G]\nclearance = \"00\"\n");
+        directory.write(
+            "agents.toml",
+            "[agent.007]\nhandler = \"claude\"\nroles = [\"case-officer\"]\nclearance = \"00\"\npriority = 10\nretire_on = \"2027-01-31\"\n[agent.008]\nextends = \"007\"\non_retire = \"retired\"\nretire_warning_days = 3\n[agent.009]\nhandler = \"codex\"\nroles = [\"analyst\"]\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        let operation = roster.operation("G").unwrap();
+        let desk = roster.agent(Some("G"), "007").unwrap();
+        let retired = roster.agent(Some("G"), "008").unwrap();
+        assert_eq!(
+            (desk.on_retire, desk.retire_warning_days),
+            (OnRetire::Desk, DEFAULT_RETIRE_WARNING_DAYS)
+        );
+        assert_eq!(
+            retired.retire_on.as_deref(),
+            Some("2027-01-31"),
+            "inherited"
+        );
+
+        let long_before = RETIRE_DAY - 20 * DAY;
+        assert_eq!(desk.retirement(long_before), Retirement::Serving);
+        assert_eq!(desk.effective_clearance(operation, long_before), "00");
+        let warned = RETIRE_DAY - 10 * DAY;
+        assert_eq!(desk.retirement(warned), Retirement::Retiring);
+        assert_eq!(
+            retired.retirement(warned),
+            Retirement::Serving,
+            "3-day window"
+        );
+        assert_eq!(retired.retirement(RETIRE_DAY - DAY), Retirement::Retiring);
+        assert_eq!(desk.effective_clearance(operation, warned), "00");
+
+        let after = RETIRE_DAY + 60;
+        assert_eq!(desk.retirement(after), Retirement::DeskDuty);
+        assert_eq!(desk.effective_clearance(operation, after), "desk");
+        assert_eq!(retired.retirement(after), Retirement::Retired);
+
+        let query = AgentQuery::new()
+            .operation(Some("G"))
+            .role(Some("case-officer"));
+        assert_eq!(roster.select_agent(&query.at(warned)).unwrap().id, "007");
+        let only_desk = query.excluding(std::slice::from_ref(&desk.id));
+        assert_eq!(
+            roster.select_agent(&only_desk.at(warned)).unwrap().id,
+            "008"
+        );
+        assert_eq!(
+            roster
+                .select_agent(&only_desk.at(after))
+                .unwrap_err()
+                .to_string(),
+            "no qualified Agent for role \"case-officer\"; 008 retired on 2027-01-31"
+        );
+        assert_eq!(
+            roster.select_agent(&only_desk).unwrap().id,
+            "008",
+            "without a time, retirement is not judged"
+        );
+        assert_eq!(roster.select_agent(&query.at(after)).unwrap().id, "007");
+
+        for bad in ["2027-02-30", "2027-1-31", "31-01-2027", "2027-13-01", ""] {
+            directory.write(
+                "agents.toml",
+                &format!("[agent.007]\nretire_on = {bad:?}\n"),
+            );
+            let roster = Roster::load(&directory.0).unwrap();
+            assert!(roster.agent(None, "007").is_err(), "{bad}");
+        }
+        directory.write("agents.toml", "[agent.007]\nretire_on = \"2028-02-29\"\n");
+        assert!(
+            Roster::load(&directory.0)
+                .unwrap()
+                .agent(None, "007")
+                .is_ok()
+        );
+        directory.write("agents.toml", "[agent.007]\non_retire = \"fired\"\n");
+        assert!(Roster::load(&directory.0).is_err());
+        let mut built = Agent::new("007");
+        built.retire_on = Some("tomorrow".to_owned());
+        assert!(Roster::builder().agent(built).build().is_err());
     }
 
     #[test]
@@ -1633,7 +1968,7 @@ sources = {{ jira = \"GUA\" }}\n",
         for role in roles {
             assert!(
                 roster
-                    .select_agent(Some("G"), Some(role), &[], None)
+                    .select_agent(&AgentQuery::new().operation(Some("G")).role(Some(role)))
                     .is_ok(),
                 "no example Agent is qualified for {role}"
             );

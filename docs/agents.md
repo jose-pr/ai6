@@ -54,6 +54,32 @@ purpose = "Own a bounded Mission and coordinate its delivery within the Operatio
 policy = "Follow the Mission brief and Operation rules; request authorization for restricted actions."
 ```
 
+### Retirement
+
+A model's end of life is a date the operator configures; no provider publishes one that the
+handlers can read. From `retire_on` (a UTC date) the codename's occupant leaves the field:
+
+```toml
+[agent.007]
+handler = "claude"
+model = "<model-id>"
+retire_on = "2027-01-31"
+on_retire = "desk"        # the default; "retired" takes it out of selection
+retire_warning_days = 14  # the default; 0 gives no warning
+```
+
+| `on_retire` | From that day |
+| --- | --- |
+| `desk` | The Agent works at clearance `desk` in every Operation and is still chosen for its roles |
+| `retired` | The Agent is never chosen: its running Missions finish, queued ones go to the next qualified Agent, and a brief that names it, or whose role only it could fill, fails assignment with `no qualified Agent for role "R"; 007 retired on 2027-01-31` |
+
+Nothing falls back to a model the operator did not choose: a role with no other qualified
+Agent fails, and a queued Mission with no backup waits. Within `retire_warning_days` of the
+date each Station logs the coming retirement and lists it in its check-in (`retirements`),
+which the Agents view in Moneypenny and `ai6ctl agents` show. Changing `model` and clearing
+`retire_on` re-occupies the slot: the codename and its record carry on, and the record opens
+a new model tenure with the next Mission.
+
 Role IDs are roster-defined, not built-in permission levels. Their names follow public
 SIS intelligence-officer job titles (case officer, targeter, reports officer); that is
 inspiration for work patterns, not a claim that the roles carry real-world authority.

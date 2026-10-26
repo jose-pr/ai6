@@ -228,11 +228,30 @@ pub struct Agent {
     pub budget: Budget,                           // layered over the Operation's
     pub max_concurrent: Option<usize>,
     pub pool: Option<String>,                     // pins one account pool; inherited through `extends`
+    pub retire_on: Option<String>,                // UTC date YYYY-MM-DD the model reaches end of life
+    pub on_retire: OnRetire,                      // Desk (default) | Retired
+    pub retire_warning_days: u32,                 // DEFAULT_RETIRE_WARNING_DAYS = 14; 0 = no warning
 }
 impl Agent {
     /// The defaults a file gives `[agent.ID]`: clearance "field", priority 0, nothing else.
     pub fn new(id: impl Into<String>) -> Self;
+    /// Serving | Retiring (within the warning window) | DeskDuty | Retired, judged by UTC day.
+    pub fn retirement(&self, now: i64) -> Retirement;
+    pub fn is_retired(&self, now: i64) -> bool;   // Retired only; DeskDuty still works
+    /// Configured clearance, capped by the Operation's; "desk" once its date has come.
+    pub fn effective_clearance(&self, operation: &Operation, now: i64) -> String;
 }
+#[non_exhaustive] pub enum OnRetire { Desk /* default */, Retired }      // snake_case; as_str()
+#[non_exhaustive] pub enum Retirement { Serving, Retiring, DeskDuty, Retired } // as_str(): serving | retiring | desk_duty | retired
+/// What select_agent looks for; Default is any Agent of the global roster.
+#[non_exhaustive] #[derive(Clone, Copy, Default)] #[must_use]
+pub struct AgentQuery<'a> { pub operation: Option<&'a str>, pub role: Option<&'a str>,
+    pub tags: &'a [String], pub available_handlers: Option<&'a [String]>,
+    pub excluded: &'a [String], pub now: Option<i64> /* None: retirement not judged */ }
+impl<'a> AgentQuery<'a> { pub fn new() -> Self; pub fn operation(self, Option<&'a str>) -> Self;
+    pub fn role(self, Option<&'a str>) -> Self; pub fn tags(self, &'a [String]) -> Self;
+    pub fn handlers(self, Option<&'a [String]>) -> Self; pub fn excluding(self, &'a [String]) -> Self;
+    pub fn at(self, now: i64) -> Self }
 #[non_exhaustive]
 pub struct AgentRole {
     pub id: String,
@@ -321,13 +340,8 @@ impl Roster {
     pub fn roles(&self) -> impl Iterator<Item = &AgentRole>;
     pub fn agent(&self, operation_key: Option<&str>, agent_key: &str)
         -> Result<Agent, RosterError>;
-    pub fn select_agent(
-        &self,
-        operation_key: Option<&str>,
-        role: Option<&str>,
-        tags: &[String],
-        available_handlers: Option<&[String]>,
-    ) -> Result<Agent, RosterError>;
+    pub fn agent_ids(&self) -> impl Iterator<Item = &str>;   // global codenames, in order
+    pub fn select_agent(&self, query: &AgentQuery<'_>) -> Result<Agent, RosterError>;
     pub fn agents_for_operation(&self, operation_key: &str) -> Result<Vec<Agent>, RosterError>;
     /// Resolves every global Agent (extends, clearance, budget) now instead of on first use;
     /// an Operation's `.ai6/agents.toml` is not read.
@@ -365,9 +379,14 @@ suffix (`case-officer/implementation` resolves to `case-officer`).
 `.ai6/agents.toml` only for a registered Operation, merges inherited `env` and `limits` by
 key, and rejects Agents outside the Operation's roster or above its clearance.
 `select_agent` returns the highest-priority eligible Agent qualified for the role prefix
-and carrying every tag. With `available_handlers`, Agents whose handler is not listed are
-skipped, so the next qualified Agent serves as the backup; the error says no available
-Agent matched. `operations` yields stable codename order. `config_dir` resolves
+and carrying every tag. Agents whose handler is not among `available_handlers`, that are
+`excluded` (the Station passes quarantined ones) or that are retired at `now` are skipped,
+so the next qualified Agent serves as the backup; the error says no available Agent
+matched, or, when only retired Agents qualified, `no qualified Agent for role "R"; 007
+retired on 2027-01-31`. `retire_on` is a UTC date; from that day an Agent with
+`on_retire = "desk"` works at `desk` and is still chosen, one with `"retired"` is never
+chosen (its running Missions finish; the Station gives queued ones to the backup or keeps
+them waiting). An invalid date fails resolving the Agent. `operations` yields stable codename order. `config_dir` resolves
 `AI6_CONFIG_DIR`, then `XDG_CONFIG_HOME/ai6`, then the platform configuration directory.
 `Agent.limits` is layered over the daemon-wide watchdog settings when a Mission starts or
 resumes.
@@ -1342,8 +1361,9 @@ one-minute load average except on Windows, total and available memory; in this c
 tests every check-in repeats the process's first sample), its `resource_limits` (Registry
 settings, else the defaults), each Theater's running `sessions`,
 local Operation paths, available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
-placement policy (`operation_policies`, omitted with a log line when over 512 KiB) and the
-configuration it runs (`config`, a `ConfigStatus`) with each Station check-in every 15
+placement policy (`operation_policies`, omitted with a log line when over 512 KiB), the
+Agents whose retirement is near or due (`retirements`: `{agent, retire_on, on_retire,
+status}`, also logged at start and on a roster reload) and the configuration it runs (`config`, a `ConfigStatus`) with each Station check-in every 15
 seconds and right after it applies a reload, alongside host and
 platform metadata. `StationConfig` defaults to both `Control` and `Execution`, no
 pinned terminal and only the `local` Theater; `with_roles` replaces the role set, `with_label`
@@ -1515,8 +1535,8 @@ impl Quarantine { pub fn new(agent, operation, reason, by, at) -> Self;
 ```
 
 A quarantined sender's Cables are accepted but held (`CableState::Held`) until an
-authorized release, whatever the receiver's inbound mode. `Roster::select_agent_excluding`
-is `select_agent` that also skips the named Agents; the Station passes the quarantined ones.
+authorized release, whatever the receiver's inbound mode. `AgentQuery::excluding`
+skips the named Agents; the Station passes the quarantined ones.
 
 ## Agent records (`ai6::directorates::registry::agent_records`)
 

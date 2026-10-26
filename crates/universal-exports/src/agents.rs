@@ -15,7 +15,7 @@ use ai6_diptel::OperationId;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ApiError, Gateway, authorize_operation_action, bearer, ensure_operation_registered,
@@ -40,6 +40,20 @@ pub struct AgentView {
     pub last_mission_at: Option<f64>,
     /// The models that occupied the codename, oldest first.
     pub model_history: Vec<ModelTenure>,
+    /// Its retirement, from the Headquarters Station's check-in, once it is near or due.
+    pub retirement: Option<RetirementNotice>,
+}
+
+/// An Agent whose `retire_on` date is near or has come.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetirementNotice {
+    /// The UTC date, `YYYY-MM-DD`.
+    pub retire_on: String,
+    /// `desk` or `retired`.
+    pub on_retire: String,
+    /// `retiring` (within the warning window), `desk_duty` or `retired`.
+    pub status: String,
 }
 
 impl AgentView {
@@ -60,38 +74,56 @@ impl AgentView {
             model_history: record
                 .map(|record| record.model_history.clone())
                 .unwrap_or_default(),
+            retirement: None,
         }
     }
 }
 
-/// The Agents the Headquarters Station's check-in lists for `operation`.
-fn posted_agents(registry: &dyn RegistryBackend, operation: &str) -> Result<Vec<String>, ApiError> {
-    let Some(headquarters) = registry.headquarters().map_err(|_| ApiError::internal())? else {
-        return Ok(Vec::new());
-    };
-    let stations = registry
-        .stations(Duration::MAX)
-        .map_err(|_| ApiError::internal())?;
-    let Some(station) = stations
-        .iter()
-        .find(|station| station.station() == headquarters.station())
-    else {
-        return Ok(Vec::new());
-    };
-    Ok(station
-        .info()
-        .get("operation_policies")
-        .and_then(|policies| policies.get(operation))
-        .and_then(|policy| policy.get("agents"))
-        .and_then(serde_json::Value::as_array)
-        .map(|agents| {
-            agents
-                .iter()
-                .filter_map(|agent| agent.get("id").and_then(serde_json::Value::as_str))
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default())
+/// What the Headquarters Station's check-in says of the roster.
+#[derive(Default)]
+struct Headquarters(BTreeMap<String, serde_json::Value>);
+
+impl Headquarters {
+    fn read(registry: &dyn RegistryBackend) -> Result<Self, ApiError> {
+        let Some(headquarters) = registry.headquarters().map_err(|_| ApiError::internal())? else {
+            return Ok(Self::default());
+        };
+        let stations = registry
+            .stations(Duration::MAX)
+            .map_err(|_| ApiError::internal())?;
+        Ok(stations
+            .into_iter()
+            .find(|station| station.station() == headquarters.station())
+            .map(|station| Self(station.info().clone()))
+            .unwrap_or_default())
+    }
+
+    /// The Agents posted to `operation`.
+    fn posted(&self, operation: &str) -> Vec<String> {
+        self.0
+            .get("operation_policies")
+            .and_then(|policies| policies.get(operation))
+            .and_then(|policy| policy.get("agents"))
+            .and_then(serde_json::Value::as_array)
+            .map(|agents| {
+                agents
+                    .iter()
+                    .filter_map(|agent| agent.get("id").and_then(serde_json::Value::as_str))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The Agent's retirement notice, if the check-in lists one.
+    fn retirement(&self, agent: &str) -> Option<RetirementNotice> {
+        self.0
+            .get("retirements")
+            .and_then(serde_json::Value::as_array)?
+            .iter()
+            .find(|notice| notice.get("agent").and_then(serde_json::Value::as_str) == Some(agent))
+            .and_then(|notice| serde_json::from_value(notice.clone()).ok())
+    }
 }
 
 /// `GET /v1/user/operations/{operation_id}/agents`: every Agent posted to the Operation or
@@ -108,7 +140,8 @@ pub(crate) async fn list(
     ensure_operation_registered(&registry, &operation_id).await?;
     let operation = operation_id.to_string();
     let views = tokio::task::spawn_blocking(move || {
-        let posted = posted_agents(registry.as_ref(), &operation)?;
+        let headquarters = Headquarters::read(registry.as_ref())?;
+        let posted = headquarters.posted(&operation);
         let records = registry.agent_records().map_err(|_| ApiError::internal())?;
         let mut views = BTreeMap::new();
         for agent in posted {
@@ -125,6 +158,9 @@ pub(crate) async fn list(
                     AgentView::new(record.agent.clone(), false, Some(record), &operation),
                 );
             }
+        }
+        for view in views.values_mut() {
+            view.retirement = headquarters.retirement(&view.agent);
         }
         Ok::<_, ApiError>(views.into_values().collect::<Vec<_>>())
     })
@@ -178,10 +214,16 @@ mod tests {
             .registry
             .check_in(
                 "hq",
-                BTreeMap::from([(
-                    "operation_policies".to_owned(),
-                    serde_json::json!({"G": {"operation": "G", "agents": [{"id": "007"}, {"id": "008"}]}}),
-                )]),
+                BTreeMap::from([
+                    (
+                        "operation_policies".to_owned(),
+                        serde_json::json!({"G": {"operation": "G", "agents": [{"id": "007"}, {"id": "008"}]}}),
+                    ),
+                    (
+                        "retirements".to_owned(),
+                        serde_json::json!([{"agent": "007", "retire_on": "2027-01-31", "on_retire": "desk", "status": "retiring"}]),
+                    ),
+                ]),
             )
             .unwrap();
         for (key, outcome) in [
@@ -229,5 +271,7 @@ mod tests {
         assert_eq!(views[0]["operation"]["stalled"], 1);
         assert_eq!(views[0]["by_clearance"]["field"]["done"], 2);
         assert_eq!(views[1]["operation"]["done"], 0);
+        assert_eq!(views[0]["retirement"]["status"], "retiring");
+        assert_eq!(views[1]["retirement"], serde_json::Value::Null);
     }
 }
