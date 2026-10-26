@@ -989,25 +989,44 @@ mod tests {
 
     /// A gate that holds every governed step until an approval in `approved` covers it, as
     /// the Station answers through `check_approval`.
+    /// A repository where every name is a branch and nothing is configured.
+    struct Branches;
+
+    impl ai6::directorates::m::approvals::Repository for Branches {
+        fn full_name(
+            &self,
+            _at: &ai6::directorates::m::approvals::GitContext,
+            name: &str,
+        ) -> Result<Option<String>, String> {
+            Ok(Some(format!("refs/heads/{name}")))
+        }
+
+        fn config(
+            &self,
+            _at: &ai6::directorates::m::approvals::GitContext,
+            _key: &str,
+        ) -> Result<Vec<String>, String> {
+            Ok(Vec::new())
+        }
+    }
+
     fn approvals_gate(approved: Arc<Mutex<Vec<ai6::ActionScope>>>) -> Gate {
-        Arc::new(
-            move |command, _cwd| match ai6::classify(command, &|_| None) {
-                Err(reason) => GateVerdict::Hold(reason),
-                Ok(steps) => {
-                    let approved = approved.lock().unwrap();
-                    match steps
-                        .iter()
-                        .find(|step| !approved.iter().any(|approval| approval.covers(step)))
-                    {
-                        None => GateVerdict::Allow,
-                        Some(step) => GateVerdict::Hold(format!(
-                            "call request_approval with kind {} and target {}",
-                            step.kind, step.target
-                        )),
-                    }
+        Arc::new(move |command, _cwd| match ai6::classify(command, &Branches) {
+            Err(reason) => GateVerdict::Hold(reason),
+            Ok(steps) => {
+                let approved = approved.lock().unwrap();
+                match steps
+                    .iter()
+                    .find(|step| !approved.iter().any(|approval| approval.covers(step)))
+                {
+                    None => GateVerdict::Allow,
+                    Some(step) => GateVerdict::Hold(format!(
+                        "call request_approval with kind {} and target {}",
+                        step.kind, step.target
+                    )),
                 }
-            },
-        )
+            }
+        })
     }
 
     fn texts_until_completed(session: &Object<dyn AgentSession>) -> Vec<String> {

@@ -65,9 +65,14 @@ enum GreenInkCommand {
     /// Claude Code's PreToolUse hook for shell commands. Reads the hook's JSON on standard
     /// input; for a command that pushes to a protected ref, deletes a ref, merges a pull
     /// request or creates a release without a live approval, prints a decision that denies it
-    /// and tells the Agent to call request_approval. Prints nothing otherwise. Asks the Station
-    /// through AI6_CABLE_MCP_URL and AI6_CABLE_MCP_TOKEN; always exits 0.
-    Gate,
+    /// and tells the Agent to call request_approval, and so it does for input it cannot read.
+    /// Prints nothing otherwise. Asks the Station at --cable-url (else AI6_CABLE_MCP_URL) with
+    /// AI6_CABLE_MCP_TOKEN; always exits 0.
+    Gate {
+        /// The Session's Cable endpoint, as the handler saw it.
+        #[arg(long)]
+        cable_url: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -289,8 +294,8 @@ async fn main() -> ExitCode {
         },
         Command::Runner { command } => runner_command(command).await,
         Command::GreenInk {
-            command: GreenInkCommand::Gate,
-        } => green_ink_gate().await,
+            command: GreenInkCommand::Gate { cable_url },
+        } => green_ink_gate(cable_url).await,
         Command::Theater { command } => {
             match tokio::task::spawn_blocking(move || theater_command(command)).await {
                 Ok(code) => code,
@@ -375,18 +380,30 @@ async fn main() -> ExitCode {
 }
 
 /// Reads the hook input, asks the gate, and prints a denial when it holds the command.
-async fn green_ink_gate() -> ExitCode {
+/// Reads the hook input, asks the gate, and prints a denial when it holds the command; a
+/// failure to read the input or to decide denies too.
+async fn green_ink_gate(cable_url: Option<String>) -> ExitCode {
+    use ai6::directorates::section_00::gate::{GateClient, deny, pre_tool_use};
     use std::io::Read;
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
+        println!(
+            "{}",
+            deny("Green ink: the hook input could not be read, so the command is held.")
+        );
         return ExitCode::SUCCESS;
     }
     let decision = tokio::task::spawn_blocking(move || {
-        let client = ai6::directorates::section_00::gate::GateClient::from_process_environment();
-        ai6::directorates::section_00::gate::pre_tool_use(&input, client.as_ref())
+        let client = GateClient::from_process_environment(cable_url);
+        pre_tool_use(&input, client.as_ref())
     })
-    .await;
-    if let Ok(Some(decision)) = decision {
+    .await
+    .unwrap_or_else(|_| {
+        Some(deny(
+            "Green ink: the gate failed while deciding, so the command is held.",
+        ))
+    });
+    if let Some(decision) = decision {
         println!("{decision}");
     }
     ExitCode::SUCCESS

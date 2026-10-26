@@ -341,4 +341,20 @@ fn the_green_ink_hook_denies_a_governed_step_and_stays_silent_otherwise() {
         quiet.stdout.is_empty(),
         "nothing printed lets the call go on"
     );
+
+    // Input the hook cannot read is denied, not let through.
+    let mut child = ai6()
+        .args(["green-ink", "gate", "--cable-url", "http://127.0.0.1:9/mcp"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("the AI6 command should start");
+    {
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(b"not json").unwrap();
+    }
+    let garbled = child.wait_with_output().unwrap();
+    assert!(garbled.status.success());
+    let decision: serde_json::Value = serde_json::from_slice(&garbled.stdout).unwrap();
+    assert_eq!(decision["hookSpecificOutput"]["permissionDecision"], "deny");
 }

@@ -927,7 +927,34 @@ mod tests {
         let environment = state.sessions.lock().unwrap()[&mission_id]
             .environment
             .clone();
-        let cwd = root.path();
+        // The hook runs in the Agent's checkout: a repository on `main` with a Mission branch.
+        let checkout = tempfile::tempdir().unwrap();
+        let path = checkout.path().to_string_lossy().into_owned();
+        for args in [
+            &["init", "-q", "-b", "main"][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "first",
+            ],
+            &["branch", "ai6/work"],
+        ] {
+            let mut full = vec!["-C".to_owned(), path.clone()];
+            full.extend(args.iter().map(|arg| (*arg).to_owned()));
+            assert!(
+                crate::directorates::section_00::gate::local_git(&full)
+                    .unwrap()
+                    .0,
+                "git {full:?}"
+            );
+        }
+        let cwd = checkout.path();
 
         let held = hook(&environment, cwd, "git push origin main")
             .await

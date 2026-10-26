@@ -14,7 +14,7 @@
 
 mod classify;
 
-pub use classify::classify;
+pub use classify::{GitContext, Repository, classify};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -121,16 +121,19 @@ impl ActionScope {
     }
 
     /// Whether an approval of this scope covers the step `attempted`: the same kind and, for
-    /// `push` and `delete`, the same ref on the same remote (a side that names no remote
-    /// matches any); for other kinds, the same target ignoring case, `#` and spacing.
+    /// `push` and `delete`, the same ref on the same remote (an approval that names no remote
+    /// covers every remote; a step that names none is covered only by such an approval); for
+    /// other kinds, the same target ignoring case, `#` and spacing, so `PR 42` does not cover
+    /// `PR other/repo#42`.
     pub fn covers(&self, attempted: &ActionScope) -> bool {
         if self.kind != attempted.kind {
             return false;
         }
         if matches!(self.kind.as_str(), "push" | "delete") {
             let remotes = match (self.remote(), attempted.remote()) {
+                (None, _) => true,
                 (Some(approved), Some(attempted)) => approved == attempted,
-                _ => true,
+                (Some(_), None) => false,
             };
             return remotes && self.pushed_ref() == attempted.pushed_ref();
         }
@@ -245,15 +248,10 @@ impl GreenInkPolicy {
     }
 
     /// Whether a push to `reference` (a full ref such as `refs/heads/main`) needs green ink. A
-    /// reference ending in `*` (every branch, every tag) needs it when it can reach a
-    /// protected ref.
+    /// reference with a pattern character (`*`, `?`, `[`), such as every branch or
+    /// `refs/heads/*ain`, always does: it may reach a protected ref.
     pub fn is_protected(&self, reference: &str) -> bool {
-        if let Some(prefix) = reference.strip_suffix('*')
-            && self
-                .protected
-                .iter()
-                .any(|pattern| pattern.starts_with(prefix))
-        {
+        if reference.contains(['*', '?', '[']) {
             return true;
         }
         self.matchers
@@ -526,10 +524,13 @@ mod tests {
         let approved = scope("push", "origin:main");
         assert!(approved.covers(&scope("push", "origin:refs/heads/main")));
         assert!(
-            approved.covers(&scope("push", "refs/heads/main")),
-            "remote unknown"
+            !approved.covers(&scope("push", "refs/heads/main")),
+            "a step without a remote may go anywhere"
         );
         assert!(scope("push", "main").covers(&scope("push", "upstream:refs/heads/main")));
+        assert!(scope("push", "main").covers(&scope("push", "refs/heads/main")));
+        assert!(!scope("merge", "PR 42").covers(&scope("merge", "PR other/repo#42")));
+        assert!(scope("merge", "PR o/r#42").covers(&scope("merge", "pr o/r #42")));
         assert!(!approved.covers(&scope("push", "upstream:refs/heads/main")));
         assert!(!approved.covers(&scope("push", "origin:refs/tags/main")));
         assert!(!approved.covers(&scope("delete", "origin:refs/heads/main")));
