@@ -201,10 +201,13 @@ credentials are issued.
 
 ### Track record and promotion
 
-Every Station counts each Agent's outcomes in its **record**: Missions done, failed, blown,
-abandoned and stalled, and the incidents charged to it (quarantines, budget stops, green ink
-refused), per Operation and per clearance, with the models that occupied the codename.
-Moneypenny's Agents view and `ai6ctl agents --operation ID` show it (`agent.read`).
+The Station that runs a Session counts its outcome in the Agent's **record**: Missions done,
+failed, blown, abandoned and stalled, and the incidents charged to it (quarantines, budget
+stops, green ink refused), per Operation and by clearance, under the model the Session was
+launched with. A Session lost with its Station or runner counts as `lost`, never as the
+Agent's failure; Chief of Staff reviews are not counted. Moneypenny's Agents view and `ai6ctl
+agents --operation ID` show an Operation's records (`agent.read`), nothing of other
+Operations'. Promotion counts only the Missions of the model that occupies the codename now.
 
 Autonomy is earned per Operation and signed by a person. When an Agent's record in an
 Operation meets the next step, M files a [green ink](missions.md#green-ink) request of kind

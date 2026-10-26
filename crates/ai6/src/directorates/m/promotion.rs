@@ -52,27 +52,32 @@ impl PromotionStep {
         }
     }
 
-    /// Why `tally` (with `everywhere`, the outcomes that apply in every Operation) does not
-    /// meet the step at `now`, or `None` when it does.
+    /// Why the record does not meet the step at `now`, or `None` when it does. `counted` is
+    /// what the Missions and failure rate are judged on (the current model's Sessions);
+    /// `incidents` are the tallies the quiet period is judged on (every model's, and the
+    /// outcomes that apply in every Operation).
     pub fn shortfall(
         &self,
-        tally: &AgentTally,
-        everywhere: &AgentTally,
+        counted: &AgentTally,
+        incidents: &[&AgentTally],
         now: f64,
     ) -> Option<String> {
         if self.missions == 0 {
             return Some("this step is turned off".to_owned());
         }
-        if tally.done < self.missions {
-            return Some(format!("{} of {} Missions done", tally.done, self.missions));
+        if counted.done < self.missions {
+            return Some(format!(
+                "{} of {} Missions done",
+                counted.done, self.missions
+            ));
         }
         if let Some(limit) = self.max_failure_rate
-            && tally.failure_rate().is_some_and(|rate| rate > limit)
+            && counted.failure_rate().is_some_and(|rate| rate > limit)
         {
             return Some(format!("failure rate above {:.0} %", limit * 100.0));
         }
         let since = now - self.quiet_days as f64 * 86_400.0;
-        let latest = [tally, everywhere]
+        let latest = incidents
             .iter()
             .filter_map(|tally| tally.latest(&self.quiet_on))
             .reduce(f64::max);
@@ -148,15 +153,15 @@ pub struct Promotion {
 }
 
 impl PromotionPolicy {
-    /// The step from `current` that `tally` has earned at `now`, if it stays within
-    /// `ceiling` (the Operation's clearance). `everywhere` holds the outcomes that apply in
-    /// every Operation, such as a quarantine of every Operation.
+    /// The step from `current` that the record has earned at `now`, if it stays within
+    /// `ceiling` (the Operation's clearance); `counted` and `incidents` as for
+    /// [`PromotionStep::shortfall`].
     pub fn due(
         &self,
         current: &str,
         ceiling: &str,
-        tally: &AgentTally,
-        everywhere: &AgentTally,
+        counted: &AgentTally,
+        incidents: &[&AgentTally],
         now: f64,
     ) -> Option<Promotion> {
         let (step, to) = match current {
@@ -165,16 +170,16 @@ impl PromotionPolicy {
             _ => return None,
         };
         let rank = |clearance| CLEARANCES.iter().position(|known| *known == clearance);
-        if rank(to)? > rank(ceiling)? || step.shortfall(tally, everywhere, now).is_some() {
+        if rank(to)? > rank(ceiling)? || step.shortfall(counted, incidents, now).is_some() {
             return None;
         }
         Some(Promotion {
             from: current.to_owned(),
             to: to.to_owned(),
-            round: tally.done / step.missions,
+            round: counted.done / step.missions,
             reason: format!(
                 "{} Missions done; meets {current} to {to}: {}",
-                tally.done,
+                counted.done,
                 step.describe()
             ),
         })
@@ -264,14 +269,16 @@ mod tests {
         let policy = PromotionPolicy::default();
         let now = 100.0 * DAY;
         let none = AgentTally::default();
-        assert_eq!(policy.due("desk", "00", &tally(9, 0), &none, now), None);
-        let due = policy.due("desk", "00", &tally(12, 3), &none, now).unwrap();
+        assert_eq!(policy.due("desk", "00", &tally(9, 0), &[&none], now), None);
+        let due = policy
+            .due("desk", "00", &tally(12, 3), &[&none], now)
+            .unwrap();
         assert_eq!(
             (due.from.as_str(), due.to.as_str(), due.round),
             ("desk", "field", 1)
         );
         assert_eq!(
-            policy.due("desk", "desk", &tally(12, 0), &none, now),
+            policy.due("desk", "desk", &tally(12, 0), &[&none], now),
             None,
             "ceiling"
         );
@@ -279,16 +286,16 @@ mod tests {
         let mut blown = tally(12, 0);
         blown.blown = 1;
         blown.last.insert(AgentOutcome::Blown, now - 29.0 * DAY);
-        assert_eq!(policy.due("desk", "00", &blown, &none, now), None);
+        assert_eq!(policy.due("desk", "00", &blown, &[&blown], now), None);
         blown.last.insert(AgentOutcome::Blown, now - 31.0 * DAY);
-        assert!(policy.due("desk", "00", &blown, &none, now).is_some());
+        assert!(policy.due("desk", "00", &blown, &[&blown], now).is_some());
 
         let mut quarantined = AgentTally::default();
         quarantined
             .last
             .insert(AgentOutcome::Quarantined, now - DAY);
         assert_eq!(
-            policy.due("desk", "00", &tally(12, 0), &quarantined, now),
+            policy.due("desk", "00", &tally(12, 0), &[&quarantined], now),
             None,
             "a quarantine of every Operation counts"
         );
@@ -301,21 +308,24 @@ mod tests {
         let none = AgentTally::default();
         assert!(
             policy
-                .due("field", "00", &tally(27, 3), &none, now)
+                .due("field", "00", &tally(27, 3), &[&none], now)
                 .is_some()
         );
-        assert_eq!(policy.due("field", "00", &tally(27, 4), &none, now), None);
         assert_eq!(
-            policy.due("field", "field", &tally(50, 0), &none, now),
+            policy.due("field", "00", &tally(27, 4), &[&none], now),
+            None
+        );
+        assert_eq!(
+            policy.due("field", "field", &tally(50, 0), &[&none], now),
             None
         );
         let mut stalled = tally(50, 0);
         stalled.last.insert(AgentOutcome::Stalled, now - 59.0 * DAY);
-        assert_eq!(policy.due("field", "00", &stalled, &none, now), None);
-        assert_eq!(policy.due("00", "00", &tally(99, 0), &none, now), None);
+        assert_eq!(policy.due("field", "00", &stalled, &[&stalled], now), None);
+        assert_eq!(policy.due("00", "00", &tally(99, 0), &[&none], now), None);
         assert_eq!(
             policy
-                .due("field", "00", &tally(50, 0), &none, now)
+                .due("field", "00", &tally(50, 0), &[&none], now)
                 .unwrap()
                 .round,
             2
@@ -330,10 +340,13 @@ mod tests {
         .unwrap();
         let policy = definition.resolve().unwrap();
         let none = AgentTally::default();
-        assert_eq!(policy.due("desk", "00", &tally(100, 0), &none, 1.0), None);
+        assert_eq!(
+            policy.due("desk", "00", &tally(100, 0), &[&none], 1.0),
+            None
+        );
         assert!(
             policy
-                .due("field", "00", &tally(3, 3), &none, 1.0)
+                .due("field", "00", &tally(3, 3), &[&none], 1.0)
                 .is_some()
         );
         for bad in [

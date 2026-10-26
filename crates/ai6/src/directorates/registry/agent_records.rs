@@ -1,12 +1,15 @@
-//! Agent records: each Agent's track record, counted per Operation and per clearance.
+//! Agent records: each Agent's track record in each Operation.
 //!
-//! A Station adds an outcome when one of its Missions finishes or stalls, and when an incident
-//! is charged to the Agent: a quarantine, a budget stop or a refused green ink request. A
-//! record holds counts and the time of each kind's latest outcome; the Missions, Sessions and
-//! audit records stay the detail. Promotion and the operator choosing a backup read them.
+//! A Station adds an outcome when one of its Missions finishes, stalls or loses its Session,
+//! and when an incident is charged to the Agent: a quarantine, a budget stop or a refused green
+//! ink request. Per Operation a record holds counts, the time of each kind's latest outcome,
+//! counts by the clearance the Agent worked at, and the models that occupied the codename with
+//! what each did; the Missions, Sessions and audit records stay the detail. Promotion and the
+//! operator choosing a backup read them.
 //!
-//! Each report carries a key naming the event (a Mission and its revision, a quarantine), and
-//! a key already counted is not counted again, so every Station may report what it saw.
+//! Each report carries a key naming the event (a Mission attempt and its outcome, a
+//! quarantine), and a key already counted is not counted again, so every Station may report
+//! what it saw.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,12 +20,13 @@ use serde::{Deserialize, Serialize};
 
 use super::store::{FileRegistry, invalid_data, registry_lock, safe_component, write_atomic};
 
-/// The tally key of outcomes outside any Operation, and of quarantines in every Operation.
+/// The Operation key of outcomes outside any Operation, and of quarantines in every Operation.
 pub const NO_OPERATION: &str = "";
-pub(super) const MAX_RECORD_BYTES: u64 = 256 * 1024;
-const MAX_TALLIES: usize = 512;
+pub(super) const MAX_RECORD_BYTES: u64 = 1024 * 1024;
+const MAX_OPERATIONS: usize = 128;
+const MAX_CLEARANCES: usize = 8;
 const MAX_COUNTED: usize = 256;
-const MAX_MODEL_HISTORY: usize = 64;
+const MAX_MODEL_HISTORY: usize = 16;
 const MAX_KEY_BYTES: usize = 512;
 const MAX_AGENT_BYTES: usize = 256;
 
@@ -41,6 +45,8 @@ pub enum AgentOutcome {
     Abandoned,
     /// The Watchdog stopped a Session that made no progress or looped.
     Stalled,
+    /// A Session was lost with its Station or runner: the infrastructure failed, not the Agent.
+    Lost,
     /// Medical or an operator quarantined the Agent.
     Quarantined,
     /// A budget limit stopped one of its Sessions.
@@ -51,12 +57,13 @@ pub enum AgentOutcome {
 
 impl AgentOutcome {
     /// Every outcome, in declaration order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Done,
         Self::Failed,
         Self::Blown,
         Self::Abandoned,
         Self::Stalled,
+        Self::Lost,
         Self::Quarantined,
         Self::BudgetStop,
         Self::GreenInkRejected,
@@ -70,6 +77,7 @@ impl AgentOutcome {
             Self::Blown => "blown",
             Self::Abandoned => "abandoned",
             Self::Stalled => "stalled",
+            Self::Lost => "lost",
             Self::Quarantined => "quarantined",
             Self::BudgetStop => "budget_stop",
             Self::GreenInkRejected => "green_ink_rejected",
@@ -84,21 +92,24 @@ impl AgentOutcome {
     }
 
     /// Whether it is an incident: a blown cover, a stall, a quarantine, a budget stop or a
-    /// refused green ink request. A failure or an abandoned Mission is not.
+    /// refused green ink request. A failure, an abandoned Mission or a lost Session is not.
     pub fn is_incident(self) -> bool {
-        !matches!(self, Self::Done | Self::Failed | Self::Abandoned)
+        !matches!(
+            self,
+            Self::Done | Self::Failed | Self::Abandoned | Self::Lost
+        )
     }
 
-    /// Whether a Mission's own state reports it, rather than an incident charged to the Agent.
-    pub fn is_mission_state(self) -> bool {
+    /// Whether it is the outcome of a Session the Agent ran, so it names the model it ran.
+    pub fn is_session_outcome(self) -> bool {
         matches!(
             self,
-            Self::Done | Self::Failed | Self::Blown | Self::Abandoned | Self::Stalled
+            Self::Done | Self::Failed | Self::Blown | Self::Abandoned | Self::Stalled | Self::Lost
         )
     }
 }
 
-/// Counts of an Agent's outcomes in one Operation or at one clearance.
+/// Counts of an Agent's outcomes.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -113,6 +124,8 @@ pub struct AgentTally {
     pub abandoned: u64,
     /// Sessions stopped as stalled or looping.
     pub stalled: u64,
+    /// Sessions lost with their Station or runner.
+    pub lost: u64,
     /// Quarantines.
     pub quarantined: u64,
     /// Budget stops.
@@ -132,6 +145,7 @@ impl AgentTally {
             AgentOutcome::Blown => self.blown,
             AgentOutcome::Abandoned => self.abandoned,
             AgentOutcome::Stalled => self.stalled,
+            AgentOutcome::Lost => self.lost,
             AgentOutcome::Quarantined => self.quarantined,
             AgentOutcome::BudgetStop => self.budget_stops,
             AgentOutcome::GreenInkRejected => self.green_ink_rejected,
@@ -152,7 +166,7 @@ impl AgentTally {
     }
 
     /// Failed and blown Missions as a share of the Missions that ended done, failed or blown;
-    /// `None` before any did.
+    /// `None` before any did. Lost Sessions do not count.
     pub fn failure_rate(&self) -> Option<f64> {
         let failures = self.failed + self.blown;
         let ended = self.done + failures;
@@ -166,6 +180,7 @@ impl AgentTally {
             AgentOutcome::Blown => &mut self.blown,
             AgentOutcome::Abandoned => &mut self.abandoned,
             AgentOutcome::Stalled => &mut self.stalled,
+            AgentOutcome::Lost => &mut self.lost,
             AgentOutcome::Quarantined => &mut self.quarantined,
             AgentOutcome::BudgetStop => &mut self.budget_stops,
             AgentOutcome::GreenInkRejected => &mut self.green_ink_rejected,
@@ -176,17 +191,73 @@ impl AgentTally {
     }
 }
 
-/// One model an Agent's codename was occupied by, and when.
+/// One model an Agent's codename was occupied by in an Operation, and what it did there.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelTenure {
-    /// The configured model; `None` is the handler's default.
+    /// The model its Sessions were launched with; `None` is the handler's default.
     pub model: Option<String>,
     /// The first outcome counted with it, as Unix seconds.
     pub from: f64,
     /// The first outcome counted with the next model; `None` while it is current.
     pub to: Option<f64>,
+    /// The outcomes of its Sessions.
+    #[serde(default)]
+    pub tally: AgentTally,
+}
+
+/// An Agent's record in one Operation.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OperationRecord {
+    /// Every outcome there.
+    pub tally: AgentTally,
+    /// Outcomes there by the clearance the Agent worked at.
+    pub by_clearance: BTreeMap<String, AgentTally>,
+    /// When its latest Mission there ended done, failed, blown or abandoned, as Unix seconds.
+    pub last_mission_at: Option<f64>,
+    /// The models that occupied the codename there, oldest first; a new one starts with the
+    /// first Session outcome counted with another model.
+    pub model_history: Vec<ModelTenure>,
+}
+
+impl OperationRecord {
+    /// What the Sessions of `model` did here while it is the current occupant; an empty tally
+    /// when another model occupies the codename now.
+    pub fn tally_of_model(&self, model: Option<&str>) -> AgentTally {
+        self.model_history
+            .last()
+            .filter(|tenure| tenure.model.as_deref() == model)
+            .map(|tenure| tenure.tally.clone())
+            .unwrap_or_default()
+    }
+
+    fn note_model(&mut self, model: Option<String>, at: f64) -> &mut ModelTenure {
+        let current = self
+            .model_history
+            .last()
+            .is_some_and(|tenure| tenure.model == model);
+        if !current {
+            if let Some(previous) = self.model_history.last_mut() {
+                previous.to = Some(at);
+            }
+            self.model_history.push(ModelTenure {
+                model,
+                from: at,
+                to: None,
+                tally: AgentTally::default(),
+            });
+            if self.model_history.len() > MAX_MODEL_HISTORY {
+                self.model_history
+                    .drain(..self.model_history.len() - MAX_MODEL_HISTORY);
+            }
+        }
+        self.model_history
+            .last_mut()
+            .expect("a tenure was just ensured")
+    }
 }
 
 /// An Agent's track record.
@@ -196,16 +267,9 @@ pub struct ModelTenure {
 pub struct AgentRecord {
     /// The Agent codename.
     pub agent: String,
-    /// Outcomes by Operation; [`NO_OPERATION`] holds those outside any Operation and
+    /// Its record per Operation; [`NO_OPERATION`] holds outcomes outside any Operation and
     /// quarantines that apply to every Operation.
-    pub by_operation: BTreeMap<String, AgentTally>,
-    /// Outcomes by the clearance the Agent worked at.
-    pub by_clearance: BTreeMap<String, AgentTally>,
-    /// When its latest Mission ended done, failed, blown or abandoned, as Unix seconds.
-    pub last_mission_at: Option<f64>,
-    /// The models that occupied the codename, oldest first; a new one starts with the first
-    /// outcome counted after a change of model.
-    pub model_history: Vec<ModelTenure>,
+    pub by_operation: BTreeMap<String, OperationRecord>,
     /// The keys of the latest reports counted, newest last, so a repeated report is not
     /// counted twice.
     pub counted: Vec<String>,
@@ -220,17 +284,12 @@ impl AgentRecord {
         }
     }
 
-    /// The Agent's outcomes in `operation`, or an empty tally.
-    pub fn in_operation(&self, operation: &str) -> AgentTally {
+    /// The Agent's record in `operation`, or an empty one.
+    pub fn in_operation(&self, operation: &str) -> OperationRecord {
         self.by_operation
             .get(operation)
             .cloned()
             .unwrap_or_default()
-    }
-
-    /// The model that occupies the codename now, as far as the record knows.
-    pub fn current_model(&self) -> Option<&ModelTenure> {
-        self.model_history.last()
     }
 
     /// Counts `report` into the record; `false` when its key was already counted.
@@ -238,7 +297,7 @@ impl AgentRecord {
     /// # Errors
     ///
     /// `InvalidInput` for a report out of bounds or for another Agent; `InvalidData` when the
-    /// record would hold more than 512 Operations or clearances.
+    /// record would hold more than 128 Operations or 8 clearances in one.
     pub fn count(&mut self, report: &AgentOutcomeReport) -> io::Result<bool> {
         report.validate()?;
         if report.agent != self.agent {
@@ -248,25 +307,26 @@ impl AgentRecord {
             return Ok(false);
         }
         let operation = report.operation.as_deref().unwrap_or(NO_OPERATION);
-        let full = |tallies: &BTreeMap<String, AgentTally>, key: &str| {
-            !tallies.contains_key(key) && tallies.len() >= MAX_TALLIES
+        let new_clearance = |record: &OperationRecord| {
+            report.clearance.as_deref().is_some_and(|clearance| {
+                !record.by_clearance.contains_key(clearance)
+                    && record.by_clearance.len() >= MAX_CLEARANCES
+            })
         };
-        if full(&self.by_operation, operation)
-            || report
-                .clearance
-                .as_deref()
-                .is_some_and(|clearance| full(&self.by_clearance, clearance))
-        {
-            return Err(invalid_data(
-                "the Agent record holds too many Operations or clearances",
-            ));
+        match self.by_operation.get(operation) {
+            None if self.by_operation.len() >= MAX_OPERATIONS => {
+                return Err(invalid_data("the Agent record holds too many Operations"));
+            }
+            Some(record) if new_clearance(record) => {
+                return Err(invalid_data("the Agent record holds too many clearances"));
+            }
+            _ => {}
         }
-        self.by_operation
-            .entry(operation.to_owned())
-            .or_default()
-            .add(report.outcome, report.at);
+        let record = self.by_operation.entry(operation.to_owned()).or_default();
+        record.tally.add(report.outcome, report.at);
         if let Some(clearance) = &report.clearance {
-            self.by_clearance
+            record
+                .by_clearance
                 .entry(clearance.clone())
                 .or_default()
                 .add(report.outcome, report.at);
@@ -278,37 +338,23 @@ impl AgentRecord {
                 | AgentOutcome::Blown
                 | AgentOutcome::Abandoned
         ) {
-            self.last_mission_at = Some(
-                self.last_mission_at
+            record.last_mission_at = Some(
+                record
+                    .last_mission_at
                     .map_or(report.at, |at| at.max(report.at)),
             );
         }
-        if report.outcome.is_mission_state() {
-            self.note_model(report.model.clone(), report.at);
+        if report.outcome.is_session_outcome() {
+            record
+                .note_model(report.model.clone(), report.at)
+                .tally
+                .add(report.outcome, report.at);
         }
         self.counted.push(report.key.clone());
         if self.counted.len() > MAX_COUNTED {
             self.counted.drain(..self.counted.len() - MAX_COUNTED);
         }
         Ok(true)
-    }
-
-    fn note_model(&mut self, model: Option<String>, at: f64) {
-        if let Some(current) = self.model_history.last_mut() {
-            if current.model == model {
-                return;
-            }
-            current.to = Some(at);
-        }
-        self.model_history.push(ModelTenure {
-            model,
-            from: at,
-            to: None,
-        });
-        if self.model_history.len() > MAX_MODEL_HISTORY {
-            self.model_history
-                .drain(..self.model_history.len() - MAX_MODEL_HISTORY);
-        }
     }
 }
 
@@ -322,11 +368,12 @@ pub struct AgentOutcomeReport {
     pub operation: Option<String>,
     /// What happened.
     pub outcome: AgentOutcome,
-    /// Names the event, such as `MISSION#REVISION`; a key counted before is not counted again.
+    /// Names the event, such as `MISSION#ATTEMPT#OUTCOME`; a key counted before is not counted
+    /// again.
     pub key: String,
     /// The clearance the Agent worked at, when known.
     pub clearance: Option<String>,
-    /// The model the Agent was configured with; `None` is the handler's default.
+    /// The model the Session was launched with; `None` is the handler's default.
     pub model: Option<String>,
     /// When, as Unix seconds.
     pub at: f64,
@@ -541,24 +588,49 @@ mod tests {
         let registry = store.handle();
         assert_eq!(registry.agent_record("007").unwrap(), None);
         registry
-            .record_agent_outcome(&report(AgentOutcome::Done, "m-1#3", 10.0))
+            .record_agent_outcome(&report(AgentOutcome::Done, "m-1#1#done", 10.0))
             .unwrap();
         registry
-            .record_agent_outcome(&report(AgentOutcome::Done, "m-2#4", 20.0))
+            .record_agent_outcome(&report(AgentOutcome::Done, "m-2#1#done", 20.0))
             .unwrap();
         registry
-            .record_agent_outcome(&report(AgentOutcome::Stalled, "m-3#2", 15.0))
+            .record_agent_outcome(&report(AgentOutcome::Stalled, "m-3#1#stalled", 15.0))
+            .unwrap();
+        registry
+            .record_agent_outcome(&report(AgentOutcome::Lost, "m-3#1#lost", 16.0))
             .unwrap();
         let again = registry
-            .record_agent_outcome(&report(AgentOutcome::Done, "m-2#4", 30.0))
+            .record_agent_outcome(&report(AgentOutcome::Done, "m-2#1#done", 30.0))
             .unwrap();
-        let tally = again.in_operation("G");
-        assert_eq!((tally.done, tally.stalled, tally.failed), (2, 1, 0));
+        let record = again.in_operation("G");
+        let tally = &record.tally;
+        assert_eq!(
+            (tally.done, tally.stalled, tally.lost, tally.failed),
+            (2, 1, 1, 0)
+        );
         assert_eq!(tally.last(AgentOutcome::Done), Some(20.0));
-        assert_eq!(again.by_clearance["field"].done, 2);
-        assert_eq!(again.last_mission_at, Some(20.0));
-        assert_eq!(tally.failure_rate(), Some(0.0));
+        assert_eq!(record.by_clearance["field"].done, 2);
+        assert_eq!(record.last_mission_at, Some(20.0));
+        assert_eq!(
+            tally.failure_rate(),
+            Some(0.0),
+            "a lost Session is no failure"
+        );
 
+        // Another Operation's work stays in its own record.
+        registry
+            .record_agent_outcome(
+                &AgentOutcomeReport::new(
+                    "007",
+                    Some("L".into()),
+                    AgentOutcome::Failed,
+                    "l-1#1#failed",
+                    60.0,
+                )
+                .at_clearance("00")
+                .with_model(Some("haiku".into())),
+            )
+            .unwrap();
         registry
             .record_agent_outcome(&AgentOutcomeReport::new(
                 "007",
@@ -573,13 +645,18 @@ mod tests {
                 "008",
                 Some("G".into()),
                 AgentOutcome::Failed,
-                "m-4#2",
+                "m-4#1#failed",
                 50.0,
             ))
             .unwrap();
         let record = registry.agent_record("007").unwrap().unwrap();
-        assert_eq!(record.in_operation(NO_OPERATION).quarantined, 1);
-        assert_eq!(record.in_operation("G").quarantined, 0);
+        let g = record.in_operation("G");
+        assert_eq!(record.in_operation(NO_OPERATION).tally.quarantined, 1);
+        assert_eq!(g.tally.quarantined, 0);
+        assert!(!g.by_clearance.contains_key("00"));
+        assert_eq!(g.last_mission_at, Some(20.0));
+        assert_eq!(g.model_history.len(), 1);
+        assert_eq!(record.in_operation("L").tally.failed, 1);
         let agents = registry
             .agent_records()
             .unwrap()
@@ -595,30 +672,41 @@ mod tests {
     fn a_change_of_model_opens_a_new_tenure(store: &dyn Store) {
         let registry = store.handle();
         registry
-            .record_agent_outcome(&report(AgentOutcome::Done, "m-1#3", 10.0))
+            .record_agent_outcome(&report(AgentOutcome::Done, "m-1#1#done", 10.0))
             .unwrap();
         registry
-            .record_agent_outcome(&report(AgentOutcome::Failed, "m-2#3", 20.0))
+            .record_agent_outcome(&report(AgentOutcome::Failed, "m-2#1#failed", 20.0))
             .unwrap();
         let record = registry
             .record_agent_outcome(
-                &report(AgentOutcome::Done, "m-3#3", 30.0).with_model(Some("sonnet".into())),
+                &report(AgentOutcome::Done, "m-3#1#done", 30.0).with_model(Some("sonnet".into())),
             )
             .unwrap();
+        let g = record.in_operation("G");
+        let tenures: Vec<_> = g
+            .model_history
+            .iter()
+            .map(|tenure| {
+                (
+                    tenure.model.as_deref(),
+                    tenure.from,
+                    tenure.to,
+                    tenure.tally.done,
+                )
+            })
+            .collect();
         assert_eq!(
-            record.model_history,
+            tenures,
             [
-                ModelTenure {
-                    model: Some("opus".into()),
-                    from: 10.0,
-                    to: Some(30.0)
-                },
-                ModelTenure {
-                    model: Some("sonnet".into()),
-                    from: 30.0,
-                    to: None
-                },
+                (Some("opus"), 10.0, Some(30.0), 1),
+                (Some("sonnet"), 30.0, None, 1),
             ]
+        );
+        assert_eq!(g.tally_of_model(Some("sonnet")).done, 1);
+        assert_eq!(
+            g.tally_of_model(Some("opus")).done,
+            0,
+            "opus is not the occupant now"
         );
         // An incident charged to the Agent does not say which model it ran.
         let record = registry
@@ -627,14 +715,15 @@ mod tests {
                     "007",
                     Some("G".into()),
                     AgentOutcome::BudgetStop,
-                    "budget#m-3#31",
+                    "budget#m-3#1",
                     31.0,
                 )
                 .with_model(Some("haiku".into())),
             )
             .unwrap();
-        assert_eq!(record.model_history.len(), 2);
-        assert_eq!(record.in_operation("G").budget_stops, 1);
+        let g = record.in_operation("G");
+        assert_eq!(g.model_history.len(), 2);
+        assert_eq!(g.tally.budget_stops, 1);
     }
 
     #[test]
@@ -645,6 +734,7 @@ mod tests {
             assert_eq!(json, format!("\"{}\"", outcome.as_str()));
         }
         assert!(!AgentOutcome::Failed.is_incident());
+        assert!(!AgentOutcome::Lost.is_incident());
         assert!(AgentOutcome::GreenInkRejected.is_incident());
     }
 }

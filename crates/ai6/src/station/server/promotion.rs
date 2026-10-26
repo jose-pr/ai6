@@ -83,11 +83,14 @@ fn consider(
         return;
     };
     let current = agent.effective_clearance(operation, grant.as_ref(), now);
+    // Missions count only for the model that occupies the codename now; incidents of any
+    // model, and quarantines of every Operation, keep the quiet period.
+    let here = record.in_operation(&operation.id);
     let Some(promotion) = operation.promotion.due(
         &current,
         &operation.clearance,
-        &record.in_operation(&operation.id),
-        &record.in_operation(NO_OPERATION),
+        &here.tally_of_model(agent.model.as_deref()),
+        &[&here.tally, &record.in_operation(NO_OPERATION).tally],
         now as f64,
     ) else {
         return;

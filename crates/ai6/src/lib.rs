@@ -117,6 +117,7 @@ pub use directorates::registry::accounts::{
 };
 pub use directorates::registry::agent_records::{
     AgentOutcome, AgentOutcomeReport, AgentRecord, AgentTally, ModelTenure, NO_OPERATION,
+    OperationRecord,
 };
 pub use directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,

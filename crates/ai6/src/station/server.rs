@@ -1474,11 +1474,10 @@ fn session_hold(state: &DaemonState, mission_id: &str) -> Option<SessionHold> {
 }
 
 /// Mirrors a Mission's state into its shared Session record, fenced by this Station's token,
-/// and counts a finished or stalled state on its Agent's record.
+/// and, while it holds the Session, counts a finished or stalled state on its Agent's record.
 ///
 /// A refused token means another Station took the Session, so this Station stops acting on it.
 fn sync_session_record(state: &DaemonState, mission_id: &str) {
-    agents::count_mission(state, mission_id);
     let Some(hold) = session_hold(state, mission_id) else {
         return;
     };
@@ -1509,7 +1508,8 @@ fn sync_session_record(state: &DaemonState, mission_id: &str) {
         .intake
         .update_session(&hold.id, &state.station_id, hold.fence, update)
     {
-        Ok(_) | Err(SessionError::Ended) => {}
+        // Only the Station that holds the Session counts what its Agent did.
+        Ok(_) | Err(SessionError::Ended) => agents::count_mission(state, mission_id, hold.attempt),
         Err(SessionError::Stale | SessionError::HeldBy(_)) => fence_out(state, mission_id),
         Err(error) => eprintln!("ai6: Session record {:?} not updated: {error}", hold.id),
     }

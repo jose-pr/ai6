@@ -1252,6 +1252,7 @@ struct AgentTally {
     blown: u64,
     abandoned: u64,
     stalled: u64,
+    lost: u64,
     quarantined: u64,
     budget_stops: u64,
     green_ink_rejected: u64,
@@ -1264,7 +1265,7 @@ struct ModelTenure {
 
 fn print_agents(agents: &[AgentView]) {
     println!(
-        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION"
+        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tLOST\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION"
     );
     for view in agents {
         let tally = &view.operation;
@@ -1276,7 +1277,7 @@ fn print_agents(agents: &[AgentView]) {
             (None, _) => "-".to_owned(),
         };
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             plain(&view.agent),
             view.posted,
             tally.done,
@@ -1284,6 +1285,7 @@ fn print_agents(agents: &[AgentView]) {
             tally.blown,
             tally.abandoned,
             tally.stalled,
+            tally.lost,
             tally.quarantined + view.every_operation.quarantined,
             tally.budget_stops,
             tally.green_ink_rejected,

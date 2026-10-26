@@ -46,11 +46,12 @@ pub struct AgentView {
     pub operation: AgentTally,
     /// Its outcomes outside any Operation, and quarantines in every Operation.
     pub every_operation: AgentTally,
-    /// Its outcomes by the clearance it worked at, in every Operation.
+    /// Its outcomes in this Operation by the clearance it worked at.
     pub by_clearance: BTreeMap<String, AgentTally>,
-    /// When its latest Mission ended, as Unix seconds.
+    /// When its latest Mission in this Operation ended, as Unix seconds.
     pub last_mission_at: Option<f64>,
-    /// The models that occupied the codename, oldest first.
+    /// The models that occupied the codename in this Operation, oldest first, with what each
+    /// did here.
     pub model_history: Vec<ModelTenure>,
     /// Its retirement, from the Headquarters Station's check-in, once it is near or due.
     pub retirement: Option<RetirementNotice>,
@@ -78,22 +79,19 @@ pub struct RetirementNotice {
 
 impl AgentView {
     fn new(agent: String, posted: bool, record: Option<&AgentRecord>, operation: &str) -> Self {
+        let here = record
+            .map(|record| record.in_operation(operation))
+            .unwrap_or_default();
         Self {
             agent,
             posted,
-            operation: record
-                .map(|record| record.in_operation(operation))
-                .unwrap_or_default(),
+            operation: here.tally,
             every_operation: record
-                .map(|record| record.in_operation(NO_OPERATION))
+                .map(|record| record.in_operation(NO_OPERATION).tally)
                 .unwrap_or_default(),
-            by_clearance: record
-                .map(|record| record.by_clearance.clone())
-                .unwrap_or_default(),
-            last_mission_at: record.and_then(|record| record.last_mission_at),
-            model_history: record
-                .map(|record| record.model_history.clone())
-                .unwrap_or_default(),
+            by_clearance: here.by_clearance,
+            last_mission_at: here.last_mission_at,
+            model_history: here.model_history,
             retirement: None,
             clearance: None,
             configured_clearance: None,
@@ -473,6 +471,20 @@ mod tests {
                 11.0,
             ))
             .unwrap();
+        served
+            .registry
+            .record_agent_outcome(
+                &AgentOutcomeReport::new(
+                    "007",
+                    Some("L".into()),
+                    AgentOutcome::Done,
+                    "m-l2#1#done",
+                    99.0,
+                )
+                .at_clearance("00")
+                .with_model(Some("haiku".into())),
+            )
+            .unwrap();
 
         let response = agents(&served.base, &served.viewer).await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
@@ -494,6 +506,13 @@ mod tests {
         assert_eq!(views[0]["operation"]["done"], 2);
         assert_eq!(views[0]["operation"]["stalled"], 1);
         assert_eq!(views[0]["by_clearance"]["field"]["done"], 2);
+        assert_eq!(
+            views[0]["by_clearance"]["00"],
+            serde_json::Value::Null,
+            "nothing of L"
+        );
+        assert_eq!(views[0]["last_mission_at"], 10.0);
+        assert_eq!(views[0]["model_history"].as_array().unwrap().len(), 1);
         assert_eq!(views[1]["operation"]["done"], 0);
         assert_eq!(views[0]["retirement"]["status"], "retiring");
         assert_eq!(views[1]["retirement"], serde_json::Value::Null);

@@ -614,6 +614,7 @@ async fn agents_lists_each_agents_record_in_the_operation() {
         ("m-1#3", ai6::AgentOutcome::Done),
         ("m-2#3", ai6::AgentOutcome::Done),
         ("m-3#2", ai6::AgentOutcome::Stalled),
+        ("m-4#1#lost", ai6::AgentOutcome::Lost),
     ] {
         registry
             .record_agent_outcome(
@@ -639,8 +640,8 @@ async fn agents_lists_each_agents_record_in_the_operation() {
     assert_eq!(
         printed,
         [
-            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION",
-            "007\tfalse\t2\t0\t0\t0\t1\t0\t0\t0\t1000\topus\t-\t-\t-",
+            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tLOST\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION",
+            "007\tfalse\t2\t0\t0\t0\t1\t1\t0\t0\t0\t1000\topus\t-\t-\t-",
         ]
     );
     let lowered = lines(

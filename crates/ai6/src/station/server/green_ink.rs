@@ -537,6 +537,7 @@ fn told(state: &DaemonState, approval: &Approval, now: f64) {
             Some(&request.operation),
             AgentOutcome::GreenInkRejected,
             format!("green-ink#{}", request.id),
+            None,
         );
     }
     queue_event(

@@ -301,7 +301,7 @@ mod tests {
             registry
                 .agent_record(agent)
                 .unwrap()
-                .map_or(0, |record| record.in_operation(operation).quarantined)
+                .map_or(0, |record| record.in_operation(operation).tally.quarantined)
         };
         assert_eq!(counted("007", "G"), 1, "quarantining again counts nothing");
         assert_eq!(counted("009", NO_OPERATION), 1);
