@@ -29,6 +29,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Account pools: the pool accounts each Operation may draw from, with the Sessions using
   each against its limit (other Operations' counted, not named), quota used per window, tokens today and until when a limited
   account waits, refreshed every fifteen seconds; it needs `pool.read`.
+- Agents (Administration, `agent.read`): each Agent of an Operation with its record there
+  (Missions done, failed, stalled and the incidents charged to it), the model occupying the
+  codename, the clearance it works at, a coming retirement and a promotion waiting for green
+  ink; with `agent.configure`, lower its clearance there or restore the configured one.
 - Administration: Operation-scoped Agent roles (purpose and policy), and each Station's
   Mission capacity and resource limits (the free memory and CPU past which it takes no new
   Missions; 0 MiB and 100% turn them off).

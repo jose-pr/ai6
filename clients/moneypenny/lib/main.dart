@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guatiao/guatiao.dart' as guatiao;
 
+import 'agents/agents_page.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
@@ -808,6 +809,84 @@ class MissionBoard extends ChangeNotifier {
       for (final account in board['accounts'] as List<dynamic>)
         PoolAccountSummary.fromJson(account as Map<String, dynamic>),
     ];
+  }
+
+  /// Operations whose Agents and records this account may read (`agent.read`).
+  List<String> get agentOperations => _operationsWith('agent.read');
+
+  /// The Agents of an Operation and their records there.
+  Future<List<AgentSummary>> loadAgents(String operationId) async {
+    if (demo) {
+      return const [
+        AgentSummary(
+          agent: '007',
+          posted: true,
+          operation: AgentTallySummary(done: 12, failed: 1, stalled: 1),
+          model: 'sonnet',
+          clearance: 'field',
+          configuredClearance: 'desk',
+          grant: ClearanceGrantSummary(
+            clearance: 'field',
+            signer: 'operator',
+            approval: 'green-ink-preview',
+          ),
+          retirement: RetirementSummary(
+            retireOn: '2027-01-31',
+            onRetire: 'desk',
+            status: 'retiring',
+          ),
+        ),
+        AgentSummary(
+          agent: '008',
+          posted: true,
+          operation: AgentTallySummary(done: 4),
+          model: 'gpt-5.6',
+          clearance: 'field',
+          configuredClearance: 'field',
+        ),
+      ];
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/agents',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the Operation\'s Agents.');
+    }
+    return [
+      for (final agent in jsonDecode(response.body) as List<dynamic>)
+        AgentSummary.fromJson(agent as Map<String, dynamic>),
+    ];
+  }
+
+  /// Holds an Agent at `clearance` or below in an Operation (`agent.configure`).
+  Future<void> lowerClearance(
+    String operationId,
+    String agent,
+    String clearance,
+    String reason,
+  ) async {
+    if (demo) throw StateError('Clearance changes are unavailable in preview.');
+    final response = await _userRequest(
+      'PUT',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/agents/${Uri.encodeComponent(agent)}/clearance',
+      body: {'clearance': clearance, 'reason': reason},
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused to lower the clearance.');
+    }
+  }
+
+  /// Removes an Agent's clearance grant in an Operation (`agent.configure`).
+  Future<void> revokeClearanceGrant(String operationId, String agent) async {
+    if (demo) throw StateError('Clearance changes are unavailable in preview.');
+    final response = await _userRequest(
+      'DELETE',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/agents/${Uri.encodeComponent(agent)}/clearance',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused to remove the clearance grant.');
+    }
   }
 
   List<String> _operationsWith(String action) {
@@ -2826,6 +2905,7 @@ class AdministrationPage extends StatelessWidget {
     final canReadRoster = board.canReadRoster;
     final pages = <Widget>[
       if (canReadRoles) AgentRolesPage(board: board),
+      if (canReadRoles) AgentsPage(board: board),
       if (canReadStationSettings) StationSettingsPage(board: board),
       if (canReadRoster) RosterPage(board: board),
       if (canReviewProposals) MissionProposalsPage(board: board),
@@ -2835,6 +2915,7 @@ class AdministrationPage extends StatelessWidget {
     ];
     final labels = <String>[
       if (canReadRoles) 'Agent roles',
+      if (canReadRoles) 'Agents',
       if (canReadStationSettings) 'Station settings',
       if (canReadRoster) 'Roster',
       if (canReviewProposals) 'Mission proposals',
