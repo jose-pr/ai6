@@ -381,18 +381,40 @@ async fn main() -> ExitCode {
                 config = config.with_config_dir(config_dir);
             }
             if let Some(location) = roster_location {
-                match ai6::directorates::m::config::open(&location) {
-                    Ok(source) => config = config.with_config_source(source),
+                let options = sql_options(headquarters_lease, "AI6_CONFIG_PASSWORD");
+                match ai6::directorates::m::config::open_with(&location, &options) {
+                    Ok(source) => {
+                        warn_weakenings("roster", &location);
+                        config = config.with_config_source(source);
+                    }
                     Err(error) => {
+                        let location = ai6::directorates::registry::sql::redact(&location);
                         eprintln!("ai6: the roster at {location} cannot be opened: {error}");
                         return ExitCode::FAILURE;
                     }
                 }
             }
+            // A SQL Registry named only in the environment still gets timeouts derived from
+            // this Station's Headquarters lease.
+            let registry = registry.or_else(|| {
+                environment_variable("AI6_REGISTRY")
+                    .ok()
+                    .flatten()
+                    .filter(|location| {
+                        ["sqlite:", "postgres://", "postgresql://"]
+                            .iter()
+                            .any(|scheme| location.starts_with(scheme))
+                    })
+            });
             if let Some(location) = registry {
-                match ai6::directorates::registry::backend::open(&location) {
-                    Ok(registry) => config = config.with_registry(registry),
+                let options = sql_options(headquarters_lease, "AI6_REGISTRY_PASSWORD");
+                match ai6::directorates::registry::backend::open_with(&location, &options) {
+                    Ok(registry) => {
+                        warn_weakenings("Registry", &location);
+                        config = config.with_registry(registry);
+                    }
                     Err(error) => {
+                        let location = ai6::directorates::registry::sql::redact(&location);
                         eprintln!("ai6: the Registry at {location} cannot be opened: {error}");
                         return ExitCode::FAILURE;
                     }
@@ -856,6 +878,26 @@ fn publisher_config() -> Result<Option<ai6::station::publisher::Config>, String>
             .map(Some)
             .map_err(|error| error.to_string()),
         _ => Err("AI6_EXPORTS_URL and AI6_EXPORTS_STATION_TOKEN must be set together".to_owned()),
+    }
+}
+
+/// Options for a SQL Registry or roster: timeouts from this Station's Headquarters lease,
+/// and the password in `password_variable` when it is set.
+fn sql_options(headquarters_lease: Duration, password_variable: &str) -> ai6::SqlOptions {
+    let options = ai6::SqlOptions::for_lease(headquarters_lease);
+    match environment_variable(password_variable) {
+        Ok(Some(password)) if !password.is_empty() => options.with_password(password),
+        _ => options,
+    }
+}
+
+/// Says on standard error what a SQL location gives up against the defaults.
+fn warn_weakenings(what: &str, location: &str) {
+    for weakening in ai6::directorates::registry::sql::weakenings(location) {
+        eprintln!(
+            "ai6: warning: the {what} at {}: {weakening}",
+            ai6::directorates::registry::sql::redact(location)
+        );
     }
 }
 

@@ -123,7 +123,16 @@ async fn main() -> ExitCode {
         }
     };
     let registry = match ai6::directorates::registry::backend::from_environment() {
-        Ok(registry) => registry,
+        Ok(registry) => {
+            let location = std::env::var("AI6_REGISTRY").unwrap_or_default();
+            for weakening in ai6::directorates::registry::sql::weakenings(&location) {
+                eprintln!(
+                    "universal-exports: warning: the Registry at {}: {weakening}",
+                    ai6::directorates::registry::sql::redact(&location)
+                );
+            }
+            registry
+        }
         Err(error) => {
             eprintln!("universal-exports: shared access-token Registry is unavailable: {error}");
             return ExitCode::FAILURE;
