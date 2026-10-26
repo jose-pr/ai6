@@ -396,7 +396,8 @@ passed over, and with none left the app gets an error entry naming the last reas
 carries the message (prefixed with `[App page: view=… operation_id=…]` from the page keys
 `view`, `operation_id`, `mission_id`, `station_id`, `session_id`, each a short identifier;
 anything else in the page is dropped), Moneypenny's instructions and the field dictionary
-(`docs/organization.md`) as context, a recap of the conversation's last 8 KiB, the provider
+(`docs/organization.md`) as context, a recap of the conversation's last 8 KiB apart as
+`recap` (a Station gives it only to a harness that starts afresh, never on resume), the provider
 Session to resume, and an MCP token bound to the person, the conversation and the Station the
 job is placed on. The token is set when the job is placed: the conversation's token for that
 Station is reused while more than 10 minutes of it remain (so a running harness keeps the

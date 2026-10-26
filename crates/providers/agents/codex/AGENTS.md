@@ -55,7 +55,14 @@ The handler answers every `item/commandExecution/requestApproval` server request
 `{"decision": "accept"}` unless the gate holds the command, then `{"decision": "decline"}`
 followed by `turn/steer {threadId, expectedTurnId: turnId, input: [{type: "text", text:
 REASON}]}` so the Agent learns what to ask for. A `writeStdin` approval and one without a
-command are declined the same way: the gate cannot see what they run. A Session without a
+command are declined the same way: the gate cannot see what they run. With a gate, two more
+are declined without asking it, and also printed on standard error and queued as an event of
+kind `declined`: a request whose line was `rebuilt` (`StreamLine::Json::rebuilt`: rejoined
+from a line the terminal broke, or with a control other than SGR removed from inside it),
+and one whose `itemId` names no earlier `item/started` commandExecution item with the same
+`command` (so a subcommand approval sharing a parent item is declined). That the app server
+starts the item before asking is read from its protocol, not seen in a live turn. A Session
+without a
 Cable endpoint cannot ask for green ink, so it has no gate and everything is accepted, as with
 the Claude handler. With a gate, `thread/start` and `thread/resume` carry
 `approvalPolicy = "untrusted"`, so Codex asks before every command outside its own list of
@@ -79,7 +86,19 @@ a Chief of Staff review, app-server receives `-c mcp_servers={}`, `-c` for
 the Session has no gate, and `thread/start` and `thread/resume` carry `sandbox =
 "read-only"`, `approvalPolicy = "never"` and `config = {"web_search": "disabled"}`. An
 assistant (`AgentStart::assistant`) gets the same, with `mcp_servers` holding exactly its
-servers.
+servers. Checked against the app-server protocol source (`ThreadStartParams`: `sandbox`,
+`approvalPolicy`, `config`; the `web_search` key and its `disabled` value): those for
+`thread/start`. Inferred: that `thread/resume` takes `config` as well, that the read-only
+sandbox has no network, and that the `mcp_servers` override replaces the user's table
+rather than merging into it.
+
+A restricted thread that uses a tool anyway is killed, ends with a `failed` event naming
+it, and nothing read after that becomes an event: any server request but
+`account/chatgptAuthTokens/refresh` and `attestation/generate`, or an `item/started` /
+`item/completed` whose item type is not `userMessage`, `agentMessage`, `reasoning`, `plan`,
+`contextCompaction`, `enteredReviewMode` or `exitedReviewMode`, or an `mcpToolCall` to a
+server outside the thread's (an unknown item type counts as a tool; item types from
+`codex app-server generate-json-schema`, 0.164.0).
 
 Both are restricted threads, which start or resume only after the tool check:
 
@@ -91,18 +110,22 @@ pub const KEPT_FEATURES: [&str; 4] = ["secret_auth_storage", "enable_request_com
 
 Through the terminal AI6 supplies, with the app server's `-c` settings, environment and
 working directory, the handler runs `codex --version`, then `codex features list` and adds
-`-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES`, then `codex
-debug prompt-input` with all of those and `-c model="<model>"` when the request names one
-(what Codex offers depends on the model). It reads the offered tools from the
-`additional_tools` items (`namespace.tool` inside a namespace); an item of any other type
-than `message` and `additional_tools`, or output that is not that JSON, is unreadable. The
+`-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES` (a non-blank line
+that is not `name stage state` fails the check), then `codex debug prompt-input` with all of
+those and `-c model="<model>"` when the request names one (what Codex offers depends on the
+model). It reads the offered tools from the `additional_tools` items (`namespace.tool` inside
+a namespace) of the one JSON array that opens `[`, `{`, `"type"`; output with no such array,
+anything but whitespace after it, no `message` item, or an item of another type is
+unreadable. The
 thread passes when every offered tool is `mcp__<server>.<tool>` for one of its servers and
 each server offers at least one (answer-only: no tool). On a failure `strict` refuses with
 `GUATIAO_ERR_UNSUPPORTED` naming what was found, before any app server starts; `warn`
 starts it, prints `ai6: weakening: …` on standard error and queues an event of kind
-`weakened` with that text first. The feature switches apply in both. A pass is cached in
-the process for 15 minutes by executable, `--version` output, settings (without the
-working directory's `projects` entry), model, servers and mode; a refusal is not cached.
+`weakened` with that text first. The feature switches apply in both. The feature list is
+cached in the process for 15 minutes by executable, `--version` output, settings (without
+the working directory's `projects` entry), mode and the values of `CODEX_HOME`, `HOME`,
+`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME` and `PATH`; a failed read is not
+cached. `prompt-input` runs on every start and resume.
 With Codex 0.164.0 an answer-only thread passes with no tool; an assistant does not, because
 that release offers its models MCP tools only inside code mode's `functions.exec` (fixtures
 in `tests/fixtures/codex-0.164.0/`). `codex debug prompt-input` is trusted to render what a
@@ -113,11 +136,7 @@ none, and the app server's case is not established.
 The terminal is opened at `STREAM_COLS` (32767) columns and read with
 `ai6::directorates::q::terminal::JsonLines`: ConPTY's controls, its echo of the requests
 written and lines it breaks are read as the stream Codex wrote. A line that is not JSON is
-skipped while waiting for a reply, and is an event of kind `output` otherwise. Checked against the app-server protocol source
-(`ThreadStartParams`: `sandbox`, `approvalPolicy`, `config`; the `web_search` key and its
-`disabled` value): those for `thread/start`. Inferred: that `thread/resume` takes `config`
-as well, that the read-only sandbox has no network, and that the `mcp_servers` override
-replaces the user's table rather than merging into it.
+skipped while waiting for a reply, and is an event of kind `output` otherwise.
 
 ## Gotchas
 

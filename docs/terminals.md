@@ -42,9 +42,11 @@ Windows.
 A program under a pty can ask for the cursor position (`ESC[6n`) and wait for an emulator,
 and ConPTY on Windows always asks once before its program's first output and holds that
 output until it is answered (`portable-pty` creates every pseudo-console with
-`PSEUDOCONSOLE_INHERIT_CURSOR`). The `pty` provider answers every such query itself (row 1,
-column 1) and removes it from the output, so a harness starts with nobody attached and an
-attached viewer does not answer a second time.
+`PSEUDOCONSOLE_INHERIT_CURSOR`). On Windows the `pty` provider answers every such query
+itself (row 1, column 1, from a thread of its own, so output keeps flowing while a write
+waits) and removes it from the output, so a harness starts with nobody attached and an
+attached viewer does not answer a second time. On Unix queries pass through to whoever
+reads.
 
 A transport that reaches another host and can open a terminal there (`ssh`) does so through
 the same contract. A harness on another host runs under the runner there, in the runner's
@@ -59,5 +61,8 @@ with mode and title sequences (`ESC[?9001h ESC[?1004h ESC[m`, `ESC]0;title BEL`,
 reads a line at a time comes back as an echo; and a line longer than the terminal is wide
 is broken with CRLF and a cursor move. The Claude Code and Codex handlers therefore start
 harnesses on the widest terminal ConPTY takes (32767 columns, `STREAM_COLS`) and read them
-with `JsonLines`, which removes the controls and rejoins a broken JSON line
+with `JsonLines`, which removes the controls and rejoins a broken JSON line, marking it
+rebuilt: the Codex handler declines a green ink approval read from such a line. An OSC
+sequence with no end stops at the line break, and a CSI at the first byte no CSI holds or
+after 64 bytes.
 ([`ai6::directorates::q::terminal`](https://jose-pr.github.io/ai6/rust/ai6/directorates/q/terminal/)).

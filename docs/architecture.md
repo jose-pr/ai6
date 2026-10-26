@@ -171,9 +171,9 @@ does not wake an idle provider session.
 ## Terminal handshakes
 
 A shell under a pty, and ConPTY at start-up, asks where the cursor is (`ESC[6n`) and
-waits. With no emulator attached that looks exactly like a hung agent, so the `pty` terminal
-provider answers every query itself, always with row 1, column 1, and removes it from the
-stream so an attached viewer's emulator does not answer a second time.
+waits. With no emulator attached that looks exactly like a hung agent, so on Windows the
+`pty` terminal provider answers every query itself, always with row 1, column 1, and removes
+it from the stream so an attached viewer's emulator does not answer a second time.
 
 ## Prior art
 

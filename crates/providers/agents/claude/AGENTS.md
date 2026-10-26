@@ -16,9 +16,13 @@ kind. `ClaudeConfig` selects the executable; `ClaudeHandler` launches Claude Cod
 the terminal instance supplied by AI6. Initial context becomes appended system
 instructions (`--append-system-prompt`) before the task prompt is written to the stream.
 Claude's provider Session ID is returned from `session_id()` after the provider emits it
-and is supplied unchanged to `resume`. Claude Code does not keep `--append-system-prompt`
-in the Session it records, so resume passes `AgentResume::initial_context` the same way
-when it is not empty. `--resume <id>` finds a Session only from the directory that recorded
+and is supplied unchanged to `resume`. Claude Code 2.1.310 records the system prompt with
+the Session (`--system-prompt-snapshot`, on by default) and reuses it on resume until the
+Session is compacted; after that it builds the prompt from the resuming launch, so resume
+passes `AgentResume::initial_context` as `--append-system-prompt` too when it is not empty.
+A restricted Session (`answer_only`, or `assistant`) whose `assistant` message calls a tool
+not named `mcp__<server>__<tool>` for one of its servers is killed, ends with a `failed`
+event naming the tools, and nothing read after that becomes an event. `--resume <id>` finds a Session only from the directory that recorded
 it (Claude Code 2.1.310: from another one it answers "No conversation found with session
 ID"), so resume must be given that working directory. Resume waits for Claude's stream
 initialization, verifies the reported ID, and only then returns the resumed operation or

@@ -23,11 +23,14 @@ pinned with `ai6 serve --terminal`; Agents and handlers do not choose one.
   `GUATIAO_ERR_BAD_VALUE`. `resize` takes 1 to 32767.
 - **Output** is read on a thread into a channel, so `read` honours its timeout; a chunk
   larger than the caller's buffer is kept for the next `read`.
-- **Cursor position queries** (`ESC[6n`, also split across reads) are answered by the
-  provider with `ESC[1;1R` and removed from the output. ConPTY sends one before its program's
-  first output and holds that output until it is answered, because `portable-pty` 0.9 creates
-  every pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR` and offers no way not to. Other
-  terminal queries pass through as output bytes.
+- **Cursor position queries** (`ESC[6n`, also split across reads) are, on Windows only,
+  removed from the output and answered with `ESC[1;1R` by a thread of the session's own, so
+  the reader never waits on a write that holds the writer. ConPTY sends one before its
+  program's first output and holds that output until it is answered, because `portable-pty`
+  0.9 creates every pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR` and offers no way not
+  to. On Unix, and for other terminal queries, the bytes pass through as output.
+- **Input lines on Unix** are cut at 4095 bytes while the program reads in canonical mode
+  (Linux N_TTY); the pty is opened in that mode.
 - **ConPTY output is a rendering**, not the program's bytes: mode and title sequences come
   first, blank lines may become cursor moves, line-mode input is echoed, and a line longer
   than `cols` is broken with CRLF and a cursor move. Read JSON-line harnesses with

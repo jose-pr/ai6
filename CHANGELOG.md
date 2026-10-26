@@ -678,9 +678,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `apply_patch` and `view_image`), computer-use and collaboration tools,
   `request_user_input` and `clock.sleep`, and ignores `features.unified_exec = false`. On
   Codex 0.164 Moneypenny is refused: it offers MCP tools only inside `functions.exec`.
-- A resumed Claude Code Session keeps its instructions: `AgentResume` carries
-  `initial_context` (the Agent's context, its role's purpose and policy, Moneypenny's
-  instructions), passed again as `--append-system-prompt`. Moneypenny's harness works in the
+- The Codex tool check renders the offered tools on every start and reuses only the feature
+  list, keyed also by `CODEX_HOME`, the home directories and `PATH`; it refuses output it
+  cannot read exactly (no `message` item, anything after the array, a feature line that is not
+  `name stage state`).
+- A restricted Session (answer-only, assistant) that uses a tool outside its MCP servers is
+  ended with a `failed` event naming it, in both handlers, backing up the flags and the tool
+  check.
+- The Codex handler declines a green ink approval read from a line the terminal rebuilt
+  (`StreamLine::Json::rebuilt`) or with no earlier `item/started` for the same item and
+  command, and records why as a `declined` event.
+- A review refuses to start when the Operation's own `.ai6/agents.toml` sets `PATH`,
+  `CODEX_HOME`, a `*_BASE_URL` or `AI6_CODEX_TOOL_CHECK` differently from the global roster.
+- The terminal reader ends an unterminated OSC at the line break and a CSI at the first byte
+  it cannot hold (or after 64 bytes), and parses a held broken line again only when its
+  brackets close. The `pty` provider answers cursor queries only on Windows, from a thread
+  of their own. `AssistantJob` carries the conversation recap apart (`recap`), and a resume
+  gets only the standing context.
+- A resumed Claude Code Session keeps its instructions once its recorded prompt is gone (after
+  compaction): `AgentResume` carries `initial_context` (the Agent's context, its role's
+  purpose and policy, Moneypenny's instructions), passed again as `--append-system-prompt`.
+  Moneypenny's harness works in the
   same directory each time her conversation resumes on a Station, since Claude Code finds a
   Session only from the directory that recorded it; she was started afresh before.
 - Codex answer-only (Chief of Staff) and assistant threads also run with command execution,

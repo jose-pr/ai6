@@ -140,7 +140,11 @@ a `review-unavailable` finding. The review Mission:
   `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
   `CODEX_HOME`, the proxy variables and `SSL_CERT_FILE`), so it authenticates with that
   Agent's own model credential or the harness's stored login, plus the Codex handler's
-  `AI6_CODEX_TOOL_CHECK` ([below](#codex-tool-check));
+  `AI6_CODEX_TOOL_CHECK` ([below](#codex-tool-check)). `PATH`, `CODEX_HOME`, every
+  `*_BASE_URL` and `AI6_CODEX_TOOL_CHECK` come only from the global roster: when the
+  Operation's own `.ai6/agents.toml` sets one of them differently for the Agent (adds,
+  changes or drops it), the Agent refuses to review, and the review Mission fails naming the
+  variables;
 - is exposed from the start (`brief:source`), and its usage counts against the Operation.
 
 Answer-only is the `answer_only` field of the handler's start request. Claude Code gets
@@ -154,49 +158,6 @@ off, the user's MCP servers replaced by none and the working directory's project
 skipped, and its thread in the `read-only` sandbox with approval policy `never`; it starts
 only after the [tool check](#codex-tool-check) finds it offers no tool at all. A Claude Code
 too old for one of its flags refuses to start, which ends the review without an answer.
-
-When a resumed Session continues, the Station gives the handler the standing part of its
-start-up context again (the Agent's `context`, its role's purpose and policy):
-Claude Code does not keep `--append-system-prompt` in the Session it records, so the handler
-passes it again; Codex keeps a thread's instructions.
-
-### Codex tool check
-
-A Codex release can offer its model tools no setting this handler passes switches off, and
-each release adds some: Codex 0.164 enables code mode (`functions.exec`, a JavaScript runtime
-whose nested tools include `apply_patch` and `view_image`), computer and browser use, a
-plugin's `mcp__cua_repl` tools, collaboration tools, `request_user_input`, `clock.sleep`,
-plugins, hooks and skills by default, and ignores a user's `features.unified_exec = false`.
-So before an answer-only or assistant Codex thread starts or resumes, the handler runs the
-same Codex with the same settings, environment and working directory:
-
-1. `codex features list`, then switches off every enabled feature except
-   `secret_auth_storage`, `enable_request_compression`, `system_proxy_fallback` and
-   `unbounded_connection_retries` (`ai6_agent_codex::KEPT_FEATURES`: how it stores its login
-   and reaches its service);
-2. `codex debug prompt-input` with those settings and the thread's model, which renders what
-   the model would be given without asking it anything, and reads the tools offered.
-
-The thread starts only when the tools offered are exactly those of its MCP servers
-(`mcp__<server>.<tool>`; none for answer-only) and every server offers at least one. A
-passed check is reused for 15 minutes for the same Codex executable, `--version`, settings,
-model and servers. With Codex 0.164.0 an answer-only thread passes with no tool at all, while
-Moneypenny does not start: that release offers its models MCP tools only inside
-`functions.exec`, and with code mode off it offers them none.
-
-| `AI6_CODEX_TOOL_CHECK` in the Agent's environment | When the tools cannot be read, or are not exactly the servers' |
-| --- | --- |
-| `strict` (the default, also when unset) | The thread does not start, and the error names what was found |
-| `warn` | The thread starts; what was found is logged on the Station as a weakening and is the Session's first event (kind `weakened`) |
-
-Any other value refuses to start. The features are switched off in both modes.
-
-The check is only as good as `codex debug prompt-input`. With Codex 0.164.0 its tools match
-the request `codex exec` sends for the same model with Codex's default features, but not
-with every feature off: there `codex exec` still sends `functions.exec`, `functions.wait`
-and `functions.request_user_input`, while `prompt-input` renders none. The app server's own
-feature state (`experimentalFeature/list`) matches `codex features list` under the same
-settings; whether its threads are sent what `prompt-input` renders is not established.
 
 It ends with one JSON object: `{"verdict": "clear"}`, or `{"verdict": "hold", "findings":
 [{"kind": "duplicate" | "scope" | "manipulation", "detail": "..."}]}`. A clear verdict lets
@@ -213,6 +174,64 @@ Mission proposals are reviewed the same way before a [class authorisation](missi
 may promote them, at most `max_proposal_reviews_per_hour` per Operation and
 `max_proposal_reviews_per_session_per_hour` per proposing Session; a proposal past either is
 held for an operator with a `rate` finding.
+
+When a resumed Session continues, the Station gives the handler the standing part of its
+start-up context again (the Agent's `context`, its role's purpose and policy; for Moneypenny
+her instructions, never the recap of the conversation the Session holds). Claude Code 2.1.310
+records the system prompt with the Session (`--system-prompt-snapshot`, on by default) and
+reuses it until the Session is compacted; after that it builds the prompt from the resuming
+launch, which carries it as `--append-system-prompt`. Codex keeps a thread's instructions.
+
+A restricted Session (answer-only, or Moneypenny's assistant mode) that uses a tool outside
+its MCP servers anyway is killed and ends with a `failed` event naming the tool, and nothing
+it wrote afterwards is read: for Claude Code a `tool_use` not named `mcp__<server>__<tool>`;
+for Codex any request from the app server but token refresh and attestation, or a thread item
+other than messages, reasoning, a plan, compaction and review-mode markers, or an MCP call to
+another server. This backs up the flags and the tool check below, which decide what the
+harness is offered.
+
+### Codex tool check
+
+A Codex release can offer its model tools no setting this handler passes switches off, and
+each release adds some: Codex 0.164 enables code mode (`functions.exec`, a JavaScript runtime
+whose nested tools include `apply_patch` and `view_image`), computer and browser use, a
+plugin's `mcp__cua_repl` tools, collaboration tools, `request_user_input`, `clock.sleep`,
+plugins, hooks and skills by default, and ignores a user's `features.unified_exec = false`.
+So before an answer-only or assistant Codex thread starts or resumes, the handler runs the
+same Codex with the same settings, environment and working directory:
+
+1. `codex features list`, then switches off every enabled feature except
+   `secret_auth_storage`, `enable_request_compression`, `system_proxy_fallback` and
+   `unbounded_connection_retries` (`ai6_agent_codex::KEPT_FEATURES`: how it stores its login
+   and reaches its service). A line that is not `name stage state` fails the check. The list
+   is reused for 15 minutes for the same executable, `--version`, settings and configuration
+   environment (`CODEX_HOME`, `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`,
+   `XDG_CONFIG_HOME`, `PATH`);
+2. `codex debug prompt-input` with those settings and the thread's model, on every start,
+   which renders what the model would be given without asking it anything. Its output must
+   be one JSON array of input items, at least one a `message` and the rest
+   `additional_tools`, with nothing after it, or the check fails.
+
+The thread starts only when the tools offered are exactly those of its MCP servers
+(`mcp__<server>.<tool>`; none for answer-only) and every server offers at least one. With
+Codex 0.164.0 an answer-only thread passes with no tool at all, while Moneypenny does not
+start: that release offers its models MCP tools only inside `functions.exec`, and with code
+mode off it offers them none.
+
+| `AI6_CODEX_TOOL_CHECK` in the Agent's environment | When the check fails |
+| --- | --- |
+| `strict` (the default, also when unset) | The thread does not start, and the error names what was found |
+| `warn` | The thread starts; what was found is logged on the Station as a weakening and is the Session's first event (kind `weakened`) |
+
+Any other value refuses to start. The features are switched off in both modes.
+
+The check is only as good as `codex debug prompt-input`. With Codex 0.164.0 its tools match
+the request `codex exec` sends for the same model with Codex's default features, but not
+with every feature off: there `codex exec` still sends `functions.exec`, `functions.wait`
+and `functions.request_user_input`, while `prompt-input` renders none. The app server's own
+feature state (`experimentalFeature/list`) matches `codex features list` under the same
+settings; whether its threads are sent what `prompt-input` renders is not established, which
+is why a restricted thread that uses a tool anyway is ended (above).
 
 ## Cables
 
@@ -298,7 +317,10 @@ the same way: a command that pushes to a protected ref, deletes a ref, merges a 
 or creates a release without a live approval is refused, and the Agent is told what to ask
 for ([What holds a step](missions.md#what-holds-a-step)). A gated Codex thread runs with
 `approvalPolicy = "untrusted"`, so it asks before every command that is not a safe read, and
-input to a running command is declined. In remote-hands mode the Station checks every
+input to a running command is declined. So is a request read from a line the terminal
+rebuilt (one ConPTY broke, or with a control other than colour inside it) and one whose
+command no `item/started` announced earlier under the same item id: its command may not be
+what Codex asked; each is logged and recorded as a `declined` event. In remote-hands mode the Station checks every
 `theater_run` command itself. The hook is the `ai6` program hosting the handler unless the
 Agent's roster environment names another in `AI6_GREEN_INK_GATE` (reported as a weakening; a
 start or resume request cannot set it), and it is given the Session's Cable URL in its own

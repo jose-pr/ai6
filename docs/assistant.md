@@ -31,8 +31,9 @@ An assistant Session is not a Mission: it has no Operation, safe house or Cable 
 and never appears on the board. It works in a directory of its own, the same one each time
 its conversation's harness starts on that Station, because Claude Code resumes a Session only
 from the directory that recorded it; the directory is removed when the harness closes. A
-resumed harness is given her instructions again, since Claude Code does not keep them in the
-Session. Of its Agent's environment it keeps only what reaches the model, as a
+harness that starts afresh is given her instructions and a recap of the conversation; a
+resumed one only her instructions, which Claude Code uses once the prompt it recorded with
+the Session is gone (after compaction). Of its Agent's environment it keeps only what reaches the model, as a
 [Chief of Staff review](agents.md#chief-of-staff) does.
 
 ## What she may touch
@@ -50,7 +51,8 @@ writes, no network) with approvals off. Then the [tool check](agents.md#codex-to
 renders what Codex would offer the model and starts her only if that is exactly her server's
 tools. Codex 0.164 offers its models MCP tools only through its code-mode JavaScript tool
 (`functions.exec`), which this check refuses, so with that release she does not start on
-Codex; run her on Claude Code.
+Codex; run her on Claude Code. Either harness that calls a tool outside her server anyway
+is ended at once ([restricted Sessions](agents.md#chief-of-staff)).
 
 The mode is built from parts (MCP servers, interpreters, skills, network policy) so later
 releases can widen it; today a handler refuses to start an assistant that asks for an

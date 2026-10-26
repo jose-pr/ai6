@@ -2206,14 +2206,19 @@ pub fn read_review(text: &str) -> Vetting;
 The review Mission's ID is its brief key `ai6-vetting--review-…`. Its Station starts it only
 on its own host, with clearance `desk`, `AgentStart::answer_only`, no Cable MCP tools (so no
 Cables, proposals or green ink), no credentials issued (no loadout, no pool account), only the
-model-credential and path variables of its Agent's environment, no project settings, and a
+model-credential and path variables of its Agent's environment (and
+`AI6_CODEX_TOOL_CHECK`), no project settings, and a
 new 0700 directory `ai6-review-*` under the temporary directory, removed when the review
 ends. Its `completed` event text is read with `read_review` once the Mission's role is
 `chief-of-staff`, its brief `is_review` and its ID matches its target's: clear →
 `clear_brief(key, digest, [Review], "review:AGENT")`; otherwise `hold_brief` when the queued
 brief still has the reviewed digest (an edited brief gets a review of its own). A review that
 ends without an applied answer holds what it reviewed with `review-error`; with the role
-configured and no qualified Agent available, a brief is held with `review-unavailable`.
+configured and no qualified Agent available, a brief is held with `review-unavailable`. A
+review Mission does not start or resume when its Agent's environment, as the Operation's
+own `.ai6/agents.toml` refines it, sets `PATH`, `CODEX_HOME`, any `*_BASE_URL` or
+`AI6_CODEX_TOOL_CHECK` differently from the global roster (names without case; added,
+changed or dropped): the configuration error names the Agent and the variables.
 
 ```rust
 pub const MAX_HELD_PER_OPERATION: usize = 1_000;  // past it a brief stays queued
@@ -2631,9 +2636,10 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // `answer_only` and is built from the mode's parts below.
 // AgentResume also carries `initial_context: Vec<String>` (serde default empty): the standing
 // part of the start-up context (the Agent's context, its role's purpose and policy; for
-// Moneypenny her instructions), which Claude Code is given again as `--append-system-prompt`
-// because its recorded Session does not keep it; Codex keeps a thread's instructions and
-// ignores it.
+// Moneypenny her instructions, never the conversation recap), which Claude Code is given again
+// as `--append-system-prompt` (2.1.310 reuses the prompt it recorded with the Session until
+// the Session is compacted, then builds it from the resuming launch); Codex keeps a thread's
+// instructions and ignores it.
 pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
                            pub interpreters: Vec<String> /* serde default */,
                            pub skills: Vec<String> /* serde default */,
@@ -2671,7 +2677,9 @@ pub const MAX_ASSISTANT_EVENTS: usize = 64;                   // per report
 pub const EVENT_ACCEPTED, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, EVENT_COMPLETED,
           EVENT_FAILED, EVENT_LIMIT, EVENT_CLOSED: &str;      // "accepted", "rejected", …
 pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
-    pub message: String, pub context: Vec<String> /* default */, pub mcp_token: String,
+    pub message: String, pub context: Vec<String> /* default: standing context */,
+    pub recap: Option<String> /* default, omitted when None: for a harness started afresh only */,
+    pub mcp_token: String,
     pub token_expires_at: f64, pub session_id: Option<String> /* default */,
     pub close: bool /* default */ }                  // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
@@ -2683,7 +2691,8 @@ pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control 
 ```
 
 All three are serde types with unknown fields refused. `validate` checks identities, a message
-of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`), the context bound and a
+of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`), the context bound (context
+and recap together) and a
 token of 32-512 bytes without whitespace. A job's answer is one report with its `job_id` and
 one `accepted` or `rejected` event (text: the reason); the harness's own events follow in
 reports without a `job_id`.
@@ -2718,7 +2727,11 @@ line longer than the terminal is wide (CRLF, then a cursor move).
 pub const STREAM_COLS: u16 = 32767;          // widest terminal every provider accepts (ConPTY: i16)
 pub const MAX_JSON_LINE: usize = 64 << 20;   // a held, unfinished value past this is handed over as text
 pub fn strip_controls(bytes: &[u8]) -> Vec<u8>; // drops CSI, OSC and two-byte escapes; keeps line breaks
-pub enum StreamLine { Json { value: serde_json::Value, text: Vec<u8> }, Text(String) }
+pub enum StreamLine {
+    Json { value: serde_json::Value, text: Vec<u8>,
+           rebuilt: bool /* joined from a broken line, or a non-SGR control removed inside */ },
+    Text(String),
+}
 pub struct JsonLines; // Default
 impl JsonLines {
     pub fn new() -> Self;
@@ -2729,10 +2742,13 @@ impl JsonLines {
 ```
 
 Lines are cut at line breaks and at cursor moves to another row (CUP, HVP, CNL, CPL, VPA,
-IND, NEL, RI), controls and CR removed. A line starting with `{` or `[` that does not parse
-yet is joined, untrimmed, with the lines after it until it does; a line that is a whole value
-of its own ends the held one as text. Anything else is `Text`, trimmed, never empty. Handlers
-spawn with `cols: STREAM_COLS` so that few lines wrap at all.
+IND, NEL, RI), controls and CR removed. A CSI ends at its final byte, or before the first byte
+no CSI holds (a line break included); past 64 parameter bytes it is no sequence and only its
+`ESC [` goes. An OSC ends at BEL, `ESC \` or before a line break. A line starting with `{`
+or `[` that does not parse yet is held, untrimmed, and joined with the lines after it; it is
+parsed again only when a piece closes its outermost bracket (strings and escapes tracked).
+A line that is a whole value of its own ends the held one as text. Anything else is `Text`,
+trimmed, never empty. Handlers spawn with `cols: STREAM_COLS` so that few lines wrap at all.
 
 ## Mission lifecycle (`ai6::directorates::m::mission`)
 
@@ -3184,8 +3200,8 @@ expires within two minutes, when the harness is closed and resumed with the new 
 for a conversation whose harness is still closing waits up to ten seconds for it, then is
 rejected. A harness idle for ten minutes is closed; the next job resumes its provider Session
 (the job's `session_id`, else the one the desk remembers) with the Agent's context and the
-job's context again as `AgentResume::initial_context`, or starts afresh with them when that
-fails. Handler events `text`,
+job's `context` again as `AgentResume::initial_context`, or starts afresh with them and the
+job's `recap` when that fails. Handler events `text`,
 `tool`, `completed`, `failed` and `limit` are reported; a closed harness reports `closed` with
 the reason (`idle`, `the Station is stopping`, …). When Universal Exports refuses a job's
 `accepted` report with 403, 404 or 409 (the job moved to another Station or was given up), the
