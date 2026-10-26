@@ -35,8 +35,8 @@ pub const KEPT_FEATURES: [&str; 4] = [
     "unbounded_connection_retries",
 ];
 
-/// How long a passed check stands for the same Codex and settings; the user's own Codex
-/// configuration can change under it.
+/// How long a feature list stands for the same Codex, settings and environment; the user's
+/// own Codex configuration can change under it.
 const CHECK_LIFETIME: Duration = Duration::from_secs(15 * 60);
 
 /// How long one of the check's commands may run.
@@ -74,53 +74,81 @@ pub(crate) struct Checked {
     pub(crate) weakening: Option<String>,
 }
 
-/// The enabled features in `codex features list` output (`name stage state` per line, the
-/// stage possibly two words); `None` when no line reads that way.
-pub(crate) fn enabled_features(output: &[u8]) -> Option<Vec<String>> {
+/// What `codex features list` printed: the enabled features, and every non-blank line that
+/// does not read as `name stage state` (the stage possibly two words).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FeatureList {
+    pub(crate) enabled: Vec<String>,
+    pub(crate) unread: Vec<String>,
+}
+
+/// Reads `codex features list` output; `None` when no line reads as a feature.
+pub(crate) fn feature_list(output: &[u8]) -> Option<FeatureList> {
     let text = String::from_utf8_lossy(&strip_controls(output)).replace('\r', "");
     let mut read = 0;
-    let mut enabled = Vec::new();
-    for line in text.lines() {
+    let mut list = FeatureList::default();
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
         let words = line.split_whitespace().collect::<Vec<_>>();
-        let (Some(name), Some(state)) = (words.first(), words.last()) else {
-            continue;
-        };
-        let named = name.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.".contains(&byte)
+        let named = words.first().is_some_and(|name| {
+            name.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.".contains(&byte)
+            })
         });
-        if words.len() < 3 || !named || !matches!(*state, "true" | "false") {
+        let state = words.last().copied();
+        if words.len() < 3 || !named || !matches!(state, Some("true" | "false")) {
+            list.unread.push(line.to_owned());
             continue;
         }
         read += 1;
-        if *state == "true" {
-            enabled.push((*name).to_owned());
+        if state == Some("true") {
+            list.enabled.push(words[0].to_owned());
         }
     }
-    (read > 0).then_some(enabled)
+    (read > 0).then_some(list)
 }
 
 /// The tools `codex debug prompt-input` output offers the model, named `namespace.tool` inside
-/// a namespace; `None` when the output is not the list of input items this handler knows
-/// (messages and `additional_tools`), so an unknown shape is never read as "no tools".
+/// a namespace; `None` unless the output is one JSON array of input items, holding at least
+/// one `message` and otherwise only `additional_tools`, with nothing after it, so an unknown
+/// shape is never read as "no tools".
 pub(crate) fn offered_tools(output: &[u8]) -> Option<Vec<String>> {
     // The output is pretty-printed JSON, and a terminal may break a long line: JSON text holds
     // no raw line break, so every one can go.
     let mut text = strip_controls(output);
     text.retain(|byte| !matches!(byte, b'\r' | b'\n'));
-    let start = text.iter().position(|byte| *byte == b'[')?;
-    let items: Value = serde_json::Deserializer::from_slice(&text[start..])
-        .into_iter::<Value>()
-        .next()?
-        .ok()?;
+    let start = (0..text.len()).find(|&at| opens_item_list(&text[at..]))?;
+    // One value, then only whitespace: `from_slice` refuses anything after it.
+    let items: Value = serde_json::from_slice(&text[start..]).ok()?;
     let mut tools = Vec::new();
+    let mut messages = 0;
     for item in items.as_array()? {
         match item.get("type").and_then(Value::as_str)? {
-            "message" => {}
+            "message" => messages += 1,
             "additional_tools" => collect(item.get("tools")?.as_array()?, "", &mut tools)?,
             _ => return None,
         }
     }
-    Some(tools)
+    (messages > 0).then_some(tools)
+}
+
+/// Whether `text` starts `[`, `{`, `"type"`, with only whitespace between.
+fn opens_item_list(text: &[u8]) -> bool {
+    let rest = |text: &[u8], token: &[u8]| -> Option<usize> {
+        let skipped = text
+            .iter()
+            .take_while(|byte| byte.is_ascii_whitespace())
+            .count();
+        text[skipped..]
+            .starts_with(token)
+            .then_some(skipped + token.len())
+    };
+    let Some(at) = rest(text, b"[") else {
+        return false;
+    };
+    let Some(more) = rest(&text[at..], b"{") else {
+        return false;
+    };
+    rest(&text[at + more..], b"\"type\"").is_some()
 }
 
 fn collect(list: &[Value], prefix: &str, tools: &mut Vec<String>) -> Option<()> {
@@ -200,21 +228,34 @@ pub(crate) fn judge(
     }
 }
 
-/// Everything a check depends on but the working directory, which only names the project
+/// The environment variables that decide which Codex runs and which configuration it reads.
+const CONFIG_ENVIRONMENT: [&str; 7] = [
+    "CODEX_HOME",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "XDG_CONFIG_HOME",
+    "PATH",
+];
+
+/// What a feature list depends on but the working directory, which only names the project
 /// marked untrusted.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct CheckKey {
+struct FeaturesKey {
     executable: String,
     version: String,
     overrides: Vec<String>,
-    model: Option<String>,
-    servers: Vec<String>,
+    environment: Vec<(String, Option<String>)>,
     check: ToolCheck,
 }
 
-fn passed() -> &'static Mutex<HashMap<CheckKey, (Instant, Checked)>> {
-    static PASSED: OnceLock<Mutex<HashMap<CheckKey, (Instant, Checked)>>> = OnceLock::new();
-    PASSED.get_or_init(Mutex::default)
+/// The features last switched off for a key, and what a `warn` check found reading them.
+type SwitchedOff = (Vec<String>, Option<String>);
+
+fn feature_lists() -> &'static Mutex<HashMap<FeaturesKey, (Instant, SwitchedOff)>> {
+    static LISTS: OnceLock<Mutex<HashMap<FeaturesKey, (Instant, SwitchedOff)>>> = OnceLock::new();
+    LISTS.get_or_init(Mutex::default)
 }
 
 /// One restricted thread's check, run through `terminal` with the app server's settings.
@@ -231,7 +272,10 @@ pub(crate) struct Probe<'a> {
 }
 
 impl Probe<'_> {
-    /// Runs the check, or takes the last passed one for the same Codex and settings.
+    /// Runs the check. The features to switch off are reused for the same Codex, settings and
+    /// configuration environment for [`CHECK_LIFETIME`]; what Codex offers is rendered on
+    /// every start, so a change the key cannot see (a configuration file edited) is still
+    /// caught there.
     pub(crate) fn check(&self) -> Result<Checked, ProviderError> {
         let check = ToolCheck::from_environment(self.environment)?;
         let version = String::from_utf8_lossy(&strip_controls(
@@ -239,7 +283,7 @@ impl Probe<'_> {
         ))
         .trim()
         .to_owned();
-        let key = CheckKey {
+        let key = FeaturesKey {
             executable: self.executable.to_owned(),
             version,
             overrides: self
@@ -248,59 +292,30 @@ impl Probe<'_> {
                 .filter(|value| !value.starts_with("projects="))
                 .cloned()
                 .collect(),
-            model: self.model.map(str::to_owned),
-            servers: self.servers.to_vec(),
+            environment: CONFIG_ENVIRONMENT
+                .iter()
+                .map(|name| ((*name).to_owned(), self.environment.get(*name).cloned()))
+                .collect(),
             check,
         };
-        if let Ok(passed) = passed().lock()
-            && let Some((at, checked)) = passed.get(&key)
-            && at.elapsed() < CHECK_LIFETIME
-        {
-            return Ok(checked.clone());
-        }
-        let checked = self.run(check)?;
-        if let Ok(mut passed) = passed().lock() {
-            passed.retain(|_, (at, _)| at.elapsed() < CHECK_LIFETIME);
-            passed.insert(key, (Instant::now(), checked.clone()));
-        }
-        Ok(checked)
-    }
-
-    fn run(&self, check: ToolCheck) -> Result<Checked, ProviderError> {
-        let mut argv = vec![
-            self.executable.to_owned(),
-            "features".to_owned(),
-            "list".to_owned(),
-        ];
-        argv.extend_from_slice(self.overrides);
-        let enabled = enabled_features(&self.capture(&argv)?);
-        let mut weakenings = Vec::new();
-        let overrides = match enabled {
-            Some(enabled) => enabled
-                .into_iter()
-                .filter(|name| !KEPT_FEATURES.contains(&name.as_str()))
-                .flat_map(|name| ["-c".to_owned(), format!("features.{name}=false")])
-                .collect::<Vec<_>>(),
+        let cached = feature_lists().lock().ok().and_then(|lists| {
+            lists
+                .get(&key)
+                .filter(|(at, _)| at.elapsed() < CHECK_LIFETIME)
+                .map(|(_, switched)| switched.clone())
+        });
+        let (overrides, read) = match cached {
+            Some(switched) => switched,
             None => {
-                let found =
-                    "the features Codex enables could not be read from `codex features list`";
-                match check {
-                    ToolCheck::Strict => {
-                        return Err(refuse(
-                            Status::GUATIAO_ERR_UNSUPPORTED,
-                            format!(
-                                "this restricted Codex thread was not started: {found} \
-                                 ({TOOL_CHECK_ENV}=warn starts it anyway, as a weakening)"
-                            ),
-                        ));
-                    }
-                    ToolCheck::Warn => {
-                        weakenings.push(found.to_owned());
-                        Vec::new()
-                    }
+                let switched = self.switch_off(check)?;
+                if let Ok(mut lists) = feature_lists().lock() {
+                    lists.retain(|_, (at, _)| at.elapsed() < CHECK_LIFETIME);
+                    lists.insert(key, (Instant::now(), switched.clone()));
                 }
+                switched
             }
         };
+        let mut weakenings = read.into_iter().collect::<Vec<_>>();
         let mut argv = vec![
             self.executable.to_owned(),
             "debug".to_owned(),
@@ -322,6 +337,47 @@ impl Probe<'_> {
             overrides,
             weakening: (!weakenings.is_empty()).then(|| weakenings.join("; ")),
         })
+    }
+
+    /// The `-c` overrides that switch off every enabled feature not kept, from `codex features
+    /// list`, and what a `warn` check found reading it.
+    fn switch_off(&self, check: ToolCheck) -> Result<SwitchedOff, ProviderError> {
+        let mut argv = vec![
+            self.executable.to_owned(),
+            "features".to_owned(),
+            "list".to_owned(),
+        ];
+        argv.extend_from_slice(self.overrides);
+        let list = feature_list(&self.capture(&argv)?);
+        let found = match &list {
+            None => Some(
+                "the features Codex enables could not be read from `codex features list`"
+                    .to_owned(),
+            ),
+            Some(list) => list.unread.first().map(|line| {
+                format!(
+                    "`codex features list` printed {} line(s) that are not a feature, such as {line:?}",
+                    list.unread.len()
+                )
+            }),
+        };
+        if let (Some(found), ToolCheck::Strict) = (&found, check) {
+            return Err(refuse(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                format!(
+                    "this restricted Codex thread was not started: {found} \
+                     ({TOOL_CHECK_ENV}=warn starts it anyway, as a weakening)"
+                ),
+            ));
+        }
+        let overrides = list
+            .map(|list| list.enabled)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|name| !KEPT_FEATURES.contains(&name.as_str()))
+            .flat_map(|name| ["-c".to_owned(), format!("features.{name}=false")])
+            .collect();
+        Ok((overrides, found))
     }
 
     /// Everything `argv` writes until it exits.
@@ -462,6 +518,13 @@ mod tests {
             "Error: unknown command",
             "[{\"type\":\"hosted_tools\",\"tools\":[]}]",
             "[{\"type\":\"additional_tools\",\"tools\":[{\"type\":\"function\"}]}]",
+            // No message: not a prompt.
+            "[{\"type\":\"additional_tools\",\"tools\":[]}]",
+            // Anything after the list.
+            "[{\"type\":\"message\"}] [{\"type\":\"message\"}]",
+            "[{\"type\":\"message\"}] trailing",
+            // A list that does not open with an item.
+            "[1, {\"type\":\"message\"}]",
         ] {
             let offered = offered_tools(output.as_bytes());
             assert_eq!(offered, None, "{output}");
@@ -486,7 +549,9 @@ mod tests {
 
     #[test]
     fn the_feature_list_names_what_is_on() {
-        let enabled = enabled_features(FEATURES.as_bytes()).unwrap();
+        let list = feature_list(FEATURES.as_bytes()).unwrap();
+        assert_eq!(list.unread, Vec::<String>::new(), "every line is a feature");
+        let enabled = list.enabled;
         for feature in [
             "code_mode_host",
             "computer_use",
@@ -502,7 +567,13 @@ mod tests {
             assert!(enabled.iter().any(|f| f == feature), "{feature}");
         }
         assert!(!enabled.iter().any(|f| f == "memories"), "off by default");
-        assert_eq!(enabled_features(b"Error: no such command\n"), None);
+        assert_eq!(feature_list(b"Error: no such command\n"), None);
+        let noisy = format!("{FEATURES}\nWARNING: plugin cache is stale\n");
+        assert_eq!(
+            feature_list(noisy.as_bytes()).unwrap().unread,
+            ["WARNING: plugin cache is stale"],
+            "a line that is not a feature is kept, for the check to judge"
+        );
     }
 
     #[test]

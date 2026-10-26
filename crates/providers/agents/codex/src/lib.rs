@@ -1003,14 +1003,31 @@ mod tests {
         }
     }
 
+    /// Marks where a fake tool-check command's own output starts and ends.
+    const FAKE_BEGIN: &str = "AI6-FAKE-OUTPUT-BEGIN";
+    const FAKE_END: &str = "AI6-FAKE-OUTPUT-END";
+
+    /// Hands over the fake app server's JSON lines, or with `json_only` false a tool-check
+    /// command's output between [`FAKE_BEGIN`] and [`FAKE_END`].
     fn forward_json_lines(mut stdout: impl Read, sender: mpsc::Sender<Vec<u8>>, json_only: bool) {
         let mut reader = BufReader::new(&mut stdout);
         let mut line = Vec::new();
+        let mut inside = false;
         loop {
             line.clear();
             match reader.read_until(b'\n', &mut line) {
                 Ok(0) | Err(_) => return,
-                Ok(_) if !json_only || serde_json::from_slice::<Value>(&line).is_ok() => {
+                Ok(_) if !json_only => {
+                    let text = String::from_utf8_lossy(&line);
+                    if text.trim() == FAKE_BEGIN {
+                        inside = true;
+                    } else if text.trim() == FAKE_END
+                        || (inside && sender.send(line.clone()).is_err())
+                    {
+                        return;
+                    }
+                }
+                Ok(_) if serde_json::from_slice::<Value>(&line).is_ok() => {
                     if sender.send(line.clone()).is_err() {
                         return;
                     }
@@ -1089,23 +1106,26 @@ mod tests {
         let argv = argv.split('\u{1f}').collect::<Vec<_>>();
         let stdout = std::io::stdout();
         let mut stdout = stdout.lock();
-        // The tool check's commands, as Codex 0.164.0 answers them: libtest's own lines
-        // around the output stand in for a terminal's noise.
+        // The tool check's commands, as Codex 0.164.0 answers them, between markers that
+        // keep libtest's own lines out of what the fake terminal hands over.
+        let answer = |stdout: &mut std::io::StdoutLock<'_>, output: &str| -> ! {
+            writeln!(stdout, "\n{FAKE_BEGIN}\n{output}\n{FAKE_END}").unwrap();
+            stdout.flush().unwrap();
+            std::process::exit(0)
+        };
         match argv.first().copied() {
-            Some("--version") => {
-                writeln!(stdout, "codex-cli 0.164.0").unwrap();
-                return;
-            }
+            Some("--version") => answer(&mut stdout, "codex-cli 0.164.0"),
             Some("features") => {
-                for line in [
-                    "code_mode_host                           stable             true",
-                    "memories                                 stable             false",
-                    "secret_auth_storage                      stable             true",
-                    "tool_suggest                             under development  true",
-                ] {
-                    writeln!(stdout, "{line}").unwrap();
-                }
-                return;
+                let output = std::env::var("CODEX_FIXTURE_FEATURES").unwrap_or_else(|_| {
+                    [
+                        "code_mode_host                           stable             true",
+                        "memories                                 stable             false",
+                        "secret_auth_storage                      stable             true",
+                        "tool_suggest                             under development  true",
+                    ]
+                    .join("\n")
+                });
+                answer(&mut stdout, &output)
             }
             Some("debug") => {
                 let output = std::env::var("CODEX_FIXTURE_PROMPT_INPUT").unwrap_or_else(|_| {
@@ -1115,14 +1135,14 @@ mod tests {
                     if servers {
                         "[{\"type\":\"additional_tools\",\"tools\":[{\"type\":\"namespace\",\
                          \"name\":\"mcp__moneypenny\",\"tools\":[{\"type\":\"function\",\
-                         \"name\":\"board\"}]}]}]"
+                         \"name\":\"board\"}]}]},{\"type\":\"message\",\"role\":\"user\",\
+                         \"content\":[]}]"
                             .to_owned()
                     } else {
                         "[{\"type\":\"message\",\"role\":\"user\",\"content\":[]}]".to_owned()
                     }
                 });
-                writeln!(stdout, "{output}").unwrap();
-                return;
+                answer(&mut stdout, &output)
             }
             _ => {}
         }
@@ -2296,16 +2316,17 @@ mod tests {
     }
 
     #[test]
-    fn a_passed_check_is_reused_for_the_same_codex_and_settings() {
+    fn the_feature_list_is_reused_only_for_the_same_codex_home_and_the_tools_rendered_every_time() {
         let terminal = ProcessTerminal::new();
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-cache-fixture".to_owned(),
         })
         .unwrap();
-        for _ in 0..2 {
+        for home in ["C:\\agents\\one", "C:\\agents\\one", "C:\\agents\\two"] {
+            let environment = BTreeMap::from([("CODEX_HOME".to_owned(), home.to_owned())]);
             let session = handler
                 .start(
-                    answer_only_start(BTreeMap::new()),
+                    answer_only_start(environment),
                     terminal.clone().into_object(),
                 )
                 .unwrap();
@@ -2318,9 +2339,48 @@ mod tests {
                 .filter(|spec| spec.argv.get(1).map(String::as_str) == Some(command))
                 .count()
         };
-        assert_eq!(count("--version"), 2, "the version is asked every time");
-        assert_eq!(count("debug"), 1, "the tools are checked once");
-        assert_eq!(count("app-server"), 2);
+        assert_eq!(count("--version"), 3, "the version is asked every time");
+        assert_eq!(
+            count("features"),
+            2,
+            "another CODEX_HOME is another configuration"
+        );
+        assert_eq!(
+            count("debug"),
+            3,
+            "what Codex offers is rendered on every start"
+        );
+        assert_eq!(count("app-server"), 3);
+    }
+
+    #[test]
+    fn a_feature_list_with_lines_it_cannot_read_refuses_unless_warned() {
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-unread-fixture".to_owned(),
+        })
+        .unwrap();
+        let features = "code_mode_host stable true\nWARNING: the plugin cache is stale";
+        let mut environment =
+            BTreeMap::from([("CODEX_FIXTURE_FEATURES".to_owned(), features.to_owned())]);
+        let refused = match handler.start(
+            answer_only_start(environment.clone()),
+            ProcessTerminal::new().into_object(),
+        ) {
+            Ok(_) => panic!("a feature list with a line it cannot read was accepted"),
+            Err(error) => error.to_string(),
+        };
+        assert!(refused.contains("plugin cache is stale"), "{refused}");
+        environment.insert(TOOL_CHECK_ENV.to_owned(), "warn".to_owned());
+        let session = handler
+            .start(
+                answer_only_start(environment),
+                ProcessTerminal::new().into_object(),
+            )
+            .unwrap();
+        let first = session.next_event(1_000).unwrap().unwrap();
+        assert_eq!(first.kind, "weakened");
+        assert!(first.text.unwrap().contains("not a feature"));
+        session.close().unwrap();
     }
 
     #[test]
