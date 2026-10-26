@@ -11,6 +11,7 @@
 //! harness's tools, with a token bound to the person and the conversation),
 //! `GET /v1/station/assistant/next` and `POST /v1/station/assistant/reports` (the Stations).
 
+pub(crate) mod actions;
 mod guide;
 pub(crate) mod mcp;
 mod store;
@@ -38,7 +39,10 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Notify, broadcast};
 use uuid::Uuid;
 
-use crate::{ApiError, Gateway, GatewayError, bearer, resolve_user, unix_timestamp};
+use crate::{
+    ApiError, Gateway, GatewayError, authorize_resource_action, bearer, resolve_user,
+    unix_timestamp,
+};
 use store::{Conversation, Entry, Pending, Role, Store};
 
 /// Moneypenny's settings: which Agent she is and how much the gateway keeps.
@@ -272,6 +276,20 @@ impl Assistant {
             Some(line) => format!("{line}\n\n{text}"),
             None => text.to_owned(),
         };
+        self.queue(gateway, conversation_id, person_id, &message, Some(text))
+            .await
+    }
+
+    /// Queues `message` for a Station, after any notes for Moneypenny the app left since her
+    /// last message; `shown` is the person's entry, when the person wrote it.
+    async fn queue(
+        &self,
+        gateway: &Gateway,
+        conversation_id: &str,
+        person_id: &str,
+        message: &str,
+        shown: Option<&str>,
+    ) -> Result<(), (&'static str, String)> {
         let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let now = now();
         let expires_at = now + self.config.token_ttl.as_secs_f64();
@@ -291,26 +309,30 @@ impl Assistant {
             if let Some(recap) = recap(conversation) {
                 context.push(recap);
             }
+            let mut parts = std::mem::take(&mut conversation.notes);
+            parts.push(message.to_owned());
             let job = AssistantJob {
                 job_id: Uuid::new_v4().to_string(),
                 conversation_id: conversation_id.to_owned(),
                 agent_id: self.config.agent_id.clone(),
-                message: cut(&message, MAX_ASSISTANT_MESSAGE_BYTES),
+                message: cut(&parts.join("\n\n"), MAX_ASSISTANT_MESSAGE_BYTES),
                 context,
                 mcp_token: token.clone(),
                 token_expires_at: expires_at,
                 session_id: conversation.session_id.clone(),
                 close: false,
             };
-            conversation.push(
-                Entry {
-                    role: Role::Person,
-                    text: text.to_owned(),
-                    at: now,
-                    data: None,
-                },
-                self.config.max_entries,
-            );
+            if let Some(text) = shown {
+                conversation.push(
+                    Entry {
+                        role: Role::Person,
+                        text: text.to_owned(),
+                        at: now,
+                        data: None,
+                    },
+                    self.config.max_entries,
+                );
+            }
             conversation.answered = false;
             conversation.set_busy(true);
             conversation.pending = Some(Pending {
@@ -511,9 +533,9 @@ impl Assistant {
         Ok(())
     }
 
-    /// The person whose conversation `token` serves, the conversation and the person's
-    /// access token, while the token is accepted.
-    pub(crate) fn grant(&self, token: &str) -> Option<(String, String)> {
+    /// The conversation `token` serves, its person and the person's access token, while the
+    /// token is accepted.
+    pub(crate) fn grant(&self, token: &str) -> Option<Granted> {
         let mut desk = self.desk();
         let now = now();
         let grant = desk.tokens.get(&digest(token))?;
@@ -522,7 +544,241 @@ impl Assistant {
         }
         let (conversation_id, person_id) = (grant.conversation_id.clone(), grant.person_id.clone());
         let conversation = desk.store.owned(&conversation_id, &person_id)?;
-        Some((conversation.id.clone(), conversation.bearer.clone()))
+        Some(Granted {
+            conversation_id,
+            person_id,
+            bearer: conversation.bearer.clone(),
+        })
+    }
+
+    /// Runs Moneypenny's write tool `tool`: checks the input and that the person may do it,
+    /// then records a proposal for the person to confirm. Nothing else happens.
+    pub(crate) async fn propose(
+        &self,
+        gateway: &Gateway,
+        granted: &Granted,
+        tool: &actions::WriteTool,
+        input: &Value,
+    ) -> tools::Outcome {
+        let id = format!("proposal-{}", Uuid::new_v4().simple());
+        let draft = match tool.draft(input, &id) {
+            Ok(draft) => draft,
+            Err(outcome) => return outcome,
+        };
+        let Ok(person) = resolve_user(gateway, &granted.bearer).await else {
+            return tools::Outcome::error("The person's sign-in has ended; nothing was proposed.");
+        };
+        if authorize_resource_action(gateway, person, draft.scope.resource(), draft.action)
+            .await
+            .is_err()
+        {
+            return tools::Outcome::error(format!(
+                "Refused: the person may not {} on {}, so nothing was proposed. Tell them so; \
+                 do not try another way.",
+                draft.action,
+                draft.scope.resource()
+            ));
+        }
+        let summary = draft.summary.clone();
+        let proposal = actions::Proposal {
+            id: id.clone(),
+            tool: tool.name,
+            draft,
+            status: "pending",
+            created_at: now(),
+            session: digest(&granted.bearer),
+            result: None,
+        };
+        let max_entries = self.config.max_entries;
+        {
+            let mut desk = self.desk();
+            let Some(conversation) = desk
+                .store
+                .owned(&granted.conversation_id, &granted.person_id)
+            else {
+                return tools::Outcome::error("The conversation is gone.");
+            };
+            expire_proposals(conversation);
+            while conversation.proposals.len() >= actions::MAX_PROPOSALS {
+                let finished = conversation
+                    .proposals
+                    .iter()
+                    .position(|proposal| proposal.status != "pending")
+                    .unwrap_or(0);
+                conversation.proposals.remove(finished);
+            }
+            conversation.push(
+                Entry {
+                    role: Role::Proposal,
+                    text: summary.clone(),
+                    at: proposal.created_at,
+                    data: Some(proposal.shown()),
+                },
+                max_entries,
+            );
+            conversation.proposals.push(proposal);
+        }
+        tools::Outcome {
+            text: format!(
+                "Proposed as {id}: {summary}. Nothing has changed. The person confirms or \
+                 cancels it in the app; you will be told which."
+            ),
+            is_error: false,
+        }
+    }
+
+    /// Runs a pending proposal the person confirmed on a socket signed in with `token`, the
+    /// session it was proposed in, and tells Moneypenny how it went.
+    async fn confirm(
+        &self,
+        gateway: &Gateway,
+        conversation_id: &str,
+        person: &ai6::Person,
+        token: &str,
+        proposal_id: &str,
+    ) -> Result<(), (&'static str, String)> {
+        let draft = {
+            let mut desk = self.desk();
+            let conversation = desk
+                .store
+                .owned(conversation_id, &person.id)
+                .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
+            expire_proposals(conversation);
+            let proposal = conversation
+                .proposals
+                .iter_mut()
+                .find(|proposal| proposal.id == proposal_id)
+                .ok_or(("not_found", "There is no such proposal.".to_owned()))?;
+            if proposal.status != "pending" {
+                return Err(("conflict", format!("The proposal is {}.", proposal.status)));
+            }
+            if proposal.session != digest(token) {
+                return Err((
+                    "forbidden",
+                    "Only the signed-in session it was proposed in can confirm it.".to_owned(),
+                ));
+            }
+            proposal.status = "confirming";
+            let shown = proposal.clone();
+            conversation.show_proposal(&shown);
+            shown
+        };
+        let outcome = self
+            .execute(gateway, conversation_id, person, token, &draft)
+            .await;
+        let (status, result) = match &outcome {
+            Ok(text) => ("done", text.clone()),
+            Err(text) => ("failed", text.clone()),
+        };
+        let note = format!(
+            "[App: the person confirmed {} ({}). {}]",
+            draft.id, draft.draft.summary, result
+        );
+        let idle = {
+            let mut desk = self.desk();
+            let Some(conversation) = desk.store.owned(conversation_id, &person.id) else {
+                return Ok(());
+            };
+            if let Some(proposal) = conversation
+                .proposals
+                .iter_mut()
+                .find(|proposal| proposal.id == proposal_id)
+            {
+                proposal.status = status;
+                proposal.result = Some(result);
+                let shown = proposal.clone();
+                conversation.show_proposal(&shown);
+            }
+            if conversation.busy {
+                conversation.notes.push(note.clone());
+                false
+            } else {
+                true
+            }
+        };
+        // The result goes back to Moneypenny: now when she is idle, else with the next message.
+        if idle {
+            let _ = self
+                .queue(gateway, conversation_id, &person.id, &note, None)
+                .await;
+        }
+        Ok(())
+    }
+
+    /// Audits, then sends, a confirmed proposal's request as the person; the text is what
+    /// AI6 answered, wrapped as data, or why it did not run.
+    async fn execute(
+        &self,
+        gateway: &Gateway,
+        conversation_id: &str,
+        person: &ai6::Person,
+        token: &str,
+        proposal: &actions::Proposal,
+    ) -> Result<String, String> {
+        let registry = gateway
+            .registry
+            .clone()
+            .ok_or("this gateway keeps no audit log, so it ran nothing")?;
+        let (operation, resource) = match &proposal.draft.scope {
+            actions::Scope::Operation(operation) => (operation.clone(), None),
+            actions::Scope::Resource(resource) => (String::new(), Some(resource.clone())),
+        };
+        let audit = ai6::AuditRecord {
+            id: Uuid::new_v4().to_string(),
+            actor: person.id.clone(),
+            action: "moneypenny.confirmed".to_owned(),
+            operation,
+            resource,
+            target: cut(
+                &format!(
+                    "{conversation_id} {} {} {}",
+                    proposal.id, proposal.tool, proposal.draft.call.path
+                ),
+                512,
+            ),
+            at: now(),
+        };
+        // Recorded before it runs: a confirmation that cannot be audited is not carried out.
+        tokio::task::spawn_blocking(move || registry.record_audit(&audit))
+            .await
+            .map_err(|_| "it could not be audited, so it did not run".to_owned())?
+            .map_err(|_| "it could not be audited, so it did not run".to_owned())?;
+        match tools::route(gateway, token, &proposal.draft.call).await {
+            Ok((status, value)) if status.is_success() => Ok(format!(
+                "AI6 answered {}: {}",
+                status.as_u16(),
+                tools::wrap(proposal.tool, &value)
+            )),
+            Ok((status, value)) => Err(tools::refusal(status, &value)),
+            Err(error) => Err(format!("The request failed: {error}")),
+        }
+    }
+
+    /// Cancels a pending proposal; Moneypenny hears of it with the next message.
+    fn cancel(
+        &self,
+        conversation_id: &str,
+        person_id: &str,
+        proposal_id: &str,
+    ) -> Result<(), (&'static str, String)> {
+        let mut desk = self.desk();
+        let conversation = desk
+            .store
+            .owned(conversation_id, person_id)
+            .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
+        let proposal = conversation
+            .proposals
+            .iter_mut()
+            .find(|proposal| proposal.id == proposal_id && proposal.status == "pending")
+            .ok_or(("not_found", "There is no such pending proposal.".to_owned()))?;
+        proposal.status = "cancelled";
+        let shown = proposal.clone();
+        conversation.notes.push(format!(
+            "[App: the person cancelled {proposal_id} ({}).]",
+            shown.draft.summary
+        ));
+        conversation.show_proposal(&shown);
+        Ok(())
     }
 
     /// Counts one tool call of the conversation; `false` past the minute's allowance.
@@ -537,6 +793,29 @@ impl Assistant {
             .or_insert_with(|| (Instant::now(), 0));
         *calls += 1;
         *calls <= limit
+    }
+}
+
+/// Who a valid MCP token speaks for.
+pub(crate) struct Granted {
+    pub(crate) conversation_id: String,
+    pub(crate) person_id: String,
+    /// The person's access token, with which the tools run.
+    pub(crate) bearer: String,
+}
+
+/// Marks proposals older than their lifetime expired.
+fn expire_proposals(conversation: &mut Conversation) {
+    let now = now();
+    let mut expired = Vec::new();
+    for proposal in &mut conversation.proposals {
+        if proposal.status == "pending" && now - proposal.created_at > actions::PROPOSAL_TTL_SECS {
+            proposal.status = "expired";
+            expired.push(proposal.clone());
+        }
+    }
+    for proposal in expired {
+        conversation.show_proposal(&proposal);
     }
 }
 
@@ -716,6 +995,12 @@ enum FromApp {
         page: Option<Value>,
     },
     New {},
+    Confirm {
+        proposal: String,
+    },
+    Cancel {
+        proposal: String,
+    },
 }
 
 fn frame(value: &Value) -> Message {
@@ -782,6 +1067,23 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
                             if let Err((code, message)) = assistant
                                 .message(&gateway, &conversation_id, &person.id, &text, page.as_ref())
                                 .await
+                                && sender.send(frame(&problem(code, &message))).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(FromApp::Confirm { proposal }) => {
+                            if let Err((code, message)) = assistant
+                                .confirm(&gateway, &conversation_id, &person, &token, &proposal)
+                                .await
+                                && sender.send(frame(&problem(code, &message))).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(FromApp::Cancel { proposal }) => {
+                            if let Err((code, message)) =
+                                assistant.cancel(&conversation_id, &person.id, &proposal)
                                 && sender.send(frame(&problem(code, &message))).await.is_err()
                             {
                                 break;

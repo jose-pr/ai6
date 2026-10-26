@@ -14,6 +14,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
 
+use super::actions::Proposal;
+
 /// Who said an entry, or what it records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -26,6 +28,8 @@ pub(crate) enum Role {
     Tools,
     /// A failure the person should see.
     Error,
+    /// A change Moneypenny proposed; data is the proposal, kept current.
+    Proposal,
 }
 
 /// One item of a conversation as the app shows it.
@@ -71,6 +75,9 @@ pub(crate) struct Conversation {
     /// The person's access token, as last presented; the tools run with it.
     pub(crate) bearer: String,
     pub(crate) events: broadcast::Sender<Value>,
+    /// What Moneypenny is told with the next message (proposals confirmed or cancelled).
+    pub(crate) notes: Vec<String>,
+    pub(crate) proposals: Vec<Proposal>,
 }
 
 impl fmt::Debug for Conversation {
@@ -100,6 +107,8 @@ impl Conversation {
             pending: None,
             bearer,
             events: broadcast::channel(EVENT_BUFFER).0,
+            notes: Vec::new(),
+            proposals: Vec::new(),
         }
     }
 
@@ -113,6 +122,21 @@ impl Conversation {
         while self.entries.len() > max_entries {
             self.entries.pop_front();
         }
+    }
+
+    /// Shows a proposal's new status in its entry and tells the app.
+    pub(crate) fn show_proposal(&mut self, proposal: &Proposal) {
+        let shown = proposal.shown();
+        let id = Value::String(proposal.id.clone());
+        if let Some(entry) = self.entries.iter_mut().rev().find(|entry| {
+            entry.role == Role::Proposal
+                && entry.data.as_ref().and_then(|data| data.get("id")) == Some(&id)
+        }) {
+            entry.data = Some(shown.clone());
+        }
+        let _ = self
+            .events
+            .send(serde_json::json!({"type": "proposal", "proposal": shown}));
     }
 
     /// Records whether a message is being answered and tells the app.

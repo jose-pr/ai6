@@ -75,7 +75,7 @@ pub(crate) struct Outcome {
 }
 
 impl Outcome {
-    fn error(text: impl Into<String>) -> Self {
+    pub(crate) fn error(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             is_error: true,
@@ -83,7 +83,7 @@ impl Outcome {
     }
 }
 
-fn object(properties: &[(&str, Value)], required: &[&str]) -> Value {
+pub(crate) fn object(properties: &[(&str, Value)], required: &[&str]) -> Value {
     let properties: Map<String, Value> = properties
         .iter()
         .map(|(name, schema)| ((*name).to_owned(), schema.clone()))
@@ -96,11 +96,11 @@ fn object(properties: &[(&str, Value)], required: &[&str]) -> Value {
     })
 }
 
-fn text(description: &str) -> Value {
+pub(crate) fn text(description: &str) -> Value {
     json!({"type": "string", "description": description})
 }
 
-fn operation() -> (&'static str, Value) {
+pub(crate) fn operation() -> (&'static str, Value) {
     (
         "operation_id",
         text("The Operation, as the board or profile names it."),
@@ -111,12 +111,12 @@ fn limit(description: &str) -> Value {
     json!({"type": "integer", "description": description})
 }
 
-fn string<'a>(input: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
+pub(crate) fn string<'a>(input: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
     input.get(name).and_then(Value::as_str)
 }
 
 /// A required string input, checked as an identifier: 1 to 256 bytes, no control characters.
-fn id<'a>(input: &'a Map<String, Value>, name: &str) -> Result<&'a str, String> {
+pub(crate) fn id<'a>(input: &'a Map<String, Value>, name: &str) -> Result<&'a str, String> {
     let value = string(input, name).ok_or_else(|| format!("{name} is required"))?;
     if ai6::directorates::section_00::assistant::valid_identity(value) {
         Ok(value)
@@ -125,7 +125,10 @@ fn id<'a>(input: &'a Map<String, Value>, name: &str) -> Result<&'a str, String> 
     }
 }
 
-fn optional_id<'a>(input: &'a Map<String, Value>, name: &str) -> Result<Option<&'a str>, String> {
+pub(crate) fn optional_id<'a>(
+    input: &'a Map<String, Value>,
+    name: &str,
+) -> Result<Option<&'a str>, String> {
     input
         .contains_key(name)
         .then(|| id(input, name))
@@ -489,14 +492,17 @@ static READ_TOOLS: &[Tool] = &[
 ];
 
 /// Checks `value` against the subset of JSON Schema the tools use: `object` with
-/// `properties`, `required` and no other properties, `string` with an optional `enum`,
-/// `integer` and `boolean`.
+/// `properties`, `required` and no other properties (or, without `properties`, any object),
+/// `array` of `items`, `string` with an optional `enum`, `integer` and `boolean`.
 pub(crate) fn check(schema: &Value, value: &Value, at: &str) -> Result<(), String> {
     match schema["type"].as_str() {
         Some("object") => {
             let object = value
                 .as_object()
                 .ok_or_else(|| format!("{at} must be an object"))?;
+            if schema.get("properties").is_none() {
+                return Ok(());
+            }
             let properties = schema["properties"].as_object();
             for (name, item) in object {
                 let property = properties
@@ -523,6 +529,15 @@ pub(crate) fn check(schema: &Value, value: &Value, at: &str) -> Result<(), Strin
                     "{at} must be one of {}",
                     Value::Array(allowed.clone())
                 ));
+            }
+            Ok(())
+        }
+        Some("array") => {
+            let items = value
+                .as_array()
+                .ok_or_else(|| format!("{at} must be a list"))?;
+            for (index, item) in items.iter().enumerate() {
+                check(&schema["items"], item, &format!("{at}[{index}]"))?;
             }
             Ok(())
         }
