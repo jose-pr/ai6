@@ -17,6 +17,7 @@ import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
+import 'pools/pools_page.dart';
 import 'timeline/timeline_page.dart';
 
 const _apiOverride = String.fromEnvironment('MONEYPENNY_API');
@@ -602,6 +603,64 @@ class MissionBoard extends ChangeNotifier {
     return TimelinePageSummary.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
+  }
+
+  /// Operations whose account pools this account may read (`pool.read`).
+  List<String> get poolOperations => _operationsWith('pool.read');
+
+  /// The pool accounts an Operation may draw from.
+  Future<List<PoolAccountSummary>> loadPools(String operationId) async {
+    if (demo) {
+      return const [
+        PoolAccountSummary(
+          pool: 'claude-team',
+          account: 'alpha',
+          handler: 'claude',
+          kind: 'claude-oauth-token',
+          active: ['mission-007'],
+          maxConcurrent: 2,
+          windows: [
+            QuotaWindowSummary(name: 'five_hour', usedPermille: 640),
+            QuotaWindowSummary(name: 'seven_day', usedPermille: 210),
+          ],
+          tokensToday: 182_400,
+        ),
+        PoolAccountSummary(
+          pool: 'claude-team',
+          account: 'beta',
+          handler: 'claude',
+          kind: 'claude-oauth-token',
+          active: [],
+          windows: [
+            QuotaWindowSummary(
+              name: 'five_hour',
+              usedPermille: 1000,
+              status: 'rejected',
+            ),
+          ],
+          limitedUntil: 1_798_003_600,
+          tokensToday: 951_020,
+        ),
+      ];
+    }
+    final token = accessToken;
+    if (token == null) {
+      throw StateError('Sign in before viewing account pools.');
+    }
+    final response = await _client.get(
+      apiOrigin.resolve(
+        '/v1/user/operations/${Uri.encodeComponent(operationId)}/pools',
+      ),
+      headers: {'authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the account pools.');
+    }
+    final board = jsonDecode(response.body) as Map<String, dynamic>;
+    return [
+      for (final account in board['accounts'] as List<dynamic>)
+        PoolAccountSummary.fromJson(account as Map<String, dynamic>),
+    ];
   }
 
   List<String> _operationsWith(String action) {
@@ -2226,6 +2285,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         board.greenInkOperations.isNotEmpty ||
         board.classAuthorizationOperations.isNotEmpty)
       _ControlSection.administration,
+    if (board.poolOperations.isNotEmpty) _ControlSection.pools,
     if (board.timelineOperations.isNotEmpty) _ControlSection.timeline,
     if (board.demo || board.canReadAudit) _ControlSection.audit,
   ];
@@ -2234,6 +2294,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     _ControlSection.stations => 'Stations',
     _ControlSection.operations => 'Operations',
     _ControlSection.administration => 'Administration',
+    _ControlSection.pools => 'Account pools',
     _ControlSection.timeline => 'Timeline',
     _ControlSection.audit => 'Audit log',
   };
@@ -2252,6 +2313,9 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
       }
       if (section == _ControlSection.timeline) {
         return OperationTimelinePage(board: widget.board);
+      }
+      if (section == _ControlSection.pools) {
+        return AccountPoolsPage(board: widget.board);
       }
       if (section == _ControlSection.stations) {
         return ListView(
@@ -2440,12 +2504,20 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   }
 }
 
-enum _ControlSection { stations, operations, administration, timeline, audit }
+enum _ControlSection {
+  stations,
+  operations,
+  administration,
+  pools,
+  timeline,
+  audit,
+}
 
 IconData _sectionIcon(_ControlSection section) => switch (section) {
   _ControlSection.stations => Icons.hub_outlined,
   _ControlSection.operations => Icons.workspaces_outline,
   _ControlSection.administration => Icons.settings_suggest_outlined,
+  _ControlSection.pools => Icons.vpn_key_outlined,
   _ControlSection.timeline => Icons.timeline,
   _ControlSection.audit => Icons.fact_check_outlined,
 };
