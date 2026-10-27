@@ -65,9 +65,11 @@ Either harness that calls a tool outside her server anyway is ended at once ([re
 Sessions](agents.md#chief-of-staff)).
 
 The mode is built from parts (MCP servers, interpreters, skills, network policy, the
-directories she may write, a context file) so later releases can widen it; today a handler
-refuses to start an assistant that asks for an interpreter, a skill or a network beyond its
-MCP server. With a [workspace](#her-workspace-and-memory), Claude Code also gets its file
+directories she may write, a context file), and Claude Code gets exactly the built-in tools
+those parts call for: [scripts and the web](#her-scripts-and-the-web) as the roster allows.
+A handler refuses to start an assistant that asks for a skill, and Codex also one that asks
+for an interpreter or a network beyond its MCP server. With a
+[workspace](#her-workspace-and-memory), Claude Code also gets its file
 tools (`Read`, `Write`, `Edit`, `Glob`, `Grep`) under `--permission-mode dontAsk`: she may
 read anything in her workspace (`--restricted` keeps the file tools inside it) and write
 only under `personal/` and `scratch/` (`Edit(/personal/**)`, `Edit(/scratch/**)`); every
@@ -244,8 +246,12 @@ A conversation is exposed, for good, when:
   cannot write with one entry per file (so two conversations recording at once keep both),
   and counts as reading one a `Read` or `Edit` of it, a `Grep` or `Glob` whose search
   covers it, a file tool call it cannot read the input of, and a `memory/MEMORY.md` that
-  imports it (`@path`). Reading other files does not expose the conversation. Removing those
-  files, or the record, in the repository clears it.
+  imports it (`@path`); a script she runs counts too, since it may read any of them. Reading
+  other files does not expose the conversation. Removing those files, or the record, in the
+  repository clears it;
+- she fetches a page or searches the web (`WebFetch`, `WebSearch`), or runs a script while her
+  scripts may reach a host (a network policy that reaches one, or [unsandboxed
+  scripts](#her-scripts-and-the-web)).
 
 The repositories in `shared/` are trusted text: the group or the organisation chose what is
 in them, so reading them exposes nothing. Universal Exports keeps the one record of exposure;
@@ -291,6 +297,67 @@ such read is audited `assistant.memory.read` before it is made. Nobody, administ
 writes or forgets another person's memory. Your own changes are audited too
 (`assistant.memory.write`, `assistant.memory.forget`), and one that cannot be audited is not
 made.
+
+## Her scripts and the web
+
+Moneypenny can run small scripts to compute or draft something, and fetch pages from the hosts
+the deployment lists, through Claude Code's own
+[sandbox](https://code.claude.com/docs/en/sandboxing). The roster's `[assistant]` decides
+what she may run and reach:
+
+```toml
+[assistant]
+interpreters = ["python3"]        # the default; [] runs no script
+network = "limited"               # the default; or "denied", or "open"
+allowed_hosts = ["docs.python.org", "*.pypi.org"]   # the default is none
+unsandboxed_scripts = false       # the default
+
+[assistant.group.contractors]     # a directory group
+network = "denied"
+
+[assistant.person."eve@sis"]      # one person
+interpreters = []
+```
+
+A `[assistant.group.<group>]` or `[assistant.person.<id>]` table takes the same keys and may
+only narrow them: fewer interpreters, a stricter network (`denied` before `limited` before
+`open`), fewer hosts, `unsandboxed_scripts = false`. A table that would widen one is refused
+when the roster loads, naming the key (`assistant.group.contractors.network: "open" is looser
+than assistant.network`). Universal Exports works out what each message may use from the
+person's groups and their own table, and every Station caps it by its own roster again, so
+nothing widens on the way.
+
+Her scripts run only as the interpreters named (`python3 personal/calc.py`; `sh -c …` is
+refused) and only inside the sandbox:
+
+- They write in her working directory, `personal/` and `scratch/` among it, but not in
+  `shared/`, `CLAUDE.md` or `AGENTS.md`, and what they leave in `personal/` is saved after the
+  answer like anything else she writes there.
+- They read nothing in the Station user's home directory, AI6's configuration, state and
+  Registry directories, or other conversations' directories.
+- They see none of the harness's credentials: the model's key or login, her tool tokens.
+- They reach only `allowed_hosts` under `limited`, nothing under `denied`, and any host
+  under `open`; a host outside the list is refused, never asked about.
+
+Her web tools follow the same policy. Under `limited` she may fetch pages from the hosts
+listed (`*.example.com` covers every name under `example.com`), and a hook refuses every other
+host, including the documentation sites Claude Code would otherwise fetch without asking.
+Under `denied`, and under `limited` with no host, she has no web tool at all. Under `open` she
+may fetch any page and search the web. A page she fetches, and a script that could reach a
+host, expose the conversation ([as her memory is](#her-workspace-and-memory)). Her MCP
+servers are the harness's own connections and need no entry.
+
+Claude Code's sandbox runs on macOS, and on Linux and WSL2 with `bubblewrap` and `socat`
+installed. On native Windows, or a Linux Station without them, she starts without scripts:
+she is told they are unavailable on this Station, and the Station's log says why. With
+`unsandboxed_scripts = true` such a Station runs her scripts anyway, with no limit on what they
+read, write or reach; each harness started so logs `ai6: weakening: assistant scripts run
+unsandboxed: files and network not enforced for them`. A sandbox that fails anyway never runs
+her scripts without it: Claude Code exits as it starts, which ends her answer with the reason,
+or refuses each script. `network = "open"` and
+`unsandboxed_scripts = true` are weakenings: a Station logs them when it starts and reports
+them at check-in, and `open` is logged again with each harness it starts. Codex runs her
+without scripts and refuses a network beyond her MCP servers.
 
 ## Cables
 
@@ -412,3 +479,7 @@ answered does nothing.
 | Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml`, or the `assistant` record of a SQL roster |
 | Shared repositories | none | `[assistant.shared.<group>]`, `[assistant.org]` (`write = false`) |
 | Run on an elevated Station | no | `[assistant] allow_elevated` |
+| Interpreters her scripts may run | `python3`, in the harness's sandbox | `[assistant] interpreters` |
+| Hosts her web tools and scripts reach | none (`limited` with no host) | `[assistant] network`, `allowed_hosts` |
+| Scripts where the harness has no sandbox | none | `[assistant] unsandboxed_scripts` |
+| Narrower scripts and network for a group or a person | none | `[assistant.group.<group>]`, `[assistant.person.<id>]` |

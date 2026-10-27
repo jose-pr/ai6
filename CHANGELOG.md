@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Moneypenny runs scripts and reaches the web on Claude Code, inside its sandbox and within
+  the roster's `[assistant]` keys `interpreters` (`["python3"]`), `network` (`limited`,
+  `denied` or `open`), `allowed_hosts` (none) and `unsandboxed_scripts` (false), which
+  `[assistant.group.<group>]` and `[assistant.person.<id>]` tables may narrow and never widen
+  (a widening table fails the roster load naming the key; `AssistantSettings::reach_for`,
+  `AssistantNarrowing`, `NetworkPolicy`). Universal Exports sends each message's reach
+  (`AssistantJob::reach`, `AssistantReach`), which the Station caps by its own roster. Claude
+  Code gets `Bash` allowed only as `Bash(<interpreter> *)` under `dontAsk`, a sandbox that
+  exits rather than run unsandboxed, writes only in her working directory (not `shared/`,
+  `CLAUDE.md`, `AGENTS.md`), reads nothing of the Station user's home, AI6's directories or
+  other conversations, no credential variables, and only the allowed hosts; `WebFetch` only
+  for those hosts, held to them by a `PreToolUse` hook (`ai6 assistant web-gate`), and
+  `WebSearch` only under `open`. A Station whose harness has no sandbox (native Windows, or
+  Linux without `bwrap` and `socat`: `AgentHandler::assistant_scripts`) starts her without
+  scripts and tells her so, unless `unsandboxed_scripts` allows them, logged as a weakening;
+  `network = "open"` is a weakening too. A `WebFetch` or `WebSearch` call, or a script that
+  can reach a host, exposes the conversation.
 - Moneypenny keeps each person's work and memory in their own repository. The global
   `agents.toml` takes an `[assistant]` table (`ai6::AssistantSettings`, also
   `RosterBuilder::assistant`): `personal_repo` (`{person}` or `{person_digest}`; a local or
