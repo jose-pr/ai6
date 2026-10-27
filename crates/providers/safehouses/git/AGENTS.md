@@ -35,8 +35,10 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   overrides everything above): `source` is a repository URL (`file://`, `ssh://`, `git://`,
   `http(s)://`), `user@host:path` or a local repository, bare or not; a remote helper
   (`ext::`, `fd::`) or another scheme is refused before Git runs. With `create_source` and a
-  local path or `file://` URL that does not exist, `git init --bare` makes it first, its
-  `HEAD` naming `spec.base`. Then `git clone -- <source> <path>` (the directory must not
+  local path or `file://` URL that does not exist, `git init --bare --shared=0600` makes it
+  first, its `HEAD` naming `spec.base`, private to the Station user (on Unix the directory is
+  made `0700` and Git keeps what it writes there `0600`; on Windows it inherits its parent's
+  access). Then `git clone -- <source> <path>` (the directory must not
   exist; its parents are made; with `git_dir`, `--separate-git-dir=<git_dir>`, which must not
   exist either, and the `.git` pointer file is removed, so the working tree holds no `.git`)
   and `git checkout -B <base> --track origin/<base>`. Every command of a clone, the clone

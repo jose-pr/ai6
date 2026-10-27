@@ -650,19 +650,32 @@ fn local_repository(source: &str) -> Option<PathBuf> {
     path.starts_with('/').then(|| PathBuf::from(path))
 }
 
-/// Makes `path` an empty bare repository whose `HEAD` names `branch`.
+/// Makes `path` an empty bare repository whose `HEAD` names `branch`, private to the Station
+/// user: on Unix the directory is made `0700` and Git keeps everything it writes there `0600`
+/// (`core.sharedRepository=0600`), whatever the umask.
 fn create_bare(path: &Path, branch: &str) -> Result<(), Failure> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
     fs::create_dir_all(parent).map_err(|error| fail(parent, error))?;
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path).map_err(|error| fail(path, error))?;
+    let git_dir = format!("--git-dir={}", path.to_string_lossy());
     git(
         parent,
-        &["init", "--quiet", "--bare", "--", &path.to_string_lossy()],
+        &[&git_dir, "init", "--quiet", "--bare", "--shared=0600"],
     )?;
     git(
-        path,
-        &["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")],
+        parent,
+        &[
+            &git_dir,
+            "symbolic-ref",
+            "HEAD",
+            &format!("refs/heads/{branch}"),
+        ],
     )?;
     Ok(())
 }
@@ -789,6 +802,40 @@ mod tests {
         assert!(next.path.join("memory").join("MEMORY.md").exists());
         next.discard().unwrap();
         assert!(!next.path.exists());
+        house.discard().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_created_repository_is_private_to_the_station_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("people").join("eve.git");
+        let house = Worktree::open(&spec(
+            &bare.to_string_lossy(),
+            &root.path().join("personal"),
+            true,
+        ))
+        .unwrap();
+        fs::write(house.path.join("notes.md"), "notes\n").unwrap();
+        house.save(&save_spec("moneypenny: notes"), "main").unwrap();
+        // Everything in it, the pushed objects too, is the Station user's alone.
+        let mut open = Vec::new();
+        let mut pending = vec![bare.clone()];
+        while let Some(path) = pending.pop() {
+            let metadata = fs::symlink_metadata(&path).unwrap();
+            if metadata.permissions().mode() & 0o077 != 0 {
+                open.push(format!(
+                    "{} {:o}",
+                    path.display(),
+                    metadata.permissions().mode()
+                ));
+            }
+            if metadata.is_dir() {
+                pending.extend(fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+            }
+        }
+        assert!(open.is_empty(), "{open:#?}");
         house.discard().unwrap();
     }
 

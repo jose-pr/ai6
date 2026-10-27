@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Moneypenny keeps each person's work and memory in their own repository. The global
   `agents.toml` takes an `[assistant]` table (`ai6::AssistantSettings`, also
   `RosterBuilder::assistant`): `personal_repo` (`{person}` or `{person_digest}`; a local or
-  `file://` repository is created bare on first use), `[assistant.shared.<group>]` and
+  `file://` repository is created bare on first use, private to the Station user on Unix), `[assistant.shared.<group>]` and
   `[assistant.org]` repositories (`write = false`), and `allow_elevated` (false). Universal
   Exports sends each message with the person's workspace (`AssistantJob::workspace`); the
   Station clones `personal/` and `shared/<name>/` into the conversation's directory, writes

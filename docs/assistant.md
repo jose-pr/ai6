@@ -175,9 +175,11 @@ repo = "https://git.example/org/handbook.git"
 identifier and is the one to use. `{person}` is the identifier itself, and only when it is 1
 to 64 lowercase letters, digits, `.`, `_`, `@` and `-` not starting with `.`: any other
 identifier is refused, so two people whose identifiers differ only in case never share a
-repository on a case-insensitive filesystem. A local path or `file://` repository is created, empty
-and bare, the first time it is used; `ssh://`, `https://` and `user@host:` repositories are
-reached with the Station user's Git credentials and must exist. Universal Exports reads the
+repository on a case-insensitive filesystem. A local path or `file://` repository is
+created, empty and bare, the first time it is used, readable by the Station's user only on
+Unix (`0700` directories, `0600` files; on Windows it takes its parent directory's access);
+`ssh://`, `https://` and `user@host:` repositories are reached with the Station user's Git
+credentials and must exist. Universal Exports reads the
 table from the roster it serves (`--roster`) and sends each message with the person's
 workspace; without `personal_repo` nothing changes from a plain conversation. A Station takes
 no repository on Universal Exports' word: it fills the person's in from its own roster's
