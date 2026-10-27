@@ -383,7 +383,7 @@ impl Desk {
                 let mut workspace = workspace
                     .lock()
                     .map_err(|_| "assistant workspace lock failed".to_owned())?;
-                if workspace.repo() == commit.repo {
+                if workspace.takes(&commit.repo) {
                     return workspace.apply(&commit);
                 }
             }
@@ -780,7 +780,7 @@ impl Pump {
                     if event.kind == "completed" {
                         // The work is saved before the turn is reported over, so the next
                         // message's turn starts from it.
-                        events.extend(self.end_turn());
+                        events.extend(self.end_turn(false));
                         self.flags.busy.store(false, Ordering::Release);
                         if let Ok(mut last) = self.flags.last_active.lock() {
                             *last = Instant::now();
@@ -837,8 +837,9 @@ impl Pump {
         if let Ok(session) = self.session.lock() {
             let _ = session.close();
         }
-        // What the closed harness left is saved before its directory goes.
-        let saved = self.end_turn();
+        // What the closed harness left is saved before its directory goes, and later commits
+        // go to clones of their own.
+        let saved = self.end_turn(true);
         if !saved.is_empty() {
             self.send(session_id.as_ref(), saved);
         }
@@ -878,8 +879,9 @@ impl Pump {
         }
     }
 
-    /// Ends the workspace's turn: the events saying what was set aside or should be known.
-    fn end_turn(&self) -> Vec<AssistantEvent> {
+    /// Ends the workspace's turn, and with `closing` the workspace: the events saying what
+    /// was set aside or should be known.
+    fn end_turn(&self, closing: bool) -> Vec<AssistantEvent> {
         let Some(workspace) = &self.workspace else {
             return Vec::new();
         };
@@ -889,7 +891,11 @@ impl Pump {
                 Some("Moneypenny's workspace could not be saved: its lock failed.".to_owned()),
             )];
         };
-        let TurnEnd { memory, notices } = workspace.end_turn();
+        let TurnEnd { memory, notices } = if closing {
+            workspace.close()
+        } else {
+            workspace.end_turn()
+        };
         let mut events: Vec<AssistantEvent> = notices
             .into_iter()
             .map(|notice| AssistantEvent::new(EVENT_NOTICE, Some(notice)))
@@ -2267,6 +2273,23 @@ mod tests {
         assert!(
             !git(&bare, &["show", "main:memory/MEMORY.md"]).contains(PREFERENCE),
             "the index is the one she started from"
+        );
+
+        // Confirmed after her harness closed, it is committed from a clone of its own.
+        fixture
+            .desk
+            .handle(committing("c-x", COMMIT_MEMORY, &bare, change))
+            .await;
+        let landed = events(&fixture, "c-x")
+            .into_iter()
+            .rfind(|event| event.kind == EVENT_ACCEPTED)
+            .and_then(|event| event.text)
+            .unwrap();
+        assert!(landed.starts_with("committed "), "{landed}");
+        assert_eq!(
+            git(&bare, &["show", "main:memory/prefs.md"]),
+            PREFERENCE,
+            "{landed}"
         );
     }
 

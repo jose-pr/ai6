@@ -64,6 +64,8 @@ pub(super) struct Workspace {
     memory: BTreeMap<String, Vec<u8>>,
     /// The other files of `personal/` at the start of the turn: size and modification time.
     files: BTreeMap<String, (u64, Option<SystemTime>)>,
+    /// The harness closed and its directory is going: a commit goes to a clone of its own.
+    closed: bool,
 }
 
 /// What the end of a turn found besides the work it saved.
@@ -101,6 +103,7 @@ impl Workspace {
             author_email: job.author_email.clone(),
             memory: BTreeMap::new(),
             files: BTreeMap::new(),
+            closed: false,
         };
         let mut notices = Vec::new();
         let index = workspace.path.join(MEMORY).join("MEMORY.md");
@@ -136,9 +139,16 @@ impl Workspace {
         Ok((workspace, notices))
     }
 
-    /// The personal repository this workspace is a checkout of.
-    pub(super) fn repo(&self) -> &str {
-        &self.repo
+    /// Whether a commit of `repo` can be made here: the checkout is of it and still open.
+    pub(super) fn takes(&self, repo: &str) -> bool {
+        !self.closed && self.repo == repo
+    }
+
+    /// Ends the last turn as the harness closes; afterwards commits go elsewhere.
+    pub(super) fn close(&mut self) -> TurnEnd {
+        let end = self.end_turn();
+        self.closed = true;
+        end
     }
 
     /// Notes what `personal/` holds as a turn starts.
