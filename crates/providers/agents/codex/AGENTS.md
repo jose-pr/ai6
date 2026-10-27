@@ -154,6 +154,10 @@ tools are offered only inside `functions.exec` there, so an assistant also finds
 missing. A server whose name collides with one of the user's is merged with it: with a stdio
 server of that name Codex refuses its configuration and the check fails.
 
+`stdio()` answers `HarnessStdio::Json`, so the Station starts the app server in a terminal
+provider without a terminal (`pipe`), where its stream arrives as written, and refuses one
+that gives it a terminal.
+
 The terminal is opened at `STREAM_COLS` (32767) columns and read with
 `ai6::directorates::q::terminal::JsonLines`: ConPTY's controls, its echo of the requests
 written and lines it breaks are read as the stream Codex wrote. A line that is not JSON is

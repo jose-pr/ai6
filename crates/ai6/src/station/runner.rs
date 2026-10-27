@@ -43,7 +43,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Notify;
 
 use crate::directorates::m::identity::SessionId;
-use crate::directorates::q::terminal::TerminalBridge;
+use crate::directorates::q::terminal::{HarnessStdio, TerminalBridge};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
@@ -59,8 +59,6 @@ const TOKEN_FILE: &str = "token";
 const LOCK_FILE: &str = "runner.lock";
 const SESSIONS_DIR: &str = "sessions";
 const SESSION_FILE: &str = "session.json";
-/// The terminal provider a runner prefers when several are available and none is pinned.
-const PREFERRED_TERMINAL: &str = "pty";
 /// Most events one read returns.
 const PAGE: usize = 256;
 /// The longest a read waits for a new event.
@@ -757,24 +755,14 @@ impl Runner {
             .ok_or_else(|| failure(StatusCode::NOT_FOUND, format!("no Session {key:?}")))
     }
 
-    fn terminal(&self, requested: Option<&str>) -> Result<String, String> {
-        if let Some(pinned) = requested.or(self.inner.terminal.as_deref()) {
-            return Ok(pinned.to_owned());
-        }
-        let available: Vec<String> = self
-            .inner
+    /// The terminal provider for a harness that talks over `stdio`: the Station's request or
+    /// the runner's pin, when that suits the harness, else one chosen among the available
+    /// providers, as a Station chooses.
+    fn terminal(&self, requested: Option<&str>, stdio: HarnessStdio) -> Result<String, String> {
+        self.inner
             .plugins
-            .terminals()
-            .into_iter()
-            .filter(|provider| provider.unavailable.is_none())
-            .map(|provider| provider.id)
-            .collect();
-        available
-            .iter()
-            .find(|id| id.as_str() == PREFERRED_TERMINAL)
-            .or_else(|| available.first())
-            .cloned()
-            .ok_or_else(|| "this runner has no available terminal provider".to_owned())
+            .choose_terminal(stdio, requested.or(self.inner.terminal.as_deref()))
+            .map_err(|refusal| format!("this runner cannot start the harness: {refusal}"))
     }
 }
 
@@ -806,14 +794,23 @@ async fn start_session(
             "a Session key uses 1 to 128 letters, digits, '.', '_' or '-'",
         ));
     }
-    let terminal = runner
-        .terminal(request.terminal.as_deref())
-        .map_err(|error| failure(StatusCode::CONFLICT, error))?;
     let handler = runner
         .inner
         .plugins
         .handler(&request.handler, None)
         .map_err(|error| failure(StatusCode::CONFLICT, error.to_string()))?;
+    let stdio = handler.stdio().map_err(|error| {
+        failure(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "handler `{}` did not declare its harness's stdio: {error}",
+                request.handler
+            ),
+        )
+    })?;
+    let terminal = runner
+        .terminal(request.terminal.as_deref(), stdio)
+        .map_err(|error| failure(StatusCode::CONFLICT, error))?;
     let provider = runner
         .inner
         .plugins
@@ -1083,6 +1080,78 @@ mod tests {
         let again = load_sessions(state_dir.path()).unwrap();
         assert_eq!(again["live"].report().last, 2);
         assert_eq!(again["done"].report().last, 1);
+    }
+
+    fn choice_runner(state_dir: &Path, with_pipe: bool, pinned: Option<&str>) -> Runner {
+        Runner {
+            inner: Arc::new(Inner {
+                state_dir: state_dir.to_path_buf(),
+                plugins: Arc::new(crate::station::plugins::testing::terminal_choice(with_pipe)),
+                terminal: pinned.map(str::to_owned),
+                sessions: Mutex::new(BTreeMap::new()),
+                stopping: AtomicBool::new(false),
+                _lock: File::create(state_dir.join(LOCK_FILE)).unwrap(),
+            }),
+        }
+    }
+
+    async fn start(runner: &Runner, key: &str, handler: &str) -> Result<SessionReport, Failure> {
+        let request = StartRequest {
+            key: key.to_owned(),
+            handler: handler.to_owned(),
+            terminal: None,
+            launch: Launch::Start(AgentStart {
+                mission_id: crate::MissionId::try_new(key).unwrap(),
+                agent_id: "007".to_owned(),
+                prompt: "work".to_owned(),
+                initial_context: Vec::new(),
+                working_directory: ".".to_owned(),
+                clearance: "standard".to_owned(),
+                environment: BTreeMap::new(),
+                model: None,
+                effort: None,
+                max_cost_micro_usd: None,
+                project_settings: false,
+                project_mcp: false,
+                answer_only: false,
+                assistant: None,
+            }),
+        };
+        start_session(State(runner.clone()), Json(request))
+            .await
+            .map(|(_, Json(report))| report)
+    }
+
+    /// A runner chooses the terminal as a Station does, from what the handler declares: the
+    /// mock handlers refuse to start, after the choice, and the Session records it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_runner_gives_each_handler_a_terminal_that_suits_it() {
+        let state_dir = tempfile::tempdir().unwrap();
+        let runner = choice_runner(state_dir.path(), true, None);
+        for (key, handler, terminal) in
+            [("json", "json-agent", "pipe"), ("tty", "tty-agent", "pty")]
+        {
+            let Failure(status, reason) = start(&runner, key, handler).await.unwrap_err();
+            assert_eq!(status, StatusCode::BAD_GATEWAY, "{reason}");
+            assert!(reason.contains(crate::station::plugins::testing::REFUSED_START));
+            let recorded = lock_of(&runner.inner.sessions)[key].report().terminal;
+            assert_eq!(recorded, terminal);
+        }
+
+        let pty_only = tempfile::tempdir().unwrap();
+        let runner = choice_runner(pty_only.path(), false, None);
+        let Failure(status, reason) = start(&runner, "json", "json-agent").await.unwrap_err();
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(reason.contains("without a terminal (`pipe`)"), "{reason}");
+        assert!(runner.hosted("json").is_err(), "nothing was started");
+
+        let pinned = tempfile::tempdir().unwrap();
+        let runner = choice_runner(pinned.path(), true, Some("pty"));
+        let Failure(status, reason) = start(&runner, "json", "json-agent").await.unwrap_err();
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(reason.contains("`pty` is pinned"), "{reason}");
+        let Failure(_, reason) = start(&runner, "tty", "tty-agent").await.unwrap_err();
+        assert!(reason.contains(crate::station::plugins::testing::REFUSED_START));
     }
 
     #[test]

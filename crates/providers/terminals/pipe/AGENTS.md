@@ -12,7 +12,9 @@ Station loads. Provider ID: `pipe`. Unsafe code is limited to the Job Object cal
 
 ## Exports
 
-- `Pipe` — implements `ai6::directorates::q::terminal::Terminal`. `Pipe::default()` merges
+- `Pipe` — implements `ai6::directorates::q::terminal::Terminal`; `tty()` answers `false`,
+  so a Station gives it to a harness whose handler declares `HarnessStdio::Json`, preferring
+  it to other providers without a terminal. `Pipe::default()` merges
   standard error; `Pipe::new(PipeConfig)` takes a configuration. As a Guatiao provider it is
   built from a `PipeConfig` value, and from an empty map (every field defaulted) when the host
   passes none.

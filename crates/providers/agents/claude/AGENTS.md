@@ -50,6 +50,11 @@ wrote that were not JSON (512 bytes each); a read timeout otherwise returns `Non
 kills the terminal and waits up to 2 s for its exit status, so the working directory is free
 when it returns.
 
+`stdio()` answers `HarnessStdio::Json`, so the Station starts Claude Code in a terminal
+provider without a terminal (`pipe`) and refuses one that gives it a terminal: with `-p`,
+Claude Code 2.1.310 exits at once when its standard input is a terminal ("Input must be
+provided either through stdin or as a prompt argument when using --print").
+
 The terminal is opened at `STREAM_COLS` (32767) columns and read with
 `ai6::directorates::q::terminal::JsonLines`, so the controls ConPTY writes on Windows and a
 line it breaks are read as the stream Claude wrote; a line that is not JSON becomes an event

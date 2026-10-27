@@ -373,7 +373,8 @@ pub struct RunnerSettings {
     /// Directories or library files on the Theater that the runner loads providers from.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_paths: Vec<String>,
-    /// The terminal provider the runner uses; an available one, preferring `pty`, when absent.
+    /// The terminal provider the runner uses; when absent, an available one that suits the
+    /// handler (`pipe` for a JSON harness, else `pty`, preferred).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
 }

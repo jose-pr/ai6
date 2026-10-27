@@ -62,6 +62,12 @@ impl TryFrom<ClaudeConfig> for ClaudeHandler {
 }
 
 impl AgentHandler for ClaudeHandler {
+    /// Claude Code with `-p` and stream-json reads JSON lines from standard input, which must not
+    /// be a terminal: on one it exits at once.
+    fn stdio(&self) -> Result<ai6::HarnessStdio, ProviderError> {
+        Ok(ai6::HarnessStdio::Json)
+    }
+
     fn start(
         &self,
         request: AgentStart,

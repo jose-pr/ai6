@@ -12,6 +12,7 @@ use crate::directorates::m::placement::{self, Resources};
 use crate::directorates::m::theaters::TheaterSummary;
 
 use super::super::{DaemonState, StationRole, station_terminal};
+use crate::directorates::q::terminal::HarnessStdio;
 
 /// What the Station tells its Head of Station about itself.
 #[derive(Debug, Clone, Serialize)]
@@ -133,7 +134,7 @@ pub(in super::super) fn station_state(state: &DaemonState) -> StationState {
         });
     let theaters = state
         .transports
-        .summaries(station_terminal(state).is_ok())
+        .summaries(station_terminal(state, HarnessStdio::Terminal).is_ok())
         .into_iter()
         .map(|summary| TheaterState {
             unfit: summary

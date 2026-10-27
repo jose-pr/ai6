@@ -597,7 +597,7 @@ pub struct RunnerSettings {                  // how to reach the `ai6 runner` on
     pub command: Option<String>,             // default: `ai6` on PATH; the Station's own binary on `local`
     pub state_dir: Option<String>,           // default: the runner's (`<AI6 state>/runner`)
     pub plugin_paths: Vec<String>,           // providers the runner loads, on the Theater
-    pub terminal: Option<String>,            // default: the runner picks, preferring `pty`
+    pub terminal: Option<String>,            // default: the runner picks one that suits the handler (`pipe` for JSON, else `pty`)
 }
 impl RunnerSettings {
     pub fn with_command(self, command: impl Into<String>) -> Self;
@@ -1389,7 +1389,8 @@ renewals (default `DEFAULT_LEASE`, 60 s; zero makes startup fail): how long a st
 control Station waits before taking over, `with_config_poll(Duration)` sets how often it
 checks its roster source and `loadouts.toml` (default `DEFAULT_CONFIG_POLL`, 5 s; zero turns
 reloading off; loadouts set with `with_loadouts` are never reloaded), and `with_terminal` pins the terminal provider. Without a pin the Station uses an available
-terminal provider, preferring `DEFAULT_TERMINAL`. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
+terminal provider that suits the Agent's handler (`choose_terminal` in the terminal API). A
+pin that gives a JSON harness a terminal is refused at Mission start. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
 distributed placement. Station and Agent limits count assignments in the shared Registry.
 The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID` set an
 explicit identity.
@@ -2598,7 +2599,10 @@ same way, in `ai6_cable_quotas`, with the same bounds.
 `AgentHandler` Guatiao kind `ai6_agent_handler`, and the `AgentSession` object kind
 `ai6_agent_session`. Handlers own harness launch, initial-context delivery, resume,
 message submission and event decoding. AI6 supplies an `AgentTerminal` object bridge
-over its selected `Terminal` provider. `AgentStart`, `AgentResume`, `AgentMessage`,
+over its selected `Terminal` provider. `AgentHandler::stdio(&self) -> Result<HarnessStdio,
+ProviderError>` is an appended slot (default `Ok(HarnessStdio::Terminal)`): a handler whose
+harness speaks JSON over standard input and output answers `Json` (the `claude` and `codex`
+handlers do), and the Station gives it a provider without a terminal. `AgentStart`, `AgentResume`, `AgentMessage`,
 `AgentEvent`, `UsageLimit` and `TokenUsage` are also serde `Serialize` and `Deserialize`
 (field names as declared): a runner's API carries them as JSON.
 
@@ -2718,6 +2722,30 @@ The daemon also queues `budget` (warning or limit), `exposed` (text: the source)
 Guatiao terminal contracts. `Terminal` is a provider kind discovered by AI6;
 `AgentTerminal` is the object bridge AI6 wraps around that provider for a handler.
 The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in tests.
+
+Which provider a harness runs in follows from what its handler declares
+(`AgentHandler::stdio`), never from a provider name the Agent or handler gives:
+
+```rust
+pub trait Terminal {                          // kind ai6_terminal
+    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
+    fn tty(&self) -> bool { true }            // appended slot: false when the program gets plain pipes (`pipe`, the detached wrapper)
+}
+pub enum HarnessStdio { Terminal /* default */, Json }  // crosses as "terminal" | "json"
+pub const DEFAULT_TERMINAL: &str = "pty";     // preferred for a Terminal harness
+pub const DEFAULT_PIPE: &str = "pipe";        // preferred for a Json harness
+pub struct TerminalOffer { pub id: String, pub tty: bool }
+#[non_exhaustive]
+pub enum TerminalRefusal { NoneAvailable, NoPipe, PinnedHasTerminal { provider: String } } // Display: the reason
+pub fn choose_terminal(stdio: HarnessStdio, offers: &[TerminalOffer], pinned: Option<&str>)
+    -> Result<String, TerminalRefusal>;
+```
+
+`choose_terminal`: a pin is used as is, except that a `Json` harness pinned to a provider
+offered with `tty: true` is `PinnedHasTerminal`; a pin not among `offers` is returned for
+construction to report. Unpinned, `Json` gets `DEFAULT_PIPE`, else the first offer without a
+terminal, else `NoPipe` (`NoneAvailable` with no offers); `Terminal` gets `DEFAULT_TERMINAL`,
+else the first offer with a terminal, else the first offer, else `NoneAvailable`.
 
 A handler whose harness writes one JSON value per line reads it with `JsonLines`, because a
 pseudo-terminal is not a pipe: ConPTY on Windows renders a console, so its output carries
@@ -2846,8 +2874,9 @@ impl Cover {
 
 ## Station daemon (`ai6::station::server`)
 
-`DEFAULT_MAX_CONCURRENT_MISSIONS` is `4`. `DEFAULT_TERMINAL` (`"pty"`) is the preferred
-terminal provider when several are available and none is pinned. `serve` and
+`DEFAULT_MAX_CONCURRENT_MISSIONS` is `4`. Without a pin, a Station chooses a harness's
+terminal provider with `Plugins::choose_terminal` and the handler's `stdio`; a refusal fails
+the Mission's start with `400` and the reason, leaving it queued. `serve` and
 `serve_with_plugins` use these defaults. The capacity-aware variants accept an explicit limit and reject zero:
 
 ```rust
@@ -3306,9 +3335,17 @@ against the provider's schema. `None` builds a provider's default instance, or t
 with every setting at its default (the `claude` and `codex` handlers); a provider with a
 required setting answers `PluginBuildError::ConfigurationRequired`.
 `scan_summary()` reports loaded, skipped, failed and unreadable paths.
+`terminal_offers()` lists the available terminal providers that build with their defaults,
+each with its `Terminal::tty`, and `choose_terminal(stdio, pinned)` applies `choose_terminal`
+(see the terminal API) to them; a Station and a runner choose a harness's terminal with it.
 
 ```rust
 impl Plugins { pub fn scan_with(paths: &[PathBuf], policy: &PluginPolicy) -> Plugins; } // scan() = default policy
+impl Plugins {
+    pub fn terminal_offers(&self) -> Vec<TerminalOffer>;
+    pub fn choose_terminal(&self, stdio: HarnessStdio, pinned: Option<&str>)
+        -> Result<String, TerminalRefusal>;
+}
 pub struct PluginPolicy;   // Default: report, no pins
 impl PluginPolicy {
     pub fn new(pins: Option<PinSet>, verified_dir: impl Into<PathBuf>) -> Self; // profile: pin set's, else strict with pins, report without
@@ -3363,8 +3400,9 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
   (feature `cli`): run the Station and load Operation and Agent configuration. The pin set
   defaults to `plugins.toml` in the configuration directory; verified copies go to the state
   directory's `plugins/verified/`.
-  `--terminal` pins the terminal provider; without it an available one is used,
-  preferring `pty`. It accepts
+  `--terminal` pins the terminal provider (refused at Mission start for a JSON harness when
+  it gives a terminal); without it an available one that suits the handler is used: `pipe`
+  preferred for a JSON harness, `pty` otherwise. It accepts
   `--max-concurrent-missions 4`, `--stall-timeout 300`, `--loop-timeout 300`,
   `--loop-min-lines 50`, `--blocked-after 10`, optional `--max-runtime`, `--history 4096`
   and `--normalize-digits`. Station roles default to control and execution; repeated `--role`

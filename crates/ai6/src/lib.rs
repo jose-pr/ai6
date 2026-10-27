@@ -93,7 +93,8 @@ pub use directorates::q::safehouse::{
     SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
 };
 pub use directorates::q::terminal::{
-    AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalBridge, TerminalSession,
+    AgentTerminal, DEFAULT_PIPE, DEFAULT_TERMINAL, ExitInfo, HarnessStdio, READ_TIMED_OUT, Spec,
+    Terminal, TerminalBridge, TerminalOffer, TerminalRefusal, TerminalSession, choose_terminal,
 };
 pub use directorates::q::transport::{
     Capabilities, DEFAULT_MAX_OUTPUT, DEFAULT_READ_LIMIT, DirEntry, DirListing, FileData, Forward,
@@ -181,7 +182,7 @@ pub use guatiao;
 #[cfg(feature = "daemon")]
 pub use station::server::{
     DEFAULT_CONFIG_POLL, DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_RESOURCES_EVERY,
-    DEFAULT_TERMINAL, ServeConfig, StationConfig, StationRole, serve, serve_with_capacity,
-    serve_with_config_dir, serve_with_config_dir_and_capacity, serve_with_options,
-    serve_with_plugins, serve_with_plugins_and_capacity,
+    ServeConfig, StationConfig, StationRole, serve, serve_with_capacity, serve_with_config_dir,
+    serve_with_config_dir_and_capacity, serve_with_options, serve_with_plugins,
+    serve_with_plugins_and_capacity,
 };

@@ -34,7 +34,8 @@ use super::{DaemonState, medical, station_terminal, unix_now, vetting};
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode, LIMIT_EVENT,
+    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
+    LIMIT_EVENT,
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
@@ -85,20 +86,31 @@ pub(super) trait Harness: Send + Sync {
     ) -> Result<Object<dyn AgentSession>, String>;
 }
 
-/// The Station's handlers, each on the terminal provider the Station uses.
+/// The Station's handlers, each on the terminal provider the Station chooses for it.
 struct StationHarness(DaemonState);
 
+/// A handler and the terminal its harness is to start in.
+type Launch = (
+    Box<dyn AgentHandler>,
+    Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+);
+
 impl StationHarness {
-    fn terminal(
-        &self,
-    ) -> Result<Object<dyn crate::directorates::q::terminal::AgentTerminal>, String> {
-        let provider = station_terminal(&self.0)?;
+    /// `handler`, and a terminal that suits what it declares.
+    fn handler(&self, handler: &str) -> Result<Launch, String> {
+        let handler = self
+            .0
+            .plugins
+            .handler(handler, None)
+            .map_err(|error| error.to_string())?;
+        let stdio = handler.stdio().map_err(|error| error.to_string())?;
+        let provider = station_terminal(&self.0, stdio)?;
         let terminal = self
             .0
             .plugins
             .terminal(&provider, None)
             .map_err(|error| error.to_string())?;
-        Ok(TerminalBridge::agent_terminal(terminal))
+        Ok((handler, TerminalBridge::agent_terminal(terminal)))
     }
 }
 
@@ -114,11 +126,8 @@ impl Harness for StationHarness {
         handler: &str,
         request: AgentStart,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let terminal = self.terminal()?;
-        self.0
-            .plugins
-            .handler(handler, None)
-            .map_err(|error| error.to_string())?
+        let (handler, terminal) = self.handler(handler)?;
+        handler
             .start(request, terminal)
             .map_err(|error| error.to_string())
     }
@@ -128,11 +137,8 @@ impl Harness for StationHarness {
         handler: &str,
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let terminal = self.terminal()?;
-        self.0
-            .plugins
-            .handler(handler, None)
-            .map_err(|error| error.to_string())?
+        let (handler, terminal) = self.handler(handler)?;
+        handler
             .resume(request, terminal)
             .map_err(|error| error.to_string())
     }

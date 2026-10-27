@@ -397,6 +397,123 @@ fn parse(bytes: &[u8]) -> Parsed {
 pub trait Terminal: Send + Sync {
     /// Starts `spec` (a [`Spec`] as a value) and hands over its session.
     fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
+
+    /// Whether a program started here has a terminal for its standard input and output. A
+    /// provider that gives it plain pipes (`pipe`) answers `false`; the default is `true`.
+    fn tty(&self) -> bool {
+        true
+    }
+}
+
+/// How the harness an AgentHandler starts talks over its standard input and output, as the
+/// handler declares it; the Station picks a terminal provider that suits it.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[map(crate = ::guatiao, rename_all = "lowercase")]
+pub enum HarnessStdio {
+    /// An interactive program, which may need a terminal: any provider, `pty` preferred.
+    #[default]
+    Terminal,
+    /// JSON over plain standard input and output: only a provider without a terminal
+    /// ([`Terminal::tty`] `false`), `pipe` preferred. A terminal would render the stream, and a
+    /// harness may refuse to read its input from one.
+    Json,
+}
+
+/// The terminal provider preferred for a harness that may want a terminal.
+pub const DEFAULT_TERMINAL: &str = "pty";
+
+/// The terminal provider preferred for a harness that speaks JSON over standard input and
+/// output.
+pub const DEFAULT_PIPE: &str = "pipe";
+
+/// An available terminal provider, as [`choose_terminal`] weighs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalOffer {
+    /// The provider ID.
+    pub id: String,
+    /// What the provider's [`Terminal::tty`] answers.
+    pub tty: bool,
+}
+
+/// Why no terminal provider suits a harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TerminalRefusal {
+    /// No terminal provider is available.
+    NoneAvailable,
+    /// The harness speaks JSON, and every available provider gives it a terminal.
+    NoPipe,
+    /// The harness speaks JSON, and the pinned provider gives it a terminal.
+    PinnedHasTerminal {
+        /// The pinned provider ID.
+        provider: String,
+    },
+}
+
+impl std::fmt::Display for TerminalRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoneAvailable => write!(f, "no terminal provider is available"),
+            Self::NoPipe => write!(
+                f,
+                "the harness speaks JSON over standard input and output and needs a terminal \
+                 provider without a terminal (`{DEFAULT_PIPE}`), and none is available"
+            ),
+            Self::PinnedHasTerminal { provider } => write!(
+                f,
+                "terminal provider `{provider}` is pinned, but it gives the harness a terminal, \
+                 and the harness speaks JSON over standard input and output; pin a provider \
+                 without one (`{DEFAULT_PIPE}`) or none"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TerminalRefusal {}
+
+/// The terminal provider for a harness that talks over `stdio`, among the available `offers`.
+///
+/// A `pinned` provider is used when it suits the harness; one that is not among `offers` is
+/// returned as is, for the caller's construction to report. Without a pin, a
+/// [`HarnessStdio::Json`] harness gets [`DEFAULT_PIPE`], else the first provider without a
+/// terminal; any other gets [`DEFAULT_TERMINAL`], else the first with a terminal, else the
+/// first offered.
+///
+/// # Errors
+///
+/// [`TerminalRefusal`] when no offered provider suits the harness, or the pinned one does not.
+pub fn choose_terminal(
+    stdio: HarnessStdio,
+    offers: &[TerminalOffer],
+    pinned: Option<&str>,
+) -> Result<String, TerminalRefusal> {
+    if let Some(pinned) = pinned {
+        let has_terminal = offers.iter().any(|offer| offer.id == pinned && offer.tty);
+        return match stdio {
+            HarnessStdio::Json if has_terminal => Err(TerminalRefusal::PinnedHasTerminal {
+                provider: pinned.to_owned(),
+            }),
+            _ => Ok(pinned.to_owned()),
+        };
+    }
+    let preferred = |id: &str, tty: bool| {
+        offers
+            .iter()
+            .filter(|offer| offer.tty == tty)
+            .find(|offer| offer.id == id)
+            .or_else(|| offers.iter().find(|offer| offer.tty == tty))
+    };
+    let chosen = match stdio {
+        HarnessStdio::Json => preferred(DEFAULT_PIPE, false).ok_or(if offers.is_empty() {
+            TerminalRefusal::NoneAvailable
+        } else {
+            TerminalRefusal::NoPipe
+        })?,
+        HarnessStdio::Terminal => preferred(DEFAULT_TERMINAL, true)
+            .or_else(|| offers.first())
+            .ok_or(TerminalRefusal::NoneAvailable)?,
+    };
+    Ok(chosen.id.clone())
 }
 
 /// The object handle AgentHandlers use to ask AI6's selected terminal provider to spawn.
@@ -589,6 +706,93 @@ mod tests {
     fn floor_hashes_are_pinned() {
         assert_eq!(TerminalVtable::FLOOR_HASH, 3285297011);
         assert_eq!(TerminalSessionVtable::FLOOR_HASH, 3148381037);
+    }
+
+    fn offers(list: &[(&str, bool)]) -> Vec<TerminalOffer> {
+        list.iter()
+            .map(|(id, tty)| TerminalOffer {
+                id: (*id).to_owned(),
+                tty: *tty,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_json_harness_gets_a_provider_without_a_terminal_preferring_pipe() {
+        let both = offers(&[("pty", true), ("other-pipe", false), ("pipe", false)]);
+        assert_eq!(
+            choose_terminal(HarnessStdio::Json, &both, None).unwrap(),
+            "pipe"
+        );
+        let other = offers(&[("pty", true), ("other-pipe", false)]);
+        assert_eq!(
+            choose_terminal(HarnessStdio::Json, &other, None).unwrap(),
+            "other-pipe"
+        );
+        assert_eq!(
+            choose_terminal(HarnessStdio::Json, &offers(&[("pty", true)]), None),
+            Err(TerminalRefusal::NoPipe)
+        );
+        assert_eq!(
+            choose_terminal(HarnessStdio::Json, &[], None),
+            Err(TerminalRefusal::NoneAvailable)
+        );
+    }
+
+    #[test]
+    fn an_interactive_harness_prefers_pty_then_any_terminal_then_anything() {
+        let both = offers(&[("pipe", false), ("other-pty", true), ("pty", true)]);
+        assert_eq!(
+            choose_terminal(HarnessStdio::Terminal, &both, None).unwrap(),
+            "pty"
+        );
+        let other = offers(&[("pipe", false), ("other-pty", true)]);
+        assert_eq!(
+            choose_terminal(HarnessStdio::Terminal, &other, None).unwrap(),
+            "other-pty"
+        );
+        assert_eq!(
+            choose_terminal(HarnessStdio::Terminal, &offers(&[("pipe", false)]), None).unwrap(),
+            "pipe"
+        );
+        assert_eq!(
+            choose_terminal(HarnessStdio::Terminal, &[], None),
+            Err(TerminalRefusal::NoneAvailable)
+        );
+    }
+
+    #[test]
+    fn a_pin_wins_unless_it_gives_a_json_harness_a_terminal() {
+        let both = offers(&[("pty", true), ("pipe", false)]);
+        assert_eq!(
+            choose_terminal(HarnessStdio::Terminal, &both, Some("pipe")).unwrap(),
+            "pipe"
+        );
+        assert_eq!(
+            choose_terminal(HarnessStdio::Json, &both, Some("pipe")).unwrap(),
+            "pipe"
+        );
+        let refused = choose_terminal(HarnessStdio::Json, &both, Some("pty")).unwrap_err();
+        assert_eq!(
+            refused,
+            TerminalRefusal::PinnedHasTerminal {
+                provider: "pty".to_owned()
+            }
+        );
+        assert!(refused.to_string().contains("`pty` is pinned"), "{refused}");
+        // An unknown pin is left for construction to report.
+        assert_eq!(
+            choose_terminal(HarnessStdio::Json, &both, Some("absent")).unwrap(),
+            "absent"
+        );
+    }
+
+    #[test]
+    fn harness_stdio_crosses_as_a_lowercase_name() {
+        let json = HarnessStdio::Json.to_value().unwrap();
+        assert_eq!(<&str>::try_from(&json).unwrap(), "json");
+        assert_eq!(HarnessStdio::from_value(&json).unwrap(), HarnessStdio::Json);
+        assert_eq!(HarnessStdio::default(), HarnessStdio::Terminal);
     }
 
     fn lines_of(chunks: &[&[u8]]) -> Vec<StreamLine> {

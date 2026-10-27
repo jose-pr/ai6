@@ -237,6 +237,11 @@ impl Terminal for DetachedTerminal {
         }
         .into_object())
     }
+
+    /// The harness reads a FIFO and writes a file.
+    fn tty(&self) -> bool {
+        false
+    }
 }
 
 /// One harness under the wrapper, read and written through the transport.

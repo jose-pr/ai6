@@ -100,6 +100,10 @@ impl Terminal for Pipe {
         let spec = Spec::from_value(spec).map_err(|e| refuse(Status::GUATIAO_ERR_BAD_VALUE, e))?;
         Ok(PipeSession::start(&spec, self.config.stderr)?.into_object())
     }
+
+    fn tty(&self) -> bool {
+        false
+    }
 }
 
 struct PipeSession {

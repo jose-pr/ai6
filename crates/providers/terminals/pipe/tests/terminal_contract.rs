@@ -346,6 +346,12 @@ fn a_child_that_exits_leaving_a_process_behind_ends_its_output() {
     assert_eq!(wait_for_exit(&session).code, Some(4));
 }
 
+/// A Station reads this to give the provider to harnesses that speak JSON.
+#[test]
+fn the_provider_says_it_gives_no_terminal() {
+    assert!(!Pipe::default().tty());
+}
+
 #[test]
 fn an_empty_argv_or_a_missing_program_is_refused() {
     assert!(

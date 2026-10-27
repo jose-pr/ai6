@@ -22,7 +22,9 @@ use crate::directorates::registry::bona_fides::{
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
 use crate::directorates::q::ephemeral::TheaterProvider;
 use crate::directorates::q::safehouse::SafeHouseProvider;
-use crate::directorates::q::terminal::Terminal;
+use crate::directorates::q::terminal::{
+    HarnessStdio, Terminal, TerminalOffer, TerminalRefusal, choose_terminal,
+};
 use crate::directorates::q::transport::Transport;
 use crate::directorates::registry::sources::Source;
 use crate::directorates::section_00::agent::AgentHandler;
@@ -374,6 +376,37 @@ impl Plugins {
         config: Option<&Value>,
     ) -> Result<Box<dyn AgentHandler>, PluginBuildError> {
         build::<dyn AgentHandler>(&self.registry, provider, config)
+    }
+
+    /// The available terminal providers that build with their defaults, each with whether it
+    /// gives a program a terminal ([`Terminal::tty`]).
+    pub fn terminal_offers(&self) -> Vec<TerminalOffer> {
+        self.terminals()
+            .into_iter()
+            .filter(|provider| provider.unavailable.is_none())
+            .filter_map(|provider| {
+                let tty = self.terminal(&provider.id, None).ok()?.tty();
+                Some(TerminalOffer {
+                    id: provider.id,
+                    tty,
+                })
+            })
+            .collect()
+    }
+
+    /// The terminal provider for a harness that talks over `stdio`, `pinned` or chosen among
+    /// [`Plugins::terminal_offers`]; see [`choose_terminal`].
+    ///
+    /// # Errors
+    ///
+    /// [`TerminalRefusal`] when no available provider suits the harness, or the pinned one does
+    /// not.
+    pub fn choose_terminal(
+        &self,
+        stdio: HarnessStdio,
+        pinned: Option<&str>,
+    ) -> Result<String, TerminalRefusal> {
+        choose_terminal(stdio, &self.terminal_offers(), pinned)
     }
 
     /// Constructs a Terminal from its provider ID and optional Guatiao config.
@@ -1256,5 +1289,189 @@ mod tests {
             plugins.authorizer("coqui_roles", Some(&policy("universe:all"))),
             Err(PluginBuildError::InvalidConfiguration { .. })
         ));
+    }
+
+    #[test]
+    fn terminal_offers_say_which_providers_give_a_terminal() {
+        let plugins = testing::terminal_choice(true);
+        let mut offers = plugins.terminal_offers();
+        offers.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(
+            offers,
+            [
+                TerminalOffer {
+                    id: "pipe".to_owned(),
+                    tty: false
+                },
+                TerminalOffer {
+                    id: "pty".to_owned(),
+                    tty: true
+                },
+            ]
+        );
+    }
+
+    /// The handler declares what its harness needs; the provider is chosen to suit it.
+    #[test]
+    fn a_handler_declares_its_stdio_and_gets_a_terminal_that_suits_it() {
+        let both = testing::terminal_choice(true);
+        let json = both.handler("json-agent", None).unwrap().stdio().unwrap();
+        let interactive = both.handler("tty-agent", None).unwrap().stdio().unwrap();
+        assert_eq!(
+            (json, interactive),
+            (HarnessStdio::Json, HarnessStdio::Terminal)
+        );
+        assert_eq!(both.choose_terminal(json, None).unwrap(), "pipe");
+        assert_eq!(both.choose_terminal(interactive, None).unwrap(), "pty");
+        assert_eq!(
+            both.choose_terminal(json, Some("pty")),
+            Err(TerminalRefusal::PinnedHasTerminal {
+                provider: "pty".to_owned()
+            })
+        );
+
+        let pty_only = testing::terminal_choice(false);
+        assert_eq!(
+            pty_only.choose_terminal(json, None),
+            Err(TerminalRefusal::NoPipe)
+        );
+        assert_eq!(pty_only.choose_terminal(interactive, None).unwrap(), "pty");
+    }
+}
+
+/// Terminal providers `pty` and `pipe`, and a JSON and an interactive handler, for the tests of
+/// how a Station and a runner choose a terminal.
+#[cfg(test)]
+pub(crate) mod testing {
+    use guatiao::Provider;
+    use guatiao::library::{Object, ProviderError, Registry};
+
+    use super::Plugins;
+    use crate::directorates::q::terminal::{
+        AgentTerminal, HarnessStdio, Terminal, TerminalSession,
+    };
+    use crate::directorates::section_00::agent::{
+        AgentHandler, AgentResume, AgentSession, AgentStart,
+    };
+
+    /// What the mock providers answer when asked to start anything: the choice comes before.
+    pub(crate) const REFUSED_START: &str = "the mock provider starts nothing";
+
+    fn refused() -> ProviderError {
+        ProviderError::new(guatiao::Status::GUATIAO_ERR_INTERNAL, REFUSED_START)
+    }
+
+    #[derive(Default, Provider)]
+    #[provider(Terminal, id = "pty", name = "Mock pty", crate = crate::guatiao)]
+    pub(crate) struct MockPty;
+
+    impl Terminal for MockPty {
+        fn spawn(
+            &self,
+            _spec: &guatiao::Value,
+        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+            Err(refused())
+        }
+    }
+
+    #[derive(Default, Provider)]
+    #[provider(Terminal, id = "pipe", name = "Mock pipe", crate = crate::guatiao)]
+    pub(crate) struct MockPipe;
+
+    impl Terminal for MockPipe {
+        fn spawn(
+            &self,
+            _spec: &guatiao::Value,
+        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+            Err(refused())
+        }
+
+        fn tty(&self) -> bool {
+            false
+        }
+    }
+
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "json-agent", name = "Mock JSON handler", crate = crate::guatiao)]
+    pub(crate) struct MockJsonHandler;
+
+    impl AgentHandler for MockJsonHandler {
+        fn start(
+            &self,
+            _request: AgentStart,
+            _terminal: Object<dyn AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Err(refused())
+        }
+
+        fn resume(
+            &self,
+            _request: AgentResume,
+            _terminal: Object<dyn AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Err(refused())
+        }
+
+        fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
+            Ok(HarnessStdio::Json)
+        }
+    }
+
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "tty-agent", name = "Mock interactive handler", crate = crate::guatiao)]
+    pub(crate) struct MockTtyHandler;
+
+    impl AgentHandler for MockTtyHandler {
+        fn start(
+            &self,
+            _request: AgentStart,
+            _terminal: Object<dyn AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Err(refused())
+        }
+
+        fn resume(
+            &self,
+            _request: AgentResume,
+            _terminal: Object<dyn AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Err(refused())
+        }
+    }
+
+    mod both {
+        use super::*;
+
+        crate::guatiao::local_providers!(
+            id = "ai6-terminal-choice-both",
+            version = "0.0.0",
+            providers = [MockPty, MockPipe, MockJsonHandler, MockTtyHandler]
+        );
+    }
+
+    mod pty_only {
+        use super::*;
+
+        crate::guatiao::local_providers!(
+            id = "ai6-terminal-choice-pty",
+            version = "0.0.0",
+            providers = [MockPty, MockJsonHandler, MockTtyHandler]
+        );
+    }
+
+    /// Both mock handlers, with `pty` and, when `with_pipe`, `pipe`.
+    pub(crate) fn terminal_choice(with_pipe: bool) -> Plugins {
+        let mut registry = Registry::new("ai6-terminal-choice", env!("CARGO_PKG_VERSION"));
+        let registered = if with_pipe {
+            registry
+                .register_local("ai6-terminal-choice-both", both::library)
+                .map(drop)
+        } else {
+            registry
+                .register_local("ai6-terminal-choice-pty", pty_only::library)
+                .map(drop)
+        };
+        registered.expect("mock providers should register");
+        Plugins::from_registry(registry)
     }
 }

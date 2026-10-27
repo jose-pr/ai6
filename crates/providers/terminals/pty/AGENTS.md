@@ -12,8 +12,10 @@ No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) and
 limited to the platform calls in `unix.rs` (`killpg`) and `windows.rs` (Job Objects),
 each with a safety comment.
 
-A Station prefers `pty` when several terminal providers are available and none is
-pinned with `ai6 serve --terminal`; Agents and handlers do not choose one.
+`tty()` answers `true`. A Station prefers `pty` for a harness whose handler does not declare
+JSON over standard input and output (`HarnessStdio::Json`), when several terminal providers
+are available and none is pinned with `ai6 serve --terminal`; a JSON harness is never given
+`pty`, pinned or not. Agents and handlers do not choose a provider.
 
 ## Session behaviour
 

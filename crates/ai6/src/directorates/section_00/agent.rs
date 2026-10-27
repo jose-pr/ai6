@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::directorates::m::identity::{MissionId, SessionId};
-use crate::directorates::q::terminal::AgentTerminal;
+use crate::directorates::q::terminal::{AgentTerminal, HarnessStdio};
 
 /// The first instruction for one agent operation in a Mission.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -271,6 +271,13 @@ pub trait AgentHandler: Send + Sync {
         request: AgentResume,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError>;
+
+    /// How the harness talks over its standard input and output, which decides the terminal
+    /// provider the Station gives it; the default is [`HarnessStdio::Terminal`]. A handler
+    /// declares a requirement here, never a provider.
+    fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
+        Ok(HarnessStdio::Terminal)
+    }
 }
 
 /// One provider-owned, resumable agent operation.

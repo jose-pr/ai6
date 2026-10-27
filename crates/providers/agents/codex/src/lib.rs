@@ -66,6 +66,11 @@ impl TryFrom<CodexConfig> for CodexHandler {
 }
 
 impl AgentHandler for CodexHandler {
+    /// `codex app-server` speaks JSON-RPC, one message per line, over standard input and output.
+    fn stdio(&self) -> Result<ai6::HarnessStdio, ProviderError> {
+        Ok(ai6::HarnessStdio::Json)
+    }
+
     fn start(
         &self,
         request: AgentStart,

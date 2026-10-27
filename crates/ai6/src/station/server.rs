@@ -60,7 +60,7 @@ use crate::directorates::medical::quarantine::IncidentKind;
 use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
 use crate::directorates::q::safehouse::{SafeHouseCheckpoint, SafeHouseReport, SafeHouseSpec};
-use crate::directorates::q::terminal::{Terminal, TerminalBridge};
+use crate::directorates::q::terminal::{DEFAULT_TERMINAL, HarnessStdio, Terminal, TerminalBridge};
 use crate::directorates::q::transport::TransportClient;
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{
@@ -92,8 +92,6 @@ use crate::{MissionId, SessionId};
 /// The loopback address used by the daemon's private health endpoint.
 pub const DEFAULT_LISTEN: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 7081);
-/// The terminal provider a Station prefers when several are available and none is pinned.
-pub const DEFAULT_TERMINAL: &str = "pty";
 /// Default number of Agent Sessions this daemon may start concurrently.
 pub const DEFAULT_MAX_CONCURRENT_MISSIONS: usize = 4;
 /// How often a Station samples the resources of each Theater other than its own host, unless
@@ -195,9 +193,11 @@ impl StationConfig {
     }
 
     /// Pins the terminal provider this Station runs harnesses in. Without it the Station
-    /// uses an available one, preferring [`DEFAULT_TERMINAL`]: every terminal provider
-    /// fulfils the same contract, so the choice belongs to where the Session runs, not to
-    /// the Agent or its handler.
+    /// picks an available one that suits the harness: one without a terminal for a handler
+    /// that declares JSON over standard input and output ([`HarnessStdio::Json`]), preferring
+    /// [`DEFAULT_PIPE`](crate::DEFAULT_PIPE), else preferring [`DEFAULT_TERMINAL`]. A pin that
+    /// gives a JSON harness a terminal is refused when the Mission starts. The Agent and its
+    /// handler never name a provider.
     #[must_use]
     pub fn with_terminal(mut self, provider: impl Into<String>) -> Self {
         self.terminal = Some(provider.into());
@@ -1810,7 +1810,9 @@ fn publish_station_check_in(state: &DaemonState) {
         "handlers".to_owned(),
         serde_json::json!(available_handlers(state)),
     );
-    let mut theaters = state.transports.summaries(station_terminal(state).is_ok());
+    let mut theaters = state
+        .transports
+        .summaries(station_terminal(state, HarnessStdio::Terminal).is_ok());
     let running = sessions_by_theater(state);
     for theater in &mut theaters {
         theater.sessions = running.get(&theater.id).copied().unwrap_or_default();
@@ -1909,7 +1911,7 @@ fn launch_plan_in(
         .map(str::to_owned)
         .or_else(|| operation.and_then(|operation| operation.theater.clone()))
         .unwrap_or_else(|| LOCAL_THEATER.to_owned());
-    let terminal_available = station_terminal(state).is_ok();
+    let terminal_available = station_terminal(state, HarnessStdio::Terminal).is_ok();
     let summary = state
         .transports
         .summary(&theater_id, terminal_available)
@@ -2579,23 +2581,13 @@ fn brief_agent(
     .map_err(|error| error.to_string())
 }
 
-fn station_terminal(state: &DaemonState) -> Result<String, String> {
-    if let Some(pinned) = &state.station.terminal {
-        return Ok(pinned.clone());
-    }
-    let available = state
+/// The terminal provider this Station starts a harness that talks over `stdio` in: its pin, when
+/// that suits the harness, else one chosen among the available providers.
+fn station_terminal(state: &DaemonState, stdio: HarnessStdio) -> Result<String, String> {
+    state
         .plugins
-        .terminals()
-        .into_iter()
-        .filter(|provider| provider.unavailable.is_none())
-        .map(|provider| provider.id)
-        .collect::<Vec<_>>();
-    available
-        .iter()
-        .find(|id| id.as_str() == DEFAULT_TERMINAL)
-        .or_else(|| available.first())
-        .cloned()
-        .ok_or_else(|| "this Station has no available terminal provider".to_owned())
+        .choose_terminal(stdio, state.station.terminal.as_deref())
+        .map_err(|refusal| format!("this Station cannot start the harness: {refusal}"))
 }
 
 fn available_handlers(state: &DaemonState) -> Vec<String> {
@@ -3469,11 +3461,33 @@ async fn start_mission(
         .ok_or_else(|| configuration_error(format!("Agent {agent_id:?} has no handler")))?;
     let model = agent.model.clone();
     let effort = agent.effort.clone();
-    // A runner reports the terminal it chose once the harness starts.
-    let terminal_provider = match &runner {
-        Some(link) => link.terminal().unwrap_or(DEFAULT_TERMINAL).to_owned(),
-        None if wrapped => crate::station::detached::TERMINAL.to_owned(),
-        None => station_terminal(&state).map_err(configuration_error)?,
+    // The Station loads the harness's providers only when it supervises the harness itself.
+    let handler = match &runner {
+        Some(_) => None,
+        None => Some(
+            state
+                .plugins
+                .handler(&handler_provider, None)
+                .map_err(provider_error)?,
+        ),
+    };
+    // A runner chooses the terminal itself and reports it once the harness starts; the
+    // detached wrapper gives the harness no terminal.
+    let terminal_provider = match &handler {
+        None => runner
+            .as_ref()
+            .and_then(|link| link.terminal())
+            .unwrap_or(DEFAULT_TERMINAL)
+            .to_owned(),
+        Some(_) if wrapped => crate::station::detached::TERMINAL.to_owned(),
+        Some(handler) => {
+            let stdio = handler.stdio().map_err(|error| {
+                provider_error(format!(
+                    "handler `{handler_provider}` did not declare its harness's stdio: {error}"
+                ))
+            })?;
+            station_terminal(&state, stdio).map_err(configuration_error)?
+        }
     };
     #[cfg(feature = "publisher")]
     let telemetry = state.publisher.as_ref().and_then(|publisher| {
@@ -3483,15 +3497,11 @@ async fn start_mission(
             .map(|operation_id| publisher.session(operation_id.clone(), mission.mission_id.clone()))
     });
     let watchdog = Watchdog::with_config(agent.limits.apply_to(&state.watchdog));
-    // The Station loads the harness's providers only when it supervises the harness itself.
-    let in_process = match &runner {
-        Some(_) => None,
-        None => Some((
+    let in_process = match handler {
+        None => None,
+        Some(handler) => Some((
             harness_terminal(&state, &theater_id, wrapped, &terminal_provider)?,
-            state
-                .plugins
-                .handler(&handler_provider, None)
-                .map_err(provider_error)?,
+            handler,
         )),
     };
     let roster = state.roster.clone();
@@ -6655,12 +6665,84 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut state = capacity_test_state(root.path(), 1, 1);
         state.station = StationConfig::default();
-        assert_eq!(station_terminal(&state).unwrap(), "mock-terminal");
+        let interactive = HarnessStdio::Terminal;
+        assert_eq!(
+            station_terminal(&state, interactive).unwrap(),
+            "mock-terminal"
+        );
         state.station = StationConfig::default().with_terminal("pinned");
-        assert_eq!(station_terminal(&state).unwrap(), "pinned");
+        assert_eq!(station_terminal(&state, interactive).unwrap(), "pinned");
         state.plugins = Arc::new(plugins::Plugins::scan(&[]));
         state.station = StationConfig::default();
-        assert!(station_terminal(&state).is_err());
+        assert!(station_terminal(&state, interactive).is_err());
+    }
+
+    /// The terminal suits what the Agent's handler declares: a JSON handler gets `pipe` beside
+    /// `pty`, an interactive one `pty`.
+    #[test]
+    fn a_station_gives_each_handler_a_terminal_that_suits_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = capacity_test_state(root.path(), 1, 1);
+        state.station = StationConfig::default();
+        state.plugins = Arc::new(plugins::testing::terminal_choice(true));
+        let stdio = |handler: &str| {
+            state
+                .plugins
+                .handler(handler, None)
+                .unwrap()
+                .stdio()
+                .unwrap()
+        };
+        assert_eq!(
+            station_terminal(&state, stdio("json-agent")).unwrap(),
+            "pipe"
+        );
+        assert_eq!(station_terminal(&state, stdio("tty-agent")).unwrap(), "pty");
+    }
+
+    async fn start_json_mission(state: &DaemonState) -> ApiErrorResponse {
+        let started = start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-1".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await;
+        match started {
+            Ok(_) => panic!("the Mission is refused before its harness starts"),
+            Err(error) => error,
+        }
+    }
+
+    /// A Mission whose handler speaks JSON is refused, with the reason, when the only terminal
+    /// provider gives it a terminal, or when the Station pins one that does.
+    #[tokio::test]
+    async fn a_json_harness_is_refused_a_terminal_at_mission_start() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", "[agent.007]\nhandler = \"json-agent\"\n");
+        state.station = StationConfig::default();
+        state.plugins = Arc::new(plugins::testing::terminal_choice(false));
+        let ApiErrorResponse(status, Json(error)) = start_json_mission(&state).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            error.error.contains("without a terminal (`pipe`)"),
+            "{}",
+            error.error
+        );
+
+        state.station = StationConfig::default().with_terminal("pty");
+        state.plugins = Arc::new(plugins::testing::terminal_choice(true));
+        let ApiErrorResponse(status, Json(error)) = start_json_mission(&state).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(error.error.contains("`pty` is pinned"), "{}", error.error);
+        assert_eq!(
+            mission_state(&state, "mission-1").state,
+            MissionState::Queued,
+            "a refused start leaves the Mission queued"
+        );
     }
 
     fn capacity_test_state(root: &Path, station_limit: usize, agent_limit: usize) -> DaemonState {

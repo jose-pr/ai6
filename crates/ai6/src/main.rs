@@ -172,7 +172,8 @@ struct RunnerServeArgs {
     /// A directory or library path to scan for AgentHandler and Terminal providers.
     #[arg(long = "plugin-path")]
     plugin_paths: Vec<PathBuf>,
-    /// Pin the terminal provider harnesses run in (default: an available one, preferring `pty`).
+    /// Pin the terminal provider harnesses run in (default: an available one that suits the
+    /// handler: without a terminal, preferring `pipe`, for a JSON harness; else preferring `pty`).
     #[arg(long)]
     terminal: Option<String>,
     #[command(flatten)]
@@ -286,7 +287,8 @@ struct ServeArgs {
     /// Station placement label in KEY=VALUE form.
     #[arg(long = "label", value_name = "KEY=VALUE", value_parser = parse_station_label)]
     labels: Vec<(String, String)>,
-    /// Pin the terminal provider agent harnesses run in (default: an available one, preferring `pty`).
+    /// Pin the terminal provider agent harnesses run in (default: an available one that suits the
+    /// handler: without a terminal, preferring `pipe`, for a JSON harness; else preferring `pty`).
     #[arg(long)]
     terminal: Option<String>,
     /// Seconds the Headquarters lease lasts between renewals: how long a standby control
