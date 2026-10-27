@@ -97,7 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   desk calls the handler's interrupt (stream-json for Claude Code, `turn/interrupt` for
   Codex) and reports the turn as `interrupted` (`EVENT_INTERRUPTED`). The conversation
   shows a `notice` entry, the harness stays up for the next message, and she is told the
-  person stopped her.
+  person stopped her. The Station reports a message `accepted` before anything her harness
+  says about it, and nothing of a turn whose `accepted` Universal Exports refused.
 - `POST /v1/user/operations/{operation}/missions/{mission}/actions` answers `404` for a
   Mission nothing knows (no Session record, brief lease, queued brief of the Operation or
   board entry) before anything is audited or queued; the Headquarters Station takes only

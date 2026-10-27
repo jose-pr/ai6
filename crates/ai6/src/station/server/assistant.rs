@@ -83,8 +83,109 @@ const REMOVE_RETRY: Duration = Duration::from_secs(2);
 /// A harness, shared by the desk (to send it messages) and its pump (to read it).
 type SharedSession = Arc<Mutex<Object<dyn AgentSession>>>;
 
-/// Sends one report to Universal Exports; it must not block for long.
-pub(super) type Reporter = Arc<dyn Fn(AssistantReport) + Send + Sync>;
+/// Told whether Universal Exports refused a job's answer (403, 404 or 409); dropped untold
+/// when the answer never reached it.
+pub(super) type Answered = tokio::sync::oneshot::Sender<bool>;
+
+/// Queues one report for Universal Exports behind every report queued before it; it must not
+/// block for long. A job's answer comes with its [`Answered`], told once it was sent.
+pub(super) type Reporter = Arc<dyn Fn(AssistantReport, Option<Answered>) + Send + Sync>;
+
+/// A report waiting for the desk's link to Universal Exports.
+type Queued = (AssistantReport, Option<Answered>);
+
+/// The desk's reports in the order Universal Exports relies on: from before a harness gets a
+/// message until Universal Exports has its `accepted`, the conversation's reports wait, and
+/// once that `accepted` is refused none is sent.
+#[derive(Clone)]
+struct Outbox {
+    report: Reporter,
+    held: Arc<Mutex<BTreeMap<String, Held>>>,
+}
+
+/// A conversation's reports while its message's answer is unsettled, or after it was refused.
+enum Held {
+    Waiting(Vec<AssistantReport>),
+    /// Universal Exports refused the message's `accepted`: the harness is closing, and nothing
+    /// it says is sent.
+    Refused,
+}
+
+impl Outbox {
+    fn new(report: Reporter) -> Self {
+        Self {
+            report,
+            held: Arc::default(),
+        }
+    }
+
+    /// Sends `report`, or keeps it while its conversation's message is unsettled.
+    fn send(&self, report: AssistantReport) {
+        let Ok(mut held) = self.held.lock() else {
+            return (self.report)(report, None);
+        };
+        match held.get_mut(&report.conversation_id) {
+            None => (self.report)(report, None),
+            Some(Held::Refused) => {}
+            Some(Held::Waiting(waiting)) if waiting.len() < REPORT_QUEUE => waiting.push(report),
+            Some(Held::Waiting(_)) => eprintln!(
+                "ai6: an assistant report was dropped: too many wait for their message's answer"
+            ),
+        }
+    }
+
+    /// Keeps `conversation`'s reports until [`Outbox::answer`] settles its message.
+    fn hold(&self, conversation: &str) {
+        if let Ok(mut held) = self.held.lock() {
+            held.insert(conversation.to_owned(), Held::Waiting(Vec::new()));
+        }
+    }
+
+    /// Sends a job's answer behind every report queued before it and waits until it was sent;
+    /// answers whether Universal Exports refused it. For a `message` job the reports held
+    /// meanwhile follow it, or, when it was a refused `accepted`, are dropped with all later
+    /// ones until the harness has closed ([`Outbox::closed`]).
+    async fn answer(&self, report: AssistantReport, message: bool) -> bool {
+        let conversation = report.conversation_id.clone();
+        let accepted = report
+            .events
+            .first()
+            .is_some_and(|event| event.kind == EVENT_ACCEPTED);
+        let (answered, refusal) = tokio::sync::oneshot::channel();
+        (self.report)(report, Some(answered));
+        // An answer that never reached Universal Exports is not a refusal.
+        let refused = refusal.await.unwrap_or(false);
+        if message && let Ok(mut held) = self.held.lock() {
+            if accepted && refused {
+                held.insert(conversation, Held::Refused);
+            } else if let Some(Held::Waiting(waiting)) = held.remove(&conversation) {
+                // Still under the lock, so a report sent meanwhile goes after these.
+                for report in waiting {
+                    (self.report)(report, None);
+                }
+            }
+        }
+        refused
+    }
+
+    /// Forgets that `conversation`'s `accepted` was refused, once its harness has closed.
+    fn closed(&self, conversation: &str) {
+        if let Ok(mut held) = self.held.lock()
+            && matches!(held.get(conversation), Some(Held::Refused))
+        {
+            held.remove(conversation);
+        }
+    }
+}
+
+/// Whether `job` carries a message for the harness, rather than a control or a commit.
+fn carries_message(job: &AssistantJob) -> bool {
+    !(job.close
+        || job.interrupt
+        || job.commit.is_some()
+        || job.cable_confirm.is_some()
+        || job.cable_discard.is_some())
+}
 
 /// Tells whether the Station runs elevated: [`crate::station::elevation::is_elevated`], or a
 /// test's.
@@ -267,7 +368,7 @@ struct Live {
 pub(super) struct Desk {
     state: DaemonState,
     harness: Arc<dyn Harness>,
-    report: Reporter,
+    outbox: Outbox,
     mcp_url: String,
     idle: Duration,
     max_live: usize,
@@ -296,7 +397,7 @@ impl Desk {
         Self {
             state,
             harness,
-            report,
+            outbox: Outbox::new(report),
             mcp_url,
             idle: IDLE,
             max_live: MAX_LIVE,
@@ -406,20 +507,38 @@ impl Desk {
     }
 
     /// Takes one job and reports whether the harness has the message, or how a commit went.
+    /// Nothing the harness says about a message is reported before Universal Exports has
+    /// its `accepted`, and nothing at all once Universal Exports refused that `accepted`: it
+    /// no longer waits for the job here (it moved to another Station or was given up), so the
+    /// harness closes.
     pub(super) async fn handle(&self, job: AssistantJob) {
+        let message = carries_message(&job);
+        if message {
+            self.outbox.hold(&job.conversation_id);
+        }
         let outcome = self.take(&job).await;
+        let accepted = outcome.is_ok();
         let event = match outcome {
             Ok(text) => AssistantEvent::new(EVENT_ACCEPTED, text),
             Err(reason) => AssistantEvent::new(EVENT_REJECTED, Some(reason)),
         };
         let session_id = self.known_session(&job.conversation_id);
-        (self.report)(AssistantReport {
-            station_id: self.state.station_id.clone(),
-            conversation_id: job.conversation_id,
-            job_id: Some(job.job_id),
-            session_id,
-            events: vec![event],
-        });
+        let refused = self
+            .outbox
+            .answer(
+                AssistantReport {
+                    station_id: self.state.station_id.clone(),
+                    conversation_id: job.conversation_id.clone(),
+                    job_id: Some(job.job_id),
+                    session_id,
+                    events: vec![event],
+                },
+                message,
+            )
+            .await;
+        if accepted && refused {
+            self.close(&job.conversation_id);
+        }
     }
 
     async fn take(&self, job: &AssistantJob) -> Result<Option<String>, String> {
@@ -696,7 +815,7 @@ impl Desk {
             flags,
             area,
             idle: self.idle,
-            report: self.report.clone(),
+            outbox: self.outbox.clone(),
             live: self.live.clone(),
             known: self.known.clone(),
             stopping: state.stopping.clone(),
@@ -725,13 +844,13 @@ impl Desk {
         let Some(person) = job.person_id.clone().filter(|_| !job.cables.is_empty()) else {
             return Ok(None);
         };
-        let (report, station, conversation) = (
-            self.report.clone(),
+        let (outbox, station, conversation) = (
+            self.outbox.clone(),
             self.state.station_id.clone(),
             job.conversation_id.clone(),
         );
         let reporter = Arc::new(move |event: AssistantEvent| {
-            report(AssistantReport {
+            outbox.send(AssistantReport {
                 station_id: station.clone(),
                 conversation_id: conversation.clone(),
                 job_id: None,
@@ -968,7 +1087,7 @@ struct Pump {
     flags: Arc<Flags>,
     area: String,
     idle: Duration,
-    report: Reporter,
+    outbox: Outbox,
     live: Arc<Mutex<BTreeMap<String, Live>>>,
     known: Arc<Mutex<BTreeMap<String, String>>>,
     stopping: Arc<AtomicBool>,
@@ -1127,6 +1246,7 @@ impl Pump {
             session_id.as_ref(),
             vec![AssistantEvent::new(EVENT_CLOSED, reason)],
         );
+        self.outbox.closed(&self.conversation_id);
     }
 
     /// Replaces a resumed harness that failed with `failure` by one started afresh (with the
@@ -1238,7 +1358,7 @@ impl Pump {
     }
 
     fn send(&self, session_id: Option<&SessionId>, events: Vec<AssistantEvent>) {
-        (self.report)(AssistantReport {
+        self.outbox.send(AssistantReport {
             station_id: self.station_id.clone(),
             conversation_id: self.conversation_id.clone(),
             job_id: None,
@@ -1538,7 +1658,7 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
         .join(ASSISTANT_MCP_PATH)
         .map_err(|error| std::io::Error::other(format!("assistant endpoint URL: {error}")))?
         .to_string();
-    let (reports, queued) = std::sync::mpsc::sync_channel::<AssistantReport>(REPORT_QUEUE);
+    let (reports, queued) = std::sync::mpsc::sync_channel::<Queued>(REPORT_QUEUE);
     let (jobs, mut receiver) = mpsc::channel::<AssistantJob>(8);
     let link = Link {
         origin,
@@ -1551,16 +1671,11 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     std::thread::Builder::new()
         .name("ai6-assistant-jobs".to_owned())
         .spawn(move || poll_link.take_jobs(&running, &jobs))?;
-    let (stale_conversations, mut stale) = mpsc::unbounded_channel::<String>();
     std::thread::Builder::new()
         .name("ai6-assistant-reports".to_owned())
-        .spawn(move || {
-            link.send_reports(&queued, &move |conversation| {
-                let _ = stale_conversations.send(conversation);
-            });
-        })?;
-    let report: Reporter = Arc::new(move |report| {
-        if reports.try_send(report).is_err() {
+        .spawn(move || link.send_reports(&queued))?;
+    let report: Reporter = Arc::new(move |report, answered| {
+        if reports.try_send((report, answered)).is_err() {
             eprintln!(
                 "ai6: an assistant report was dropped: the queue to Universal Exports is full"
             );
@@ -1581,7 +1696,6 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
                     Some(job) => desk.handle(job).await,
                     None => break,
                 },
-                Some(conversation) = stale.recv() => desk.close(&conversation),
                 () = tokio::time::sleep(STOP_CHECK) => {}
             }
         }
@@ -1713,19 +1827,15 @@ impl Link {
         }
     }
 
-    /// Sends reports in order. When Universal Exports refuses a job's `accepted` report (it
-    /// no longer waits for that job here: it moved to another Station or was given up),
-    /// `stale` is told the conversation, so the harness this Station started for it closes.
-    fn send_reports(
-        &self,
-        queued: &std::sync::mpsc::Receiver<AssistantReport>,
-        stale: &(dyn Fn(String) + Send + Sync),
-    ) {
+    /// Sends reports in the order they were queued, and tells each job's answer whether
+    /// Universal Exports refused it once it was sent.
+    fn send_reports(&self, queued: &std::sync::mpsc::Receiver<Queued>) {
         let Ok(endpoint) = self.origin.join("v1/station/assistant/reports") else {
             return;
         };
         let agent = Self::agent(Duration::ZERO);
-        while let Ok(report) = queued.recv() {
+        while let Ok((report, answered)) = queued.recv() {
+            let mut refused = false;
             for _ in 0..3 {
                 let sent = agent
                     .post(endpoint.as_str())
@@ -1733,19 +1843,16 @@ impl Link {
                     .send_json(&report);
                 // A refused report (an unknown conversation) is not retried.
                 match sent {
-                    Err(ureq::Error::StatusCode(403 | 404 | 409))
-                        if report.job_id.is_some()
-                            && report
-                                .events
-                                .first()
-                                .is_some_and(|event| event.kind == EVENT_ACCEPTED) =>
-                    {
-                        stale(report.conversation_id.clone());
+                    Err(ureq::Error::StatusCode(403 | 404 | 409)) => {
+                        refused = true;
                         break;
                     }
                     Ok(_) | Err(ureq::Error::StatusCode(_)) => break,
                     Err(_) => std::thread::sleep(Duration::from_millis(200)),
                 }
+            }
+            if let Some(answered) = answered {
+                let _ = answered.send(refused);
             }
         }
     }
@@ -2112,7 +2219,12 @@ mod tests {
                 script,
                 resumed,
             }),
-            Arc::new(move |report| sink.lock().unwrap().push(report)),
+            Arc::new(move |report, answered: Option<Answered>| {
+                sink.lock().unwrap().push(report);
+                if let Some(answered) = answered {
+                    let _ = answered.send(false);
+                }
+            }),
             "https://exports.example/v1/moneypenny/mcp".to_owned(),
         )
         .with_limits(idle, 2)
@@ -2515,8 +2627,8 @@ mod tests {
     }
 
     #[test]
-    fn a_harness_whose_accept_the_gateway_refused_is_closed() {
-        for (status, closes) in [(409, vec!["c-late".to_owned()]), (204, Vec::new())] {
+    fn the_link_tells_a_job_answer_whether_the_gateway_refused_it() {
+        for (status, refused) in [(409, true), (204, false)] {
             let (origin, served) = refusing_gateway(status);
             let link = Link {
                 origin,
@@ -2531,20 +2643,115 @@ mod tests {
                 session_id: None,
                 events: vec![AssistantEvent::new(kind, None)],
             };
-            reports.send(report(Some("job-1"), EVENT_ACCEPTED)).unwrap();
-            reports.send(report(None, EVENT_TEXT)).unwrap();
+            let (answered, mut told) = tokio::sync::oneshot::channel();
+            reports
+                .send((report(Some("job-1"), EVENT_ACCEPTED), Some(answered)))
+                .unwrap();
+            reports.send((report(None, EVENT_TEXT), None)).unwrap();
             drop(reports);
-            let closed = Mutex::new(Vec::new());
-            link.send_reports(&queued, &|conversation| {
-                closed.lock().unwrap().push(conversation);
-            });
+            link.send_reports(&queued);
             assert_eq!(served.join().unwrap(), 2);
-            assert_eq!(
-                closed.into_inner().unwrap(),
-                closes,
-                "only a refused accept closes, at {status}"
-            );
+            assert_eq!(told.try_recv(), Ok(refused), "at {status}");
         }
+    }
+
+    /// Makes the fixture's gateway take a job's answer only once its conversation holds
+    /// `holding` reports back (or two seconds passed), refusing an `accepted` when `refuse`;
+    /// each answer is recorded with how many were held when it arrived.
+    fn slow_gateway(
+        fixture: &mut Fixture,
+        holding: usize,
+        refuse: bool,
+    ) -> Arc<Mutex<Vec<(AssistantReport, usize)>>> {
+        let sink = fixture.reports.clone();
+        let answers = Arc::new(Mutex::new(Vec::new()));
+        let seen = answers.clone();
+        let held: Arc<Mutex<BTreeMap<String, Held>>> = Arc::default();
+        let waiting = held.clone();
+        let report: Reporter = Arc::new(move |report, answered: Option<Answered>| {
+            let Some(answered) = answered else {
+                sink.lock().unwrap().push(report);
+                return;
+            };
+            let (sink, seen, waiting) = (sink.clone(), seen.clone(), waiting.clone());
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                let held = loop {
+                    let held = match waiting.lock().unwrap().get(&report.conversation_id) {
+                        Some(Held::Waiting(held)) => held.len(),
+                        _ => 0,
+                    };
+                    if held >= holding || Instant::now() >= deadline {
+                        break held;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                };
+                let accepted = report.events[0].kind == EVENT_ACCEPTED;
+                seen.lock().unwrap().push((report.clone(), held));
+                sink.lock().unwrap().push(report);
+                let _ = answered.send(refuse && accepted);
+            });
+        });
+        fixture.desk.outbox = Outbox { report, held };
+        answers
+    }
+
+    #[tokio::test]
+    async fn no_event_of_a_turn_is_reported_before_its_slow_accepted() {
+        let mut fixture = fixture(true, IDLE);
+        // Each turn reports `text` and `completed`.
+        let answers = slow_gateway(&mut fixture, 2, false);
+        fixture.desk.handle(job("c-slow", "first")).await;
+        assert_eq!(
+            kinds(&fixture, "c-slow").first().map(String::as_str),
+            Some(EVENT_ACCEPTED),
+            "the desk waits for the gateway to take its answer"
+        );
+        until(|| kinds(&fixture, "c-slow").contains(&EVENT_COMPLETED.to_owned())).await;
+        // The warm harness's turn too.
+        fixture.desk.handle(job("c-slow", "second")).await;
+        until(|| {
+            kinds(&fixture, "c-slow")
+                .iter()
+                .filter(|kind| *kind == EVENT_COMPLETED)
+                .count()
+                == 2
+        })
+        .await;
+        assert_eq!(
+            kinds(&fixture, "c-slow"),
+            [
+                EVENT_ACCEPTED,
+                EVENT_TEXT,
+                EVENT_COMPLETED,
+                EVENT_ACCEPTED,
+                EVENT_TEXT,
+                EVENT_COMPLETED
+            ]
+        );
+        let held: Vec<usize> = answers.lock().unwrap().iter().map(|(_, n)| *n).collect();
+        assert_eq!(
+            held,
+            [2, 2],
+            "each turn was over while its accepted was on its way"
+        );
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_turn_whose_accepted_is_refused_reports_nothing_and_its_harness_closes() {
+        let mut fixture = fixture(true, IDLE);
+        let answers = slow_gateway(&mut fixture, 2, true);
+        fixture.desk.handle(job("c-moved", "hello")).await;
+        until(|| fixture.desk.live.lock().unwrap().is_empty()).await;
+        until(|| fixture.desk.outbox.held.lock().unwrap().is_empty()).await;
+        assert_eq!(
+            kinds(&fixture, "c-moved"),
+            [EVENT_ACCEPTED],
+            "neither the turn nor the harness's closing"
+        );
+        assert_eq!(answers.lock().unwrap()[0].1, 2, "the turn was held back");
+        assert_eq!(fixture.asked.lock().unwrap().starts.len(), 1);
     }
 
     #[tokio::test]

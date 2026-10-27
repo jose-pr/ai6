@@ -3393,9 +3393,13 @@ stopped`, `the Station is stopping`, …). An `interrupt` job calls the running 
 `AgentSession::interrupt` while it is answering (nothing when it is idle or not running there;
 `rejected` with the reason when the handler fails), and that turn's `completed` is reported as
 `interrupted`; the harness stays up for the next message. Its directory is removed after `close`, tried again
-for up to 2 s while Windows still holds it. When Universal Exports refuses a job's
-`accepted` report with 403, 404 or 409 (the job moved to another Station or was given up), the
-desk closes the harness it started for that conversation. An assistant Session is not a Mission: no
+for up to 2 s while Windows still holds it. Reports go in the order they were made, and a
+message's answer comes first: from before the harness gets a message until the reports thread
+has sent its `accepted` or `rejected`, the conversation's reports wait (at most 256), then
+follow it. When Universal Exports refuses a job's `accepted` report with 403, 404 or 409 (the
+job moved to another Station or was given up), the desk closes the harness it started for that
+conversation, and for a message nothing more of that conversation is reported until the
+harness has closed. An assistant Session is not a Mission: no
 Operation, board entry or usage ledger record.
 
 A job with a `workspace` gets, through the `git` safe-house provider (`SafeHouseSpec::clone`,
