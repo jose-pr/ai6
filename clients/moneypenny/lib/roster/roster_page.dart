@@ -111,15 +111,36 @@ class RosterRefused implements Exception {
   String toString() => reason;
 }
 
+/// An accepted roster change: the revision it moved to, and each setting of the stored
+/// `assistant` record looser than its default.
+@immutable
+class RosterChange {
+  const RosterChange({required this.revision, this.weakened = const []});
+
+  /// In decimal.
+  final String revision;
+  final List<String> weakened;
+
+  factory RosterChange.fromJson(Map<String, dynamic> json) => RosterChange(
+    revision: json['revision'] as String,
+    weakened: ((json['weakened'] as List<dynamic>?) ?? const []).cast<String>(),
+  );
+}
+
 const _kinds = {
   'operations': 'Operations',
   'agents': 'Agents',
   'roles': 'Agent roles',
   'covers': 'Cover policies',
+  _assistantKind: "Moneypenny's settings",
 };
 
-/// The roster every Station reads: Operations, Agents, roles and cover policies, edited
-/// through Universal Exports. Each Station takes up an accepted edit at its next poll.
+/// The kind of Moneypenny's `[assistant]` settings: at most one record, keyed like the kind.
+const _assistantKind = 'assistant';
+
+/// The roster every Station reads: Operations, Agents, roles, cover policies and Moneypenny's
+/// settings, edited through Universal Exports. Each Station takes up an accepted edit at its
+/// next poll; what an edit of her settings weakens stays shown until the next edit.
 class RosterPage extends StatefulWidget {
   const RosterPage({required this.board, super.key});
 
@@ -134,6 +155,9 @@ class _RosterPageState extends State<RosterPage> {
   RosterRecords? _records;
   String? _error;
   bool _loading = false;
+
+  /// What the last accepted edit weakens, as the gateway words it.
+  List<String> _weakened = const [];
 
   @override
   void initState() {
@@ -163,14 +187,15 @@ class _RosterPageState extends State<RosterPage> {
   }
 
   Future<void> _edit(RosterRecord? record) async {
-    final revision = await showDialog<String>(
+    final change = await showDialog<RosterChange>(
       context: context,
       builder: (context) =>
           _RecordEditor(board: widget.board, kind: _kind, record: record),
     );
-    if (revision == null || !mounted) return;
+    if (change == null || !mounted) return;
+    setState(() => _weakened = change.weakened);
     _say(
-      'Saved as roster revision $revision; each Station takes it up at its next poll.',
+      'Saved as roster revision ${change.revision}; each Station takes it up at its next poll.',
     );
     await _load();
   }
@@ -198,9 +223,10 @@ class _RosterPageState extends State<RosterPage> {
     );
     if (confirmed != true || !mounted) return;
     try {
-      final revision = await widget.board.deleteRosterRecord(_kind, record.key);
+      final change = await widget.board.deleteRosterRecord(_kind, record.key);
       if (!mounted) return;
-      _say('Removed; roster revision $revision.');
+      setState(() => _weakened = change.weakened);
+      _say('Removed; roster revision ${change.revision}.');
       await _load();
     } on Object catch (error) {
       if (mounted) _say(error.toString());
@@ -212,6 +238,10 @@ class _RosterPageState extends State<RosterPage> {
     final records = _records;
     final canEdit =
         widget.board.canManageRoster && (records?.writable ?? false);
+    // Moneypenny's settings are one record: once it exists it is edited, not added.
+    final canAdd =
+        canEdit &&
+        (_kind != _assistantKind || (records?.records.isEmpty ?? false));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -233,6 +263,7 @@ class _RosterPageState extends State<RosterPage> {
                   setState(() {
                     _kind = kind;
                     _records = null;
+                    _weakened = const [];
                   });
                   unawaited(_load());
                 },
@@ -242,7 +273,7 @@ class _RosterPageState extends State<RosterPage> {
                 onPressed: () => unawaited(_load()),
                 icon: const Icon(Icons.refresh),
               ),
-              if (canEdit)
+              if (canAdd)
                 FilledButton.icon(
                   onPressed: () => unawaited(_edit(null)),
                   icon: const Icon(Icons.add),
@@ -264,6 +295,11 @@ class _RosterPageState extends State<RosterPage> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(error),
+          ),
+        if (_weakened.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+            child: _Weakened(_weakened),
           ),
         Expanded(
           child: switch (records) {
@@ -358,7 +394,48 @@ class _Reach extends StatelessWidget {
   }
 }
 
-/// Edits one record's key and definition as a JSON object.
+/// The settings the stored record leaves looser than their defaults, one line each, after an
+/// accepted edit.
+class _Weakened extends StatelessWidget {
+  const _Weakened(this.lines);
+
+  final List<String> lines;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      color: colors.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 4,
+          children: [
+            Row(
+              spacing: 8,
+              children: [
+                Icon(Icons.warning_amber, color: colors.onErrorContainer),
+                Expanded(
+                  child: Text(
+                    "Moneypenny's settings now weaken these defaults:",
+                    style: TextStyle(color: colors.onErrorContainer),
+                  ),
+                ),
+              ],
+            ),
+            for (final line in lines)
+              Text(line, style: TextStyle(color: colors.onErrorContainer)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Edits one record's key and definition as a JSON object; the key of Moneypenny's settings
+/// is fixed.
 class _RecordEditor extends StatefulWidget {
   const _RecordEditor({
     required this.board,
@@ -375,7 +452,10 @@ class _RecordEditor extends StatefulWidget {
 }
 
 class _RecordEditorState extends State<_RecordEditor> {
-  late final _key = TextEditingController(text: widget.record?.key ?? '');
+  late final _fixedKey = widget.kind == _assistantKind;
+  late final _key = TextEditingController(
+    text: widget.record?.key ?? (_fixedKey ? _assistantKind : ''),
+  );
   late final _definition = TextEditingController(
     text: const JsonEncoder.withIndent('  ')
         .convert(widget.record?.definition ?? const <String, dynamic>{}),
@@ -410,12 +490,12 @@ class _RecordEditorState extends State<_RecordEditor> {
       _problem = null;
     });
     try {
-      final revision = await widget.board.saveRosterRecord(
+      final change = await widget.board.saveRosterRecord(
         widget.kind,
         key,
         definition,
       );
-      if (mounted) Navigator.of(context).pop(revision);
+      if (mounted) Navigator.of(context).pop(change);
     } on RosterRefused catch (refused) {
       if (mounted) setState(() => _problem = 'Refused: ${refused.reason}');
     } on Object catch (error) {
@@ -438,12 +518,15 @@ class _RecordEditorState extends State<_RecordEditor> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            key: const Key('roster-key'),
-            controller: _key,
-            enabled: widget.record == null && !_saving,
-            decoration: const InputDecoration(labelText: 'Key'),
-          ),
+          if (_fixedKey)
+            const Text('Key: assistant (the one record of this kind)')
+          else
+            TextField(
+              key: const Key('roster-key'),
+              controller: _key,
+              enabled: widget.record == null && !_saving,
+              decoration: const InputDecoration(labelText: 'Key'),
+            ),
           const SizedBox(height: 12),
           TextField(
             key: const Key('roster-definition'),

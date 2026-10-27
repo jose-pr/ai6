@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `roster.read` and `roster.manage`) and an accepted edit answers with the settings it loosens
   (`RosterChange::weakened`); Moneypenny's `roster` and `propose_roster_edit` tools take it
   too, a proposal naming each weakening in its summary.
+- The Moneypenny app's Roster page lists Moneypenny's settings (the `assistant` record),
+  edited under its fixed key `assistant` and added only while there is none, and after an
+  accepted edit shows each setting the stored record leaves looser than its default.
 - One record of a Moneypenny conversation's exposure, `Conversation.exposed` in Universal
   Exports, carried to the Station as `AssistantJob::exposed`: every read tool sets it but
   `field_guide`, `profile` and `station_settings`, and the Station sets it (`POST

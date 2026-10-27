@@ -694,7 +694,8 @@ class MissionBoard extends ChangeNotifier {
   bool get canManageRoster =>
       !demo && (userSession?.roster.contains('roster.manage') ?? false);
 
-  /// The roster records of one kind (`operations`, `agents`, `roles` or `covers`).
+  /// The roster records of one kind (`operations`, `agents`, `roles`, `covers` or
+  /// `assistant`).
   Future<RosterRecords> loadRoster(String kind) async {
     if (demo) return RosterRecords.demo(kind);
     final response = await _userRequest(
@@ -712,9 +713,10 @@ class MissionBoard extends ChangeNotifier {
     );
   }
 
-  /// Stores one record's definition; returns the roster revision it moved to. Throws
-  /// [RosterRefused] with the reason when the roster it would leave is not acceptable.
-  Future<String> saveRosterRecord(
+  /// Stores one record's definition; returns the roster revision it moved to and what the
+  /// stored record weakens. Throws [RosterRefused] with the reason when the roster it would
+  /// leave is not acceptable.
+  Future<RosterChange> saveRosterRecord(
     String kind,
     String key,
     Map<String, dynamic> definition,
@@ -730,7 +732,7 @@ class MissionBoard extends ChangeNotifier {
   }
 
   /// Removes one record; returns the roster revision it moved to.
-  Future<String> deleteRosterRecord(String kind, String key) async {
+  Future<RosterChange> deleteRosterRecord(String kind, String key) async {
     if (demo) throw StateError('Roster changes are unavailable in preview.');
     return _rosterChange(
       await _userRequest(
@@ -740,11 +742,12 @@ class MissionBoard extends ChangeNotifier {
     );
   }
 
-  String _rosterChange(http.Response response) {
+  RosterChange _rosterChange(http.Response response) {
     switch (response.statusCode) {
       case 200:
-        return (jsonDecode(response.body) as Map<String, dynamic>)['revision']
-            as String;
+        return RosterChange.fromJson(
+          jsonDecode(response.body) as Map<String, dynamic>,
+        );
       case 422:
         throw RosterRefused(
           (jsonDecode(response.body) as Map<String, dynamic>)['refused']

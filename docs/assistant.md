@@ -194,7 +194,8 @@ same keys as one record of kind `assistant`, keyed `assistant`, in the table
 `ai6_config_assistant`: the row `assistant` holding `{"personal_repo":
 "/srv/moneypenny/{person_digest}.git"}` is the first line above. An administrator with
 `roster.manage` sets it with `PUT /v1/user/roster/assistant/assistant` (the definition as a
-JSON object, replacing the whole record) or removes it to go back to the defaults. It is
+JSON object, replacing the whole record) or removes it to go back to the defaults, through the
+API or on the app's Roster page under **Moneypenny's settings**. It is
 checked as the table is: an unknown key, a repository AI6 refuses or a record under another key
 is refused with `422` and changes nothing. The answer lists each setting the record makes
 looser than its default (`weakened`), and every Station logs and reports them as it takes the
