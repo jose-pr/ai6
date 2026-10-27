@@ -12,8 +12,10 @@
 //! the Station runs. The Station user's global and system configuration still apply: they
 //! hold its credential helpers, and nothing in a working tree writes them.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use ai6::RepoKind;
 use ai6::directorates::q::safehouse::{
@@ -25,9 +27,11 @@ use crate::worktree::{Failure, Worktree, fail, git, git_input, git_path, git_wit
 
 /// The settings every command of a clone runs with. `core.hooksPath` names a directory that
 /// is never made, so no hook runs; `core.symlinks=false` checks a link out as a plain file
-/// holding its target, so nothing in a working tree leads outside it.
+/// holding its target, so nothing in a working tree leads outside it. Every filter driver
+/// (`lfs` and each the global or system configuration names) is blanked and not required,
+/// so no `.gitattributes` in a repository makes a checkout or a save run one.
 fn hardened(git_dir: &Path) -> Vec<String> {
-    vec![
+    let mut settings = vec![
         "-c".to_owned(),
         format!(
             "core.hooksPath={}",
@@ -39,7 +43,53 @@ fn hardened(git_dir: &Path) -> Vec<String> {
         "commit.gpgsign=false".to_owned(),
         "-c".to_owned(),
         "core.symlinks=false".to_owned(),
-    ]
+    ];
+    for driver in filter_drivers() {
+        for key in ["clean", "smudge", "process"] {
+            settings.extend(["-c".to_owned(), format!("filter.{driver}.{key}=")]);
+        }
+        settings.extend(["-c".to_owned(), format!("filter.{driver}.required=false")]);
+    }
+    settings
+}
+
+/// The environment every command of a clone runs with: Git LFS, should it run anyway,
+/// fetches nothing.
+const HARDENED_ENV: (&str, &str) = ("GIT_LFS_SKIP_SMUDGE", "1");
+
+/// `lfs` and the filter drivers the Station user's global and system configuration define,
+/// read once.
+fn filter_drivers() -> &'static [String] {
+    static DRIVERS: OnceLock<Vec<String>> = OnceLock::new();
+    DRIVERS.get_or_init(|| {
+        let mut drivers = BTreeSet::from(["lfs".to_owned()]);
+        for scope in ["--global", "--system"] {
+            let listed = git(
+                &std::env::temp_dir(),
+                &[
+                    "config",
+                    scope,
+                    "--includes",
+                    "--name-only",
+                    "--get-regexp",
+                    r"^filter\.",
+                ],
+            )
+            .unwrap_or_default();
+            for key in listed.lines() {
+                // `filter.<driver>.<key>`, where the driver's name may hold dots.
+                if let Some(driver) = key
+                    .strip_prefix("filter.")
+                    .and_then(|rest| rest.rsplit_once('.'))
+                    .map(|(driver, _)| driver)
+                    .filter(|driver| !driver.is_empty() && !driver.contains(['=', '\n']))
+                {
+                    drivers.insert(driver.to_owned());
+                }
+            }
+        }
+        drivers.into_iter().collect()
+    })
 }
 
 /// Pathspecs leaving out of a save every path with a name starting with `.`
@@ -232,7 +282,9 @@ impl<'a> Repo<'a> {
         all.extend(hardened(self.git_dir));
         all.extend(args.iter().map(|arg| (*arg).to_owned()));
         let all: Vec<&str> = all.iter().map(String::as_str).collect();
-        git_with(self.work_tree, &all, env)
+        let mut env = env.to_vec();
+        env.push((HARDENED_ENV.0, HARDENED_ENV.1.to_owned()));
+        git_with(self.work_tree, &all, &env)
     }
 
     /// Runs `git args`, hardened, with `input` on its standard input.
@@ -244,7 +296,8 @@ impl<'a> Repo<'a> {
         all.extend(hardened(self.git_dir));
         all.extend(args.iter().map(|arg| (*arg).to_owned()));
         let all: Vec<&str> = all.iter().map(String::as_str).collect();
-        git_input(self.work_tree, &all, &[], Some(input))
+        let env = [(HARDENED_ENV.0, HARDENED_ENV.1.to_owned())];
+        git_input(self.work_tree, &all, &env, Some(input))
     }
 
     /// The commit `revision` names.
@@ -330,7 +383,11 @@ impl Worktree {
         }
         args.extend(["--".to_owned(), spec.source.clone(), name]);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        git(&parent, &args)?;
+        git_with(
+            &parent,
+            &args,
+            &[(HARDENED_ENV.0, HARDENED_ENV.1.to_owned())],
+        )?;
         if clone.git_dir.is_some() {
             // The pointer Git leaves in the working tree is not needed: every command names the
             // git directory itself.
@@ -906,6 +963,88 @@ mod tests {
         assert_eq!(run(&bare, &["show", "main:notes.md"]), "notes\n");
         house.discard().unwrap();
         assert!(!house.path.exists() && !git_dir.exists());
+    }
+
+    #[test]
+    fn no_filter_runs_whatever_the_attributes_say() {
+        let root = tempfile::tempdir().unwrap();
+        let seed = root.path().join("seed");
+        fs::create_dir_all(&seed).unwrap();
+        run(&seed, &["init", "--quiet", "--initial-branch=main"]);
+        fs::write(seed.join(".gitattributes"), "*.md filter=lfs\n").unwrap();
+        run(&seed, &["add", ".gitattributes"]);
+        run(&seed, &["commit", "--quiet", "-m", "attributes"]);
+        run(
+            root.path(),
+            &["clone", "--quiet", "--bare", "seed", "eve.git"],
+        );
+        let bare = root.path().join("eve.git");
+        let mut spec = spec(
+            &bare.to_string_lossy(),
+            &root.path().join("area").join("personal"),
+            false,
+        );
+        let git_dir = root.path().join("repos").join("personal");
+        if let Some(clone) = spec.clone.as_mut() {
+            clone.git_dir = Some(git_dir.to_string_lossy().into_owned());
+        }
+        let house = Worktree::open(&spec).unwrap();
+
+        // The clone's configuration names a filter program for `lfs`.
+        let marker = root.path().join("filter-ran");
+        let filter = root.path().join("planted").join("filter");
+        fs::create_dir_all(filter.parent().unwrap()).unwrap();
+        fs::write(
+            &filter,
+            format!(
+                "#!/bin/sh\necho ran > '{}'\ncat\n",
+                marker.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&filter, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let command = format!("'{}'", filter.to_string_lossy().replace('\\', "/"));
+        // `process`, which Git prefers, is what `git lfs install` sets; the script starts and
+        // fails its handshake, which is enough to show it ran.
+        for (key, value) in [
+            ("filter.lfs.process", command.as_str()),
+            ("filter.lfs.clean", command.as_str()),
+            ("filter.lfs.smudge", command.as_str()),
+            ("filter.lfs.required", "true"),
+        ] {
+            run(
+                root.path(),
+                &[
+                    &format!("--git-dir={}", git_dir.to_string_lossy()),
+                    "config",
+                    key,
+                    value,
+                ],
+            );
+        }
+        // Plain Git runs the planted filter: the plant works.
+        fs::write(house.path.join("control.md"), "control\n").unwrap();
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(&house.path)
+            .arg(format!("--git-dir={}", git_dir.to_string_lossy()))
+            .arg(format!("--work-tree={}", house.path.to_string_lossy()))
+            .args(["hash-object", "control.md"])
+            .output()
+            .unwrap();
+        assert!(marker.exists(), "the planted filter runs under plain Git");
+        fs::remove_file(&marker).unwrap();
+        fs::remove_file(house.path.join("control.md")).unwrap();
+
+        fs::write(house.path.join("notes.md"), "notes\n").unwrap();
+        house.save(&save_spec("moneypenny: notes"), "main").unwrap();
+        assert!(!marker.exists(), "no filter ran during the save");
+        assert_eq!(run(&bare, &["show", "main:notes.md"]), "notes\n");
+        house.discard().unwrap();
     }
 
     #[test]

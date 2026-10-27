@@ -42,9 +42,12 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   and `git checkout -B <base> --track origin/<base>`. Every command of a clone, the clone
   itself included, names `--git-dir` and `--work-tree` outright and runs with
   `core.hooksPath` set to a directory that does not exist, `core.fsmonitor=false`,
-  `commit.gpgsign=false` and `core.symlinks=false` (a committed link is checked out as a
-  plain file holding its target); the Station user's global and system configuration still
-  apply (credential helpers). Branch names (`base`, a save's `branch` and `fallback`) are
+  `commit.gpgsign=false`, `core.symlinks=false` (a committed link is checked out as a
+  plain file holding its target), every filter driver blanked (`filter.<d>.clean`, `smudge`
+  and `process` empty, `required=false`, for `lfs` and each driver the global or system
+  configuration names, read once per process) and `GIT_LFS_SKIP_SMUDGE=1`, so no
+  `.gitattributes` runs a filter; the Station user's global and system configuration still
+  apply otherwise (credential helpers). Branch names (`base`, a save's `branch` and `fallback`) are
   checked by `git check-ref-format --branch` rules in the provider itself (and `@` alone is
   refused), not by a Git command. A repository with no branch at all leaves `<base>` unborn (the base is empty); one with
   branches but not `<base>` is refused and the clone removed. Remote repositories are reached

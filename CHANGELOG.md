@@ -27,8 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   repository has `write = true`. `{person}` takes lowercase identifiers only;
   `{person_digest}` works for all. A Station takes only the repositories its own roster gives
   the job's `person_id`. Her repositories' git directories live beside her workspace, every
-  Git command the Station runs on them has hooks, filesystem monitors and links off (a
-  committed link is checked out as a plain file), the Station never reads, writes or removes
+  Git command the Station runs on them has hooks, filesystem monitors, filters (Git LFS
+  among them) and links off (a committed link is checked out as a plain file), the Station never reads, writes or removes
   anything in her workspace through a link, junction or other reparse point, and paths with
   a name starting with `.` are neither written by her nor committed. A starting desk removes
   what desks that are gone left in the temporary directory.
