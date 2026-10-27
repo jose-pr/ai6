@@ -21,7 +21,8 @@ use rustls::{ClientConfig, ServerConfig};
 /// The ALPN protocol Stations speak to each other.
 pub const STATION_ALPN: &[u8] = b"ai6-station/1";
 
-/// The identity file in a state directory: one certificate followed by its private key.
+/// The identity file in a state directory: the certificate (and any intermediates) followed by
+/// its private key.
 pub const IDENTITY_FILE: &str = "identity.pem";
 
 /// Why a Station identity, trust store or TLS configuration could not be made.
@@ -66,25 +67,26 @@ impl From<coqui_peer::Error> for StationIdentityError {
     }
 }
 
-/// Opens this Station's identity in `state_dir`, creating a self-signed one on first use.
+/// Opens this Station's identity in `state_dir`, creating a self-signed one on first use. A
+/// file holding a chain (the leaf first, then its intermediates) is read whole.
 ///
 /// # Errors
 ///
-/// Returns an error when the file is unreadable, holds more than one certificate or no
-/// matching key, or cannot be created.
+/// Returns an error when the file is unreadable, holds no key matching its first
+/// certificate, or cannot be created.
 pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError> {
     Ok(Identity::open_or_create(&state_dir.join(IDENTITY_FILE))?)
 }
 
 /// Opens the peers this Station has accepted or is asked to accept, under
-/// `<state_dir>/peers`, bounded by `policy`'s waiting limits (per source address, in total,
-/// and how often one peer from one address is written down again).
+/// `<state_dir>/peers`, bounded by `policy.waiting` (per source address, in total, and how
+/// often one peer from one address is written down again).
 ///
 /// # Errors
 ///
 /// Returns an error when the directories cannot be created.
 pub fn open_peers(state_dir: &Path, policy: &Policy) -> Result<TrustStore, StationIdentityError> {
-    Ok(TrustStore::open(state_dir)?.with_limits(policy.waiting_limits()))
+    Ok(TrustStore::open(state_dir)?.with_limits(policy.waiting))
 }
 
 /// Trust exactly the peers in `store`: a peer that is not accepted is refused, and recorded as
@@ -202,7 +204,7 @@ mod tests {
     fn the_policy_bounds_the_waiting_list_per_source_address() {
         let directory = tempfile::tempdir().unwrap();
         let mut policy = Policy::strict();
-        policy.waiting_per_source = 1;
+        policy.waiting.per_source = 1;
         let peers = open_peers(directory.path(), &policy).unwrap();
         let source: SocketAddr = "192.0.2.7:4000".parse().unwrap();
         let first = Identity::generate().unwrap();

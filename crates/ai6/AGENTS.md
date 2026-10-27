@@ -2336,7 +2336,7 @@ API headers describe them. `open_identity` stores the certificate and private ke
 and proof of its key, then applies `trust`. A peer not in the store is refused and, once it
 has proved its key, recorded under `peers/waiting` with the address it came from; waiting is
 bounded per source address, in total, and by how often one peer is written down again (the
-policy's `waiting_per_source`, `waiting_total` and `waiting_rerecord_secs`). An operator lists
+policy's `waiting`: `per_source`, `total` and `rerecord`). An operator lists
 them with `ai6 peer waiting` (fingerprint and source address) and accepts one with
 `ai6 peer accept <fingerprint>`. The default AI6 state location can be overridden with
 `AI6_STATE` or `AI6_HOME`.

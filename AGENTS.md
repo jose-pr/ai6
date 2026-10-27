@@ -61,8 +61,10 @@ servers in Docker. Building the `sqlite` feature compiles SQLite, so it needs a 
 - Directorates are modules of the `ai6` crate. Providers live under `crates/providers/` and
   carry their own Guatiao entry point; do not add forwarding-only crates.
 - Access kinds, the role authorizer, the access providers and Station mutual TLS are the shared
-  `coqui-access`, `coqui-roles`, `coqui-peer` and `coqui-peer-tls` crates, pinned by git
-  revision beside Guatiao; AI6 keeps only its scope kinds, actions and where it stores things.
+  `coqui-access`, `coqui-roles`, `coqui-peer` and `coqui-peer-tls` crates: `coqui-peer` and
+  `coqui-peer-tls` at an exact crates.io version, `coqui-access` and `coqui-roles` (unpublished)
+  pinned by git revision beside Guatiao. AI6 keeps only its scope kinds, actions and where it
+  stores things.
   The host's tests build the access plugins as dev-dependencies and load them from beside the
   test binary: clean `target/` after a plugin is renamed, since the host loads every library.
 - A project's `.ai6/` configuration is read only for a registered Operation.
