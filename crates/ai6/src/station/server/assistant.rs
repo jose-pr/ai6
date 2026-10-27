@@ -323,7 +323,11 @@ impl Desk {
         if let Some((session, flags, expires, workspace)) = running {
             if expires > unix_now() + TOKEN_MARGIN_SECS {
                 flags.interrupting.store(false, Ordering::Release);
-                flags.busy.store(true, Ordering::Release);
+                // A message that reaches a harness still answering (Universal Exports gave the
+                // answer up) joins the turn in progress, whose memory copy stays the one taken
+                // when it started: taken again, it would take what the turn wrote to her memory
+                // for where it started, and commit it unseen.
+                let answering = flags.busy.swap(true, Ordering::AcqRel);
                 *flags
                     .last_active
                     .lock()
@@ -331,7 +335,7 @@ impl Desk {
                 let text = job.message.clone();
                 return tokio::task::spawn_blocking(move || {
                     // The turn's memory copy is taken before the harness can read the message.
-                    if let Some(workspace) = &workspace {
+                    if let Some(workspace) = workspace.as_ref().filter(|_| !answering) {
                         workspace
                             .lock()
                             .map_err(|_| "assistant workspace lock failed".to_owned())?
@@ -2367,6 +2371,38 @@ mod tests {
         assert!(
             !git(&bare, &["ls-tree", "-r", "--name-only", "main"]).contains("evil.md"),
             "still not committed"
+        );
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_message_reaching_a_harness_still_answering_keeps_the_turn_copy() {
+        let fixture = scripted(true, IDLE, Script::Works, Script::Answers).with_git();
+        let people = tempfile::tempdir().unwrap();
+        let bare = people.path().join("eve.git");
+        fixture
+            .desk
+            .handle(working("c-b", "A long job.", workspace(&bare)))
+            .await;
+        until(|| kinds(&fixture, "c-b").contains(&EVENT_TEXT.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let memory = PathBuf::from(&start.working_directory)
+            .join("personal")
+            .join("memory");
+        std::fs::write(memory.join("midway.md"), "Written mid-turn.\n").unwrap();
+        // Universal Exports gave the answer up and sends the next message to the same harness.
+        fixture
+            .desk
+            .handle(working("c-b", "Are you there?", workspace(&bare)))
+            .await;
+        until(|| fixture.asked.lock().unwrap().messages == ["Are you there?"]).await;
+        fixture.desk.handle(interruption("c-b", "done")).await;
+        until(|| kinds(&fixture, "c-b").contains(&EVENT_INTERRUPTED.to_owned())).await;
+        let (change, _) = set_aside(&fixture, "c-b");
+        assert!(change.files.contains_key("memory/midway.md"), "{change:?}");
+        assert!(
+            !git(&bare, &["ls-tree", "-r", "--name-only", "main"]).contains("midway.md"),
+            "never committed unseen"
         );
         fixture.desk.close_all();
     }
