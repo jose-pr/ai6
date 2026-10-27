@@ -3365,9 +3365,13 @@ pushes there, and removes it.
 Exposure is Universal Exports' record (`Conversation.exposed`); the desk reads it with `GET
 /v1/station/assistant/exposure?station&conversation` (`{"exposed"}`) when a turn ends and
 raises it with `POST` (`{"station","conversation","source"}`) for what only it sees
-(shared repositories are trusted text and expose nothing): a turn whose
-harness calls `Read`, `Grep` or `Glob` while `.moneypenny/outside-text` in the personal
-repository names any file is exposed at that call (source `personal:<paths>`). A turn ending
+(shared repositories are trusted text and expose nothing): a harness call that can answer
+with a file `.moneypenny/outside-text` in the personal repository names exposes the turn at
+that call (source `personal:<path> (read by <tool>)`): a `Read` or `Edit` of it, a `Grep` or
+`Glob` whose search covers it (paths compared after `.`/`..`, the filesystem's own spelling
+and case), or a call whose input (`AgentEvent::data`) the desk cannot read. A
+`memory/MEMORY.md` importing one (`@path`, followed five deep) exposes the conversation as
+its harness starts. Other reads do not. A turn ending
 exposed adds the files it changed in `personal/` to that record (committed by the Station
 with `CheckpointSpec::files`; files no longer there are dropped, and an empty record is
 removed). A failed `GET` counts as exposed; a memory change of a turn the desk found exposed

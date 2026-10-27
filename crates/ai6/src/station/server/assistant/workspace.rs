@@ -14,14 +14,15 @@
 //! Exposure is Universal Exports' to record (`Conversation.exposed`), but the desk sees one
 //! way in it cannot: text she wrote in `personal/` while exposed. (The repositories in
 //! `shared/` are trusted text and expose nothing.) Their paths are kept in the personal
-//! repository, in
-//! [`OUTSIDE_TEXT`] (a hidden file she cannot write), and a turn that reads, searches or
-//! lists files while any are recorded is exposed. The record is cleared by removing the files
-//! it names, or the record itself, in the repository.
+//! repository, in [`OUTSIDE_TEXT`] (a hidden file she cannot write). A file tool call that can
+//! answer with one of them exposes the conversation: a `Read` or `Edit` of one, a `Grep` or
+//! `Glob` whose search covers one, or a call whose input the desk cannot read. So does a
+//! `MEMORY.md` that imports one. Reading other files does not. The record is cleared by
+//! removing the files it names, or the record itself, in the repository.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -54,8 +55,11 @@ const MAX_WALK: usize = 10_000;
 /// The record, in the personal repository, of the files she wrote while exposed: one path a
 /// line, relative to the repository.
 pub(super) const OUTSIDE_TEXT: &str = ".moneypenny/outside-text";
-/// The built-in tools that read files, or their names, for her.
-const READING_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
+/// The built-in tools that answer with text of a file or its name: `Read`, `Grep` and `Glob`,
+/// and `Edit`, whose answer quotes the lines around its change.
+const READING_TOOLS: [&str; 4] = ["Read", "Grep", "Glob", "Edit"];
+/// How deep Claude Code follows `@path` imports from a memory file.
+const MAX_IMPORT_DEPTH: usize = 5;
 
 /// `MEMORY.md` as a first use writes it.
 const MEMORY_INDEX: &str = "# Memory\n\nWhat Moneypenny remembers about the person she works \
@@ -84,6 +88,8 @@ pub(super) struct Workspace {
     exposed: bool,
     /// The files of `personal/` she wrote while exposed ([`OUTSIDE_TEXT`]).
     outside: BTreeSet<String>,
+    /// What exposed the conversation as the workspace was prepared, until it is reported.
+    found: Option<String>,
 }
 
 /// What the end of a turn found besides the work it saved.
@@ -134,6 +140,7 @@ impl Workspace {
             closed: false,
             exposed,
             outside: BTreeSet::new(),
+            found: None,
         };
         workspace.outside = fs::read_to_string(workspace.path.join(OUTSIDE_TEXT))
             .unwrap_or_default()
@@ -142,6 +149,12 @@ impl Workspace {
             .filter(|line| !line.is_empty())
             .map(str::to_owned)
             .collect();
+        if !workspace.exposed
+            && let Some(file) = workspace.imported_outside()
+        {
+            workspace.exposed = true;
+            workspace.found = Some(format!("personal:{file} (imported by {MEMORY}/MEMORY.md)"));
+        }
         let mut notices = Vec::new();
         let index = workspace.path.join(MEMORY).join("MEMORY.md");
         if !index.exists() {
@@ -189,26 +202,90 @@ impl Workspace {
         self.exposed
     }
 
-    /// Notes the tools a turn called: reading, searching or listing files while the record
-    /// names any makes the conversation exposed. Answers the source to report when this call
-    /// is what exposed it.
-    pub(super) fn note_tools(&mut self, tools: &[String]) -> Option<String> {
+    /// Notes the tools a harness event calls, with the event's raw line (`data`): a call that
+    /// returns the text of a file the record names makes the conversation exposed. A reading
+    /// call whose input cannot be read counts as reaching them all. Answers the source to
+    /// report when this call is what exposed it.
+    pub(super) fn note_tools(&mut self, tools: &[String], data: Option<&[u8]>) -> Option<String> {
         let reads = tools
             .iter()
             .any(|tool| READING_TOOLS.contains(&tool.as_str()));
         if self.exposed || !reads || self.outside.is_empty() {
             return None;
         }
-        self.exposed = true;
-        Some(format!(
-            "personal:{} (files written while exposed)",
-            self.outside
-                .iter()
-                .take(3)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(",")
-        ))
+        let area = self.path.parent().unwrap_or(&self.path).to_path_buf();
+        let listed = self.listed();
+        let source = match reading_calls(data) {
+            Some(calls) => calls.iter().find_map(|(tool, scope)| {
+                let covered = scope.resolve(&area);
+                listed
+                    .iter()
+                    .find(|(_, key)| covered.covers(key))
+                    .map(|(file, _)| format!("personal:{file} (read by {tool})"))
+            }),
+            None => Some(format!(
+                "personal:{} (a file tool call that could not be read)",
+                self.outside
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )),
+        };
+        if source.is_some() {
+            self.exposed = true;
+        }
+        source
+    }
+
+    /// The record's files, each with the key [`Scope::covers`] compares.
+    fn listed(&self) -> Vec<(String, String)> {
+        self.outside
+            .iter()
+            .map(|file| (file.clone(), path_key(&in_tree(&self.path, file))))
+            .collect()
+    }
+
+    /// The first recorded file `MEMORY.md` imports (`@path`, followed through the files it
+    /// imports), which a harness that loads `CLAUDE.md` reads with it.
+    fn imported_outside(&self) -> Option<String> {
+        if self.outside.is_empty() {
+            return None;
+        }
+        let listed = self.listed();
+        let mut seen = BTreeSet::new();
+        let mut next = vec![self.path.join(MEMORY).join("MEMORY.md")];
+        for _ in 0..=MAX_IMPORT_DEPTH {
+            let mut found = Vec::new();
+            for file in next.drain(..) {
+                let Ok(text) = fs::read_to_string(&file) else {
+                    continue;
+                };
+                let base = file.parent().unwrap_or(&self.path).to_path_buf();
+                for import in imports(&text) {
+                    // An import of a home that is not known could be any of them.
+                    let Some(target) = expand(&base, import) else {
+                        return self.outside.first().cloned();
+                    };
+                    let key = path_key(&target);
+                    if let Some((listed, _)) = listed.iter().find(|(_, at)| *at == key) {
+                        return Some(listed.clone());
+                    }
+                    if seen.insert(key) {
+                        found.push(target);
+                    }
+                }
+            }
+            next = found;
+        }
+        None
+    }
+
+    /// What exposed the conversation as the workspace was prepared, once, for Universal
+    /// Exports.
+    pub(super) fn take_found(&mut self) -> Option<String> {
+        self.found.take()
     }
 
     /// Notes that the conversation is exposed, as Universal Exports says or as the desk found.
@@ -689,6 +766,174 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     fs::write(path, bytes)
 }
 
+/// What a file tool call can answer with: one file, or anything under a directory, as given.
+enum Scope {
+    File(String),
+    Under(String),
+}
+
+/// A [`Scope`] resolved to [`path_key`] form; `None` covers everything.
+struct Covered {
+    key: Option<String>,
+    under: bool,
+}
+
+impl Scope {
+    /// Resolves a relative path against `area`, her working directory.
+    fn resolve(&self, area: &Path) -> Covered {
+        let (raw, under) = match self {
+            Self::File(raw) => (raw, false),
+            Self::Under(raw) => (raw, true),
+        };
+        Covered {
+            key: expand(area, raw).map(|path| path_key(&path)),
+            under,
+        }
+    }
+}
+
+impl Covered {
+    fn covers(&self, key: &str) -> bool {
+        let Some(scope) = &self.key else {
+            return true;
+        };
+        key == scope
+            || (self.under && key.starts_with(&format!("{}/", scope.trim_end_matches('/'))))
+    }
+}
+
+/// The reading calls (`READING_TOOLS`) of a harness event's raw line, each with what it can
+/// answer with; `None` when the line is not one this desk can read.
+fn reading_calls(data: Option<&[u8]>) -> Option<Vec<(String, Scope)>> {
+    let value: serde_json::Value = serde_json::from_slice(data?).ok()?;
+    let mut calls = Vec::new();
+    for block in value.pointer("/message/content")?.as_array()? {
+        if block.get("type").and_then(serde_json::Value::as_str) != Some("tool_use") {
+            continue;
+        }
+        let tool = block.get("name")?.as_str()?;
+        if !READING_TOOLS.contains(&tool) {
+            continue;
+        }
+        let input = block.get("input")?;
+        // An absent path is her working directory; one that is not text is unreadable.
+        let path = match input.get("path") {
+            None | Some(serde_json::Value::Null) => ".",
+            Some(path) => path.as_str()?,
+        };
+        match tool {
+            "Read" | "Edit" => calls.push((
+                tool.to_owned(),
+                Scope::File(input.get("file_path")?.as_str()?.to_owned()),
+            )),
+            "Grep" => calls.push((tool.to_owned(), Scope::Under(path.to_owned()))),
+            _ => {
+                let pattern = input.get("pattern")?.as_str()?;
+                let prefix = literal_prefix(pattern);
+                // An absolute pattern may be taken as it is or under `path`: both are covered.
+                if Path::new(&prefix).has_root() {
+                    calls.push((tool.to_owned(), Scope::Under(prefix.clone())));
+                }
+                let under = Path::new(path).join(prefix.trim_start_matches(['/', '\\']));
+                calls.push((
+                    tool.to_owned(),
+                    Scope::Under(under.to_string_lossy().into_owned()),
+                ));
+            }
+        }
+    }
+    (!calls.is_empty()).then_some(calls)
+}
+
+/// The directories a glob pattern names before its first wildcard or escape.
+fn literal_prefix(pattern: &str) -> String {
+    let separators: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
+    let mut parts: Vec<&str> = pattern.split(separators).collect();
+    // The last name is matched, not a directory to look in.
+    parts.pop();
+    parts
+        .into_iter()
+        .take_while(|part| !part.contains(['*', '?', '[', ']', '{', '}', '!', '\\']))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The `@path` imports of a memory file's text, as written.
+fn imports(text: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    for word in text.split_whitespace() {
+        if let Some(path) = word.strip_prefix('@').filter(|path| !path.is_empty()) {
+            found.push(path);
+            let trimmed = path.trim_end_matches(['.', ',', ';', ':', ')', ']', '"', '\'', '`']);
+            if trimmed != path && !trimmed.is_empty() {
+                found.push(trimmed);
+            }
+        }
+    }
+    found
+}
+
+/// `raw` as a path: `~` is the Station user's home, and a relative path is under `base`.
+/// `None` when it names a home that is not known.
+fn expand(base: &Path, raw: &str) -> Option<PathBuf> {
+    if let Some(rest) = raw.strip_prefix('~') {
+        if !(rest.is_empty() || rest.starts_with(['/', '\\'])) {
+            return None;
+        }
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+        return Some(PathBuf::from(home).join(rest.trim_start_matches(['/', '\\'])));
+    }
+    Some(base.join(raw))
+}
+
+/// The path of `file`, a `/`-separated path relative to `root`.
+fn in_tree(root: &Path, file: &str) -> PathBuf {
+    file.split('/')
+        .fold(root.to_path_buf(), |at, name| at.join(name))
+}
+
+/// The form two paths are compared in: `.` and `..` resolved, the longest part that exists
+/// resolved by the filesystem (long names for short ones, links followed), `/`-separated and
+/// lowercase, so two spellings of one file meet (and some different files too, which only
+/// counts more as read).
+fn path_key(path: &Path) -> String {
+    let mut plain = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                plain.pop();
+            }
+            other => plain.push(other.as_os_str()),
+        }
+    }
+    let mut base = plain.clone();
+    let mut rest = Vec::new();
+    let resolved = loop {
+        if let Ok(found) = fs::canonicalize(&base) {
+            break rest
+                .iter()
+                .rev()
+                .fold(found, |at: PathBuf, name| at.join(name));
+        }
+        match (base.file_name().map(ToOwned::to_owned), base.parent()) {
+            (Some(name), Some(parent)) => {
+                rest.push(name);
+                base = parent.to_path_buf();
+            }
+            _ => break plain,
+        }
+    };
+    let text = resolved.to_string_lossy().replace('\\', "/");
+    let text = if let Some(unc) = text.strip_prefix("//?/UNC/") {
+        format!("//{unc}")
+    } else {
+        text.strip_prefix("//?/").unwrap_or(&text).to_owned()
+    };
+    let trimmed = text.trim_end_matches(['/', '.', ' ']);
+    if trimmed.is_empty() { "/" } else { trimmed }.to_lowercase()
+}
+
 fn cut(text: &str, limit: usize) -> &str {
     let mut end = text.len().min(limit);
     while !text.is_char_boundary(end) {
@@ -700,6 +945,98 @@ fn cut(text: &str, limit: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_tool_call_is_read_for_what_it_can_answer_with() {
+        let line = |name: &str, input: serde_json::Value| {
+            serde_json::json!({ "type": "assistant", "message": { "content": [
+                { "type": "text", "text": "Looking." },
+                { "type": "tool_use", "id": "t", "name": name, "input": input }
+            ] } })
+            .to_string()
+            .into_bytes()
+        };
+        let scopes = |data: Vec<u8>| {
+            reading_calls(Some(&data)).map(|calls| {
+                calls
+                    .into_iter()
+                    .map(|(_, scope)| match scope {
+                        Scope::File(path) => format!("file {path}"),
+                        Scope::Under(path) => format!("under {}", path.replace('\\', "/")),
+                    })
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(
+            scopes(line("Read", serde_json::json!({ "file_path": "/a/b.md" }))),
+            Some(vec!["file /a/b.md".to_owned()])
+        );
+        assert_eq!(
+            scopes(line("Grep", serde_json::json!({ "pattern": "x" }))),
+            Some(vec!["under .".to_owned()])
+        );
+        assert_eq!(
+            scopes(line(
+                "Glob",
+                serde_json::json!({ "pattern": "notes/*/x.md", "path": "personal" })
+            )),
+            Some(vec!["under personal/notes".to_owned()])
+        );
+        assert_eq!(
+            scopes(line("Glob", serde_json::json!({ "pattern": "/srv/x/**" }))),
+            Some(vec!["under /srv/x".to_owned(), "under ./srv/x".to_owned()])
+        );
+        // What cannot be read is no answer, which counts as every file.
+        assert_eq!(scopes(line("Read", serde_json::json!({}))), None);
+        assert_eq!(
+            scopes(line(
+                "Grep",
+                serde_json::json!({ "pattern": "x", "path": 1 })
+            )),
+            None
+        );
+        assert_eq!(scopes(b"not json".to_vec()), None);
+        assert_eq!(reading_calls(None).map(|calls| calls.len()), None);
+        assert_eq!(scopes(line("Write", serde_json::json!({}))), None);
+    }
+
+    #[test]
+    fn a_memory_file_imports_each_at_path() {
+        assert_eq!(
+            imports("See @notes/a.md.\n- @~/x and me@host\n@"),
+            ["notes/a.md.", "notes/a.md", "~/x"]
+        );
+    }
+
+    #[test]
+    fn two_spellings_of_one_file_meet() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("notes")).unwrap();
+        fs::write(root.path().join("notes").join("a.md"), "a").unwrap();
+        let key = path_key(&root.path().join("notes").join("a.md"));
+        assert_eq!(
+            path_key(
+                &root
+                    .path()
+                    .join("NOTES")
+                    .join(".")
+                    .join("x")
+                    .join("..")
+                    .join("A.md")
+            ),
+            key
+        );
+        let scope = Covered {
+            key: Some(path_key(root.path())),
+            under: true,
+        };
+        assert!(scope.covers(&key));
+        let other = Covered {
+            key: Some(path_key(&root.path().join("note"))),
+            under: true,
+        };
+        assert!(!other.covers(&key), "a name's prefix is not its directory");
+    }
 
     #[test]
     fn a_summary_names_up_to_three_files() {

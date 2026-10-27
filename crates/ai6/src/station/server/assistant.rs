@@ -689,7 +689,7 @@ impl Desk {
         let conversation = job.conversation_id.clone();
         let file = context.clone();
         let exposed = job.exposed;
-        let (workspace, notices) = tokio::task::spawn_blocking(move || {
+        let (mut workspace, notices) = tokio::task::spawn_blocking(move || {
             Workspace::prepare(
                 &houses,
                 &area,
@@ -708,6 +708,19 @@ impl Desk {
                 "assistant conversation {}: {notice}",
                 conversation_digest(&job.conversation_id)
             ));
+        }
+        // A failure is told again when the turn ends.
+        if let Some(source) = workspace.take_found() {
+            let exposure = self.exposure.clone();
+            let conversation = job.conversation_id.clone();
+            let marked =
+                tokio::task::spawn_blocking(move || exposure.mark(&conversation, &source)).await;
+            if !matches!(marked, Ok(Ok(()))) {
+                (self.log)(&format!(
+                    "assistant conversation {}: exposure not recorded yet",
+                    conversation_digest(&job.conversation_id)
+                ));
+            }
         }
         let mode = AssistantMode {
             files: vec![PERSONAL.to_owned(), SCRATCH.to_owned()],
@@ -876,7 +889,7 @@ impl Pump {
                 Ok(Some(event)) => {
                     heard = Instant::now();
                     if !event.tools.is_empty() {
-                        self.note_tools(&event.tools);
+                        self.note_tools(&event.tools, event.data.as_deref());
                     }
                     let ended = matches!(event.kind.as_str(), "failed" | LIMIT_EVENT);
                     let mut stopped = false;
@@ -1039,17 +1052,17 @@ impl Pump {
         events
     }
 
-    /// Notes the tools an event called: one that reads files while the personal repository
-    /// holds text written while exposed exposes the conversation, which Universal Exports is
-    /// told at once (a failure is told again when the turn ends).
-    fn note_tools(&self, tools: &[String]) {
+    /// Notes the tools an event called, with its raw line: one that answers with a file the
+    /// personal repository records as written while exposed exposes the conversation, which
+    /// Universal Exports is told at once (a failure is told again when the turn ends).
+    fn note_tools(&self, tools: &[String], data: Option<&[u8]>) {
         let Some(workspace) = &self.workspace else {
             return;
         };
         let source = workspace
             .lock()
             .ok()
-            .and_then(|mut workspace| workspace.note_tools(tools));
+            .and_then(|mut workspace| workspace.note_tools(tools, data));
         if let Some(source) = source
             && let Err(reason) = self.exposure.mark(&self.conversation_id, &source)
         {
@@ -1529,7 +1542,8 @@ mod tests {
         Works,
         /// Writes a note and a memory in `personal/`, then answers and completes.
         Writes,
-        /// Reads a file (a `Read` tool call), writes a memory, then answers and completes.
+        /// Calls a file tool (see [`ScriptedSession::answer`]), writes a memory, then answers
+        /// and completes.
         Reads,
     }
 
@@ -1635,8 +1649,29 @@ mod tests {
                     events.push_back(event("completed", Some("Noted.")));
                 }
                 Script::Reads => {
+                    // `<Tool> <input>` calls that tool, `{area}` in the input being her
+                    // working directory; anything else is a `Read` whose line is not given.
                     let mut read = event("tool", None);
                     read.tools = vec!["Read".to_owned()];
+                    if let Some((tool, input)) = message.split_once(' ')
+                        && input.starts_with('{')
+                    {
+                        let area = self.dir.to_string_lossy().replace('\\', "/");
+                        let input: serde_json::Value =
+                            serde_json::from_str(&input.replace("{area}", &area)).unwrap();
+                        read.tools = vec![tool.to_owned()];
+                        read.data = Some(
+                            serde_json::json!({
+                                "type": "assistant",
+                                "message": { "content": [
+                                    { "type": "tool_use", "id": "toolu_1", "name": tool,
+                                      "input": input }
+                                ] }
+                            })
+                            .to_string()
+                            .into_bytes(),
+                        );
+                    }
                     events.push_back(read);
                     let memory = self.dir.join(PERSONAL).join("memory");
                     std::fs::write(memory.join("prefs.md"), PREFERENCE).unwrap();
@@ -2906,18 +2941,84 @@ mod tests {
         writes.desk.close_all();
         until(|| kinds(&writes, "c-s").contains(&EVENT_CLOSED.to_owned())).await;
 
-        // A later clean conversation that reads files while that record names any is
-        // exposed by the read, at once.
+        // In a later clean conversation, only a call that answers with a recorded file
+        // exposes it, at once; reading other files does not.
         let later = git_fixture(people.path(), Script::Reads);
+        let cases = [
+            (
+                "c-o",
+                r#"Read {"file_path":"{area}/personal/memory/MEMORY.md"}"#,
+                None,
+            ),
+            ("c-g", r#"Glob {"pattern":"personal/memory/**/*.md"}"#, None),
+            (
+                "c-h",
+                r#"Grep {"pattern":"x","path":"{area}/scratch"}"#,
+                None,
+            ),
+            (
+                "c-t",
+                r#"Read {"file_path":"{area}/personal/NOTES/./x/../A.md"}"#,
+                Some("personal:notes/a.md (read by Read)"),
+            ),
+            (
+                "c-p",
+                r#"Grep {"pattern":"x","path":"personal"}"#,
+                Some("personal:notes/a.md (read by Grep)"),
+            ),
+            (
+                "c-q",
+                r#"Glob {"pattern":"**/*.md"}"#,
+                Some("personal:notes/a.md (read by Glob)"),
+            ),
+            (
+                "c-e",
+                r#"Edit {"file_path":"{area}/personal/notes/a.md","old_string":"a","new_string":"b"}"#,
+                Some("personal:notes/a.md (read by Edit)"),
+            ),
+            // A call whose input cannot be read reaches every recorded file.
+            (
+                "c-n",
+                "What did I note?",
+                Some("personal:notes/a.md (a file tool call that could not be read)"),
+            ),
+        ];
+        for (conversation, message, expected) in cases {
+            later
+                .desk
+                .handle(working(conversation, message, workspace(&bare)))
+                .await;
+            until(|| kinds(&later, conversation).contains(&EVENT_COMPLETED.to_owned())).await;
+            let raised = marks(&later, conversation);
+            assert_eq!(
+                raised,
+                expected.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                "{conversation}: {message}"
+            );
+            later.desk.close_all();
+            until(|| kinds(&later, conversation).contains(&EVENT_CLOSED.to_owned())).await;
+        }
+
+        // A memory index that imports a recorded file exposes the conversation as it starts.
+        let imports = AssistantChange::new(BTreeMap::from([(
+            "memory/MEMORY.md".to_owned(),
+            Some("# Memory\n\nSee @../notes/a.md.\n".to_owned()),
+        )]));
         later
             .desk
-            .handle(working("c-t", "What did I note?", workspace(&bare)))
+            .handle(committing("c-i", COMMIT_MEMORY, &bare, imports))
             .await;
-        until(|| kinds(&later, "c-t").contains(&EVENT_COMPLETED.to_owned())).await;
-        let raised = marks(&later, "c-t");
-        assert_eq!(raised.len(), 1, "{raised:?}");
-        assert!(raised[0].starts_with("personal:notes/a.md"), "{raised:?}");
-        later.desk.close_all();
+        let quiet = git_fixture(people.path(), Script::Answers);
+        quiet
+            .desk
+            .handle(working("c-m", "Hello.", workspace(&bare)))
+            .await;
+        until(|| kinds(&quiet, "c-m").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert_eq!(
+            marks(&quiet, "c-m"),
+            ["personal:notes/a.md (imported by memory/MEMORY.md)"]
+        );
+        quiet.desk.close_all();
 
         // Removing the file clears it from the record.
         let clears = git_fixture(people.path(), Script::Works);

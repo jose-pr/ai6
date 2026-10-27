@@ -213,10 +213,12 @@ A conversation is exposed, for good, when:
 
 - any of her read tools answers other than `field_guide`, `profile` and `station_settings`
   (every other one can quote an Agent, a brief or another person);
-- she reads, searches or lists files (`Read`, `Grep`, `Glob`) while her repository holds
-  files she wrote in an exposed conversation. The Station keeps their paths in
-  `.moneypenny/outside-text` in the personal repository, a hidden file she cannot write;
-  removing those files, or the record, in the repository clears it.
+- she reads one of the files she wrote in an exposed conversation. The Station keeps their
+  paths in `.moneypenny/outside-text` in the personal repository, a hidden file she cannot
+  write, and counts as reading one a `Read` or `Edit` of it, a `Grep` or `Glob` whose search
+  covers it, a file tool call it cannot read the input of, and a `memory/MEMORY.md` that
+  imports it (`@path`). Reading other files does not expose the conversation. Removing those
+  files, or the record, in the repository clears it.
 
 The repositories in `shared/` are trusted text: the group or the organisation chose what is
 in them, so reading them exposes nothing. Universal Exports keeps the one record of exposure;

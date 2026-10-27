@@ -33,8 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - One record of a Moneypenny conversation's exposure, `Conversation.exposed` in Universal
   Exports, carried to the Station as `AssistantJob::exposed`: every read tool sets it but
   `field_guide`, `profile` and `station_settings`, and the Station sets it (`POST
-  /v1/station/assistant/exposure`, read with `GET`) when she reads files while her repository
-  records files written while exposed (`.moneypenny/outside-text`). Group and organisation
+  /v1/station/assistant/exposure`, read with `GET`) when she reads a file her repository
+  records as written while exposed (`.moneypenny/outside-text`): a `Read` or `Edit` of it, a
+  `Grep` or `Glob` whose search covers it, a call whose input cannot be read, or a
+  `MEMORY.md` that imports it. Reading other files does not. Group and organisation
   repositories are trusted text and expose nothing.
 - An assistant mode names the directories she may write (`AssistantMode::files`) and a
   context file (`AssistantMode::context_file`): Claude Code gets its file tools under
