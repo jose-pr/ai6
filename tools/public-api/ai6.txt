@@ -110,33 +110,60 @@ pub fn ai6::directorates::section_00::gate::GitRepository<F>::full_name(&self, &
 pub fn ai6::directorates::m::approvals::classify(&str, &dyn ai6::directorates::m::approvals::Repository) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::directorates::m::approvals::clearance_at_least(&str, &str) -> bool
 pub mod ai6::directorates::m::assistant
+#[non_exhaustive] pub enum ai6::directorates::m::assistant::NetworkPolicy
+pub ai6::directorates::m::assistant::NetworkPolicy::Denied
+pub ai6::directorates::m::assistant::NetworkPolicy::Limited
+pub ai6::directorates::m::assistant::NetworkPolicy::Open
+impl ai6::directorates::m::assistant::NetworkPolicy
+pub fn ai6::directorates::m::assistant::NetworkPolicy::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::directorates::m::assistant::RepoKind
 pub ai6::directorates::m::assistant::RepoKind::Local
 pub ai6::directorates::m::assistant::RepoKind::Remote
 impl ai6::directorates::m::assistant::RepoKind
 pub fn ai6::directorates::m::assistant::RepoKind::of(&str) -> core::result::Result<Self, alloc::string::String>
+pub struct ai6::directorates::m::assistant::AssistantNarrowing
+impl ai6::directorates::m::assistant::AssistantNarrowing
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::new() -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_allowed_hosts(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_network(self, ai6::directorates::m::assistant::NetworkPolicy) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_unsandboxed_scripts(self, bool) -> Self
 pub struct ai6::directorates::m::assistant::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
+pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::m::assistant::AssistantSettings::deployment_reach(&self) -> ai6::directorates::section_00::assistant::AssistantReach
+pub fn ai6::directorates::m::assistant::AssistantSettings::interpreters(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::m::assistant::AssistantSettings::network(&self) -> ai6::directorates::m::assistant::NetworkPolicy
 pub fn ai6::directorates::m::assistant::AssistantSettings::new() -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::org(&self) -> core::option::Option<&ai6::directorates::m::assistant::SharedRepo>
 pub fn ai6::directorates::m::assistant::AssistantSettings::personal_repo(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::m::assistant::AssistantSettings::personal_repo_for(&self, &str) -> core::result::Result<core::option::Option<alloc::string::String>, alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::reach_for(&self, &str, &[alloc::string::String]) -> ai6::directorates::section_00::assistant::AssistantReach
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::assistant::SharedRepo>
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared_for<'a>(&'a self, &[alloc::string::String]) -> impl core::iter::traits::iterator::Iterator<Item = (&'a str, &'a ai6::directorates::m::assistant::SharedRepo)>
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared_named(&self, &str, &[alloc::string::String]) -> core::option::Option<&ai6::directorates::m::assistant::SharedRepo>
+pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_elevated(self, bool) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_group(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_network(self, ai6::directorates::m::assistant::NetworkPolicy, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_org(self, ai6::directorates::m::assistant::SharedRepo) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_person(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_personal_repo(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_shared(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::SharedRepo) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_unsandboxed_scripts(self, bool) -> Self
+impl core::default::Default for ai6::directorates::m::assistant::AssistantSettings
+pub fn ai6::directorates::m::assistant::AssistantSettings::default() -> Self
 pub struct ai6::directorates::m::assistant::SharedRepo
 impl ai6::directorates::m::assistant::SharedRepo
 pub fn ai6::directorates::m::assistant::SharedRepo::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::SharedRepo::repo(&self) -> &str
 pub fn ai6::directorates::m::assistant::SharedRepo::writable(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::SharedRepo::write(&self) -> bool
+pub const ai6::directorates::m::assistant::DEFAULT_INTERPRETER: &str
 pub const ai6::directorates::m::assistant::ORG_SHARED: &str
 pub const ai6::directorates::m::assistant::PERSON_DIGEST_PLACEHOLDER: &str
 pub const ai6::directorates::m::assistant::PERSON_PLACEHOLDER: &str
@@ -3785,11 +3812,14 @@ pub ai6::directorates::section_00::agent::AgentStart::prompt: alloc::string::Str
 pub ai6::directorates::section_00::agent::AgentStart::working_directory: alloc::string::String
 pub struct ai6::directorates::section_00::agent::AssistantMode
 pub ai6::directorates::section_00::agent::AssistantMode::context_file: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AssistantMode::deny_read: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::files: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::interpreters: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::mcp_servers: alloc::vec::Vec<ai6::directorates::section_00::agent::McpServerRef>
 pub ai6::directorates::section_00::agent::AssistantMode::network: ai6::directorates::section_00::agent::AssistantNetwork
+pub ai6::directorates::section_00::agent::AssistantMode::read_only: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::agent::AssistantMode::unsandboxed: bool
 impl ai6::directorates::section_00::agent::AssistantMode
 pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
 pub fn ai6::directorates::section_00::agent::AssistantMode::validate(&self) -> core::result::Result<(), alloc::string::String>
@@ -3798,6 +3828,7 @@ pub struct ai6::directorates::section_00::agent::AssistantNetwork
 pub ai6::directorates::section_00::agent::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantNetwork::policy: alloc::string::String
 impl ai6::directorates::section_00::agent::AssistantNetwork
+pub fn ai6::directorates::section_00::agent::AssistantNetwork::open(&self) -> bool
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::reaches_nothing(&self) -> bool
 impl core::default::Default for ai6::directorates::section_00::agent::AssistantNetwork
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::default() -> Self
@@ -3821,14 +3852,17 @@ pub ai6::directorates::section_00::agent::UsageLimit::resets_at: core::option::O
 pub ai6::directorates::section_00::agent::UsageLimit::window: core::option::Option<alloc::string::String>
 pub const ai6::directorates::section_00::agent::LIMIT_EVENT: &str
 pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -3921,6 +3955,7 @@ pub ai6::directorates::section_00::assistant::AssistantJob::mcp_token: alloc::st
 pub ai6::directorates::section_00::assistant::AssistantJob::memory: core::option::Option<ai6::directorates::section_00::assistant::MemoryOp>
 pub ai6::directorates::section_00::assistant::AssistantJob::message: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::person_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantJob::reach: ai6::directorates::section_00::assistant::AssistantReach
 pub ai6::directorates::section_00::assistant::AssistantJob::recap: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::token_expires_at: f64
@@ -3929,6 +3964,14 @@ impl ai6::directorates::section_00::assistant::AssistantJob
 pub fn ai6::directorates::section_00::assistant::AssistantJob::validate(&self) -> core::result::Result<(), alloc::string::String>
 impl core::fmt::Debug for ai6::directorates::section_00::assistant::AssistantJob
 pub fn ai6::directorates::section_00::assistant::AssistantJob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::section_00::assistant::AssistantReach
+pub ai6::directorates::section_00::assistant::AssistantReach::interpreters: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantReach::network: ai6::directorates::section_00::agent::AssistantNetwork
+pub ai6::directorates::section_00::assistant::AssistantReach::unsandboxed_scripts: bool
+impl ai6::directorates::section_00::assistant::AssistantReach
+pub fn ai6::directorates::section_00::assistant::AssistantReach::capped_by(&self, &ai6::directorates::section_00::assistant::AssistantReach) -> ai6::directorates::section_00::assistant::AssistantReach
+pub fn ai6::directorates::section_00::assistant::AssistantReach::scripts_reach_hosts(&self) -> bool
+pub fn ai6::directorates::section_00::assistant::AssistantReach::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::directorates::section_00::assistant::AssistantReport
 pub ai6::directorates::section_00::assistant::AssistantReport::conversation_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantReport::events: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantEvent>
@@ -3995,7 +4038,10 @@ pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENT_BYTES: u
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_MESSAGE_BYTES: usize
 pub const ai6::directorates::section_00::assistant::MAX_MEMORY_FILES: usize
 pub const ai6::directorates::section_00::assistant::MAX_MEMORY_LIST_BYTES: usize
+pub fn ai6::directorates::section_00::assistant::host_pattern(&str) -> bool
+pub fn ai6::directorates::section_00::assistant::interpreter_name(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::memory_path(&str) -> bool
+pub fn ai6::directorates::section_00::assistant::outside_tool(&str, bool) -> bool
 pub fn ai6::directorates::section_00::assistant::repository_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::valid_identity(&str) -> bool
 pub mod ai6::directorates::section_00::gate
@@ -4018,11 +4064,13 @@ pub fn ai6::directorates::section_00::gate::GitRepository<F>::full_name(&self, &
 pub const ai6::directorates::section_00::gate::CABLE_TOKEN_ENV: &str
 pub const ai6::directorates::section_00::gate::CABLE_URL_ENV: &str
 pub const ai6::directorates::section_00::gate::GATE_PROGRAM_ENV: &str
+pub const ai6::directorates::section_00::gate::WEB_GATE_ARGS: [&str; 2]
 pub fn ai6::directorates::section_00::gate::decide(core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>, impl core::ops::function::FnOnce(&[ai6::directorates::m::approvals::ActionScope]) -> core::result::Result<ai6::directorates::section_00::gate::Answers, alloc::string::String>) -> ai6::directorates::section_00::gate::GateVerdict
 pub fn ai6::directorates::section_00::gate::deny(&str) -> alloc::string::String
 pub fn ai6::directorates::section_00::gate::gate(&str, core::option::Option<&std::path::Path>, core::option::Option<&ai6::directorates::section_00::gate::GateClient>) -> ai6::directorates::section_00::gate::GateVerdict
 pub fn ai6::directorates::section_00::gate::local_git(&[alloc::string::String]) -> core::result::Result<ai6::directorates::section_00::gate::GitOutput, alloc::string::String>
 pub fn ai6::directorates::section_00::gate::pre_tool_use(&str, core::option::Option<&ai6::directorates::section_00::gate::GateClient>) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::section_00::gate::web_fetch_gate(&str, &[alloc::string::String]) -> core::option::Option<alloc::string::String>
 pub type ai6::directorates::section_00::gate::Answers = alloc::vec::Vec<(alloc::string::String, core::option::Option<alloc::string::String>)>
 pub type ai6::directorates::section_00::gate::GitOutput = (bool, alloc::string::String)
 pub mod ai6::station
@@ -4419,6 +4467,12 @@ pub ai6::MemoryAction::Write::base: core::option::Option<alloc::string::String>
 pub ai6::MemoryAction::Write::commit: ai6::directorates::section_00::assistant::MemoryCommit
 pub ai6::MemoryAction::Write::path: alloc::string::String
 pub ai6::MemoryAction::Write::text: alloc::string::String
+#[non_exhaustive] pub enum ai6::NetworkPolicy
+pub ai6::NetworkPolicy::Denied
+pub ai6::NetworkPolicy::Limited
+pub ai6::NetworkPolicy::Open
+impl ai6::directorates::m::assistant::NetworkPolicy
+pub fn ai6::directorates::m::assistant::NetworkPolicy::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::OnLost
 pub ai6::OnLost::Fail
 pub ai6::OnLost::Retry
@@ -4966,6 +5020,7 @@ pub ai6::AssistantJob::mcp_token: alloc::string::String
 pub ai6::AssistantJob::memory: core::option::Option<ai6::directorates::section_00::assistant::MemoryOp>
 pub ai6::AssistantJob::message: alloc::string::String
 pub ai6::AssistantJob::person_id: core::option::Option<alloc::string::String>
+pub ai6::AssistantJob::reach: ai6::directorates::section_00::assistant::AssistantReach
 pub ai6::AssistantJob::recap: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::session_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::token_expires_at: f64
@@ -4976,22 +5031,41 @@ impl core::fmt::Debug for ai6::directorates::section_00::assistant::AssistantJob
 pub fn ai6::directorates::section_00::assistant::AssistantJob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::AssistantMode
 pub ai6::AssistantMode::context_file: core::option::Option<alloc::string::String>
+pub ai6::AssistantMode::deny_read: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::files: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::interpreters: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::mcp_servers: alloc::vec::Vec<ai6::directorates::section_00::agent::McpServerRef>
 pub ai6::AssistantMode::network: ai6::directorates::section_00::agent::AssistantNetwork
+pub ai6::AssistantMode::read_only: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
+pub ai6::AssistantMode::unsandboxed: bool
 impl ai6::directorates::section_00::agent::AssistantMode
 pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
 pub fn ai6::directorates::section_00::agent::AssistantMode::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::section_00::agent::AssistantMode::with_cables(self) -> Self
+pub struct ai6::AssistantNarrowing
+impl ai6::directorates::m::assistant::AssistantNarrowing
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::new() -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_allowed_hosts(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_network(self, ai6::directorates::m::assistant::NetworkPolicy) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_unsandboxed_scripts(self, bool) -> Self
 pub struct ai6::AssistantNetwork
 pub ai6::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantNetwork::policy: alloc::string::String
 impl ai6::directorates::section_00::agent::AssistantNetwork
+pub fn ai6::directorates::section_00::agent::AssistantNetwork::open(&self) -> bool
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::reaches_nothing(&self) -> bool
 impl core::default::Default for ai6::directorates::section_00::agent::AssistantNetwork
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::default() -> Self
+pub struct ai6::AssistantReach
+pub ai6::AssistantReach::interpreters: alloc::vec::Vec<alloc::string::String>
+pub ai6::AssistantReach::network: ai6::directorates::section_00::agent::AssistantNetwork
+pub ai6::AssistantReach::unsandboxed_scripts: bool
+impl ai6::directorates::section_00::assistant::AssistantReach
+pub fn ai6::directorates::section_00::assistant::AssistantReach::capped_by(&self, &ai6::directorates::section_00::assistant::AssistantReach) -> ai6::directorates::section_00::assistant::AssistantReach
+pub fn ai6::directorates::section_00::assistant::AssistantReach::scripts_reach_hosts(&self) -> bool
+pub fn ai6::directorates::section_00::assistant::AssistantReach::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::AssistantReport
 pub ai6::AssistantReport::conversation_id: alloc::string::String
 pub ai6::AssistantReport::events: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantEvent>
@@ -5001,19 +5075,32 @@ pub ai6::AssistantReport::station_id: alloc::string::String
 pub struct ai6::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
+pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::m::assistant::AssistantSettings::deployment_reach(&self) -> ai6::directorates::section_00::assistant::AssistantReach
+pub fn ai6::directorates::m::assistant::AssistantSettings::interpreters(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::m::assistant::AssistantSettings::network(&self) -> ai6::directorates::m::assistant::NetworkPolicy
 pub fn ai6::directorates::m::assistant::AssistantSettings::new() -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::org(&self) -> core::option::Option<&ai6::directorates::m::assistant::SharedRepo>
 pub fn ai6::directorates::m::assistant::AssistantSettings::personal_repo(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::m::assistant::AssistantSettings::personal_repo_for(&self, &str) -> core::result::Result<core::option::Option<alloc::string::String>, alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::reach_for(&self, &str, &[alloc::string::String]) -> ai6::directorates::section_00::assistant::AssistantReach
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::assistant::SharedRepo>
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared_for<'a>(&'a self, &[alloc::string::String]) -> impl core::iter::traits::iterator::Iterator<Item = (&'a str, &'a ai6::directorates::m::assistant::SharedRepo)>
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared_named(&self, &str, &[alloc::string::String]) -> core::option::Option<&ai6::directorates::m::assistant::SharedRepo>
+pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_elevated(self, bool) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_group(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_network(self, ai6::directorates::m::assistant::NetworkPolicy, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_org(self, ai6::directorates::m::assistant::SharedRepo) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_person(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_personal_repo(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_shared(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::SharedRepo) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_unsandboxed_scripts(self, bool) -> Self
+impl core::default::Default for ai6::directorates::m::assistant::AssistantSettings
+pub fn ai6::directorates::m::assistant::AssistantSettings::default() -> Self
 pub struct ai6::AssistantWorkspace
 pub ai6::AssistantWorkspace::author_email: alloc::string::String
 pub ai6::AssistantWorkspace::author_name: alloc::string::String
@@ -7040,14 +7127,17 @@ pub fn ai6::directorates::registry::store::FileRegistry::renew_account_claims(&s
 pub fn ai6::directorates::registry::store::FileRegistry::report_quota(&self, &ai6::directorates::registry::accounts::AccountRef, &[ai6::directorates::registry::accounts::QuotaWindow]) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
 pub trait ai6::AgentHandler: core::marker::Send + core::marker::Sync
+pub fn ai6::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -7605,6 +7695,8 @@ pub fn ai6::describe(&guatiao::library::kind::ProviderError) -> alloc::string::S
 pub fn ai6::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
 pub fn ai6::fitness(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::harness_verdict(&ai6::directorates::m::theaters::TheaterSummary, ai6::directorates::m::placement::ExecutionMode, &str) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::host_pattern(&str) -> bool
+pub fn ai6::interpreter_name(&str) -> bool
 pub fn ai6::is_head_of_station_role(&str) -> bool
 pub fn ai6::is_review(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::is_sha256_pin(&str) -> bool
@@ -7614,6 +7706,7 @@ pub fn ai6::library_pin(&[u8]) -> coqui_peer::id::PeerId
 pub fn ai6::load_role_authorizer(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::memory_path(&str) -> bool
 pub fn ai6::micro_usd(f64) -> u64
+pub fn ai6::outside_tool(&str, bool) -> bool
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
 pub fn ai6::read_review(&str) -> ai6::directorates::m::vetting::Vetting
