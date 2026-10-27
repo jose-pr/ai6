@@ -1935,6 +1935,120 @@ async fn expose_as(served: &Served, station: &str, conversation: &str) -> Status
         .status()
 }
 
+/// A roster whose `[assistant]` runs `python3` and `node`, reaches two hosts, narrows the
+/// `ops` group to `python3` and one host, and denies the viewer any network.
+fn narrowing_roster() -> Arc<dyn ai6::ConfigSource> {
+    let settings = ai6::AssistantSettings::new()
+        .with_personal_repo("/srv/mp/{person}.git")
+        .with_interpreters(vec!["python3".to_owned(), "node".to_owned()])
+        .with_network(
+            ai6::NetworkPolicy::Limited,
+            vec!["docs.python.org".to_owned(), "pypi.org".to_owned()],
+        )
+        .with_group(
+            "ops",
+            ai6::AssistantNarrowing::new()
+                .with_interpreters(vec!["python3".to_owned()])
+                .with_allowed_hosts(vec!["pypi.org".to_owned()]),
+        )
+        .with_person(
+            "viewer-007",
+            ai6::AssistantNarrowing::new().with_network(ai6::NetworkPolicy::Denied),
+        );
+    Arc::new(ai6::MemoryConfigSource::new(
+        ai6::Roster::builder().assistant(settings).build().unwrap(),
+    ))
+}
+
+#[tokio::test]
+async fn each_job_carries_what_the_persons_groups_and_own_table_narrow_her_reach_to() {
+    let served = served_with(AssistantConfig::default(), Some(narrowing_roster())).await;
+    let (_operator_app, operator) = accepted(&served, &served.operator, "Hello.").await;
+    assert_eq!(
+        operator.reach.interpreters,
+        ["python3"],
+        "the ops table narrows"
+    );
+    assert_eq!(operator.reach.network.policy, "limited");
+    assert_eq!(operator.reach.network.allowed_hosts, ["pypi.org"]);
+    assert!(!operator.reach.unsandboxed_scripts);
+    let (_viewer_app, viewer) = accepted(&served, &served.viewer, "Hello.").await;
+    assert_eq!(viewer.reach.interpreters, ["python3", "node"]);
+    assert_eq!(
+        viewer.reach.network.policy, "denied",
+        "the viewer's own table"
+    );
+    assert!(viewer.reach.network.allowed_hosts.is_empty());
+
+    // A table that would widen the deployment's setting is refused with the roster, by key.
+    let widening = ai6::AssistantSettings::new().with_group(
+        "ops",
+        ai6::AssistantNarrowing::new().with_network(ai6::NetworkPolicy::Open),
+    );
+    let refused = ai6::Roster::builder()
+        .assistant(widening)
+        .build()
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("assistant.group.ops.network"), "{refused}");
+}
+
+#[tokio::test]
+async fn a_web_fetch_she_reports_makes_her_next_memory_change_a_proposal() {
+    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Look it up.").await;
+    // By default her scripts reach no host, so running one brings in nothing.
+    assert!(!job.reach.scripts_reach_hosts());
+    let mut ran = AssistantEvent::new(EVENT_TOOL, None);
+    ran.tools = vec!["Bash".to_owned()];
+    assert_eq!(
+        report(&served, "hq", &job, None, vec![ran]).await,
+        StatusCode::NO_CONTENT
+    );
+    set_aside(&served, &job).await;
+    let commit_job = take(&served, "hq").await;
+    assert!(
+        commit_job.commit.is_some(),
+        "a script that reaches nothing exposes nothing"
+    );
+    answer_commit(&served, &commit_job, "committed 0123456789ab to main").await;
+    finish(&served, &mut app, &job).await;
+
+    say(&mut app, "And the docs?", None).await;
+    let second = take(&served, "hq").await;
+    assert!(!second.exposed);
+    report(
+        &served,
+        "hq",
+        &second,
+        Some(&second.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    let mut fetched = AssistantEvent::new(EVENT_TOOL, None);
+    fetched.tools = vec!["WebFetch".to_owned()];
+    assert_eq!(
+        report(&served, "hq", &second, None, vec![fetched]).await,
+        StatusCode::NO_CONTENT
+    );
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "notice").await;
+    let notice = frames.last().unwrap()["entry"]["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(notice.contains("WebFetch"), "{notice}");
+    set_aside(&served, &second).await;
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
+    assert_eq!(proposal_of(&frames)["tool"], "memory_commit");
+    assert!(
+        nothing_for(&served, "hq").await,
+        "nothing is committed unseen"
+    );
+    finish(&served, &mut app, &second).await;
+    say(&mut app, "Thanks.", None).await;
+    assert!(take(&served, "hq").await.exposed, "for good");
+}
+
 #[tokio::test]
 async fn the_station_raises_exposure_it_alone_sees_and_her_memory_then_waits() {
     let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;

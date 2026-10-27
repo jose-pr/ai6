@@ -15,7 +15,7 @@ default = []
 # The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
 daemon = ["gate", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "guatiao/load"]
 # The harness gate's client of a Station's Cable endpoint (`ai6::directorates::section_00::gate`).
-gate = ["dep:ureq"]
+gate = ["dep:ureq", "dep:url"]
 # Adds bounded background event publication to the Universal Exports gateway.
 publisher = ["daemon", "dep:ai6-diptel", "dep:url", "dep:similar"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]

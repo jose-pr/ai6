@@ -415,6 +415,8 @@ impl Assistant {
             cable_confirm: None,
             cable_discard: None,
             memory: Some(op),
+            // Runs nothing.
+            reach: Default::default(),
         };
         job.validate()
             .map_err(|reason| refused(StatusCode::BAD_REQUEST, sentence(&reason)))?;

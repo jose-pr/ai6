@@ -40,11 +40,12 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use ai6::{
-    AssistantChange, AssistantCommit, AssistantEvent, AssistantJob, AssistantReport,
-    AssistantSettings, AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED, EVENT_ACCEPTED,
-    EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED,
-    EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT,
-    EVENT_TOOL, MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES,
+    AssistantChange, AssistantCommit, AssistantEvent, AssistantJob, AssistantReach,
+    AssistantReport, AssistantSettings, AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED,
+    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
+    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
+    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENTS,
+    MAX_ASSISTANT_MESSAGE_BYTES, outside_tool,
 };
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
@@ -271,6 +272,7 @@ fn control_job(
         cable_confirm: None,
         cable_discard: None,
         memory: None,
+        reach: AssistantReach::default(),
     }
 }
 
@@ -580,15 +582,20 @@ impl Assistant {
                 "Sign in again to talk to Moneypenny.".to_owned(),
             )
         })?;
-        let workspace = assistant_settings(gateway)
-            .await
-            .and_then(|settings| workspace_for(&settings, &person))
-            .map_err(|reason| {
-                (
-                    "unavailable",
-                    format!("Moneypenny cannot keep a workspace for you: {reason}"),
-                )
-            })?;
+        let settings = assistant_settings(gateway).await.map_err(|reason| {
+            (
+                "unavailable",
+                format!("Moneypenny cannot keep a workspace for you: {reason}"),
+            )
+        })?;
+        let workspace = workspace_for(&settings, &person).map_err(|reason| {
+            (
+                "unavailable",
+                format!("Moneypenny cannot keep a workspace for you: {reason}"),
+            )
+        })?;
+        // Read again for every message, so a narrowed table reaches her next turn.
+        let reach = settings.reach_for(&person.id, &person.groups);
         // Read again for every message, so a permission removed reaches her next turn.
         let cables = cables::grants(gateway, &person).await;
         {
@@ -659,8 +666,10 @@ impl Assistant {
                 cable_confirm: None,
                 cable_discard: None,
                 memory: None,
+                reach,
             };
             conversation.workspace = job.workspace.clone();
+            conversation.scripts_reach_hosts = job.reach.scripts_reach_hosts();
             if let Some(text) = shown {
                 conversation.push(
                     Entry {
@@ -1938,6 +1947,23 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: B
         EVENT_TOOL => {
             let tools = event.tools.join(", ");
             conversation.push(entry(Role::Tools, tools), max_entries);
+            let reach = conversation.scripts_reach_hosts;
+            if let Some(tool) = event.tools.iter().find(|tool| outside_tool(tool, reach))
+                && !conversation.exposed
+            {
+                conversation.exposed = true;
+                conversation.push(
+                    entry(
+                        Role::Notice,
+                        format!(
+                            "Moneypenny read text from outside AI6 ({}): from now on her memory \
+                             changes and Cables wait for your confirmation.",
+                            cut(tool, 200)
+                        ),
+                    ),
+                    max_entries,
+                );
+            }
         }
         EVENT_COMPLETED => {
             if !conversation.answered && !text.trim().is_empty() {

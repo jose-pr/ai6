@@ -462,10 +462,16 @@ configuration directory's `agents.toml`, or a SQL roster's `assistant` record). 
 in for the person signed in to the conversation (a person whose identifier cannot fill
 `{person}` gets an `unavailable` error instead of a job), the repositories of the person's
 Directory groups and `org`, the author (`display_name` else `name`, without control
-characters, `<` or `>`; `email` else `<16 hex>@people.ai6.invalid`). Every job carries
+characters, `<` or `>`; `email` else `<16 hex>@people.ai6.invalid`). Every message job
+carries `reach`, read from the roster for each message: `AssistantSettings::reach_for(person,
+groups)`, the deployment's scripts and network narrowed by the tables of the person's Directory
+groups and their own. Every job carries
 `exposed`, the conversation's one record of exposure (`Conversation.exposed`, never cleared):
 set once a read tool other than `field_guide`, `profile` and `station_settings` answers
-without error (before she gets the answer), and by the Station running the conversation through `POST
+without error (before she gets the answer), when a Station reports a `tool` event naming
+`WebFetch` or `WebSearch`, or `Bash` while the last job's reach lets scripts reach a host
+(`ai6::outside_tool`; the conversation shows a `notice` naming the tool), and by the Station
+running the conversation through `POST
 /v1/station/assistant/exposure`, which also shows the person a `notice` naming the source the
 first time. A Station's
 `memory_changes` event (with `change`) in a conversation not exposed becomes a `notice`

@@ -57,6 +57,11 @@ enum Command {
         #[command(subcommand)]
         command: GreenInkCommand,
     },
+    /// Moneypenny's harness hooks.
+    Assistant {
+        #[command(subcommand)]
+        command: AssistantCommand,
+    },
     /// Provider library pins (`plugins.toml`).
     Plugins {
         #[command(subcommand)]
@@ -101,6 +106,19 @@ enum GreenInkCommand {
         /// The Session's Cable endpoint, as the handler saw it.
         #[arg(long)]
         cable_url: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AssistantCommand {
+    /// Claude Code's PreToolUse hook for Moneypenny's WebFetch. Reads the hook's JSON on
+    /// standard input; for a URL whose host is not one of --hosts (`*.example.com` covering
+    /// the names under it), and for input it cannot read, prints a decision that denies the
+    /// fetch. Prints nothing otherwise; always exits 0.
+    WebGate {
+        /// The hosts she may fetch from, separated by commas.
+        #[arg(long, value_delimiter = ',')]
+        hosts: Vec<String>,
     },
 }
 
@@ -375,6 +393,9 @@ async fn main() -> ExitCode {
         Command::GreenInk {
             command: GreenInkCommand::Gate { cable_url },
         } => green_ink_gate(cable_url).await,
+        Command::Assistant {
+            command: AssistantCommand::WebGate { hosts },
+        } => assistant_web_gate(&hosts),
         Command::Plugins {
             command: PluginsCommand::Pin { paths },
         } => {
@@ -620,6 +641,22 @@ async fn green_ink_gate(cable_url: Option<String>) -> ExitCode {
         ))
     });
     if let Some(decision) = decision {
+        println!("{decision}");
+    }
+    ExitCode::SUCCESS
+}
+
+/// Reads the hook input and prints a denial when the fetch's host is not one of `hosts`; a
+/// failure to read the input denies too.
+fn assistant_web_gate(hosts: &[String]) -> ExitCode {
+    use ai6::directorates::section_00::gate::web_fetch_gate;
+    use std::io::Read;
+    let mut input = String::new();
+    // Unreadable input is not hook input, which the gate denies.
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        input.clear();
+    }
+    if let Some(decision) = web_fetch_gate(&input, hosts) {
         println!("{decision}");
     }
     ExitCode::SUCCESS

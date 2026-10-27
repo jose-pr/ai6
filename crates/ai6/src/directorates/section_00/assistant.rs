@@ -53,9 +53,12 @@ impl AssistantMode {
                 env_prefix: ASSISTANT_MCP_ENV_PREFIX.to_owned(),
             }],
             interpreters: Vec::new(),
+            deny_read: Vec::new(),
+            unsandboxed: false,
             skills: Vec::new(),
             network: AssistantNetwork::default(),
             files: Vec::new(),
+            read_only: Vec::new(),
             context_file: None,
         }
     }
@@ -73,9 +76,10 @@ impl AssistantMode {
 
     /// Checks the parts: at least one server; server names of letters, digits, `-` and `_`;
     /// environment prefixes of capitals, digits and `_`; interpreter and skill names of
-    /// letters, digits, `.`, `-` and `_`; writable directories of one to eight `/`-separated
-    /// names of letters, digits, `.`, `-` and `_`, none starting with `.`; a context file
-    /// given as an absolute path. A handler checks this before building settings from the
+    /// letters, digits, `.`, `-` and `_`; a known network policy and hosts as [`host_pattern`]
+    /// accepts them; writable directories of one to eight `/`-separated names of letters,
+    /// digits, `.`, `-` and `_`, none starting with `.`; a context file and unreadable paths
+    /// given as absolute paths. A handler checks this before building settings from the
     /// names.
     ///
     /// # Errors
@@ -105,29 +109,31 @@ impl AssistantMode {
                 ));
             }
         }
-        for name in self.interpreters.iter().chain(&self.skills) {
+        if let Some(name) = self
+            .interpreters
+            .iter()
+            .find(|name| !interpreter_name(name))
+        {
+            return Err(format!("{name:?} is not an allowed interpreter name"));
+        }
+        for name in &self.skills {
             if !word(name, &['.', '-', '_']) {
                 return Err(format!(
                     "{name:?} is not an allowed interpreter or skill name"
                 ));
             }
         }
-        if !matches!(self.network.policy.as_str(), "limited" | "denied" | "open") {
-            return Err(format!(
-                "network policy {:?} is not limited, denied or open",
-                self.network.policy
-            ));
-        }
-        for host in &self.network.allowed_hosts {
-            if !word(host, &['.', '-', '*']) || host.len() > 253 {
-                return Err(format!("{host:?} is not a host name"));
+        check_network(&self.network)?;
+        for path in &self.deny_read {
+            if path.chars().any(char::is_control) || !std::path::Path::new(path).is_absolute() {
+                return Err(format!("{path:?} is not an absolute path"));
             }
         }
-        for path in &self.files {
+        for path in self.files.iter().chain(&self.read_only) {
             let names: Vec<&str> = path.split('/').collect();
             if names.len() > 8 || !names.iter().all(|name| file_safe(name)) {
                 return Err(format!(
-                    "{path:?} is not a directory the assistant may write"
+                    "{path:?} is not a path in the assistant's working directory"
                 ));
             }
         }
@@ -139,6 +145,159 @@ impl AssistantMode {
         Ok(())
     }
 }
+
+/// Whether `host` may name a host an assistant reaches: a lowercase DNS name of at least two
+/// labels (1 to 63 letters, digits and `-`, not starting or ending with `-`), 253 bytes at
+/// most, optionally `*.` before it for every name under it. A bare `*`, a wildcard elsewhere,
+/// an address or a dotless name (which Claude Code's WebFetch refuses) is not one.
+pub fn host_pattern(host: &str) -> bool {
+    let name = host.strip_prefix("*.").unwrap_or(host);
+    let labels: Vec<&str> = name.split('.').collect();
+    name.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(|label| {
+            (1..=63).contains(&label.len())
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+        && !labels
+            .last()
+            .is_some_and(|tld| tld.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether `name` may name an interpreter: 1 to 64 letters, digits, `.`, `-` and `_`, so it
+/// is a program name and never a path or an argument.
+pub fn interpreter_name(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && !name.starts_with(['.', '-'])
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+/// Checks a network policy: `limited`, `denied` or `open`, with hosts as [`host_pattern`]
+/// accepts them.
+fn check_network(network: &AssistantNetwork) -> Result<(), String> {
+    if !matches!(network.policy.as_str(), "limited" | "denied" | "open") {
+        return Err(format!(
+            "network policy {:?} is not limited, denied or open",
+            network.policy
+        ));
+    }
+    for host in &network.allowed_hosts {
+        if !host_pattern(host) {
+            return Err(format!("{host:?} is not a host name"));
+        }
+    }
+    Ok(())
+}
+
+/// Whether a [`EVENT_TOOL`] event's `tool` brings text from outside AI6 into the conversation:
+/// Claude Code's web tools always, and a script (`Bash`) when `scripts_reach_hosts`
+/// ([`AssistantReach::scripts_reach_hosts`]). Text it brings in exposes the conversation.
+pub fn outside_tool(tool: &str, scripts_reach_hosts: bool) -> bool {
+    matches!(tool, "WebFetch" | "WebSearch") || (tool == "Bash" && scripts_reach_hosts)
+}
+
+/// How strict a network policy is: `denied` before `limited` before `open`; an unknown one
+/// counts as `denied`.
+fn policy_rank(policy: &str) -> u8 {
+    match policy {
+        "limited" => 1,
+        "open" => 2,
+        _ => 0,
+    }
+}
+
+/// What a conversation's harness may run and reach besides its MCP servers, as Universal
+/// Exports works it out for the person from the roster's `[assistant]` and its narrowing
+/// tables. The default runs nothing and reaches nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AssistantReach {
+    /// The interpreters her scripts may run (`python3`); empty, she runs no script.
+    pub interpreters: Vec<String>,
+    /// What her web tools and scripts may reach.
+    pub network: AssistantNetwork,
+    /// Whether her scripts may run without a sandbox where the harness has none; a weakening.
+    pub unsandboxed_scripts: bool,
+}
+
+impl AssistantReach {
+    /// This reach, never wider than `cap`: the interpreters both name, the stricter network
+    /// policy (`denied` < `limited` < `open`) with the hosts both reach, and unsandboxed
+    /// scripts only when both allow them.
+    #[must_use]
+    pub fn capped_by(&self, cap: &AssistantReach) -> AssistantReach {
+        let interpreters = self
+            .interpreters
+            .iter()
+            .filter(|name| cap.interpreters.contains(name))
+            .cloned()
+            .collect();
+        let (mine, theirs) = (&self.network, &cap.network);
+        let rank = policy_rank(&mine.policy).min(policy_rank(&theirs.policy));
+        let network = match rank {
+            2 => AssistantNetwork {
+                policy: "open".to_owned(),
+                allowed_hosts: Vec::new(),
+            },
+            1 => {
+                // An `open` side reaches every host the other lists.
+                let hosts = match (mine.open(), theirs.open()) {
+                    (true, _) => theirs.allowed_hosts.clone(),
+                    (_, true) => mine.allowed_hosts.clone(),
+                    _ => mine
+                        .allowed_hosts
+                        .iter()
+                        .filter(|host| theirs.allowed_hosts.contains(host))
+                        .cloned()
+                        .collect(),
+                };
+                AssistantNetwork {
+                    policy: "limited".to_owned(),
+                    allowed_hosts: hosts,
+                }
+            }
+            _ => AssistantNetwork {
+                policy: "denied".to_owned(),
+                allowed_hosts: Vec::new(),
+            },
+        };
+        AssistantReach {
+            interpreters,
+            network,
+            unsandboxed_scripts: self.unsandboxed_scripts && cap.unsandboxed_scripts,
+        }
+    }
+
+    /// Whether her scripts may reach a host: a network policy that reaches one, or scripts let
+    /// run without a sandbox, which no policy limits.
+    pub fn scripts_reach_hosts(&self) -> bool {
+        !self.network.reaches_nothing() || self.unsandboxed_scripts
+    }
+
+    /// Checks the reach: interpreters as [`interpreter_name`] accepts them, and a network as
+    /// [`AssistantMode::validate`] wants it.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the first part out of bounds.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(name) = self
+            .interpreters
+            .iter()
+            .find(|name| !interpreter_name(name))
+        {
+            return Err(format!("{name:?} is not an interpreter name"));
+        }
+        check_network(&self.network)
+    }
+}
+
 /// The endpoint's path on Universal Exports, relative to its origin.
 pub const ASSISTANT_MCP_PATH: &str = "v1/moneypenny/mcp";
 /// The longest message a job carries, in bytes.
@@ -636,6 +795,10 @@ pub struct AssistantJob {
     /// `accepted` or `rejected` event. Requires `person_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryOp>,
+    /// What the harness may run and reach for this person; the Station caps it by its own
+    /// roster's `[assistant]` and never widens it. The default runs and reaches nothing.
+    #[serde(default)]
+    pub reach: AssistantReach,
 }
 
 /// What a person may do with Cables in one Operation, through the assistant.
@@ -783,6 +946,9 @@ impl AssistantJob {
                 .validate()
                 .map_err(|reason| format!("memory: {reason}"))?;
         }
+        self.reach
+            .validate()
+            .map_err(|reason| format!("reach: {reason}"))?;
         let recap = self.recap.as_ref().map_or(0, String::len);
         if self.context.iter().map(String::len).sum::<usize>() + recap > MAX_ASSISTANT_CONTEXT_BYTES
         {
@@ -835,6 +1001,7 @@ impl fmt::Debug for AssistantJob {
                     MemoryAction::Forget { .. } => "forget",
                 }),
             )
+            .field("reach", &self.reach)
             .finish()
     }
 }
@@ -968,6 +1135,7 @@ mod tests {
             cable_confirm: None,
             cable_discard: None,
             memory: None,
+            reach: AssistantReach::default(),
         }
     }
 
@@ -976,6 +1144,17 @@ mod tests {
             message: "Edit memory/prefs.md\n\nVia: Universal Exports".to_owned(),
             author_name: "Eve".to_owned(),
             author_email: "eve@example.invalid".to_owned(),
+        }
+    }
+
+    fn reach(interpreters: &[&str], policy: &str, hosts: &[&str]) -> AssistantReach {
+        AssistantReach {
+            interpreters: interpreters.iter().map(|name| (*name).to_owned()).collect(),
+            network: AssistantNetwork {
+                policy: policy.to_owned(),
+                allowed_hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+            },
+            unsandboxed_scripts: false,
         }
     }
 
@@ -1073,6 +1252,89 @@ mod tests {
             serde_json::json!({"missing": true}),
             "an answer carries only what it says"
         );
+    }
+
+    #[test]
+    fn a_reach_capped_by_another_is_never_wider_than_either() {
+        let wide = reach(&["python3", "node"], "limited", &["a.example", "b.example"]);
+        let narrow = reach(&["python3"], "limited", &["b.example", "c.example"]);
+        assert_eq!(
+            wide.capped_by(&narrow),
+            reach(&["python3"], "limited", &["b.example"])
+        );
+        let open = reach(&["python3"], "open", &[]);
+        assert_eq!(
+            open.capped_by(&wide),
+            reach(&["python3"], "limited", &["a.example", "b.example"]),
+            "an open side reaches what the limited side lists"
+        );
+        assert_eq!(open.capped_by(&open), open);
+        let denied = reach(&[], "denied", &[]);
+        assert_eq!(wide.capped_by(&denied), denied);
+        assert_eq!(denied.capped_by(&open), denied);
+        let unknown = reach(&["python3"], "everything", &["a.example"]);
+        assert_eq!(
+            open.capped_by(&unknown).network.policy,
+            "denied",
+            "an unknown policy counts as the strictest"
+        );
+        let mut loose = open.clone();
+        loose.unsandboxed_scripts = true;
+        assert!(!loose.capped_by(&open).unsandboxed_scripts);
+        assert!(loose.capped_by(&loose).unsandboxed_scripts);
+        assert_eq!(AssistantReach::default().validate(), Ok(()));
+        assert!(AssistantReach::default().network.reaches_nothing());
+    }
+
+    #[test]
+    fn hosts_and_interpreters_are_names_never_patterns_or_paths() {
+        for host in [
+            "example.com",
+            "*.example.com",
+            "a-b.c1.example",
+            "xn--e1a.example",
+        ] {
+            assert!(host_pattern(host), "{host}");
+        }
+        for host in [
+            "*",
+            "localhost",
+            "Example.com",
+            "*example.com",
+            "a.*.example",
+            "example.*",
+            "10.0.0.1",
+            "-a.example",
+            "a..example",
+            "a.example:443",
+            "a.example/path",
+            "",
+        ] {
+            assert!(!host_pattern(host), "{host:?}");
+        }
+        for name in ["python3", "python3.12", "node", "Rscript"] {
+            assert!(interpreter_name(name), "{name}");
+        }
+        for name in [
+            "",
+            "/usr/bin/python3",
+            "python3 -c",
+            "-c",
+            ".hidden",
+            "a\\b",
+            "sh;rm",
+        ] {
+            assert!(!interpreter_name(name), "{name:?}");
+        }
+        let mut wild = job();
+        wild.reach = reach(&["python3"], "limited", &["*"]);
+        assert!(wild.validate().unwrap_err().contains("host"));
+        let mut mode = AssistantMode::moneypenny();
+        mode.network.allowed_hosts.push("*".to_owned());
+        assert!(mode.validate().is_err(), "a bare wildcard is not a host");
+        let mut mode = AssistantMode::moneypenny();
+        mode.deny_read.push("relative/home".to_owned());
+        assert!(mode.validate().is_err());
     }
 
     #[test]

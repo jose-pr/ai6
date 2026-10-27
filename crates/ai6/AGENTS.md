@@ -371,23 +371,52 @@ pub fn config_dir() -> Result<PathBuf, RosterError>;
 
 // ai6::directorates::m::assistant, re-exported at the crate root
 #[derive(Default, Serialize, Deserialize)] // serde: unknown keys refused
-pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, write}, org {repo, write}, allow_elevated
+pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, write}, org {repo, write}, allow_elevated,
+                                // interpreters (["python3"]), network ("limited"), allowed_hosts ([]),
+                                // unsandboxed_scripts (false), group.<group> and person.<id> narrowing tables
 impl AssistantSettings {
-    pub fn new() -> Self;                                  // keeps nothing, refuses elevated Stations
+    pub fn new() -> Self;   // keeps nothing, python3 in the sandbox, no host, refuses elevated Stations
     pub fn with_personal_repo(self, template: impl Into<String>) -> Self; // {person} | {person_digest}
     pub fn with_shared(self, group: impl Into<String>, repo: SharedRepo) -> Self;
     pub fn with_org(self, repo: SharedRepo) -> Self;       // checked out as "org"
     pub fn with_allow_elevated(self, allow: bool) -> Self; // a weakening
+    pub fn with_interpreters(self, interpreters: Vec<String>) -> Self;  // empty: no scripts
+    pub fn with_network(self, policy: NetworkPolicy, allowed_hosts: Vec<String>) -> Self; // Open: a weakening
+    pub fn with_unsandboxed_scripts(self, allow: bool) -> Self;         // a weakening
+    pub fn with_group(self, group: impl Into<String>, narrowing: AssistantNarrowing) -> Self;
+    pub fn with_person(self, person: impl Into<String>, narrowing: AssistantNarrowing) -> Self;
     pub fn personal_repo(&self) -> Option<&str>;
     pub fn shared(&self) -> &BTreeMap<String, SharedRepo>;
     pub fn org(&self) -> Option<&SharedRepo>;
     pub fn allow_elevated(&self) -> bool;
-    pub fn validate(&self) -> Result<(), String>;          // "assistant.<key>: …"
+    pub fn interpreters(&self) -> &[String];
+    pub fn network(&self) -> NetworkPolicy;
+    pub fn allowed_hosts(&self) -> &[String];
+    pub fn unsandboxed_scripts(&self) -> bool;
+    pub fn deployment_reach(&self) -> AssistantReach;      // before any table
+    /// The deployment's reach capped by every group table of `groups` and the person's own.
+    pub fn reach_for(&self, person: &str, groups: &[String]) -> AssistantReach;
+    pub fn validate(&self) -> Result<(), String>;          // "assistant.<key>: …"; a table that widens
+                                                           // fails naming "assistant.group.<g>.<key>"
     pub fn personal_repo_for(&self, person: &str) -> Result<Option<String>, String>;
     pub fn shared_for(&self, groups: &[String]) -> impl Iterator<Item = (&str, &SharedRepo)>;
     pub fn shared_named(&self, name: &str, groups: &[String]) -> Option<&SharedRepo>;
-    pub fn weakenings(&self) -> Vec<String>;               // allow_elevated, each write = true
+    /// allow_elevated, each write = true, network = "open", unsandboxed_scripts = true
+    pub fn weakenings(&self) -> Vec<String>;
 }
+#[non_exhaustive] #[derive(Default, PartialOrd, Ord)] // serde lowercase; Denied < Limited < Open
+pub enum NetworkPolicy { Denied, #[default] Limited, Open }
+impl NetworkPolicy { pub fn as_str(self) -> &'static str; }
+#[derive(Default, Serialize, Deserialize)] // serde: unknown keys refused; every key optional
+pub struct AssistantNarrowing;  // interpreters, network, allowed_hosts, unsandboxed_scripts
+impl AssistantNarrowing {
+    pub fn new() -> Self;                                     // narrows nothing
+    pub fn with_interpreters(self, interpreters: Vec<String>) -> Self; // a subset of the deployment's
+    pub fn with_network(self, network: NetworkPolicy) -> Self;        // no looser than the deployment's
+    pub fn with_allowed_hosts(self, hosts: Vec<String>) -> Self;     // under limited, a subset
+    pub fn with_unsandboxed_scripts(self, allow: bool) -> Self;       // true only if the deployment allows
+}
+pub const DEFAULT_INTERPRETER: &str = "python3";
 pub struct SharedRepo;  // SharedRepo::new(repo).writable(bool); repo(), write()
 #[non_exhaustive] pub enum RepoKind { Local, Remote }
 impl RepoKind { pub fn of(repo: &str) -> Result<Self, String>; }
@@ -1971,7 +2000,20 @@ impl GateClient {
 pub fn gate(command: &str, cwd: Option<&Path>, client: Option<&GateClient>) -> GateVerdict;
 pub fn local_git(args: &[String]) -> Result<GitOutput, String>;   // git in a process here
 pub fn pre_tool_use(input: &str, client: Option<&GateClient>) -> Option<String>;   // Claude Code hook output
+pub const WEB_GATE_ARGS: [&str; 2];   // ["assistant", "web-gate"]: Moneypenny's WebFetch hook
+// feature `gate`:
+pub fn web_fetch_gate(input: &str, hosts: &[String]) -> Option<String>;  // None: the fetch goes on
 ```
+
+`web_fetch_gate` takes a WebFetch `PreToolUse` hook input (`tool_input.url`) and lets it go
+on only when the URL's host name, lowercased and without a trailing dot, is one of `hosts`
+(`*.example.com` covers the names under `example.com`, not `example.com` itself, as Claude
+Code's `WebFetch(domain:…)` rules do); an address, a URL without a host name, unreadable input
+and every other host get the deny decision. `ai6 assistant web-gate --hosts H1,H2` is that
+hook: it reads standard input, prints the decision and always exits 0. It exists because
+Claude Code 2.1.310 fetches its preapproved documentation domains (`docs.python.org`,
+`developer.mozilla.org`) under `dontAsk` although no rule names them (measured against a
+loopback stand-in for the API).
 
 `decide` allows a command that takes no governed step, or whose every step the Station answers
 `approved` or `not_required`. Anything else holds it: `needs_approval` (the text names the
@@ -2684,7 +2726,13 @@ message submission and event decoding. AI6 supplies an `AgentTerminal` object br
 over its selected `Terminal` provider. `AgentHandler::stdio(&self) -> Result<HarnessStdio,
 ProviderError>` is an appended slot (default `Ok(HarnessStdio::Terminal)`): a handler whose
 harness speaks JSON over standard input and output answers `Json` (the `claude` and `codex`
-handlers do), and the Station gives it a provider without a terminal. `AgentStart`, `AgentResume`, `AgentMessage`,
+handlers do), and the Station gives it a provider without a terminal.
+`AgentHandler::assistant_scripts(&self, environment: BTreeMap<String, String>) ->
+Result<Option<String>, ProviderError>` is another appended slot: `None` when the harness,
+started with `environment`, can run an assistant's interpreters inside its own sandbox on this
+Station, else why not; the default answers that it cannot. Claude's answers `None` on macOS,
+and on Linux when `bwrap` and `socat` are on the environment's `PATH` (else the Station's).
+`AgentStart`, `AgentResume`, `AgentMessage`,
 `AgentEvent`, `UsageLimit` and `TokenUsage` are also serde `Serialize` and `Deserialize`
 (field names as declared): a runner's API carries them as JSON.
 
@@ -2729,9 +2777,12 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // instructions and ignores it.
 pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
                            pub interpreters: Vec<String> /* serde default */,
+                           pub deny_read: Vec<String> /* serde default; absolute paths scripts may not read */,
+                           pub unsandboxed: bool /* serde default; scripts without the sandbox, a weakening */,
                            pub skills: Vec<String> /* serde default */,
                            pub network: AssistantNetwork /* serde default */,
                            pub files: Vec<String> /* serde default; directories it may write */,
+                           pub read_only: Vec<String> /* serde default; relative paths scripts may not write */,
                            pub context_file: Option<String> /* serde default; absolute, outside the working directory */ }
 pub struct McpServerRef { pub name: String /* moneypenny */,
                           pub env_prefix: String /* AI6_MONEYPENNY_MCP: <prefix>_URL, <prefix>_TOKEN */ }
@@ -2740,21 +2791,36 @@ pub struct AssistantNetwork { pub policy: String /* limited (default) | denied |
 impl AssistantMode { pub fn moneypenny() -> Self; pub fn validate(&self) -> Result<(), String>;
                      pub fn with_cables(self) -> Self; } // adds server `cables`,
                                                          // prefix AI6_ASSISTANT_CABLE_MCP
-impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool; } // denied, or limited with no host
+impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or limited with no host
+                        pub fn open(&self) -> bool; }
 // Claude Code: `--restricted --tools= --disallowedTools <its shell, file, web, sub-agent and
 // Skill tools, no mcp__> --allowedTools mcp__<name>,… --setting-sources user
 // --strict-mcp-config --mcp-config {"mcpServers":{<name>:{"type":"http","url":"${P_URL}",
 // "headers":{"Authorization":"Bearer ${P_TOKEN}"}}}}`, no gate. Codex: `-c mcp_servers=
 // {<name>={url="…",bearer_token_env_var="P_TOKEN"}}` (replacing the user's servers), the same
 // `-c` settings that switch its built-in tools off as answer-only, the project untrusted, and
-// the answer-only thread policy. Both refuse to start (UNSUPPORTED) with
-// interpreters, skills or a network reaching more than the servers, and (BAD_VALUE) when the
+// the answer-only thread policy. Both refuse to start (UNSUPPORTED) with skills, Codex also
+// with interpreters or a network reaching more than the servers, and (BAD_VALUE) when the
 // environment lacks a server's URL or token; tokens never reach a command line.
-// `validate` also checks `files` (1 to 8 `/`-separated names of letters, digits, `.`, `-`,
-// `_`, none starting with `.`) and that `context_file` is absolute. With `files`, Claude Code
-// gets `--tools Read,Write,Edit,Glob,Grep --permission-mode dontAsk`, the deny list less
-// those five, and `--allowedTools mcp__<name>,…,Read,Glob,Grep,Edit(/<dir>/**),…`; a
-// `context_file` is `--append-system-prompt-file`; every assistant Session has
+// `validate` also checks `files` and `read_only` (1 to 8 `/`-separated names of letters,
+// digits, `.`, `-`, `_`, none starting with `.`), interpreters (`interpreter_name`), hosts
+// (`host_pattern`) and that `context_file` and `deny_read` are absolute. Claude Code offers
+// exactly the built-in tools the parts call for in `--tools` (none: `--tools=`) under
+// `--permission-mode dontAsk`, denies the rest by name: with `files`, `Read,Write,Edit,Glob,
+// Grep` and `--allowedTools …,Read,Glob,Grep,Edit(/<dir>/**),…` (no path with a name starting
+// with `.`); with interpreters, `Bash` and `Bash(<interpreter> *)`; with a `limited` network
+// that lists hosts, `WebFetch` and `WebFetch(domain:<host>)`; with `open`, `WebFetch`,
+// `WebSearch`, `WebFetch(domain:*)` and `WebSearch`. Interpreters add `--settings` with the
+// sandbox (`enabled`, `failIfUnavailable`, `autoAllowBashIfSandboxed: false`,
+// `allowUnsandboxedCommands: false`, `filesystem` {`allowWrite`: the `files` directories,
+// `denyWrite`: `read_only` and `.claude`, `denyRead`: `deny_read`, `allowRead`: the working
+// directory}, `network` {`allowedDomains`: the hosts, `["*"]` when open, `strictAllowlist`},
+// `credentials.envVars` denying every environment variable but PATH, HOME, temp, locale and
+// proxy ones, and the model credentials) and `permissions.blockReadsOutsideWorkingDirectories`;
+// `unsandboxed` makes it `{"sandbox":{"enabled":false},…}`. A `limited` WebFetch adds a
+// `PreToolUse` hook on `WebFetch` running `<gate program> assistant web-gate --hosts …`
+// (`onFailure: block`). A network reaching nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1`;
+// a `context_file` is `--append-system-prompt-file`; every assistant Session has
 // `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Codex refuses `files` and `context_file`
 // (UNSUPPORTED).
 ```
@@ -2802,7 +2868,8 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub cables: Vec<AssistantCableGrant> /* default, omitted when empty */,
     pub cable_confirm: Option<AssistantCableDecision> /* default, omitted when None */,
     pub cable_discard: Option<AssistantCableDecision> /* default, omitted when None */,
-    pub memory: Option<MemoryOp> /* default, omitted when None: the person's memory from the app */ }
+    pub memory: Option<MemoryOp> /* default, omitted when None: the person's memory from the app */,
+    pub reach: AssistantReach /* default: runs and reaches nothing */ }
                                                      // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
 pub struct MemoryOp { pub repo: String /* the person's personal repository */,
@@ -2822,6 +2889,20 @@ pub struct MemoryAnswer { pub commit: Option<String> /* main read at, or the com
                                                      // every field default, omitted when empty
 pub struct MemoryFile { pub path: String /* relative to the repository */, pub bytes: u64 }
 pub fn memory_path(path: &str) -> bool;              // a repository_path under memory/
+#[derive(Default)] // serde: every key default, unknown keys refused
+pub struct AssistantReach { pub interpreters: Vec<String>, pub network: AssistantNetwork,
+                            pub unsandboxed_scripts: bool }
+impl AssistantReach {
+    /// The interpreters both name, the stricter policy (denied < limited < open; unknown is
+    /// denied) with the hosts both reach (an open side reaches what the other lists), and
+    /// unsandboxed scripts only when both allow them.
+    pub fn capped_by(&self, cap: &AssistantReach) -> AssistantReach;
+    pub fn scripts_reach_hosts(&self) -> bool;   // a network that reaches a host, or unsandboxed
+    pub fn validate(&self) -> Result<(), String>;
+}
+pub fn host_pattern(host: &str) -> bool;       // lowercase DNS name with a dot, optional leading "*."
+pub fn interpreter_name(name: &str) -> bool;   // 1-64 letters, digits, . - _, not a path or flag
+pub fn outside_tool(tool: &str, scripts_reach_hosts: bool) -> bool; // WebFetch, WebSearch, or Bash when reaching
 pub struct AssistantWorkspace { pub personal: String /* the person's repository, expanded */,
     pub shared: BTreeMap<String, String> /* default; checkout name (group or "org") -> repository */,
     pub author_name: String, pub author_email: String /* the person's */ }
@@ -3476,6 +3557,22 @@ with no fallback branch: a `main` that refuses it twice refuses the job. A `Writ
 against `main` as it commits); a `Read` or `Forget` of a missing file with `missing`. A
 conversation running anywhere keeps the memory it read until its harness starts again.
 
+Her scripts and network: the desk caps `job.reach` by its own roster's
+`assistant().reach_for(person_id, &[])` (the groups are Universal Exports'), so a job never
+widens what this Station's roster gives, and sets the mode's `network` from it, logging
+`weakening: assistant.network = "open": …` when it is open. With interpreters left, it asks
+`Harness::scripts` (the handler's `assistant_scripts` with the harness environment): when the
+harness can sandbox them, the mode gets them, `deny_read` (the Station user's home, AI6's
+configuration, state and Registry directories, and the directory holding every
+conversation's directory) and, with a workspace, `read_only = ["shared", "CLAUDE.md",
+"AGENTS.md"]`; when it cannot, the mode gets none, the start and resume context get the line
+`Scripts are unavailable on this Station (<reason>), …`, and the log
+`assistant conversation <digest>: scripts are unavailable on this Station: <reason>`, unless
+the reach allows `unsandboxed_scripts`: then the mode gets them with `unsandboxed`, and the
+log `weakening: assistant scripts run unsandboxed: files and network not enforced for them`.
+A `WebFetch` or `WebSearch` call, or `Bash` while her scripts reach a host, marks the turn
+exposed, so what she writes from then on is recorded as outside text.
+
 Exposure is Universal Exports' record (`Conversation.exposed`); the desk reads it with `GET
 /v1/station/assistant/exposure?station&conversation` (`{"exposed"}`) when a turn ends and
 raises it with `POST` (`{"station","conversation","source"}`) for what only it sees
@@ -3483,7 +3580,8 @@ raises it with `POST` (`{"station","conversation","source"}`) for what only it s
 with a file `.moneypenny/outside-text/` in the personal repository names exposes the turn at
 that call (source `personal:<path> (read by <tool>)`): a `Read` or `Edit` of it, a `Grep` or
 `Glob` whose search covers it (paths compared after `.`/`..`, the filesystem's own spelling
-and case), or a call whose input (`AgentEvent::data`) the desk cannot read. A
+and case), a `Bash` call (a script may read any file of her directory), or a call whose input
+(`AgentEvent::data`) the desk cannot read. A
 `memory/MEMORY.md` importing one (`@path`, followed five deep) exposes the conversation as
 its harness starts. Other reads do not. The record is a directory: one entry per file, holding
 the path and named by the Git object ID of that text. A save of an exposed conversation

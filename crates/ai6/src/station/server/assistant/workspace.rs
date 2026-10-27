@@ -57,8 +57,9 @@ const MAX_WALK: usize = 10_000;
 /// it, so conversations adding to it at once never touch the same file.
 pub(super) const OUTSIDE_TEXT: &str = ".moneypenny/outside-text";
 /// The built-in tools that answer with text of a file or its name: `Read`, `Grep` and `Glob`,
-/// and `Edit`, whose answer quotes the lines around its change.
-const READING_TOOLS: [&str; 4] = ["Read", "Grep", "Glob", "Edit"];
+/// `Edit`, whose answer quotes the lines around its change, and `Bash`, whose script may read
+/// any file of her working directory.
+const READING_TOOLS: [&str; 5] = ["Read", "Grep", "Glob", "Edit", "Bash"];
 /// How deep Claude Code follows `@path` imports from a memory file.
 const MAX_IMPORT_DEPTH: usize = 5;
 
@@ -989,6 +990,7 @@ fn reading_calls(data: Option<&[u8]>) -> Option<Vec<(String, Scope)>> {
             Some(path) => path.as_str()?,
         };
         match tool {
+            "Bash" => calls.push((tool.to_owned(), Scope::Under(".".to_owned()))),
             "Read" | "Edit" => calls.push((
                 tool.to_owned(),
                 Scope::File(input.get("file_path")?.as_str()?.to_owned()),

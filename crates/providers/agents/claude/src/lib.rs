@@ -18,7 +18,7 @@ use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
     LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
 };
-use ai6::directorates::section_00::gate::GATE_PROGRAM_ENV;
+use ai6::directorates::section_00::gate::{GATE_PROGRAM_ENV, WEB_GATE_ARGS};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
@@ -68,6 +68,24 @@ impl AgentHandler for ClaudeHandler {
         Ok(ai6::HarnessStdio::Json)
     }
 
+    /// Claude Code's sandbox runs on macOS (Seatbelt, built in) and on Linux and WSL2 with
+    /// `bwrap` and `socat` on the harness's `PATH`; on native Windows it runs commands
+    /// unsandboxed (code.claude.com/docs/en/sandboxing). WSL1 passes this check and is caught
+    /// by `failIfUnavailable`, which makes Claude Code exit at start.
+    fn assistant_scripts(
+        &self,
+        environment: BTreeMap<String, String>,
+    ) -> Result<Option<String>, ProviderError> {
+        Ok(script_sandbox_missing(
+            std::env::consts::OS,
+            environment
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+                .map(|(_, path)| std::ffi::OsString::from(path))
+                .or_else(|| std::env::var_os("PATH")),
+        ))
+    }
+
     fn start(
         &self,
         request: AgentStart,
@@ -104,6 +122,7 @@ impl AgentHandler for ClaudeHandler {
         add_settings(
             &mut argv,
             &request.environment,
+            &request.working_directory,
             mode,
             request.assistant.as_ref(),
         )?;
@@ -114,7 +133,7 @@ impl AgentHandler for ClaudeHandler {
             &harness_environment(
                 &request.environment,
                 request.answer_only || request.assistant.is_some(),
-                request.assistant.is_some(),
+                request.assistant.as_ref(),
             ),
         )?;
         let operation = ClaudeSession::new(session, None)
@@ -165,6 +184,7 @@ impl AgentHandler for ClaudeHandler {
         add_settings(
             &mut argv,
             &request.environment,
+            &request.working_directory,
             mode,
             request.assistant.as_ref(),
         )?;
@@ -175,7 +195,7 @@ impl AgentHandler for ClaudeHandler {
             &harness_environment(
                 &request.environment,
                 request.answer_only || request.assistant.is_some(),
-                request.assistant.is_some(),
+                request.assistant.as_ref(),
             ),
         )?;
         let operation = ClaudeSession::new(session, Some(expected_session_id))
@@ -212,29 +232,37 @@ const DISABLE_ADVISOR_ENV: &str = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL";
 /// (code.claude.com/docs/en/memory, read 2026-10-27).
 const DISABLE_AUTO_MEMORY_ENV: &str = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
 
+/// Turns WebFetch off altogether (code.claude.com/docs/en/env-vars, Claude Code 2.1.285 or
+/// later), beside leaving it out of `--tools`.
+const DISABLE_WEB_FETCH_ENV: &str = "CLAUDE_CODE_DISABLE_WEB_FETCH";
+
 /// The harness's environment: `environment`, with the advisor turned off for a restricted
-/// (answer-only or assistant) Session, and auto memory off for an assistant.
+/// (answer-only or assistant) Session, auto memory off for an assistant, and WebFetch off for
+/// an assistant whose network reaches no host.
 fn harness_environment(
     environment: &BTreeMap<String, String>,
     restricted: bool,
-    assistant: bool,
+    assistant: Option<&AssistantMode>,
 ) -> BTreeMap<String, String> {
     let mut environment = environment.clone();
     if restricted {
         environment.insert(DISABLE_ADVISOR_ENV.to_owned(), "1".to_owned());
     }
-    if assistant {
+    if let Some(mode) = assistant {
         environment.insert(DISABLE_AUTO_MEMORY_ENV.to_owned(), "1".to_owned());
+        if mode.network.reaches_nothing() {
+            environment.insert(DISABLE_WEB_FETCH_ENV.to_owned(), "1".to_owned());
+        }
     }
     environment
 }
 
 /// What a restricted (answer-only or assistant) Session may call: its MCP servers' tools, and
-/// the file tools when its mode names directories to write.
+/// the built-in tools its mode offers ([`offered_tools`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Allowed {
     servers: Vec<String>,
-    file_tools: bool,
+    builtins: Vec<&'static str>,
 }
 
 /// What a restricted Session may call, `None` for a Session that is not restricted.
@@ -246,10 +274,30 @@ fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<A
                 .iter()
                 .map(|server| server.name.clone())
                 .collect(),
-            file_tools: !mode.files.is_empty(),
+            builtins: offered_tools(mode),
         }),
         None => answer_only.then(Allowed::default),
     }
+}
+
+/// The built-in tools an assistant's mode offers: the file tools with directories to write,
+/// `Bash` with interpreters, `WebFetch` when the network reaches a host, and `WebSearch` only
+/// when it is open (a search takes no host list).
+fn offered_tools(mode: &AssistantMode) -> Vec<&'static str> {
+    let mut tools = Vec::new();
+    if !mode.files.is_empty() {
+        tools.extend(ASSISTANT_FILE_TOOLS.split(','));
+    }
+    if !mode.interpreters.is_empty() {
+        tools.push("Bash");
+    }
+    if !mode.network.reaches_nothing() {
+        tools.push("WebFetch");
+    }
+    if mode.network.open() {
+        tools.push("WebSearch");
+    }
+    tools
 }
 
 /// What AI6 decided about the Session's settings.
@@ -269,27 +317,55 @@ const ASSISTANT_DENIED: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glo
 /// The built-in tools of an assistant whose mode names directories to write.
 const ASSISTANT_FILE_TOOLS: &str = "Read,Write,Edit,Glob,Grep";
 
-/// [`ASSISTANT_DENIED`] less [`ASSISTANT_FILE_TOOLS`]: what an assistant with file tools is
-/// still denied by name.
-/// The rules after the names deny writing any path with a name starting with `.` (`.git`,
+/// The rules that deny writing any path with a name starting with `.` (`.git`,
 /// `.gitattributes`, `.claude`), whatever the allow rules say. Measured with Claude Code
 /// 2.1.310 on Windows against a loopback stand-in for the API: Write and Edit to `.git/config`,
 /// `.GIT/config`, `.git./config`, `PERSONAL\.git\config`, `.gitattributes`, `notes/.hidden`
 /// and `scratch/.x` were refused, and so were writes through 8.3 short names (`GIT~1\config`,
 /// `GITATT~1`), even after a read.
-const ASSISTANT_FILES_DENIED: &str = "Bash,PowerShell,NotebookEdit,WebFetch,WebSearch,Task,\
-                                      Agent,TodoWrite,Skill,Edit(**/.*),Edit(**/.*/**)";
+const DOT_PATHS_DENIED: [&str; 2] = ["Edit(**/.*)", "Edit(**/.*/**)"];
+
+/// Environment variables a script may keep: none of them holds a credential. Every other
+/// variable of the harness's environment is removed from its scripts' environment.
+const SCRIPT_ENVIRONMENT: [&str; 17] = [
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TZ",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+];
+
+/// Model credentials Claude Code reads (code.claude.com/docs/en/env-vars), removed from every
+/// script's environment even when the harness's own environment does not name them.
+const MODEL_CREDENTIALS: [&str; 3] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
 
 /// Adds the settings flags: assistant ([`add_assistant`]), answer-only ([`add_answer_only`]),
 /// or the project settings AI6 allowed, the Station's MCP servers and the green ink gate.
 fn add_settings(
     argv: &mut Vec<String>,
     environment: &BTreeMap<String, String>,
+    working_directory: &str,
     mode: Mode,
     assistant: Option<&AssistantMode>,
 ) -> Result<(), ProviderError> {
     if let Some(assistant) = assistant {
-        add_assistant(argv, environment, assistant)?;
+        add_assistant(argv, environment, working_directory, assistant)?;
     } else if mode.answer_only {
         add_answer_only(argv);
     } else {
@@ -301,37 +377,39 @@ fn add_settings(
 }
 
 /// An assistant Session, built from its mode's parts: answer-only's restrictions
-/// (`--restricted`, no built-in tool, only the user's settings) with exactly the mode's MCP
-/// servers connected (`--strict-mcp-config`) and their tools allowed without a prompt
-/// (`--allowedTools mcp__<name>`); a print-mode run denies any other tool it would have to ask
-/// for. Interpreters and skills are refused until this handler can confine them: refusing
-/// fails closed, where ignoring would start a Session the Station did not ask for.
+/// (`--restricted`, only the user's settings) with exactly the mode's MCP servers connected
+/// (`--strict-mcp-config`) and their tools allowed without a prompt (`--allowedTools
+/// mcp__<name>`), and only the built-in tools [`offered_tools`] names (`--tools`; none is
+/// `--tools=`), each other one denied by name. Skills are refused until this handler can
+/// confine them: refusing fails closed, where ignoring would start a Session the Station did
+/// not ask for.
 ///
-/// A mode with `files` gets the file tools (`--tools Read,Write,Edit,Glob,Grep`), which
-/// `--restricted` confines to the working directory, under `--permission-mode dontAsk`, which
-/// denies every call no rule allows: reading is allowed anywhere there, writing only under each
-/// directory (`Edit(/<dir>/**)`, relative to the working directory; Edit rules cover Write),
-/// and writes to `.git` and `.claude` always need a prompt, so they are denied too
-/// (code.claude.com/docs/en/permissions). A `context_file` is passed with
-/// `--append-system-prompt-file`.
+/// With any built-in tool the Session runs under `--permission-mode dontAsk`, which denies
+/// every call no rule allows (code.claude.com/docs/en/permissions):
+///
+/// - `files`: the file tools, which `--restricted` confines to the working directory; reading
+///   is allowed anywhere there, writing only under each directory (`Edit(/<dir>/**)`, relative
+///   to the working directory; Edit rules cover Write), never to a path with a name starting
+///   with `.`.
+/// - `interpreters`: `Bash`, allowed only as `Bash(<interpreter> *)`, inside the sandbox
+///   [`script_settings`] describes.
+/// - network `limited` with hosts: `WebFetch`, allowed as `WebFetch(domain:<host>)` for each
+///   host (which also lets the sandbox's scripts reach it); `open`: `WebFetch(domain:*)` and
+///   `WebSearch`. WebFetch runs outside the sandbox, so its rules are its only limit.
+///
+/// A `context_file` is passed with `--append-system-prompt-file`.
 fn add_assistant(
     argv: &mut Vec<String>,
     environment: &BTreeMap<String, String>,
+    working_directory: &str,
     mode: &AssistantMode,
 ) -> Result<(), ProviderError> {
     mode.validate()
         .map_err(|reason| refuse(Status::GUATIAO_ERR_BAD_VALUE, reason))?;
-    if !mode.interpreters.is_empty() || !mode.skills.is_empty() {
+    if !mode.skills.is_empty() {
         return Err(refuse(
             Status::GUATIAO_ERR_UNSUPPORTED,
-            "this Claude Code handler runs no interpreter or skill for an assistant",
-        ));
-    }
-    // WebFetch and WebSearch stay denied, so the only network the Session has is its servers.
-    if !mode.network.reaches_nothing() {
-        return Err(refuse(
-            Status::GUATIAO_ERR_UNSUPPORTED,
-            "this Claude Code handler gives an assistant no network beyond its MCP servers",
+            "this Claude Code handler runs no skill for an assistant",
         ));
     }
     let mut servers = serde_json::Map::new();
@@ -349,26 +427,59 @@ fn add_assistant(
         servers.insert(server.name.clone(), http_server(&server.env_prefix));
         allowed.push(format!("mcp__{}", server.name));
     }
+    let offered = offered_tools(mode);
+    // Under `dontAsk` Claude Code 2.1.310 still fetches its own documentation domains
+    // (docs.python.org, developer.mozilla.org) when no rule names them, so a hook refuses every
+    // host a `limited` mode does not list.
+    let web_gate = if offered.contains(&"WebFetch") && !mode.network.open() {
+        Some(hook_program(environment).ok_or_else(|| {
+            refuse(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "no program to run as the assistant's WebFetch gate",
+            )
+        })?)
+    } else {
+        None
+    };
+    let mut denied: Vec<String> = ASSISTANT_DENIED
+        .split(',')
+        .filter(|tool| !offered.contains(tool))
+        .map(str::to_owned)
+        .collect();
     argv.push("--restricted".to_owned());
-    if mode.files.is_empty() {
-        argv.extend([
-            "--tools=".to_owned(),
-            "--disallowedTools".to_owned(),
-            ASSISTANT_DENIED.to_owned(),
-        ]);
+    if offered.is_empty() {
+        argv.push("--tools=".to_owned());
     } else {
         argv.extend([
             "--tools".to_owned(),
-            ASSISTANT_FILE_TOOLS.to_owned(),
+            offered.join(","),
             "--permission-mode".to_owned(),
             "dontAsk".to_owned(),
-            "--disallowedTools".to_owned(),
-            ASSISTANT_FILES_DENIED.to_owned(),
         ]);
+    }
+    if !mode.files.is_empty() {
+        denied.extend(DOT_PATHS_DENIED.map(str::to_owned));
         allowed.extend(["Read".to_owned(), "Glob".to_owned(), "Grep".to_owned()]);
         allowed.extend(mode.files.iter().map(|path| format!("Edit(/{path}/**)")));
     }
+    allowed.extend(
+        mode.interpreters
+            .iter()
+            .map(|interpreter| format!("Bash({interpreter} *)")),
+    );
+    if mode.network.open() {
+        allowed.extend(["WebFetch(domain:*)".to_owned(), "WebSearch".to_owned()]);
+    } else if !mode.network.reaches_nothing() {
+        allowed.extend(
+            mode.network
+                .allowed_hosts
+                .iter()
+                .map(|host| format!("WebFetch(domain:{host})")),
+        );
+    }
     argv.extend([
+        "--disallowedTools".to_owned(),
+        denied.join(","),
         "--allowedTools".to_owned(),
         allowed.join(","),
         "--setting-sources".to_owned(),
@@ -377,10 +488,181 @@ fn add_assistant(
         "--mcp-config".to_owned(),
         json!({ "mcpServers": servers }).to_string(),
     ]);
+    let mut settings = serde_json::Map::new();
+    if !mode.interpreters.is_empty() {
+        settings.extend(script_settings(mode, working_directory, environment));
+    }
+    if let Some(program) = web_gate {
+        settings.extend(web_gate_settings(&program, &mode.network.allowed_hosts));
+    }
+    if !settings.is_empty() {
+        argv.extend(["--settings".to_owned(), Value::Object(settings).to_string()]);
+    }
     if let Some(file) = &mode.context_file {
         argv.extend(["--append-system-prompt-file".to_owned(), file.clone()]);
     }
     Ok(())
+}
+
+/// The Claude Code settings that confine an assistant's scripts (code.claude.com/docs/en/
+/// sandboxing and /settings-reference): the sandbox on, Claude Code exiting at start when it
+/// cannot run it (`failIfUnavailable`), every command still checked against the allow rules
+/// (`autoAllowBashIfSandboxed: false`) and none retried outside it
+/// (`allowUnsandboxedCommands: false`). Scripts write only in the working directory (where
+/// `read_only` paths and `.claude` stay unwritable) and the mode's directories, read nothing
+/// under `deny_read` but the working directory, reach only the mode's hosts (refused rather
+/// than asked about, `strictAllowlist`), and see none of the harness's environment variables
+/// that could hold a credential (`credentials.envVars`). The file tools are kept to the
+/// working directory too (`blockReadsOutsideWorkingDirectories`). With `unsandboxed` the
+/// sandbox is off and none of the file, network or environment limits applies to scripts.
+fn script_settings(
+    mode: &AssistantMode,
+    working_directory: &str,
+    environment: &BTreeMap<String, String>,
+) -> serde_json::Map<String, Value> {
+    let permissions = json!({ "blockReadsOutsideWorkingDirectories": true });
+    if mode.unsandboxed {
+        return object(json!({ "sandbox": { "enabled": false }, "permissions": permissions }));
+    }
+    let root = std::path::Path::new(working_directory);
+    let under = |path: &str| root.join(path).to_string_lossy().into_owned();
+    let mut read_only: Vec<String> = mode.read_only.iter().map(|path| under(path)).collect();
+    read_only.push(under(".claude"));
+    // Claude Code 2.1.310 does not open the sandbox to `WebFetch(domain:*)` given in
+    // `--allowedTools`, so an open network names every host here itself.
+    let hosts: Vec<&str> = match mode.network.policy.as_str() {
+        "open" => vec!["*"],
+        "limited" => mode
+            .network
+            .allowed_hosts
+            .iter()
+            .map(String::as_str)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut hidden: std::collections::BTreeSet<&str> = MODEL_CREDENTIALS.into_iter().collect();
+    hidden.extend(
+        environment
+            .keys()
+            .map(String::as_str)
+            .filter(|name| {
+                !SCRIPT_ENVIRONMENT
+                    .iter()
+                    .any(|kept| kept.eq_ignore_ascii_case(name))
+            })
+            .filter(|name| variable_name(name)),
+    );
+    object(json!({
+        "sandbox": {
+            "enabled": true,
+            "failIfUnavailable": true,
+            "autoAllowBashIfSandboxed": false,
+            "allowUnsandboxedCommands": false,
+            "filesystem": {
+                "allowWrite": mode.files.iter().map(|path| under(path)).collect::<Vec<_>>(),
+                "denyWrite": read_only,
+                "denyRead": mode.deny_read,
+                "allowRead": [working_directory],
+            },
+            "network": {
+                "allowedDomains": hosts,
+                "strictAllowlist": true,
+            },
+            "credentials": {
+                "envVars": hidden
+                    .into_iter()
+                    .map(|name| json!({ "name": name, "mode": "deny" }))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "permissions": permissions,
+    }))
+}
+
+/// The members of a JSON object built with `json!`.
+fn object(value: Value) -> serde_json::Map<String, Value> {
+    match value {
+        Value::Object(members) => members,
+        _ => serde_json::Map::new(),
+    }
+}
+
+/// The Claude Code settings that keep an assistant's WebFetch to `hosts`: a `PreToolUse` hook
+/// on `WebFetch` running `PROGRAM assistant web-gate --hosts HOST,...`, which denies a fetch of
+/// any other host (`ai6::directorates::section_00::gate::web_fetch_gate`), with hooks on
+/// whatever the user's settings say and a hook that fails to run blocking the fetch
+/// (`onFailure`, Claude Code 2.1.295 or later), as the green ink gate's.
+fn web_gate_settings(program: &str, hosts: &[String]) -> serde_json::Map<String, Value> {
+    let mut args: Vec<String> = WEB_GATE_ARGS.map(str::to_owned).to_vec();
+    args.extend(["--hosts".to_owned(), hosts.join(",")]);
+    object(json!({
+        "disableAllHooks": false,
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "WebFetch",
+                "hooks": [{
+                    "type": "command",
+                    "command": program,
+                    "args": args,
+                    "timeout": 60,
+                    "onFailure": "block"
+                }]
+            }]
+        }
+    }))
+}
+
+/// The program a harness hook runs as AI6's gate: `AI6_GREEN_INK_GATE` from the Session
+/// environment (which only the Agent's roster can set) when not blank, else the executable
+/// hosting this handler (`ai6` on a Station or field runner).
+fn hook_program(environment: &BTreeMap<String, String>) -> Option<String> {
+    environment
+        .get(GATE_PROGRAM_ENV)
+        .filter(|program| !program.trim().is_empty())
+        .cloned()
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned())
+        })
+}
+
+/// Why Claude Code's sandbox cannot run on `os` with programs found on `path`, or `None` when
+/// it can.
+fn script_sandbox_missing(os: &str, path: Option<std::ffi::OsString>) -> Option<String> {
+    match os {
+        "macos" => None,
+        "linux" => {
+            let missing: Vec<&str> = ["bwrap", "socat"]
+                .into_iter()
+                .filter(|program| {
+                    !path.as_ref().is_some_and(|path| {
+                        std::env::split_paths(path).any(|dir| dir.join(program).is_file())
+                    })
+                })
+                .collect();
+            (!missing.is_empty()).then(|| {
+                format!(
+                    "Claude Code's sandbox needs bubblewrap (bwrap) and socat on the harness's \
+                     PATH, and {} is not there",
+                    missing.join(" and ")
+                )
+            })
+        }
+        "windows" => Some(
+            "Claude Code runs commands unsandboxed on native Windows; its sandbox runs on \
+             macOS, Linux and WSL2"
+                .to_owned(),
+        ),
+        other => Some(format!("Claude Code has no sandbox on {other}")),
+    }
+}
+
+/// Whether `name` is a variable `credentials.envVars` accepts: a letter or `_`, then
+/// letters, digits and `_`.
+fn variable_name(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// A Session that only reads its prompt and answers: `--restricted` (Claude Code 2.1.248 or
@@ -474,16 +756,7 @@ fn add_gate(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
     else {
         return;
     };
-    let program = environment
-        .get(GATE_PROGRAM_ENV)
-        .filter(|program| !program.trim().is_empty())
-        .cloned()
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .map(|path| path.to_string_lossy().into_owned())
-        });
-    if let Some(program) = program {
+    if let Some(program) = hook_program(environment) {
         argv.extend([
             "--settings".to_owned(),
             gate_settings(&program, cable_url).to_string(),
@@ -638,10 +911,10 @@ impl ClaudeSession {
     }
 
     /// The `failed` event that ends a restricted Session whose `seen` event calls a tool outside
-    /// its servers (`mcp__<server>__<tool>`) and, when it has them, its file tools, after
+    /// its servers (`mcp__<server>__<tool>`) and the built-in tools its mode offers, after
     /// closing it; `None` when it calls none. The flags it was started with are meant to make
-    /// this impossible; this backs them up. Which paths a file tool may write is the
-    /// permission rules' to enforce.
+    /// this impossible; this backs them up. Which paths, commands and hosts a built-in tool may
+    /// reach is the permission rules' and the sandbox's to enforce.
     fn tripped(&self, seen: &AgentEvent) -> Option<AgentEvent> {
         let allowed = self.restricted.as_ref()?;
         let forbidden = seen
@@ -652,8 +925,7 @@ impl ClaudeSession {
                     .servers
                     .iter()
                     .any(|server| tool.starts_with(&format!("mcp__{server}__")))
-                    || (allowed.file_tools
-                        && ASSISTANT_FILE_TOOLS.split(',').any(|file| file == *tool)))
+                    || allowed.builtins.iter().any(|builtin| builtin == *tool))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -2758,7 +3030,7 @@ mod tests {
         let cables = AssistantMode::moneypenny().with_cables();
         let mut argv = Vec::new();
         assert!(
-            add_assistant(&mut argv, &environment, &cables).is_err(),
+            add_assistant(&mut argv, &environment, "/wd", &cables).is_err(),
             "no Cable endpoint in the environment"
         );
         environment.insert(
@@ -2770,7 +3042,7 @@ mod tests {
             "cable-token".to_owned(),
         );
         let mut argv = Vec::new();
-        add_assistant(&mut argv, &environment, &cables).unwrap();
+        add_assistant(&mut argv, &environment, "/wd", &cables).unwrap();
         let after = |flag: &str| {
             let position = argv.iter().position(|a| a == flag).unwrap();
             argv[position + 1].clone()
@@ -2799,31 +3071,409 @@ mod tests {
     #[test]
     fn an_assistant_mode_the_handler_cannot_confine_is_refused() {
         let environment = assistant_environment();
-        let mut interpreters = AssistantMode::moneypenny();
-        interpreters.interpreters.push("python3".to_owned());
-        let mut open = AssistantMode::moneypenny();
-        open.network.policy = "open".to_owned();
-        let mut hosts = AssistantMode::moneypenny();
-        hosts.network.allowed_hosts.push("example.com".to_owned());
-        for mode in [interpreters, open, hosts] {
+        let mut skills = AssistantMode::moneypenny();
+        skills.skills.push("pdf".to_owned());
+        let mut wildcard = AssistantMode::moneypenny();
+        wildcard.network.allowed_hosts.push("*".to_owned());
+        let mut path = AssistantMode::moneypenny();
+        path.interpreters.push("/bin/sh".to_owned());
+        for mode in [skills, wildcard, path] {
             let mut argv = Vec::new();
-            assert!(add_assistant(&mut argv, &environment, &mode).is_err());
+            assert!(add_assistant(&mut argv, &environment, "/wd", &mode).is_err());
             assert!(argv.is_empty());
         }
         let mut argv = Vec::new();
-        let denied = AssistantMode {
+        assert!(
+            add_assistant(
+                &mut argv,
+                &BTreeMap::new(),
+                "/wd",
+                &AssistantMode::moneypenny()
+            )
+            .is_err(),
+            "no endpoint in the environment"
+        );
+    }
+
+    /// The working directory, an unreadable directory and the mode of a fixture: `policy` with
+    /// `hosts`, `python3` when `scripts`, and her workspace's directories.
+    fn script_mode(policy: &str, hosts: &[&str], scripts: bool) -> (String, String, AssistantMode) {
+        let root = std::env::temp_dir().join("ai6-claude-fixture");
+        let working_directory = root.join("conversation").to_string_lossy().into_owned();
+        let home = root.join("home").to_string_lossy().into_owned();
+        let mode = AssistantMode {
+            interpreters: if scripts {
+                vec!["python3".to_owned()]
+            } else {
+                Vec::new()
+            },
+            deny_read: vec![home.clone()],
             network: ai6::AssistantNetwork {
-                policy: "denied".to_owned(),
-                allowed_hosts: Vec::new(),
+                policy: policy.to_owned(),
+                allowed_hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+            },
+            files: vec!["personal".to_owned(), "scratch".to_owned()],
+            read_only: vec![
+                "shared".to_owned(),
+                "CLAUDE.md".to_owned(),
+                "AGENTS.md".to_owned(),
+            ],
+            ..AssistantMode::moneypenny()
+        };
+        (working_directory, home, mode)
+    }
+
+    /// The argv and environment Claude Code is started with for `mode`.
+    fn started_with(
+        working_directory: &str,
+        mode: AssistantMode,
+    ) -> (Vec<String>, BTreeMap<String, String>) {
+        let mut environment = assistant_environment();
+        environment.insert("ANTHROPIC_API_KEY".to_owned(), "model-key".to_owned());
+        environment.insert("LANG".to_owned(), "C".to_owned());
+        let terminal = ProcessTerminal::new();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-assistant-fixture".to_owned(),
+        })
+        .unwrap();
+        let started = handler
+            .start(
+                AgentStart {
+                    mission_id: "assistant-conversation".parse().unwrap(),
+                    agent_id: "moneypenny".to_owned(),
+                    prompt: "Work it out.".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: working_directory.to_owned(),
+                    clearance: "desk".to_owned(),
+                    environment,
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: Some(mode),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&started);
+        started.close().unwrap();
+        let spec = terminal.specs.lock().unwrap().remove(0);
+        (spec.argv, spec.env.unwrap())
+    }
+
+    fn flag(argv: &[String], flag: &str) -> Option<String> {
+        argv.iter()
+            .position(|a| a == flag)
+            .map(|position| argv[position + 1].clone())
+    }
+
+    /// The sandbox a fixture's scripts run in, for `hosts`.
+    fn sandbox(working_directory: &str, home: &str, hosts: &[&str]) -> Value {
+        let under = |path: &str| {
+            std::path::Path::new(working_directory)
+                .join(path)
+                .to_string_lossy()
+                .into_owned()
+        };
+        json!({
+            "sandbox": {
+                "enabled": true,
+                "failIfUnavailable": true,
+                "autoAllowBashIfSandboxed": false,
+                "allowUnsandboxedCommands": false,
+                "filesystem": {
+                    "allowWrite": [under("personal"), under("scratch")],
+                    "denyWrite": [
+                        under("shared"),
+                        under("CLAUDE.md"),
+                        under("AGENTS.md"),
+                        under(".claude")
+                    ],
+                    "denyRead": [home],
+                    "allowRead": [working_directory],
+                },
+                "network": { "allowedDomains": hosts, "strictAllowlist": true },
+                "credentials": { "envVars": [
+                    { "name": "AI6_CABLE_MCP_TOKEN", "mode": "deny" },
+                    { "name": "AI6_CABLE_MCP_URL", "mode": "deny" },
+                    { "name": "AI6_MONEYPENNY_MCP_TOKEN", "mode": "deny" },
+                    { "name": "AI6_MONEYPENNY_MCP_URL", "mode": "deny" },
+                    { "name": "ANTHROPIC_API_KEY", "mode": "deny" },
+                    { "name": "ANTHROPIC_AUTH_TOKEN", "mode": "deny" },
+                    { "name": "CLAUDE_CODE_OAUTH_TOKEN", "mode": "deny" },
+                    { "name": "CLAUDE_FIXTURE_SESSION_ID", "mode": "deny" }
+                ]}
+            },
+            "permissions": { "blockReadsOutsideWorkingDirectories": true }
+        })
+    }
+
+    /// The WebFetch gate of a fixture's `limited` network: the hook runs the program hosting
+    /// the handler, here the test binary.
+    fn web_gate(hosts: &[&str]) -> Value {
+        json!({
+            "disableAllHooks": false,
+            "hooks": { "PreToolUse": [{
+                "matcher": "WebFetch",
+                "hooks": [{
+                    "type": "command",
+                    "command": std::env::current_exe().unwrap().to_string_lossy(),
+                    "args": ["assistant", "web-gate", "--hosts", hosts.join(",")],
+                    "timeout": 60,
+                    "onFailure": "block"
+                }]
+            }]}
+        })
+    }
+
+    /// Each network policy with and without scripts, as code.claude.com/docs/en/sandboxing,
+    /// /permissions and /settings-reference describe the flags and keys.
+    #[test]
+    fn scripts_and_the_network_policy_give_exactly_their_tools_rules_and_sandbox() {
+        let files = "mcp__moneypenny,Read,Glob,Grep,Edit(/personal/**),Edit(/scratch/**)";
+        let dots = "Edit(**/.*),Edit(**/.*/**)";
+        // (policy, hosts, scripts, --tools, --disallowedTools, --allowedTools, WebFetch off)
+        let cases = [
+            (
+                "limited",
+                &["docs.python.org", "*.pypi.org"][..],
+                true,
+                "Read,Write,Edit,Glob,Grep,Bash,WebFetch",
+                format!("PowerShell,NotebookEdit,WebSearch,Task,Agent,TodoWrite,Skill,{dots}"),
+                format!(
+                    "{files},Bash(python3 *),WebFetch(domain:docs.python.org),\
+                     WebFetch(domain:*.pypi.org)"
+                ),
+                false,
+            ),
+            (
+                "limited",
+                &["docs.python.org", "*.pypi.org"][..],
+                false,
+                "Read,Write,Edit,Glob,Grep,WebFetch",
+                format!("Bash,PowerShell,NotebookEdit,WebSearch,Task,Agent,TodoWrite,Skill,{dots}"),
+                format!("{files},WebFetch(domain:docs.python.org),WebFetch(domain:*.pypi.org)"),
+                false,
+            ),
+            (
+                "denied",
+                &[][..],
+                true,
+                "Read,Write,Edit,Glob,Grep,Bash",
+                format!(
+                    "PowerShell,NotebookEdit,WebFetch,WebSearch,Task,Agent,TodoWrite,Skill,{dots}"
+                ),
+                format!("{files},Bash(python3 *)"),
+                true,
+            ),
+            (
+                "denied",
+                &[][..],
+                false,
+                "Read,Write,Edit,Glob,Grep",
+                format!(
+                    "Bash,PowerShell,NotebookEdit,WebFetch,WebSearch,Task,Agent,TodoWrite,Skill,\
+                     {dots}"
+                ),
+                files.to_owned(),
+                true,
+            ),
+            (
+                "open",
+                &[][..],
+                true,
+                "Read,Write,Edit,Glob,Grep,Bash,WebFetch,WebSearch",
+                format!("PowerShell,NotebookEdit,Task,Agent,TodoWrite,Skill,{dots}"),
+                format!("{files},Bash(python3 *),WebFetch(domain:*),WebSearch"),
+                false,
+            ),
+            (
+                "open",
+                &[][..],
+                false,
+                "Read,Write,Edit,Glob,Grep,WebFetch,WebSearch",
+                format!("Bash,PowerShell,NotebookEdit,Task,Agent,TodoWrite,Skill,{dots}"),
+                format!("{files},WebFetch(domain:*),WebSearch"),
+                false,
+            ),
+        ];
+        for (policy, hosts, scripts, tools, denied, allowed, fetch_off) in cases {
+            let case = format!("{policy} {hosts:?} scripts={scripts}");
+            let (working_directory, home, mode) = script_mode(policy, hosts, scripts);
+            let (argv, environment) = started_with(&working_directory, mode);
+            assert_eq!(flag(&argv, "--tools").as_deref(), Some(tools), "{case}");
+            assert_eq!(flag(&argv, "--permission-mode").as_deref(), Some("dontAsk"));
+            assert_eq!(flag(&argv, "--disallowedTools"), Some(denied), "{case}");
+            assert_eq!(flag(&argv, "--allowedTools"), Some(allowed), "{case}");
+            assert_eq!(
+                environment.get(DISABLE_WEB_FETCH_ENV).map(String::as_str),
+                fetch_off.then_some("1"),
+                "{case}"
+            );
+            let settings = flag(&argv, "--settings")
+                .map(|settings| serde_json::from_str::<Value>(&settings).unwrap());
+            let mut expected = serde_json::Map::new();
+            if scripts {
+                let listed: &[&str] = match policy {
+                    "limited" => hosts,
+                    "open" => &["*"],
+                    _ => &[],
+                };
+                expected.extend(object(sandbox(&working_directory, &home, listed)));
+            }
+            if policy == "limited" {
+                expected.extend(object(web_gate(hosts)));
+            }
+            assert_eq!(
+                settings,
+                (!expected.is_empty()).then_some(Value::Object(expected)),
+                "{case}"
+            );
+            assert!(
+                !argv
+                    .iter()
+                    .any(|a| a.contains("conversation-token") || a.contains("model-key")),
+                "secrets stay out of the command line: {case}"
+            );
+        }
+    }
+
+    /// Without a workspace, scripts and the web still get their tools, and an assistant whose
+    /// network reaches no host and runs no script keeps `--tools=` with no permission mode.
+    #[test]
+    fn scripts_without_a_workspace_and_a_mode_with_nothing_built_in() {
+        let mode = AssistantMode {
+            interpreters: vec!["python3".to_owned(), "node".to_owned()],
+            network: ai6::AssistantNetwork {
+                policy: "limited".to_owned(),
+                allowed_hosts: vec!["docs.python.org".to_owned()],
             },
             ..AssistantMode::moneypenny()
         };
-        assert!(add_assistant(&mut argv, &environment, &denied).is_ok());
-        let mut argv = Vec::new();
-        assert!(
-            add_assistant(&mut argv, &BTreeMap::new(), &AssistantMode::moneypenny()).is_err(),
-            "no endpoint in the environment"
+        let (argv, environment) = started_with("/conversation", mode);
+        assert_eq!(flag(&argv, "--tools").as_deref(), Some("Bash,WebFetch"));
+        assert_eq!(
+            flag(&argv, "--allowedTools").as_deref(),
+            Some("mcp__moneypenny,Bash(python3 *),Bash(node *),WebFetch(domain:docs.python.org)")
         );
+        assert!(
+            !flag(&argv, "--disallowedTools")
+                .unwrap()
+                .contains("Edit(**/.*)")
+        );
+        let settings: Value = serde_json::from_str(&flag(&argv, "--settings").unwrap()).unwrap();
+        assert_eq!(settings["sandbox"]["filesystem"]["allowWrite"], json!([]));
+        assert_eq!(settings["sandbox"]["filesystem"]["denyRead"], json!([]));
+        assert_eq!(environment.get(DISABLE_WEB_FETCH_ENV), None);
+
+        let (argv, environment) = started_with("/conversation", AssistantMode::moneypenny());
+        assert!(argv.iter().any(|a| a == "--tools="), "{argv:?}");
+        assert_eq!(flag(&argv, "--permission-mode"), None);
+        assert_eq!(flag(&argv, "--settings"), None);
+        assert_eq!(
+            environment.get(DISABLE_WEB_FETCH_ENV).map(String::as_str),
+            Some("1"),
+            "limited with no host reaches nothing"
+        );
+    }
+
+    /// With `unsandboxed`, scripts run with the sandbox off; Bash is still allowed only for
+    /// the interpreters.
+    #[test]
+    fn unsandboxed_scripts_turn_the_sandbox_off_and_keep_the_interpreter_rules() {
+        let (working_directory, _, mut mode) = script_mode("limited", &[], true);
+        mode.unsandboxed = true;
+        let (argv, _) = started_with(&working_directory, mode);
+        let settings: Value = serde_json::from_str(&flag(&argv, "--settings").unwrap()).unwrap();
+        assert_eq!(
+            settings,
+            json!({
+                "sandbox": { "enabled": false },
+                "permissions": { "blockReadsOutsideWorkingDirectories": true }
+            })
+        );
+        assert!(
+            flag(&argv, "--allowedTools")
+                .unwrap()
+                .contains("Bash(python3 *)")
+        );
+    }
+
+    #[test]
+    fn the_sandbox_is_found_on_macos_and_on_linux_with_bwrap_and_socat() {
+        let bin = std::env::temp_dir().join(format!("ai6-claude-sandbox-{}", std::process::id()));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("bwrap"), "").unwrap();
+        let path = Some(std::env::join_paths([&bin]).unwrap());
+        let missing = script_sandbox_missing("linux", path.clone()).unwrap();
+        assert!(
+            missing.contains("socat") && !missing.contains("bwrap and"),
+            "{missing}"
+        );
+        std::fs::write(bin.join("socat"), "").unwrap();
+        assert_eq!(script_sandbox_missing("linux", path.clone()), None);
+        assert!(script_sandbox_missing("linux", None).is_some());
+        assert_eq!(script_sandbox_missing("macos", None), None);
+        let windows = script_sandbox_missing("windows", path).unwrap();
+        assert!(windows.contains("native Windows"), "{windows}");
+        assert!(script_sandbox_missing("freebsd", None).is_some());
+        std::fs::remove_dir_all(&bin).unwrap();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude".to_owned(),
+        })
+        .unwrap();
+        let here = handler.assistant_scripts(BTreeMap::new()).unwrap();
+        if cfg!(windows) {
+            assert!(here.is_some());
+        }
+    }
+
+    #[test]
+    fn an_assistant_may_call_the_built_in_tools_its_mode_offers_and_no_other() {
+        let (_, _, scripts) = script_mode("limited", &["docs.python.org"], true);
+        let (_, _, denied) = script_mode("denied", &[], false);
+        let (_, _, open) = script_mode("open", &[], false);
+        for (mode, tool, ends) in [
+            (scripts.clone(), "Bash", false),
+            (scripts.clone(), "WebFetch", false),
+            (scripts, "WebSearch", true),
+            (denied.clone(), "Bash", true),
+            (denied, "WebFetch", true),
+            (open.clone(), "WebSearch", false),
+            (open, "PowerShell", true),
+        ] {
+            let mut input =
+                b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-1\"}\n".to_vec();
+            input.extend_from_slice(
+                format!(
+                    "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"tool_use\",\
+                     \"id\":\"t\",\"name\":\"{tool}\",\"input\":{{}}}}]}}}}\n"
+                )
+                .as_bytes(),
+            );
+            input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
+            let session = ClaudeSession::new(
+                ResumeTerminalSession {
+                    input: Mutex::new(input),
+                    writes: Arc::new(Mutex::new(Vec::new())),
+                }
+                .into_object(),
+                None,
+            )
+            .restricted_to(restriction(false, Some(&mode)));
+            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+                .map(|event| event.kind)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                kinds.contains(&"failed".to_owned()),
+                ends,
+                "{tool} under {:?} with {:?}: {kinds:?}",
+                mode.network.policy,
+                mode.interpreters
+            );
+        }
     }
 
     #[test]

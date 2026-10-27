@@ -552,3 +552,104 @@ mod client {
         }
     }
 }
+
+/// The `ai6` subcommand an assistant's `PreToolUse` hook runs to keep WebFetch to her hosts:
+/// `PROGRAM assistant web-gate --hosts HOST,...`.
+pub const WEB_GATE_ARGS: [&str; 2] = ["assistant", "web-gate"];
+
+#[cfg(feature = "gate")]
+pub use web::web_fetch_gate;
+
+#[cfg(feature = "gate")]
+mod web {
+    use serde_json::Value;
+
+    use super::deny;
+
+    /// Answers Claude Code's `PreToolUse` hook for WebFetch, `input` being the JSON the hook
+    /// reads: `None` (print nothing, let the fetch go on) when the URL's host is one of
+    /// `hosts`, a `*.example.com` entry covering every name under `example.com` but not
+    /// `example.com` itself, as Claude Code's own `WebFetch(domain:…)` rules do; otherwise the
+    /// decision that denies the fetch, so a host Claude Code fetches without asking (its
+    /// documentation domains) is refused too. Input it cannot read, or a URL with no host
+    /// name, is denied.
+    pub fn web_fetch_gate(input: &str, hosts: &[String]) -> Option<String> {
+        let refused = |why: &str| {
+            Some(deny(&format!(
+                "WebFetch reaches only the hosts this deployment allows ({}); {why}",
+                if hosts.is_empty() {
+                    "none".to_owned()
+                } else {
+                    hosts.join(", ")
+                }
+            )))
+        };
+        let Ok(input) = serde_json::from_str::<Value>(input) else {
+            return refused("the hook input could not be read, so the fetch is refused.");
+        };
+        let Some(url) = input.pointer("/tool_input/url").and_then(Value::as_str) else {
+            return refused("the hook input names no URL, so the fetch is refused.");
+        };
+        let host = url::Url::parse(url).ok().and_then(|url| match url.host() {
+            Some(url::Host::Domain(domain)) => {
+                Some(domain.trim_end_matches('.').to_ascii_lowercase())
+            }
+            _ => None,
+        });
+        let Some(host) = host else {
+            return refused("the URL names no host name, so the fetch is refused.");
+        };
+        let listed = hosts
+            .iter()
+            .any(|allowed| match allowed.strip_prefix("*.") {
+                Some(parent) => host
+                    .strip_suffix(parent)
+                    .is_some_and(|sub| sub.ends_with('.') && sub.len() > 1),
+                None => host == *allowed,
+            });
+        if listed {
+            None
+        } else {
+            refused(&format!("{host} is not one of them."))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn fetch(url: &str) -> String {
+            serde_json::json!({ "tool_name": "WebFetch", "tool_input": { "url": url } }).to_string()
+        }
+
+        #[test]
+        fn only_listed_hosts_are_fetched_and_everything_else_is_denied() {
+            let hosts = vec!["docs.python.org".to_owned(), "*.pypi.org".to_owned()];
+            for allowed in [
+                "https://docs.python.org/3/",
+                "http://DOCS.python.org./x",
+                "https://files.pypi.org/a",
+                "https://a.b.pypi.org/",
+                "https://user@docs.python.org:8443/x",
+            ] {
+                assert_eq!(web_fetch_gate(&fetch(allowed), &hosts), None, "{allowed}");
+            }
+            for refused in [
+                "https://developer.mozilla.org/en-US/",
+                "https://pypi.org/",
+                "https://evilpypi.org/",
+                "https://docs.python.org.evil.example/",
+                "https://127.0.0.1/",
+                "https://[::1]/",
+                "file:///etc/passwd",
+                "not a url",
+            ] {
+                let decision = web_fetch_gate(&fetch(refused), &hosts).expect(refused);
+                assert!(decision.contains("\"deny\""), "{refused}: {decision}");
+            }
+            assert!(web_fetch_gate("{", &hosts).is_some());
+            assert!(web_fetch_gate("{\"tool_input\":{}}", &hosts).is_some());
+            assert!(web_fetch_gate(&fetch("https://docs.python.org/"), &[]).is_some());
+        }
+    }
+}

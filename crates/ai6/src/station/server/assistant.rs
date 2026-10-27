@@ -60,7 +60,7 @@ use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
     AssistantJob, AssistantReport, COMMIT_MEMORY, EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED,
     EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
-    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer,
+    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
 };
 use crate::guatiao::library::Object;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
@@ -269,6 +269,12 @@ pub(super) trait Harness: Send + Sync {
         handler: &str,
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String>;
+    /// Why `handler`'s harness, started with `environment`, cannot run scripts in its own
+    /// sandbox here; `None` when it can.
+    fn scripts(&self, handler: &str, environment: &BTreeMap<String, String>) -> Option<String> {
+        let _ = (handler, environment);
+        Some("this Station's harness runs no scripts".to_owned())
+    }
 }
 
 /// The Station's handlers, each on the terminal provider the Station chooses for it.
@@ -345,6 +351,16 @@ impl Harness for StationHarness {
             .map_err(|error| error.to_string())?;
         log_start(&session, "resumed", handler, &provider);
         Ok(resumed)
+    }
+
+    fn scripts(&self, handler: &str, environment: &BTreeMap<String, String>) -> Option<String> {
+        let handler = match self.0.plugins.handler(handler, None) {
+            Ok(handler) => handler,
+            Err(error) => return Some(error.to_string()),
+        };
+        handler
+            .assistant_scripts(environment.clone())
+            .unwrap_or_else(|error| Some(error.to_string()))
     }
 }
 
@@ -770,6 +786,7 @@ impl Desk {
                 return Err(reason);
             }
         };
+        let unavailable = self.arm(&mut mode, job, &handler, &environment, &area);
         let mission_id = MissionId::try_new(format!(
             "assistant--{}",
             conversation_digest(&job.conversation_id)
@@ -784,6 +801,8 @@ impl Desk {
             .into_iter()
             .collect();
         initial_context.extend(job.context.iter().cloned());
+        initial_context.extend(unavailable);
+        let reaching = !mode.network.reaches_nothing() || mode.unsandboxed;
         // A resumed harness has the conversation; only one started afresh is given its recap.
         let mut fresh_context = initial_context.clone();
         fresh_context.extend(job.recap.iter().cloned());
@@ -897,12 +916,91 @@ impl Desk {
             workspace,
             notices,
             exposure: self.exposure.clone(),
+            reaching,
         };
         std::thread::Builder::new()
             .name("ai6-assistant".to_owned())
             .spawn(move || pump.run())
             .map_err(|error| format!("the assistant pump did not start: {error}"))?;
         Ok(())
+    }
+
+    /// Gives `mode` what the job lets her run and reach, never more than this Station's own
+    /// roster gives the person ([`AssistantSettings::reach_for`], without the groups only
+    /// Universal Exports knows): the network policy, and the interpreters when `handler`'s
+    /// harness can sandbox them here, or without a sandbox when `unsandboxed_scripts` allows
+    /// it, a weakening logged each time. Answers the line that tells her scripts are
+    /// unavailable, when they are, which the Station's log also gets with the reason.
+    ///
+    /// [`AssistantSettings::reach_for`]: crate::directorates::m::assistant::AssistantSettings::reach_for
+    fn arm(
+        &self,
+        mode: &mut AssistantMode,
+        job: &AssistantJob,
+        handler: &str,
+        environment: &BTreeMap<String, String>,
+        area: &str,
+    ) -> Option<String> {
+        let state = self.state.current();
+        let person = job.person_id.as_deref().unwrap_or_default();
+        let reach = job
+            .reach
+            .capped_by(&state.roster.assistant().reach_for(person, &[]));
+        let digest = conversation_digest(&job.conversation_id);
+        if reach.network.open() {
+            (self.log)(
+                "weakening: assistant.network = \"open\": Moneypenny's web tools and scripts \
+                 reach any host",
+            );
+        }
+        mode.network = reach.network;
+        if reach.interpreters.is_empty() {
+            return None;
+        }
+        if let Some(reason) = self.harness.scripts(handler, environment) {
+            if !reach.unsandboxed_scripts {
+                (self.log)(&format!(
+                    "assistant conversation {digest}: scripts are unavailable on this Station: \
+                     {reason}"
+                ));
+                return Some(format!(
+                    "Scripts are unavailable on this Station ({reason}), so you have no shell \
+                     and run nothing: say so when the person asks for a script."
+                ));
+            }
+            (self.log)(
+                "weakening: assistant scripts run unsandboxed: files and network not enforced \
+                 for them",
+            );
+            mode.unsandboxed = true;
+        }
+        mode.interpreters = reach.interpreters;
+        mode.deny_read = self.unreadable(area);
+        if !mode.files.is_empty() {
+            mode.read_only = vec![
+                workspace::SHARED.to_owned(),
+                "CLAUDE.md".to_owned(),
+                "AGENTS.md".to_owned(),
+            ];
+        }
+        None
+    }
+
+    /// What her scripts may not read: the Station user's home directory, AI6's state and
+    /// configuration, and the directory holding every conversation's working directory, her
+    /// own context and git directories included (`area` itself stays readable to her).
+    fn unreadable(&self, area: &str) -> Vec<String> {
+        let home = ["HOME", "USERPROFILE"]
+            .into_iter()
+            .find_map(std::env::var_os)
+            .map(PathBuf::from);
+        let root = Path::new(area).parent().map(Path::to_path_buf);
+        home.into_iter()
+            .chain(self.state.station.private_paths.iter().cloned())
+            .chain(root)
+            .filter(|path| path.is_absolute())
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect()
     }
 
     /// With Cable grants, serves the conversation its Cable endpoint, as a further server of
@@ -1173,6 +1271,8 @@ struct Pump {
     /// What preparing the workspace left to tell, sent with the first event.
     notices: Vec<String>,
     exposure: Arc<dyn Exposure>,
+    /// Her scripts can reach a host (a network policy that reaches one, or no sandbox).
+    reaching: bool,
 }
 
 /// A fresh start for a conversation whose harness was resumed.
@@ -1398,13 +1498,21 @@ impl Pump {
         events
     }
 
-    /// Notes the tools an event called, with its raw line: one that answers with a file the
-    /// personal repository records as written while exposed exposes the conversation, which
-    /// Universal Exports is told at once (a failure is told again when the turn ends).
+    /// Notes the tools an event called, with its raw line: a web tool, or a script that can
+    /// reach a host, brings in outside text, so what she writes from then on is recorded as
+    /// such (Universal Exports marks the conversation from the same `tool` event); one that
+    /// answers with a file the personal repository records as written while exposed exposes
+    /// the conversation, which Universal Exports is told at once (a failure is told again when
+    /// the turn ends).
     fn note_tools(&self, tools: &[String], data: Option<&[u8]>) {
         let Some(workspace) = &self.workspace else {
             return;
         };
+        if tools.iter().any(|tool| outside_tool(tool, self.reaching))
+            && let Ok(mut workspace) = workspace.lock()
+        {
+            workspace.mark_exposed();
+        }
         let source = workspace
             .lock()
             .ok()
@@ -1971,6 +2079,9 @@ mod tests {
         /// Calls a file tool (see [`ScriptedSession::answer`]), writes a memory, then answers
         /// and completes.
         Reads,
+        /// Writes `personal/calc.py`, runs it with `Bash`, which writes `personal/out.txt`,
+        /// then answers and completes.
+        Computes,
     }
 
     /// Universal Exports' exposure record, as a test keeps it.
@@ -2017,14 +2128,18 @@ mod tests {
 
     /// What [`Script::Writes`] puts in her memory.
     const PREFERENCE: &str = "The person prefers tables over prose.\n";
+    /// The script [`Script::Computes`] writes.
+    const CALC: &str = "open('personal/out.txt', 'w').write(f'{6 * 7}\\n')\n";
 
     /// A harness that does what `script` says with every message; a resumed one does what
-    /// `resumed` says, and one that dies when resumed never confirms its Session.
+    /// `resumed` says, and one that dies when resumed never confirms its Session. Its scripts
+    /// run in a sandbox unless `no_sandbox` says why not.
     struct Scripted {
         asked: Arc<Mutex<Asked>>,
         resumable: bool,
         script: Script,
         resumed: Script,
+        no_sandbox: Arc<Mutex<Option<String>>>,
     }
 
     struct ScriptedSession {
@@ -2112,6 +2227,20 @@ mod tests {
                     let memory = self.dir.join(PERSONAL).join("memory");
                     std::fs::write(memory.join("prefs.md"), PREFERENCE).unwrap();
                     events.push_back(event("completed", Some("Read it.")));
+                }
+                Script::Computes => {
+                    let personal = self.dir.join(PERSONAL);
+                    std::fs::write(personal.join("calc.py"), CALC).unwrap();
+                    let mut wrote = event("tool", None);
+                    wrote.tools = vec!["Write".to_owned()];
+                    events.push_back(wrote);
+                    // What `python3 personal/calc.py` leaves behind.
+                    std::fs::write(personal.join("out.txt"), "42\n").unwrap();
+                    let mut ran = event("tool", None);
+                    ran.tools = vec!["Bash".to_owned()];
+                    events.push_back(ran);
+                    events.push_back(event(EVENT_TEXT, Some("It is 42.")));
+                    events.push_back(event("completed", Some("It is 42.")));
                 }
             }
         }
@@ -2202,6 +2331,14 @@ mod tests {
             session.answer(&message);
             Ok(session.into_object())
         }
+
+        fn scripts(
+            &self,
+            _handler: &str,
+            _environment: &BTreeMap<String, String>,
+        ) -> Option<String> {
+            self.no_sandbox.lock().unwrap().clone()
+        }
     }
 
     const AGENTS: &str = "[agent.moneypenny]\nhandler = \"mock-assistant\"\nmodel = \"sonnet\"\n\
@@ -2217,6 +2354,8 @@ mod tests {
         logged: Arc<Mutex<Vec<String>>>,
         /// Universal Exports' exposure record.
         exposure: Arc<Recorded>,
+        /// Why the harness's scripts cannot be sandboxed here; `None`, they can.
+        no_sandbox: Arc<Mutex<Option<String>>>,
         _root: tempfile::TempDir,
     }
 
@@ -2224,9 +2363,14 @@ mod tests {
     /// as `<people>/{person}.git` and shares `<people>/ops` (`ops`) and a repository that does
     /// not exist (`gone`).
     fn station_agents(people: &Path) -> String {
+        station_agents_with(people, "")
+    }
+
+    /// [`station_agents`] with the further `[assistant]` keys in `keys`.
+    fn station_agents_with(people: &Path, keys: &str) -> String {
         format!(
-            "{AGENTS}[assistant]\npersonal_repo = '{}'\n[assistant.shared.ops]\nrepo = '{}'\n\
-             [assistant.shared.gone]\nrepo = '{}'\n",
+            "{AGENTS}[assistant]\npersonal_repo = '{}'\n{keys}[assistant.shared.ops]\n\
+             repo = '{}'\n[assistant.shared.gone]\nrepo = '{}'\n",
             people.join("{person}.git").display(),
             people.join("ops").display(),
             people.join("missing.git").display()
@@ -2286,6 +2430,7 @@ mod tests {
         let log = logged.clone();
         let elevated = Arc::new(Mutex::new(Some(elevated)));
         let exposure = Arc::new(Recorded::default());
+        let no_sandbox = Arc::new(Mutex::new(None));
         let desk = Desk::new(
             state,
             Arc::new(Scripted {
@@ -2293,6 +2438,7 @@ mod tests {
                 resumable,
                 script,
                 resumed,
+                no_sandbox: no_sandbox.clone(),
             }),
             Arc::new(move |report, answered: Option<Answered>| {
                 sink.lock().unwrap().push(report);
@@ -2314,6 +2460,7 @@ mod tests {
             reports,
             logged,
             exposure,
+            no_sandbox,
             _root: root,
         }
     }
@@ -2453,6 +2600,7 @@ mod tests {
             cable_confirm: None,
             cable_discard: None,
             memory: None,
+            reach: Default::default(),
         }
     }
 
@@ -4426,5 +4574,185 @@ mod tests {
         until(|| kinds(&plain, "c-e").contains(&EVENT_COMPLETED.to_owned())).await;
         assert!(plain.logged.lock().unwrap().is_empty(), "nothing weakened");
         plain.desk.close_all();
+    }
+
+    /// A message job that asks for `reach`.
+    fn reaching(
+        job: AssistantJob,
+        interpreters: &[&str],
+        policy: &str,
+        hosts: &[&str],
+    ) -> AssistantJob {
+        AssistantJob {
+            reach: crate::directorates::section_00::assistant::AssistantReach {
+                interpreters: interpreters.iter().map(|name| (*name).to_owned()).collect(),
+                network: crate::directorates::section_00::agent::AssistantNetwork {
+                    policy: policy.to_owned(),
+                    allowed_hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+                },
+                unsandboxed_scripts: true,
+            },
+            ..job
+        }
+    }
+
+    #[tokio::test]
+    async fn a_script_she_runs_is_saved_by_the_turn_and_never_reaches_past_the_stations_roster() {
+        let people = tempfile::tempdir().unwrap();
+        let agents = station_agents_with(
+            people.path(),
+            "interpreters = ['python3', 'node']\nallowed_hosts = ['docs.python.org', 'pypi.org']\n",
+        );
+        let mut fixture = on_station(
+            &agents,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Computes,
+            Script::Answers,
+        );
+        fixture.desk.houses = git_houses();
+        let bare = people.path().join("eve.git");
+        // Universal Exports asks for more than this Station's roster gives.
+        let asked = reaching(
+            working("c-s", "What is six times seven?", workspace(&bare)),
+            &["python3", "perl"],
+            "open",
+            &[],
+        );
+        fixture.desk.handle(asked).await;
+        until(|| kinds(&fixture, "c-s").contains(&EVENT_COMPLETED.to_owned())).await;
+
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let mode = start.assistant.unwrap();
+        assert_eq!(mode.interpreters, ["python3"], "only what both name");
+        assert_eq!(
+            mode.network.policy, "limited",
+            "never wider than the roster"
+        );
+        assert_eq!(mode.network.allowed_hosts, ["docs.python.org", "pypi.org"]);
+        assert!(!mode.unsandboxed, "the harness has a sandbox here");
+        assert_eq!(mode.read_only, ["shared", "CLAUDE.md", "AGENTS.md"]);
+        let area = PathBuf::from(&start.working_directory);
+        let root = area.parent().unwrap().to_string_lossy().into_owned();
+        assert!(mode.deny_read.contains(&root), "{:?}", mode.deny_read);
+        assert!(
+            !start
+                .initial_context
+                .iter()
+                .any(|line| line.contains("Scripts are unavailable"))
+        );
+        assert!(
+            fixture
+                .logged
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|line| !line.contains("weakening")),
+            "nothing weakened"
+        );
+
+        let files = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+        assert!(
+            files.contains("calc.py") && files.contains("out.txt"),
+            "the script and what it wrote are on main: {files}"
+        );
+        assert_eq!(git(&bare, &["show", "main:out.txt"]), "42\n");
+        // A script that can reach a host brings in outside text.
+        let marks = fixture.exposure.marks.lock().unwrap().clone();
+        assert!(
+            marks.iter().any(|(conversation, _)| conversation == "c-s"),
+            "{marks:?}"
+        );
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn where_the_harness_has_no_sandbox_she_runs_no_script_unless_the_roster_allows_it() {
+        let windows = "Claude Code runs commands unsandboxed on native Windows; its sandbox runs \
+                       on macOS, Linux and WSL2";
+        let fixture = fixture(true, IDLE);
+        *fixture.no_sandbox.lock().unwrap() = Some(windows.to_owned());
+        let asked = reaching(job("c-n", "Run a script."), &["python3"], "denied", &[]);
+        fixture.desk.handle(asked.clone()).await;
+        until(|| kinds(&fixture, "c-n").contains(&EVENT_COMPLETED.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let mode = start.assistant.unwrap();
+        assert!(mode.interpreters.is_empty(), "no Bash: {mode:?}");
+        assert!(!mode.unsandboxed);
+        assert!(
+            start.initial_context.iter().any(|line| line
+                .starts_with("Scripts are unavailable on this Station")
+                && line.contains("native Windows")),
+            "{:?}",
+            start.initial_context
+        );
+        let logged = fixture.logged.lock().unwrap().clone();
+        assert!(
+            logged.iter().any(
+                |line| line.contains("scripts are unavailable on this Station")
+                    && line.contains("native Windows")
+            ),
+            "{logged:?}"
+        );
+        assert!(
+            !logged.iter().any(|line| line.contains("weakening")),
+            "{logged:?}"
+        );
+        fixture.desk.close_all();
+
+        let allowed =
+            format!("{AGENTS}[assistant]\nunsandboxed_scripts = true\nnetwork = 'open'\n");
+        let loose = on_station(
+            &allowed,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        *loose.no_sandbox.lock().unwrap() = Some(windows.to_owned());
+        loose
+            .desk
+            .handle(reaching(
+                job("c-u", "Run a script."),
+                &["python3"],
+                "open",
+                &[],
+            ))
+            .await;
+        until(|| kinds(&loose, "c-u").contains(&EVENT_COMPLETED.to_owned())).await;
+        let mode = loose.asked.lock().unwrap().starts[0]
+            .assistant
+            .clone()
+            .unwrap();
+        assert_eq!(mode.interpreters, ["python3"]);
+        assert!(mode.unsandboxed);
+        assert_eq!(mode.network.policy, "open");
+        let logged = loose.logged.lock().unwrap().clone();
+        assert!(
+            logged.iter().any(|line| line
+                == "weakening: assistant scripts run unsandboxed: files and network not \
+                    enforced for them"),
+            "{logged:?}"
+        );
+        assert!(
+            logged
+                .iter()
+                .any(|line| line.starts_with("weakening: assistant.network = \"open\"")),
+            "{logged:?}"
+        );
+        let roster = loose.desk.state.current().roster.clone();
+        let reported = weakenings(&roster);
+        assert!(
+            reported
+                .iter()
+                .any(|line| line.starts_with("assistant.network = \"open\""))
+                && reported
+                    .iter()
+                    .any(|line| line.starts_with("assistant.unsandboxed_scripts = true")),
+            "the check-in names both: {reported:?}"
+        );
+        loose.desk.close_all();
     }
 }

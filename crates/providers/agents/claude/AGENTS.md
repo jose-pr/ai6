@@ -21,8 +21,9 @@ the Session (`--system-prompt-snapshot`, on by default) and reuses it on resume 
 Session is compacted; after that it builds the prompt from the resuming launch, so resume
 passes `AgentResume::initial_context` as `--append-system-prompt` too when it is not empty.
 A restricted Session (`answer_only`, or `assistant`) whose `assistant` message calls a tool
-not named `mcp__<server>__<tool>` for one of its servers (nor, for an assistant with `files`,
-one of its five file tools) is killed, ends with a `failed`
+not named `mcp__<server>__<tool>` for one of its servers (nor, for an assistant, one of the
+built-in tools its mode offers: the file tools, `Bash`, `WebFetch`, `WebSearch`) is killed,
+ends with a `failed`
 event naming the tools, and nothing read after that becomes an event. A call is any
 `tool_use` content block (named by its `name`) and any other block whose type ends in
 `_tool_use` (named `TYPE:NAME`, such as `server_tool_use:advisor` or `mcp_tool_use:echo`):
@@ -159,6 +160,48 @@ short names (`GIT~1\config`, `GITATT~1`) even after reading them. Under `--restr
 `CLAUDE.md` does not load, with or without `--setting-sources user,project`, so a mode's
 `context_file` goes in with `--append-system-prompt-file`, which reached the request's
 system prompt. Every assistant Session also has `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+
+An assistant's scripts and network (code.claude.com/docs/en/sandboxing, /permissions and
+/settings-reference): `--tools` names exactly the built-in tools its parts call for, in the
+order file tools, `Bash` (interpreters), `WebFetch` (a network that reaches a host),
+`WebSearch` (`open` only, since a search takes no host list), under `--permission-mode
+dontAsk`; `--disallowedTools` names every other one of its list, and `--allowedTools` adds
+`Bash(<interpreter> *)` per interpreter, `WebFetch(domain:<host>)` per host of a `limited`
+network, or `WebFetch(domain:*),WebSearch` for `open`. With interpreters, `--settings` holds
+the sandbox: `enabled`, `failIfUnavailable: true`, `autoAllowBashIfSandboxed: false`,
+`allowUnsandboxedCommands: false`, `filesystem` (`allowWrite` the mode's `files` under the
+working directory, `denyWrite` its `read_only` paths and `.claude`, `denyRead` its
+`deny_read`, `allowRead` the working directory), `network` (`allowedDomains` the hosts, `["*"]`
+for `open`, none for `denied`; `strictAllowlist: true`), `credentials.envVars` denying (`mode:
+"deny"`) every variable of the Session's environment but `PATH`, `HOME`, `USERPROFILE`,
+`APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`, `LC_CTYPE`,
+`TERM`, `TZ` and the proxy variables, and always `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`
+and `CLAUDE_CODE_OAUTH_TOKEN`; and `permissions.blockReadsOutsideWorkingDirectories: true`.
+A mode with `unsandboxed` gets `{"sandbox":{"enabled":false},"permissions":{…}}` instead. A
+`limited` network with hosts adds, in the same `--settings`, a `PreToolUse` hook on `WebFetch`
+running `PROGRAM assistant web-gate --hosts H1,H2` (`PROGRAM` as for the green ink gate,
+`timeout` 60, `onFailure: "block"`, `disableAllHooks: false`). A network that reaches nothing
+adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1` to the environment. Skills are still refused.
+
+Measured with 2.1.310 against a loopback stand-in for the API (no model reached), on Linux
+(WSL2 with `bwrap` and `socat`): `python3 -c …` and `python3 personal/calc.py` ran, `sh -c` was
+denied, writes to `shared/` and `CLAUDE.md` failed (read-only file system), reads of the home
+directory, another conversation's directory and the context file failed, no credential
+variable reached the script, a script reached a listed host and was refused (`403`) any other;
+WebFetch fetched a listed host and refused an unlisted one, but also fetched
+`docs.python.org` and `developer.mozilla.org`, documentation domains Claude Code fetches
+without a rule, until the hook refused them (on Windows too). `WebFetch(domain:*)` given in
+`--allowedTools` does not open the sandbox to scripts, so `open` names `*` in
+`allowedDomains` itself. On native Windows `sandbox.enabled` with `failIfUnavailable` makes
+Claude Code exit at start ("sandbox required but unavailable"); with the sandbox off a script
+reached any host, and a command Claude Code cannot trace (`python3 -c "…"`) was refused by
+`dontAsk`. `assistant_scripts` answers why the sandbox cannot run: native Windows, another
+platform than macOS or Linux, or `bwrap` or `socat` missing from the environment's `PATH`
+(else the Station's). WSL1 passes that check and is stopped by `failIfUnavailable`. Inferred,
+not measured: that a Linux host without `bwrap` makes Claude Code exit at start, as the
+settings reference says; that the user's own settings (`--setting-sources user`) can still
+add `sandbox.excludedCommands`, allowed domains or hooks, which are merged rather than
+replaced, so the Agent's Claude Code configuration directory is trusted.
 `MultiEdit` and `LS`
 are not denied: Claude Code 2.1.310 warns that such a rule matches no known tool. `Task` is
 the former name of `Agent`, which Claude Code still accepts. Taken

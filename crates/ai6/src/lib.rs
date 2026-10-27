@@ -24,7 +24,9 @@ pub use directorates::m::approvals::{
     GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement,
     SAFE_HOUSE_DELETE, classify, clearance_at_least,
 };
-pub use directorates::m::assistant::{AssistantSettings, RepoKind, SharedRepo};
+pub use directorates::m::assistant::{
+    AssistantNarrowing, AssistantSettings, NetworkPolicy, RepoKind, SharedRepo,
+};
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::m::config::SqlConfigSource;
 pub use directorates::m::config::{
@@ -178,13 +180,14 @@ pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_URL_ENV, ASSISTANT_MCP_ENV_PREFIX, ASSISTANT_MCP_PATH,
     ASSISTANT_MCP_SERVER, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantCable,
     AssistantCableDecision, AssistantCableGrant, AssistantChange, AssistantCommit, AssistantEvent,
-    AssistantJob, AssistantReport, AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED,
-    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
-    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MAX_ASSISTANT_CABLE_GRANTS, MAX_ASSISTANT_CHANGE_BYTES,
-    MAX_ASSISTANT_CHANGE_FILES, MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENT_BYTES,
-    MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES, MAX_MEMORY_FILES, MAX_MEMORY_LIST_BYTES,
-    MemoryAction, MemoryAnswer, MemoryCommit, MemoryFile, MemoryOp, memory_path,
+    AssistantJob, AssistantReach, AssistantReport, AssistantWorkspace, COMMIT_MEMORY,
+    COMMIT_SHARED, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED,
+    EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES,
+    EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MAX_ASSISTANT_CABLE_GRANTS,
+    MAX_ASSISTANT_CHANGE_BYTES, MAX_ASSISTANT_CHANGE_FILES, MAX_ASSISTANT_CONTEXT_BYTES,
+    MAX_ASSISTANT_EVENT_BYTES, MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES, MAX_MEMORY_FILES,
+    MAX_MEMORY_LIST_BYTES, MemoryAction, MemoryAnswer, MemoryCommit, MemoryFile, MemoryOp,
+    host_pattern, interpreter_name, memory_path, outside_tool,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

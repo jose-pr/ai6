@@ -66,9 +66,20 @@ pub struct AssistantMode {
     /// The MCP servers the harness connects to and may call every tool of, and no other.
     pub mcp_servers: Vec<McpServerRef>,
     /// Interpreters the harness may run inside its own sandbox (`python3`); empty means no
-    /// shell at all. A handler that cannot confine them refuses to start.
+    /// shell at all. A handler that cannot confine them refuses to start, unless
+    /// `unsandboxed` lets them run without it.
     #[serde(default)]
     pub interpreters: Vec<String>,
+    /// Absolute paths the interpreters may not read: the Station user's home directory, AI6's
+    /// state and configuration, the directory holding other conversations' working
+    /// directories. The working directory stays readable whatever this names.
+    #[serde(default)]
+    pub deny_read: Vec<String>,
+    /// Run the interpreters without the harness's sandbox, where it has none: no file or
+    /// network limit applies to them. A weakening the Station reports; `false` refuses
+    /// interpreters a handler cannot confine.
+    #[serde(default)]
+    pub unsandboxed: bool,
     /// Skills the harness may load, by name; empty means none. A handler that cannot limit
     /// skills to a list refuses a non-empty one.
     #[serde(default)]
@@ -83,6 +94,10 @@ pub struct AssistantMode {
     /// refuses a non-empty list.
     #[serde(default)]
     pub files: Vec<String>,
+    /// Paths, relative to the working directory (`shared`, `CLAUDE.md`), the interpreters may
+    /// not write although the rest of the working directory is theirs to write.
+    #[serde(default)]
+    pub read_only: Vec<String>,
     /// A file outside the working directory whose text the harness gets as part of its system
     /// prompt: standing context too large for a command line. A handler that cannot pass a
     /// file refuses it.
@@ -116,6 +131,11 @@ impl AssistantNetwork {
     /// with no host.
     pub fn reaches_nothing(&self) -> bool {
         self.policy == "denied" || (self.policy == "limited" && self.allowed_hosts.is_empty())
+    }
+
+    /// Whether the policy reaches any host at all: `open`.
+    pub fn open(&self) -> bool {
+        self.policy == "open"
     }
 }
 
@@ -288,6 +308,19 @@ pub trait AgentHandler: Send + Sync {
     /// declares a requirement here, never a provider.
     fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
         Ok(HarnessStdio::Terminal)
+    }
+
+    /// Whether the harness can run an assistant's interpreters inside its own sandbox on this
+    /// Station, started with `environment` (as the Station would give it): `None` when it
+    /// can, else why not, in a sentence. The default: it cannot.
+    fn assistant_scripts(
+        &self,
+        environment: BTreeMap<String, String>,
+    ) -> Result<Option<String>, ProviderError> {
+        let _ = environment;
+        Ok(Some(
+            "this handler runs no interpreter for an assistant".to_owned(),
+        ))
     }
 }
 
