@@ -114,6 +114,7 @@ impl AgentHandler for ClaudeHandler {
             &harness_environment(
                 &request.environment,
                 request.answer_only || request.assistant.is_some(),
+                request.assistant.is_some(),
             ),
         )?;
         let operation = ClaudeSession::new(session, None)
@@ -174,6 +175,7 @@ impl AgentHandler for ClaudeHandler {
             &harness_environment(
                 &request.environment,
                 request.answer_only || request.assistant.is_some(),
+                request.assistant.is_some(),
             ),
         )?;
         let operation = ClaudeSession::new(session, Some(expected_session_id))
@@ -205,30 +207,48 @@ const ANSWER_ONLY_DENIED: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,G
 /// (code.claude.com/docs/en/advisor; read by Claude Code 2.1.310 from its environment).
 const DISABLE_ADVISOR_ENV: &str = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL";
 
+/// Turns off Claude Code's auto memory, which would keep notes under the user's own
+/// `~/.claude/projects/` beside the assistant's memory in her repository
+/// (code.claude.com/docs/en/memory, read 2026-10-27).
+const DISABLE_AUTO_MEMORY_ENV: &str = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+
 /// The harness's environment: `environment`, with the advisor turned off for a restricted
-/// (answer-only or assistant) Session.
+/// (answer-only or assistant) Session, and auto memory off for an assistant.
 fn harness_environment(
     environment: &BTreeMap<String, String>,
     restricted: bool,
+    assistant: bool,
 ) -> BTreeMap<String, String> {
     let mut environment = environment.clone();
     if restricted {
         environment.insert(DISABLE_ADVISOR_ENV.to_owned(), "1".to_owned());
     }
+    if assistant {
+        environment.insert(DISABLE_AUTO_MEMORY_ENV.to_owned(), "1".to_owned());
+    }
     environment
 }
 
-/// The MCP servers a restricted (answer-only or assistant) Session may call, `None` for a
-/// Session that is not restricted.
-fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<Vec<String>> {
+/// What a restricted (answer-only or assistant) Session may call: its MCP servers' tools, and
+/// the file tools when its mode names directories to write.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Allowed {
+    servers: Vec<String>,
+    file_tools: bool,
+}
+
+/// What a restricted Session may call, `None` for a Session that is not restricted.
+fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<Allowed> {
     match assistant {
-        Some(mode) => Some(
-            mode.mcp_servers
+        Some(mode) => Some(Allowed {
+            servers: mode
+                .mcp_servers
                 .iter()
                 .map(|server| server.name.clone())
                 .collect(),
-        ),
-        None => answer_only.then(Vec::new),
+            file_tools: !mode.files.is_empty(),
+        }),
+        None => answer_only.then(Allowed::default),
     }
 }
 
@@ -245,6 +265,14 @@ struct Mode {
 /// servers are how it works.
 const ASSISTANT_DENIED: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,\
                                 WebFetch,WebSearch,Task,Agent,TodoWrite,Skill";
+
+/// The built-in tools of an assistant whose mode names directories to write.
+const ASSISTANT_FILE_TOOLS: &str = "Read,Write,Edit,Glob,Grep";
+
+/// [`ASSISTANT_DENIED`] less [`ASSISTANT_FILE_TOOLS`]: what an assistant with file tools is
+/// still denied by name.
+const ASSISTANT_FILES_DENIED: &str = "Bash,PowerShell,NotebookEdit,WebFetch,WebSearch,Task,\
+                                      Agent,TodoWrite,Skill";
 
 /// Adds the settings flags: assistant ([`add_assistant`]), answer-only ([`add_answer_only`]),
 /// or the project settings AI6 allowed, the Station's MCP servers and the green ink gate.
@@ -272,6 +300,14 @@ fn add_settings(
 /// (`--allowedTools mcp__<name>`); a print-mode run denies any other tool it would have to ask
 /// for. Interpreters and skills are refused until this handler can confine them: refusing
 /// fails closed, where ignoring would start a Session the Station did not ask for.
+///
+/// A mode with `files` gets the file tools (`--tools Read,Write,Edit,Glob,Grep`), which
+/// `--restricted` confines to the working directory, under `--permission-mode dontAsk`, which
+/// denies every call no rule allows: reading is allowed anywhere there, writing only under each
+/// directory (`Edit(/<dir>/**)`, relative to the working directory; Edit rules cover Write),
+/// and writes to `.git` and `.claude` always need a prompt, so they are denied too
+/// (code.claude.com/docs/en/permissions). A `context_file` is passed with
+/// `--append-system-prompt-file`.
 fn add_assistant(
     argv: &mut Vec<String>,
     environment: &BTreeMap<String, String>,
@@ -307,11 +343,26 @@ fn add_assistant(
         servers.insert(server.name.clone(), http_server(&server.env_prefix));
         allowed.push(format!("mcp__{}", server.name));
     }
+    argv.push("--restricted".to_owned());
+    if mode.files.is_empty() {
+        argv.extend([
+            "--tools=".to_owned(),
+            "--disallowedTools".to_owned(),
+            ASSISTANT_DENIED.to_owned(),
+        ]);
+    } else {
+        argv.extend([
+            "--tools".to_owned(),
+            ASSISTANT_FILE_TOOLS.to_owned(),
+            "--permission-mode".to_owned(),
+            "dontAsk".to_owned(),
+            "--disallowedTools".to_owned(),
+            ASSISTANT_FILES_DENIED.to_owned(),
+        ]);
+        allowed.extend(["Read".to_owned(), "Glob".to_owned(), "Grep".to_owned()]);
+        allowed.extend(mode.files.iter().map(|path| format!("Edit(/{path}/**)")));
+    }
     argv.extend([
-        "--restricted".to_owned(),
-        "--tools=".to_owned(),
-        "--disallowedTools".to_owned(),
-        ASSISTANT_DENIED.to_owned(),
         "--allowedTools".to_owned(),
         allowed.join(","),
         "--setting-sources".to_owned(),
@@ -320,6 +371,9 @@ fn add_assistant(
         "--mcp-config".to_owned(),
         json!({ "mcpServers": servers }).to_string(),
     ]);
+    if let Some(file) = &mode.context_file {
+        argv.extend(["--append-system-prompt-file".to_owned(), file.clone()]);
+    }
     Ok(())
 }
 
@@ -489,8 +543,8 @@ struct ClaudeSession {
     expected_session_id: Option<SessionId>,
     eof: AtomicBool,
     eof_reported: AtomicBool,
-    /// For a restricted (answer-only or assistant) Session, the MCP servers it may call.
-    restricted: Option<Vec<String>>,
+    /// For a restricted (answer-only or assistant) Session, what it may call.
+    restricted: Option<Allowed>,
     /// Set once a restricted Session called a tool it may not, and was ended: nothing it
     /// wrote after that is read.
     tripped: AtomicBool,
@@ -571,24 +625,29 @@ impl ClaudeSession {
         }
     }
 
-    /// Restricts the Session to the tools of `servers`: calling any other tool ends it.
-    fn restricted_to(mut self, servers: Option<Vec<String>>) -> Self {
-        self.restricted = servers;
+    /// Restricts the Session to what `allowed` names: calling any other tool ends it.
+    fn restricted_to(mut self, allowed: Option<Allowed>) -> Self {
+        self.restricted = allowed;
         self
     }
 
     /// The `failed` event that ends a restricted Session whose `seen` event calls a tool outside
-    /// its servers (`mcp__<server>__<tool>`), after closing it; `None` when it calls none.
-    /// The flags it was started with are meant to make this impossible; this backs them up.
+    /// its servers (`mcp__<server>__<tool>`) and, when it has them, its file tools, after
+    /// closing it; `None` when it calls none. The flags it was started with are meant to make
+    /// this impossible; this backs them up. Which paths a file tool may write is the
+    /// permission rules' to enforce.
     fn tripped(&self, seen: &AgentEvent) -> Option<AgentEvent> {
-        let servers = self.restricted.as_ref()?;
+        let allowed = self.restricted.as_ref()?;
         let forbidden = seen
             .tools
             .iter()
             .filter(|tool| {
-                !servers
+                !(allowed
+                    .servers
                     .iter()
                     .any(|server| tool.starts_with(&format!("mcp__{server}__")))
+                    || (allowed.file_tools
+                        && ASSISTANT_FILE_TOOLS.split(',').any(|file| file == *tool)))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -2487,6 +2546,17 @@ mod tests {
                 Some("1"),
                 "no server-side advisor"
             );
+            assert_eq!(
+                spec.env
+                    .as_ref()
+                    .unwrap()
+                    .get(DISABLE_AUTO_MEMORY_ENV)
+                    .map(String::as_str),
+                Some("1"),
+                "no auto memory beside hers"
+            );
+            assert!(!argv.iter().any(|a| a == "--permission-mode"), "{argv:?}");
+            assert!(!argv.iter().any(|a| a == "--append-system-prompt-file"));
             assert_eq!(after("--allowedTools"), "mcp__moneypenny");
             let servers: Value = serde_json::from_str(&after("--mcp-config")).unwrap();
             assert_eq!(
@@ -2512,6 +2582,164 @@ mod tests {
             assert!(
                 !argv.iter().any(|a| a.contains("conversation-token")),
                 "the token stays in the environment"
+            );
+        }
+    }
+
+    /// Measured with Claude Code 2.1.310 against a loopback stand-in for the API: under these
+    /// flags Write and Edit under `personal/` ran, and Write to another directory, to the
+    /// working directory's own `CLAUDE.md`, to `personal/.git/hooks` and to `personal/../x`
+    /// were denied, as was Read outside the working directory.
+    #[test]
+    fn an_assistant_with_files_gets_the_file_tools_under_dont_ask_on_start_and_resume() {
+        let environment = assistant_environment();
+        let terminal = ProcessTerminal::new();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-assistant-fixture".to_owned(),
+        })
+        .unwrap();
+        let working_directory = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let context = std::env::temp_dir()
+            .join("assistant-context.md")
+            .to_string_lossy()
+            .into_owned();
+        let mode = AssistantMode {
+            files: vec!["personal".to_owned(), "scratch".to_owned()],
+            context_file: Some(context.clone()),
+            ..AssistantMode::moneypenny()
+        };
+        let started = handler
+            .start(
+                AgentStart {
+                    mission_id: "assistant-conversation".parse().unwrap(),
+                    agent_id: "moneypenny".to_owned(),
+                    prompt: "Remember that I like tables.".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: working_directory.clone(),
+                    clearance: "desk".to_owned(),
+                    environment: environment.clone(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: Some(mode.clone()),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&started);
+        started.close().unwrap();
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "assistant-conversation".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-assistant-session").unwrap(),
+                    message: Some("And now?".to_owned()),
+                    working_directory,
+                    environment,
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: Some(mode),
+                    initial_context: Vec::new(),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&resumed);
+        resumed.close().unwrap();
+        let specs = terminal.specs.lock().unwrap();
+        assert_eq!(specs.len(), 2);
+        for spec in specs.iter() {
+            let argv = &spec.argv;
+            let after = |flag: &str| {
+                let position = argv.iter().position(|a| a == flag).unwrap_or_else(|| {
+                    panic!("{flag} missing from {argv:?}");
+                });
+                argv[position + 1].clone()
+            };
+            assert!(argv.iter().any(|a| a == "--restricted"), "{argv:?}");
+            assert!(!argv.iter().any(|a| a == "--tools="), "{argv:?}");
+            assert_eq!(after("--tools"), "Read,Write,Edit,Glob,Grep");
+            assert_eq!(after("--permission-mode"), "dontAsk");
+            let denied = after("--disallowedTools");
+            for tool in [
+                "Bash",
+                "PowerShell",
+                "WebFetch",
+                "WebSearch",
+                "Task",
+                "Skill",
+            ] {
+                assert!(denied.split(',').any(|name| name == tool), "{denied}");
+            }
+            for tool in ["Read", "Write", "Edit", "Glob", "Grep"] {
+                assert!(!denied.split(',').any(|name| name == tool), "{denied}");
+            }
+            assert_eq!(
+                after("--allowedTools"),
+                "mcp__moneypenny,Read,Glob,Grep,Edit(/personal/**),Edit(/scratch/**)"
+            );
+            assert_eq!(after("--setting-sources"), "user");
+            assert_eq!(after("--append-system-prompt-file"), context);
+            assert_eq!(
+                spec.env
+                    .as_ref()
+                    .unwrap()
+                    .get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")
+                    .map(String::as_str),
+                Some("1")
+            );
+        }
+    }
+
+    #[test]
+    fn an_assistant_with_files_may_call_them_and_nothing_else_built_in() {
+        let mode = AssistantMode {
+            files: vec!["personal".to_owned()],
+            ..AssistantMode::moneypenny()
+        };
+        for (mode, tool, ends) in [
+            (mode.clone(), "Write", false),
+            (mode.clone(), "Read", false),
+            (mode, "Bash", true),
+            (AssistantMode::moneypenny(), "Write", true),
+        ] {
+            let mut input =
+                b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-1\"}\n".to_vec();
+            input.extend_from_slice(
+                format!(
+                    "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"tool_use\",\
+                     \"id\":\"t\",\"name\":\"{tool}\",\"input\":{{}}}}]}}}}\n"
+                )
+                .as_bytes(),
+            );
+            input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
+            let session = ClaudeSession::new(
+                ResumeTerminalSession {
+                    input: Mutex::new(input),
+                    writes: Arc::new(Mutex::new(Vec::new())),
+                }
+                .into_object(),
+                None,
+            )
+            .restricted_to(restriction(false, Some(&mode)));
+            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+                .map(|event| event.kind)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                kinds.contains(&"failed".to_owned()),
+                ends,
+                "{tool} with files {:?}: {kinds:?}",
+                mode.files
             );
         }
     }

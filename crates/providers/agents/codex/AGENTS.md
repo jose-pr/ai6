@@ -93,7 +93,8 @@ and `request_user_input_async`; no feature does), and the untrusted-project over
 of AI6's servers; the Session has no gate, and `thread/start` and `thread/resume` carry
 `sandbox = "read-only"`, `approvalPolicy = "never"` and `config = {"web_search":
 "disabled"}`. An assistant (`AgentStart::assistant`) gets the same, with `mcp_servers`
-holding exactly its servers. Codex merges that table into the user's own MCP servers rather
+holding exactly its servers; a mode with `files` or a `context_file` is refused
+(`GUATIAO_ERR_UNSUPPORTED`). Codex merges that table into the user's own MCP servers rather
 than replacing them (0.164.0: a user's `node_repl` started in an answer-only thread), so the
 tool check below also switches off each of the user's servers by name. Checked against the
 app-server protocol source (`ThreadStartParams`: `sandbox`, `approvalPolicy`, `config`; the

@@ -15,6 +15,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::agent::{AssistantMode, AssistantNetwork, McpServerRef};
+use crate::directorates::m::assistant::file_safe;
 
 /// The prefix of the environment variables holding the assistant's MCP endpoint
 /// (`AI6_MONEYPENNY_MCP_URL`, `AI6_MONEYPENNY_MCP_TOKEN`).
@@ -39,13 +40,17 @@ impl AssistantMode {
             interpreters: Vec::new(),
             skills: Vec::new(),
             network: AssistantNetwork::default(),
+            files: Vec::new(),
+            context_file: None,
         }
     }
 
     /// Checks the parts: at least one server; server names of letters, digits, `-` and `_`;
     /// environment prefixes of capitals, digits and `_`; interpreter and skill names of
-    /// letters, digits, `.`, `-` and `_`. A handler checks this before building settings
-    /// from the names.
+    /// letters, digits, `.`, `-` and `_`; writable directories of one to eight `/`-separated
+    /// names of letters, digits, `.`, `-` and `_`, none starting with `.`; a context file
+    /// given as an absolute path. A handler checks this before building settings from the
+    /// names.
     ///
     /// # Errors
     ///
@@ -91,6 +96,19 @@ impl AssistantMode {
             if !word(host, &['.', '-', '*']) || host.len() > 253 {
                 return Err(format!("{host:?} is not a host name"));
             }
+        }
+        for path in &self.files {
+            let names: Vec<&str> = path.split('/').collect();
+            if names.len() > 8 || !names.iter().all(|name| file_safe(name)) {
+                return Err(format!(
+                    "{path:?} is not a directory the assistant may write"
+                ));
+            }
+        }
+        if let Some(file) = &self.context_file
+            && (file.chars().any(char::is_control) || !std::path::Path::new(file).is_absolute())
+        {
+            return Err(format!("context file {file:?} is not an absolute path"));
         }
         Ok(())
     }
@@ -348,6 +366,41 @@ mod tests {
         let mut control = job();
         control.conversation_id = "a\nb".to_owned();
         assert!(control.validate().is_err());
+    }
+
+    #[test]
+    fn writable_directories_stay_inside_the_working_directory() {
+        let with = |files: &[&str]| AssistantMode {
+            files: files.iter().map(|path| (*path).to_owned()).collect(),
+            ..AssistantMode::moneypenny()
+        };
+        assert_eq!(
+            with(&["personal", "scratch", "personal/notes"]).validate(),
+            Ok(())
+        );
+        for bad in [
+            "",
+            "/etc",
+            "..",
+            "personal/../shared",
+            "personal/.git",
+            ".claude",
+            "a\\b",
+            "C:",
+            "a//b",
+        ] {
+            assert!(with(&[bad]).validate().is_err(), "{bad:?}");
+        }
+        let mut relative = AssistantMode::moneypenny();
+        relative.context_file = Some("context.md".to_owned());
+        assert!(relative.validate().is_err());
+        relative.context_file = Some(
+            std::env::temp_dir()
+                .join("context.md")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        assert_eq!(relative.validate(), Ok(()));
     }
 
     #[test]

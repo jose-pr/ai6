@@ -21,7 +21,8 @@ the Session (`--system-prompt-snapshot`, on by default) and reuses it on resume 
 Session is compacted; after that it builds the prompt from the resuming launch, so resume
 passes `AgentResume::initial_context` as `--append-system-prompt` too when it is not empty.
 A restricted Session (`answer_only`, or `assistant`) whose `assistant` message calls a tool
-not named `mcp__<server>__<tool>` for one of its servers is killed, ends with a `failed`
+not named `mcp__<server>__<tool>` for one of its servers (nor, for an assistant with `files`,
+one of its five file tools) is killed, ends with a `failed`
 event naming the tools, and nothing read after that becomes an event. A call is any
 `tool_use` content block (named by its `name`) and any other block whose type ends in
 `_tool_use` (named `TYPE:NAME`, such as `server_tool_use:advisor` or `mcp_tool_use:echo`):
@@ -143,7 +144,19 @@ a Chief of Staff review, start and resume add, in place of the project settings,
 flags: `--restricted`, `--tools=`, `--disallowedTools
 Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*`,
 `--setting-sources user`, `--strict-mcp-config` and `--mcp-config {"mcpServers":{}}`. An
-assistant Session's list is the same with `Skill` in place of `mcp__*`. `MultiEdit` and `LS`
+assistant Session's list is the same with `Skill` in place of `mcp__*`. An assistant whose
+mode names `files` instead gets `--tools Read,Write,Edit,Glob,Grep`, `--permission-mode
+dontAsk`, `--disallowedTools Bash,PowerShell,NotebookEdit,WebFetch,WebSearch,Task,Agent,
+TodoWrite,Skill` and `--allowedTools mcp__<server>,…,Read,Glob,Grep,Edit(/<dir>/**),…` (Edit
+rules cover Write; `/` is the working directory), and its tripwire lets those five tools
+through. Measured with 2.1.310 against a loopback stand-in for the API (no model reached):
+Write and Edit under `personal/` ran; Write to another directory, to the working directory's
+own `CLAUDE.md`, to `personal/.git/hooks` and to `personal/../x` were denied; `--restricted`
+refused Read outside the working directory. Under `--restricted` the working directory's
+`CLAUDE.md` does not load, with or without `--setting-sources user,project`, so a mode's
+`context_file` goes in with `--append-system-prompt-file`, which reached the request's
+system prompt. Every assistant Session also has `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+`MultiEdit` and `LS`
 are not denied: Claude Code 2.1.310 warns that such a rule matches no known tool. `Task` is
 the former name of `Agent`, which Claude Code still accepts. Taken
 from `claude --help` (2.1.310) and the CLI reference: `--tools ""` turns every built-in tool

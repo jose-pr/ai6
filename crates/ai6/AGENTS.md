@@ -2648,7 +2648,9 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
                            pub interpreters: Vec<String> /* serde default */,
                            pub skills: Vec<String> /* serde default */,
-                           pub network: AssistantNetwork /* serde default */ }
+                           pub network: AssistantNetwork /* serde default */,
+                           pub files: Vec<String> /* serde default; directories it may write */,
+                           pub context_file: Option<String> /* serde default; absolute, outside the working directory */ }
 pub struct McpServerRef { pub name: String /* moneypenny */,
                           pub env_prefix: String /* AI6_MONEYPENNY_MCP: <prefix>_URL, <prefix>_TOKEN */ }
 pub struct AssistantNetwork { pub policy: String /* limited (default) | denied | open */,
@@ -2664,6 +2666,13 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool; } // denied, or l
 // the answer-only thread policy. Both refuse to start (UNSUPPORTED) with
 // interpreters, skills or a network reaching more than the servers, and (BAD_VALUE) when the
 // environment lacks a server's URL or token; tokens never reach a command line.
+// `validate` also checks `files` (1 to 8 `/`-separated names of letters, digits, `.`, `-`,
+// `_`, none starting with `.`) and that `context_file` is absolute. With `files`, Claude Code
+// gets `--tools Read,Write,Edit,Glob,Grep --permission-mode dontAsk`, the deny list less
+// those five, and `--allowedTools mcp__<name>,…,Read,Glob,Grep,Edit(/<dir>/**),…`; a
+// `context_file` is `--append-system-prompt-file`; every assistant Session has
+// `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Codex refuses `files` and `context_file`
+// (UNSUPPORTED).
 ```
 
 `ai6::directorates::section_00::assistant` is the contract between Universal Exports and a

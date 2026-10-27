@@ -1139,6 +1139,14 @@ fn assistant_argv(
             "this Codex handler runs no interpreter or skill for an assistant",
         ));
     }
+    // Codex's file edits go through its own tools, which a read-only assistant thread does not
+    // have; a writable workspace waits for its sandboxed mode.
+    if !mode.files.is_empty() || mode.context_file.is_some() {
+        return Err(refuse(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "this Codex handler gives an assistant no files to write and no context file",
+        ));
+    }
     if !mode.network.reaches_nothing() {
         return Err(refuse(
             Status::GUATIAO_ERR_UNSUPPORTED,
@@ -3143,8 +3151,18 @@ mod tests {
         skills.skills.push("pdf".to_owned());
         let mut open = AssistantMode::moneypenny();
         open.network.policy = "open".to_owned();
-        for mode in [skills, open] {
-            assert!(assistant_argv("codex", &environment, &mode).is_err());
+        let mut files = AssistantMode::moneypenny();
+        files.files.push("personal".to_owned());
+        let mut context = AssistantMode::moneypenny();
+        context.context_file = Some(
+            std::env::temp_dir()
+                .join("context.md")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        for mode in [skills, open, files, context] {
+            let refused = assistant_argv("codex", &environment, &mode).unwrap_err();
+            assert_eq!(refused.status, Status::GUATIAO_ERR_UNSUPPORTED, "{mode:?}");
         }
         assert!(
             assistant_argv("codex", &BTreeMap::new(), &AssistantMode::moneypenny()).is_err(),

@@ -77,6 +77,17 @@ pub struct AssistantMode {
     /// servers, which are always reachable.
     #[serde(default)]
     pub network: AssistantNetwork,
+    /// Directories, relative to the working directory (`personal`), under which the harness
+    /// may create and change files; it may read anything in the working directory. Empty
+    /// means no file tool at all. A handler that cannot confine its file tools to them
+    /// refuses a non-empty list.
+    #[serde(default)]
+    pub files: Vec<String>,
+    /// A file outside the working directory whose text the harness gets as part of its system
+    /// prompt: standing context too large for a command line. A handler that cannot pass a
+    /// file refuses it.
+    #[serde(default)]
+    pub context_file: Option<String>,
 }
 
 /// The assistant's network policy. `limited` with no hosts, the default, reaches nothing
