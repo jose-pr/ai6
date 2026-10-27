@@ -1301,7 +1301,8 @@ impl AgentRoleDefinition {
 /// The roster of records kept somewhere other than configuration files: each record's
 /// definition as the keys of its table in `operations.toml` or `agents.toml`, in any serde
 /// format, keyed by its ID, built into typed records and checked by [`Roster::from_parts`].
-/// `source` names where they came from in error messages.
+/// `assistant` holds the keys of `[assistant]`, checked by [`AssistantSettings::validate`];
+/// `None` is the default settings. `source` names where they came from in error messages.
 ///
 /// Agents are resolved here, `extends` included, so the roster holds them complete.
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
@@ -1310,6 +1311,7 @@ pub(crate) fn roster_from_definitions<'de, D>(
     agents: impl IntoIterator<Item = (String, D)>,
     roles: impl IntoIterator<Item = (String, D)>,
     covers: Covers,
+    assistant: Option<D>,
     source: &dyn fmt::Display,
 ) -> Result<Roster, RosterError>
 where
@@ -1348,7 +1350,20 @@ where
             .map_err(|reason| invalid("Agent role", &id, &reason))?;
         typed_roles.push(definition.resolve(id, source)?);
     }
-    Roster::from_parts(parsed, resolved, typed_roles, covers)
+    let assistant = match assistant {
+        Some(definition) => {
+            let settings = AssistantSettings::deserialize(definition)
+                .map_err(|reason| error(format!("{source}: assistant: {reason}")))?;
+            settings
+                .validate()
+                .map_err(|reason| error(format!("{source}: {reason}")))?;
+            settings
+        }
+        None => AssistantSettings::default(),
+    };
+    let mut roster = Roster::from_parts(parsed, resolved, typed_roles, covers)?;
+    roster.assistant = assistant;
+    Ok(roster)
 }
 
 fn valid_role_id(value: &str) -> bool {

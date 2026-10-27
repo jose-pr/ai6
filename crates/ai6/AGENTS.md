@@ -395,8 +395,9 @@ pub fn file_safe(name: &str) -> bool;          // 1-64 of letters, digits, . - _
 ```
 
 `[assistant]` lives in the global `agents.toml` only (an Operation's `.ai6/agents.toml` with
-one fails to resolve its Agents); the SQL configuration source has no table for it, so a SQL
-roster has the default settings. `RepoKind::of` refuses empty values, control characters, Git
+one fails to resolve its Agents); a SQL roster keeps it as the one row of
+`ai6_config_assistant`, keyed `assistant` (`ConfigRecord::Assistant`), and has the default
+settings without it. `RepoKind::of` refuses empty values, control characters, Git
 remote helpers (`::`) and schemes other than `file`, `ssh`, `git`, `http`, `https`; a local
 path or `file://` is `Local` (made bare on first use), the rest and `user@host:path` are
 `Remote` (must exist). `personal_repo_for` fills `{person_digest}` always and `{person}` only
@@ -505,10 +506,11 @@ pub trait ConfigSource: Send + Sync {
         -> Result<Option<ConfigRevision>, RosterError>;   // None: there was none
 }
 #[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ConfigRecord { Operation, Agent, Role, Cover }
+pub enum ConfigRecord { Operation, Agent, Role, Cover, Assistant }
 impl ConfigRecord {
-    pub const ALL: [Self; 4];
-    pub const fn name(self) -> &'static str;   // "operation" | "agent" | "role" | "cover"
+    pub const ALL: [Self; 5];
+    pub const ASSISTANT_KEY: &'static str;     // "assistant": the one Assistant record
+    pub const fn name(self) -> &'static str;   // "operation" | "agent" | "role" | "cover" | "assistant"
     pub fn from_name(name: &str) -> Option<Self>;
 }
 #[non_exhaustive] #[derive(Clone, PartialEq)]
@@ -547,7 +549,8 @@ for one value, the roster. `TomlConfigDir` is `Roster::load` over `operations.to
 `agents.toml` and `covers.toml` plus `Roster::check_agents`, so an Agent that cannot resolve
 is refused as in SQL; its revision is a digest of those three files' contents, taken before
 they are parsed, so `changes_since` reads them but parses nothing while they are unchanged;
-`definitions` converts the files' tables to JSON, and `put`/`remove` are `ReadOnly`.
+`definitions` converts the files' tables to JSON (`Assistant` lists the global `[assistant]`
+table as one record keyed `assistant`, none without it), and `put`/`remove` are `ReadOnly`.
 `MemoryConfigSource` starts at revision 0 and moves to the next on each `replace`. Any
 other store (a database, an HTTP API) builds its roster with `Roster::from_parts`. The
 daemon reads the roster at start (`ServeConfig::with_config_source`; default
@@ -565,11 +568,14 @@ settings (listen address, Registry and roster locations, roles, labels, terminal
 plugins, watchdog) also apply only at start.
 
 `SqlConfigSource` keeps one table per record kind (`ai6_config_operations`, `_agents`,
-`_roles`, `_covers`): a row is a key and a JSON object with the keys of that record's
-table in `operations.toml`, `agents.toml` or `covers.toml` (`deny_unknown_fields` as
+`_roles`, `_covers`, `_assistant`): a row is a key and a JSON object with the keys of that
+record's table in `operations.toml`, `agents.toml` or `covers.toml` (`deny_unknown_fields` as
 there). `load` parses each with the file loader's types and checks, resolves Agents'
 `extends` among the rows, adds the cover rows over the built-in covers and builds the roster
 with `Roster::from_parts`; an Operation's trusted `.ai6/agents.toml` still applies on top.
+The `assistant` row holds the keys of `[assistant]` and is checked by
+`AssistantSettings::validate`; a row under any other key makes the roster invalid, so `put`
+refuses one, and removing the row restores the default settings.
 The revision is the `config` row of `ai6_clock`, read before the rows; `changes_since` reads
 only it. `put` and `remove` change one record and check the whole roster in the same
 transaction, refusing (and rolling back) a change that leaves it unacceptable, such as

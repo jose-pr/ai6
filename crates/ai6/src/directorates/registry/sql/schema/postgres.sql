@@ -251,3 +251,11 @@ CREATE TABLE ai6_config_covers (
     definition TEXT NOT NULL,
     revision BIGINT NOT NULL
 );
+
+-- Moneypenny's settings: at most one row, named 'assistant', holding the keys of the
+-- [assistant] table of agents.toml.
+CREATE TABLE ai6_config_assistant (
+    name TEXT PRIMARY KEY,
+    definition TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);

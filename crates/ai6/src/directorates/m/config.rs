@@ -44,20 +44,33 @@ pub enum ConfigRecord {
     Role,
     /// A cover policy: the keys of a `[cover.<name>]` table.
     Cover,
+    /// Moneypenny's settings ([`AssistantSettings`](crate::AssistantSettings)): the keys of
+    /// the `[assistant]` table, one record keyed [`ASSISTANT_KEY`](Self::ASSISTANT_KEY).
+    Assistant,
 }
 
 impl ConfigRecord {
     /// Every kind, in the order a roster is built.
-    pub const ALL: [Self; 4] = [Self::Operation, Self::Agent, Self::Role, Self::Cover];
+    pub const ALL: [Self; 5] = [
+        Self::Operation,
+        Self::Agent,
+        Self::Role,
+        Self::Cover,
+        Self::Assistant,
+    ];
 
-    /// The name of its table in the configuration files: `operation`, `agent`, `role` or
-    /// `cover`.
+    /// The key of the one [`Assistant`](Self::Assistant) record.
+    pub const ASSISTANT_KEY: &'static str = "assistant";
+
+    /// The name of its table in the configuration files: `operation`, `agent`, `role`,
+    /// `cover` or `assistant`.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Operation => "operation",
             Self::Agent => "agent",
             Self::Role => "role",
             Self::Cover => "cover",
+            Self::Assistant => "assistant",
         }
     }
 
@@ -70,7 +83,7 @@ impl ConfigRecord {
     const fn file(self) -> &'static str {
         match self {
             Self::Operation => "operations.toml",
-            Self::Agent | Self::Role => "agents.toml",
+            Self::Agent | Self::Role | Self::Assistant => "agents.toml",
             Self::Cover => "covers.toml",
         }
     }
@@ -148,7 +161,7 @@ impl ConfigSnapshot {
     }
 }
 
-/// Where the Station's Operations, Agents, roles and covers come from.
+/// Where the Station's Operations, Agents, roles, covers and Moneypenny's settings come from.
 ///
 /// A source hands out only rosters that passed the same checks as the configuration files
 /// ([`Roster::load`], [`Roster::from_parts`]): an invalid configuration is an error, never a
@@ -379,6 +392,13 @@ impl ConfigSource for TomlConfigDir {
         let in_file = |reason: &dyn fmt::Display| error(format!("{}: {reason}", path.display()));
         let mut document: toml::Table = toml::from_str(&text).map_err(|reason| in_file(&reason))?;
         let records = match document.remove(record.name()) {
+            // `[assistant]` is the settings themselves, not a table of records.
+            Some(toml::Value::Table(table)) if record == ConfigRecord::Assistant => {
+                vec![(
+                    ConfigRecord::ASSISTANT_KEY.to_owned(),
+                    serde_json::to_value(table).map_err(|reason| in_file(&reason))?,
+                )]
+            }
             Some(toml::Value::Table(table)) => table
                 .into_iter()
                 .map(|(key, value)| {
@@ -511,9 +531,17 @@ mod tests {
         fs::write(
             root.path().join("agents.toml"),
             "[agent.007]\nhandler = \"mock-agent\"\npriority = 5\n\
-             [role.case-officer]\npurpose = \"Runs it.\"\npolicy = \"Report.\"\n",
+             [role.case-officer]\npurpose = \"Runs it.\"\npolicy = \"Report.\"\n\
+             [assistant]\nallow_elevated = true\n[assistant.shared.ops]\nrepo = \"/srv/ops.git\"\n",
         )
         .unwrap();
+        assert_eq!(
+            source.definitions(ConfigRecord::Assistant).unwrap().records,
+            [(
+                "assistant".to_owned(),
+                serde_json::json!({"allow_elevated": true, "shared": {"ops": {"repo": "/srv/ops.git"}}})
+            )]
+        );
         let agents = source.definitions(ConfigRecord::Agent).unwrap();
         assert_eq!(agents.revision, source.revision().unwrap());
         assert!(!agents.writable);
@@ -538,6 +566,19 @@ mod tests {
             .unwrap_err();
         assert_eq!(refused.kind(), RosterErrorKind::ReadOnly);
         assert_eq!(ConfigRecord::from_name("agent"), Some(ConfigRecord::Agent));
+        assert_eq!(
+            ConfigRecord::from_name("assistant"),
+            Some(ConfigRecord::Assistant)
+        );
+
+        fs::remove_file(root.path().join("agents.toml")).unwrap();
+        assert!(
+            source
+                .definitions(ConfigRecord::Assistant)
+                .unwrap()
+                .records
+                .is_empty()
+        );
     }
 
     #[test]

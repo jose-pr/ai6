@@ -1,5 +1,5 @@
 //! The roster kept in a SQL database, so every Station of an HA deployment reads the same
-//! Operations, Agents, roles and covers.
+//! Operations, Agents, roles, covers and Moneypenny's settings.
 
 use std::fmt;
 use std::io;
@@ -12,14 +12,17 @@ use crate::directorates::m::roster::{
 use crate::directorates::registry::sql::SqlOptions;
 use crate::directorates::registry::sql::db::{Clock, Database, Location, Tx};
 
-/// The tables of each kind: `ai6_config_operations`, `ai6_config_agents`, `ai6_config_roles`
-/// and `ai6_config_covers`.
+/// The tables of each kind: `ai6_config_operations`, `ai6_config_agents`, `ai6_config_roles`,
+/// `ai6_config_covers` and `ai6_config_assistant`.
 fn select(record: ConfigRecord) -> &'static str {
     match record {
         ConfigRecord::Operation => "SELECT id, definition FROM ai6_config_operations ORDER BY id",
         ConfigRecord::Agent => "SELECT id, definition FROM ai6_config_agents ORDER BY id",
         ConfigRecord::Role => "SELECT id, definition FROM ai6_config_roles ORDER BY id",
         ConfigRecord::Cover => "SELECT name, definition FROM ai6_config_covers ORDER BY name",
+        ConfigRecord::Assistant => {
+            "SELECT name, definition FROM ai6_config_assistant ORDER BY name"
+        }
     }
 }
 
@@ -41,6 +44,10 @@ fn upsert(record: ConfigRecord) -> &'static str {
             "INSERT INTO ai6_config_covers (name, definition, revision) VALUES ($1, $2, $3) \
              ON CONFLICT (name) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
         }
+        ConfigRecord::Assistant => {
+            "INSERT INTO ai6_config_assistant (name, definition, revision) VALUES ($1, $2, $3) \
+             ON CONFLICT (name) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
+        }
     }
 }
 
@@ -50,6 +57,7 @@ fn delete(record: ConfigRecord) -> &'static str {
         ConfigRecord::Agent => "DELETE FROM ai6_config_agents WHERE id = $1",
         ConfigRecord::Role => "DELETE FROM ai6_config_roles WHERE id = $1",
         ConfigRecord::Cover => "DELETE FROM ai6_config_covers WHERE name = $1",
+        ConfigRecord::Assistant => "DELETE FROM ai6_config_assistant WHERE name = $1",
     }
 }
 
@@ -70,14 +78,14 @@ fn table(tx: &mut Tx<'_>, record: ConfigRecord) -> io::Result<Vec<(String, Strin
 /// Every row of the roster tables, as read in one transaction.
 struct Rows {
     revision: i64,
-    tables: [Vec<(String, String)>; 4],
+    tables: [Vec<(String, String)>; ConfigRecord::ALL.len()],
 }
 
 fn rows(tx: &mut Tx<'_>) -> io::Result<Rows> {
     // The revision is read first: a write landing between the statements shows up as a
     // change on the next poll rather than being missed.
     let revision = clock(tx)?;
-    let mut tables: [Vec<(String, String)>; 4] = Default::default();
+    let mut tables: [Vec<(String, String)>; ConfigRecord::ALL.len()] = Default::default();
     for (record, rows) in ConfigRecord::ALL.into_iter().zip(tables.iter_mut()) {
         *rows = table(tx, record)?;
     }
@@ -103,14 +111,25 @@ fn revision_of(number: i64) -> Result<ConfigRevision, RosterError> {
 }
 
 fn roster(rows: Rows) -> Result<ConfigSnapshot, RosterError> {
-    let [operations, agents, roles, covers] = rows.tables.map(parsed);
+    let [operations, agents, roles, covers, assistant] = rows.tables.map(parsed);
     let mut policies = Covers::default();
     for (name, definition) in covers? {
         policies.insert(
             cover_from(name, definition).map_err(|reason| error(format!("{SOURCE}: {reason}")))?,
         );
     }
-    let roster = roster_from_definitions(operations?, agents?, roles?, policies, &SOURCE)?;
+    let mut settings = None;
+    for (key, definition) in assistant? {
+        if key != ConfigRecord::ASSISTANT_KEY {
+            return Err(error(format!(
+                "{SOURCE}: the assistant record is keyed {:?}, not {key:?}",
+                ConfigRecord::ASSISTANT_KEY
+            )));
+        }
+        settings = Some(definition);
+    }
+    let roster =
+        roster_from_definitions(operations?, agents?, roles?, policies, settings, &SOURCE)?;
     Ok(ConfigSnapshot::new(revision_of(rows.revision)?, roster))
 }
 
@@ -121,6 +140,8 @@ fn failed(reason: io::Error) -> RosterError {
 /// The roster kept in a SQLite or PostgreSQL database: one table per record kind, each row a
 /// record's definition as a JSON object with the keys of its table in `operations.toml`,
 /// `agents.toml` or `covers.toml`, built into the roster with [`Roster::from_parts`](crate::Roster::from_parts).
+/// Moneypenny's settings are one row keyed `assistant` holding the keys of `[assistant]`;
+/// without it the roster has the default settings.
 ///
 /// Its revision is the `config` row of `ai6_clock`, which every
 /// [`put`](ConfigSource::put) and [`remove`](ConfigSource::remove) advances; a writer outside
@@ -391,6 +412,87 @@ mod tests {
         assert!(source.changes_since(good.revision).unwrap().is_none());
     }
 
+    fn an_assistant_row_gives_the_roster_its_settings(location: &str) {
+        let source = SqlConfigSource::open(location).unwrap();
+        seed(&source);
+        let seeded = source.load().unwrap();
+        assert_eq!(
+            seeded.roster.assistant(),
+            &crate::AssistantSettings::default()
+        );
+        assert!(
+            source
+                .definitions(ConfigRecord::Assistant)
+                .unwrap()
+                .records
+                .is_empty()
+        );
+
+        let settings = json!({
+            "personal_repo": "/srv/mp/{person_digest}.git",
+            "allow_elevated": true,
+            "shared": {"ops": {"repo": "/srv/ops.git", "write": true}},
+        });
+        source
+            .put(ConfigRecord::Assistant, "assistant", &settings)
+            .unwrap();
+        let other_station = SqlConfigSource::open(location).unwrap();
+        let set = other_station
+            .changes_since(seeded.revision)
+            .unwrap()
+            .unwrap();
+        let assistant = set.roster.assistant();
+        assert!(assistant.allow_elevated());
+        assert_eq!(
+            assistant.personal_repo(),
+            Some("/srv/mp/{person_digest}.git")
+        );
+        assert!(assistant.shared()["ops"].write());
+        assert_eq!(assistant.weakenings().len(), 2, "{assistant:?}");
+        assert_eq!(
+            other_station
+                .definitions(ConfigRecord::Assistant)
+                .unwrap()
+                .records,
+            [("assistant".to_owned(), settings)]
+        );
+
+        for (key, definition, names) in [
+            ("moneypenny", json!({}), "\"assistant\""),
+            (
+                "assistant",
+                json!({"personal_repo": "ext::sh"}),
+                "assistant.personal_repo",
+            ),
+            ("assistant", json!({"allow_elevated": "yes"}), "assistant"),
+            ("assistant", json!({"unknown": true}), "unknown"),
+            (
+                "assistant",
+                json!({"shared": {"org": {"repo": "/srv/org.git"}}}),
+                "assistant.shared",
+            ),
+        ] {
+            let refused = source
+                .put(ConfigRecord::Assistant, key, &definition)
+                .unwrap_err();
+            assert_eq!(refused.kind(), RosterErrorKind::Invalid, "{refused}");
+            assert!(refused.to_string().contains(names), "{refused}");
+        }
+        assert!(source.changes_since(set.revision).unwrap().is_none());
+
+        assert!(
+            source
+                .remove(ConfigRecord::Assistant, "assistant")
+                .unwrap()
+                .is_some()
+        );
+        let removed = source.changes_since(set.revision).unwrap().unwrap();
+        assert_eq!(
+            removed.roster.assistant(),
+            &crate::AssistantSettings::default()
+        );
+    }
+
     fn run(case: fn(&str)) {
         #[cfg(feature = "sqlite")]
         {
@@ -415,5 +517,10 @@ mod tests {
     #[test]
     fn an_unacceptable_sql_roster_change_is_refused_and_changes_nothing() {
         run(an_unacceptable_change_is_refused_and_changes_nothing);
+    }
+
+    #[test]
+    fn an_assistant_row_gives_a_sql_roster_its_settings() {
+        run(an_assistant_row_gives_the_roster_its_settings);
     }
 }
