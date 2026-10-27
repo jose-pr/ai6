@@ -2723,6 +2723,10 @@ The daemon also queues `budget` (warning or limit), `exposed` (text: the source)
 Guatiao terminal contracts. `Terminal` is a provider kind discovered by AI6;
 `AgentTerminal` is the object bridge AI6 wraps around that provider for a handler.
 The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in tests.
+`ExitInfo::code` is the signed 32-bit exit code the standard library reports, so Windows'
+`0xC000013A` is `-1073741510`; `pub fn exit_code_text(code: i64) -> String` renders it for a
+person, a negative code followed by its hex (`-1073741510 (0xC000013A)`), as the Claude Code
+and Codex handlers do in their exit reasons.
 
 Which provider a harness runs in follows from what its handler declares
 (`AgentHandler::stdio`), never from a provider name the Agent or handler gives:

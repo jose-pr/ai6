@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{
     AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine,
-    TerminalSession,
+    TerminalSession, exit_code_text,
 };
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
@@ -540,7 +540,7 @@ impl ClaudeSession {
         let how = match self.exited(EXIT_WAIT_MS) {
             Some(ExitInfo {
                 code: Some(code), ..
-            }) => format!("exited with code {code}"),
+            }) => format!("exited with code {}", exit_code_text(code)),
             Some(ExitInfo {
                 signal: Some(signal),
                 ..

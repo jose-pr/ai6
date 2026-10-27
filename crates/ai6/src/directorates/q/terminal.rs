@@ -42,6 +42,15 @@ pub struct ExitInfo {
     pub signal: Option<i64>,
 }
 
+/// An [`ExitInfo::code`] as a person reads it: the number, followed for a negative one by its
+/// 32-bit value in hex, which is how Windows names an NTSTATUS (`-1073741510 (0xC000013A)`).
+pub fn exit_code_text(code: i64) -> String {
+    match i32::try_from(code) {
+        Ok(signed) if signed < 0 => format!("{code} ({:#010X})", signed.cast_unsigned()),
+        _ => code.to_string(),
+    }
+}
+
 /// `read` answers this when nothing arrived within the timeout.
 pub const READ_TIMED_OUT: i64 = -1;
 
@@ -700,6 +709,14 @@ pub trait TerminalSession: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_negative_exit_code_is_also_shown_as_windows_names_it() {
+        assert_eq!(exit_code_text(3), "3");
+        assert_eq!(exit_code_text(-1), "-1 (0xFFFFFFFF)");
+        assert_eq!(exit_code_text(-1_073_741_510), "-1073741510 (0xC000013A)");
+        assert_eq!(exit_code_text(i64::MIN), i64::MIN.to_string());
+    }
 
     // A changed required signature affects every built terminal provider.
     #[test]

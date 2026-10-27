@@ -45,7 +45,8 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   `ai6::directorates::q::terminal::JsonLines` and spawn them with `cols: STREAM_COLS`.
 - **Exit** is asked of the child, never inferred from EOF: a pseudo-console can stay
   readable after its program exits. A signal is reported by number when `portable-pty`
-  names it, else `-1`.
+  names it, else `-1`. A Windows exit code is reported as a signed 32-bit value
+  (`0xC000013A` is `-1073741510`), as the `pipe` provider and the transports do.
 - **End of output**: `read` returns `0` when the terminal closes, and also once the child
   has exited and no output has arrived for 200 ms, on every platform. ConPTY keeps the
   output open until the pseudo-console is closed, and on Unix a process the child left

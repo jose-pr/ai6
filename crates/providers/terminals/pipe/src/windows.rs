@@ -147,11 +147,33 @@ pub(crate) fn resolve(program: &str, env: Option<&BTreeMap<String, String>>) -> 
     Path::new(program).to_path_buf()
 }
 
-/// Windows exit codes are unsigned (`0xC000013A`); the standard library reports them as `i32`.
+/// The exit code as the signed 32-bit value the standard library and every transport report:
+/// Windows' `0xFFFFFFFF` is `-1` and its NTSTATUS `0xC000013A` is `-1073741510`.
 pub(crate) fn exit_info(status: ExitStatus) -> ExitInfo {
     ExitInfo {
         running: false,
-        code: status.code().map(|code| i64::from(code as u32)),
+        code: status.code().map(i64::from),
         signal: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::windows::process::ExitStatusExt;
+
+    use super::*;
+
+    #[test]
+    fn an_exit_code_with_the_high_bit_set_is_negative() {
+        for (raw, code) in [
+            (0, 0),
+            (1, 1),
+            (0xFFFF_FFFF, -1),
+            (0xC000_013A, -1_073_741_510),
+        ] {
+            let exit = exit_info(ExitStatus::from_raw(raw));
+            assert_eq!(exit.code, Some(code), "{raw:#010X}");
+            assert!(!exit.running && exit.signal.is_none());
+        }
     }
 }

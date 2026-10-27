@@ -45,7 +45,8 @@ Station loads. Provider ID: `pipe`. Unsafe code is limited to the Job Object cal
 - **Input** is written as given; a write to a program that has exited fails.
 - **Resize** does nothing and succeeds.
 - **Exit** is asked of the child. On Unix a signal is reported by number; on Windows the exit
-  code is reported unsigned (`0xC000013A` is `3221225786`), and `kill` makes it `1`.
+  code is reported as the standard library's signed 32-bit value (`0xFFFFFFFF` is `-1`,
+  `0xC000013A` is `-1073741510`), and `kill` makes it `1`.
 - **Kill** takes the whole process tree. On Unix the child leads a new process group, which is
   killed with `SIGKILL`; a process that left the group (`setsid`) survives. On Windows the child
   is assigned to a Job Object with `KILL_ON_JOB_CLOSE` right after it starts, and is started

@@ -383,7 +383,9 @@ fn exit_info(status: &portable_pty::ExitStatus) -> ExitInfo {
         },
         None => ExitInfo {
             running: false,
-            code: Some(i64::from(status.exit_code())),
+            // `portable-pty` keeps Windows' unsigned exit code; it is reported as the signed
+            // 32-bit value the standard library and every transport give (`0xFFFFFFFF` is -1).
+            code: Some(i64::from(status.exit_code().cast_signed())),
             signal: None,
         },
     }
@@ -453,6 +455,19 @@ mod tests {
         }
         output.extend(queries.finish());
         (output, asked)
+    }
+
+    #[test]
+    fn an_exit_code_with_the_high_bit_set_is_negative() {
+        for (raw, code) in [
+            (0, 0),
+            (3, 3),
+            (0xFFFF_FFFF, -1),
+            (0xC000_013A, -1_073_741_510),
+        ] {
+            let exit = exit_info(&portable_pty::ExitStatus::with_exit_code(raw));
+            assert_eq!(exit.code, Some(code), "{raw:#010X}");
+        }
     }
 
     #[test]
