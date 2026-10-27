@@ -3374,12 +3374,13 @@ that call (source `personal:<path> (read by <tool>)`): a `Read` or `Edit` of it,
 `Glob` whose search covers it (paths compared after `.`/`..`, the filesystem's own spelling
 and case), or a call whose input (`AgentEvent::data`) the desk cannot read. A
 `memory/MEMORY.md` importing one (`@path`, followed five deep) exposes the conversation as
-its harness starts. Other reads do not. The record is a directory: one entry per file, named
-by the hex SHA-256 of its path and holding the path. A turn ending exposed adds an entry for
-each file it changed in `personal/` and removes the entries of files no longer there, each
-committed by the Station with `CheckpointSpec::files`, so conversations adding to it at once
-never replace each other's entries; the desk reads the record again at each turn's start and
-after each save. A failed `GET` counts as exposed; a memory change of a turn the desk found exposed
+its harness starts. Other reads do not. The record is a directory: one entry per file, holding
+the path and named by the Git object ID of that text. A save of an exposed conversation
+records each file it adds or changes in the same commit (`CheckpointSpec::record`, the paths
+taken from what is committed); a turn's end removes the entries of files no longer there
+(`CheckpointSpec::files`, those entries only). So conversations adding to it at once never
+replace each other's entries, and a file is never on `main` without its entry; the desk reads
+the record again at each turn's start and after each save. A failed `GET` counts as exposed; a memory change of a turn the desk found exposed
 is dropped with a `notice` when the `POST` fails.
 
 A job with a `workspace` or a `commit` must name `person_id`, and the Station refuses one whose
@@ -3455,6 +3456,7 @@ pub struct CheckpointSpec {
     pub branch: Option<String>,   // commit in place and fast-forward this branch instead (a clone)
     pub fallback: Option<String>, // with `branch`: where the work goes when that branch refuses it
     pub files: Option<Vec<CheckpointFile>>, // with `branch`: commit exactly these, nothing of the working directory
+    pub record: Option<String>, // with `branch`, no `files`: a directory in which the same commit records each file it adds or changes
 }
 pub struct CheckpointFile { pub path: String /* repository_path */, pub text: Option<String> /* None removes */ }
 pub struct SafeHouseCheckpoint { pub remote: String, pub branch: String, pub commit: String, pub base: Option<String> }

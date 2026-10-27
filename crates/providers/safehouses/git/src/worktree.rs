@@ -1046,6 +1046,7 @@ mod tests {
             branch: None,
             fallback: None,
             files: None,
+            record: None,
         }
     }
 

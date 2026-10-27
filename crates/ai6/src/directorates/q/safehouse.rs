@@ -109,6 +109,11 @@ pub struct CheckpointSpec {
     /// With `branch`, commit exactly these files with exactly this text, and nothing else the
     /// working directory holds, whoever is writing there meanwhile.
     pub files: Option<Vec<CheckpointFile>>,
+    /// With `branch` and no `files`: a directory, relative to the repository's root, in which
+    /// the save records, in the same commit, each file it adds or changes. One entry per file,
+    /// holding its path and a newline and named by the Git object ID of that text. The paths
+    /// come from what is committed, so none is missed; a save that cannot name them fails.
+    pub record: Option<String>,
 }
 
 /// One file a save commits with exactly its text. Crosses as a value, inside a

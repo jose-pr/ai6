@@ -26,8 +26,6 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use sha2::{Digest, Sha256};
-
 use crate::directorates::m::assistant::RepoKind;
 use crate::directorates::q::safehouse::{
     CheckpointFile, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseProvider,
@@ -52,7 +50,7 @@ const MAIN: &str = "main";
 pub(super) const PROVIDER: &str = "git";
 /// The most of `MEMORY.md` inlined into `AGENTS.md` and the context file.
 const MAX_INLINED_MEMORY: usize = 32 * 1024;
-/// The most files of `personal/` looked at to name what a turn changed.
+/// The most files of `personal/` looked at to name what a turn changed in its commit message.
 const MAX_WALK: usize = 10_000;
 /// The record, in the personal repository, of the files she wrote while exposed: a directory
 /// of entries, each holding one path relative to the repository and named by the SHA-256 of
@@ -363,7 +361,7 @@ impl Workspace {
                 "Moneypenny's work in personal/ could not be saved: {reason}"
             )),
         }
-        if let Err(reason) = self.record_outside_text(&changed) {
+        if let Err(reason) = self.drop_gone_records() {
             end.notices.push(format!(
                 "Which of Moneypenny's files hold outside text could not be recorded: {reason}"
             ));
@@ -435,28 +433,13 @@ impl Workspace {
         found
     }
 
-    /// Adds the files a turn changed to [`OUTSIDE_TEXT`] when the conversation is exposed and
-    /// drops the entries of files that no longer exist, writing and committing only those
-    /// entries: what other conversations recorded meanwhile stays, and is read back after.
-    fn record_outside_text(&mut self, changed: &[String]) -> Result<(), String> {
+    /// Removes from [`OUTSIDE_TEXT`] the entries of files that no longer exist, committing only
+    /// those removals: what other conversations recorded meanwhile stays, and is read back.
+    fn drop_gone_records(&mut self) -> Result<(), String> {
         let record = self.read_record();
-        let known: BTreeSet<&String> = record.values().collect();
-        let exists = |file: &str| {
-            fs::symlink_metadata(in_tree(&self.path, file)).is_ok_and(|metadata| metadata.is_file())
-        };
         let mut files = Vec::new();
-        if self.exposed {
-            for file in changed {
-                if !known.contains(file) && exists(file) {
-                    files.push(CheckpointFile {
-                        path: format!("{OUTSIDE_TEXT}/{}", record_entry(file)),
-                        text: Some(format!("{file}\n")),
-                    });
-                }
-            }
-        }
         for (entry, file) in &record {
-            if !exists(file) {
+            if !fs::symlink_metadata(in_tree(&self.path, file)).is_ok_and(|meta| meta.is_file()) {
                 files.push(CheckpointFile {
                     path: format!("{OUTSIDE_TEXT}/{entry}"),
                     text: None,
@@ -467,13 +450,10 @@ impl Workspace {
             self.outside = record.into_values().collect();
             return Ok(());
         }
-        // Written here too, so this checkout reads what it committed.
+        // Removed here too, so this checkout reads what it committed.
         for file in &files {
-            let at = in_tree(&self.path, &file.path);
-            match &file.text {
-                Some(text) => write_file(self.area(), &at, text)?,
-                None => remove(self.area(), &at).map_err(|error| error.to_string())?,
-            }
+            remove(self.area(), &in_tree(&self.path, &file.path))
+                .map_err(|error| error.to_string())?;
         }
         let message = format!(
             "moneypenny: record which files hold outside text\n\nVia: Moneypenny (conversation \
@@ -491,15 +471,20 @@ impl Workspace {
 
     /// Commits everything in `personal/` and pushes it; a notice when it landed elsewhere
     /// than `main`.
-    fn save(&self, summary: &str) -> Result<Option<String>, String> {
+    fn save(&mut self, summary: &str) -> Result<Option<String>, String> {
         let message = format!(
             "moneypenny: {summary}\n\nVia: Moneypenny (conversation {})",
             self.conversation_id
         );
+        let mut spec = self.spec(message, &self.author_name, &self.author_email, None);
+        // Written while exposed, each file it commits is recorded in the same commit, from
+        // what is committed.
+        spec.record = self.exposed.then(|| OUTSIDE_TEXT.to_owned());
         let saved = self
             .personal
-            .checkpoint(&self.spec(message, &self.author_name, &self.author_email, None))
+            .checkpoint(&spec)
             .map_err(|error| error.to_string())?;
+        self.outside = self.read_record().into_values().collect();
         Ok((saved.branch != MAIN).then(|| {
             format!(
                 "main of the personal repository moved on in a way that conflicts with \
@@ -524,6 +509,7 @@ impl Workspace {
             branch: Some(MAIN.to_owned()),
             fallback: Some(fallback(&self.digest)),
             files,
+            record: None,
         }
     }
 }
@@ -561,6 +547,7 @@ pub(super) fn commit_once(
             branch: Some(MAIN.to_owned()),
             fallback: Some(fallback(digest)),
             files: Some(exactly(&commit.change)),
+            record: None,
         })
         .map_err(|error| error.to_string());
     let _ = house.discard();
@@ -576,14 +563,6 @@ fn exactly(change: &AssistantChange) -> Vec<CheckpointFile> {
             path: path.clone(),
             text: text.clone(),
         })
-        .collect()
-}
-
-/// The name of `file`'s entry in [`OUTSIDE_TEXT`]: the SHA-256 of its path, in hex.
-pub(super) fn record_entry(file: &str) -> String {
-    Sha256::digest(file.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 

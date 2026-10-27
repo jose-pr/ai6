@@ -90,6 +90,58 @@ fn stage_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failur
     Ok(())
 }
 
+/// Stages an entry in `record` for each file the index adds or changes against `HEAD` (every
+/// staged file when `HEAD` is unborn), outside `record` itself: the entry holds the path and a
+/// newline and is named by its own object ID. Answers whether it staged any.
+fn record_changes(repo: &Repo<'_>, record: &str) -> Result<bool, Failure> {
+    if !exact_path(record) {
+        return Err(format!(
+            "{record:?} is not a directory a save may record in"
+        ));
+    }
+    let listed = if repo.resolve("HEAD").is_ok() {
+        repo.run(
+            &[
+                "diff-index",
+                "--cached",
+                "--name-only",
+                "--no-renames",
+                "--diff-filter=d",
+                "-z",
+                "HEAD",
+            ],
+            &[],
+        )?
+    } else {
+        repo.run(&["ls-files", "--cached", "-z"], &[])?
+    };
+    let inside = format!("{record}/");
+    let mut any = false;
+    for path in listed.split('\0') {
+        if path.is_empty() || path.starts_with(&inside) {
+            continue;
+        }
+        any = true;
+        let entry = repo
+            .input(
+                &["hash-object", "-w", "--no-filters", "--stdin"],
+                format!("{path}\n").as_bytes(),
+            )?
+            .trim()
+            .to_owned();
+        repo.run(
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("100644,{entry},{record}/{entry}"),
+            ],
+            &[],
+        )?;
+    }
+    Ok(any)
+}
+
 /// Makes the working tree hold `HEAD`'s version of each of `files`: checked out when `HEAD`
 /// has it, removed when it does not. Paths are literal, never patterns.
 fn sync_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failure> {
@@ -344,8 +396,22 @@ impl Worktree {
             let status = run(&["status", "--porcelain", "--untracked-files=all"])?;
             if !status.trim().is_empty() {
                 run(&["add", "--all", "--", ".", HIDDEN_FILES, HIDDEN_DIRECTORIES])?;
+                let recorded = match &spec.record {
+                    Some(record) => record_changes(&repo, record)?,
+                    None => false,
+                };
                 if staged(&repo)? {
                     run(&["commit", "--quiet", "--no-verify", "-m", &spec.message])?;
+                    if let Some(record) = spec.record.as_ref().filter(|_| recorded) {
+                        // The entries were staged as blobs: Git writes them here too.
+                        run(&[
+                            "checkout",
+                            "--quiet",
+                            "HEAD",
+                            "--",
+                            &format!(":(literal){record}"),
+                        ])?;
+                    }
                 }
             }
         }
@@ -562,6 +628,7 @@ mod tests {
             branch: Some("main".to_owned()),
             fallback: Some("moneypenny/conversation".to_owned()),
             files: None,
+            record: None,
         }
     }
 
@@ -863,6 +930,60 @@ mod tests {
         assert_eq!(files.trim(), "memory/m.md\ny.md", "{files}");
         a.discard().unwrap();
         b.discard().unwrap();
+    }
+
+    #[test]
+    fn a_recording_save_names_every_file_it_adds_or_changes_in_the_same_commit() {
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("eve.git");
+        let house = Worktree::open(&spec(
+            &bare.to_string_lossy(),
+            &root.path().join("personal"),
+            true,
+        ))
+        .unwrap();
+        fs::write(house.path.join("kept.md"), "kept\n").unwrap();
+        fs::write(house.path.join("gone.md"), "gone\n").unwrap();
+        house.save(&save_spec("moneypenny: first"), "main").unwrap();
+
+        let mut recording = save_spec("moneypenny: second");
+        recording.record = Some(".moneypenny/outside-text".to_owned());
+        fs::create_dir_all(house.path.join("notes").join("deep")).unwrap();
+        fs::write(house.path.join("notes").join("deep").join("a.md"), "a\n").unwrap();
+        fs::write(house.path.join("kept.md"), "changed\n").unwrap();
+        fs::remove_file(house.path.join("gone.md")).unwrap();
+        fs::write(house.path.join(".hidden"), "never committed\n").unwrap();
+        house.save(&recording, "main").unwrap();
+
+        let entries = run(
+            &bare,
+            &[
+                "show",
+                "--name-only",
+                "--format=",
+                "main",
+                "--",
+                ".moneypenny/outside-text",
+            ],
+        );
+        let mut named: Vec<String> = entries
+            .lines()
+            .map(|entry| run(&bare, &["show", &format!("main:{entry}")]))
+            .collect();
+        named.sort();
+        assert_eq!(named, ["kept.md\n", "notes/deep/a.md\n"], "{entries}");
+        assert!(
+            house
+                .path
+                .join(".moneypenny")
+                .join("outside-text")
+                .read_dir()
+                .unwrap()
+                .count()
+                >= 2,
+            "the entries are in the working tree too"
+        );
+        house.discard().unwrap();
     }
 
     #[test]

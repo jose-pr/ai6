@@ -2934,20 +2934,10 @@ mod tests {
             agents.contains("waits until the person confirms"),
             "{agents}"
         );
-        assert_eq!(
-            git(
-                &bare,
-                &[
-                    "show",
-                    &format!(
-                        "main:{}/{}",
-                        workspace::OUTSIDE_TEXT,
-                        workspace::record_entry("notes/a.md")
-                    )
-                ]
-            ),
-            "notes/a.md\n"
-        );
+        assert_eq!(recorded(&bare), ["notes/a.md"]);
+        // Recorded by the commit that holds the file, from what it commits.
+        let last = |path: &str| git(&bare, &["log", "-1", "--format=%H", "main", "--", path]);
+        assert_eq!(last("notes/a.md"), last(workspace::OUTSIDE_TEXT));
         writes.desk.close_all();
         until(|| kinds(&writes, "c-s").contains(&EVENT_CLOSED.to_owned())).await;
 
