@@ -493,18 +493,26 @@ in with (`operations` of their check-in) where the Authorizer gives the person `
 `cable.read`, at most 64 in Operation ID order, read again for every message. With any, the
 Station gives her its Cable endpoint (see the `ai6` header, assistant desk). Exposure is the
 same `Conversation.exposed` as above: the Station raises it with `POST
-/v1/station/assistant/exposure` when she reads a Cable body, and asks the `GET` before each
-send, so a send in an exposed conversation waits. A `cable_proposal` event becomes a proposal: tool
-`send_cable` or `reply_to_cable`, request `CABLE <target>` with body `{operation, body}`,
+/v1/station/assistant/exposure` before it shows her a Cable body, and asks the `GET` with the
+call's `operation` before every Cable call, which then also answers whether the person holds
+`cable.send` and `cable.read` there now. A `cable_proposal` event becomes a proposal: tool
+`send_cable` or `reply_to_cable`, request `CABLE <target>` with body `{operation, recipient,
+ttl_seconds, body}`, summary naming the recipient and lifetime,
 needs `cable.send` on `operation:<id>`, the session of the conversation's current access
-token; a Cable whose ID, Operation, target or digest is not a valid identity, whose body
-exceeds 16 KiB or holds a hidden character, is an `error` entry instead. Confirming one checks
+token; a Cable whose ID, Operation, target or recipient is not a valid identity, whose digest
+is not `AssistantCable::request_digest` of what is shown, whose body exceeds 16 KiB or holds a
+hidden character, is an `error` entry instead. With 32 proposals pending or confirming, none
+of which is ever dropped, a new one (write tool or Cable) is refused: a write tool answers so,
+a Cable is an `error` entry and a `cable_discard` job for its Station. Confirming one checks
 `cable.send` again (a refusal fails it, nothing audited or sent), records
-`moneypenny.confirmed`, then queues a control job with `cable_confirm {id, digest}` for the
-Station holding it; that Station's `cable_sent` event makes it `done` (`Sent as Cable <id>.`),
-its `rejected` answer `failed` with the reason, and Moneypenny is told either way. Cancelling
-one queues a `cable_discard` job. Every `cable_sent` event is audited `moneypenny.cable.sent`
-(actor the person, the Cable's Operation, target `CONVERSATION CABLE`).
+`moneypenny.confirmed`, then queues a control job with `cable_confirm {id, digest}` and
+`token_expires_at` one answer timeout away for the Station holding it; that Station's
+`cable_sent` event makes it `done` (`Sent as Cable <id>.`), its `rejected` answer `failed` with
+the reason, no answer within one and a half answer timeouts `failed` (the job withdrawn), and
+Moneypenny is told each way. Cancelling one queues a `cable_discard` job. A control job's
+answer is taken only from the Station it was given to (`403` otherwise, and it waits on). Every
+`cable_sent` event is audited `moneypenny.cable.sent` (actor the person, the Cable's Operation,
+target `CONVERSATION CABLE`).
 
 The `show` tool takes `{"view": VIEW}` in the strict view schema version 1 (serde, unknown
 fields refused): `{"version": 1, "title"?, "blocks": [1..=24]}`, each block tagged by `kind`:
@@ -740,7 +748,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most 25,000). |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries; `cable_proposal` and `cable_sent` as under Cables in Moneypenny, the assistant. |
-| `GET /v1/station/assistant/exposure?station=ID&conversation=ID` | Station bearer. `{"exposed": bool}` for a conversation the Station runs; `404` unknown conversation, `403` a Station that does not run it. |
+| `GET /v1/station/assistant/exposure?station=ID&conversation=ID[&operation=ID]` | Station bearer. `{"exposed": bool}` for a conversation the Station runs; with `operation` also `"send"` and `"read"`, whether its person holds `cable.send` and `cable.read` there now (both false once the person's sign-in ended); `404` unknown conversation, `403` a Station that does not run it. |
 | `POST /v1/station/assistant/exposure` | Station bearer; body `{"station", "conversation", "source"}` (source 1-256 bytes). Marks the conversation exposed for good, `204`; `404`, `403` as for `GET`. |
 | `POST /v1/attach` | Requires exact `Origin` and trusted HTTPS proxy marker; exchanges token from JSON body for a scoped cookie. |
 | `GET /v1/socket/{session_id}?after={sequence}` | Requires the cookie, exact `Origin` and trusted HTTPS marker. Streams binary guatiao messages. |

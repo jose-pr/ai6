@@ -2623,10 +2623,24 @@ principal's Operation other than its own Agent, and carries the person in
 `CableAuditRecord::on_behalf_of`. A reply to such a Cable reaches only the Session that sent
 it, never the Agent's other conversations (its `session_id` is required). Recipients see
 `CableDelivery::on_behalf_of` and `CableDelivery::sent_as` (`"<from_agent> for <person>"`),
-both omitted from JSON when the Cable was not sent for a person. The daemon's relay audit
-sink writes these sends, and refusals, to the Registry audit log: action `cable.send`, actor
-the person, the sending Operation, resource `station:<id>`, target
-`<agent> <decision> <scope>:<name> <cable id or ->`; other relay records stay metadata.
+both omitted from JSON when the Cable was not sent for a person. Its sender bucket is keyed
+by Agent and person (`sender:<agent>:person:<person>`), so each person has their own.
+
+`CableRelay::with_person_audit(write: impl Fn(&CableAuditRecord) -> Result<(), String>)`
+installs the durable log of Cables sent for a person: the relay calls it with the Cable's
+record (decision `accepted`, its ID) before `submit_cable`, also on an idempotent retry, and
+refuses the send (`Unavailable`, an `audit_failed` record to the sink) when it errs or none is
+installed. The daemon writes it to the Registry audit log (action `cable.send`, actor the
+person, the sending Operation, resource `station:<id>`, target
+`<agent> <decision> <scope>:<name> <cable id or ->`); its audit sink writes refused sends for a
+person the same way, best effort; other relay records stay metadata.
+
+`CableEndpoint::with_conversation_only(self) -> Self` (`conversation_only() -> bool`) marks
+an assistant conversation's endpoint: it is never discovered and never in the audience of a
+send to an Agent, Station, Theater, channel or everyone; only a reply to a Cable it sent
+reaches it. `inbox_from(principal, operation, limit)` reads the inbox as `inbox` does, for
+Cables sent in `operation` only: the others are neither delivered nor counted against
+`limit`.
 
 The daemon reads strict `cables.toml` from its config directory. Missing configuration
 denies every action. `[[grants]]` entries name `agent`, `action`, `scope`, and optional
@@ -2798,8 +2812,12 @@ pub struct AssistantCableGrant { pub operation: String, pub send: bool, pub read
 pub struct AssistantCableDecision { pub id: String, pub digest: String }
 pub struct AssistantCable { pub id: String /* desk's held ID, or the Cable ID when sent at once */,
     pub operation: String, pub target: String /* agent:007, station:hq, global, reply:<cable> */,
-    pub body: Option<String> /* proposals only */, pub digest: String /* SHA-256 hex */,
+    pub recipient: String /* the audience; for a reply agent:<sender of the answered Cable> */,
+    pub ttl_seconds: Option<u32> /* default, omitted when None: the relay's 15 minutes */,
+    pub body: Option<String> /* proposals only */, pub digest: String /* request_digest */,
     pub cable_id: Option<String> /* once sent */ }
+impl AssistantCable { pub fn request_digest(&self) -> String; } // SHA-256 hex of operation,
+    // target, recipient, ttl and body, each prefixed with its byte length and `:`
 pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
     pub job_id: Option<String>, pub session_id: Option<String>, pub events: Vec<AssistantEvent> }
 pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,
@@ -3442,29 +3460,34 @@ assistant.allow_elevated = true: …`. The roster's assistant weakenings
 at start and on a roster change, and published at check-in as `assistant_weakened`.
 
 With `cables-mcp`, a job whose `cables` is not empty also gets the conversation a Cable
-endpoint (loopback, its own bearer token) as a further server, `mode.with_cables()`, with
-`AI6_ASSISTANT_CABLE_MCP_URL`/`_TOKEN` in the harness environment. Its tools are
-`discover_agents`, `send_cable`, `read_cables`, `acknowledge_cable` and `reply_to_cable`, each
-naming an `operation`. Each call is made as the principal (Agent `job.agent_id`, the call's
-Operation, this Station, Session `assistant-<conversation digest>`, no Mission)
-`with_on_behalf_of(job.person_id)`; `cables.toml` grants for that Agent, the quotas and
-fan-out apply as for any Agent. A send or reply needs the grant's `send`, a read or
-acknowledgement its `read`, discovery either; otherwise the answer is the relay's own
-indistinguishable refusal. Reads return only Cables sent in the call's Operation; a reply or
+endpoint (loopback, its own bearer token, accepted until the job's `token_expires_at`) as a
+further server, `mode.with_cables()`, with `AI6_ASSISTANT_CABLE_MCP_URL`/`_TOKEN` in the
+harness environment. Its tools are `discover_agents`, `send_cable`, `read_cables`,
+`acknowledge_cable` and `reply_to_cable`, each naming an `operation`. Each call is made as the
+principal (Agent `job.agent_id`, the call's Operation, this Station, Session
+`assistant-<conversation digest>`, no Mission) `with_on_behalf_of(job.person_id)`;
+`cables.toml` grants for that Agent, the quotas and fan-out apply as for any Agent. Before
+every call the desk asks the same `GET` with `&operation=<id>`, which then also answers `send`
+and `read`, the person's `cable.send` and `cable.read` there now; without an answer the call
+is refused. A send or reply needs the job grant's `send` and `send` now, a read or
+acknowledgement `read` in both, discovery either; otherwise the answer is the relay's own
+indistinguishable refusal. Reads use `inbox_from` the call's Operation; a reply or
 acknowledgement only touches a Cable of that Operation delivered to the conversation. Retry
-keys are scoped to the conversation. The Session is in the relay's endpoint directory (under
-the first granted Operation) while the harness runs, so replies reach it. A later job's grants
-replace the endpoint's; exposure only turns on. A read that returns a body raises the
-conversation's exposure with the same `POST` (source `cable:<sender>`, one per sender). Before
-each send the desk asks the same `GET` (no answer counts as exposed). Exposed, `send_cable` and
-`reply_to_cable` send nothing: the request (refused if its body holds a character
-`vetting::is_invisible` names) is held in memory, at most 32 per conversation for an hour, a
-`cable_proposal` event carries its desk ID, Operation, target, body and digest, and she is
-told it waits for the person. A `cable_confirm` job sends the held request when its digest
-matches, it is under an hour old and the endpoint's current grants still give `send`; it is
-`rejected` with the reason otherwise or when the harness has closed (held requests never
-survive it). A `cable_discard` job drops one. Every Cable sent for the person is reported as
-`cable_sent`.
+keys are scoped to the conversation. The Session is in the relay's endpoint directory,
+conversation-only, while the harness runs, so replies to its Cables reach it and nothing else
+does. A later job's grants replace the endpoint's; exposure only turns on. A read that returns
+a body first raises the conversation's exposure with the same `POST` (source
+`cable:<sender>`, one per sender) and withholds every body ("Cable inbox is unavailable")
+unless each is acknowledged. Exposed, `send_cable` and `reply_to_cable` send nothing: the
+request (refused if its body holds a character `vetting::is_invisible` names) is held in
+memory for an hour, at most 32 per conversation (the 33rd is refused, none is dropped), a
+`cable_proposal` event carries it as an `AssistantCable` (desk ID, Operation, target,
+recipient, TTL, body, `request_digest`), and she is told it waits for the person. A
+`cable_confirm` job is `rejected` once its `token_expires_at` has passed; otherwise it sends the
+held request when its digest matches, it is under an hour old and the endpoint's current
+grants still give `send`, and is `rejected` with the reason otherwise or when the harness has
+closed (held requests never survive it). A `cable_discard` job drops one. Every Cable sent for
+the person is reported as `cable_sent`.
 
 ## Safe houses (`ai6::directorates::q::safehouse`, `ai6::station::safehouse`)
 

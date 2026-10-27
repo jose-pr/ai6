@@ -250,15 +250,19 @@ She can talk to Agents for you over [Cables](agents.md#cables), in the Operation
 may: `cable.send` on `operation:<id>` lets her send and reply there, `cable.read` lets her
 read the Cables sent to her there ([access policy](access.md#the-access-policy)). With
 neither anywhere she has no Cable tools at all. Universal Exports works out those Operations
-with each message you send, so a permission taken away holds from her next turn.
+with each message you send, and the Station asks it again before every Cable call, so a
+permission taken away holds from her next call; when Universal Exports does not answer, the
+call is refused.
 
 The Station running her gives her a second MCP server, `cables`, with `discover_agents`,
 `send_cable`, `read_cables`, `acknowledge_cable` and `reply_to_cable`; every call names an
-Operation, and one outside your permissions is refused exactly as an unknown target is.
-Recipients see the Cable as from her **for you** (`moneypenny for <your person ID>`), and
-only Agents of the Operation it is sent in can get it. Your permissions are not enough on their
-own: the Station's `cables.toml` must also let her Agent send and receive, and its quotas and
-fan-out limits apply to her as to any Agent:
+Operation, and one outside your permissions is refused exactly as an unknown target is. Its
+token expires with the token of her own tools, and the Station starts her again with new ones
+before that. Recipients see the Cable as from her **for you** (`moneypenny for <your person
+ID>`), and only Agents of the Operation it is sent in can get it. Your permissions are not
+enough on their own: the Station's `cables.toml` must also let her Agent send and receive,
+and its quotas and fan-out limits apply to her as to any Agent, except that the sender quota
+is counted for each person she acts for:
 
 ```toml
 # cables.toml
@@ -275,21 +279,32 @@ scope = "station"
 name = "hq"
 ```
 
-A reply to one of her Cables reaches only the conversation that sent it, never your other
-conversations or another person's. She reads only the Cables of the Operation she names.
+One Agent is Moneypenny for everyone, so her conversations are never an audience: a Cable to
+the Agent `moneypenny`, to a Station, a Theater, a channel or everyone does not reach any of
+them. Only a reply to one of her Cables reaches her, and only the conversation that sent it,
+never your other conversations or another person's. She reads only the Cables of the
+Operation she names; the others stay unread.
 
 Once the conversation is **exposed** ([as her memory is](#her-workspace-and-memory): a Cable
-body exposes it too), a Cable she sends or replies with is not sent: the Station holds it and the
-chat shows it as a proposal, with the Operation, the audience and the exact text, needing
-`cable.send`. Confirm, and the person's permission is checked again, the confirmation is
-audited (`moneypenny.confirmed`), and only then does the Station holding it send it. Cancel,
-or leave it for an hour, and nothing is sent. A held Cable lives only in that Station's
-memory: if her session there closes first, confirming it fails and says why. A body with a
-character that renders as nothing is refused before it can become a proposal.
+body exposes it too), a Cable she sends or replies with is not sent. Universal Exports keeps
+that one record, and the Station shows her a Cable body only once Universal Exports has
+recorded it, so a conversation resumed or moved to another Station stays exposed. The Station
+holds the Cable and the chat shows it as a proposal with the Operation, the recipient, how
+long it lasts and the exact text, needing `cable.send`. Universal Exports checks that what it
+shows is what the Station holds (a digest of all of it) and shows nothing otherwise. Confirm,
+and your permission is checked again, the confirmation is audited (`moneypenny.confirmed`),
+and the Station holding it sends it if it hears within the answer timeout (a minute by
+default); otherwise the proposal fails and nothing is sent. Cancel, or leave it for an hour,
+and nothing is sent. A held Cable lives only in that Station's memory: if her session there
+closes first, confirming it fails and says why. A body with a character that renders as
+nothing is refused before it can become a proposal. With 32 Cables already held, or 32
+proposals waiting, she is told so and the new one is refused; nothing waiting for you is
+dropped to make room.
 
-Every Cable sent for you is recorded twice in the audit log: by the Station's relay (action
-`cable.send`, you as actor, her Agent and the audience in the target, refusals too) and by
-Universal Exports (`moneypenny.cable.sent`, you as actor, the conversation and the Cable).
+Every Cable sent for you is recorded twice in the audit log: by the Station's relay before the
+Cable is stored (action `cable.send`, you as actor, her Agent and the audience in the target;
+refusals too), and a Cable whose record cannot be written is not sent; then by Universal
+Exports (`moneypenny.cable.sent`, you as actor, the conversation and the Cable).
 
 ## Views she shows
 

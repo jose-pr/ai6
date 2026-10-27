@@ -66,19 +66,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `cables` (`AssistantMode::with_cables`, environment `AI6_ASSISTANT_CABLE_MCP_URL`/`_TOKEN`),
   whose `discover_agents`, `send_cable`, `read_cables`, `acknowledge_cable` and
   `reply_to_cable` name an Operation and act as her Agent for the person, under the Station's
-  `cables.toml`, quotas and fan-out. A Cable sent for a person carries `on_behalf_of`
-  (`CablePrincipal::with_on_behalf_of`, `Cable::on_behalf_of`, `CableDelivery::sent_as`
-  `"<agent> for <person>"`), reaches only Agents of its Operation, and its reply only the
-  conversation that sent it; the relay audits it (`cable.send`, the person as actor) and
-  Universal Exports too (`moneypenny.cable.sent`).
-- Once her conversation has read outside text (a Cable body, or a Mission's brief, Agent
-  output or the audit log through her tools), its `exposed` flag holds for good, and a Cable
-  she sends or replies with is held by the Station and shown as a proposal
-  (`EVENT_CABLE_PROPOSAL`); the person confirms it (checked again, audited
-  `moneypenny.confirmed`, then sent through a `cable_confirm` job) or cancels it
-  (`cable_discard`). The Station asks `GET /v1/station/assistant/exposure` before each send,
-  so a send in the same turn as the read waits too; held Cables live in the Station's memory
-  for at most an hour and never survive the harness.
+  `cables.toml`, quotas (the sender quota per person) and fan-out. A Cable sent for a person
+  carries `on_behalf_of` (`CablePrincipal::with_on_behalf_of`, `Cable::on_behalf_of`,
+  `CableDelivery::sent_as` `"<agent> for <person>"`), reaches only Agents of its Operation,
+  and its reply only the conversation that sent it; her conversations
+  (`CableEndpoint::with_conversation_only`) are in no other audience. The relay writes its
+  audit record (`cable.send`, the person as actor) before storing it and refuses the send when
+  it cannot (`CableRelay::with_person_audit`); Universal Exports audits it too
+  (`moneypenny.cable.sent`). Before every Cable call the Station asks Universal Exports
+  (`GET /v1/station/assistant/exposure` with `operation`, which then also answers `send` and
+  `read`) whether the person may still send or read in that Operation, and refuses without an
+  answer; the endpoint's token expires with her MCP token. `CableRelay::inbox_from` reads one
+  Operation's Cables and leaves the rest undelivered.
+- A Cable body exposes her conversation too: the Station shows one only after Universal
+  Exports has recorded the exposure (`POST /v1/station/assistant/exposure`). In an exposed
+  conversation a Cable she sends or replies with is held by the Station and shown as a
+  proposal (`EVENT_CABLE_PROPOSAL`) with its recipient, lifetime and
+  text, whose digest (`AssistantCable::request_digest`) Universal Exports checks against what
+  it shows; the person confirms it (checked again, audited `moneypenny.confirmed`, then sent
+  through a `cable_confirm` job within the answer timeout) or cancels it (`cable_discard`).
+  Held Cables live in the Station's memory for at most an hour and never survive the harness;
+  at 32 held Cables or 32 waiting proposals a new one is refused rather than one dropped. A
+  control job's answer is taken only from the Station it was given to.
 
 - Moneypenny's answer can be stopped: the app's **Stop** button, in place of Send while she
   answers, sends `{"type":"interrupt"}` on the chat socket, which acts only on the socket's
