@@ -169,6 +169,26 @@ fn sync_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failure
     Ok(())
 }
 
+/// Whether `name` is a branch name by Git's rules (`git check-ref-format --branch`), checked
+/// here rather than by a Git command, which would read the configuration of whatever
+/// repository holds its working directory: no name part empty, starting with `.` or ending
+/// in `.lock`; no `..`, `@{`, control character, space or any of `~^:?*[\`; not `@`, not
+/// starting with `-` and not ending with `.`.
+fn branch_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "@"
+        && !name.starts_with('-')
+        && !name.ends_with('.')
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, ' ' | '~' | '^' | ':' | '?' | '*' | '[' | '\\'))
+        && name
+            .split('/')
+            .all(|part| !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock"))
+}
+
 /// Whether `path` may be given to an exact save: 1 to 8 `/`-separated names, none empty,
 /// `.`, `..` or `.git` in any case, none holding `\` or `:`. Hidden names are allowed: the
 /// caller chose the file, unlike the working tree's.
@@ -266,8 +286,9 @@ impl Worktree {
             .ok_or_else(|| format!("{} has no parent directory", target.display()))?;
         fs::create_dir_all(parent).map_err(|error| fail(parent, error))?;
         let parent = git_path(parent.canonicalize().map_err(|error| fail(parent, error))?);
-        git(&parent, &["check-ref-format", "--branch", &spec.base])
-            .map_err(|_| format!("{:?} is not a branch name", spec.base))?;
+        if !branch_name(&spec.base) {
+            return Err(format!("{:?} is not a branch name", spec.base));
+        }
         if clone.create_source
             && kind == RepoKind::Local
             && let Some(local) = local_repository(&spec.source)
@@ -371,8 +392,9 @@ impl Worktree {
         branch: &str,
     ) -> Result<SafeHouseCheckpoint, Failure> {
         for name in std::iter::once(branch).chain(spec.fallback.as_deref()) {
-            git(&self.path, &["check-ref-format", "--branch", name])
-                .map_err(|_| format!("{name:?} is not a branch name"))?;
+            if !branch_name(name) {
+                return Err(format!("{name:?} is not a branch name"));
+            }
         }
         let mut env = Vec::new();
         if let (Some(name), Some(email)) = (&spec.author_name, &spec.author_email) {
@@ -1086,6 +1108,51 @@ mod tests {
         assert!(metadata.is_file(), "{metadata:?}");
         assert_eq!(fs::read_to_string(&memory).unwrap(), "../../outside");
         house.discard().unwrap();
+    }
+
+    #[test]
+    fn branch_names_are_checked_as_git_checks_them_without_running_it() {
+        let names = [
+            "main",
+            "moneypenny/0123abcd",
+            "a.b/c-d_e",
+            "",
+            "@",
+            "-x",
+            "x.",
+            "a..b",
+            "a@{1}",
+            "a b",
+            "a~1",
+            "a^",
+            "a:b",
+            "a?",
+            "a*",
+            "a[b",
+            "a\\b",
+            "a/.b",
+            "a.lock",
+            "a/b.lock/c",
+            "a//b",
+            "/a",
+            "a/",
+            "a\u{7}",
+        ];
+        let outside = tempfile::tempdir().unwrap();
+        for name in names {
+            let git = Command::new("git")
+                .arg("-C")
+                .arg(outside.path())
+                .args(["check-ref-format", "--branch", name])
+                .output()
+                .unwrap();
+            // Never one Git refuses; `@` alone, which Git reads as `HEAD`, is refused too.
+            assert_eq!(
+                branch_name(name),
+                git.status.success() && name != "@",
+                "{name:?}"
+            );
+        }
     }
 
     #[test]
