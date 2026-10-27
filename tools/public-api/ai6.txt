@@ -1274,15 +1274,18 @@ pub ai6::directorates::q::safehouse::Change::message: alloc::string::String
 pub struct ai6::directorates::q::safehouse::ChangeLog
 pub ai6::directorates::q::safehouse::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
 pub struct ai6::directorates::q::safehouse::CheckpointFile
+pub ai6::directorates::q::safehouse::CheckpointFile::base: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointFile::path: alloc::string::String
 pub ai6::directorates::q::safehouse::CheckpointFile::text: core::option::Option<alloc::string::String>
 pub struct ai6::directorates::q::safehouse::CheckpointSpec
 pub ai6::directorates::q::safehouse::CheckpointSpec::author_email: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::author_name: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::branch: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::CheckpointSpec::exclude: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::q::safehouse::CheckpointSpec::fallback: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::files: core::option::Option<alloc::vec::Vec<ai6::directorates::q::safehouse::CheckpointFile>>
 pub ai6::directorates::q::safehouse::CheckpointSpec::message: alloc::string::String
+pub ai6::directorates::q::safehouse::CheckpointSpec::record: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::remote: alloc::string::String
 pub struct ai6::directorates::q::safehouse::SafeHouseCheckpoint
 pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::base: core::option::Option<alloc::string::String>
@@ -3830,10 +3833,13 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
 pub mod ai6::directorates::section_00::assistant
 pub struct ai6::directorates::section_00::assistant::AssistantChange
+pub ai6::directorates::section_00::assistant::AssistantChange::base: alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>
 pub ai6::directorates::section_00::assistant::AssistantChange::digest: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantChange::files: alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>
 impl ai6::directorates::section_00::assistant::AssistantChange
+pub fn ai6::directorates::section_00::assistant::AssistantChange::based(alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>, alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> Self
 pub fn ai6::directorates::section_00::assistant::AssistantChange::digest_of(&alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> alloc::string::String
+pub fn ai6::directorates::section_00::assistant::AssistantChange::digest_over(&alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>, &alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> alloc::string::String
 pub fn ai6::directorates::section_00::assistant::AssistantChange::new(alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> Self
 pub fn ai6::directorates::section_00::assistant::AssistantChange::validate(&self, bool) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::directorates::section_00::assistant::AssistantCommit
@@ -4804,10 +4810,13 @@ pub fn ai6::directorates::registry::approvals::ApprovalRequest::expiring(self, f
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::proposing_role(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, ai6::directorates::m::identity::SessionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::approvals::ActionScope, impl core::convert::Into<alloc::string::String>, &str) -> core::io::error::Result<Self>
 pub struct ai6::AssistantChange
+pub ai6::AssistantChange::base: alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>
 pub ai6::AssistantChange::digest: alloc::string::String
 pub ai6::AssistantChange::files: alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>
 impl ai6::directorates::section_00::assistant::AssistantChange
+pub fn ai6::directorates::section_00::assistant::AssistantChange::based(alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>, alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> Self
 pub fn ai6::directorates::section_00::assistant::AssistantChange::digest_of(&alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> alloc::string::String
+pub fn ai6::directorates::section_00::assistant::AssistantChange::digest_over(&alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>, &alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> alloc::string::String
 pub fn ai6::directorates::section_00::assistant::AssistantChange::new(alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> Self
 pub fn ai6::directorates::section_00::assistant::AssistantChange::validate(&self, bool) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::AssistantCommit
@@ -5117,15 +5126,18 @@ pub ai6::Change::message: alloc::string::String
 pub struct ai6::ChangeLog
 pub ai6::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
 pub struct ai6::CheckpointFile
+pub ai6::CheckpointFile::base: core::option::Option<alloc::string::String>
 pub ai6::CheckpointFile::path: alloc::string::String
 pub ai6::CheckpointFile::text: core::option::Option<alloc::string::String>
 pub struct ai6::CheckpointSpec
 pub ai6::CheckpointSpec::author_email: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::author_name: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::branch: core::option::Option<alloc::string::String>
+pub ai6::CheckpointSpec::exclude: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::CheckpointSpec::fallback: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::files: core::option::Option<alloc::vec::Vec<ai6::directorates::q::safehouse::CheckpointFile>>
 pub ai6::CheckpointSpec::message: alloc::string::String
+pub ai6::CheckpointSpec::record: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::remote: alloc::string::String
 #[non_exhaustive] pub struct ai6::ClassAuthorization
 pub ai6::ClassAuthorization::agents: alloc::vec::Vec<alloc::string::String>
