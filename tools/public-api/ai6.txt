@@ -1395,6 +1395,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal:
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::terminal::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6::directorates::q::terminal::TerminalOffer], core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
+pub fn ai6::directorates::q::terminal::exit_code_text(i64) -> alloc::string::String
 pub fn ai6::directorates::q::terminal::strip_controls(&[u8]) -> alloc::vec::Vec<u8>
 pub mod ai6::directorates::q::transport
 pub mod ai6::directorates::q::transport::contract
@@ -3791,6 +3792,7 @@ pub ai6::directorates::section_00::assistant::AssistantJob::agent_id: alloc::str
 pub ai6::directorates::section_00::assistant::AssistantJob::close: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::conversation_id: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::interrupt: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::job_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::mcp_token: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::message: alloc::string::String
@@ -3816,6 +3818,7 @@ pub const ai6::directorates::section_00::assistant::EVENT_ACCEPTED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_CLOSED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_COMPLETED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_FAILED: &str
+pub const ai6::directorates::section_00::assistant::EVENT_INTERRUPTED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_LIMIT: &str
 pub const ai6::directorates::section_00::assistant::EVENT_REJECTED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_TEXT: &str
@@ -4721,6 +4724,7 @@ pub ai6::AssistantJob::agent_id: alloc::string::String
 pub ai6::AssistantJob::close: bool
 pub ai6::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantJob::conversation_id: alloc::string::String
+pub ai6::AssistantJob::interrupt: bool
 pub ai6::AssistantJob::job_id: alloc::string::String
 pub ai6::AssistantJob::mcp_token: alloc::string::String
 pub ai6::AssistantJob::message: alloc::string::String
@@ -6608,6 +6612,7 @@ pub const ai6::EVENT_ACCEPTED: &str
 pub const ai6::EVENT_CLOSED: &str
 pub const ai6::EVENT_COMPLETED: &str
 pub const ai6::EVENT_FAILED: &str
+pub const ai6::EVENT_INTERRUPTED: &str
 pub const ai6::EVENT_LIMIT: &str
 pub const ai6::EVENT_REJECTED: &str
 pub const ai6::EVENT_TEXT: &str
