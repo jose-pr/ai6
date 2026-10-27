@@ -289,6 +289,57 @@ impl Desk {
         )
     }
 
+    /// Refuses a job naming a repository this Station's own roster does not give: the person's
+    /// personal repository filled in for `person_id`, the shared repositories by name, and a
+    /// commit only to one of those. Universal Exports' word is not taken for where a person's
+    /// work and memory go.
+    fn check_repositories(&self, job: &AssistantJob) -> Result<(), String> {
+        let state = self.state.current();
+        let settings = state.roster.assistant();
+        let person = job.person_id.as_deref().unwrap_or_default();
+        let personal = || -> Result<Option<String>, String> { settings.personal_repo_for(person) };
+        let shared = |name: &str| {
+            if name == crate::directorates::m::assistant::ORG_SHARED {
+                settings.org().map(|repo| repo.repo().to_owned())
+            } else {
+                settings
+                    .shared()
+                    .get(name)
+                    .map(|repo| repo.repo().to_owned())
+            }
+        };
+        let refused = |what: &str| {
+            Err(format!(
+                "{what} is not one this Station's roster ([assistant]) gives, so nothing was done"
+            ))
+        };
+        if let Some(workspace) = &job.workspace {
+            if personal()?.as_deref() != Some(workspace.personal.as_str()) {
+                return refused("the person's repository");
+            }
+            for (name, repo) in &workspace.shared {
+                if shared(name).as_deref() != Some(repo.as_str()) {
+                    return refused(&format!("shared repository {name:?}"));
+                }
+            }
+        }
+        if let Some(commit) = &job.commit {
+            let given = if commit.kind == COMMIT_MEMORY {
+                personal()?.as_deref() == Some(commit.repo.as_str())
+            } else {
+                settings
+                    .shared()
+                    .values()
+                    .chain(settings.org())
+                    .any(|repo| repo.repo() == commit.repo)
+            };
+            if !given {
+                return refused("the commit's repository");
+            }
+        }
+        Ok(())
+    }
+
     /// Takes one job and reports whether the harness has the message, or how a commit went.
     pub(super) async fn handle(&self, job: AssistantJob) {
         let outcome = self.take(&job).await;
@@ -309,6 +360,7 @@ impl Desk {
     async fn take(&self, job: &AssistantJob) -> Result<Option<String>, String> {
         job.validate()?;
         self.check_elevation()?;
+        self.check_repositories(job)?;
         if job.close {
             self.close(&job.conversation_id);
             return Ok(None);
@@ -1461,12 +1513,32 @@ mod tests {
         _root: tempfile::TempDir,
     }
 
-    impl Fixture {
-        /// The desk with the real `git` safe-house provider.
-        fn with_git(mut self) -> Self {
-            self.desk.houses = git_houses();
-            self
-        }
+    /// The roster's agents file for a Station whose `[assistant]` keeps personal repositories
+    /// as `<people>/{person}.git` and shares `<people>/ops` (`ops`) and a repository that does
+    /// not exist (`gone`).
+    fn station_agents(people: &Path) -> String {
+        format!(
+            "{AGENTS}[assistant]\npersonal_repo = '{}'\n[assistant.shared.ops]\nrepo = '{}'\n\
+             [assistant.shared.gone]\nrepo = '{}'\n",
+            people.join("{person}.git").display(),
+            people.join("ops").display(),
+            people.join("missing.git").display()
+        )
+    }
+
+    /// A desk with the real `git` safe-house provider on a Station whose roster keeps
+    /// personal repositories under `people` ([`station_agents`]).
+    fn git_fixture(people: &Path, script: Script) -> Fixture {
+        let mut fixture = on_station(
+            &station_agents(people),
+            Ok(false),
+            true,
+            IDLE,
+            script,
+            Script::Answers,
+        );
+        fixture.desk.houses = git_houses();
+        fixture
     }
 
     impl Drop for Fixture {
@@ -1600,6 +1672,7 @@ mod tests {
     fn working(conversation: &str, message: &str, workspace: AssistantWorkspace) -> AssistantJob {
         AssistantJob {
             workspace: Some(workspace),
+            person_id: Some("eve".to_owned()),
             ..job(conversation, message)
         }
     }
@@ -1626,6 +1699,7 @@ mod tests {
                 author_name: "Eve Moneypenny".to_owned(),
                 author_email: "eve@example.invalid".to_owned(),
             }),
+            person_id: Some("eve".to_owned()),
             ..job(conversation, "unused")
         }
     }
@@ -1655,6 +1729,7 @@ mod tests {
             session_id: None,
             close: false,
             interrupt: false,
+            person_id: None,
             workspace: None,
             commit: None,
         }
@@ -2114,8 +2189,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_turn_commits_her_work_to_main_and_her_memory_once_it_is_let_through() {
-        let fixture = scripted(true, IDLE, Script::Writes, Script::Answers).with_git();
         let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Writes);
         let bare = people.path().join("eve.git");
         fixture
             .desk
@@ -2257,7 +2332,7 @@ mod tests {
         fixture.desk.close_all();
         until(|| kinds(&fixture, "c-w").contains(&EVENT_CLOSED.to_owned())).await;
         until(|| !area.exists() && !context.exists() && !repos.exists()).await;
-        let next = scripted(true, IDLE, Script::Answers, Script::Answers).with_git();
+        let next = git_fixture(people.path(), Script::Answers);
         next.desk
             .handle(working("c-next", "What do I like?", workspace(&bare)))
             .await;
@@ -2298,8 +2373,8 @@ mod tests {
 
     #[tokio::test]
     async fn hooks_and_a_monitor_in_her_repository_never_run_when_the_station_commits() {
-        let fixture = scripted(true, IDLE, Script::Works, Script::Answers).with_git();
         let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Works);
         let bare = people.path().join("eve.git");
         fixture
             .desk
@@ -2337,8 +2412,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_confirmed_memory_commit_takes_nothing_a_turn_in_progress_wrote() {
-        let fixture = scripted(true, IDLE, Script::Works, Script::Answers).with_git();
         let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Works);
         let bare = people.path().join("eve.git");
         fixture
             .desk
@@ -2377,8 +2452,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_message_reaching_a_harness_still_answering_keeps_the_turn_copy() {
-        let fixture = scripted(true, IDLE, Script::Works, Script::Answers).with_git();
         let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Works);
         let bare = people.path().join("eve.git");
         fixture
             .desk
@@ -2408,9 +2483,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hidden_files_in_her_repository_are_never_saved_or_set_aside() {
-        let fixture = scripted(true, IDLE, Script::Works, Script::Answers).with_git();
+    async fn the_station_takes_only_repositories_its_own_roster_gives() {
         let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Answers);
+        let elsewhere = tempfile::tempdir().unwrap();
+        let theirs = elsewhere.path().join("eve.git");
+        let mine = people.path().join("eve.git");
+        let reason = |conversation: &str| {
+            events(&fixture, conversation)
+                .first()
+                .filter(|event| event.kind == EVENT_REJECTED)
+                .and_then(|event| event.text.clone())
+                .unwrap_or_default()
+        };
+
+        // Another repository, or another person's, for this person.
+        fixture
+            .desk
+            .handle(working("c-1", "hi", workspace(&theirs)))
+            .await;
+        assert!(reason("c-1").contains("roster"), "{}", reason("c-1"));
+        let mut other = working("c-2", "hi", workspace(&people.path().join("mallory.git")));
+        other.person_id = Some("eve".to_owned());
+        fixture.desk.handle(other).await;
+        assert!(reason("c-2").contains("roster"), "{}", reason("c-2"));
+        // A shared repository under a name the roster gives another.
+        let mut wanted = workspace(&mine);
+        wanted.shared.insert(
+            "ops".to_owned(),
+            elsewhere.path().join("ops").to_string_lossy().into_owned(),
+        );
+        fixture.desk.handle(working("c-3", "hi", wanted)).await;
+        assert!(
+            reason("c-3").contains("shared repository"),
+            "{}",
+            reason("c-3")
+        );
+        // Commits to repositories the roster does not give.
+        let change = AssistantChange::new(BTreeMap::from([(
+            "memory/prefs.md".to_owned(),
+            Some(PREFERENCE.to_owned()),
+        )]));
+        fixture
+            .desk
+            .handle(committing("c-4", COMMIT_MEMORY, &theirs, change.clone()))
+            .await;
+        assert!(reason("c-4").contains("commit"), "{}", reason("c-4"));
+        let shared = AssistantChange::new(BTreeMap::from([(
+            "handbook.md".to_owned(),
+            Some("x".to_owned()),
+        )]));
+        fixture
+            .desk
+            .handle(committing("c-5", COMMIT_SHARED, &theirs, shared))
+            .await;
+        assert!(reason("c-5").contains("commit"), "{}", reason("c-5"));
+        assert!(fixture.asked.lock().unwrap().starts.is_empty());
+        assert!(!theirs.exists(), "nothing was made where it was told to");
+
+        // The person's own, as the roster fills it in, is taken.
+        fixture
+            .desk
+            .handle(working("c-6", "hi", workspace(&mine)))
+            .await;
+        until(|| kinds(&fixture, "c-6").contains(&EVENT_COMPLETED.to_owned())).await;
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn hidden_files_in_her_repository_are_never_saved_or_set_aside() {
+        let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Works);
         let bare = people.path().join("eve.git");
         fixture
             .desk
@@ -2439,8 +2582,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_memory_change_nobody_lets_through_never_reaches_the_repository() {
-        let fixture = scripted(true, IDLE, Script::Writes, Script::Answers).with_git();
         let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Writes);
         let bare = people.path().join("eve.git");
         let exposed = AssistantWorkspace {
             exposed: true,
@@ -2490,8 +2633,8 @@ mod tests {
 
     #[tokio::test]
     async fn shared_repositories_are_checked_out_and_a_shared_commit_lands_on_main() {
-        let fixture = scripted(true, IDLE, Script::Answers, Script::Answers).with_git();
         let repos = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(repos.path(), Script::Answers);
         let ops = repos.path().join("ops");
         std::fs::create_dir_all(&ops).unwrap();
         git(&ops, &["init", "--quiet", "--initial-branch=main"]);

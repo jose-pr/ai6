@@ -458,7 +458,7 @@ conversation.
 
 Workspaces come from the `[assistant]` table of the roster `with_roster` serves (a
 configuration directory's `agents.toml`; a SQL roster has none, so no workspace). With
-`personal_repo` set, each message job carries `ai6::AssistantWorkspace`: the template filled
+`personal_repo` set, each message job carries `person_id` and `ai6::AssistantWorkspace`: the template filled
 in for the person signed in to the conversation (a person whose identifier cannot fill
 `{person}` gets an `unavailable` error instead of a job), the repositories of the person's
 Directory groups and `org`, the author (`display_name` else `name`, without control

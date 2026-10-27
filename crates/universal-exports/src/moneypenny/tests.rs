@@ -1625,6 +1625,8 @@ async fn each_person_works_in_their_own_repository_and_reads_only_their_groups()
     let served = served_with(AssistantConfig::default(), Some(workspace_roster())).await;
     let (_operator_app, operator) = accepted(&served, &served.operator, "Hello.").await;
     let (_viewer_app, viewer) = accepted(&served, &served.viewer, "Hello.").await;
+    assert_eq!(operator.person_id.as_deref(), Some("operator-007"));
+    assert_eq!(viewer.person_id.as_deref(), Some("viewer-007"));
     let mine = operator.workspace.clone().unwrap();
     assert_eq!(mine.personal, "/srv/mp/operator-007.git");
     assert_eq!(mine.author_name, "operator-007");

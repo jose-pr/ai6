@@ -381,6 +381,10 @@ pub struct AssistantJob {
     /// `message` is empty. A harness that is not answering is left as it is.
     #[serde(default)]
     pub interrupt: bool,
+    /// The person the conversation is for. Required with `workspace` and `commit`: the
+    /// Station fills the person's repository from its own roster and takes only that one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person_id: Option<String>,
     /// Where the conversation keeps its work; `None` keeps nothing, in an empty directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<AssistantWorkspace>,
@@ -427,6 +431,14 @@ impl AssistantJob {
         {
             return Err("message is empty or too long".to_owned());
         }
+        if let Some(person) = &self.person_id
+            && !valid_identity(person)
+        {
+            return Err("person_id is empty, too long or has control characters".to_owned());
+        }
+        if (self.workspace.is_some() || self.commit.is_some()) && self.person_id.is_none() {
+            return Err("a workspace or a commit needs person_id".to_owned());
+        }
         if let Some(workspace) = &self.workspace {
             workspace
                 .validate()
@@ -471,6 +483,7 @@ impl fmt::Debug for AssistantJob {
             .field("session_id", &self.session_id)
             .field("close", &self.close)
             .field("interrupt", &self.interrupt)
+            .field("person_id", &self.person_id)
             .field("workspace", &self.workspace.is_some())
             .field(
                 "commit",
@@ -562,6 +575,7 @@ mod tests {
             session_id: None,
             close: false,
             interrupt: false,
+            person_id: None,
             workspace: None,
             commit: None,
         }
@@ -590,6 +604,7 @@ mod tests {
         let committing = AssistantJob {
             message: String::new(),
             commit: Some(commit()),
+            person_id: Some("eve".to_owned()),
             ..job()
         };
         assert_eq!(committing.validate(), Ok(()));

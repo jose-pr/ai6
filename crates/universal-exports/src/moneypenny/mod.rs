@@ -244,6 +244,7 @@ fn control_job(
         session_id: conversation.session_id.clone(),
         close: *control == Control::Close,
         interrupt: *control == Control::Interrupt,
+        person_id: Some(conversation.person_id.clone()),
         workspace: None,
         commit,
     }
@@ -622,6 +623,7 @@ impl Assistant {
                 session_id: conversation.session_id.clone(),
                 close: false,
                 interrupt: false,
+                person_id: Some(person_id.to_owned()),
                 workspace: workspace.map(|workspace| AssistantWorkspace {
                     exposed: conversation.exposed,
                     ..workspace

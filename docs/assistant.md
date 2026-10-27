@@ -175,7 +175,10 @@ repository on a case-insensitive filesystem. A local path or `file://` repositor
 and bare, the first time it is used; `ssh://`, `https://` and `user@host:` repositories are
 reached with the Station user's Git credentials and must exist. Universal Exports reads the
 table from the roster it serves (`--roster`) and sends each message with the person's
-workspace; without `personal_repo` nothing changes from a plain conversation.
+workspace; without `personal_repo` nothing changes from a plain conversation. A Station takes
+no repository on Universal Exports' word: it fills the person's in from its own roster's
+`[assistant]` and refuses a message or commit naming any repository that roster does not give,
+so the gateway and every Station must read the same roster.
 
 Her workspace on the Station holds:
 

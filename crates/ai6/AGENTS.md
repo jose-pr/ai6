@@ -2744,6 +2744,7 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub token_expires_at: f64, pub session_id: Option<String> /* default */,
     pub close: bool /* default */,
     pub interrupt: bool /* default */,
+    pub person_id: Option<String> /* default, omitted when None; required with workspace or commit */,
     pub workspace: Option<AssistantWorkspace> /* default, omitted when None */,
     pub commit: Option<AssistantCommit> /* default, omitted when None */ } // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
@@ -3357,6 +3358,12 @@ into its `personal/` and copy and committed exactly (`CheckpointSpec::files`: no
 in progress wrote goes with it); otherwise, and for `COMMIT_SHARED`,
 the desk clones the commit's repository into a temporary directory, writes, commits and
 pushes there, and removes it.
+
+A job with a `workspace` or a `commit` must name `person_id`, and the Station refuses one whose
+repositories its own roster does not give: the personal repository must be
+`personal_repo_for(person_id)` of its `[assistant]`, each shared one the repository its roster
+gives that name (`org` or a group), and a commit's repository the person's (memory) or one
+of the shared ones.
 
 On a Station running elevated (`ai6::station::elevation::is_elevated() -> io::Result<bool>`,
 feature `daemon`: root on Unix, a High or
