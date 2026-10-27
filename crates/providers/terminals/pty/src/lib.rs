@@ -241,6 +241,12 @@ impl TerminalSession for PtySession {
                         break;
                     }
                     Err(RecvTimeoutError::Disconnected) => {
+                        // The terminal can close before the child is reaped; the end of output
+                        // promises its exit status, so wait for it as kill does.
+                        let settle = Instant::now() + KILL_WAIT;
+                        while self.poll_exit()?.is_none() && Instant::now() < settle {
+                            std::thread::sleep(EXIT_POLL);
+                        }
                         self.eof.store(true, Ordering::Release);
                         return Ok(0);
                     }
