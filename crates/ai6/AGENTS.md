@@ -3310,9 +3310,11 @@ one harness per conversation, started with the roster Agent `job.agent_id` (hand
 effort; environment reduced to what reaches the model, as a Chief of Staff review's),
 `AssistantMode::moneypenny()`, clearance `desk`, no project settings, in the conversation's
 directory `<temp>/ai6-assistant-<random>/<conversation digest>` (the parent made once per
-desk, readable by the Station's user only and holding `desk.lock`, which the desk keeps locked;
-a starting desk removes every `<temp>/ai6-assistant-*` whose lock it can take, or which has none
-and is an hour old, with the context files and git directories in it; the same path on every
+desk, readable by the Station's user only, beside `<temp>/ai6-assistant-<random>.lock`, which
+the desk makes and locks before it makes the directory and keeps locked; a starting desk
+removes every `<temp>/ai6-assistant-*` directory whose lock it can take, or which has none and
+is an hour old, with the context files and git directories in it, and lock files an hour old
+whose directory is gone and nobody holds; the same path on every
 start of that conversation,
 because Claude Code resumes a Session only from the directory that recorded it; removed when
 the harness closes), and the MCP URL `<gateway origin>/v1/moneypenny/mcp` plus the job's token
