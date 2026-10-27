@@ -24,7 +24,7 @@ use super::actions::{self, CableHold, Draft, Proposal, Scope};
 use super::store::{Bounds, Conversation, Entry, Role};
 use super::tools::Call;
 use super::{Assistant, Control, audit, control_job, digest, expire_proposals, now};
-use crate::{Gateway, authorize_resource_action};
+use crate::{Gateway, authorize_resource_action, resolve_user};
 
 /// What to do once the desk lock is released: audit records to write and notes to give
 /// Moneypenny with a message of their own (conversation, person, note).
@@ -286,6 +286,50 @@ pub(super) fn answered(
 }
 
 impl Assistant {
+    /// Whether the person of `conversation_id` holds `cable.send` and `cable.read` on
+    /// `operation` now: neither once their sign-in has ended, or for an Operation that is not a
+    /// valid identity.
+    pub(super) async fn cable_permissions(
+        &self,
+        gateway: &Gateway,
+        conversation_id: &str,
+        operation: &str,
+    ) -> (bool, bool) {
+        let Some(token) = self
+            .desk()
+            .store
+            .conversations
+            .get(conversation_id)
+            .map(|conversation| conversation.bearer.clone())
+        else {
+            return (false, false);
+        };
+        if !ai6::directorates::section_00::assistant::valid_identity(operation) {
+            return (false, false);
+        }
+        let Ok(person) = resolve_user(gateway, &token).await else {
+            return (false, false);
+        };
+        let Some(access) = gateway.access.as_ref() else {
+            return (false, false);
+        };
+        let (authorizer, operation) = (access.authorizer.clone(), operation.to_owned());
+        tokio::task::spawn_blocking(move || {
+            let allowed = |action: &str| {
+                authorizer
+                    .authorize(AuthorizationRequest {
+                        person: person.clone(),
+                        action: action.to_owned(),
+                        resource: format!("operation:{operation}"),
+                    })
+                    .is_ok_and(|decision| decision.allowed)
+            };
+            (allowed("cable.send"), allowed("cable.read"))
+        })
+        .await
+        .unwrap_or((false, false))
+    }
+
     /// Writes the audit records and gives Moneypenny the notes `after` collected.
     pub(super) async fn follow_up(&self, gateway: &Gateway, after: After) {
         if let Some(registry) = gateway.registry.clone()
@@ -365,11 +409,56 @@ impl Assistant {
                     id: hold.held_id,
                     digest: hold.digest,
                 });
+                // The Station refuses it once the answer timeout has passed, so a late one
+                // sends nothing; the proposal fails half as long again after that.
+                let timeout = self.config.answer_timeout.as_secs_f64();
+                job.token_expires_at = now() + timeout;
+                desk.cable_deadlines.insert(
+                    job.job_id.clone(),
+                    (
+                        conversation_id.to_owned(),
+                        proposal.id.clone(),
+                        now() + timeout * 1.5,
+                    ),
+                );
                 desk.controlling.insert(job.job_id.clone(), control);
                 desk.controls.push((hold.station, job));
             }
         }
         self.ready.notify_waiters();
+        self.follow_up(gateway, after).await;
+    }
+
+    /// Gives up on confirmed Cables whose Station has not answered within one and a half answer
+    /// timeouts: their jobs are withdrawn and the proposals fail. A Station refuses a
+    /// confirmation past its `token_expires_at`, one answer timeout, in any case.
+    pub(super) async fn expire_confirms(&self, gateway: &Gateway) {
+        let now = now();
+        let mut after = After::default();
+        {
+            let mut desk = self.desk();
+            let late: Vec<String> = desk
+                .cable_deadlines
+                .iter()
+                .filter(|(_, (_, _, until))| *until <= now)
+                .map(|(job, _)| job.clone())
+                .collect();
+            for job in late {
+                let Some((conversation, proposal, _)) = desk.cable_deadlines.remove(&job) else {
+                    continue;
+                };
+                desk.controlling.remove(&job);
+                desk.controls.retain(|(_, queued)| queued.job_id != job);
+                if let Some(conversation) = desk.store.conversations.get_mut(&conversation) {
+                    answered(
+                        conversation,
+                        &proposal,
+                        Some("no Station sent it in time".to_owned()),
+                        &mut after,
+                    );
+                }
+            }
+        }
         self.follow_up(gateway, after).await;
     }
 

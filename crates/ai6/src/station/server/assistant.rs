@@ -42,7 +42,7 @@ use tokio::task::JoinHandle;
 use url::Url;
 
 #[cfg(feature = "cables-mcp")]
-use super::cables_mcp::{AssistantEndpoint, AssistantIdentity};
+use super::cables_mcp::{AssistantEndpoint, AssistantIdentity, CableGate, Standing};
 use super::{DaemonState, medical, station_terminal, unix_now, vetting};
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::q::terminal::TerminalBridge;
@@ -104,6 +104,10 @@ pub(super) trait Exposure: Send + Sync {
     fn mark(&self, conversation: &str, source: &str) -> Result<(), String>;
     /// Whether `conversation` is exposed.
     fn exposed(&self, conversation: &str) -> Result<bool, String>;
+    /// Whether `conversation` is exposed, and whether its person holds `cable.send` and
+    /// `cable.read` on `operation` now, asked before every Cable call.
+    #[cfg(feature = "cables-mcp")]
+    fn standing(&self, conversation: &str, operation: &str) -> Result<Standing, String>;
 }
 
 /// No Universal Exports to ask: every answer is an error, which the desk reads as exposed.
@@ -116,6 +120,27 @@ impl Exposure for Unreachable {
 
     fn exposed(&self, _conversation: &str) -> Result<bool, String> {
         Err("no Universal Exports to ask".to_owned())
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    fn standing(&self, _conversation: &str, _operation: &str) -> Result<Standing, String> {
+        Err("no Universal Exports to ask".to_owned())
+    }
+}
+
+/// A conversation's Cable endpoint's view of [`Exposure`]: no answer refuses the call, and an
+/// exposure counts once Universal Exports has recorded it.
+#[cfg(feature = "cables-mcp")]
+struct ExportsGate(Arc<dyn Exposure>);
+
+#[cfg(feature = "cables-mcp")]
+impl CableGate for ExportsGate {
+    fn standing(&self, conversation: &str, operation: &str) -> Option<Standing> {
+        self.0.standing(conversation, operation).ok()
+    }
+
+    fn expose(&self, conversation: &str, source: &str) -> bool {
+        self.0.mark(conversation, source).is_ok()
     }
 }
 
@@ -714,26 +739,22 @@ impl Desk {
                 events: vec![event],
             });
         });
-        let (asked, marked, conversation) = (
-            self.exposure.clone(),
-            self.exposure.clone(),
-            job.conversation_id.clone(),
-        );
-        let marking = conversation.clone();
         let endpoint = AssistantEndpoint::start(
             self.state.cables.clone(),
             self.state.intake.clone(),
             AssistantIdentity {
                 agent: agent.to_owned(),
                 station: self.state.station_id.clone(),
+                conversation: job.conversation_id.clone(),
                 session: format!("assistant-{}", conversation_digest(&job.conversation_id)),
                 person,
             },
             job.cables.clone(),
             job.exposed,
             reporter,
-            Arc::new(move || asked.exposed(&conversation).ok()),
-            Arc::new(move |source| marked.mark(&marking, source).is_ok()),
+            Arc::new(ExportsGate(self.exposure.clone())),
+            // The harness is started again before the job's token expires; so is this one.
+            job.token_expires_at,
         )
         .await
         .map_err(|error| format!("the conversation's Cable endpoint did not start: {error}"))?;
@@ -770,6 +791,10 @@ impl Desk {
                         .to_owned(),
                 );
             };
+            // Universal Exports gives up on a confirmation that waited this long.
+            if job.token_expires_at <= unix_now() {
+                return Err("the confirmation came too late; nothing was sent".to_owned());
+            }
             tokio::task::spawn_blocking(move || cables.confirm(&decision))
                 .await
                 .map_err(|error| error.to_string())?
@@ -1592,6 +1617,35 @@ impl Exposure for Link {
     }
 
     fn exposed(&self, conversation: &str) -> Result<bool, String> {
+        self.ask(conversation, None)?["exposed"]
+            .as_bool()
+            .ok_or_else(|| "Universal Exports did not say".to_owned())
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    fn standing(&self, conversation: &str, operation: &str) -> Result<Standing, String> {
+        let answer = self.ask(conversation, Some(operation))?;
+        let flag = |name: &str| {
+            answer[name]
+                .as_bool()
+                .ok_or_else(|| "Universal Exports did not say".to_owned())
+        };
+        Ok(Standing {
+            exposed: flag("exposed")?,
+            send: flag("send")?,
+            read: flag("read")?,
+        })
+    }
+}
+
+impl Link {
+    /// `GET /v1/station/assistant/exposure` about `conversation`, and its person's Cable
+    /// permissions on `operation` when one is named.
+    fn ask(
+        &self,
+        conversation: &str,
+        operation: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
         let mut endpoint = self
             .origin
             .join("v1/station/assistant/exposure")
@@ -1600,21 +1654,21 @@ impl Exposure for Link {
             .query_pairs_mut()
             .append_pair("station", &self.station)
             .append_pair("conversation", conversation);
-        let answer: serde_json::Value = Self::agent(Duration::ZERO)
+        if let Some(operation) = operation {
+            endpoint
+                .query_pairs_mut()
+                .append_pair("operation", operation);
+        }
+        Self::agent(Duration::ZERO)
             .get(endpoint.as_str())
             .header("Authorization", &format!("Bearer {}", self.token))
             .call()
             .map_err(|error| error.to_string())?
             .body_mut()
             .read_json()
-            .map_err(|error| error.to_string())?;
-        answer["exposed"]
-            .as_bool()
-            .ok_or_else(|| "Universal Exports did not say".to_owned())
+            .map_err(|error| error.to_string())
     }
-}
 
-impl Link {
     fn agent(wait: Duration) -> ureq::Agent {
         ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(2) + wait))
@@ -1766,6 +1820,16 @@ mod tests {
                 .get(conversation)
                 .copied()
                 .unwrap_or(false))
+        }
+
+        /// The person may send and read Cables everywhere.
+        #[cfg(feature = "cables-mcp")]
+        fn standing(&self, conversation: &str, _operation: &str) -> Result<Standing, String> {
+            Ok(Standing {
+                exposed: self.exposed(conversation)?,
+                send: true,
+                read: true,
+            })
         }
     }
 
@@ -2768,7 +2832,6 @@ mod tests {
             id: proposal.id.clone(),
             digest: proposal.digest.clone(),
         });
-        fixture.desk.handle(confirm.clone()).await;
         let answer = |job_id: &str| {
             fixture
                 .reports
@@ -2778,6 +2841,13 @@ mod tests {
                 .find(|report| report.job_id.as_deref() == Some(job_id))
                 .map(|report| report.events[0].kind.clone())
         };
+        // A confirmation past its time limit sends nothing; the Cable stays held.
+        let mut late = confirm.clone();
+        late.job_id = "confirm-late".to_owned();
+        late.token_expires_at = unix_now() - 1.0;
+        fixture.desk.handle(late).await;
+        assert_eq!(answer("confirm-late").as_deref(), Some(EVENT_REJECTED));
+        fixture.desk.handle(confirm.clone()).await;
         assert_eq!(answer("confirm-1").as_deref(), Some(EVENT_ACCEPTED));
         let confirmed_sends = fixture
             .reports

@@ -215,6 +215,9 @@ struct Desk {
     controls: Vec<(String, AssistantJob)>,
     /// The control jobs a Station has not answered yet, by ID.
     controlling: HashMap<String, Control>,
+    /// Confirmed Cables waiting for their Station, by control job ID: the conversation, the
+    /// proposal and when they are given up, Unix seconds.
+    cable_deadlines: HashMap<String, (String, String, f64)>,
 }
 
 /// What a control job asks of a Station.
@@ -816,6 +819,7 @@ impl Assistant {
         for conversation in again {
             self.place(gateway, &conversation).await;
         }
+        self.expire_confirms(gateway).await;
     }
 
     /// The next job for `station`: a close or interrupt first, then the oldest message.
@@ -860,6 +864,7 @@ impl Assistant {
             if let Some(job_id) = &report.job_id
                 && let Some(control) = desk.controlling.remove(job_id)
             {
+                desk.cable_deadlines.remove(job_id);
                 // The answer to a close or an interrupt: the harness reports `closed` when it
                 // is gone and `interrupted` when its turn stops. An interrupt the Station could
                 // not make is shown, since the answer goes on.
@@ -2239,11 +2244,15 @@ pub(crate) async fn next(
 pub(crate) struct ExposureQuery {
     station: String,
     conversation: String,
+    /// An Operation whose Cable permissions the Station asks about too.
+    #[serde(default)]
+    operation: Option<String>,
 }
 
-/// `GET /v1/station/assistant/exposure?station=ID&conversation=ID`: `{"exposed": bool}` for a
-/// conversation the Station runs; `404` for one this gateway does not hold, `403` for one
-/// another Station runs.
+/// `GET /v1/station/assistant/exposure?station=ID&conversation=ID[&operation=ID]`:
+/// `{"exposed": bool}` for a conversation the Station runs, with an Operation also `"send"`
+/// and `"read"`, whether its person holds `cable.send` and `cable.read` there now; `404` for
+/// one this gateway does not hold, `403` for one another Station runs.
 pub(crate) async fn exposure(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -2252,7 +2261,15 @@ pub(crate) async fn exposure(
     gateway.authenticate_station(bearer(&headers)?)?;
     let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
     let exposed = assistant.run_by(&query.station, &query.conversation, false)?;
-    Ok(Json(json!({"exposed": exposed})))
+    let Some(operation) = query.operation else {
+        return Ok(Json(json!({"exposed": exposed})));
+    };
+    let (send, read) = assistant
+        .cable_permissions(&gateway, &query.conversation, &operation)
+        .await;
+    Ok(Json(
+        json!({"exposed": exposed, "send": send, "read": read}),
+    ))
 }
 
 #[derive(Deserialize)]

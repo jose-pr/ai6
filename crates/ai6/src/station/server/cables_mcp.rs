@@ -907,27 +907,33 @@ mod tests {
         receiver_client.cancel().await.unwrap();
     }
 
-    /// Moneypenny's endpoint for person-007's conversation, with what it reported, a switch
-    /// for what Universal Exports answers when asked about exposure, and the exposures it was
-    /// told of.
+    /// Moneypenny's endpoint for person-007's conversation, with what it reported and what
+    /// Universal Exports answers it.
     struct Assistant {
         endpoint: AssistantEndpoint,
         events: Arc<Mutex<Vec<AssistantEvent>>>,
-        marked: Arc<Mutex<Option<bool>>>,
-        exposures: Arc<Mutex<Vec<String>>>,
+        gate: Arc<TestGate>,
     }
 
     async fn assistant(relay: Arc<CableRelay>, registry: Arc<FileRegistry>) -> Assistant {
+        assistant_until(relay, registry, unix_now() + 3_600.0).await
+    }
+
+    async fn assistant_until(
+        relay: Arc<CableRelay>,
+        registry: Arc<FileRegistry>,
+        expires_at: f64,
+    ) -> Assistant {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let marked = Arc::new(Mutex::new(Some(false)));
-        let exposures = Arc::new(Mutex::new(Vec::new()));
-        let (sink, answer, told) = (events.clone(), marked.clone(), exposures.clone());
+        let gate = TestGate::open();
+        let sink = events.clone();
         let endpoint = AssistantEndpoint::start(
             relay,
             registry,
             AssistantIdentity {
                 agent: "moneypenny".to_owned(),
                 station: "station-a".to_owned(),
+                conversation: "conversation-1".to_owned(),
                 session: "assistant-0123".to_owned(),
                 person: "person-007".to_owned(),
             },
@@ -945,19 +951,15 @@ mod tests {
             ],
             false,
             Arc::new(move |event| sink.lock().unwrap().push(event)),
-            Arc::new(move || *answer.lock().unwrap()),
-            Arc::new(move |source| {
-                told.lock().unwrap().push(source.to_owned());
-                true
-            }),
+            gate.clone(),
+            expires_at,
         )
         .await
         .unwrap();
         Assistant {
             endpoint,
             events,
-            marked,
-            exposures,
+            gate,
         }
     }
 
@@ -1107,7 +1109,7 @@ mod tests {
             serde_json::json!({"cable_id": cable_id, "body": "Green.", "idempotency_key": "r1"}),
         )
         .await;
-        assert!(moneypenny.exposures.lock().unwrap().is_empty());
+        assert!(moneypenny.gate.exposures.lock().unwrap().is_empty());
         let read = call(
             &her,
             "read_cables",
@@ -1115,7 +1117,7 @@ mod tests {
         )
         .await;
         assert!(read.contains("Green."), "{read}");
-        assert_eq!(*moneypenny.exposures.lock().unwrap(), ["cable:008"]);
+        assert_eq!(*moneypenny.gate.exposures.lock().unwrap(), ["cable:008"]);
         her.cancel().await.unwrap();
         theirs.cancel().await.unwrap();
     }
@@ -1132,8 +1134,15 @@ mod tests {
             let read = call(client, "read_cables", serde_json::json!({})).await;
             serde_json::from_str(&read).unwrap()
         }
-        // Universal Exports cannot answer: the send waits, as it would once marked.
-        *moneypenny.marked.lock().unwrap() = None;
+        let exposed = |exposed: bool| {
+            Some(Standing {
+                exposed,
+                send: true,
+                read: true,
+            })
+        };
+        // Universal Exports marked the conversation exposed since its last message.
+        moneypenny.gate.answer(exposed(true));
         let held = call(
             &her,
             "send_cable",
@@ -1148,8 +1157,6 @@ mod tests {
             "{held}"
         );
         assert!(inbox(&theirs).await.is_empty(), "nothing was sent");
-        // It answers again: marked exposed, and that sticks.
-        *moneypenny.marked.lock().unwrap() = Some(true);
         let hidden = call(
             &her,
             "send_cable",
@@ -1160,7 +1167,7 @@ mod tests {
         )
         .await;
         assert!(hidden.contains("hidden character"), "{hidden}");
-        *moneypenny.marked.lock().unwrap() = Some(false);
+        moneypenny.gate.answer(exposed(false));
         let second = call(
             &her,
             "send_cable",
@@ -1242,6 +1249,76 @@ mod tests {
         her.cancel().await.unwrap();
         theirs.cancel().await.unwrap();
     }
+
+    #[tokio::test]
+    async fn universal_exports_is_asked_for_the_persons_permission_at_every_call() {
+        let (_directory, registry, relay, agent) = station_with_agent_008().await;
+        let moneypenny = assistant(relay, registry.clone()).await;
+        let her = client(moneypenny.endpoint.url(), moneypenny.endpoint.token()).await;
+        let send = serde_json::json!({
+            "operation": "operation-a", "scope": "agent", "target": "008",
+            "body": "Is the build green?", "idempotency_key": "k1"
+        });
+        let read = serde_json::json!({"operation": "operation-a"});
+        // No answer, or the permission gone since the job: nothing, whatever the job granted.
+        for standing in [
+            None,
+            Some(Standing {
+                exposed: false,
+                send: false,
+                read: false,
+            }),
+        ] {
+            moneypenny.gate.answer(standing);
+            assert_eq!(call(&her, "send_cable", send.clone()).await, UNAVAILABLE);
+            assert_eq!(
+                call(&her, "read_cables", read.clone()).await,
+                "Cable inbox is unavailable"
+            );
+        }
+        assert!(registry.find_cable("moneypenny", "k1").unwrap().is_none());
+        moneypenny.gate.answer(Some(Standing {
+            exposed: false,
+            send: true,
+            read: true,
+        }));
+        let sent = call(&her, "send_cable", send).await;
+        let cable_id = serde_json::from_str::<serde_json::Value>(&sent).unwrap()["cable_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let theirs = client(agent.url(), agent.token()).await;
+        call(&theirs, "read_cables", serde_json::json!({})).await;
+        call(
+            &theirs,
+            "reply_to_cable",
+            serde_json::json!({"cable_id": cable_id, "body": "Green.", "idempotency_key": "r1"}),
+        )
+        .await;
+
+        // A body is shown only once Universal Exports has recorded the exposure.
+        moneypenny.gate.acknowledges.store(false, Ordering::Release);
+        let withheld = call(&her, "read_cables", read.clone()).await;
+        assert_eq!(withheld, "Cable inbox is unavailable");
+        assert!(moneypenny.gate.exposures.lock().unwrap().is_empty());
+        moneypenny.gate.acknowledges.store(true, Ordering::Release);
+        let shown = call(&her, "read_cables", read).await;
+        assert!(shown.contains("Green."), "{shown}");
+        assert_eq!(*moneypenny.gate.exposures.lock().unwrap(), ["cable:008"]);
+        her.cancel().await.unwrap();
+        theirs.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn her_cable_token_expires_with_the_jobs() {
+        let (_directory, registry, relay, _agent) = station_with_agent_008().await;
+        let expired = assistant_until(relay, registry, unix_now() - 1.0).await;
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(expired.endpoint.url().to_owned())
+                .auth_header(expired.endpoint.token().to_owned()),
+        );
+        assert!(().serve(transport).await.is_err());
+    }
 }
 
 pub(super) async fn authorize(
@@ -1259,6 +1336,18 @@ pub(super) async fn authorize(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     next.run(request).await
+}
+
+/// [`authorize`], for a token accepted only until a time (Unix seconds).
+async fn authorize_until(
+    State((token, expires_at)): State<(String, f64)>,
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    if unix_now() >= expires_at {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    authorize(State(token), request, next).await
 }
 
 #[derive(Clone)]
@@ -1956,20 +2045,79 @@ const MAX_HELD: usize = 32;
 /// What a refused or failed send answers, the same whatever the reason.
 const UNAVAILABLE: &str = "Cable target is unavailable or not authorized";
 
-/// Asks Universal Exports whether the conversation has been marked exposed: `Some(answer)`, or
-/// `None` when it cannot tell, which counts as exposed.
-pub(super) type ExposureProbe = Arc<dyn Fn() -> Option<bool> + Send + Sync>;
-/// Tells Universal Exports the conversation read outside text from a source; `true` once it
-/// has recorded it.
-pub(super) type ExposureMark = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 /// Sends one event of the conversation to Universal Exports; it must not block for long.
 pub(super) type EventReporter = Arc<dyn Fn(AssistantEvent) + Send + Sync>;
+
+/// What Universal Exports says now about a conversation and one Operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Standing {
+    /// The conversation has read outside text.
+    pub(super) exposed: bool,
+    /// Its person holds `cable.send` on the Operation.
+    pub(super) send: bool,
+    /// Its person holds `cable.read` on the Operation.
+    pub(super) read: bool,
+}
+
+/// Universal Exports' word on an assistant conversation, asked before every Cable call.
+pub(super) trait CableGate: Send + Sync {
+    /// The conversation's exposure and its person's Cable permissions on `operation`; `None`
+    /// when Universal Exports does not answer, which refuses the call.
+    fn standing(&self, conversation: &str, operation: &str) -> Option<Standing>;
+    /// Marks the conversation exposed by `source` for good; `true` once acknowledged.
+    fn expose(&self, conversation: &str, source: &str) -> bool;
+}
+
+/// A gate that answers what it is set to and records the exposures it is told, for tests.
+#[cfg(test)]
+pub(super) struct TestGate {
+    pub(super) standing: Mutex<Option<Standing>>,
+    pub(super) exposures: Mutex<Vec<String>>,
+    pub(super) acknowledges: AtomicBool,
+}
+
+#[cfg(test)]
+impl TestGate {
+    /// Not exposed, the person may send and read, exposures acknowledged.
+    pub(super) fn open() -> Arc<Self> {
+        Arc::new(Self {
+            standing: Mutex::new(Some(Standing {
+                exposed: false,
+                send: true,
+                read: true,
+            })),
+            exposures: Mutex::default(),
+            acknowledges: AtomicBool::new(true),
+        })
+    }
+
+    pub(super) fn answer(&self, standing: Option<Standing>) {
+        *self.standing.lock().unwrap() = standing;
+    }
+}
+
+#[cfg(test)]
+impl CableGate for TestGate {
+    fn standing(&self, _conversation: &str, _operation: &str) -> Option<Standing> {
+        *self.standing.lock().unwrap()
+    }
+
+    fn expose(&self, _conversation: &str, source: &str) -> bool {
+        let acknowledged = self.acknowledges.load(Ordering::Acquire);
+        if acknowledged {
+            self.exposures.lock().unwrap().push(source.to_owned());
+        }
+        acknowledged
+    }
+}
 
 /// Who an assistant's Cable endpoint acts as and for.
 pub(super) struct AssistantIdentity {
     /// The roster Agent that is the assistant.
     pub(super) agent: String,
     pub(super) station: String,
+    /// The Universal Exports conversation.
+    pub(super) conversation: String,
     /// `assistant-<conversation digest>`: the Session the relay delivers her Cables to.
     pub(super) session: String,
     /// The person the conversation is for.
@@ -2006,8 +2154,7 @@ struct AssistantCableDesk {
     exposed: AtomicBool,
     held: Mutex<BTreeMap<String, HeldCable>>,
     report: EventReporter,
-    probe: ExposureProbe,
-    mark: ExposureMark,
+    gate: Arc<dyn CableGate>,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -2046,6 +2193,29 @@ impl AssistantCableDesk {
         self.grant(operation).is_some_and(|grant| grant.read)
     }
 
+    /// What Universal Exports says now; exposure it reports sticks here.
+    fn standing(&self, operation: &str) -> Option<Standing> {
+        let standing = self.gate.standing(&self.identity.conversation, operation)?;
+        if standing.exposed {
+            self.exposed.store(true, Ordering::Release);
+        }
+        Some(standing)
+    }
+
+    /// For a send in `operation` the job's grants and the person's permission now allow,
+    /// whether it must wait for the person (`Some(exposed)`); `None` refuses it.
+    fn sending(&self, operation: &str) -> Option<bool> {
+        if !self.may_send(operation) || !self.standing(operation)?.send {
+            return None;
+        }
+        Some(self.exposed.load(Ordering::Acquire))
+    }
+
+    /// Whether the job's grants and the person's permission now allow reading `operation`.
+    fn reading(&self, operation: &str) -> bool {
+        self.may_read(operation) && self.standing(operation).is_some_and(|now| now.read)
+    }
+
     fn principal(&self, operation: &str) -> Result<CablePrincipal, CableRelayError> {
         CablePrincipal::try_new(
             self.identity.agent.clone(),
@@ -2064,22 +2234,6 @@ impl AssistantCableDesk {
     fn key(&self, key: &str) -> String {
         let digest = hex(&Sha256::digest(key.as_bytes()));
         format!("{}:{}", self.identity.session, &digest[..32])
-    }
-
-    /// Whether a send must wait for the person: once the conversation is exposed, or when
-    /// Universal Exports cannot say that it is not.
-    fn exposed(&self) -> bool {
-        if self.exposed.load(Ordering::Acquire) {
-            return true;
-        }
-        match (self.probe)() {
-            Some(false) => false,
-            Some(true) => {
-                self.exposed.store(true, Ordering::Release);
-                true
-            }
-            None => true,
-        }
     }
 
     /// The audience as the person reads it, and SHA-256 of the whole request.
@@ -2228,7 +2382,8 @@ pub(super) struct AssistantEndpoint {
 }
 
 impl AssistantEndpoint {
-    /// Serves the endpoint on a loopback port and enters the conversation's Session in the
+    /// Serves the endpoint on a loopback port, its token accepted until `expires_at` (Unix
+    /// seconds, the job's own token's expiry), and enters the conversation's Session in the
     /// relay's directory, so replies reach it.
     ///
     /// # Errors
@@ -2242,8 +2397,8 @@ impl AssistantEndpoint {
         grants: Vec<AssistantCableGrant>,
         exposed: bool,
         report: EventReporter,
-        probe: ExposureProbe,
-        mark: ExposureMark,
+        gate: Arc<dyn CableGate>,
+        expires_at: f64,
     ) -> std::io::Result<Self> {
         let first = grants
             .first()
@@ -2266,8 +2421,7 @@ impl AssistantEndpoint {
             exposed: AtomicBool::new(exposed),
             held: Mutex::default(),
             report,
-            probe,
-            mark,
+            gate,
         });
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -2280,9 +2434,9 @@ impl AssistantEndpoint {
             Arc::new(LocalSessionManager::default()),
             StreamableHttpServerConfig::default(),
         );
-        let router = axum::Router::new()
-            .route_service("/mcp", service)
-            .layer(middleware::from_fn_with_state(token.clone(), authorize));
+        let router = axum::Router::new().route_service("/mcp", service).layer(
+            middleware::from_fn_with_state((token.clone(), expires_at), authorize_until),
+        );
         let server = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
         });
@@ -2463,7 +2617,12 @@ impl AssistantCableTools {
     ) -> String {
         let desk = self.desk.clone();
         let found = tokio::task::spawn_blocking(move || {
-            if !desk.may_send(&args.operation) && !desk.may_read(&args.operation) {
+            let granted = desk.may_send(&args.operation) || desk.may_read(&args.operation);
+            if !granted
+                || !desk
+                    .standing(&args.operation)
+                    .is_some_and(|now| now.send || now.read)
+            {
                 return Ok(Vec::new());
             }
             let principal = desk.principal(&args.operation)?;
@@ -2514,10 +2673,10 @@ impl AssistantCableTools {
         };
         let desk = self.desk.clone();
         let sent = tokio::task::spawn_blocking(move || {
-            if !desk.may_send(&args.operation) {
+            let Some(exposed) = desk.sending(&args.operation) else {
                 return UNAVAILABLE.to_owned();
-            }
-            if desk.exposed() {
+            };
+            if exposed {
                 return desk.hold(&args.operation, action, args.body, args.idempotency_key);
             }
             match desk.send(
@@ -2548,7 +2707,7 @@ impl AssistantCableTools {
         let limit = args.limit.unwrap_or(20).clamp(1, 1000);
         let desk = self.desk.clone();
         let read = tokio::task::spawn_blocking(move || {
-            if !desk.may_read(&args.operation) {
+            if !desk.reading(&args.operation) {
                 return Err(CableRelayError::Unavailable);
             }
             let principal = desk.principal(&args.operation)?;
@@ -2560,8 +2719,13 @@ impl AssistantCableTools {
             if !senders.is_empty() {
                 desk.exposed.store(true, Ordering::Release);
             }
+            // Universal Exports keeps the conversation's exposure, so a resumed or moved
+            // conversation stays exposed: no body is shown until it has acknowledged.
             for sender in senders {
-                (desk.mark)(&cable_source(&sender));
+                let source = cable_source(&sender);
+                if !desk.gate.expose(&desk.identity.conversation, &source) {
+                    return Err(CableRelayError::RegistryUnavailable);
+                }
             }
             Ok(deliveries)
         })
@@ -2581,8 +2745,7 @@ impl AssistantCableTools {
     ) -> String {
         let desk = self.desk.clone();
         let acknowledged = tokio::task::spawn_blocking(move || {
-            if !desk.may_read(&args.operation)
-                || !desk.delivered_in(&args.operation, &args.cable_id)
+            if !desk.reading(&args.operation) || !desk.delivered_in(&args.operation, &args.cable_id)
             {
                 return Err(CableRelayError::Unavailable);
             }
@@ -2603,15 +2766,16 @@ impl AssistantCableTools {
     async fn reply_to_cable(&self, Parameters(args): Parameters<AssistantReplyArgs>) -> String {
         let desk = self.desk.clone();
         let replied = tokio::task::spawn_blocking(move || {
-            if !desk.may_send(&args.operation)
-                || !desk.delivered_in(&args.operation, &args.cable_id)
-            {
+            let sending = desk.sending(&args.operation);
+            let Some(exposed) =
+                sending.filter(|_| desk.delivered_in(&args.operation, &args.cable_id))
+            else {
                 return "Cable is unavailable or not authorized".to_owned();
-            }
+            };
             let action = Held::Reply {
                 cable_id: args.cable_id,
             };
-            if desk.exposed() {
+            if exposed {
                 return desk.hold(&args.operation, action, args.body, args.idempotency_key);
             }
             match desk.send(

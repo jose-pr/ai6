@@ -2021,7 +2021,12 @@ async fn cable_grants_follow_the_persons_permissions_and_outside_text_exposes() 
     let conversation = job.conversation_id.as_str();
     assert_eq!(
         exposure(&served, "hq", conversation).await,
-        (StatusCode::OK, json!({"exposed": false}))
+        (StatusCode::OK, json!({"exposed": false})),
+        "no Operation named, no permission answered"
+    );
+    assert_eq!(
+        standing(&served, "hq", conversation, "G").await,
+        json!({"exposed": false, "send": true, "read": true})
     );
     assert_eq!(
         exposure(&served, "worker", conversation).await.0,
@@ -2059,6 +2064,76 @@ async fn cable_grants_follow_the_persons_permissions_and_outside_text_exposes() 
         theirs.cables.is_empty(),
         "no Cable permission, no Cable server"
     );
+}
+
+/// What `GET /v1/station/assistant/exposure` answers `station` about a conversation and an
+/// Operation.
+async fn standing(served: &Served, station: &str, conversation: &str, operation: &str) -> Value {
+    reqwest::Client::new()
+        .get(format!(
+            "{}/v1/station/assistant/exposure?station={station}&conversation={conversation}\
+             &operation={operation}",
+            served.base
+        ))
+        .bearer_auth(STATION_TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_station_reads_the_persons_cable_permissions_as_they_are_now() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, viewer) = accepted(&served, &served.viewer, "Ask 008.").await;
+    assert_eq!(
+        standing(&served, "hq", &viewer.conversation_id, "G").await,
+        json!({"exposed": false, "send": false, "read": false}),
+        "a viewer may neither send nor read Cables"
+    );
+    let (_app, job) = accepted(&served, &served.operator, "Read what 008 sent.").await;
+    let conversation = job.conversation_id.as_str();
+    assert_eq!(
+        expose_as(&served, "hq", conversation).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        standing(&served, "hq", conversation, "H").await,
+        json!({"exposed": true, "send": false, "read": false}),
+        "nothing on an Operation the person holds nothing on"
+    );
+}
+
+#[tokio::test]
+async fn a_confirmed_cable_no_station_sends_in_time_fails() {
+    let served =
+        served(AssistantConfig::default().with_answer_timeout(Duration::from_secs(1))).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Tell 008 to deploy.").await;
+    report(
+        &served,
+        "hq",
+        &job,
+        None,
+        vec![held("held-1", "Deploy now.")],
+    )
+    .await;
+    let frames = finish(&served, &mut app, &job).await;
+    decide(&mut app, "confirm", &proposal_of(&frames)).await;
+    let control = take(&served, "hq").await;
+    assert!(
+        control.token_expires_at <= now() + 1.5,
+        "the Station refuses it after the answer timeout"
+    );
+    // The Station never answers.
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "proposal" && frame["proposal"]["status"] == "failed"
+    })
+    .await;
+    let result = proposal_of(&frames)["result"].as_str().unwrap().to_owned();
+    assert!(result.contains("in time"), "{result}");
+    assert!(audits(&served, "moneypenny.cable.sent").is_empty());
 }
 
 /// The proposal a Station reports when Moneypenny asks to send `body` while exposed.
