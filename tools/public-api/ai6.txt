@@ -2649,6 +2649,7 @@ pub fn ai6::directorates::registry::cables::Cable::expires_at(&self) -> f64
 pub fn ai6::directorates::registry::cables::Cable::id(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::idempotency_key(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::registry::cables::Cable::on_behalf_of(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::recipients(&self) -> &[ai6::directorates::registry::cables::CableRecipient]
 pub fn ai6::directorates::registry::cables::Cable::reply_to(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::same_request(&self, &Self) -> bool
@@ -2669,6 +2670,7 @@ pub ai6::directorates::registry::cables::CableAuditRecord::cable_id: core::optio
 pub ai6::directorates::registry::cables::CableAuditRecord::decision: &'static str
 pub ai6::directorates::registry::cables::CableAuditRecord::event: &'static str
 pub ai6::directorates::registry::cables::CableAuditRecord::mission_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CableAuditRecord::on_behalf_of: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableAuditRecord::operation: alloc::string::String
 pub ai6::directorates::registry::cables::CableAuditRecord::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableAuditRecord::station: alloc::string::String
@@ -2695,7 +2697,9 @@ pub ai6::directorates::registry::cables::CableDelivery::from_operation: alloc::s
 pub ai6::directorates::registry::cables::CableDelivery::from_station: alloc::string::String
 pub ai6::directorates::registry::cables::CableDelivery::from_theater: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::mission_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CableDelivery::on_behalf_of: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::reply_to: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CableDelivery::sent_as: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::state: ai6::directorates::registry::cables::CableState
 pub ai6::directorates::registry::cables::CableDelivery::target: ai6::directorates::registry::cables::CableTarget
@@ -2709,6 +2713,7 @@ pub ai6::directorates::registry::cables::CableDraft::expires_at: f64
 pub ai6::directorates::registry::cables::CableDraft::id: alloc::string::String
 pub ai6::directorates::registry::cables::CableDraft::idempotency_key: alloc::string::String
 pub ai6::directorates::registry::cables::CableDraft::mission_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CableDraft::on_behalf_of: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDraft::recipients: alloc::vec::Vec<ai6::directorates::registry::cables::CableRecipient>
 pub ai6::directorates::registry::cables::CableDraft::reply_to: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDraft::sender_agent: alloc::string::String
@@ -2721,6 +2726,7 @@ impl ai6::directorates::registry::cables::CableDraft
 pub fn ai6::directorates::registry::cables::CableDraft::new(alloc::string::String, alloc::string::String, alloc::string::String, ai6::directorates::registry::cables::CableTarget, alloc::string::String, alloc::vec::Vec<ai6::directorates::registry::cables::CableRecipient>, alloc::string::String, alloc::string::String, f64, f64) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_mission(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::cables::CableDraft::with_on_behalf_of(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_sender_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_session(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -2729,12 +2735,14 @@ pub fn ai6::directorates::registry::cables::CableDraft::fmt(&self, &mut core::fm
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableEndpoint
 impl ai6::CableEndpoint
 pub fn ai6::CableEndpoint::agent(&self) -> &str
+pub fn ai6::CableEndpoint::conversation_only(&self) -> bool
 pub fn ai6::CableEndpoint::mission_id(&self) -> core::option::Option<&str>
 pub fn ai6::CableEndpoint::operation(&self) -> &str
 pub fn ai6::CableEndpoint::session_id(&self) -> core::option::Option<&str>
 pub fn ai6::CableEndpoint::station(&self) -> &str
 pub fn ai6::CableEndpoint::theater(&self) -> core::option::Option<&str>
 pub fn ai6::CableEndpoint::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableEndpoint::with_conversation_only(self) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableError(_)
 impl core::error::Error for ai6::directorates::registry::cables::CableError
 impl core::fmt::Display for ai6::directorates::registry::cables::CableError
@@ -2758,11 +2766,13 @@ pub fn ai6::CablePolicy::try_new(alloc::vec::Vec<ai6::CableGrant>, alloc::collec
 impl ai6::CablePrincipal
 pub fn ai6::CablePrincipal::agent(&self) -> &str
 pub fn ai6::CablePrincipal::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::CablePrincipal::on_behalf_of(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::operation(&self) -> &str
 pub fn ai6::CablePrincipal::session_id(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::station(&self) -> &str
 pub fn ai6::CablePrincipal::theater(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CablePrincipal::with_on_behalf_of(self, alloc::string::String) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub struct ai6::directorates::registry::cables::CableRecipient
 impl ai6::directorates::registry::cables::CableRecipient
 pub fn ai6::directorates::registry::cables::CableRecipient::agent(&self) -> &str
@@ -2775,6 +2785,7 @@ pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::
 pub fn ai6::CableRelay::discover(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::CableEndpoint>, ai6::CableRelayError>
 pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
+pub fn ai6::CableRelay::inbox_from(&self, &ai6::CablePrincipal, &str, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, ai6::CablePolicy, impl core::ops::function::Fn() -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>) -> Self
 pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::release(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::CableRelease, ai6::CableRelayError>
@@ -2785,6 +2796,7 @@ pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::
 pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableRelay::with_person_audit(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) -> core::result::Result<(), alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableRelease
 pub ai6::directorates::registry::cables::CableRelease::delivered: usize
 pub ai6::directorates::registry::cables::CableRelease::refused: usize
@@ -3779,6 +3791,7 @@ pub ai6::directorates::section_00::agent::AssistantMode::skills: alloc::vec::Vec
 impl ai6::directorates::section_00::agent::AssistantMode
 pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
 pub fn ai6::directorates::section_00::agent::AssistantMode::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::section_00::agent::AssistantMode::with_cables(self) -> Self
 pub struct ai6::directorates::section_00::agent::AssistantNetwork
 pub ai6::directorates::section_00::agent::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantNetwork::policy: alloc::string::String
@@ -3832,6 +3845,24 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
 pub mod ai6::directorates::section_00::assistant
+pub struct ai6::directorates::section_00::assistant::AssistantCable
+pub ai6::directorates::section_00::assistant::AssistantCable::body: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantCable::cable_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantCable::digest: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantCable::id: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantCable::operation: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantCable::recipient: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantCable::target: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantCable::ttl_seconds: core::option::Option<u32>
+impl ai6::directorates::section_00::assistant::AssistantCable
+pub fn ai6::directorates::section_00::assistant::AssistantCable::request_digest(&self) -> alloc::string::String
+pub struct ai6::directorates::section_00::assistant::AssistantCableDecision
+pub ai6::directorates::section_00::assistant::AssistantCableDecision::digest: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantCableDecision::id: alloc::string::String
+pub struct ai6::directorates::section_00::assistant::AssistantCableGrant
+pub ai6::directorates::section_00::assistant::AssistantCableGrant::operation: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantCableGrant::read: bool
+pub ai6::directorates::section_00::assistant::AssistantCableGrant::send: bool
 pub struct ai6::directorates::section_00::assistant::AssistantChange
 pub ai6::directorates::section_00::assistant::AssistantChange::base: alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>
 pub ai6::directorates::section_00::assistant::AssistantChange::digest: alloc::string::String
@@ -3852,6 +3883,7 @@ pub ai6::directorates::section_00::assistant::AssistantCommit::repo: alloc::stri
 impl ai6::directorates::section_00::assistant::AssistantCommit
 pub fn ai6::directorates::section_00::assistant::AssistantCommit::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::directorates::section_00::assistant::AssistantEvent
+pub ai6::directorates::section_00::assistant::AssistantEvent::cable: core::option::Option<ai6::directorates::section_00::assistant::AssistantCable>
 pub ai6::directorates::section_00::assistant::AssistantEvent::change: core::option::Option<ai6::directorates::section_00::assistant::AssistantChange>
 pub ai6::directorates::section_00::assistant::AssistantEvent::kind: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantEvent::text: core::option::Option<alloc::string::String>
@@ -3860,6 +3892,9 @@ impl ai6::directorates::section_00::assistant::AssistantEvent
 pub fn ai6::directorates::section_00::assistant::AssistantEvent::new(&str, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::directorates::section_00::assistant::AssistantJob
 pub ai6::directorates::section_00::assistant::AssistantJob::agent_id: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::cable_confirm: core::option::Option<ai6::directorates::section_00::assistant::AssistantCableDecision>
+pub ai6::directorates::section_00::assistant::AssistantJob::cable_discard: core::option::Option<ai6::directorates::section_00::assistant::AssistantCableDecision>
+pub ai6::directorates::section_00::assistant::AssistantJob::cables: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantCableGrant>
 pub ai6::directorates::section_00::assistant::AssistantJob::close: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::commit: core::option::Option<ai6::directorates::section_00::assistant::AssistantCommit>
 pub ai6::directorates::section_00::assistant::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
@@ -3891,6 +3926,10 @@ pub ai6::directorates::section_00::assistant::AssistantWorkspace::personal: allo
 pub ai6::directorates::section_00::assistant::AssistantWorkspace::shared: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantWorkspace
 pub fn ai6::directorates::section_00::assistant::AssistantWorkspace::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub const ai6::directorates::section_00::assistant::ASSISTANT_CABLE_MCP_ENV_PREFIX: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_CABLE_MCP_SERVER: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_CABLE_MCP_TOKEN_ENV: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_CABLE_MCP_URL_ENV: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_ENV_PREFIX: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_PATH: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_SERVER: &str
@@ -3899,6 +3938,8 @@ pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_URL_ENV: &str
 pub const ai6::directorates::section_00::assistant::COMMIT_MEMORY: &str
 pub const ai6::directorates::section_00::assistant::COMMIT_SHARED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_ACCEPTED: &str
+pub const ai6::directorates::section_00::assistant::EVENT_CABLE_PROPOSAL: &str
+pub const ai6::directorates::section_00::assistant::EVENT_CABLE_SENT: &str
 pub const ai6::directorates::section_00::assistant::EVENT_CLOSED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_COMPLETED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_FAILED: &str
@@ -3909,6 +3950,7 @@ pub const ai6::directorates::section_00::assistant::EVENT_NOTICE: &str
 pub const ai6::directorates::section_00::assistant::EVENT_REJECTED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_TEXT: &str
 pub const ai6::directorates::section_00::assistant::EVENT_TOOL: &str
+pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_CABLE_GRANTS: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_CHANGE_BYTES: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_CHANGE_FILES: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_CONTEXT_BYTES: usize
@@ -4809,6 +4851,24 @@ impl ai6::directorates::registry::approvals::ApprovalRequest
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::expiring(self, f64, core::time::Duration) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::proposing_role(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, ai6::directorates::m::identity::SessionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::approvals::ActionScope, impl core::convert::Into<alloc::string::String>, &str) -> core::io::error::Result<Self>
+pub struct ai6::AssistantCable
+pub ai6::AssistantCable::body: core::option::Option<alloc::string::String>
+pub ai6::AssistantCable::cable_id: core::option::Option<alloc::string::String>
+pub ai6::AssistantCable::digest: alloc::string::String
+pub ai6::AssistantCable::id: alloc::string::String
+pub ai6::AssistantCable::operation: alloc::string::String
+pub ai6::AssistantCable::recipient: alloc::string::String
+pub ai6::AssistantCable::target: alloc::string::String
+pub ai6::AssistantCable::ttl_seconds: core::option::Option<u32>
+impl ai6::directorates::section_00::assistant::AssistantCable
+pub fn ai6::directorates::section_00::assistant::AssistantCable::request_digest(&self) -> alloc::string::String
+pub struct ai6::AssistantCableDecision
+pub ai6::AssistantCableDecision::digest: alloc::string::String
+pub ai6::AssistantCableDecision::id: alloc::string::String
+pub struct ai6::AssistantCableGrant
+pub ai6::AssistantCableGrant::operation: alloc::string::String
+pub ai6::AssistantCableGrant::read: bool
+pub ai6::AssistantCableGrant::send: bool
 pub struct ai6::AssistantChange
 pub ai6::AssistantChange::base: alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>
 pub ai6::AssistantChange::digest: alloc::string::String
@@ -4829,6 +4889,7 @@ pub ai6::AssistantCommit::repo: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantCommit
 pub fn ai6::directorates::section_00::assistant::AssistantCommit::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::AssistantEvent
+pub ai6::AssistantEvent::cable: core::option::Option<ai6::directorates::section_00::assistant::AssistantCable>
 pub ai6::AssistantEvent::change: core::option::Option<ai6::directorates::section_00::assistant::AssistantChange>
 pub ai6::AssistantEvent::kind: alloc::string::String
 pub ai6::AssistantEvent::text: core::option::Option<alloc::string::String>
@@ -4837,6 +4898,9 @@ impl ai6::directorates::section_00::assistant::AssistantEvent
 pub fn ai6::directorates::section_00::assistant::AssistantEvent::new(&str, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::AssistantJob
 pub ai6::AssistantJob::agent_id: alloc::string::String
+pub ai6::AssistantJob::cable_confirm: core::option::Option<ai6::directorates::section_00::assistant::AssistantCableDecision>
+pub ai6::AssistantJob::cable_discard: core::option::Option<ai6::directorates::section_00::assistant::AssistantCableDecision>
+pub ai6::AssistantJob::cables: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantCableGrant>
 pub ai6::AssistantJob::close: bool
 pub ai6::AssistantJob::commit: core::option::Option<ai6::directorates::section_00::assistant::AssistantCommit>
 pub ai6::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
@@ -4865,6 +4929,7 @@ pub ai6::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
 impl ai6::directorates::section_00::agent::AssistantMode
 pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
 pub fn ai6::directorates::section_00::agent::AssistantMode::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::section_00::agent::AssistantMode::with_cables(self) -> Self
 pub struct ai6::AssistantNetwork
 pub ai6::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantNetwork::policy: alloc::string::String
@@ -4958,6 +5023,7 @@ pub fn ai6::directorates::registry::cables::Cable::expires_at(&self) -> f64
 pub fn ai6::directorates::registry::cables::Cable::id(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::idempotency_key(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::registry::cables::Cable::on_behalf_of(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::recipients(&self) -> &[ai6::directorates::registry::cables::CableRecipient]
 pub fn ai6::directorates::registry::cables::Cable::reply_to(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::same_request(&self, &Self) -> bool
@@ -4978,6 +5044,7 @@ pub ai6::CableAuditRecord::cable_id: core::option::Option<alloc::string::String>
 pub ai6::CableAuditRecord::decision: &'static str
 pub ai6::CableAuditRecord::event: &'static str
 pub ai6::CableAuditRecord::mission_id: core::option::Option<alloc::string::String>
+pub ai6::CableAuditRecord::on_behalf_of: core::option::Option<alloc::string::String>
 pub ai6::CableAuditRecord::operation: alloc::string::String
 pub ai6::CableAuditRecord::session_id: core::option::Option<alloc::string::String>
 pub ai6::CableAuditRecord::station: alloc::string::String
@@ -5004,7 +5071,9 @@ pub ai6::CableDelivery::from_operation: alloc::string::String
 pub ai6::CableDelivery::from_station: alloc::string::String
 pub ai6::CableDelivery::from_theater: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::mission_id: core::option::Option<alloc::string::String>
+pub ai6::CableDelivery::on_behalf_of: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::reply_to: core::option::Option<alloc::string::String>
+pub ai6::CableDelivery::sent_as: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::session_id: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::state: ai6::directorates::registry::cables::CableState
 pub ai6::CableDelivery::target: ai6::directorates::registry::cables::CableTarget
@@ -5018,6 +5087,7 @@ pub ai6::CableDraft::expires_at: f64
 pub ai6::CableDraft::id: alloc::string::String
 pub ai6::CableDraft::idempotency_key: alloc::string::String
 pub ai6::CableDraft::mission_id: core::option::Option<alloc::string::String>
+pub ai6::CableDraft::on_behalf_of: core::option::Option<alloc::string::String>
 pub ai6::CableDraft::recipients: alloc::vec::Vec<ai6::directorates::registry::cables::CableRecipient>
 pub ai6::CableDraft::reply_to: core::option::Option<alloc::string::String>
 pub ai6::CableDraft::sender_agent: alloc::string::String
@@ -5030,6 +5100,7 @@ impl ai6::directorates::registry::cables::CableDraft
 pub fn ai6::directorates::registry::cables::CableDraft::new(alloc::string::String, alloc::string::String, alloc::string::String, ai6::directorates::registry::cables::CableTarget, alloc::string::String, alloc::vec::Vec<ai6::directorates::registry::cables::CableRecipient>, alloc::string::String, alloc::string::String, f64, f64) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_mission(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::cables::CableDraft::with_on_behalf_of(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_sender_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_session(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -5038,12 +5109,14 @@ pub fn ai6::directorates::registry::cables::CableDraft::fmt(&self, &mut core::fm
 #[non_exhaustive] pub struct ai6::CableEndpoint
 impl ai6::CableEndpoint
 pub fn ai6::CableEndpoint::agent(&self) -> &str
+pub fn ai6::CableEndpoint::conversation_only(&self) -> bool
 pub fn ai6::CableEndpoint::mission_id(&self) -> core::option::Option<&str>
 pub fn ai6::CableEndpoint::operation(&self) -> &str
 pub fn ai6::CableEndpoint::session_id(&self) -> core::option::Option<&str>
 pub fn ai6::CableEndpoint::station(&self) -> &str
 pub fn ai6::CableEndpoint::theater(&self) -> core::option::Option<&str>
 pub fn ai6::CableEndpoint::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableEndpoint::with_conversation_only(self) -> Self
 #[non_exhaustive] pub struct ai6::CableError(_)
 impl core::error::Error for ai6::directorates::registry::cables::CableError
 impl core::fmt::Display for ai6::directorates::registry::cables::CableError
@@ -5067,11 +5140,13 @@ pub fn ai6::CablePolicy::try_new(alloc::vec::Vec<ai6::CableGrant>, alloc::collec
 impl ai6::CablePrincipal
 pub fn ai6::CablePrincipal::agent(&self) -> &str
 pub fn ai6::CablePrincipal::mission_id(&self) -> core::option::Option<&str>
+pub fn ai6::CablePrincipal::on_behalf_of(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::operation(&self) -> &str
 pub fn ai6::CablePrincipal::session_id(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::station(&self) -> &str
 pub fn ai6::CablePrincipal::theater(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CablePrincipal::with_on_behalf_of(self, alloc::string::String) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub struct ai6::CableRecipient
 impl ai6::directorates::registry::cables::CableRecipient
 pub fn ai6::directorates::registry::cables::CableRecipient::agent(&self) -> &str
@@ -5084,6 +5159,7 @@ pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::
 pub fn ai6::CableRelay::discover(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::CableEndpoint>, ai6::CableRelayError>
 pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
+pub fn ai6::CableRelay::inbox_from(&self, &ai6::CablePrincipal, &str, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, ai6::CablePolicy, impl core::ops::function::Fn() -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>) -> Self
 pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::release(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::CableRelease, ai6::CableRelayError>
@@ -5094,6 +5170,7 @@ pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::
 pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableRelay::with_person_audit(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) -> core::result::Result<(), alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 #[non_exhaustive] pub struct ai6::CableRelease
 pub ai6::CableRelease::delivered: usize
 pub ai6::CableRelease::refused: usize
@@ -6725,6 +6802,10 @@ pub ai6::WriteSpec::create_dirs: bool
 pub ai6::WriteSpec::data: guatiao::value::convert::Bytes
 pub ai6::WriteSpec::path: alloc::string::String
 pub const ai6::ACTIONS: &[&str]
+pub const ai6::ASSISTANT_CABLE_MCP_ENV_PREFIX: &str
+pub const ai6::ASSISTANT_CABLE_MCP_SERVER: &str
+pub const ai6::ASSISTANT_CABLE_MCP_TOKEN_ENV: &str
+pub const ai6::ASSISTANT_CABLE_MCP_URL_ENV: &str
 pub const ai6::ASSISTANT_MCP_ENV_PREFIX: &str
 pub const ai6::ASSISTANT_MCP_PATH: &str
 pub const ai6::ASSISTANT_MCP_SERVER: &str
@@ -6778,6 +6859,8 @@ pub const ai6::DEFAULT_TERMINAL: &str
 pub const ai6::DEFAULT_WARN_AT_PERMILLE: u16
 pub const ai6::DEFAULT_WINDOW_SECS: u64
 pub const ai6::EVENT_ACCEPTED: &str
+pub const ai6::EVENT_CABLE_PROPOSAL: &str
+pub const ai6::EVENT_CABLE_SENT: &str
 pub const ai6::EVENT_CLOSED: &str
 pub const ai6::EVENT_COMPLETED: &str
 pub const ai6::EVENT_FAILED: &str
@@ -6795,6 +6878,7 @@ pub const ai6::HEAD_OF_STATION_ROLE: &str
 pub const ai6::LIMIT_EVENT: &str
 pub const ai6::LOCAL_THEATER: &str
 pub const ai6::LOGBOOK_LENGTH: usize
+pub const ai6::MAX_ASSISTANT_CABLE_GRANTS: usize
 pub const ai6::MAX_ASSISTANT_CHANGE_BYTES: usize
 pub const ai6::MAX_ASSISTANT_CHANGE_FILES: usize
 pub const ai6::MAX_ASSISTANT_CONTEXT_BYTES: usize
