@@ -1,22 +1,125 @@
 [
   {
+    "type": "additional_tools",
+    "id": "at_01a17b16-fb1e-7712-b0af-b8f2b8f54388",
+    "role": "developer",
+    "tools": [
+      {
+        "type": "namespace",
+        "name": "functions",
+        "description": "",
+        "tools": [
+          {
+            "type": "custom",
+            "name": "exec",
+            "description": "Run JavaScript code to orchestrate/compose tool calls\n- Evaluates the provided JavaScript code in a fresh V8 isolate as "
+          },
+          {
+            "type": "function",
+            "name": "wait",
+            "description": "Waits on a yielded `exec` cell and returns new output or completion.\n- Use `wait` only after `exec` returns `Script runn"
+          }
+        ]
+      }
+    ]
+  },
+  {
     "type": "message",
+    "id": "msg_01a17b16-fb1e-7712-b0af-b90dd2563c39",
     "role": "developer",
     "content": [
       {
         "type": "input_text",
         "text": "(trimmed)"
       }
-    ]
+    ],
+    "internal_chat_message_metadata_passthrough": {
+      "turn_id": "auto-compact-0",
+      "create_time": 1793066466.0783172,
+      "content_item_kinds": [
+        "model.base_instructions"
+      ],
+      "content_item_metadata": [
+        {
+          "provenance": {
+            "type": "harness",
+            "hook": false
+          }
+        }
+      ]
+    }
   },
   {
     "type": "message",
+    "id": "msg_01a17b16-fb1e-7712-b0af-b910697c512f",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      },
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      },
+      {
+        "type": "input_text",
+        "text": "(trimmed)"
+      }
+    ],
+    "internal_chat_message_metadata_passthrough": {
+      "turn_id": "auto-compact-0",
+      "create_time": 1793066466.0783172,
+      "content_item_kinds": [
+        "host_skills.instructions",
+        "permissions.instructions",
+        "collaboration_mode.instructions"
+      ],
+      "content_item_metadata": [
+        {
+          "provenance": {
+            "type": "skills"
+          }
+        },
+        {
+          "provenance": {
+            "type": "harness",
+            "hook": false
+          }
+        },
+        {
+          "provenance": {
+            "type": "harness",
+            "hook": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "message",
+    "id": "msg_01a17b16-fb1e-7712-b0af-b92307bbb479",
     "role": "user",
     "content": [
       {
         "type": "input_text",
         "text": "(trimmed)"
       }
-    ]
+    ],
+    "internal_chat_message_metadata_passthrough": {
+      "turn_id": "auto-compact-0",
+      "create_time": 1793066466.0783174,
+      "content_item_kinds": [
+        "environments.environment_context"
+      ],
+      "content_item_metadata": [
+        {
+          "provenance": {
+            "type": "harness",
+            "hook": false
+          }
+        }
+      ]
+    }
   }
 ]

@@ -1073,21 +1073,23 @@ fn app_server_argv(
 
 /// The settings that leave an answer-only or assistant thread no built-in tool that reads,
 /// runs or reaches anything: no command execution (`features.shell_tool`; Codex ignores a
-/// user's `features.unified_exec = false`), no local image attachment (`tools.view_image`), no
-/// web search, no sub-agents (`features.multi_agent`, `agents.enabled`), no app connectors, and
-/// a skills catalog too small to list one (`skills.max_context_tokens`, which takes no 0).
-/// Names and meanings from the Codex configuration reference
-/// (learn.chatgpt.com/docs/config-file/config-reference). Every other feature Codex enables is
-/// switched off by the tool check ([`tools`]), and the read-only sandbox and approval policy
-/// `never` stay as a further line.
+/// user's `features.unified_exec = false`), no web search, no sub-agents
+/// (`features.multi_agent`, `agents.enabled`), no app connectors, a skills catalog too small to
+/// list one (`skills.max_context_tokens`, which takes no 0), and no questions to the user. Names
+/// and meanings from the Codex configuration reference
+/// (learn.chatgpt.com/docs/config-file/config-reference), but for
+/// `tools.experimental_request_user_input`: switched off, it removes `request_user_input` and
+/// `request_user_input_async`, which no feature does (Codex 0.164.0). Every other
+/// feature Codex enables is switched off by the tool check ([`tools`]), and the read-only
+/// sandbox and approval policy `never` stay as a further line.
 const NO_BUILT_IN_TOOLS: [&str; 7] = [
     "features.shell_tool=false",
-    "tools.view_image=false",
     "web_search=\"disabled\"",
     "features.multi_agent=false",
     "agents.enabled=false",
     "features.apps=false",
     "skills.max_context_tokens=1",
+    "tools.experimental_request_user_input={enabled=false}",
 ];
 
 /// `-c` overrides for [`NO_BUILT_IN_TOOLS`].
@@ -2691,6 +2693,61 @@ mod tests {
     /// Codex 0.164.0's own answer with the settings this handler passed before the tool check.
     const OFFERS_EXEC: &str =
         include_str!("../tests/fixtures/codex-0.164.0/prompt-input-main.json");
+    /// Codex 0.164.0's answer with the settings it passes now: the model's catalog entry still
+    /// brings `functions.exec` and `functions.wait`.
+    const ANSWER_ONLY_PROMPT: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/prompt-input-answer-only.json");
+
+    #[test]
+    fn an_answer_only_thread_codex_still_gives_exec_and_wait_is_not_started() {
+        let terminal = ProcessTerminal::new();
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-catalog-fixture".to_owned(),
+        })
+        .unwrap();
+        let environment = BTreeMap::from([
+            (
+                "CODEX_FIXTURE_PROMPT_INPUT".to_owned(),
+                ANSWER_ONLY_PROMPT.replace('\n', ""),
+            ),
+            (
+                "CODEX_FIXTURE_FEATURES".to_owned(),
+                include_str!("../tests/fixtures/codex-0.164.0/features-list.txt").to_owned(),
+            ),
+        ]);
+        let refused = match handler.start(
+            answer_only_start(environment),
+            terminal.clone().into_object(),
+        ) {
+            Ok(_) => panic!("a thread offered functions.exec and functions.wait started"),
+            Err(error) => error.to_string(),
+        };
+        assert!(
+            refused.contains("functions.exec, functions.wait"),
+            "{refused}"
+        );
+        let specs = terminal.specs.lock().unwrap();
+        assert!(specs.iter().all(|spec| spec.argv[1] != "app-server"));
+        let checked = specs
+            .iter()
+            .find(|spec| spec.argv.len() > 2 && spec.argv[1..3] == ["debug", "prompt-input"])
+            .unwrap();
+        assert!(
+            checked
+                .argv
+                .iter()
+                .any(|argument| argument == "features.code_mode_host=false"),
+            "rendered with the features off: {:?}",
+            checked.argv
+        );
+        assert!(
+            !checked
+                .argv
+                .iter()
+                .any(|argument| argument.starts_with("features.incremental_tools")),
+            "kept on, or prompt-input renders no tool"
+        );
+    }
 
     #[test]
     fn an_answer_only_thread_offered_extra_tools_is_not_started() {
@@ -2986,7 +3043,15 @@ mod tests {
         }
         let off = |table: &str, key: &str| settings[table][key].as_bool();
         assert_eq!(off("features", "shell_tool"), Some(false), "{argv:?}");
-        assert_eq!(off("tools", "view_image"), Some(false), "{argv:?}");
+        assert_eq!(
+            settings["tools"]["experimental_request_user_input"]["enabled"].as_bool(),
+            Some(false),
+            "{argv:?}"
+        );
+        assert!(
+            settings["tools"].get("view_image").is_none(),
+            "Codex 0.164.0 ignores it as unrecognized: {argv:?}"
+        );
         assert_eq!(off("features", "multi_agent"), Some(false), "{argv:?}");
         assert_eq!(off("agents", "enabled"), Some(false), "{argv:?}");
         assert_eq!(off("features", "apps"), Some(false), "{argv:?}");

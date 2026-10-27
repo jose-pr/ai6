@@ -27,12 +27,17 @@ use crate::{internal, refuse};
 pub const TOOL_CHECK_ENV: &str = "AI6_CODEX_TOOL_CHECK";
 
 /// Features a restricted thread keeps: how Codex stores its login and reaches its service,
-/// none of which offers the model a tool. Every other enabled feature is switched off.
-pub const KEPT_FEATURES: [&str; 4] = [
+/// none of which offers the model a tool, and `incremental_tools`. Every other enabled feature
+/// is switched off.
+pub const KEPT_FEATURES: [&str; 5] = [
     "secret_auth_storage",
     "enable_request_compression",
     "system_proxy_fallback",
     "unbounded_connection_retries",
+    // Without it `codex debug prompt-input` renders no tool, while the app server still sends
+    // the tools of the model's catalog entry (`functions.exec` and `wait` in Codex 0.164.0):
+    // the check would see less than the thread is given.
+    "incremental_tools",
 ];
 
 /// How long a feature list stands for the same Codex, settings and environment; the user's
@@ -228,6 +233,21 @@ pub(crate) fn judge(
     }
 }
 
+/// Refuses, naming what was found, when a `strict` check found anything.
+fn refuse_if_strict(found: &[String], check: ToolCheck) -> Result<(), ProviderError> {
+    if found.is_empty() || check == ToolCheck::Warn {
+        return Ok(());
+    }
+    Err(refuse(
+        Status::GUATIAO_ERR_UNSUPPORTED,
+        format!(
+            "this restricted Codex thread was not started: {} \
+             ({TOOL_CHECK_ENV}=warn starts it anyway, as a weakening)",
+            found.join("; ")
+        ),
+    ))
+}
+
 /// The environment variables that decide which Codex runs and which configuration it reads.
 const CONFIG_ENVIRONMENT: [&str; 7] = [
     "CODEX_HOME",
@@ -316,13 +336,7 @@ impl Probe<'_> {
             }
         };
         let mut weakenings = read.into_iter().collect::<Vec<_>>();
-        let mut argv = vec![
-            self.executable.to_owned(),
-            "debug".to_owned(),
-            "prompt-input".to_owned(),
-        ];
-        argv.extend_from_slice(self.overrides);
-        argv.extend_from_slice(&overrides);
+        let mut argv = self.command(&["debug", "prompt-input"], &overrides);
         if let Some(model) = self.model {
             let model = serde_json::to_string(model).map_err(internal)?;
             argv.extend(["-c".to_owned(), format!("model={model}")]);
@@ -342,42 +356,38 @@ impl Probe<'_> {
     /// The `-c` overrides that switch off every enabled feature not kept, from `codex features
     /// list`, and what a `warn` check found reading it.
     fn switch_off(&self, check: ToolCheck) -> Result<SwitchedOff, ProviderError> {
-        let mut argv = vec![
-            self.executable.to_owned(),
-            "features".to_owned(),
-            "list".to_owned(),
-        ];
-        argv.extend_from_slice(self.overrides);
-        let list = feature_list(&self.capture(&argv)?);
-        let found = match &list {
-            None => Some(
+        let mut found = Vec::new();
+        let list = feature_list(&self.capture(&self.command(&["features", "list"], &[]))?);
+        match &list {
+            None => found.push(
                 "the features Codex enables could not be read from `codex features list`"
                     .to_owned(),
             ),
-            Some(list) => list.unread.first().map(|line| {
+            Some(list) => found.extend(list.unread.first().map(|line| {
                 format!(
                     "`codex features list` printed {} line(s) that are not a feature, such as {line:?}",
                     list.unread.len()
                 )
-            }),
-        };
-        if let (Some(found), ToolCheck::Strict) = (&found, check) {
-            return Err(refuse(
-                Status::GUATIAO_ERR_UNSUPPORTED,
-                format!(
-                    "this restricted Codex thread was not started: {found} \
-                     ({TOOL_CHECK_ENV}=warn starts it anyway, as a weakening)"
-                ),
-            ));
+            })),
         }
+        refuse_if_strict(&found, check)?;
         let overrides = list
             .map(|list| list.enabled)
             .unwrap_or_default()
             .into_iter()
             .filter(|name| !KEPT_FEATURES.contains(&name.as_str()))
             .flat_map(|name| ["-c".to_owned(), format!("features.{name}=false")])
-            .collect();
-        Ok((overrides, found))
+            .collect::<Vec<_>>();
+        Ok((overrides, (!found.is_empty()).then(|| found.join("; "))))
+    }
+
+    /// `codex <words>` with the app server's settings and `more`.
+    fn command(&self, words: &[&str], more: &[String]) -> Vec<String> {
+        let mut argv = vec![self.executable.to_owned()];
+        argv.extend(words.iter().map(|word| (*word).to_owned()));
+        argv.extend_from_slice(self.overrides);
+        argv.extend_from_slice(more);
+        argv
     }
 
     /// Everything `argv` writes until it exits.
@@ -430,8 +440,9 @@ mod tests {
     /// `codex debug prompt-input` and `codex features list` output of Codex 0.164.0 on
     /// Windows, model descriptions shortened and message text replaced (it holds the
     /// machine's paths): with the settings this handler passed before the tool check, with
-    /// those it passes now (answer-only, and an assistant with one MCP server, `moneypenny`),
-    /// and with code mode kept and that server's namespace exposed directly.
+    /// those it passes now (answer-only, and an assistant with one MCP server, `moneypenny`,
+    /// model `gpt-6.1-sol`), and with code mode kept and that server's namespace exposed
+    /// directly.
     const BEFORE: &str = include_str!("../tests/fixtures/codex-0.164.0/prompt-input-main.json");
     const ANSWER_ONLY: &str =
         include_str!("../tests/fixtures/codex-0.164.0/prompt-input-answer-only.json");
@@ -462,10 +473,27 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_only_thread_passes_with_no_tool_at_all() {
+    fn an_answer_only_thread_offered_the_catalogs_exec_and_wait_is_refused() {
         let offered = offered_tools(ANSWER_ONLY.as_bytes()).unwrap();
-        assert!(offered.is_empty(), "{offered:?}");
-        assert_eq!(judge(Some(&offered), &[], ToolCheck::Strict), Ok(None));
+        assert_eq!(
+            offered,
+            ["functions.exec", "functions.wait"],
+            "request_user_input is switched off; exec and wait come with the model"
+        );
+        let refused = judge(Some(&offered), &[], ToolCheck::Strict).unwrap_err();
+        assert!(
+            refused.contains("functions.exec, functions.wait"),
+            "{refused}"
+        );
+        let weakening = judge(Some(&offered), &[], ToolCheck::Warn)
+            .unwrap()
+            .unwrap();
+        assert!(weakening.contains("functions.exec"), "{weakening}");
+        assert_eq!(
+            judge(Some(&[]), &[], ToolCheck::Strict),
+            Ok(None),
+            "an answer-only thread passes with no tool at all"
+        );
     }
 
     #[test]
@@ -473,7 +501,8 @@ mod tests {
         let offered = offered_tools(ASSISTANT.as_bytes()).unwrap();
         let refused = judge(Some(&offered), &moneypenny(), ToolCheck::Strict).unwrap_err();
         assert!(
-            refused.contains("no tool of MCP server moneypenny"),
+            refused.contains("functions.exec, functions.wait")
+                && refused.contains("no tool of MCP server moneypenny"),
             "{refused}"
         );
     }
@@ -567,6 +596,10 @@ mod tests {
             assert!(enabled.iter().any(|f| f == feature), "{feature}");
         }
         assert!(!enabled.iter().any(|f| f == "memories"), "off by default");
+        assert!(
+            KEPT_FEATURES.contains(&"incremental_tools"),
+            "kept, or prompt-input renders no tool"
+        );
         assert_eq!(feature_list(b"Error: no such command\n"), None);
         let noisy = format!("{FEATURES}\nWARNING: plugin cache is stale\n");
         assert_eq!(
