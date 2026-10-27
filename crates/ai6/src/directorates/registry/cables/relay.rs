@@ -204,9 +204,24 @@ pub struct CableEndpoint {
     station: String,
     session_id: Option<String>,
     mission_id: Option<String>,
+    conversation_only: bool,
 }
 
 impl CableEndpoint {
+    /// Marks this endpoint as one conversation of an assistant that acts for a person: it is
+    /// never discovered and never in the audience of a Cable addressed to an Agent, a Station,
+    /// a Theater, a channel or everyone; only a reply to a Cable it sent reaches it.
+    #[must_use]
+    pub fn with_conversation_only(mut self) -> Self {
+        self.conversation_only = true;
+        self
+    }
+
+    /// Whether only replies to its own Cables reach this endpoint.
+    pub fn conversation_only(&self) -> bool {
+        self.conversation_only
+    }
+
     /// Constructs a validated directory endpoint.
     pub fn try_new(
         agent: String,
@@ -225,6 +240,7 @@ impl CableEndpoint {
             station: principal.station,
             session_id: principal.session_id,
             mission_id: principal.mission_id,
+            conversation_only: false,
         })
     }
 
@@ -628,6 +644,7 @@ impl CableSendRequest {
 
 type EndpointSource = dyn Fn() -> Vec<CableEndpoint> + Send + Sync;
 type AuditSink = dyn Fn(&CableAuditRecord) + Send + Sync;
+type PersonAudit = dyn Fn(&CableAuditRecord) -> Result<(), String> + Send + Sync;
 type EndpointKey = (String, String, Option<String>, Option<String>);
 
 /// Authorizes sends and receives, snapshots broadcast audiences and stores accepted Cables.
@@ -643,6 +660,7 @@ pub struct CableRelay {
     scope_burst: u32,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     audit: Option<Arc<AuditSink>>,
+    person_audit: Option<Arc<PersonAudit>>,
     live_endpoints: Mutex<BTreeMap<EndpointKey, CableEndpoint>>,
 }
 
@@ -666,6 +684,7 @@ impl CableRelay {
             scope_burst: DEFAULT_SCOPE_BURST,
             now: Arc::new(system_time),
             audit: None,
+            person_audit: None,
             live_endpoints: Mutex::new(BTreeMap::new()),
         }
     }
@@ -711,6 +730,17 @@ impl CableRelay {
         sink: impl Fn(&CableAuditRecord) + Send + Sync + 'static,
     ) -> Self {
         self.audit = Some(Arc::new(sink));
+        self
+    }
+
+    /// Installs the durable audit log of Cables sent for a person: `write` is given the
+    /// record of each such Cable before it is stored, and the send is refused when it
+    /// errs. Without one, nothing is sent for a person.
+    pub fn with_person_audit(
+        mut self,
+        write: impl Fn(&CableAuditRecord) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        self.person_audit = Some(Arc::new(write));
         self
     }
 
@@ -761,6 +791,7 @@ impl CableRelay {
             .into_iter()
             .filter(|endpoint| {
                 endpoint.agent != principal.agent
+                    && !endpoint.conversation_only
                     && endpoint.station == principal.station
                     && policy.allows(&endpoint.agent, CableAction::Receive, &station)
             })
@@ -779,6 +810,26 @@ impl CableRelay {
         principal: &CablePrincipal,
         limit: usize,
     ) -> Result<Vec<CableDelivery>, CableRelayError> {
+        self.read_inbox(principal, None, limit)
+    }
+
+    /// As [`inbox`](Self::inbox), for the Cables sent in `operation` only: the others are left
+    /// as they are, neither delivered nor counted against `limit`.
+    pub fn inbox_from(
+        &self,
+        principal: &CablePrincipal,
+        operation: &str,
+        limit: usize,
+    ) -> Result<Vec<CableDelivery>, CableRelayError> {
+        self.read_inbox(principal, Some(operation), limit)
+    }
+
+    fn read_inbox(
+        &self,
+        principal: &CablePrincipal,
+        operation: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CableDelivery>, CableRelayError> {
         let now = (self.now)();
         if !now.is_finite() || now <= 0.0 {
             return Err(CableRelayError::RegistryUnavailable);
@@ -792,12 +843,15 @@ impl CableRelay {
             .cable_inbox(
                 &principal.agent,
                 principal.session_id.as_deref(),
-                limit,
+                if operation.is_some() { 1_000 } else { limit },
                 Some(now),
             )
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
-        let mut deliveries = Vec::with_capacity(queued.len());
+        let mut deliveries = Vec::with_capacity(queued.len().min(limit));
         for listed in queued {
+            if deliveries.len() >= limit {
+                break;
+            }
             let Some(cable) = self
                 .registry
                 .get_cable(listed.id())
@@ -805,6 +859,9 @@ impl CableRelay {
             else {
                 continue;
             };
+            if operation.is_some_and(|operation| cable.sender_operation() != operation) {
+                continue;
+            }
             let Some(recipient) = recipient_for(&cable, principal) else {
                 continue;
             };
@@ -1133,6 +1190,7 @@ impl CableRelay {
             retry.created_at = existing.created_at();
             retry.expires_at = existing.expires_at();
             let retry = Cable::try_new(retry).map_err(|_| CableRelayError::InvalidRequest)?;
+            self.audit_for_person("cable_retry", principal, &request.target, &retry)?;
             let accepted = self
                 .registry
                 .submit_cable(&retry)
@@ -1160,6 +1218,9 @@ impl CableRelay {
         }
         if let Some(session) = request.to_session.as_deref() {
             candidates.retain(|endpoint| endpoint.session_id.as_deref() == Some(session));
+        } else {
+            // An assistant's conversations, each a different person's, hear only replies.
+            candidates.retain(|endpoint| !endpoint.conversation_only);
         }
         let recipients =
             self.authorized_recipients(&policy, principal, &request.target, candidates)?;
@@ -1170,12 +1231,14 @@ impl CableRelay {
 
         let target_name = request.target.name().unwrap_or("");
         let scope = format!("{}:{target_name}", scope_name(request.target.scope()));
+        // An assistant shared by many people has a sender bucket per person, so one person's
+        // sends do not use up another's.
+        let sender = match principal.on_behalf_of.as_deref() {
+            Some(person) => format!("sender:{}:person:{person}", principal.agent),
+            None => format!("sender:{}", principal.agent),
+        };
         let buckets = [
-            (
-                format!("sender:{}", principal.agent),
-                self.sender_rate,
-                self.sender_burst,
-            ),
+            (sender, self.sender_rate, self.sender_burst),
             (format!("scope:{scope}"), self.scope_rate, self.scope_burst),
         ];
         let borrowed = buckets
@@ -1199,6 +1262,7 @@ impl CableRelay {
 
         let draft = self.draft(principal, &request, recipients, now)?;
         let cable = Cable::try_new(draft).map_err(|_| CableRelayError::InvalidRequest)?;
+        self.audit_for_person("cable_send", principal, &request.target, &cable)?;
         let accepted = self
             .registry
             .submit_cable(&cable)
@@ -1361,6 +1425,30 @@ impl CableRelay {
         Ok(selected)
     }
 
+    /// For a principal acting for a person, writes the audit record of `cable` before the
+    /// Cable is stored: a relay that cannot write it sends nothing for the person.
+    fn audit_for_person(
+        &self,
+        event: &'static str,
+        principal: &CablePrincipal,
+        target: &CableTarget,
+        cable: &Cable,
+    ) -> Result<(), CableRelayError> {
+        if principal.on_behalf_of.is_none() {
+            return Ok(());
+        }
+        let record = self.audit_record(event, principal, target, "accepted", Some(cable));
+        let written = match &self.person_audit {
+            Some(write) => write(&record),
+            None => Err("this relay keeps no audit log for Cables sent for a person".to_owned()),
+        };
+        if written.is_err() {
+            self.record_event(event, principal, target, "audit_failed", Some(cable));
+            return Err(CableRelayError::Unavailable);
+        }
+        Ok(())
+    }
+
     fn record_event(
         &self,
         event: &'static str,
@@ -1372,7 +1460,18 @@ impl CableRelay {
         let Some(sink) = &self.audit else {
             return;
         };
-        let record = CableAuditRecord {
+        sink(&self.audit_record(event, principal, target, decision, cable));
+    }
+
+    fn audit_record(
+        &self,
+        event: &'static str,
+        principal: &CablePrincipal,
+        target: &CableTarget,
+        decision: &'static str,
+        cable: Option<&Cable>,
+    ) -> CableAuditRecord {
+        CableAuditRecord {
             event,
             agent: principal.agent.clone(),
             operation: principal.operation.clone(),
@@ -1386,8 +1485,7 @@ impl CableRelay {
             at: (self.now)(),
             cable_id: cable.map(|item| item.id().to_owned()),
             on_behalf_of: principal.on_behalf_of.clone(),
-        };
-        sink(&record);
+        }
     }
 }
 
@@ -1620,7 +1718,8 @@ mod tests {
                 endpoint("009", "operation-b", Some("session-009")),
             ],
         )
-        .with_audit_sink(move |record| audit_records.lock().unwrap().push(record.clone()));
+        .with_audit_sink(move |record| audit_records.lock().unwrap().push(record.clone()))
+        .with_person_audit(|_| Ok(()));
         // Two conversations of the same assistant Agent, for two people.
         for (session, operation) in [
             ("assistant-a", "operation-a"),
@@ -1636,7 +1735,8 @@ mod tests {
                         Some(session.into()),
                         None,
                     )
-                    .unwrap(),
+                    .unwrap()
+                    .with_conversation_only(),
                 )
                 .unwrap();
         }
@@ -1722,6 +1822,283 @@ mod tests {
                 .inbox(&assistant("assistant-b", "person-b"), 10)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    type AuditLog = fn(&CableAuditRecord) -> Result<(), String>;
+
+    /// Moneypenny's conversations `assistant-a` (person-a) and `assistant-b` (person-b),
+    /// conversation-only, beside 008 and 010 in operation-a; all may send and receive on
+    /// station-a. `audit` is the person audit log; `sender_burst` the sender bucket.
+    fn assistant_relay(
+        root: &std::path::Path,
+        audit: Option<AuditLog>,
+        sender_burst: u32,
+    ) -> (CableRelay, Arc<Mutex<Vec<CableAuditRecord>>>) {
+        let station = target(CableScope::Station, Some("station-a"));
+        let policy = CablePolicy::try_new(
+            ["moneypenny", "008", "010"]
+                .into_iter()
+                .flat_map(|agent| {
+                    [
+                        CableAction::Send,
+                        CableAction::Receive,
+                        CableAction::Discover,
+                    ]
+                    .map(|action| grant(agent, action, station.clone()))
+                })
+                .collect(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let records = Arc::new(Mutex::new(Vec::new()));
+        let sink = records.clone();
+        let mut service = relay(
+            Arc::new(FileRegistry::open(root)),
+            policy,
+            vec![
+                endpoint("008", "operation-a", Some("session-008")),
+                endpoint("010", "operation-a", Some("session-010")),
+            ],
+        )
+        .with_limits(100, 0.001, sender_burst, 100.0, 1_000)
+        .unwrap()
+        .with_audit_sink(move |record| sink.lock().unwrap().push(record.clone()));
+        if let Some(audit) = audit {
+            service = service.with_person_audit(audit);
+        }
+        for session in ["assistant-a", "assistant-b"] {
+            service
+                .register_endpoint(
+                    CableEndpoint::try_new(
+                        "moneypenny".into(),
+                        "operation-a".into(),
+                        None,
+                        "station-a".into(),
+                        Some(session.into()),
+                        None,
+                    )
+                    .unwrap()
+                    .with_conversation_only(),
+                )
+                .unwrap();
+        }
+        (service, records)
+    }
+
+    fn for_person(session: &str, person: &str) -> CablePrincipal {
+        CablePrincipal::try_new(
+            "moneypenny".into(),
+            "operation-a".into(),
+            None,
+            "station-a".into(),
+            Some(session.into()),
+            None,
+        )
+        .unwrap()
+        .with_on_behalf_of(person.into())
+        .unwrap()
+    }
+
+    fn agent_008() -> CablePrincipal {
+        CablePrincipal::try_new(
+            "008".into(),
+            "operation-a".into(),
+            None,
+            "station-a".into(),
+            Some("session-008".into()),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_assistants_conversations_hear_only_replies_to_their_own_cables() {
+        let root = tempfile::tempdir().unwrap();
+        let (service, _) = assistant_relay(root.path(), Some(|_| Ok(())), 20);
+        let sent = service
+            .send(
+                &for_person("assistant-a", "person-a"),
+                request(target(CableScope::Agent, Some("008")), "k1"),
+            )
+            .unwrap();
+        service.inbox(&agent_008(), 10).unwrap();
+
+        // 008 writes afresh to the assistant, to the Station and to everyone.
+        assert_eq!(
+            service
+                .send(
+                    &agent_008(),
+                    request(target(CableScope::Agent, Some("moneypenny")), "fresh")
+                )
+                .unwrap_err(),
+            CableRelayError::Unavailable,
+            "no conversation is the assistant Agent's inbox"
+        );
+        let broadcast = service
+            .send(
+                &agent_008(),
+                request(target(CableScope::Station, Some("station-a")), "all"),
+            )
+            .unwrap();
+        let reached: Vec<_> = broadcast
+            .recipients()
+            .iter()
+            .map(|recipient| recipient.agent())
+            .collect();
+        assert_eq!(
+            reached,
+            ["008", "010"],
+            "her conversations are not in the audience"
+        );
+        assert!(
+            service
+                .discover(&agent_008())
+                .unwrap()
+                .iter()
+                .all(|peer| peer.agent() != "moneypenny")
+        );
+        for session in ["assistant-a", "assistant-b"] {
+            let person = if session == "assistant-a" {
+                "person-a"
+            } else {
+                "person-b"
+            };
+            assert!(
+                service
+                    .inbox(&for_person(session, person), 10)
+                    .unwrap()
+                    .is_empty(),
+                "{session}"
+            );
+        }
+        service
+            .reply(&agent_008(), sent.id(), "Done".into(), "r1".into())
+            .unwrap();
+        assert_eq!(
+            service
+                .inbox(&for_person("assistant-a", "person-a"), 10)
+                .unwrap()
+                .len(),
+            1,
+            "the reply reaches the conversation that asked"
+        );
+    }
+
+    #[test]
+    fn each_person_has_a_sender_bucket_of_their_own() {
+        let root = tempfile::tempdir().unwrap();
+        let (service, _) = assistant_relay(root.path(), Some(|_| Ok(())), 1);
+        let to_008 = |key: &str| request(target(CableScope::Agent, Some("008")), key);
+        let person_a = for_person("assistant-a", "person-a");
+        service.send(&person_a, to_008("a1")).unwrap();
+        assert_eq!(
+            service.send(&person_a, to_008("a2")).unwrap_err(),
+            CableRelayError::Unavailable,
+            "person-a used up their bucket"
+        );
+        assert!(
+            service
+                .send(&for_person("assistant-b", "person-b"), to_008("b1"))
+                .is_ok(),
+            "person-b still has theirs"
+        );
+    }
+
+    #[test]
+    fn a_cable_for_a_person_is_not_stored_unless_its_audit_record_is_written_first() {
+        fn refuse(_: &CableAuditRecord) -> Result<(), String> {
+            Err("disk full".to_owned())
+        }
+        let refusing: AuditLog = refuse;
+        for audit in [None, Some(refusing)] {
+            let root = tempfile::tempdir().unwrap();
+            let (service, records) = assistant_relay(root.path(), audit, 20);
+            assert_eq!(
+                service
+                    .send(
+                        &for_person("assistant-a", "person-a"),
+                        request(target(CableScope::Agent, Some("008")), "k1"),
+                    )
+                    .unwrap_err(),
+                CableRelayError::Unavailable
+            );
+            assert!(
+                service
+                    .registry
+                    .find_cable("moneypenny", "k1")
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(service.inbox(&agent_008(), 10).unwrap().is_empty());
+            assert_eq!(
+                records.lock().unwrap().last().unwrap().decision,
+                "audit_failed"
+            );
+        }
+        // An Agent acting for nobody needs no such log.
+        let root = tempfile::tempdir().unwrap();
+        let (service, _) = assistant_relay(root.path(), None, 20);
+        assert!(
+            service
+                .send(
+                    &agent_008(),
+                    request(target(CableScope::Agent, Some("010")), "k")
+                )
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn an_inbox_read_for_one_operation_leaves_the_others_undelivered() {
+        let root = tempfile::tempdir().unwrap();
+        let station = target(CableScope::Station, Some("station-a"));
+        let service = relay(
+            Arc::new(FileRegistry::open(root.path())),
+            CablePolicy::try_new(
+                ["007", "008"]
+                    .into_iter()
+                    .flat_map(|agent| {
+                        [CableAction::Send, CableAction::Receive]
+                            .map(|action| grant(agent, action, station.clone()))
+                    })
+                    .collect(),
+                BTreeMap::new(),
+            )
+            .unwrap(),
+            vec![endpoint("008", "operation-a", Some("session-008"))],
+        );
+        let sender = |operation: &str| {
+            CablePrincipal::try_new(
+                "007".into(),
+                operation.into(),
+                None,
+                "station-a".into(),
+                Some(format!("session-{operation}")),
+                None,
+            )
+            .unwrap()
+        };
+        let to_008 = |key: &str| request(target(CableScope::Agent, Some("008")), key);
+        let elsewhere = service.send(&sender("operation-b"), to_008("b1")).unwrap();
+        let first = service.send(&sender("operation-a"), to_008("a1")).unwrap();
+        service.send(&sender("operation-a"), to_008("a2")).unwrap();
+
+        let read = service.inbox_from(&agent_008(), "operation-a", 1).unwrap();
+        assert_eq!(read.len(), 1, "the limit counts this Operation's Cables");
+        assert_eq!(read[0].cable_id, first.id());
+        let untouched = service.registry.get_cable(elsewhere.id()).unwrap().unwrap();
+        assert_eq!(
+            untouched.recipients()[0].state(),
+            CableState::Queued,
+            "another Operation's Cable is not marked delivered"
+        );
+        assert_eq!(
+            service
+                .inbox_from(&agent_008(), "operation-a", 10)
+                .unwrap()
+                .len(),
+            2
         );
     }
 

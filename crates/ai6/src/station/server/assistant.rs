@@ -2671,8 +2671,8 @@ mod tests {
                 },
                 BTreeMap::new(),
             )
-            .with_audit_sink(move |record| {
-                super::super::audit_cable_for_person(audit.as_ref(), "test", record);
+            .with_person_audit(move |record| {
+                super::super::write_person_cable_audit(audit.as_ref(), "test", record)
             }),
         );
 

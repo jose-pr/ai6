@@ -1005,8 +1005,8 @@ mod tests {
                 Vec::new,
                 BTreeMap::new(),
             )
-            .with_audit_sink(move |record| {
-                super::super::audit_cable_for_person(audit.as_ref(), "station-a", record);
+            .with_person_audit(move |record| {
+                super::super::write_person_cable_audit(audit.as_ref(), "station-a", record)
             }),
         );
         let mut agent = Endpoint::start(
@@ -2256,7 +2256,8 @@ impl AssistantEndpoint {
             Some(identity.session.clone()),
             None,
         )
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
+        .map_err(|error| std::io::Error::other(error.to_string()))?
+        .with_conversation_only();
         let desk = Arc::new(AssistantCableDesk {
             relay,
             intake,
@@ -2551,12 +2552,7 @@ impl AssistantCableTools {
                 return Err(CableRelayError::Unavailable);
             }
             let principal = desk.principal(&args.operation)?;
-            let deliveries: Vec<_> = desk
-                .relay
-                .inbox(&principal, limit)?
-                .into_iter()
-                .filter(|delivery| delivery.from_operation == args.operation)
-                .collect();
+            let deliveries = desk.relay.inbox_from(&principal, &args.operation, limit)?;
             let senders: std::collections::BTreeSet<_> = deliveries
                 .iter()
                 .map(|delivery| delivery.from_agent.clone())

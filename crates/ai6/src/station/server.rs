@@ -626,6 +626,7 @@ where
     let cable_site = station_id.clone();
     let (sender_rate, sender_burst, scope_rate, scope_burst) = cable_config.quota_limits();
     let (audit_registry, audit_station) = (intake.clone(), station_id.clone());
+    let (person_registry, person_station) = (intake.clone(), station_id.clone());
     let cables = CableRelay::new(
         intake.clone(),
         cable_config
@@ -638,7 +639,10 @@ where
         cable_config.channels().clone(),
     )
     .with_audit_sink(move |record| {
-        audit_cable_for_person(audit_registry.as_ref(), &audit_station, record);
+        audit_refused_cable_for_person(audit_registry.as_ref(), &audit_station, record);
+    })
+    .with_person_audit(move |record| {
+        write_person_cable_audit(person_registry.as_ref(), &person_station, record)
     })
     .with_limits(
         cable_config.max_fanout(),
@@ -844,19 +848,48 @@ async fn list_intake_briefs(
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
 }
 
-/// Records in the audit log a Cable an assistant sent, or was refused, on a person's behalf:
-/// action `cable.send`, the person as actor, `<agent> <decision> <target> <cable id>` as
-/// target. Other relay records are metadata the relay keeps to itself.
-fn audit_cable_for_person(
+/// Writes the audit record of a Cable an assistant is about to send for a person, before the
+/// relay stores it (its person audit log); `Err` makes the relay refuse the send.
+fn write_person_cable_audit(
+    registry: &dyn RegistryBackend,
+    station: &str,
+    record: &crate::directorates::registry::cables::CableAuditRecord,
+) -> Result<(), String> {
+    match person_cable_audit(station, record) {
+        Some(audit) => registry
+            .record_audit(&audit)
+            .map_err(|error| error.to_string()),
+        None => Err("not a Cable sent for a person".to_owned()),
+    }
+}
+
+/// Records a send for a person the relay refused, best effort (its audit sink); accepted ones
+/// are written before they are stored, by [`write_person_cable_audit`].
+fn audit_refused_cable_for_person(
     registry: &dyn RegistryBackend,
     station: &str,
     record: &crate::directorates::registry::cables::CableAuditRecord,
 ) {
-    let Some(person) = &record.on_behalf_of else {
+    if record.decision == "accepted" {
         return;
-    };
+    }
+    if let Some(audit) = person_cable_audit(station, record)
+        && let Err(error) = registry.record_audit(&audit)
+    {
+        eprintln!("ai6: the audit record of a Cable refused for a person was not written: {error}");
+    }
+}
+
+/// The audit log entry of a Cable an assistant sent, or was refused, on a person's behalf:
+/// action `cable.send`, the person as actor, `<agent> <decision> <target> <cable id>` as
+/// target. Other relay records are metadata the relay keeps to itself.
+fn person_cable_audit(
+    station: &str,
+    record: &crate::directorates::registry::cables::CableAuditRecord,
+) -> Option<crate::directorates::registry::store::AuditRecord> {
+    let person = record.on_behalf_of.as_ref()?;
     if !matches!(record.event, "cable_send" | "cable_retry") {
-        return;
+        return None;
     }
     let target = match &record.target_name {
         Some(name) => format!("{:?}:{name}", record.target_scope).to_lowercase(),
@@ -873,7 +906,7 @@ fn audit_cable_for_person(
         end -= 1;
     }
     target.truncate(end);
-    let audit = crate::directorates::registry::store::AuditRecord {
+    Some(crate::directorates::registry::store::AuditRecord {
         id: format!("cable.send-{}", uuid::Uuid::new_v4().simple()),
         actor: person.clone(),
         action: "cable.send".to_owned(),
@@ -881,10 +914,7 @@ fn audit_cable_for_person(
         resource: Some(format!("station:{station}")),
         target,
         at: record.at,
-    };
-    if let Err(error) = registry.record_audit(&audit) {
-        eprintln!("ai6: the audit record of a Cable sent for a person was not written: {error}");
-    }
+    })
 }
 
 fn cable_endpoints(
