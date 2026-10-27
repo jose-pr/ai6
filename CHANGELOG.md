@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `moneypenny/<conversation digest>`. Changes to `memory/` are set aside and reported
   (`memory_changes`): committed at once in a conversation that has read nothing others wrote,
   a `memory_commit` proposal once it has, and a confirmed one commits exactly the confirmed
-  files. `propose_shared_change` proposes a change to a group's shared repository for its
+  files. A memory change records what each file held when it was made
+  (`AssistantChange::base`, checked through `CheckpointFile::base`), and its commit is
+  refused when one has changed on `main` since. `propose_shared_change` proposes a change to a group's shared repository for its
   members, or commits it at once (audited `moneypenny.shared.write`) when the group's
   repository has `write = true`. `{person}` takes lowercase identifiers only;
   `{person_digest}` works for all. A Station takes only the repositories its own roster gives

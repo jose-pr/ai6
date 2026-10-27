@@ -3301,6 +3301,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_memory_change_whose_files_changed_since_it_was_made_is_refused() {
+        let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Writes);
+        let bare = people.path().join("eve.git");
+        let mut exposed = working("c-x", "Remember this.", workspace(&bare));
+        exposed.exposed = true;
+        fixture.desk.handle(exposed).await;
+        until(|| kinds(&fixture, "c-x").contains(&EVENT_COMPLETED.to_owned())).await;
+        let (change, _) = set_aside(&fixture, "c-x");
+        assert_eq!(
+            change.base.get("memory/prefs.md"),
+            Some(&None),
+            "made where no such file was"
+        );
+        assert!(matches!(change.base.get("memory/MEMORY.md"), Some(Some(_))));
+        fixture.desk.close_all();
+        until(|| kinds(&fixture, "c-x").contains(&EVENT_CLOSED.to_owned())).await;
+
+        // Meanwhile her index changed another way.
+        let other = AssistantChange::new(BTreeMap::from([(
+            "memory/MEMORY.md".to_owned(),
+            Some("# Memory\n\n- something else\n".to_owned()),
+        )]));
+        fixture
+            .desk
+            .handle(committing("c-y", COMMIT_MEMORY, &bare, other))
+            .await;
+        assert!(kinds(&fixture, "c-y").contains(&EVENT_ACCEPTED.to_owned()));
+
+        // Confirmed now, the change would replace that: it is refused, and nothing changes.
+        fixture
+            .desk
+            .handle(committing("c-x", COMMIT_MEMORY, &bare, change))
+            .await;
+        let refused = events(&fixture, "c-x")
+            .into_iter()
+            .rfind(|event| event.kind == EVENT_REJECTED)
+            .and_then(|event| event.text)
+            .unwrap_or_default();
+        assert!(
+            refused.contains("memory/MEMORY.md changed on main"),
+            "{refused}"
+        );
+        assert_eq!(
+            git(&bare, &["show", "main:memory/MEMORY.md"]),
+            "# Memory\n\n- something else\n"
+        );
+        assert!(!git(&bare, &["ls-tree", "-r", "--name-only", "main"]).contains("prefs.md"));
+    }
+
+    #[tokio::test]
     async fn a_turn_whose_memory_cannot_be_put_back_saves_nothing() {
         let people = tempfile::tempdir().unwrap();
         let fixture = git_fixture(people.path(), Script::Works);

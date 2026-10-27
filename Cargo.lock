@@ -136,6 +136,7 @@ name = "ai6-safehouse-git"
 version = "0.1.0"
 dependencies = [
  "ai6",
+ "sha2",
  "tempfile",
 ]
 

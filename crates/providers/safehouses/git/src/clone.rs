@@ -17,6 +17,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use sha2::{Digest, Sha256};
+
 use ai6::RepoKind;
 use ai6::directorates::q::safehouse::{
     CheckpointFile, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseReport,
@@ -43,6 +45,10 @@ fn hardened(git_dir: &Path) -> Vec<String> {
         "commit.gpgsign=false".to_owned(),
         "-c".to_owned(),
         "core.symlinks=false".to_owned(),
+        // A checkout holds each file's bytes as committed, so what was read from it can be
+        // compared with what is committed.
+        "-c".to_owned(),
+        "core.autocrlf=false".to_owned(),
     ];
     for driver in filter_drivers() {
         for key in ["clean", "smudge", "process"] {
@@ -190,6 +196,59 @@ fn record_changes(repo: &Repo<'_>, record: &str) -> Result<bool, Failure> {
         )?;
     }
     Ok(any)
+}
+
+/// Refuses `files` when one with a `base` holds anything else on `branch` of `remote` (fetched
+/// now): the change was made from another text, and would replace what was written since.
+fn check_bases(
+    repo: &Repo<'_>,
+    remote: &str,
+    branch: &str,
+    files: &[CheckpointFile],
+) -> Result<(), Failure> {
+    if files.iter().all(|file| file.base.is_none()) {
+        return Ok(());
+    }
+    let head = format!("refs/heads/{branch}");
+    let tip = match repo.run(&["fetch", "--quiet", "--no-tags", remote, &head], &[]) {
+        Ok(_) => Some(repo.resolve("FETCH_HEAD")?),
+        // A branch that does not exist yet holds no file.
+        Err(error) => match repo.run(&["ls-remote", "--heads", remote, &head], &[]) {
+            Ok(listed) if listed.trim().is_empty() => None,
+            _ => return Err(error),
+        },
+    };
+    for file in files {
+        let Some(base) = &file.base else {
+            continue;
+        };
+        let at = tip.as_ref().map(|tip| format!("{tip}:{}", file.path));
+        let found = match at
+            .as_deref()
+            .map(|at| repo.run(&["cat-file", "-t", at], &[]))
+        {
+            Some(Ok(kind)) if kind.trim() == "blob" => {
+                let text = repo.run(
+                    &["cat-file", "blob", at.as_deref().unwrap_or_default()],
+                    &[],
+                )?;
+                Sha256::digest(text.as_bytes())
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect()
+            }
+            Some(Ok(kind)) => kind.trim().to_owned(),
+            Some(Err(_)) | None => String::new(),
+        };
+        if found != *base {
+            return Err(format!(
+                "{} changed on {branch} since this change was made from it, so nothing was \
+                 committed: make the change again from what it holds now",
+                file.path
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Makes the working tree hold `HEAD`'s version of each of `files`: checked out when `HEAD`
@@ -467,6 +526,7 @@ impl Worktree {
         let repo = self.repo();
         let run = |args: &[&str]| repo.run(args, &env);
         if let Some(files) = &spec.files {
+            check_bases(&repo, &spec.remote, branch, files)?;
             stage_exactly(&repo, files)?;
             if staged(&repo)? {
                 run(&["commit", "--quiet", "--no-verify", "-m", &spec.message])?;
@@ -1141,10 +1201,12 @@ mod tests {
             CheckpointFile {
                 path: "memory/m.md".to_owned(),
                 text: Some("m\n".to_owned()),
+                base: None,
             },
             CheckpointFile {
                 path: "x.md".to_owned(),
                 text: None,
+                base: None,
             },
         ]);
         let saved = b.save(&exact, "main").unwrap();
@@ -1234,6 +1296,47 @@ mod tests {
             "the entries are in the working tree too"
         );
         house.discard().unwrap();
+    }
+
+    #[test]
+    fn an_exact_save_is_refused_when_a_file_changed_since_its_base() {
+        let hex = |text: &str| -> String {
+            Sha256::digest(text.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        };
+        let file = |path: &str, text: &str, base: Option<String>| CheckpointFile {
+            path: path.to_owned(),
+            text: Some(text.to_owned()),
+            base,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("eve.git");
+        let source = bare.to_string_lossy().into_owned();
+        let a = Worktree::open(&spec(&source, &root.path().join("a"), true)).unwrap();
+        let mut exact = save_spec("moneypenny: exact");
+        // No branch yet: a file that must not exist does not.
+        exact.files = Some(vec![file("m.md", "one\n", Some(String::new()))]);
+        a.save(&exact, "main").unwrap();
+        let b = Worktree::open(&spec(&source, &root.path().join("b"), false)).unwrap();
+
+        exact.files = Some(vec![file("m.md", "two\n", Some(hex("one\n")))]);
+        a.save(&exact, "main").unwrap();
+        assert_eq!(run(&bare, &["show", "main:m.md"]), "two\n");
+
+        // b's change was made from "one\n", which is gone: refused, whatever b's own HEAD says.
+        exact.files = Some(vec![file("m.md", "three\n", Some(hex("one\n")))]);
+        let refused = b.save(&exact, "main").unwrap_err();
+        assert!(refused.contains("m.md changed on main"), "{refused}");
+        exact.files = Some(vec![
+            file("n.md", "new\n", Some(String::new())),
+            file("m.md", "x\n", Some(String::new())),
+        ]);
+        assert!(b.save(&exact, "main").is_err(), "m.md exists now");
+        assert_eq!(run(&bare, &["show", "main:m.md"]), "two\n");
+        a.discard().unwrap();
+        b.discard().unwrap();
     }
 
     #[test]

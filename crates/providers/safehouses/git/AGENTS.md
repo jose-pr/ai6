@@ -5,7 +5,7 @@ provider for AI6, so it can be used without reading its source. It ships inside 
 and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
-No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) only. The crate
+No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) and `sha2`. The crate
 root exports `Git`, which implements
 `ai6::directorates::q::safehouse::SafeHouseProvider`; the library is both an `rlib` and the
 Guatiao `cdylib` a Station loads. Provider ID: `git`. No unsafe code. Needs the `git`
@@ -45,7 +45,7 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   itself included, names `--git-dir` and `--work-tree` outright and runs with
   `core.hooksPath` set to a directory that does not exist, `core.fsmonitor=false`,
   `commit.gpgsign=false`, `core.symlinks=false` (a committed link is checked out as a
-  plain file holding its target), every filter driver blanked (`filter.<d>.clean`, `smudge`
+  plain file holding its target), `core.autocrlf=false`, every filter driver blanked (`filter.<d>.clean`, `smudge`
   and `process` empty, `required=false`, for `lfs` and each driver the global or system
   configuration names, read once per process) and `GIT_LFS_SKIP_SMUDGE=1`, so no
   `.gitattributes` runs a filter; the Station user's global and system configuration still
@@ -89,7 +89,9 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   set to `HEAD` and each file is written as a blob of
   its own (`hash-object --no-filters --stdin`, `update-index --cacheinfo`; `None` removes it),
   so exactly those texts are committed whatever the working tree holds and nothing is read
-  from it; a path that is not a `repository_path` is refused. Only before a replay does Git
+  from it. A file with a `base` is first checked against `<b>` of the remote, fetched then
+  (a branch that does not exist holds nothing): when its text's hex SHA-256 is not `base`
+  (or it exists and `base` is empty) the save is refused and nothing committed; a path that is not a `repository_path` is refused. Only before a replay does Git
   write those files into the working tree (`checkout HEAD --`, `clean -f -x --`, each path
   `:(literal)`), since a rebase needs it to match `HEAD`.
 - `exports()`: first `git fetch --prune --no-tags <remote>` for every configured remote (a

@@ -189,25 +189,48 @@ pub struct AssistantWorkspace {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantChange {
-    /// The SHA-256 of the files, as [`AssistantChange::digest_of`] makes it, in hex.
+    /// The SHA-256 of the files and their bases, as [`AssistantChange::digest_over`] makes
+    /// it, in hex.
     pub digest: String,
     /// The files.
     pub files: BTreeMap<String, Option<String>>,
+    /// What each file held when the change was made from it, for the commit to refuse a
+    /// file changed since: the hex SHA-256 of its text, or `None` when it did not exist. A
+    /// file not named here is written whatever it holds.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub base: BTreeMap<String, Option<String>>,
 }
 
 impl AssistantChange {
-    /// The change of `files`, with its digest.
+    /// The change of `files`, with its digest, whatever they hold now.
     pub fn new(files: BTreeMap<String, Option<String>>) -> Self {
+        Self::based(files, BTreeMap::new())
+    }
+
+    /// The change of `files` made from `base` ([`AssistantChange::base`]), with its digest.
+    pub fn based(
+        files: BTreeMap<String, Option<String>>,
+        base: BTreeMap<String, Option<String>>,
+    ) -> Self {
         Self {
-            digest: Self::digest_of(&files),
+            digest: Self::digest_over(&files, &base),
             files,
+            base,
         }
     }
 
     /// The SHA-256, in hex, over each path and its text (or removal), in path order.
     pub fn digest_of(files: &BTreeMap<String, Option<String>>) -> String {
+        Self::digest_over(files, &BTreeMap::new())
+    }
+
+    /// [`AssistantChange::digest_of`], then each base, in path order, when there are any.
+    pub fn digest_over(
+        files: &BTreeMap<String, Option<String>>,
+        base: &BTreeMap<String, Option<String>>,
+    ) -> String {
         let mut hasher = Sha256::new();
-        for (path, text) in files {
+        let mut entry = |path: &str, text: &Option<String>| {
             hasher.update((path.len() as u64).to_be_bytes());
             hasher.update(path.as_bytes());
             match text {
@@ -217,6 +240,15 @@ impl AssistantChange {
                     hasher.update(text.as_bytes());
                 }
                 None => hasher.update([0]),
+            }
+        };
+        for (path, text) in files {
+            entry(path, text);
+        }
+        if !base.is_empty() {
+            entry("base", &None);
+            for (path, digest) in base {
+                entry(path, digest);
             }
         }
         hasher
@@ -251,7 +283,15 @@ impl AssistantChange {
                 return Err(format!("{path:?} is not a file this change may write"));
             }
         }
-        if Self::digest_of(&self.files) != self.digest {
+        for (path, digest) in &self.base {
+            let hex = |digest: &String| {
+                digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
+            };
+            if !self.files.contains_key(path) || !digest.as_ref().is_none_or(hex) {
+                return Err(format!("the base of {path:?} is not one of its files'"));
+            }
+        }
+        if Self::digest_over(&self.files, &self.base) != self.digest {
             return Err("the change's digest does not match its files".to_owned());
         }
         Ok(())

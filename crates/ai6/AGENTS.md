@@ -2752,10 +2752,13 @@ impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
 pub struct AssistantWorkspace { pub personal: String /* the person's repository, expanded */,
     pub shared: BTreeMap<String, String> /* default; checkout name (group or "org") -> repository */,
     pub author_name: String, pub author_email: String /* the person's */ }
-pub struct AssistantChange { pub digest: String /* hex SHA-256 of the files */,
-    pub files: BTreeMap<String, Option<String>> /* path -> new text, None removes */ }
-impl AssistantChange { pub fn new(files) -> Self; pub fn digest_of(&files) -> String;
-    pub fn validate(&self, memory: bool) -> Result<(), String>; }
+pub struct AssistantChange { pub digest: String /* hex SHA-256 of the files, then the bases */,
+    pub files: BTreeMap<String, Option<String>> /* path -> new text, None removes */,
+    pub base: BTreeMap<String, Option<String>> /* default, omitted when empty: path -> hex SHA-256
+        of the text it was made from, None = did not exist; a commit is refused when it differs */ }
+impl AssistantChange { pub fn new(files) -> Self /* no base */; pub fn based(files, base) -> Self;
+    pub fn digest_of(&files) -> String; pub fn digest_over(&files, &base) -> String;
+    pub fn validate(&self, memory: bool) -> Result<(), String>; } // bases only of its files, 64 hex
 pub struct AssistantCommit { pub kind: String /* COMMIT_MEMORY | COMMIT_SHARED */,
     pub repo: String, pub change: AssistantChange, pub message: String /* trailer included */,
     pub author_name: String, pub author_email: String }
@@ -3462,7 +3465,8 @@ pub struct CheckpointSpec {
     pub record: Option<String>, // with `branch`, no `files`: a directory in which the same commit records each file it adds or changes
     pub exclude: Option<Vec<String>>, // with `branch`, no `files`: paths left out with everything under them
 }
-pub struct CheckpointFile { pub path: String /* repository_path */, pub text: Option<String> /* None removes */ }
+pub struct CheckpointFile { pub path: String /* repository_path */, pub text: Option<String> /* None removes */,
+    pub base: Option<String> /* hex SHA-256 it must hold on the remote branch, "" absent; None unchecked */ }
 pub struct SafeHouseCheckpoint { pub remote: String, pub branch: String, pub commit: String, pub base: Option<String> }
 pub struct SafeHouseInfo {
     pub path: String, pub branch: Option<String>, pub base: Option<String>,

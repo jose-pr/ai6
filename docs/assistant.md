@@ -214,7 +214,10 @@ there, with a diff. In a conversation that has read nothing other people wrote, 
 committed at once and the conversation shows what she kept. Once the conversation is
 **exposed** to such text, the change becomes a **proposal** with the diff: **Confirm** commits
 exactly what was shown (audited `moneypenny.confirmed`), **Cancel** discards it. Either way
-she is told.
+she is told. A memory change records what each of its files held when she made it, and its
+commit is refused when one of them has changed on `main` since (another conversation's
+memory, or the person's own edit), so nothing written meanwhile is lost: she proposes it
+again from what the file holds now.
 
 A conversation is exposed, for good, when:
 

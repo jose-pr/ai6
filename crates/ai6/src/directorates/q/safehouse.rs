@@ -130,6 +130,10 @@ pub struct CheckpointFile {
     pub path: String,
     /// The file's text; `None` removes it.
     pub text: Option<String>,
+    /// What the file must hold on the remote branch for the save to go ahead: the hex
+    /// SHA-256 of its text, or empty when it must not exist there. `None` writes it whatever
+    /// it holds.
+    pub base: Option<String>,
 }
 
 /// Where an open safe house is and what it can tell.

@@ -400,7 +400,18 @@ impl Workspace {
             ));
         }
         if !files.is_empty() {
-            let change = AssistantChange::new(files);
+            // Made from the memory the turn started with: a commit of it is refused once any
+            // of its files changed since.
+            let base = files
+                .keys()
+                .map(|path| {
+                    (
+                        path.clone(),
+                        self.memory.get(path).map(|bytes| sha256_hex(bytes)),
+                    )
+                })
+                .collect();
+            let change = AssistantChange::based(files, base);
             let diff = unified_diff(&self.memory, &change);
             match change.validate(true) {
                 Ok(()) if diff.len() <= MAX_ASSISTANT_EVENT_BYTES => {
@@ -419,10 +430,20 @@ impl Workspace {
         end
     }
 
-    /// Writes a memory commit the person let through into this checkout, as the turn's
-    /// starting point too, and commits exactly its files, never what a turn in progress has
-    /// written beside them; answers where it landed.
+    /// Commits exactly the files of a memory commit the person let through, never what a turn
+    /// in progress has written beside them, then writes them into this checkout as the turn's
+    /// starting point too; answers where it landed. Nothing is written when the commit is
+    /// refused.
     pub(super) fn apply(&mut self, commit: &AssistantCommit) -> Result<String, String> {
+        let saved = self
+            .personal
+            .checkpoint(&self.spec(
+                commit.message.clone(),
+                &commit.author_name,
+                &commit.author_email,
+                Some(exactly(&commit.change)),
+            ))
+            .map_err(|error| error.to_string())?;
         write_change(&self.path, &commit.change)?;
         for (path, text) in &commit.change.files {
             match text {
@@ -434,15 +455,6 @@ impl Workspace {
                 }
             }
         }
-        let saved = self
-            .personal
-            .checkpoint(&self.spec(
-                commit.message.clone(),
-                &commit.author_name,
-                &commit.author_email,
-                Some(exactly(&commit.change)),
-            ))
-            .map_err(|error| error.to_string())?;
         self.outside = self.read_record().into_values().collect();
         Ok(landed(&saved, &self.repo))
     }
@@ -476,6 +488,7 @@ impl Workspace {
                 files.push(CheckpointFile {
                     path: format!("{OUTSIDE_TEXT}/{entry}"),
                     text: None,
+                    base: None,
                 });
             }
         }
@@ -593,7 +606,20 @@ fn exactly(change: &AssistantChange) -> Vec<CheckpointFile> {
         .map(|(path, text)| CheckpointFile {
             path: path.clone(),
             text: text.clone(),
+            base: change
+                .base
+                .get(path)
+                .map(|base| base.clone().unwrap_or_default()),
         })
+        .collect()
+}
+
+/// The hex SHA-256 of `bytes`: a file's [`AssistantChange::base`].
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 
