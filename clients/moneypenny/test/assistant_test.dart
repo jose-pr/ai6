@@ -257,6 +257,69 @@ void main() {
     );
   });
 
+  testWidgets(
+    'Stop interrupts her answer and the conversation shows it stopped',
+    (tester) async {
+      final channel = FakeChannel();
+      final controller = AssistantController(
+        token: 'user-token',
+        connect: () => channel,
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: AssistantPanel(controller: controller)),
+        ),
+      );
+      channel.answer({
+        'type': 'ready',
+        'conversation': 'c-1',
+        'busy': false,
+        'entries': const [],
+      });
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Stop'), findsNothing, reason: 'nothing to stop');
+      expect(find.byTooltip('Send'), findsOneWidget);
+
+      channel.answer({'type': 'busy', 'busy': true});
+      await tester.pump();
+      await tester.pump();
+      expect(find.byTooltip('Send'), findsNothing);
+      await tester.tap(find.byTooltip('Stop'));
+      await tester.pump();
+      expect(channel.sent.last, {'type': 'interrupt'});
+      expect(find.text('Stopping…'), findsOneWidget);
+      expect(
+        tester
+            .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.stop))
+            .onPressed,
+        isNull,
+        reason: 'one interrupt is enough',
+      );
+
+      channel
+        ..answer({'type': 'interrupt', 'stopping': true})
+        ..answer({
+          'type': 'entry',
+          'entry': {
+            'role': 'notice',
+            'text': "You stopped Moneypenny's answer.",
+            'at': 2.0,
+          },
+        })
+        ..answer({'type': 'busy', 'busy': false});
+      await tester.pumpAndSettle();
+      expect(find.text("You stopped Moneypenny's answer."), findsOneWidget);
+      expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
+      expect(find.byTooltip('Stop'), findsNothing);
+      expect(find.byTooltip('Send'), findsOneWidget);
+      expect(
+        channel.sent.where((frame) => frame['type'] == 'interrupt').length,
+        1,
+      );
+    },
+  );
+
   testWidgets('a proposal shows every hidden character of its request', (
     tester,
   ) async {

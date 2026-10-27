@@ -7,8 +7,8 @@ import 'assistant_controller.dart';
 import 'assistant_view.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
-/// proposes, with Confirm and Cancel. Each message carries [page], the app page the person
-/// is on, so "this Mission" means something to her.
+/// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries [page],
+/// the app page the person is on, so "this Mission" means something to her.
 class AssistantPanel extends StatefulWidget {
   const AssistantPanel({
     required this.controller,
@@ -64,6 +64,8 @@ class _AssistantPanelState extends State<AssistantPanel> {
             subtitle: Text(
               !controller.connected
                   ? 'Connecting…'
+                  : controller.stopping
+                  ? 'Stopping…'
                   : controller.busy
                   ? 'Answering…'
                   : 'Ask about AI6, or ask her to propose a change.',
@@ -125,13 +127,20 @@ class _AssistantPanelState extends State<AssistantPanel> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton.filled(
-                  tooltip: 'Send',
-                  onPressed: controller.connected && !controller.busy
-                      ? _send
-                      : null,
-                  icon: const Icon(Icons.send),
-                ),
+                if (controller.busy)
+                  IconButton.filled(
+                    tooltip: controller.stopping ? 'Stopping…' : 'Stop',
+                    onPressed: controller.connected && !controller.stopping
+                        ? controller.interrupt
+                        : null,
+                    icon: const Icon(Icons.stop),
+                  )
+                else
+                  IconButton.filled(
+                    tooltip: 'Send',
+                    onPressed: controller.connected ? _send : null,
+                    icon: const Icon(Icons.send),
+                  ),
               ],
             ),
           ),
@@ -189,6 +198,22 @@ class _EntryView extends StatelessWidget {
         onSubmit: entry.id == null
             ? null
             : (values) => controller.submit(entry.id!, values),
+      ),
+      'notice' => Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        spacing: 6,
+        children: [
+          Icon(Icons.stop_circle_outlined, size: 16, color: colors.outline),
+          Flexible(
+            child: Text(
+              revealInvisible(entry.text),
+              style: TextStyle(
+                color: colors.outline,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
       ),
       _ => Text(
         revealInvisible(entry.text),

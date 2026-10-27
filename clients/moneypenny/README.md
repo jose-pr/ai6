@@ -49,7 +49,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Moneypenny, the assistant: **Ask Moneypenny** on every page opens a chat with her. She
   answers from AI6's records, through tools that run with the signed-in operator's own
   permissions, shows tables, charts, cards, timelines and diffs rendered by the app, and
-  proposes changes the operator confirms or cancels (the exact request is shown). See the
+  proposes changes the operator confirms or cancels (the exact request is shown); **Stop**
+  ends an answer she is still giving. See the
   [assistant guide](https://jose-pr.github.io/ai6/assistant/).
 - Audit log for operators with `audit.read`; operator menu with identity, effective
   permissions per Operation, theme and sign-out.

@@ -49,7 +49,7 @@ class AssistantEntry {
     this.data,
   });
 
-  /// `person`, `moneypenny`, `tools`, `error`, `proposal` or `view`.
+  /// `person`, `moneypenny`, `tools`, `error`, `proposal`, `view` or `notice`.
   final String role;
   final String text;
   final double at;
@@ -89,6 +89,9 @@ class AssistantController extends ChangeNotifier {
   /// How many older entries Universal Exports kept but did not send.
   int earlier = 0;
   bool busy = false;
+
+  /// The person asked to stop the answer, and it has not stopped yet.
+  bool stopping = false;
   bool connected = false;
   String? problem;
 
@@ -117,6 +120,7 @@ class AssistantController extends ChangeNotifier {
     _channel = null;
     connected = false;
     busy = false;
+    stopping = false;
     problem = why ?? problem;
     notifyListeners();
   }
@@ -134,6 +138,7 @@ class AssistantController extends ChangeNotifier {
         problem = null;
         conversationId = message['conversation'] as String?;
         busy = message['busy'] == true;
+        stopping = false;
         earlier = (message['earlier'] as num?)?.toInt() ?? 0;
         entries = [
           for (final entry in message['entries'] as List? ?? const [])
@@ -156,6 +161,10 @@ class AssistantController extends ChangeNotifier {
         ];
       case 'busy':
         busy = message['busy'] == true;
+        if (!busy) stopping = false;
+      case 'interrupt':
+        // `stopping: false` means nothing was being answered any more.
+        stopping = busy && message['stopping'] == true;
       case 'error':
         problem = message['message'] as String? ?? 'Moneypenny refused that.';
       default:
@@ -190,6 +199,13 @@ class AssistantController extends ChangeNotifier {
 
   void submit(String viewId, Map<String, Object?> values) =>
       _send({'type': 'submit', 'view': viewId, 'values': values});
+
+  /// Stops the answer Moneypenny is giving; the conversation shows when it has stopped.
+  void interrupt() {
+    if (!busy || stopping) return;
+    stopping = _channel != null;
+    _send({'type': 'interrupt'});
+  }
 
   /// Starts a new conversation.
   void startOver() => _send({'type': 'new'});
