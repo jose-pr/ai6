@@ -142,7 +142,7 @@ impl Workspace {
             outside: BTreeSet::new(),
             found: None,
         };
-        workspace.outside = fs::read_to_string(workspace.path.join(OUTSIDE_TEXT))
+        workspace.outside = read_text(area, &workspace.path.join(OUTSIDE_TEXT))
             .unwrap_or_default()
             .lines()
             .map(str::trim)
@@ -157,8 +157,8 @@ impl Workspace {
         }
         let mut notices = Vec::new();
         let index = workspace.path.join(MEMORY).join("MEMORY.md");
-        if !index.exists() {
-            write_file(&index, MEMORY_INDEX)?;
+        if fs::symlink_metadata(&index).is_err() {
+            write_file(area, &index, MEMORY_INDEX)?;
             notices.extend(workspace.save("start her memory")?);
         }
         let mut shared = Vec::new();
@@ -181,9 +181,10 @@ impl Workspace {
             }
         }
         fs::create_dir_all(area.join(SCRATCH)).map_err(|error| error.to_string())?;
-        let memory = fs::read_to_string(&index).unwrap_or_default();
+        let memory = read_text(area, &index).unwrap_or_default();
         let standing = instructions(workspace.exposed, &shared);
         write_file(
+            area,
             &area.join("CLAUDE.md"),
             &format!("{standing}\n## Memory\n\n@{PERSONAL}/{MEMORY}/MEMORY.md\n"),
         )?;
@@ -191,8 +192,8 @@ impl Workspace {
             "{standing}\n## Memory\n\n{}\n",
             cut(&memory, MAX_INLINED_MEMORY)
         );
-        write_file(&area.join("AGENTS.md"), &inlined)?;
-        write_file(context, &inlined)?;
+        write_file(area, &area.join("AGENTS.md"), &inlined)?;
+        write_file(context.parent().unwrap_or(context), context, &inlined)?;
         workspace.begin_turn(false);
         Ok((workspace, notices))
     }
@@ -213,7 +214,7 @@ impl Workspace {
         if self.exposed || !reads || self.outside.is_empty() {
             return None;
         }
-        let area = self.path.parent().unwrap_or(&self.path).to_path_buf();
+        let area = self.area().to_path_buf();
         let listed = self.listed();
         let source = match reading_calls(data) {
             Some(calls) => calls.iter().find_map(|(tool, scope)| {
@@ -239,6 +240,11 @@ impl Workspace {
         source
     }
 
+    /// Her working directory, holding `personal/`.
+    fn area(&self) -> &Path {
+        self.path.parent().unwrap_or(&self.path)
+    }
+
     /// The record's files, each with the key [`Scope::covers`] compares.
     fn listed(&self) -> Vec<(String, String)> {
         self.outside
@@ -259,7 +265,8 @@ impl Workspace {
         for _ in 0..=MAX_IMPORT_DEPTH {
             let mut found = Vec::new();
             for file in next.drain(..) {
-                let Ok(text) = fs::read_to_string(&file) else {
+                // Only her own files are followed: nothing else can import what she wrote.
+                let Some(text) = read_text(self.area(), &file) else {
                     continue;
                 };
                 let base = file.parent().unwrap_or(&self.path).to_path_buf();
@@ -268,6 +275,7 @@ impl Workspace {
                     let Some(target) = expand(&base, import) else {
                         return self.outside.first().cloned();
                     };
+                    let target = plain_path(&target);
                     let key = path_key(&target);
                     if let Some((listed, _)) = listed.iter().find(|(_, at)| *at == key) {
                         return Some(listed.clone());
@@ -338,12 +346,12 @@ impl Workspace {
         // The memory goes back to what it was; the change waits for the person.
         for path in now.keys() {
             if !self.memory.contains_key(path) {
-                let _ = fs::remove_file(self.path.join(path));
+                let _ = remove(self.area(), &self.path.join(path));
             }
         }
         for (path, bytes) in &self.memory {
             if now.get(path) != Some(bytes)
-                && let Err(error) = write_bytes(&self.path.join(path), bytes)
+                && let Err(error) = write_bytes(self.area(), &self.path.join(path), bytes)
             {
                 end.notices
                     .push(format!("{path} could not be put back: {error}"));
@@ -417,9 +425,7 @@ impl Workspace {
         }
         let path = self.path.clone();
         self.outside.retain(|file| {
-            file.split('/')
-                .fold(path.clone(), |at, name| at.join(name))
-                .is_file()
+            fs::symlink_metadata(in_tree(&path, file)).is_ok_and(|metadata| metadata.is_file())
         });
         if self.outside == before {
             return Ok(());
@@ -432,9 +438,9 @@ impl Workspace {
         });
         let record = self.path.join(OUTSIDE_TEXT);
         match &text {
-            Some(text) => write_file(&record, text)?,
+            Some(text) => write_file(self.area(), &record, text)?,
             None => {
-                let _ = fs::remove_file(&record);
+                let _ = remove(self.area(), &record);
             }
         }
         let message = format!(
@@ -517,19 +523,19 @@ pub(super) fn commit_once(
         create,
         digest,
     )?;
-    let saved = write_change(&target, &commit.change).and_then(|()| {
-        house
-            .checkpoint(&CheckpointSpec {
-                remote: "origin".to_owned(),
-                message: commit.message.clone(),
-                author_name: Some(commit.author_name.clone()),
-                author_email: Some(commit.author_email.clone()),
-                branch: Some(MAIN.to_owned()),
-                fallback: Some(fallback(digest)),
-                files: Some(exactly(&commit.change)),
-            })
-            .map_err(|error| error.to_string())
-    });
+    // The save takes the files' text from the commit, never from this working tree, which
+    // nothing here writes.
+    let saved = house
+        .checkpoint(&CheckpointSpec {
+            remote: "origin".to_owned(),
+            message: commit.message.clone(),
+            author_name: Some(commit.author_name.clone()),
+            author_email: Some(commit.author_email.clone()),
+            branch: Some(MAIN.to_owned()),
+            fallback: Some(fallback(digest)),
+            files: Some(exactly(&commit.change)),
+        })
+        .map_err(|error| error.to_string());
     let _ = house.discard();
     Ok(landed(&saved?, &commit.repo))
 }
@@ -655,7 +661,7 @@ fn stat_tree(root: &Path) -> BTreeMap<String, (u64, Option<SystemTime>)> {
         }
         walk(&entry.path(), &name, &mut |path, file| {
             if found.len() < MAX_WALK
-                && let Ok(metadata) = fs::metadata(file)
+                && let Ok(metadata) = fs::symlink_metadata(file)
             {
                 found.insert(path, (metadata.len(), metadata.modified().ok()));
             }
@@ -668,6 +674,9 @@ fn walk(path: &Path, name: &str, visit: &mut dyn FnMut(String, &Path)) {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return;
     };
+    if is_link(&metadata) {
+        return;
+    }
     if metadata.is_file() {
         visit(name.to_owned(), path);
     } else if metadata.is_dir()
@@ -740,30 +749,107 @@ fn unified_diff(before: &BTreeMap<String, Vec<u8>>, change: &AssistantChange) ->
 /// Writes each file of `change` under `root`, or removes it.
 fn write_change(root: &Path, change: &AssistantChange) -> Result<(), String> {
     for (path, text) in &change.files {
-        let file = path
-            .split('/')
-            .fold(root.to_path_buf(), |file, name| file.join(name));
+        let file = in_tree(root, path);
         match text {
-            Some(text) => write_file(&file, text)?,
-            None => match fs::remove_file(&file) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(format!("{path}: {error}")),
-            },
+            Some(text) => write_file(root, &file, text)?,
+            None => remove(root, &file).map_err(|error| format!("{path}: {error}"))?,
         }
     }
     Ok(())
 }
 
-fn write_file(path: &Path, text: &str) -> Result<(), String> {
-    write_bytes(path, text.as_bytes()).map_err(|error| format!("{}: {error}", path.display()))
+fn write_file(root: &Path, path: &Path, text: &str) -> Result<(), String> {
+    write_bytes(root, path, text.as_bytes()).map_err(|error| format!("{}: {error}", path.display()))
 }
 
-fn write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Writes `path`, under `root`, making the directories it needs; never through a link.
+fn write_bytes(root: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    no_links(root, path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, bytes)
+}
+
+/// Removes the file `path`, under `root`, if it is there; never through a link.
+fn remove(root: &Path, path: &Path) -> std::io::Result<()> {
+    no_links(root, path)?;
+    match fs::remove_file(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// The text of the plain file `path`, under `root`, reached through no link.
+fn read_text(root: &Path, path: &Path) -> Option<String> {
+    no_links(root, path).ok()?;
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_file())
+        .then(|| fs::read_to_string(path).ok())
+        .flatten()
+}
+
+/// Refuses `path` when `root`, or anything from `root` down to it, is a link: a symbolic link,
+/// a junction or any other reparse point, which would take a read or write of the Station's
+/// somewhere else. What does not exist yet is fine.
+fn no_links(root: &Path, path: &Path) -> std::io::Result<()> {
+    let refused = |at: &Path| {
+        std::io::Error::other(format!(
+            "{} is a link, which is never followed",
+            at.display()
+        ))
+    };
+    let rest = path
+        .strip_prefix(root)
+        .map_err(|_| std::io::Error::other(format!("{} is outside its area", path.display())))?;
+    let mut at = root.to_path_buf();
+    if fs::symlink_metadata(&at).is_ok_and(|metadata| is_link(&metadata)) {
+        return Err(refused(&at));
+    }
+    for part in rest.components() {
+        let Component::Normal(name) = part else {
+            return Err(std::io::Error::other(format!(
+                "{} is not a plain path",
+                path.display()
+            )));
+        };
+        at.push(name);
+        match fs::symlink_metadata(&at) {
+            Ok(metadata) if is_link(&metadata) => return Err(refused(&at)),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// Whether `metadata` is of a link: a symbolic link, or on Windows any reparse point.
+fn is_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_REPARSE_POINT: junctions, symbolic links and the rest.
+        if metadata.file_attributes() & 0x400 != 0 {
+            return true;
+        }
+    }
+    metadata.file_type().is_symlink()
+}
+
+/// `path` with `.` and `..` resolved by name.
+fn plain_path(path: &Path) -> PathBuf {
+    let mut plain = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                plain.pop();
+            }
+            other => plain.push(other.as_os_str()),
+        }
+    }
+    plain
 }
 
 /// What a file tool call can answer with: one file, or anything under a directory, as given.
@@ -897,16 +983,7 @@ fn in_tree(root: &Path, file: &str) -> PathBuf {
 /// lowercase, so two spellings of one file meet (and some different files too, which only
 /// counts more as read).
 fn path_key(path: &Path) -> String {
-    let mut plain = PathBuf::new();
-    for part in path.components() {
-        match part {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                plain.pop();
-            }
-            other => plain.push(other.as_os_str()),
-        }
-    }
+    let plain = plain_path(path);
     let mut base = plain.clone();
     let mut rest = Vec::new();
     let resolved = loop {
@@ -945,6 +1022,83 @@ fn cut(text: &str, limit: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Makes `at` a link to the directory `target`: a symbolic link, or a junction on Windows,
+    /// which needs no privilege.
+    fn link_directory(target: &Path, at: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, at).unwrap();
+        #[cfg(windows)]
+        {
+            let made = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(at)
+                .arg(target)
+                .output()
+                .unwrap();
+            assert!(made.status.success(), "{made:?}");
+        }
+    }
+
+    #[test]
+    fn nothing_is_read_written_or_removed_through_a_link() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.md"), "secret").unwrap();
+        let area = root.path().join("area");
+        let personal = area.join(PERSONAL);
+        fs::create_dir_all(&personal).unwrap();
+        let memory = personal.join(MEMORY);
+        link_directory(outside.path(), &memory);
+        // The link works: anything following it reaches outside the area.
+        assert_eq!(
+            fs::read_to_string(memory.join("secret.md")).unwrap(),
+            "secret"
+        );
+
+        assert!(write_file(&area, &memory.join("x.md"), "x").is_err());
+        assert!(!outside.path().join("x.md").exists());
+        assert!(write_file(&area, &memory.join("new").join("x.md"), "x").is_err());
+        assert!(!outside.path().join("new").exists());
+        assert_eq!(read_text(&area, &memory.join("secret.md")), None);
+        assert!(remove(&area, &memory.join("secret.md")).is_err());
+        assert!(outside.path().join("secret.md").exists());
+        assert!(read_tree(&memory, MEMORY).is_empty());
+        assert!(stat_tree(&personal).is_empty());
+        let change = AssistantChange::new(BTreeMap::from([(
+            "memory/secret.md".to_owned(),
+            Some("overwritten".to_owned()),
+        )]));
+        assert!(write_change(&personal, &change).is_err());
+        assert_eq!(
+            fs::read_to_string(outside.path().join("secret.md")).unwrap(),
+            "secret"
+        );
+
+        // A plain path beside it is read and written as before.
+        write_file(&area, &personal.join("notes").join("a.md"), "a").unwrap();
+        assert_eq!(
+            read_text(&area, &personal.join("notes").join("a.md")).as_deref(),
+            Some("a")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_link_is_never_read_or_written() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.md");
+        fs::write(&secret, "secret").unwrap();
+        let area = root.path().join("area");
+        fs::create_dir_all(&area).unwrap();
+        let index = area.join("MEMORY.md");
+        std::os::unix::fs::symlink(&secret, &index).unwrap();
+        assert_eq!(fs::read_to_string(&index).unwrap(), "secret");
+        assert_eq!(read_text(&area, &index), None);
+        assert!(write_file(&area, &index, "x").is_err());
+        assert_eq!(fs::read_to_string(&secret).unwrap(), "secret");
+    }
 
     #[test]
     fn a_file_tool_call_is_read_for_what_it_can_answer_with() {

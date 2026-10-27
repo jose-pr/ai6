@@ -41,10 +41,10 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   exist either, and the `.git` pointer file is removed, so the working tree holds no `.git`)
   and `git checkout -B <base> --track origin/<base>`. Every command of a clone, the clone
   itself included, names `--git-dir` and `--work-tree` outright and runs with
-  `core.hooksPath` set to a directory that does not exist, `core.fsmonitor=false` and
-  `commit.gpgsign=false`; the Station user's global and system configuration still apply
-  (credential helpers). A
-  repository with no branch at all leaves `<base>` unborn (the base is empty); one with
+  `core.hooksPath` set to a directory that does not exist, `core.fsmonitor=false`,
+  `commit.gpgsign=false` and `core.symlinks=false` (a committed link is checked out as a
+  plain file holding its target); the Station user's global and system configuration still
+  apply (credential helpers). A repository with no branch at all leaves `<base>` unborn (the base is empty); one with
   branches but not `<base>` is refused and the clone removed. Remote repositories are reached
   with the Station user's Git credentials.
 
@@ -75,8 +75,10 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   `<remote>/<b>` pushes nothing; an unborn `HEAD` with nothing written answers an empty
   `commit`. With `files`, the index is set to `HEAD` and each file is written as a blob of
   its own (`hash-object --no-filters --stdin`, `update-index --cacheinfo`; `None` removes it),
-  so exactly those texts are committed whatever the working tree holds; a path that is not a
-  `repository_path` is refused.
+  so exactly those texts are committed whatever the working tree holds and nothing is read
+  from it; a path that is not a `repository_path` is refused. Only before a replay does Git
+  write those files into the working tree (`checkout HEAD --`, `clean -f -x --`, each path
+  `:(literal)`), since a rebase needs it to match `HEAD`.
 - `exports()`: first `git fetch --prune --no-tags <remote>` for every configured remote (a
   remote that cannot be reached fails the call), then `unexported` lists `"<short id>
   <subject>"` for each commit in `<base>..HEAD` that none of those remotes' branches holds

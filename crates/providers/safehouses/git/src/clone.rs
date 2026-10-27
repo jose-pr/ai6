@@ -24,7 +24,8 @@ use ai6::directorates::q::safehouse::{
 use crate::worktree::{Failure, Worktree, fail, git, git_input, git_path, git_with};
 
 /// The settings every command of a clone runs with. `core.hooksPath` names a directory that
-/// is never made, so no hook runs.
+/// is never made, so no hook runs; `core.symlinks=false` checks a link out as a plain file
+/// holding its target, so nothing in a working tree leads outside it.
 fn hardened(git_dir: &Path) -> Vec<String> {
     vec![
         "-c".to_owned(),
@@ -36,6 +37,8 @@ fn hardened(git_dir: &Path) -> Vec<String> {
         "core.fsmonitor=false".to_owned(),
         "-c".to_owned(),
         "commit.gpgsign=false".to_owned(),
+        "-c".to_owned(),
+        "core.symlinks=false".to_owned(),
     ]
 }
 
@@ -83,6 +86,33 @@ fn stage_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failur
                 repo.run(&["update-index", "--force-remove", "--", &file.path], &[])?;
             }
         }
+    }
+    Ok(())
+}
+
+/// Makes the working tree hold `HEAD`'s version of each of `files`: checked out when `HEAD`
+/// has it, removed when it does not. Paths are literal, never patterns.
+fn sync_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failure> {
+    let (present, removed): (Vec<String>, Vec<String>) = {
+        let (present, removed): (Vec<_>, Vec<_>) =
+            files.iter().partition(|file| file.text.is_some());
+        let literal = |files: Vec<&CheckpointFile>| {
+            files
+                .into_iter()
+                .map(|file| format!(":(literal){}", file.path))
+                .collect()
+        };
+        (literal(present), literal(removed))
+    };
+    if !present.is_empty() {
+        let mut args = vec!["checkout", "--quiet", "HEAD", "--"];
+        args.extend(present.iter().map(String::as_str));
+        repo.run(&args, &[])?;
+    }
+    if !removed.is_empty() {
+        let mut args = vec!["clean", "--quiet", "-f", "-x", "--"];
+        args.extend(removed.iter().map(String::as_str));
+        repo.run(&args, &[])?;
     }
     Ok(())
 }
@@ -339,6 +369,11 @@ impl Worktree {
         let Err(refused) = run(&["push", "--quiet", &spec.remote, &target]) else {
             return saved(branch);
         };
+        if let Some(files) = &spec.files {
+            // An exact save never read its files from the working tree, which a replay needs to
+            // match `HEAD` for them: Git writes them there, never through a link.
+            sync_exactly(&repo, files)?;
+        }
         let replayed = run(&[
             "fetch",
             "--quiet",
@@ -794,6 +829,99 @@ mod tests {
             run(&bare, &["ls-tree", "-r", "--name-only", "main"]).trim(),
             "notes/a.md"
         );
+        house.discard().unwrap();
+    }
+
+    #[test]
+    fn an_exact_save_takes_nothing_from_the_working_tree_and_replays_on_a_moved_branch() {
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("eve.git");
+        let source = bare.to_string_lossy().into_owned();
+        let a = Worktree::open(&spec(&source, &root.path().join("a"), true)).unwrap();
+        fs::write(a.path.join("x.md"), "x\n").unwrap();
+        a.save(&save_spec("moneypenny: x"), "main").unwrap();
+        let b = Worktree::open(&spec(&source, &root.path().join("b"), false)).unwrap();
+        fs::write(a.path.join("y.md"), "y\n").unwrap();
+        a.save(&save_spec("moneypenny: y"), "main").unwrap();
+
+        // Nothing of the change is in b's working tree, and something else is.
+        fs::write(b.path.join("junk.md"), "junk\n").unwrap();
+        let mut exact = save_spec("moneypenny: exact");
+        exact.files = Some(vec![
+            CheckpointFile {
+                path: "memory/m.md".to_owned(),
+                text: Some("m\n".to_owned()),
+            },
+            CheckpointFile {
+                path: "x.md".to_owned(),
+                text: None,
+            },
+        ]);
+        let saved = b.save(&exact, "main").unwrap();
+        assert_eq!(saved.branch, "main", "replayed on the moved main");
+        let files = run(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+        assert_eq!(files.trim(), "memory/m.md\ny.md", "{files}");
+        a.discard().unwrap();
+        b.discard().unwrap();
+    }
+
+    #[test]
+    fn a_committed_link_is_checked_out_as_a_plain_file() {
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("eve.git");
+        let seed = root.path().join("seed");
+        fs::create_dir_all(&seed).unwrap();
+        run(&seed, &["init", "--quiet", "--initial-branch=main"]);
+        // A link to a directory outside any checkout, committed as Git keeps links.
+        let blob = Command::new("git")
+            .arg("-C")
+            .arg(&seed)
+            .args(["hash-object", "-w", "--stdin"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                child.stdin.take().unwrap().write_all(b"../../outside")?;
+                child.wait_with_output()
+            })
+            .unwrap();
+        let blob = String::from_utf8_lossy(&blob.stdout).trim().to_owned();
+        run(
+            &seed,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("120000,{blob},memory"),
+            ],
+        );
+        run(&seed, &["commit", "--quiet", "-m", "link"]);
+        run(
+            root.path(),
+            &["clone", "--quiet", "--bare", "seed", "eve.git"],
+        );
+        #[cfg(unix)]
+        {
+            // Plain Git here makes it a link: the plant works.
+            run(root.path(), &["clone", "--quiet", "eve.git", "control"]);
+            assert!(
+                fs::symlink_metadata(root.path().join("control").join("memory"))
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+        }
+        let house = Worktree::open(&spec(
+            &bare.to_string_lossy(),
+            &root.path().join("area").join("personal"),
+            false,
+        ))
+        .unwrap();
+        let memory = house.path.join("memory");
+        let metadata = fs::symlink_metadata(&memory).unwrap();
+        assert!(metadata.is_file(), "{metadata:?}");
+        assert_eq!(fs::read_to_string(&memory).unwrap(), "../../outside");
         house.discard().unwrap();
     }
 

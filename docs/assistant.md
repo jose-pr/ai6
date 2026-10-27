@@ -74,7 +74,10 @@ other write is denied without a prompt, and so is any path with a name starting 
 (`.git`, `.gitattributes`, `.claude`), case and Windows short-name variants included. Her
 repositories' git directories are not in her workspace at all: they sit beside it, and every
 Git command the Station runs on them names them outright, with hooks and filesystem
-monitors switched off, so nothing she writes can make the Station run a program. Her
+monitors switched off, so nothing she writes can make the Station run a program. Links are
+off too: a link committed to one of her repositories is checked out as a plain file holding
+its target, and the Station never reads, writes or removes anything in her workspace through
+a symbolic link, a junction or another reparse point. Her
 standing context goes in with `--append-system-prompt-file`, from a file beside, not inside,
 her workspace. Every assistant Session runs with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so Claude
 Code keeps no memory of its own beside hers. Codex refuses a workspace for now.

@@ -3359,8 +3359,11 @@ in her memory too) to `main` as the person, message
 with a `notice`. A `commit` job of `COMMIT_MEMORY` for a conversation running here is written
 into its `personal/` and copy and committed exactly (`CheckpointSpec::files`: nothing else a turn
 in progress wrote goes with it); otherwise, and for `COMMIT_SHARED`,
-the desk clones the commit's repository into a temporary directory, writes, commits and
-pushes there, and removes it.
+the desk clones the commit's repository into a temporary directory, commits the files'
+text there exactly without writing them, pushes, and removes it. The desk never reads, writes
+or removes a file in the conversation's directory through a symbolic link, junction or other
+reparse point (refused, or skipped when it walks a tree), and the provider checks links out as
+plain files.
 
 Exposure is Universal Exports' record (`Conversation.exposed`); the desk reads it with `GET
 /v1/station/assistant/exposure?station&conversation` (`{"exposed"}`) when a turn ends and
