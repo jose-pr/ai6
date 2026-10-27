@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::approvals::{GreenInkDefinition, GreenInkPolicy};
+use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::harness::HarnessPolicy;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
@@ -433,6 +434,7 @@ pub struct Roster {
         allow(dead_code, reason = "used only by the daemon")
     )]
     covers: Covers,
+    assistant: AssistantSettings,
 }
 
 /// Configuration could not be read or resolved.
@@ -494,6 +496,7 @@ pub struct RosterBuilder {
     agents: Vec<Agent>,
     roles: Vec<AgentRole>,
     covers: Covers,
+    assistant: AssistantSettings,
 }
 
 impl RosterBuilder {
@@ -521,13 +524,23 @@ impl RosterBuilder {
         self
     }
 
-    /// The roster of these records, checked as [`Roster::from_parts`] checks them.
+    /// Sets Moneypenny's `[assistant]` settings.
+    pub fn assistant(mut self, settings: AssistantSettings) -> Self {
+        self.assistant = settings;
+        self
+    }
+
+    /// The roster of these records, checked as [`Roster::from_parts`] checks them, with the
+    /// assistant settings checked by [`AssistantSettings::validate`].
     ///
     /// # Errors
     ///
-    /// As [`Roster::from_parts`].
+    /// As [`Roster::from_parts`], or assistant settings that are not acceptable.
     pub fn build(self) -> Result<Roster, RosterError> {
-        Roster::from_parts(self.operations, self.agents, self.roles, self.covers)
+        self.assistant.validate().map_err(error)?;
+        let mut roster = Roster::from_parts(self.operations, self.agents, self.roles, self.covers)?;
+        roster.assistant = self.assistant;
+        Ok(roster)
     }
 }
 
@@ -635,8 +648,20 @@ impl Roster {
                     .roles
                     .insert(id.clone(), definition.resolve(id, &agents_file.display())?);
             }
+            if let Some(assistant) = document.assistant {
+                assistant
+                    .validate()
+                    .map_err(|reason| error(format!("{}: {reason}", agents_file.display())))?;
+                roster.assistant = assistant;
+            }
         }
         Ok(roster)
+    }
+
+    /// Moneypenny's settings, the `[assistant]` table of the global `agents.toml`; the default
+    /// when it has none.
+    pub fn assistant(&self) -> &AssistantSettings {
+        &self.assistant
     }
 
     /// Builds a roster from typed records, with no configuration files: the way in for
@@ -966,6 +991,8 @@ struct AgentsDocument {
     agent: BTreeMap<String, AgentDefinition>,
     #[serde(default)]
     role: BTreeMap<String, AgentRoleDefinition>,
+    #[serde(default)]
+    assistant: Option<AssistantSettings>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1489,6 +1516,12 @@ fn parse_operation_agents(path: &Path) -> Result<AgentsDocument, RosterError> {
     if !document.role.is_empty() {
         return Err(error(format!(
             "{}: Agent roles must be configured in the global agents.toml",
+            path.display()
+        )));
+    }
+    if document.assistant.is_some() {
+        return Err(error(format!(
+            "{}: [assistant] must be configured in the global agents.toml",
             path.display()
         )));
     }
@@ -2266,6 +2299,59 @@ sources = {{ jira = \"GUA\" }}\n",
         assert_eq!(licensed.requirement("00", &push), Requirement::NotRequired);
         assert_eq!(licensed.requirement("field", &push), Requirement::GreenInk);
         assert_eq!(licensed.request_ttl(), std::time::Duration::from_secs(60));
+    }
+
+    #[test]
+    fn the_assistant_table_lives_in_the_global_agents_file_only() {
+        let directory = TestDirectory::new();
+        assert_eq!(
+            Roster::load(&directory.0).unwrap().assistant(),
+            &AssistantSettings::default()
+        );
+        directory.write(
+            "agents.toml",
+            "[agent.moneypenny]\nhandler = \"claude\"\n[assistant]\npersonal_repo = \"/srv/mp/{person}.git\"\n[assistant.shared.ops]\nrepo = \"/srv/ops.git\"\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        assert_eq!(
+            roster
+                .assistant()
+                .personal_repo_for("007")
+                .unwrap()
+                .as_deref(),
+            Some("/srv/mp/007.git")
+        );
+        assert_eq!(roster.assistant().shared()["ops"].repo(), "/srv/ops.git");
+
+        directory.write("agents.toml", "[assistant]\npersonal_repo = \"ext::sh\"\n");
+        let refused = Roster::load(&directory.0).unwrap_err().to_string();
+        assert!(refused.contains("assistant.personal_repo"), "{refused}");
+
+        let checkout = directory.0.join("project");
+        directory.write(
+            "operations.toml",
+            &format!("[operation.G]\npath = {:?}\n", checkout.to_string_lossy()),
+        );
+        directory.write("agents.toml", "[agent.007]\nhandler = \"claude\"\n");
+        directory.write(
+            "project/.ai6/agents.toml",
+            "[assistant]\nallow_elevated = true\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        let refused = roster.agent(Some("G"), "007").unwrap_err().to_string();
+        assert!(refused.contains("[assistant]"), "{refused}");
+
+        let built = Roster::builder()
+            .assistant(AssistantSettings::new().with_allow_elevated(true))
+            .build()
+            .unwrap();
+        assert!(built.assistant().allow_elevated());
+        assert!(
+            Roster::builder()
+                .assistant(AssistantSettings::new().with_personal_repo("fd::3"))
+                .build()
+                .is_err()
+        );
     }
 
     #[test]

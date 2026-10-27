@@ -24,6 +24,7 @@ pub use directorates::m::approvals::{
     GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement,
     SAFE_HOUSE_DELETE, classify, clearance_at_least,
 };
+pub use directorates::m::assistant::{AssistantSettings, RepoKind, SharedRepo};
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::m::config::SqlConfigSource;
 pub use directorates::m::config::{

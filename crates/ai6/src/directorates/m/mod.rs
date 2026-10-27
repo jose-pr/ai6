@@ -3,6 +3,7 @@
 
 pub mod access;
 pub mod approvals;
+pub mod assistant;
 pub mod config;
 pub mod cover;
 pub mod harness;
