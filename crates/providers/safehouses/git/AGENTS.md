@@ -31,6 +31,16 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   new branch named `saved.branch` at `saved.commit` (or the fetched tip when that commit is
   gone). The base is `saved.base` when it is an ancestor of the commit, else the commit
   itself. A local branch of that name already in `source` is refused by Git.
+- **A clone** (`clone = Some(SafeHouseClone { path, create_source })`, which overrides
+  everything above): `source` is a repository URL (`file://`, `ssh://`, `git://`,
+  `http(s)://`), `user@host:path` or a local repository, bare or not; a remote helper
+  (`ext::`, `fd::`) or another scheme is refused before Git runs. With `create_source` and a
+  local path or `file://` URL that does not exist, `git init --bare` makes it first, its
+  `HEAD` naming `spec.base`. Then `git clone -- <source> <path>` (the directory must not
+  exist; its parents are made) and `git checkout -B <base> --track origin/<base>`. A
+  repository with no branch at all leaves `<base>` unborn (the base is empty); one with
+  branches but not `<base>` is refused and the clone removed. Remote repositories are reached
+  with the Station user's Git credentials.
 
 ## Session behaviour
 
@@ -48,6 +58,15 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   nothing uncommitted the commit is `HEAD` itself. The worktree, its index and `HEAD` are
   untouched. Answers the remote, branch, commit and base. An in-place session has no branch
   and is refused.
+- `checkpoint(CheckpointSpec { branch: Some(b), fallback, .. })`, meant for a clone: commits
+  everything in the working directory itself (`git add --all`, `git commit --no-verify` with
+  `commit.gpgsign=false`, author and committer `spec.author_*`), so `HEAD` moves, then
+  `git push <remote> HEAD:refs/heads/<b>` without force. A refused push fetches `<b>`,
+  rebases onto it and pushes once more; when that fails too (a conflict aborts the rebase),
+  `HEAD` is force-pushed to `fallback` and the answer's `branch` says so, or, without a
+  fallback, the first refusal is the error. Nothing to commit and `HEAD` already on
+  `<remote>/<b>` pushes nothing; an unborn `HEAD` with nothing written answers an empty
+  `commit`.
 - `exports()`: first `git fetch --prune --no-tags <remote>` for every configured remote (a
   remote that cannot be reached fails the call), then `unexported` lists `"<short id>
   <subject>"` for each commit in `<base>..HEAD` that none of those remotes' branches holds
@@ -61,13 +80,15 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   the caller to judge. Each call reaches the network once per remote. A path that has
   disappeared exports nothing.
 - `discard()`: `git worktree remove --force --force` and `git branch -D` of the Mission's
-  branch, whatever they hold; what is already gone is skipped. An in-place session is
-  refused.
+  branch, whatever they hold; what is already gone is skipped. A clone's directory is
+  removed, read-only object files included. An in-place session is refused.
+- `finish()` on a clone: removed when clean and every commit is on an `origin` branch, else
+  kept and its unpushed commits listed.
 
 ## Gotchas
 
 - A malformed spec is `GUATIAO_ERR_BAD_VALUE`; a Git failure is `GUATIAO_ERR_INTERNAL`
   carrying Git's own message.
-- `source` is a local path; cloning a URL is not supported.
+- A Mission's `source` is a local checkout; only a `clone` spec takes a URL.
 - After renaming or removing a provider library, clean the plugin directory: a Station
   loads every provider library it finds.

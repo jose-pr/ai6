@@ -44,6 +44,24 @@ pub struct SafeHouseSpec {
     /// Work an earlier attempt saved elsewhere: start the new safe house from its commit, on
     /// its branch, instead of from `base`. A provider without checkpoints ignores it.
     pub checkpoint: Option<SafeHouseCheckpoint>,
+    /// Make the working directory a clone of `source` (a repository URL, `user@host:path`,
+    /// or a local repository, bare or not) on its branch `base`, instead of a Mission's working
+    /// directory beneath `state_root`. `branch`, `isolate`, `reopen` and `checkpoint` are then
+    /// ignored; a provider that cannot clone refuses it.
+    pub clone: Option<SafeHouseClone>,
+}
+
+/// Where a cloned safe house goes. Crosses as a value, inside a [`SafeHouseSpec`].
+#[derive(
+    ToValue, FromValue, Schema, serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq,
+)]
+#[map(crate = ::guatiao)]
+pub struct SafeHouseClone {
+    /// The working directory: a directory that must not exist yet.
+    pub path: String,
+    /// First make `source` an empty bare repository whose `HEAD` is the spec's `base` when it
+    /// is a local path or `file://` URL that does not exist.
+    pub create_source: bool,
 }
 
 /// Work in progress saved where another Station can fetch it: a commit pushed to a branch.
@@ -75,6 +93,15 @@ pub struct CheckpointSpec {
     pub author_name: Option<String>,
     /// The author and committer email, when the Operation commits under a cover identity.
     pub author_email: Option<String>,
+    /// Commit the work in the working directory itself (`HEAD` moves to the commit) and push
+    /// it to this branch of `remote` as a fast-forward, instead of force-pushing a commit on
+    /// top of `HEAD` to the safe house's own branch. A push the remote refuses is tried once
+    /// more after the work is replayed on the remote branch. The answer's `branch` is where the
+    /// work landed, and its `commit` is empty when there was nothing to save.
+    pub branch: Option<String>,
+    /// With `branch`, where the work goes when the remote branch still refuses it: this
+    /// branch of `remote`, which each such push replaces. Without it the refusal is an error.
+    pub fallback: Option<String>,
 }
 
 /// Where an open safe house is and what it can tell.
@@ -235,6 +262,7 @@ mod tests {
                 changes: vec!["abc1234 add work".to_owned()],
             }),
             checkpoint: None,
+            clone: None,
         }
     }
 
@@ -249,6 +277,7 @@ mod tests {
                 "base",
                 "branch",
                 "checkpoint",
+                "clone",
                 "isolate",
                 "mission_id",
                 "operation_id",

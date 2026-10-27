@@ -310,6 +310,7 @@ mod tests {
             state_root: "/state".to_owned(),
             reopen: None,
             checkpoint: None,
+            clone: None,
         }
     }
 

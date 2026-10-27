@@ -3294,18 +3294,25 @@ impl SafeHouseExports {
 }
 pub struct SafeHouseSpec {
     pub operation_id: String, pub mission_id: String, pub title: String,
-    pub source: String,    // a local path today
+    pub source: String,    // a local path; with `clone`, a repository URL or path
     pub base: String,      // revision to start from; ignored by providers without revisions
     pub branch: String,    // template: {id} {slug} {operation}
     pub isolate: bool,     // false: work in `source` itself
     pub state_root: String,
     pub reopen: Option<SafeHouseReport>, // re-attach to a safe house kept by an earlier run
     pub checkpoint: Option<SafeHouseCheckpoint>, // start a new one from a lost attempt's work
+    pub clone: Option<SafeHouseClone>, // a clone of `source` on branch `base` instead; overrides the rest
+}
+pub struct SafeHouseClone {
+    pub path: String,          // the working directory; must not exist
+    pub create_source: bool,   // first make a missing local/file:// `source` an empty bare repository
 }
 pub struct CheckpointSpec {
     pub remote: String,    // Git remote name or URL
     pub message: String,   // already under the Operation's cover
     pub author_name: Option<String>, pub author_email: Option<String>, // the cover identity
+    pub branch: Option<String>,   // commit in place and fast-forward this branch instead (a clone)
+    pub fallback: Option<String>, // with `branch`: where the work goes when that branch refuses it
 }
 pub struct SafeHouseCheckpoint { pub remote: String, pub branch: String, pub commit: String, pub base: Option<String> }
 pub struct SafeHouseInfo {

@@ -19,6 +19,7 @@ fn spec(source: &Path, state: &Path) -> SafeHouseSpec {
         state_root: state.to_string_lossy().into_owned(),
         reopen: None,
         checkpoint: None,
+        clone: None,
     }
 }
 
@@ -138,4 +139,24 @@ fn discard_removes_a_copy_and_never_the_source() {
     let session = Copier.open(&in_place.to_value().unwrap()).unwrap();
     assert!(session.discard().is_err());
     assert!(source.join("a.txt").exists());
+}
+
+#[test]
+fn a_clone_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("notes");
+    fs::create_dir_all(&source).unwrap();
+    let cloned = SafeHouseSpec {
+        clone: Some(ai6::directorates::q::safehouse::SafeHouseClone {
+            path: root.path().join("clone").to_string_lossy().into_owned(),
+            create_source: false,
+        }),
+        ..spec(&source, &root.path().join("state"))
+    };
+    let refused = Copier.open(&cloned.to_value().unwrap()).err().unwrap();
+    assert_eq!(
+        refused.status,
+        ai6::guatiao::Status::GUATIAO_ERR_UNSUPPORTED
+    );
+    assert!(!root.path().join("clone").exists());
 }

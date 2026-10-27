@@ -3,7 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use ai6::directorates::q::safehouse::{
-    ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSpec,
+    ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseInfo,
+    SafeHouseProvider, SafeHouseReport, SafeHouseSpec,
 };
 use ai6::guatiao::{FromValue, ToValue};
 use ai6_safehouse_git::Git;
@@ -30,7 +31,56 @@ fn spec(source: &Path, state: &Path) -> SafeHouseSpec {
         state_root: state.to_string_lossy().into_owned(),
         reopen: None,
         checkpoint: None,
+        clone: None,
     }
+}
+
+#[test]
+fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
+    let root = tempfile::tempdir().unwrap();
+    let bare = root.path().join("people").join("eve.git");
+    let target = root.path().join("conversation").join("personal");
+    let spec = SafeHouseSpec {
+        base: "main".to_owned(),
+        clone: Some(SafeHouseClone {
+            path: target.to_string_lossy().into_owned(),
+            create_source: true,
+        }),
+        ..spec(&bare, &root.path().join("state"))
+    };
+    let session = Git.open(&spec.to_value().unwrap()).unwrap();
+    let info = SafeHouseInfo::from_value(&session.info().unwrap()).unwrap();
+    assert_eq!(Path::new(&info.path), target);
+    assert_eq!(info.branch.as_deref(), Some("main"));
+    fs::write(target.join("notes.md"), "notes\n").unwrap();
+    let saved = SafeHouseCheckpoint::from_value(
+        &session
+            .checkpoint(
+                &CheckpointSpec {
+                    remote: "origin".to_owned(),
+                    message: "moneypenny: notes".to_owned(),
+                    author_name: Some("Eve".to_owned()),
+                    author_email: Some("eve@example.invalid".to_owned()),
+                    branch: Some("main".to_owned()),
+                    fallback: None,
+                }
+                .to_value()
+                .unwrap(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved.branch, "main");
+    assert!(!saved.commit.is_empty());
+    let shown = Command::new("git")
+        .arg("-C")
+        .arg(&bare)
+        .args(["show", "main:notes.md"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&shown.stdout), "notes\n");
+    session.discard().unwrap();
+    assert!(!target.exists());
 }
 
 #[test]

@@ -3,13 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! `ai6-safehouse-git`: the `git` safe-house provider. Each Mission gets a worktree of the
-//! Operation's checkout on a new branch; the work is read back as commits. The Git logic is
-//! plain Rust in `worktree.rs`; this file is the thin layer that implements the kind.
+//! Operation's checkout on a new branch; the work is read back as commits. A spec with
+//! `clone_to` gets a clone of a repository instead, saved to a branch it shares. The Git logic
+//! is plain Rust in `worktree.rs` and `clone.rs`; this file is the thin layer that implements
+//! the kind.
 
 #![doc = include_str!("../README.md")]
 
 ai6::guatiao::providers!(Git);
 
+mod clone;
 mod worktree;
 
 use ai6::directorates::q::safehouse::{

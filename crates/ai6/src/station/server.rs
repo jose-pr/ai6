@@ -3282,6 +3282,7 @@ fn open_safe_house(
         // Only a new safe house starts from a checkpoint.
         checkpoint: checkpoint.filter(|_| reopen.is_none() && isolate),
         reopen,
+        clone: None,
     };
     SafeHouse::open(provider.as_ref(), &spec)
         .map(Some)
@@ -8999,6 +9000,7 @@ mod tests {
             state_root: ".".to_owned(),
             reopen: None,
             checkpoint: None,
+            clone: None,
         };
         let house = SafeHouse::open(&MockPlainProvider, &spec).unwrap();
         state.sessions.lock().unwrap().insert(

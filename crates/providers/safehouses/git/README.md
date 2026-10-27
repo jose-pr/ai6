@@ -18,6 +18,9 @@ commits or edits is kept and reported. See the
 - Branch names from a template (`{id}`, `{slug}`, `{operation}`), made safe for Git refs.
 - Commits since the base, with author, committer and message, for cover checks.
 - Re-attaches to a kept worktree after the daemon restarts, and can work in place.
+- Clones a repository (URL or local, created bare on request) on one branch and saves to
+  that shared branch by fast-forward, replaying once and falling back to a branch of its
+  own; Moneypenny's personal and shared repositories use it.
 
 ## Installation
 

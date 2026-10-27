@@ -33,6 +33,12 @@ impl SafeHouseProvider for Copier {
     fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
         let spec = SafeHouseSpec::from_value(spec)
             .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
+        if spec.clone.is_some() {
+            return Err(refuse(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "the copy provider does not clone repositories",
+            ));
+        }
         let directory =
             Tree::open(&spec).map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
         Ok(CopySafeHouse(directory).into_object())

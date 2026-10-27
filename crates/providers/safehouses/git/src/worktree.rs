@@ -21,19 +21,25 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 /// A rejected Git operation, as text for the provider error.
 pub(crate) type Failure = String;
 
-/// An open safe house: a worktree of `repository`, or `repository` itself when not isolated.
+/// An open safe house: a worktree of `repository`, `repository` itself when not isolated, or
+/// a clone (`cloned`), which is its own repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Worktree {
-    repository: PathBuf,
+    pub(crate) repository: PathBuf,
     pub(crate) path: PathBuf,
     pub(crate) branch: Option<String>,
+    /// The commit the work started from; empty for a clone of an empty repository.
     pub(crate) base: String,
     pub(crate) isolated: bool,
+    pub(crate) cloned: bool,
 }
 
 impl Worktree {
     /// Creates, re-attaches or adopts the safe house `spec` describes.
     pub(crate) fn open(spec: &SafeHouseSpec) -> Result<Self, Failure> {
+        if let Some(clone) = &spec.clone {
+            return Self::clone_into(spec, Path::new(&clone.path), clone.create_source);
+        }
         match (&spec.reopen, spec.isolate) {
             (None, true) => Self::create(spec),
             (Some(report), true) => Self::reopen(spec, report),
@@ -96,13 +102,18 @@ impl Worktree {
             branch: Some(branch),
             base,
             isolated: true,
+            cloned: false,
         })
     }
 
     /// Saves the work so far as one commit on top of `HEAD`, holding the uncommitted changes
     /// too, and pushes it to the safe house's branch on `spec.remote`. The worktree, its
-    /// index and `HEAD` are left as they are: the Agent keeps working undisturbed.
+    /// index and `HEAD` are left as they are: the Agent keeps working undisturbed. With
+    /// `spec.branch` the work is committed in place and pushed there instead ([`Self::save`]).
     pub(crate) fn checkpoint(&self, spec: &CheckpointSpec) -> Result<SafeHouseCheckpoint, Failure> {
+        if let Some(branch) = &spec.branch {
+            return self.save(spec, branch);
+        }
         let branch = self
             .branch
             .as_ref()
@@ -204,6 +215,7 @@ impl Worktree {
             branch: Some(branch.clone()),
             base: base.clone(),
             isolated: true,
+            cloned: false,
         })
     }
 
@@ -226,6 +238,7 @@ impl Worktree {
             branch: None,
             base,
             isolated: false,
+            cloned: false,
         })
     }
 
@@ -233,6 +246,9 @@ impl Worktree {
     pub(crate) fn finish(&self) -> Result<SafeHouseReport, Failure> {
         if !self.path.exists() {
             return Ok(self.report(false, Vec::new()));
+        }
+        if self.cloned {
+            return self.finish_clone();
         }
         let commits = self.summaries()?;
         if !self.isolated {
@@ -281,7 +297,7 @@ impl Worktree {
                 &["fetch", "--prune", "--quiet", "--no-tags", "--", remote],
             )?;
         }
-        let range = format!("{}..HEAD", self.base);
+        let range = self.since_base();
         let mut args = vec!["log".to_owned(), "--format=%h %s".to_owned(), range];
         if !remotes.is_empty() {
             args.push("--not".to_owned());
@@ -336,6 +352,9 @@ impl Worktree {
         if !self.isolated {
             return Err("a safe house in the Operation's own checkout is never removed".to_owned());
         }
+        if self.cloned {
+            return crate::clone::remove_clone(&self.path);
+        }
         if self.path.exists() {
             git(
                 &self.repository,
@@ -358,20 +377,33 @@ impl Worktree {
         Ok(())
     }
 
+    /// The commits since the base, as a `git log` range: every commit of `HEAD` for a clone
+    /// of an empty repository.
+    pub(crate) fn since_base(&self) -> String {
+        if self.base.is_empty() {
+            "HEAD".to_owned()
+        } else {
+            format!("{}..HEAD", self.base)
+        }
+    }
+
     /// One-line summaries of the commits made since the base, newest first.
-    fn summaries(&self) -> Result<Vec<String>, Failure> {
-        let output = git(
-            &self.path,
-            &["log", "--format=%h %s", &format!("{}..HEAD", self.base)],
-        )?;
+    pub(crate) fn summaries(&self) -> Result<Vec<String>, Failure> {
+        if self.base.is_empty() && resolve(&self.path, "HEAD").is_err() {
+            return Ok(Vec::new());
+        }
+        let output = git(&self.path, &["log", "--format=%h %s", &self.since_base()])?;
         Ok(output.lines().map(str::to_owned).collect())
     }
 
     /// Full commit identity and messages since the base, newest first.
     pub(crate) fn changes(&self) -> Result<Vec<Change>, Failure> {
+        if self.base.is_empty() && resolve(&self.path, "HEAD").is_err() {
+            return Ok(Vec::new());
+        }
         let format = "%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e";
         let format_arg = format!("--format={format}");
-        let range = format!("{}..HEAD", self.base);
+        let range = self.since_base();
         let output = git(&self.path, &["log", &format_arg, &range])?;
         Ok(output
             .split('\u{1e}')
@@ -405,7 +437,7 @@ impl Worktree {
 }
 
 /// The commit `revision` names in `cwd`.
-fn resolve(cwd: &Path, revision: &str) -> Result<String, Failure> {
+pub(crate) fn resolve(cwd: &Path, revision: &str) -> Result<String, Failure> {
     let commit = git(
         cwd,
         &["rev-parse", "--verify", &format!("{revision}^{{commit}}")],
@@ -568,7 +600,11 @@ pub(crate) fn git(cwd: &Path, args: &[&str]) -> Result<String, Failure> {
     git_with(cwd, args, &[])
 }
 
-fn git_with(cwd: &Path, args: &[&str], env: &[(&str, String)]) -> Result<String, Failure> {
+pub(crate) fn git_with(
+    cwd: &Path,
+    args: &[&str],
+    env: &[(&str, String)],
+) -> Result<String, Failure> {
     let name = args.first().copied().unwrap_or("command");
     let mut child = Command::new("git")
         .arg("-C")
@@ -636,12 +672,12 @@ fn read_pipe(mut pipe: impl Read) -> std::io::Result<Vec<u8>> {
     Ok(output)
 }
 
-fn fail(path: &Path, error: std::io::Error) -> Failure {
+pub(crate) fn fail(path: &Path, error: std::io::Error) -> Failure {
     format!("{}: {error}", path.display())
 }
 
 /// Drops the verbatim prefix `canonicalize` adds on Windows, which Git does not accept.
-fn git_path(path: PathBuf) -> PathBuf {
+pub(crate) fn git_path(path: PathBuf) -> PathBuf {
     #[cfg(windows)]
     {
         let text = path.to_string_lossy();
@@ -703,6 +739,7 @@ mod tests {
                 state_root: self.0.to_string_lossy().into_owned(),
                 reopen: None,
                 checkpoint: None,
+                clone: None,
             }
         }
     }
@@ -965,6 +1002,8 @@ mod tests {
             message: "Checkpoint of work in progress".to_owned(),
             author_name: Some("Field Station".to_owned()),
             author_email: Some("station@example.invalid".to_owned()),
+            branch: None,
+            fallback: None,
         }
     }
 

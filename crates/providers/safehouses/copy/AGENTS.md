@@ -20,6 +20,7 @@ Guatiao `cdylib` a Station loads. Provider ID: `copy`. No unsafe code, no extern
 - **Re-attach** (`reopen = Some(report)`): the report must be `kept` and name the existing
   copy this Mission would get; nothing is copied.
 - **In place** (`isolate = false`): the session works in `source` and never removes it.
+- **A clone** (`clone = Some(..)`): refused with `GUATIAO_ERR_UNSUPPORTED`; nothing is made.
 
 ## Session behaviour
 
