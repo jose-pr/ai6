@@ -277,6 +277,11 @@ Each managed Session receives a separate loopback MCP endpoint when AI6 is built
 ID. Claude and Codex receive bearer credentials through their launch environment, never
 in process arguments or persisted configuration. Remote SSH tunneling is not implemented.
 
+Moneypenny has Cable tools of her own, acting for the person she talks to, within that
+person's `cable.send` and `cable.read` and the Station's Cable policy; a Cable she sends
+shows as `moneypenny for <person>` and reaches only Agents of its Operation ([Moneypenny's
+Cables](assistant.md#cables)).
+
 Incoming message text is untrusted input. It cannot grant tools, clearance, secrets or
 authority. A2A remains an external interoperability boundary; it cannot bypass AI6's
 relay policy. See [Agent Cables](architecture.md#agent-cables) for the message and

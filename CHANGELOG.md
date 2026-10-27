@@ -58,6 +58,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a refusal, then pushes to `CheckpointSpec::fallback`; with `CheckpointSpec::record` the
   commit also records each file it adds or changes in a directory, from what it commits, and
   `CheckpointSpec::exclude` leaves paths out. The `copy` safe house refuses a clone.
+- Moneypenny sends and reads Cables for the person she talks to. New access actions
+  `cable.send` and `cable.read` on `operation:<id>` (in `ai6::ACTIONS` and the profile's
+  Operation grants) bound what she may do; each `AssistantJob` carries the person
+  (`person_id`) and the Operations where they hold either (`cables`, at most 64,
+  `AssistantCableGrant`). With any, the Station serves her conversation a second MCP server,
+  `cables` (`AssistantMode::with_cables`, environment `AI6_ASSISTANT_CABLE_MCP_URL`/`_TOKEN`),
+  whose `discover_agents`, `send_cable`, `read_cables`, `acknowledge_cable` and
+  `reply_to_cable` name an Operation and act as her Agent for the person, under the Station's
+  `cables.toml`, quotas and fan-out. A Cable sent for a person carries `on_behalf_of`
+  (`CablePrincipal::with_on_behalf_of`, `Cable::on_behalf_of`, `CableDelivery::sent_as`
+  `"<agent> for <person>"`), reaches only Agents of its Operation, and its reply only the
+  conversation that sent it; the relay audits it (`cable.send`, the person as actor) and
+  Universal Exports too (`moneypenny.cable.sent`).
+- Once her conversation has read outside text (a Cable body, or a Mission's brief, Agent
+  output or the audit log through her tools), its `exposed` flag holds for good, and a Cable
+  she sends or replies with is held by the Station and shown as a proposal
+  (`EVENT_CABLE_PROPOSAL`); the person confirms it (checked again, audited
+  `moneypenny.confirmed`, then sent through a `cable_confirm` job) or cancels it
+  (`cable_discard`). The Station asks `GET /v1/station/assistant/exposure` before each send,
+  so a send in the same turn as the read waits too; held Cables live in the Station's memory
+  for at most an hour and never survive the harness.
 
 - Moneypenny's answer can be stopped: the app's **Stop** button, in place of Send while she
   answers, sends `{"type":"interrupt"}` on the chat socket, which acts only on the socket's

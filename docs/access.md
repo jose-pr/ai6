@@ -34,7 +34,8 @@ With no `source` they live in memory and are gone at exit.
 `operation:<id>`, `theater:<id>` or `config:roster` (the roster every Station reads); the
 first rule that matches decides, and no match denies. The actions Universal Exports checks
 are `agent.configure`, `agent.read`, `approval.class`, `approval.decide`, `audit.read`,
-`mission.control`, `mission.create`, `mission.read`, `pool.manage`, `pool.read`,
+`cable.read`, `cable.send`, `mission.control`, `mission.create`, `mission.read`,
+`pool.manage`, `pool.read`,
 `roster.manage`, `roster.read`, `session.input`, `session.read`, `station.configure` and
 `station.read`. `roster.read` and `roster.manage` at `config:roster` list and edit the
 roster's Operations, Agents, roles and covers ([Changing the configuration of running
@@ -44,7 +45,10 @@ may draw from, never a credential; `pool.manage` lifts an account's limit. `miss
 (cancel, retry, resume and interrupt a Mission) is separate from `session.input`: typing into
 a Session does not grant stopping it. `approval.decide` signs or refuses an Agent's request
 for [green ink](missions.md#green-ink) and `approval.class` manages class authorisations;
-neither comes with `mission.create` or `mission.control`.
+neither comes with `mission.create` or `mission.control`. `cable.send` and `cable.read` on
+`operation:<id>` are what [Moneypenny](assistant.md#cables) may do with Cables there for
+the person: send and reply, and read what is sent to her. The Station's `cables.toml` still
+has to let her Agent do it.
 
 ```toml
 [role.viewer]

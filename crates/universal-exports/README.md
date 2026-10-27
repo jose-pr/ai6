@@ -137,7 +137,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/station/attach-grants` | Issue a read or write token within M's Station grant. |
 | `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token. |
 | `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the Registry. |
-| `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `mission.control`, `approval.decide`, `approval.class`, `session.read`, `session.input`, `audit.read`, `agent.read`, `agent.configure`, `pool.read` and `pool.manage` actions by authorized Operation. |
+| `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `mission.control`, `approval.decide`, `approval.class`, `session.read`, `session.input`, `audit.read`, `agent.read`, `agent.configure`, `pool.read`, `pool.manage`, `cable.send` and `cable.read` actions by authorized Operation. |
 | `GET` | `/v1/user/operations/{operation_id}/green-ink` | Require `approval.decide`; list the steps Agents wait to take, oldest first. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/approve` | Require `approval.decide`; sign the step as the caller for `expires_in_secs` (default one hour) with an optional `note`. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/reject` | Require `approval.decide`; refuse the step, with an optional `reason` the Agent is told. |

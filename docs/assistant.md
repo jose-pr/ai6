@@ -31,11 +31,12 @@ its last words; so is one that writes nothing for ten minutes while answering. A
 cannot be resumed is noted in the Station's log, and the conversation starts afresh with a
 recap.
 
-An assistant Session is not a Mission: it has no Operation or Cable endpoint, and never
-appears on the board. It works in a directory of its own, the same one each time its
-conversation's harness starts on that Station, because Claude Code resumes a Session only
-from the directory that recorded it; the directory is removed when the harness closes. With
-[personal repositories](#her-workspace-and-memory) the directory is her workspace. A
+An assistant Session is not a Mission: it has no Operation, and never appears on the board;
+it reaches Agents only through [Cables](#cables), for the person. It works in a directory of
+its own, the same one each time its conversation's harness starts on that Station, because
+Claude Code resumes a Session only from the directory that recorded it; the directory is
+removed when the harness closes. With [personal repositories](#her-workspace-and-memory) the
+directory is her workspace. A
 harness that starts afresh is given her instructions and a recap of the conversation; a
 resumed one only her instructions, which Claude Code uses once the prompt it recorded with
 the Session is gone (after compaction). Of its Agent's environment it keeps only what reaches the model, as a
@@ -223,6 +224,7 @@ A conversation is exposed, for good, when:
 
 - any of her read tools answers other than `field_guide`, `profile` and `station_settings`
   (every other one can quote an Agent, a brief or another person);
+- she reads a [Cable](#cables) body;
 - she reads one of the files she wrote in an exposed conversation. The Station keeps their
   paths in `.moneypenny/outside-text/` in the personal repository, a hidden directory she
   cannot write with one entry per file (so two conversations recording at once keep both),
@@ -241,6 +243,53 @@ anyone else's request is refused. Confirmed, it is committed under the person's 
 same trailer. With `write = true` for that group (or for `org`) it is committed at once and
 audited `moneypenny.shared.write`; that setting is a weakening, as are `allow_elevated` and
 any `write = true`, and each is logged when a Station starts or its roster changes.
+
+## Cables
+
+She can talk to Agents for you over [Cables](agents.md#cables), in the Operations where you
+may: `cable.send` on `operation:<id>` lets her send and reply there, `cable.read` lets her
+read the Cables sent to her there ([access policy](access.md#the-access-policy)). With
+neither anywhere she has no Cable tools at all. Universal Exports works out those Operations
+with each message you send, so a permission taken away holds from her next turn.
+
+The Station running her gives her a second MCP server, `cables`, with `discover_agents`,
+`send_cable`, `read_cables`, `acknowledge_cable` and `reply_to_cable`; every call names an
+Operation, and one outside your permissions is refused exactly as an unknown target is.
+Recipients see the Cable as from her **for you** (`moneypenny for <your person ID>`), and
+only Agents of the Operation it is sent in can get it. Your permissions are not enough on their
+own: the Station's `cables.toml` must also let her Agent send and receive, and its quotas and
+fan-out limits apply to her as to any Agent:
+
+```toml
+# cables.toml
+[[grants]]
+agent = "moneypenny"
+action = "send"
+scope = "station"
+name = "hq"
+
+[[grants]]
+agent = "moneypenny"
+action = "receive"
+scope = "station"
+name = "hq"
+```
+
+A reply to one of her Cables reaches only the conversation that sent it, never your other
+conversations or another person's. She reads only the Cables of the Operation she names.
+
+Once the conversation is **exposed** ([as her memory is](#her-workspace-and-memory): a Cable
+body exposes it too), a Cable she sends or replies with is not sent: the Station holds it and the
+chat shows it as a proposal, with the Operation, the audience and the exact text, needing
+`cable.send`. Confirm, and the person's permission is checked again, the confirmation is
+audited (`moneypenny.confirmed`), and only then does the Station holding it send it. Cancel,
+or leave it for an hour, and nothing is sent. A held Cable lives only in that Station's
+memory: if her session there closes first, confirming it fails and says why. A body with a
+character that renders as nothing is refused before it can become a proposal.
+
+Every Cable sent for you is recorded twice in the audit log: by the Station's relay (action
+`cable.send`, you as actor, her Agent and the audience in the target, refusals too) and by
+Universal Exports (`moneypenny.cable.sent`, you as actor, the conversation and the Cable).
 
 ## Views she shows
 

@@ -61,10 +61,12 @@ What AI6 adds:
 pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
                               // "config:roster" is the roster every Station reads
 pub const ACTIONS: &[&str];   // agent.configure, agent.read, approval.class,
-                              // approval.decide, audit.read, mission.control,
-                              // mission.create, mission.read, pool.manage, pool.read,
-                              // roster.manage, roster.read, session.input,
-                              // session.read, station.configure, station.read
+                              // approval.decide, audit.read, cable.read, cable.send,
+                              // mission.control, mission.create, mission.read,
+                              // pool.manage, pool.read, roster.manage, roster.read,
+                              // session.input, session.read, station.configure,
+                              // station.read; cable.* on operation:<id> bound
+                              // Moneypenny's Cables for the person
 pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
 pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError>;
 pub fn load_role_authorizer(path: impl AsRef<Path>) -> Result<RoleAuthorizer, AccessPolicyError>;
@@ -2612,6 +2614,20 @@ The default lifetime is 15 minutes, maximum 24 hours and default fan-out limit i
 `with_audit_sink` emits sender/target/decision/time metadata only; bodies are omitted.
 Inbound bodies are untrusted data and do not grant authority.
 
+An assistant acting for a person (Moneypenny) sends with
+`CablePrincipal::with_on_behalf_of(person) -> Result<Self, CableError>` (1-256 characters, no
+control characters; `on_behalf_of()` reads it). The relay then stamps the Cable
+(`CableDraft::with_on_behalf_of`, `Cable::on_behalf_of() -> Option<&str>`; serde field
+`on_behalf_of`, default `None`, omitted when `None`), keeps the audience to endpoints of the
+principal's Operation other than its own Agent, and carries the person in
+`CableAuditRecord::on_behalf_of`. A reply to such a Cable reaches only the Session that sent
+it, never the Agent's other conversations (its `session_id` is required). Recipients see
+`CableDelivery::on_behalf_of` and `CableDelivery::sent_as` (`"<from_agent> for <person>"`),
+both omitted from JSON when the Cable was not sent for a person. The daemon's relay audit
+sink writes these sends, and refusals, to the Registry audit log: action `cable.send`, actor
+the person, the sending Operation, resource `station:<id>`, target
+`<agent> <decision> <scope>:<name> <cable id or ->`; other relay records stay metadata.
+
 The daemon reads strict `cables.toml` from its config directory. Missing configuration
 denies every action. `[[grants]]` entries name `agent`, `action`, `scope`, and optional
 `name`; `[inbound]` selects `deliver`, `hold`, or `refuse` by Agent; `[channels]` maps
@@ -2697,7 +2713,9 @@ pub struct McpServerRef { pub name: String /* moneypenny */,
                           pub env_prefix: String /* AI6_MONEYPENNY_MCP: <prefix>_URL, <prefix>_TOKEN */ }
 pub struct AssistantNetwork { pub policy: String /* limited (default) | denied | open */,
                               pub allowed_hosts: Vec<String> }
-impl AssistantMode { pub fn moneypenny() -> Self; pub fn validate(&self) -> Result<(), String>; }
+impl AssistantMode { pub fn moneypenny() -> Self; pub fn validate(&self) -> Result<(), String>;
+                     pub fn with_cables(self) -> Self; } // adds server `cables`,
+                                                         // prefix AI6_ASSISTANT_CABLE_MCP
 impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool; } // denied, or limited with no host
 // Claude Code: `--restricted --tools= --disallowedTools <its shell, file, web, sub-agent and
 // Skill tools, no mcp__> --allowedTools mcp__<name>,… --setting-sources user
@@ -2726,6 +2744,11 @@ pub const ASSISTANT_MCP_URL_ENV: &str = "AI6_MONEYPENNY_MCP_URL";
 pub const ASSISTANT_MCP_TOKEN_ENV: &str = "AI6_MONEYPENNY_MCP_TOKEN";
 pub const ASSISTANT_MCP_SERVER: &str = "moneypenny";
 pub const ASSISTANT_MCP_PATH: &str = "v1/moneypenny/mcp";      // relative to the gateway origin
+pub const ASSISTANT_CABLE_MCP_ENV_PREFIX: &str = "AI6_ASSISTANT_CABLE_MCP";
+pub const ASSISTANT_CABLE_MCP_URL_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_URL";
+pub const ASSISTANT_CABLE_MCP_TOKEN_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_TOKEN";
+pub const ASSISTANT_CABLE_MCP_SERVER: &str = "cables";
+pub const MAX_ASSISTANT_CABLE_GRANTS: usize = 64;
 pub const MAX_ASSISTANT_MESSAGE_BYTES: usize = 32 * 1024;
 pub const MAX_ASSISTANT_CONTEXT_BYTES: usize = 24 * 1024;     // all context items together
 pub const MAX_ASSISTANT_EVENT_BYTES: usize = 64 * 1024;       // longer event text is cut
@@ -2734,6 +2757,8 @@ pub const EVENT_ACCEPTED, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, EVENT_COMPLETE
           EVENT_FAILED, EVENT_LIMIT, EVENT_INTERRUPTED, EVENT_CLOSED: &str; // "accepted", …
 pub const EVENT_MEMORY_CHANGES: &str = "memory_changes"; // text: unified diff; `change`: the files
 pub const EVENT_NOTICE: &str = "notice";       // text: work saved elsewhere than main, a repository not opened
+pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal"; // `cable`: held, body included
+pub const EVENT_CABLE_SENT: &str = "cable_sent";      // `cable`: sent, `cable_id` set
 pub const COMMIT_MEMORY: &str = "memory"; pub const COMMIT_SHARED: &str = "shared";
 pub const MAX_ASSISTANT_CHANGE_BYTES: usize = 64 * 1024;  // text of one change or commit
 pub const MAX_ASSISTANT_CHANGE_FILES: usize = 32;
@@ -2745,9 +2770,13 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub close: bool /* default */,
     pub interrupt: bool /* default */,
     pub exposed: bool /* default: Conversation.exposed at queue time, the one record of it */,
-    pub person_id: Option<String> /* default, omitted when None; required with workspace or commit */,
+    pub person_id: Option<String> /* default, omitted when None; required with workspace, commit or cables */,
     pub workspace: Option<AssistantWorkspace> /* default, omitted when None */,
-    pub commit: Option<AssistantCommit> /* default, omitted when None */ } // Debug redacts the token
+    pub commit: Option<AssistantCommit> /* default, omitted when None */,
+    pub cables: Vec<AssistantCableGrant> /* default, omitted when empty */,
+    pub cable_confirm: Option<AssistantCableDecision> /* default, omitted when None */,
+    pub cable_discard: Option<AssistantCableDecision> /* default, omitted when None */ }
+                                                     // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
 pub struct AssistantWorkspace { pub personal: String /* the person's repository, expanded */,
     pub shared: BTreeMap<String, String> /* default; checkout name (group or "org") -> repository */,
@@ -2765,24 +2794,32 @@ pub struct AssistantCommit { pub kind: String /* COMMIT_MEMORY | COMMIT_SHARED *
 impl AssistantCommit { pub fn validate(&self) -> Result<(), String>; }
 impl AssistantWorkspace { pub fn validate(&self) -> Result<(), String>; }
 pub fn repository_path(path: &str) -> bool; // 1-8 `/`-separated names, none starting with `.`
+pub struct AssistantCableGrant { pub operation: String, pub send: bool, pub read: bool }
+pub struct AssistantCableDecision { pub id: String, pub digest: String }
+pub struct AssistantCable { pub id: String /* desk's held ID, or the Cable ID when sent at once */,
+    pub operation: String, pub target: String /* agent:007, station:hq, global, reply:<cable> */,
+    pub body: Option<String> /* proposals only */, pub digest: String /* SHA-256 hex */,
+    pub cable_id: Option<String> /* once sent */ }
 pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
     pub job_id: Option<String>, pub session_id: Option<String>, pub events: Vec<AssistantEvent> }
 pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,
-    pub change: Option<AssistantChange> /* default, omitted when None */ }
+    pub change: Option<AssistantChange> /* default, omitted when None */,
+    pub cable: Option<AssistantCable> /* default, omitted when None */ }
 impl AssistantEvent { pub fn new(kind: &str, text: Option<String>) -> Self; } // cuts text
 pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control characters
 ```
 
 All are serde types with unknown fields refused. `validate` checks identities, a message
-of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`, `interrupt` or `commit`,
-of which a job sets one), the context bound (context and recap together), a
-token of 32-512 bytes without whitespace, a workspace (repositories of a known `RepoKind`,
-checkout names as `file_safe` names, an author without control characters, `<` or `>`) and a
-commit (a known kind; the change's 1-32 files within `MAX_ASSISTANT_CHANGE_BYTES`, each
-`repository_path`, under `memory/` for `COMMIT_MEMORY`, its digest matching; a message of
-1-4096 bytes). A job's answer is one report with its `job_id` and one `accepted` (for a
-commit, text saying where it landed) or `rejected` event (text: the reason); the harness's
-own events follow in reports without a `job_id`.
+of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`, `interrupt`, `commit`,
+`cable_confirm` or `cable_discard`, of which a job sets one), the context bound (context and
+recap together), a token of 32-512 bytes without whitespace, a workspace (repositories of a
+known `RepoKind`, checkout names as `file_safe` names, an author without control characters,
+`<` or `>`), a commit (a known kind; the change's 1-32 files within
+`MAX_ASSISTANT_CHANGE_BYTES`, each `repository_path`, under `memory/` for `COMMIT_MEMORY`, its
+digest matching; a message of 1-4096 bytes), and at most `MAX_ASSISTANT_CABLE_GRANTS` Cable
+grants for distinct valid Operations, which need `person_id`. A job's answer is one report
+with its `job_id` and one `accepted` (for a commit, text saying where it landed) or `rejected`
+event (text: the reason); the harness's own events follow in reports without a `job_id`.
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
 `limit` set, in place of the `completed` or `failed` event the same output would
@@ -3341,7 +3378,7 @@ stopped`, `the Station is stopping`, …). An `interrupt` job calls the running 
 for up to 2 s while Windows still holds it. When Universal Exports refuses a job's
 `accepted` report with 403, 404 or 409 (the job moved to another Station or was given up), the
 desk closes the harness it started for that conversation. An assistant Session is not a Mission: no
-Operation, Cable endpoint, board entry or usage ledger record.
+Operation, board entry or usage ledger record.
 
 A job with a `workspace` gets, through the `git` safe-house provider (`SafeHouseSpec::clone`,
 `CheckpointSpec::branch`): `personal/`, a clone of `workspace.personal` on `main` (a missing
@@ -3403,6 +3440,31 @@ the roster sets it; with it set, each harness start logs `ai6: weakening:
 assistant.allow_elevated = true: …`. The roster's assistant weakenings
 (`AssistantSettings::weakenings`, plus this Station running elevated when allowed) are logged
 at start and on a roster change, and published at check-in as `assistant_weakened`.
+
+With `cables-mcp`, a job whose `cables` is not empty also gets the conversation a Cable
+endpoint (loopback, its own bearer token) as a further server, `mode.with_cables()`, with
+`AI6_ASSISTANT_CABLE_MCP_URL`/`_TOKEN` in the harness environment. Its tools are
+`discover_agents`, `send_cable`, `read_cables`, `acknowledge_cable` and `reply_to_cable`, each
+naming an `operation`. Each call is made as the principal (Agent `job.agent_id`, the call's
+Operation, this Station, Session `assistant-<conversation digest>`, no Mission)
+`with_on_behalf_of(job.person_id)`; `cables.toml` grants for that Agent, the quotas and
+fan-out apply as for any Agent. A send or reply needs the grant's `send`, a read or
+acknowledgement its `read`, discovery either; otherwise the answer is the relay's own
+indistinguishable refusal. Reads return only Cables sent in the call's Operation; a reply or
+acknowledgement only touches a Cable of that Operation delivered to the conversation. Retry
+keys are scoped to the conversation. The Session is in the relay's endpoint directory (under
+the first granted Operation) while the harness runs, so replies reach it. A later job's grants
+replace the endpoint's; exposure only turns on. A read that returns a body raises the
+conversation's exposure with the same `POST` (source `cable:<sender>`, one per sender). Before
+each send the desk asks the same `GET` (no answer counts as exposed). Exposed, `send_cable` and
+`reply_to_cable` send nothing: the request (refused if its body holds a character
+`vetting::is_invisible` names) is held in memory, at most 32 per conversation for an hour, a
+`cable_proposal` event carries its desk ID, Operation, target, body and digest, and she is
+told it waits for the person. A `cable_confirm` job sends the held request when its digest
+matches, it is under an hour old and the endpoint's current grants still give `send`; it is
+`rejected` with the reason otherwise or when the harness has closed (held requests never
+survive it). A `cable_discard` job drops one. Every Cable sent for the person is reported as
+`cable_sent`.
 
 ## Safe houses (`ai6::directorates::q::safehouse`, `ai6::station::safehouse`)
 

@@ -488,6 +488,24 @@ repository (`org` is everyone's). With that repository's `write = true` it is au
 sent at once as a `shared` commit job; otherwise it is a proposal (needs `membership` on
 `group:<group>`) handled as above.
 
+Cables. Each message's job carries `person_id` and `cables`: the Operations the Stations check
+in with (`operations` of their check-in) where the Authorizer gives the person `cable.send` or
+`cable.read`, at most 64 in Operation ID order, read again for every message. With any, the
+Station gives her its Cable endpoint (see the `ai6` header, assistant desk). Exposure is the
+same `Conversation.exposed` as above: the Station raises it with `POST
+/v1/station/assistant/exposure` when she reads a Cable body, and asks the `GET` before each
+send, so a send in an exposed conversation waits. A `cable_proposal` event becomes a proposal: tool
+`send_cable` or `reply_to_cable`, request `CABLE <target>` with body `{operation, body}`,
+needs `cable.send` on `operation:<id>`, the session of the conversation's current access
+token; a Cable whose ID, Operation, target or digest is not a valid identity, whose body
+exceeds 16 KiB or holds a hidden character, is an `error` entry instead. Confirming one checks
+`cable.send` again (a refusal fails it, nothing audited or sent), records
+`moneypenny.confirmed`, then queues a control job with `cable_confirm {id, digest}` for the
+Station holding it; that Station's `cable_sent` event makes it `done` (`Sent as Cable <id>.`),
+its `rejected` answer `failed` with the reason, and Moneypenny is told either way. Cancelling
+one queues a `cable_discard` job. Every `cable_sent` event is audited `moneypenny.cable.sent`
+(actor the person, the Cable's Operation, target `CONVERSATION CABLE`).
+
 The `show` tool takes `{"view": VIEW}` in the strict view schema version 1 (serde, unknown
 fields refused): `{"version": 1, "title"?, "blocks": [1..=24]}`, each block tagged by `kind`:
 `text` (`markdown` ≤ 8 KiB; every `](` link must target `app:/…`), `table` (`columns` 1..=12,
@@ -673,7 +691,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Session and UTC day) once a provider has reported any, and its `attempts` from the shared Session records. `GET /v1/missions` carries `attempts` too. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret. |
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. |
-| `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role, `approval.decide`/`approval.class`, `pool.read` and `pool.manage` actions; Station grants include `station.read`, `station.configure` and `audit.read`; `roster` lists the person's `roster.read`, `roster.manage` and `audit.read` on `config:roster`. Every action is computed by the Authorizer, not inferred from directory groups. |
+| `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role, `approval.decide`/`approval.class`, `pool.read`, `pool.manage`, `cable.send` and `cable.read` actions; Station grants include `station.read`, `station.configure` and `audit.read`; `roster` lists the person's `roster.read`, `roster.manage` and `audit.read` on `config:roster`. Every action is computed by the Authorizer, not inferred from directory groups. |
 | `GET /v1/user/audit?operation_id=<id>&station_id=<id>&limit=<n>` | Requires a user bearer and `audit.read`; the optional Operation and Station filters are mutually exclusive. Returns at most 500 newest metadata-only records, filtered by the Authorizer for each resource. Records contain actor, action, resource scope, target and time; prompts, terminal output and secrets are excluded. |
 | `GET /v1/user/operations/{operation_id}/timeline?cursor=&mission=&limit=` | Requires `audit.read` on the Operation; returns a `TimelinePage` (see Activity timeline). |
 | `GET /v1/user/operations/{operation_id}/pools` | Requires `pool.read` on the Operation; returns a `PoolBoard { operation_id, accounts: Vec<BoardAccount> }`: each account a Station declared for the Operation with `pool`, `account`, `handler`, `kind`, `priority`, `max_concurrent`, `labels`, `active` (`BoardClaim { station_id, mission_id, since }`, this Operation's live claims only), `other_sessions` (the count of other Operations' live claims), `windows` (`BoardWindow { name, used_permille, resets_at, status }`), `limited_until` (only while in the future), `last_used` and `tokens_today` (UTC). Never a credential, its secret's name or a login directory. |
@@ -721,7 +739,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized","message"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"earlier","busy"}` (the newest 100 entries within 512 KiB; `earlier` counts those left out); a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"page"?:{…}}` (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}`, `{"type":"submit","view":ID,"values":{…}}` and `{"type":"interrupt"}` (answered `{"type":"interrupt","stopping":bool}`; see Moneypenny, the assistant); the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal"\|"view"\|"notice","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most 25,000). |
-| `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries. |
+| `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries; `cable_proposal` and `cable_sent` as under Cables in Moneypenny, the assistant. |
 | `GET /v1/station/assistant/exposure?station=ID&conversation=ID` | Station bearer. `{"exposed": bool}` for a conversation the Station runs; `404` unknown conversation, `403` a Station that does not run it. |
 | `POST /v1/station/assistant/exposure` | Station bearer; body `{"station", "conversation", "source"}` (source 1-256 bytes). Marks the conversation exposed for good, `204`; `404`, `403` as for `GET`. |
 | `POST /v1/attach` | Requires exact `Origin` and trusted HTTPS proxy marker; exchanges token from JSON body for a scoped cookie. |
