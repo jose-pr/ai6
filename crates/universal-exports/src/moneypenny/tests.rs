@@ -1645,8 +1645,8 @@ async fn each_person_works_in_their_own_repository_and_reads_only_their_groups()
         "the group's and the organisation's"
     );
     assert!(
-        operator.exposed,
-        "a shared repository exposes from the first message"
+        !operator.exposed,
+        "shared repositories are trusted text and expose nothing"
     );
     let theirs = viewer.workspace.clone().unwrap();
     assert_eq!(theirs.personal, "/srv/mp/viewer-007.git");

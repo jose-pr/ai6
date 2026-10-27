@@ -2844,7 +2844,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shared_text_and_what_she_wrote_after_reading_it_expose_later_turns() {
+    async fn what_she_wrote_while_exposed_exposes_later_turns_and_shared_text_never_does() {
         let people = tempfile::tempdir().unwrap();
         let bare = people.path().join("eve.git");
 
@@ -2860,10 +2860,9 @@ mod tests {
         reads.desk.close_all();
         until(|| kinds(&reads, "c-0").contains(&EVENT_CLOSED.to_owned())).await;
 
-        // With a shared repository checked out, the conversation is exposed from the start:
-        // Universal Exports is told before her memory change is reported, and what she wrote
-        // is recorded as written while exposed.
-        let writes = git_fixture(people.path(), Script::Writes);
+        // Shared repositories are trusted text: one checked out exposes nothing, and what she
+        // writes beside it is not recorded.
+        let trusted = git_fixture(people.path(), Script::Writes);
         let mut shared = workspace(&bare);
         shared.shared.insert(
             "gone".to_owned(),
@@ -2873,12 +2872,26 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
         );
-        writes
+        trusted
             .desk
-            .handle(working("c-s", "Note what the handbook says.", shared))
+            .handle(working("c-r", "Note what the handbook says.", shared))
             .await;
+        until(|| kinds(&trusted, "c-r").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert!(marks(&trusted, "c-r").is_empty());
+        trusted.desk.close_all();
+        until(|| kinds(&trusted, "c-r").contains(&EVENT_CLOSED.to_owned())).await;
+        assert!(
+            !git(&bare, &["ls-tree", "-r", "--name-only", "main"]).contains("outside-text"),
+            "nothing is recorded as outside text"
+        );
+
+        // In an exposed conversation, what she wrote is recorded as written while exposed.
+        let writes = git_fixture(people.path(), Script::Writes);
+        writes.exposure.mark("c-s", "test").unwrap();
+        let mut exposed = working("c-s", "Note what the brief says.", workspace(&bare));
+        exposed.exposed = true;
+        writes.desk.handle(exposed).await;
         until(|| kinds(&writes, "c-s").contains(&EVENT_COMPLETED.to_owned())).await;
-        assert_eq!(marks(&writes, "c-s"), ["station:workspace"]);
         let start = writes.asked.lock().unwrap().starts[0].clone();
         let agents =
             std::fs::read_to_string(Path::new(&start.working_directory).join("AGENTS.md")).unwrap();

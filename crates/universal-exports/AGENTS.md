@@ -465,8 +465,7 @@ Directory groups and `org`, the author (`display_name` else `name`, without cont
 characters, `<` or `>`; `email` else `<16 hex>@people.ai6.invalid`). Every job carries
 `exposed`, the conversation's one record of exposure (`Conversation.exposed`, never cleared):
 set once a read tool other than `field_guide`, `profile` and `station_settings` answers
-without error (before she gets the answer), from the first message of a workspace with any
-shared repository, and by the Station running the conversation through `POST
+without error (before she gets the answer), and by the Station running the conversation through `POST
 /v1/station/assistant/exposure`, which also shows the person a `notice` naming the source the
 first time. A Station's
 `memory_changes` event (with `change`) in a conversation not exposed becomes a `notice`

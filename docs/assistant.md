@@ -213,15 +213,14 @@ A conversation is exposed, for good, when:
 
 - any of her read tools answers other than `field_guide`, `profile` and `station_settings`
   (every other one can quote an Agent, a brief or another person);
-- its workspace has a shared repository checked out, from the first message: the group's
-  files are other people's text whether she reads them or not;
 - she reads, searches or lists files (`Read`, `Grep`, `Glob`) while her repository holds
   files she wrote in an exposed conversation. The Station keeps their paths in
   `.moneypenny/outside-text` in the personal repository, a hidden file she cannot write;
   removing those files, or the record, in the repository clears it.
 
-Universal Exports keeps the one record of it; the Station reports what only it sees, and the
-conversation shows a notice the first time.
+The repositories in `shared/` are trusted text: the group or the organisation chose what is
+in them, so reading them exposes nothing. Universal Exports keeps the one record of exposure;
+the Station reports what only it sees, and the conversation shows a notice the first time.
 
 A change to a shared repository is a proposal too, through `propose_shared_change` (the
 group, a file path, its new text and a commit subject), and only for a member of that group;

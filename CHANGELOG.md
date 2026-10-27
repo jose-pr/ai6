@@ -32,10 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   what desks that are gone left in the temporary directory.
 - One record of a Moneypenny conversation's exposure, `Conversation.exposed` in Universal
   Exports, carried to the Station as `AssistantJob::exposed`: every read tool sets it but
-  `field_guide`, `profile` and `station_settings`; so does a workspace with a shared
-  repository, from the first message; and the Station sets it (`POST
+  `field_guide`, `profile` and `station_settings`, and the Station sets it (`POST
   /v1/station/assistant/exposure`, read with `GET`) when she reads files while her repository
-  records files written while exposed (`.moneypenny/outside-text`).
+  records files written while exposed (`.moneypenny/outside-text`). Group and organisation
+  repositories are trusted text and expose nothing.
 - An assistant mode names the directories she may write (`AssistantMode::files`) and a
   context file (`AssistantMode::context_file`): Claude Code gets its file tools under
   `--permission-mode dontAsk` with `Edit(/<dir>/**)` rules and the file through

@@ -3364,8 +3364,8 @@ pushes there, and removes it.
 
 Exposure is Universal Exports' record (`Conversation.exposed`); the desk reads it with `GET
 /v1/station/assistant/exposure?station&conversation` (`{"exposed"}`) when a turn ends and
-raises it with `POST` (`{"station","conversation","source"}`) for what only it sees: a
-workspace with any shared repository counts as exposed from its start, and a turn whose
+raises it with `POST` (`{"station","conversation","source"}`) for what only it sees
+(shared repositories are trusted text and expose nothing): a turn whose
 harness calls `Read`, `Grep` or `Glob` while `.moneypenny/outside-text` in the personal
 repository names any file is exposed at that call (source `personal:<paths>`). A turn ending
 exposed adds the files it changed in `personal/` to that record (committed by the Station

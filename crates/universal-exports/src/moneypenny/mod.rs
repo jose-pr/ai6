@@ -14,9 +14,10 @@
 //! is a proposal unless the group's repository is `write = true`.
 //!
 //! Exposure has one record, `Conversation.exposed`, never cleared. A read tool marks it
-//! unless it is one of [`tools::QUIET_TOOLS`]; a workspace with a shared repository marks it
-//! from the first message; a Station marks it (`POST /v1/station/assistant/exposure`) for what
-//! only it sees. Jobs carry it as [`ai6::AssistantJob::exposed`].
+//! unless it is one of [`tools::QUIET_TOOLS`], and a Station marks it
+//! (`POST /v1/station/assistant/exposure`) for what only it sees. Group and organisation
+//! repositories are trusted text and expose nothing. Jobs carry it as
+//! [`ai6::AssistantJob::exposed`].
 //!
 //! Routes: `GET /v1/user/moneypenny` (the app's WebSocket), `POST /v1/moneypenny/mcp` (the
 //! harness's tools, with a token bound to the person and the conversation),
@@ -628,14 +629,8 @@ impl Assistant {
                 session_id: conversation.session_id.clone(),
                 close: false,
                 interrupt: false,
-                // Text in a shared repository is outside text: a conversation with one checked
-                // out is exposed from its first message.
-                exposed: {
-                    conversation.exposed |= workspace
-                        .as_ref()
-                        .is_some_and(|workspace| !workspace.shared.is_empty());
-                    conversation.exposed
-                },
+                // Shared repositories are trusted text: checking them out exposes nothing.
+                exposed: conversation.exposed,
                 person_id: Some(person_id.to_owned()),
                 workspace,
                 commit: None,

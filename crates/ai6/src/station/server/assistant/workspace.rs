@@ -11,10 +11,10 @@
 //! to let through; everything else in `personal/` is committed to `main`, authored by the
 //! person. A `main` that refuses the work twice gets it on `moneypenny/<conversation digest>`.
 //!
-//! Exposure is Universal Exports' to record (`Conversation.exposed`), but the desk sees two
-//! ways in it cannot: text in `shared/`, which a conversation with any shared repository
-//! checked out counts as read from its start, and text she wrote in `personal/` while exposed.
-//! The paths of the latter are kept in the personal repository, in
+//! Exposure is Universal Exports' to record (`Conversation.exposed`), but the desk sees one
+//! way in it cannot: text she wrote in `personal/` while exposed. (The repositories in
+//! `shared/` are trusted text and expose nothing.) Their paths are kept in the personal
+//! repository, in
 //! [`OUTSIDE_TEXT`] (a hidden file she cannot write), and a turn that reads, searches or
 //! lists files while any are recorded is exposed. The record is cleared by removing the files
 //! it names, or the record itself, in the repository.
@@ -132,8 +132,7 @@ impl Workspace {
             memory: BTreeMap::new(),
             files: BTreeMap::new(),
             closed: false,
-            // Text in a shared repository is outside text, read or not.
-            exposed: exposed || !job.shared.is_empty(),
+            exposed,
             outside: BTreeSet::new(),
         };
         workspace.outside = fs::read_to_string(workspace.path.join(OUTSIDE_TEXT))
