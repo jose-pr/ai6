@@ -98,6 +98,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   at 32 held Cables or 32 waiting proposals a new one is refused rather than one dropped. A
   control job's answer is taken only from the Station it was given to.
 
+- The Moneypenny app uses Moneypenny's icon: her chat shows it as an avatar beside her
+  messages (labelled "Moneypenny" for screen readers), and it is the web favicon, the web
+  app icons (with maskable versions) and the Windows application icon.
 - Moneypenny's answer can be stopped: the app's **Stop** button, in place of Send while she
   answers, sends `{"type":"interrupt"}` on the chat socket, which acts only on the socket's
   own conversation and is a no-op (`stopping: false`) when nothing is being answered. A

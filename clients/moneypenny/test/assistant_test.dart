@@ -172,6 +172,11 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.text('Earlier question'), findsOneWidget);
+    expect(
+      find.byType(MoneypennyAvatar),
+      findsNothing,
+      reason: 'only her messages carry her avatar',
+    );
 
     await tester.enterText(find.byType(TextField), 'Which Stations are busy?');
     await tester.tap(find.byTooltip('Send'));
@@ -201,6 +206,20 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(find.text('board'), findsOneWidget);
     expect(find.textContaining('is busy: 4 of 4.'), findsOneWidget);
+    expect(find.byType(MoneypennyAvatar), findsOneWidget);
+    expect(
+      find.image(const AssetImage(MoneypennyAvatar.asset)),
+      findsOneWidget,
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label == 'Moneypenny' &&
+            widget.properties.image == true,
+      ),
+      findsOneWidget,
+    );
 
     final proposal = {
       'id': 'proposal-1',

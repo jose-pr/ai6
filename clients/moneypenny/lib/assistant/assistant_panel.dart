@@ -176,7 +176,14 @@ class _EntryView extends StatelessWidget {
           child: Text(revealInvisible(entry.text)),
         ),
       ),
-      'moneypenny' => MarkdownText(entry.text, onOpen: onOpen),
+      'moneypenny' => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 8,
+        children: [
+          const MoneypennyAvatar(),
+          Expanded(child: MarkdownText(entry.text, onOpen: onOpen)),
+        ],
+      ),
       'tools' => Wrap(
         spacing: 6,
         children: [
@@ -221,6 +228,29 @@ class _EntryView extends StatelessWidget {
       ),
     };
   }
+}
+
+/// Moneypenny's icon beside her messages, labelled "Moneypenny" for screen readers.
+class MoneypennyAvatar extends StatelessWidget {
+  const MoneypennyAvatar({this.size = 32, super.key});
+
+  /// The asset declared in `pubspec.yaml`.
+  static const asset = 'assets/brand/moneypenny-128.png';
+
+  /// Side in logical pixels; the 128 px asset stays sharp up to 4x at the default 32.
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(size / 4),
+    child: Image.asset(
+      asset,
+      width: size,
+      height: size,
+      filterQuality: FilterQuality.medium,
+      semanticLabel: 'Moneypenny',
+    ),
+  );
 }
 
 /// [value] with every string in it, keys included, passed through [revealInvisible], so a
