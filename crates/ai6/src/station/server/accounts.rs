@@ -1459,11 +1459,14 @@ secret = "codex-b"
         .await
         .expect("the limited Mission is queued again");
         let first = session_hold(&state, "pooled-codex").unwrap();
-        assert_eq!(
-            state.intake.session(&first.id).unwrap().unwrap().status,
-            SessionStatus::Ended,
-            "the limited attempt is closed"
-        );
+        // The Mission is queued again before the attempt it replaces is closed.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state.intake.session(&first.id).unwrap().unwrap().status != SessionStatus::Ended {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the limited attempt is closed");
         schedule_queued_once(&state).await;
         wait_for_state(&state, "pooled-codex", MissionState::Done).await;
         let made = calls("pooled-codex");

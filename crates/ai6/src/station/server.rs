@@ -5335,12 +5335,14 @@ fn handle_limit(
 /// Queues an interrupted Mission again for `agent` as a new attempt and closes the attempt
 /// it replaces; the next start records the replacement. Whether it was queued.
 fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
+    // Taken before the requeue: once queued, a scheduler pass may record the next attempt.
+    let replaced = session_hold(state, mission_id);
     let handed_off = state
         .missions
         .lock()
         .ok()
         .is_some_and(|mut missions| missions.requeue_for(mission_id, agent).is_ok());
-    if handed_off && let Some(hold) = session_hold(state, mission_id) {
+    if handed_off && let Some(hold) = replaced {
         let _ = state.intake.update_session(
             &hold.id,
             &state.station_id,
