@@ -8,9 +8,14 @@ edit_uri: edit/main/docs/
 # Constrained to docs/ so a strict build does not scan the repository's own markdown:
 # the API headers and component READMEs are not pages.
 docs_dir: docs
+# The brand assets' provenance note is not a page.
+exclude_docs: |
+  assets/README.md
 
 theme:
   name: material
+  logo: assets/ai6-128.png
+  favicon: assets/favicon.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

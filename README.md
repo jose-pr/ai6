@@ -1,3 +1,5 @@
+![AI6](docs/assets/ai6-header.png)
+
 # AI6
 
 [![Version](https://img.shields.io/badge/version-0.1.0--dev-blue.svg)](https://github.com/jose-pr/ai6/blob/main/CHANGELOG.md#unreleased)
