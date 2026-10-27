@@ -14,7 +14,7 @@ pub fn ai6_agent_codex::CodexHandler::try_from(ai6_agent_codex::CodexConfig) -> 
 impl guatiao::library::kind::parts::ProviderDecl for ai6_agent_codex::CodexHandler
 pub const ai6_agent_codex::CodexHandler::KINDS: &'static [&'static str]
 pub fn ai6_agent_codex::CodexHandler::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
-pub const ai6_agent_codex::KEPT_FEATURES: [&str; 4]
+pub const ai6_agent_codex::KEPT_FEATURES: [&str; 5]
 pub const ai6_agent_codex::TOOL_CHECK_ENV: &str
 #[no_mangle] pub static ai6_agent_codex::guatiao_declares: [u8; 24]
 #[no_mangle] pub unsafe c fn ai6_agent_codex::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>
