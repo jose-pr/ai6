@@ -1273,11 +1273,15 @@ pub ai6::directorates::q::safehouse::Change::id: alloc::string::String
 pub ai6::directorates::q::safehouse::Change::message: alloc::string::String
 pub struct ai6::directorates::q::safehouse::ChangeLog
 pub ai6::directorates::q::safehouse::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
+pub struct ai6::directorates::q::safehouse::CheckpointFile
+pub ai6::directorates::q::safehouse::CheckpointFile::path: alloc::string::String
+pub ai6::directorates::q::safehouse::CheckpointFile::text: core::option::Option<alloc::string::String>
 pub struct ai6::directorates::q::safehouse::CheckpointSpec
 pub ai6::directorates::q::safehouse::CheckpointSpec::author_email: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::author_name: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::branch: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::fallback: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::CheckpointSpec::files: core::option::Option<alloc::vec::Vec<ai6::directorates::q::safehouse::CheckpointFile>>
 pub ai6::directorates::q::safehouse::CheckpointSpec::message: alloc::string::String
 pub ai6::directorates::q::safehouse::CheckpointSpec::remote: alloc::string::String
 pub struct ai6::directorates::q::safehouse::SafeHouseCheckpoint
@@ -1287,6 +1291,7 @@ pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::commit: alloc::string:
 pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::remote: alloc::string::String
 pub struct ai6::directorates::q::safehouse::SafeHouseClone
 pub ai6::directorates::q::safehouse::SafeHouseClone::create_source: bool
+pub ai6::directorates::q::safehouse::SafeHouseClone::git_dir: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::SafeHouseClone::path: alloc::string::String
 pub struct ai6::directorates::q::safehouse::SafeHouseExports
 pub ai6::directorates::q::safehouse::SafeHouseExports::dirty: bool
@@ -3853,10 +3858,12 @@ pub ai6::directorates::section_00::assistant::AssistantJob::close: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::commit: core::option::Option<ai6::directorates::section_00::assistant::AssistantCommit>
 pub ai6::directorates::section_00::assistant::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::conversation_id: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::exposed: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::interrupt: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::job_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::mcp_token: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::message: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::person_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::recap: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::token_expires_at: f64
@@ -3874,7 +3881,6 @@ pub ai6::directorates::section_00::assistant::AssistantReport::station_id: alloc
 pub struct ai6::directorates::section_00::assistant::AssistantWorkspace
 pub ai6::directorates::section_00::assistant::AssistantWorkspace::author_email: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantWorkspace::author_name: alloc::string::String
-pub ai6::directorates::section_00::assistant::AssistantWorkspace::exposed: bool
 pub ai6::directorates::section_00::assistant::AssistantWorkspace::personal: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantWorkspace::shared: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantWorkspace
@@ -4826,10 +4832,12 @@ pub ai6::AssistantJob::close: bool
 pub ai6::AssistantJob::commit: core::option::Option<ai6::directorates::section_00::assistant::AssistantCommit>
 pub ai6::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantJob::conversation_id: alloc::string::String
+pub ai6::AssistantJob::exposed: bool
 pub ai6::AssistantJob::interrupt: bool
 pub ai6::AssistantJob::job_id: alloc::string::String
 pub ai6::AssistantJob::mcp_token: alloc::string::String
 pub ai6::AssistantJob::message: alloc::string::String
+pub ai6::AssistantJob::person_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::recap: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::session_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::token_expires_at: f64
@@ -4880,7 +4888,6 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::with_shared(self, imp
 pub struct ai6::AssistantWorkspace
 pub ai6::AssistantWorkspace::author_email: alloc::string::String
 pub ai6::AssistantWorkspace::author_name: alloc::string::String
-pub ai6::AssistantWorkspace::exposed: bool
 pub ai6::AssistantWorkspace::personal: alloc::string::String
 pub ai6::AssistantWorkspace::shared: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantWorkspace
@@ -5109,11 +5116,15 @@ pub ai6::Change::id: alloc::string::String
 pub ai6::Change::message: alloc::string::String
 pub struct ai6::ChangeLog
 pub ai6::ChangeLog::changes: alloc::vec::Vec<ai6::directorates::q::safehouse::Change>
+pub struct ai6::CheckpointFile
+pub ai6::CheckpointFile::path: alloc::string::String
+pub ai6::CheckpointFile::text: core::option::Option<alloc::string::String>
 pub struct ai6::CheckpointSpec
 pub ai6::CheckpointSpec::author_email: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::author_name: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::branch: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::fallback: core::option::Option<alloc::string::String>
+pub ai6::CheckpointSpec::files: core::option::Option<alloc::vec::Vec<ai6::directorates::q::safehouse::CheckpointFile>>
 pub ai6::CheckpointSpec::message: alloc::string::String
 pub ai6::CheckpointSpec::remote: alloc::string::String
 #[non_exhaustive] pub struct ai6::ClassAuthorization
@@ -5978,6 +5989,7 @@ pub ai6::SafeHouseCheckpoint::commit: alloc::string::String
 pub ai6::SafeHouseCheckpoint::remote: alloc::string::String
 pub struct ai6::SafeHouseClone
 pub ai6::SafeHouseClone::create_source: bool
+pub ai6::SafeHouseClone::git_dir: core::option::Option<alloc::string::String>
 pub ai6::SafeHouseClone::path: alloc::string::String
 pub struct ai6::SafeHouseExports
 pub ai6::SafeHouseExports::dirty: bool
