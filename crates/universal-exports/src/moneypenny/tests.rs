@@ -2209,6 +2209,21 @@ async fn a_held_cable_is_sent_only_when_the_person_confirms_it() {
         })
     );
     assert!(control.message.is_empty());
+    assert_eq!(
+        report(
+            &served,
+            "worker",
+            &control,
+            Some(&control.job_id),
+            vec![AssistantEvent::new(
+                EVENT_REJECTED,
+                Some("not sent".to_owned())
+            )]
+        )
+        .await,
+        StatusCode::FORBIDDEN,
+        "only the Station the job was given to answers it"
+    );
     let sent = AssistantEvent {
         cable: Some(ai6::AssistantCable {
             id: "held-1".to_owned(),

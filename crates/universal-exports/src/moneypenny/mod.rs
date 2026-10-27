@@ -213,8 +213,8 @@ struct Desk {
     calls: HashMap<String, (Instant, u32)>,
     /// Jobs that close or interrupt a harness, by the Station that runs it.
     controls: Vec<(String, AssistantJob)>,
-    /// The control jobs a Station has not answered yet, by ID.
-    controlling: HashMap<String, Control>,
+    /// The control jobs a Station has not answered yet, by ID, with the Station given each.
+    controlling: HashMap<String, (String, Control)>,
     /// Confirmed Cables waiting for their Station, by control job ID: the conversation, the
     /// proposal and when they are given up, Unix seconds.
     cable_deadlines: HashMap<String, (String, String, f64)>,
@@ -283,7 +283,8 @@ impl Desk {
         let job = control_job(conversation, agent_id, &Control::Close, None);
         self.tokens
             .retain(|_, grant| grant.conversation_id != conversation_id);
-        self.controlling.insert(job.job_id.clone(), Control::Close);
+        self.controlling
+            .insert(job.job_id.clone(), (station.clone(), Control::Close));
         self.controls.push((station, job));
     }
 
@@ -300,7 +301,8 @@ impl Desk {
             return;
         };
         let job = control_job(conversation, agent_id, &control, Some(commit));
-        self.controlling.insert(job.job_id.clone(), control);
+        self.controlling
+            .insert(job.job_id.clone(), (station.clone(), control));
         self.controls.push((station, job));
     }
 }
@@ -862,8 +864,15 @@ impl Assistant {
         'locked: {
             let mut desk = self.desk();
             if let Some(job_id) = &report.job_id
-                && let Some(control) = desk.controlling.remove(job_id)
+                && let Some((given_to, _)) = desk.controlling.get(job_id)
             {
+                // Only the Station the job was given to answers it.
+                if *given_to != report.station_id {
+                    return Err(StatusCode::FORBIDDEN);
+                }
+                let Some((_, control)) = desk.controlling.remove(job_id) else {
+                    break 'locked;
+                };
                 desk.cable_deadlines.remove(job_id);
                 // The answer to a close or an interrupt: the harness reports `closed` when it
                 // is gone and `interrupted` when its turn stops. An interrupt the Station could
@@ -1643,7 +1652,7 @@ impl Assistant {
             .any(|(_, queued)| queued.interrupt && queued.conversation_id == conversation_id);
         if !asked && let Some(station) = station {
             desk.controlling
-                .insert(job.job_id.clone(), Control::Interrupt);
+                .insert(job.job_id.clone(), (station.clone(), Control::Interrupt));
             desk.controls.push((station, job));
             drop(desk);
             self.ready.notify_waiters();

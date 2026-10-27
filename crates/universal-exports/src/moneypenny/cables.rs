@@ -421,7 +421,8 @@ impl Assistant {
                         now() + timeout * 1.5,
                     ),
                 );
-                desk.controlling.insert(job.job_id.clone(), control);
+                desk.controlling
+                    .insert(job.job_id.clone(), (hold.station.clone(), control));
                 desk.controls.push((hold.station, job));
             }
         }
@@ -476,7 +477,8 @@ impl Assistant {
                 id: hold.held_id,
                 digest: hold.digest,
             });
-            desk.controlling.insert(job.job_id.clone(), control);
+            desk.controlling
+                .insert(job.job_id.clone(), (hold.station.clone(), control));
             desk.controls.push((hold.station, job));
         }
         self.ready.notify_waiters();
