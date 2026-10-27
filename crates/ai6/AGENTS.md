@@ -3353,7 +3353,8 @@ in her memory too) to `main` as the person, message
 `moneypenny: update <paths>` (or `save her work`) with the trailer `Via: Moneypenny
 (conversation <id>)`; work `main` refuses twice lands on `moneypenny/<conversation digest>`
 with a `notice`. A `commit` job of `COMMIT_MEMORY` for a conversation running here is written
-into its `personal/` and copy, then saved the same way; otherwise, and for `COMMIT_SHARED`,
+into its `personal/` and copy and committed exactly (`CheckpointSpec::files`: nothing else a turn
+in progress wrote goes with it); otherwise, and for `COMMIT_SHARED`,
 the desk clones the commit's repository into a temporary directory, writes, commits and
 pushes there, and removes it.
 
@@ -3423,7 +3424,9 @@ pub struct CheckpointSpec {
     pub author_name: Option<String>, pub author_email: Option<String>, // the cover identity
     pub branch: Option<String>,   // commit in place and fast-forward this branch instead (a clone)
     pub fallback: Option<String>, // with `branch`: where the work goes when that branch refuses it
+    pub files: Option<Vec<CheckpointFile>>, // with `branch`: commit exactly these, nothing of the working directory
 }
+pub struct CheckpointFile { pub path: String /* repository_path */, pub text: Option<String> /* None removes */ }
 pub struct SafeHouseCheckpoint { pub remote: String, pub branch: String, pub commit: String, pub base: Option<String> }
 pub struct SafeHouseInfo {
     pub path: String, pub branch: Option<String>, pub base: Option<String>,

@@ -64,6 +64,7 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
                     author_email: Some("eve@example.invalid".to_owned()),
                     branch: Some("main".to_owned()),
                     fallback: None,
+                    files: None,
                 }
                 .to_value()
                 .unwrap(),

@@ -19,7 +19,8 @@ use std::time::SystemTime;
 
 use crate::directorates::m::assistant::RepoKind;
 use crate::directorates::q::safehouse::{
-    CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseProvider, SafeHouseSpec,
+    CheckpointFile, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseProvider,
+    SafeHouseSpec,
 };
 use crate::directorates::section_00::assistant::{
     AssistantChange, AssistantCommit, AssistantWorkspace, COMMIT_MEMORY, MAX_ASSISTANT_EVENT_BYTES,
@@ -238,7 +239,8 @@ impl Workspace {
     }
 
     /// Writes a memory commit the person let through into this checkout, as the turn's
-    /// starting point too, and saves it; answers where it landed.
+    /// starting point too, and commits exactly its files, never what a turn in progress has
+    /// written beside them; answers where it landed.
     pub(super) fn apply(&mut self, commit: &AssistantCommit) -> Result<String, String> {
         write_change(&self.path, &commit.change)?;
         for (path, text) in &commit.change.files {
@@ -257,6 +259,7 @@ impl Workspace {
                 commit.message.clone(),
                 &commit.author_name,
                 &commit.author_email,
+                Some(exactly(&commit.change)),
             ))
             .map_err(|error| error.to_string())?;
         Ok(landed(&saved, &self.repo))
@@ -271,7 +274,7 @@ impl Workspace {
         );
         let saved = self
             .personal
-            .checkpoint(&self.spec(message, &self.author_name, &self.author_email))
+            .checkpoint(&self.spec(message, &self.author_name, &self.author_email, None))
             .map_err(|error| error.to_string())?;
         Ok((saved.branch != MAIN).then(|| {
             format!(
@@ -282,7 +285,13 @@ impl Workspace {
         }))
     }
 
-    fn spec(&self, message: String, name: &str, email: &str) -> CheckpointSpec {
+    fn spec(
+        &self,
+        message: String,
+        name: &str,
+        email: &str,
+        files: Option<Vec<CheckpointFile>>,
+    ) -> CheckpointSpec {
         CheckpointSpec {
             remote: "origin".to_owned(),
             message,
@@ -290,6 +299,7 @@ impl Workspace {
             author_email: Some(email.to_owned()),
             branch: Some(MAIN.to_owned()),
             fallback: Some(fallback(&self.digest)),
+            files,
         }
     }
 }
@@ -325,11 +335,24 @@ pub(super) fn commit_once(
                 author_email: Some(commit.author_email.clone()),
                 branch: Some(MAIN.to_owned()),
                 fallback: Some(fallback(digest)),
+                files: Some(exactly(&commit.change)),
             })
             .map_err(|error| error.to_string())
     });
     let _ = house.discard();
     Ok(landed(&saved?, &commit.repo))
+}
+
+/// The files of `change` for a save that commits exactly them.
+fn exactly(change: &AssistantChange) -> Vec<CheckpointFile> {
+    change
+        .files
+        .iter()
+        .map(|(path, text)| CheckpointFile {
+            path: path.clone(),
+            text: text.clone(),
+        })
+        .collect()
 }
 
 /// The branch a conversation's work goes to when `main` refuses it.

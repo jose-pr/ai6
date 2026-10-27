@@ -17,10 +17,11 @@ use std::path::{Path, PathBuf};
 
 use ai6::RepoKind;
 use ai6::directorates::q::safehouse::{
-    CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseReport, SafeHouseSpec,
+    CheckpointFile, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseReport,
+    SafeHouseSpec,
 };
 
-use crate::worktree::{Failure, Worktree, fail, git, git_path, git_with};
+use crate::worktree::{Failure, Worktree, fail, git, git_input, git_path, git_with};
 
 /// The settings every command of a clone runs with. `core.hooksPath` names a directory that
 /// is never made, so no hook runs.
@@ -43,6 +44,48 @@ fn hardened(git_dir: &Path) -> Vec<String> {
 /// its tools treat the repository are never committed unseen.
 const HIDDEN_FILES: &str = ":(exclude,glob)**/.*";
 const HIDDEN_DIRECTORIES: &str = ":(exclude,glob)**/.*/**";
+
+/// Sets the index to `HEAD` with exactly `files` changed: each text is written as a blob of
+/// its own, never read from the working tree, so what someone writes there meanwhile is not
+/// taken with it.
+fn stage_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failure> {
+    for file in files {
+        if !ai6::directorates::section_00::assistant::repository_path(&file.path) {
+            return Err(format!("{:?} is not a file a save may write", file.path));
+        }
+    }
+    if repo.resolve("HEAD").is_ok() {
+        repo.run(&["read-tree", "HEAD"], &[])?;
+    } else {
+        repo.run(&["read-tree", "--empty"], &[])?;
+    }
+    for file in files {
+        match &file.text {
+            Some(text) => {
+                let blob = repo
+                    .input(
+                        &["hash-object", "-w", "--no-filters", "--stdin"],
+                        text.as_bytes(),
+                    )?
+                    .trim()
+                    .to_owned();
+                repo.run(
+                    &[
+                        "update-index",
+                        "--add",
+                        "--cacheinfo",
+                        &format!("100644,{blob},{}", file.path),
+                    ],
+                    &[],
+                )?;
+            }
+            None => {
+                repo.run(&["update-index", "--force-remove", "--", &file.path], &[])?;
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Whether the index holds anything `HEAD` does not.
 fn staged(repo: &Repo<'_>) -> Result<bool, Failure> {
@@ -74,6 +117,18 @@ impl<'a> Repo<'a> {
         all.extend(args.iter().map(|arg| (*arg).to_owned()));
         let all: Vec<&str> = all.iter().map(String::as_str).collect();
         git_with(self.work_tree, &all, env)
+    }
+
+    /// Runs `git args`, hardened, with `input` on its standard input.
+    fn input(&self, args: &[&str], input: &[u8]) -> Result<String, Failure> {
+        let mut all = vec![
+            format!("--git-dir={}", self.git_dir.to_string_lossy()),
+            format!("--work-tree={}", self.work_tree.to_string_lossy()),
+        ];
+        all.extend(hardened(self.git_dir));
+        all.extend(args.iter().map(|arg| (*arg).to_owned()));
+        let all: Vec<&str> = all.iter().map(String::as_str).collect();
+        git_input(self.work_tree, &all, &[], Some(input))
     }
 
     /// The commit `revision` names.
@@ -236,11 +291,18 @@ impl Worktree {
         }
         let repo = self.repo();
         let run = |args: &[&str]| repo.run(args, &env);
-        let status = run(&["status", "--porcelain", "--untracked-files=all"])?;
-        if !status.trim().is_empty() {
-            run(&["add", "--all", "--", ".", HIDDEN_FILES, HIDDEN_DIRECTORIES])?;
+        if let Some(files) = &spec.files {
+            stage_exactly(&repo, files)?;
             if staged(&repo)? {
                 run(&["commit", "--quiet", "--no-verify", "-m", &spec.message])?;
+            }
+        } else {
+            let status = run(&["status", "--porcelain", "--untracked-files=all"])?;
+            if !status.trim().is_empty() {
+                run(&["add", "--all", "--", ".", HIDDEN_FILES, HIDDEN_DIRECTORIES])?;
+                if staged(&repo)? {
+                    run(&["commit", "--quiet", "--no-verify", "-m", &spec.message])?;
+                }
             }
         }
         let saved = |landed: &str| -> Result<SafeHouseCheckpoint, Failure> {
@@ -450,6 +512,7 @@ mod tests {
             author_email: Some("eve@example.invalid".to_owned()),
             branch: Some("main".to_owned()),
             fallback: Some("moneypenny/conversation".to_owned()),
+            files: None,
         }
     }
 

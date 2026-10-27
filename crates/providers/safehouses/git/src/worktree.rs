@@ -620,18 +620,44 @@ pub(crate) fn git_with(
     args: &[&str],
     env: &[(&str, String)],
 ) -> Result<String, Failure> {
-    let name = args.first().copied().unwrap_or("command");
+    git_input(cwd, args, env, None)
+}
+
+/// [`git_with`], with `input` written to the command's standard input.
+pub(crate) fn git_input(
+    cwd: &Path,
+    args: &[&str],
+    env: &[(&str, String)],
+    input: Option<&[u8]>,
+) -> Result<String, Failure> {
+    // The subcommand, past the global options (`-c key=value`, `--git-dir=...`).
+    let name = args
+        .iter()
+        .enumerate()
+        .find(|(index, arg)| !arg.starts_with('-') && (*index == 0 || args[index - 1] != "-c"))
+        .map_or("command", |(_, arg)| *arg);
     let mut child = Command::new("git")
         .arg("-C")
         .arg(cwd)
         .args(args)
         .envs(env.iter().map(|(key, value)| (*key, value.as_str())))
         .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("git {name}: {error}"))?;
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        let input = input.to_vec();
+        thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(&input);
+        });
+    }
     let stdout_pipe = child
         .stdout
         .take()
@@ -1019,6 +1045,7 @@ mod tests {
             author_email: Some("station@example.invalid".to_owned()),
             branch: None,
             fallback: None,
+            files: None,
         }
     }
 

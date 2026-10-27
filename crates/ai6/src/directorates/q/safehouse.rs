@@ -106,6 +106,21 @@ pub struct CheckpointSpec {
     /// With `branch`, where the work goes when the remote branch still refuses it: this
     /// branch of `remote`, which each such push replaces. Without it the refusal is an error.
     pub fallback: Option<String>,
+    /// With `branch`, commit exactly these files with exactly this text, and nothing else the
+    /// working directory holds, whoever is writing there meanwhile.
+    pub files: Option<Vec<CheckpointFile>>,
+}
+
+/// One file a save commits with exactly its text. Crosses as a value, inside a
+/// [`CheckpointSpec`].
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct CheckpointFile {
+    /// The path, `/`-separated and relative to the repository's root; a path naming a parent
+    /// or a hidden directory is refused.
+    pub path: String,
+    /// The file's text; `None` removes it.
+    pub text: Option<String>,
 }
 
 /// Where an open safe house is and what it can tell.

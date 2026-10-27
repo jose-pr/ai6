@@ -846,6 +846,7 @@ pub(super) fn checkpoint_due(state: &DaemonState) {
             author_email: operation.cover_identity.as_ref().map(|i| i.email.clone()),
             branch: None,
             fallback: None,
+            files: None,
         };
         let state = state.clone();
         tokio::task::spawn_blocking(move || {

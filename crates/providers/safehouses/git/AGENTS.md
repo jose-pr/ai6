@@ -73,7 +73,10 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   `HEAD` is force-pushed to `fallback` and the answer's `branch` says so, or, without a
   fallback, the first refusal is the error. Nothing to commit and `HEAD` already on
   `<remote>/<b>` pushes nothing; an unborn `HEAD` with nothing written answers an empty
-  `commit`.
+  `commit`. With `files`, the index is set to `HEAD` and each file is written as a blob of
+  its own (`hash-object --no-filters --stdin`, `update-index --cacheinfo`; `None` removes it),
+  so exactly those texts are committed whatever the working tree holds; a path that is not a
+  `repository_path` is refused.
 - `exports()`: first `git fetch --prune --no-tags <remote>` for every configured remote (a
   remote that cannot be reached fails the call), then `unexported` lists `"<short id>
   <subject>"` for each commit in `<base>..HEAD` that none of those remotes' branches holds
