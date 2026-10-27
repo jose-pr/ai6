@@ -53,6 +53,7 @@ name = "ai6"
 version = "0.1.0"
 dependencies = [
  "ai6-diptel",
+ "ai6-safehouse-git",
  "axum",
  "clap",
  "coqui-access 0.1.0 (git+https://github.com/Boriken-Dev/coqui-access?rev=756310a6600a30fb1ddbe1b00e719da6396e81be)",
@@ -76,12 +77,14 @@ dependencies = [
  "ring",
  "rmcp",
  "rusqlite",
+ "rustix",
  "rustls",
  "rustls-native-certs",
  "schemars",
  "serde",
  "serde_json",
  "sha2",
+ "similar",
  "subtle",
  "sysinfo",
  "tempfile",
@@ -3639,6 +3642,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
 name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3866,7 +3875,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

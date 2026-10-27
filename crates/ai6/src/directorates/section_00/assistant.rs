@@ -10,12 +10,14 @@
 //!
 //! [`AgentStart::assistant`]: super::agent::AgentStart::assistant
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::agent::{AssistantMode, AssistantNetwork, McpServerRef};
-use crate::directorates::m::assistant::file_safe;
+use crate::directorates::m::assistant::{RepoKind, file_safe};
 
 /// The prefix of the environment variables holding the assistant's MCP endpoint
 /// (`AI6_MONEYPENNY_MCP_URL`, `AI6_MONEYPENNY_MCP_TOKEN`).
@@ -146,6 +148,197 @@ pub const EVENT_INTERRUPTED: &str = "interrupted";
 /// The Station closed the conversation's harness (idle, closed by request, or stopping). The
 /// provider Session can be resumed by a later job.
 pub const EVENT_CLOSED: &str = "closed";
+/// The assistant changed her memory (`memory/` of the personal repository) in a turn: the
+/// change was set aside, `text` is its unified diff and [`AssistantEvent::change`] the files.
+/// Universal Exports answers with an [`AssistantCommit`] of [`COMMIT_MEMORY`], or a proposal
+/// first.
+pub const EVENT_MEMORY_CHANGES: &str = "memory_changes";
+/// Something the person and the assistant should know about her workspace, in `text`: work
+/// saved to a branch of its own because `main` refused it, or a repository that could not be
+/// opened.
+pub const EVENT_NOTICE: &str = "notice";
+
+/// An [`AssistantCommit`] to the personal repository's `memory/`.
+pub const COMMIT_MEMORY: &str = "memory";
+/// An [`AssistantCommit`] to a shared repository.
+pub const COMMIT_SHARED: &str = "shared";
+/// The most bytes of file content one memory change or commit carries.
+pub const MAX_ASSISTANT_CHANGE_BYTES: usize = 64 * 1024;
+/// The most files one memory change or commit carries.
+pub const MAX_ASSISTANT_CHANGE_FILES: usize = 32;
+
+/// Where a person's conversation with the assistant keeps its work, sent with each message
+/// when the deployment gives people personal repositories (`[assistant] personal_repo`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantWorkspace {
+    /// The person's personal repository: her working directory and memory for them.
+    pub personal: String,
+    /// The shared repositories the person reads, by the name each is checked out under (a
+    /// directory group, or `org`).
+    #[serde(default)]
+    pub shared: BTreeMap<String, String>,
+    /// The name commits are authored with: the person's.
+    pub author_name: String,
+    /// The email commits are authored with: the person's.
+    pub author_email: String,
+    /// The conversation has read text others wrote, so a memory change waits for the person.
+    #[serde(default)]
+    pub exposed: bool,
+}
+
+/// A memory change the desk set aside, or the files of a commit: each path, relative to the
+/// repository, with its new text, or `None` to remove it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantChange {
+    /// The SHA-256 of the files, as [`AssistantChange::digest_of`] makes it, in hex.
+    pub digest: String,
+    /// The files.
+    pub files: BTreeMap<String, Option<String>>,
+}
+
+impl AssistantChange {
+    /// The change of `files`, with its digest.
+    pub fn new(files: BTreeMap<String, Option<String>>) -> Self {
+        Self {
+            digest: Self::digest_of(&files),
+            files,
+        }
+    }
+
+    /// The SHA-256, in hex, over each path and its text (or removal), in path order.
+    pub fn digest_of(files: &BTreeMap<String, Option<String>>) -> String {
+        let mut hasher = Sha256::new();
+        for (path, text) in files {
+            hasher.update((path.len() as u64).to_be_bytes());
+            hasher.update(path.as_bytes());
+            match text {
+                Some(text) => {
+                    hasher.update([1]);
+                    hasher.update((text.len() as u64).to_be_bytes());
+                    hasher.update(text.as_bytes());
+                }
+                None => hasher.update([0]),
+            }
+        }
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    /// Checks the change: at most [`MAX_ASSISTANT_CHANGE_FILES`] files and
+    /// [`MAX_ASSISTANT_CHANGE_BYTES`] of text, each path one to eight `/`-separated names of
+    /// letters, digits, `.`, `-` and `_` not starting with `.`, under `memory/` when `memory`,
+    /// and the digest matching.
+    ///
+    /// # Errors
+    ///
+    /// A message naming what is out of bounds.
+    pub fn validate(&self, memory: bool) -> Result<(), String> {
+        if self.files.is_empty() || self.files.len() > MAX_ASSISTANT_CHANGE_FILES {
+            return Err(format!(
+                "a change has 1 to {MAX_ASSISTANT_CHANGE_FILES} files"
+            ));
+        }
+        let bytes: usize = self.files.values().flatten().map(String::len).sum();
+        if bytes > MAX_ASSISTANT_CHANGE_BYTES {
+            return Err(format!(
+                "a change holds at most {MAX_ASSISTANT_CHANGE_BYTES} bytes of text"
+            ));
+        }
+        for path in self.files.keys() {
+            if !repository_path(path) || (memory && !path.starts_with("memory/")) {
+                return Err(format!("{path:?} is not a file this change may write"));
+            }
+        }
+        if Self::digest_of(&self.files) != self.digest {
+            return Err("the change's digest does not match its files".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// Whether `path` is a file path inside a repository that names no hidden or parent
+/// directory: one to eight `/`-separated names of letters, digits, `.`, `-` and `_`, none
+/// starting with `.`.
+pub fn repository_path(path: &str) -> bool {
+    let names: Vec<&str> = path.split('/').collect();
+    names.len() <= 8 && names.iter().all(|name| file_safe(name))
+}
+
+/// A commit Universal Exports asks a Station to make for a person: a memory change she made
+/// and the person let through, or a change to a shared repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantCommit {
+    /// [`COMMIT_MEMORY`] or [`COMMIT_SHARED`].
+    pub kind: String,
+    /// The repository: the person's personal repository, or a shared one.
+    pub repo: String,
+    /// What to write.
+    pub change: AssistantChange,
+    /// The commit message, its trailer included.
+    pub message: String,
+    /// The author name: the person's.
+    pub author_name: String,
+    /// The author email: the person's.
+    pub author_email: String,
+}
+
+impl AssistantCommit {
+    /// Checks the commit: a known kind, a repository of a known kind, the change as
+    /// [`AssistantChange::validate`] checks it, a message of 1 to 4,096 bytes and an author
+    /// without control characters or `<`, `>`.
+    ///
+    /// # Errors
+    ///
+    /// A message naming what is out of bounds.
+    pub fn validate(&self) -> Result<(), String> {
+        let memory = match self.kind.as_str() {
+            COMMIT_MEMORY => true,
+            COMMIT_SHARED => false,
+            other => return Err(format!("{other:?} is not a kind of commit")),
+        };
+        RepoKind::of(&self.repo)?;
+        self.change.validate(memory)?;
+        if self.message.trim().is_empty() || self.message.len() > 4_096 {
+            return Err("a commit message is 1 to 4096 bytes".to_owned());
+        }
+        author(&self.author_name, &self.author_email)
+    }
+}
+
+/// Checks a commit author: 1 to 256 bytes each, no control characters, `<` or `>`.
+fn author(name: &str, email: &str) -> Result<(), String> {
+    for value in [name, email] {
+        if !valid_identity(value) || value.contains(['<', '>']) {
+            return Err(format!("{value:?} cannot author a commit"));
+        }
+    }
+    Ok(())
+}
+
+impl AssistantWorkspace {
+    /// Checks the workspace: repositories of a known kind, shared names as directory names,
+    /// and an author as [`AssistantCommit::validate`] wants one.
+    ///
+    /// # Errors
+    ///
+    /// A message naming what is out of bounds.
+    pub fn validate(&self) -> Result<(), String> {
+        RepoKind::of(&self.personal)?;
+        for (name, repo) in &self.shared {
+            if !file_safe(name) {
+                return Err(format!("{name:?} cannot name a shared checkout"));
+            }
+            RepoKind::of(repo)?;
+        }
+        author(&self.author_name, &self.author_email)
+    }
+}
 
 /// One message for the assistant of one conversation, queued for a Station.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -188,13 +381,21 @@ pub struct AssistantJob {
     /// `message` is empty. A harness that is not answering is left as it is.
     #[serde(default)]
     pub interrupt: bool,
+    /// Where the conversation keeps its work; `None` keeps nothing, in an empty directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<AssistantWorkspace>,
+    /// Make this commit instead of sending a message; `message` is empty. The Station answers
+    /// `accepted` with where the commit landed, or `rejected` with why it did not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<AssistantCommit>,
 }
 
 impl AssistantJob {
     /// Checks the job's bounds: identities of 1 to 256 bytes without control characters, a
-    /// message within [`MAX_ASSISTANT_MESSAGE_BYTES`] (empty only to close or interrupt, which
-    /// a job does not both), context within [`MAX_ASSISTANT_CONTEXT_BYTES`] and a token of 32
-    /// to 512 bytes.
+    /// message within [`MAX_ASSISTANT_MESSAGE_BYTES`] (empty only to close, interrupt or
+    /// commit, of which a job does one), context within [`MAX_ASSISTANT_CONTEXT_BYTES`], a
+    /// token of 32 to 512 bytes, and a workspace and commit as their own `validate` checks
+    /// them.
     ///
     /// # Errors
     ///
@@ -216,13 +417,25 @@ impl AssistantJob {
         {
             return Err("session_id is empty, too long or has control characters".to_owned());
         }
-        if self.close && self.interrupt {
-            return Err("a job closes or interrupts, not both".to_owned());
+        let controls = [self.close, self.interrupt, self.commit.is_some()];
+        if controls.iter().filter(|set| **set).count() > 1 {
+            return Err("a job closes, interrupts or commits, only one".to_owned());
         }
+        let control = controls.contains(&true);
         if self.message.len() > MAX_ASSISTANT_MESSAGE_BYTES
-            || (self.message.trim().is_empty() && !self.close && !self.interrupt)
+            || (self.message.trim().is_empty() && !control)
         {
             return Err("message is empty or too long".to_owned());
+        }
+        if let Some(workspace) = &self.workspace {
+            workspace
+                .validate()
+                .map_err(|reason| format!("workspace: {reason}"))?;
+        }
+        if let Some(commit) = &self.commit {
+            commit
+                .validate()
+                .map_err(|reason| format!("commit: {reason}"))?;
         }
         let recap = self.recap.as_ref().map_or(0, String::len);
         if self.context.iter().map(String::len).sum::<usize>() + recap > MAX_ASSISTANT_CONTEXT_BYTES
@@ -258,6 +471,11 @@ impl fmt::Debug for AssistantJob {
             .field("session_id", &self.session_id)
             .field("close", &self.close)
             .field("interrupt", &self.interrupt)
+            .field("workspace", &self.workspace.is_some())
+            .field(
+                "commit",
+                &self.commit.as_ref().map(|commit| commit.kind.as_str()),
+            )
             .finish()
     }
 }
@@ -293,6 +511,9 @@ pub struct AssistantEvent {
     /// The tools a [`EVENT_TOOL`] event called, as the harness names them.
     #[serde(default)]
     pub tools: Vec<String>,
+    /// The memory change an [`EVENT_MEMORY_CHANGES`] event set aside.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<AssistantChange>,
 }
 
 impl AssistantEvent {
@@ -303,6 +524,7 @@ impl AssistantEvent {
             kind: kind.to_owned(),
             text: text.map(|text| cut(text, MAX_ASSISTANT_EVENT_BYTES)),
             tools: Vec::new(),
+            change: None,
         }
     }
 }
@@ -340,7 +562,85 @@ mod tests {
             session_id: None,
             close: false,
             interrupt: false,
+            workspace: None,
+            commit: None,
         }
+    }
+
+    fn change() -> AssistantChange {
+        AssistantChange::new(BTreeMap::from([(
+            "memory/prefs.md".to_owned(),
+            Some("tables".to_owned()),
+        )]))
+    }
+
+    fn commit() -> AssistantCommit {
+        AssistantCommit {
+            kind: COMMIT_MEMORY.to_owned(),
+            repo: "/srv/mp/eve.git".to_owned(),
+            change: change(),
+            message: "moneypenny: remember\n\nVia: Moneypenny (conversation c-1)".to_owned(),
+            author_name: "Eve".to_owned(),
+            author_email: "eve@example.invalid".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_commit_job_carries_one_bounded_change_and_nothing_else() {
+        let committing = AssistantJob {
+            message: String::new(),
+            commit: Some(commit()),
+            ..job()
+        };
+        assert_eq!(committing.validate(), Ok(()));
+        let mut both = committing.clone();
+        both.close = true;
+        assert!(both.validate().is_err(), "a job does one thing");
+
+        let mut forged = commit();
+        forged.change.files.insert("memory/x.md".to_owned(), None);
+        assert!(forged.validate().unwrap_err().contains("digest"));
+        let mut outside = commit();
+        outside.change = AssistantChange::new(BTreeMap::from([(
+            "notes/a.md".to_owned(),
+            Some("a".to_owned()),
+        )]));
+        assert!(
+            outside.validate().is_err(),
+            "a memory commit writes memory/ only"
+        );
+        outside.kind = COMMIT_SHARED.to_owned();
+        assert_eq!(outside.validate(), Ok(()));
+        for path in [".git/config", "memory/../x", "/etc/passwd", "a\\b"] {
+            let mut bad = commit();
+            bad.kind = COMMIT_SHARED.to_owned();
+            bad.change = AssistantChange::new(BTreeMap::from([(path.to_owned(), None)]));
+            assert!(bad.validate().is_err(), "{path}");
+        }
+        let mut large = commit();
+        large.change = AssistantChange::new(BTreeMap::from([(
+            "memory/big.md".to_owned(),
+            Some("x".repeat(MAX_ASSISTANT_CHANGE_BYTES + 1)),
+        )]));
+        assert!(large.validate().is_err());
+        let mut author = commit();
+        author.author_name = "Eve <evil@example.invalid>".to_owned();
+        assert!(author.validate().is_err());
+
+        let mut working = job();
+        working.workspace = Some(AssistantWorkspace {
+            personal: "ext::sh".to_owned(),
+            shared: BTreeMap::new(),
+            author_name: "Eve".to_owned(),
+            author_email: "eve@example.invalid".to_owned(),
+            exposed: false,
+        });
+        assert!(working.validate().is_err(), "a remote helper is refused");
+        let encoded = serde_json::to_value(&committing).unwrap();
+        assert_eq!(
+            serde_json::from_value::<AssistantJob>(encoded).unwrap(),
+            committing
+        );
     }
 
     #[test]

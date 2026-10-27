@@ -4,6 +4,8 @@
 
 #[cfg(feature = "daemon")]
 pub(crate) mod detached;
+#[cfg(feature = "daemon")]
+pub mod elevation;
 #[cfg(feature = "station-tls")]
 pub mod identity;
 #[cfg(feature = "daemon")]

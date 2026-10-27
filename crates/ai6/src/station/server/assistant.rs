@@ -12,17 +12,24 @@
 //! fails, when asked or before the resumed harness confirms its Session, goes to the
 //! Station's log and the conversation starts afresh with its recap.
 //!
-//! An assistant Session is not a Mission: it has no Operation, no safe house and no Cable
-//! endpoint, and is never on the board. It works in a directory of its own, named for its
-//! conversation inside one the desk made readable by the Station's user only: the same
-//! directory each time the conversation's harness starts, because Claude Code finds a Session
-//! to resume only from the directory it was recorded in. The directory goes when the harness
-//! closes.
+//! An assistant Session is not a Mission: it has no Operation and no Cable endpoint, and is
+//! never on the board. It works in a directory of its own, named for its conversation inside
+//! one the desk made readable by the Station's user only: the same directory each time the
+//! conversation's harness starts, because Claude Code finds a Session to resume only from the
+//! directory it was recorded in. The directory goes when the harness closes. A job that names
+//! a workspace fills it with the person's repositories and saves her work after each answer
+//! ([`workspace`]).
+//!
+//! A Station running elevated (root, or an administrator's elevated token) refuses every job
+//! unless the roster's `assistant.allow_elevated` is set, which is logged as a weakening each
+//! time a harness starts.
+
+mod workspace;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
@@ -39,10 +46,12 @@ use crate::directorates::section_00::agent::{
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
-    AssistantJob, AssistantReport, EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED,
-    EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
+    AssistantJob, AssistantReport, COMMIT_MEMORY, EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED,
+    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
+    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
 };
 use crate::guatiao::library::Object;
+use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
 
 /// How long a harness may wait for the next message before the desk closes it.
 pub(super) const IDLE: Duration = Duration::from_secs(10 * 60);
@@ -70,6 +79,20 @@ type SharedSession = Arc<Mutex<Object<dyn AgentSession>>>;
 
 /// Sends one report to Universal Exports; it must not block for long.
 pub(super) type Reporter = Arc<dyn Fn(AssistantReport) + Send + Sync>;
+
+/// Tells whether the Station runs elevated: [`crate::station::elevation::is_elevated`], or a
+/// test's.
+type ElevationProbe = Arc<dyn Fn() -> std::io::Result<bool> + Send + Sync>;
+
+/// Writes one line to the Station's log, `ai6: ` added.
+type Logger = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// A conversation's workspace, shared by the desk (a turn starts, a commit arrives) and its
+/// pump (a turn ends, the harness closes).
+type SharedWorkspace = Arc<Mutex<Workspace>>;
+
+/// A running harness: its Session, flags, token expiry and workspace.
+type Running = (SharedSession, Arc<Flags>, f64, Option<SharedWorkspace>);
 
 /// Starts and resumes harnesses: the Station's own handlers and terminal, or a test's.
 pub(super) trait Harness: Send + Sync {
@@ -181,6 +204,7 @@ struct Live {
     session: SharedSession,
     token_expires_at: f64,
     flags: Arc<Flags>,
+    workspace: Option<SharedWorkspace>,
 }
 
 /// The assistant Sessions of one Station.
@@ -195,6 +219,12 @@ pub(super) struct Desk {
     known: Arc<Mutex<BTreeMap<String, String>>>,
     /// Where the conversations' working directories go, made at the first start.
     areas: Mutex<Option<PathBuf>>,
+    /// Opens the safe houses of the workspaces' repositories.
+    houses: Houses,
+    elevated: ElevationProbe,
+    /// The probe's answer, asked once; an error counts as elevated.
+    elevation: OnceLock<bool>,
+    log: Logger,
 }
 
 impl Desk {
@@ -204,6 +234,7 @@ impl Desk {
         report: Reporter,
         mcp_url: String,
     ) -> Self {
+        let plugins = state.plugins.clone();
         Self {
             state,
             harness,
@@ -214,6 +245,14 @@ impl Desk {
             live: Arc::default(),
             known: Arc::default(),
             areas: Mutex::default(),
+            houses: Arc::new(move || {
+                plugins
+                    .safehouse(workspace::PROVIDER, None)
+                    .map_err(|error| error.to_string())
+            }),
+            elevated: Arc::new(crate::station::elevation::is_elevated),
+            elevation: OnceLock::new(),
+            log: Arc::new(|line| eprintln!("ai6: {line}")),
         }
     }
 
@@ -224,11 +263,37 @@ impl Desk {
         self
     }
 
-    /// Takes one job and reports whether the harness has the message.
+    #[cfg(test)]
+    fn with_elevation(mut self, probe: ElevationProbe, log: Logger) -> Self {
+        self.elevated = probe;
+        self.log = log;
+        self
+    }
+
+    /// Whether the Station runs elevated, asked once; an error counts as elevated.
+    fn elevated(&self) -> bool {
+        *self
+            .elevation
+            .get_or_init(|| (self.elevated)().unwrap_or(true))
+    }
+
+    /// Refuses every job on an elevated Station unless `assistant.allow_elevated` is set.
+    fn check_elevation(&self) -> Result<(), String> {
+        if !self.elevated() || self.state.current().roster.assistant().allow_elevated() {
+            return Ok(());
+        }
+        Err(
+            "this Station runs elevated (as root or with an administrator's elevated token) \
+             and assistant.allow_elevated is false, so Moneypenny does not run here"
+                .to_owned(),
+        )
+    }
+
+    /// Takes one job and reports whether the harness has the message, or how a commit went.
     pub(super) async fn handle(&self, job: AssistantJob) {
         let outcome = self.take(&job).await;
         let event = match outcome {
-            Ok(()) => AssistantEvent::new(EVENT_ACCEPTED, None),
+            Ok(text) => AssistantEvent::new(EVENT_ACCEPTED, text),
             Err(reason) => AssistantEvent::new(EVENT_REJECTED, Some(reason)),
         };
         let session_id = self.known_session(&job.conversation_id);
@@ -241,17 +306,21 @@ impl Desk {
         });
     }
 
-    async fn take(&self, job: &AssistantJob) -> Result<(), String> {
+    async fn take(&self, job: &AssistantJob) -> Result<Option<String>, String> {
         job.validate()?;
+        self.check_elevation()?;
         if job.close {
             self.close(&job.conversation_id);
-            return Ok(());
+            return Ok(None);
         }
         if job.interrupt {
-            return self.interrupt(&job.conversation_id).await;
+            return self.interrupt(&job.conversation_id).await.map(|()| None);
+        }
+        if job.commit.is_some() {
+            return self.commit(job).await.map(Some);
         }
         let running = self.running(&job.conversation_id);
-        if let Some((session, flags, expires)) = running {
+        if let Some((session, flags, expires, workspace)) = running {
             if expires > unix_now() + TOKEN_MARGIN_SECS {
                 flags.interrupting.store(false, Ordering::Release);
                 flags.busy.store(true, Ordering::Release);
@@ -261,6 +330,13 @@ impl Desk {
                     .map_err(|_| "assistant lock failed".to_owned())? = Instant::now();
                 let text = job.message.clone();
                 return tokio::task::spawn_blocking(move || {
+                    // The turn's memory copy is taken before the harness can read the message.
+                    if let Some(workspace) = &workspace {
+                        workspace
+                            .lock()
+                            .map_err(|_| "assistant workspace lock failed".to_owned())?
+                            .begin_turn();
+                    }
                     session
                         .lock()
                         .map_err(|_| "assistant Session lock failed".to_owned())?
@@ -268,7 +344,8 @@ impl Desk {
                         .map_err(|error| error.to_string())
                 })
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| error.to_string())?
+                .map(|()| None);
             }
             // Its token is about to expire: the harness starts again with the job's.
             self.close(&job.conversation_id);
@@ -283,7 +360,37 @@ impl Desk {
         {
             return Err("the conversation's previous harness is still closing".to_owned());
         }
-        self.begin(job).await
+        self.begin(job).await.map(|()| None)
+    }
+
+    /// Makes a job's commit: a memory change in the conversation's running workspace when it
+    /// has one here, so its next turn starts from it, else in a clone of the commit's own.
+    /// Answers where it landed.
+    async fn commit(&self, job: &AssistantJob) -> Result<String, String> {
+        let commit = job.commit.clone().ok_or("the job has no commit")?;
+        let workspace = self
+            .live
+            .lock()
+            .map_err(|_| "assistant lock failed")?
+            .get(&job.conversation_id)
+            .and_then(|live| live.workspace.clone());
+        let houses = self.houses.clone();
+        let digest = conversation_digest(&job.conversation_id);
+        tokio::task::spawn_blocking(move || {
+            if commit.kind == COMMIT_MEMORY
+                && let Some(workspace) = workspace
+            {
+                let mut workspace = workspace
+                    .lock()
+                    .map_err(|_| "assistant workspace lock failed".to_owned())?;
+                if workspace.repo() == commit.repo {
+                    return workspace.apply(&commit);
+                }
+            }
+            workspace::commit_once(&houses, &commit, &digest)
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     /// Starts or resumes the conversation's harness with the job's message.
@@ -308,6 +415,19 @@ impl Desk {
             return Err("this Station runs as many assistant Sessions as it may".to_owned());
         }
         let area = self.area(&job.conversation_id)?;
+        if self.elevated() {
+            (self.log)(
+                "weakening: assistant.allow_elevated = true: Moneypenny's harness starts on \
+                 this elevated Station",
+            );
+        }
+        let (mode, workspace, notices) = match self.workspace(job, &area).await {
+            Ok(prepared) => prepared,
+            Err(reason) => {
+                remove_area(&area);
+                return Err(reason);
+            }
+        };
         // As a Chief of Staff review, the harness keeps only what reaches its model.
         let mut environment = vetting::review_environment(&agent.env);
         environment.insert(ASSISTANT_MCP_URL_ENV.to_owned(), self.mcp_url.clone());
@@ -343,7 +463,7 @@ impl Desk {
             project_settings: false,
             project_mcp: false,
             answer_only: false,
-            assistant: Some(AssistantMode::moneypenny()),
+            assistant: Some(mode.clone()),
         };
         let resume = previous
             .and_then(|previous| SessionId::try_new(previous).ok())
@@ -359,7 +479,7 @@ impl Desk {
                 project_settings: false,
                 project_mcp: false,
                 answer_only: false,
-                assistant: Some(AssistantMode::moneypenny()),
+                assistant: Some(mode),
                 initial_context,
             });
         let harness = self.harness.clone();
@@ -419,6 +539,7 @@ impl Desk {
                     session: session.clone(),
                     token_expires_at: job.token_expires_at,
                     flags: flags.clone(),
+                    workspace: workspace.clone(),
                 },
             );
         let pump = Pump {
@@ -433,6 +554,8 @@ impl Desk {
             known: self.known.clone(),
             stopping: state.stopping.clone(),
             fallback,
+            workspace,
+            notices,
         };
         std::thread::Builder::new()
             .name("ai6-assistant".to_owned())
@@ -441,7 +564,7 @@ impl Desk {
         Ok(())
     }
 
-    fn running(&self, conversation: &str) -> Option<(SharedSession, Arc<Flags>, f64)> {
+    fn running(&self, conversation: &str) -> Option<Running> {
         let live = self.live.lock().ok()?;
         let entry = live.get(conversation)?;
         entry.flags.alive.load(Ordering::Acquire).then(|| {
@@ -449,15 +572,53 @@ impl Desk {
                 entry.session.clone(),
                 entry.flags.clone(),
                 entry.token_expires_at,
+                entry.workspace.clone(),
             )
         })
+    }
+
+    /// The mode a job's harness starts in, and its workspace with the notices preparing it
+    /// left: Moneypenny's own tools only without one; with one, the repositories cloned into
+    /// `area` and the file tools for `personal/` and `scratch/`.
+    async fn workspace(
+        &self,
+        job: &AssistantJob,
+        area: &str,
+    ) -> Result<(AssistantMode, Option<SharedWorkspace>, Vec<String>), String> {
+        let Some(wanted) = job.workspace.clone() else {
+            return Ok((AssistantMode::moneypenny(), None, Vec::new()));
+        };
+        let area = PathBuf::from(area);
+        let context = context_file(&area).ok_or("the conversation's directory has no parent")?;
+        let houses = self.houses.clone();
+        let conversation = job.conversation_id.clone();
+        let digest = conversation_digest(&conversation);
+        let file = context.clone();
+        let (workspace, notices) = tokio::task::spawn_blocking(move || {
+            Workspace::prepare(&houses, &area, &file, &conversation, &digest, &wanted)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|reason| format!("the assistant's workspace could not be prepared: {reason}"))?;
+        for notice in &notices {
+            (self.log)(&format!(
+                "assistant conversation {}: {notice}",
+                conversation_digest(&job.conversation_id)
+            ));
+        }
+        let mode = AssistantMode {
+            files: vec![PERSONAL.to_owned(), SCRATCH.to_owned()],
+            context_file: Some(context.to_string_lossy().into_owned()),
+            ..AssistantMode::moneypenny()
+        };
+        Ok((mode, Some(Arc::new(Mutex::new(workspace))), notices))
     }
 
     /// Stops the answer the conversation's harness is giving, through its handler's
     /// interrupt; its pump reports `interrupted` when the turn ends. A harness that is not
     /// answering, or not running here, is left as it is.
     async fn interrupt(&self, conversation: &str) -> Result<(), String> {
-        let Some((session, flags, _)) = self.running(conversation) else {
+        let Some((session, flags, _, _)) = self.running(conversation) else {
             return Ok(());
         };
         if !flags.busy.load(Ordering::Acquire) {
@@ -546,6 +707,10 @@ struct Pump {
     /// For a resumed harness, how to start afresh should it fail before confirming the
     /// provider Session.
     fallback: Option<Fallback>,
+    /// The conversation's workspace, whose turn ends with each `completed` and at close.
+    workspace: Option<SharedWorkspace>,
+    /// What preparing the workspace left to tell, sent with the first event.
+    notices: Vec<String>,
 }
 
 /// A fresh start for a conversation whose harness was resumed.
@@ -608,7 +773,14 @@ impl Pump {
                     heard = Instant::now();
                     let ended = matches!(event.kind.as_str(), "failed" | LIMIT_EVENT);
                     let mut stopped = false;
+                    let mut events: Vec<AssistantEvent> = std::mem::take(&mut self.notices)
+                        .into_iter()
+                        .map(|notice| AssistantEvent::new(EVENT_NOTICE, Some(notice)))
+                        .collect();
                     if event.kind == "completed" {
+                        // The work is saved before the turn is reported over, so the next
+                        // message's turn starts from it.
+                        events.extend(self.end_turn());
                         self.flags.busy.store(false, Ordering::Release);
                         if let Ok(mut last) = self.flags.last_active.lock() {
                             *last = Instant::now();
@@ -620,8 +792,9 @@ impl Pump {
                     } else {
                         translate(&event)
                     };
-                    if let Some(event) = shown {
-                        self.send(session_id.as_ref(), vec![event]);
+                    events.extend(shown);
+                    if !events.is_empty() {
+                        self.send(session_id.as_ref(), events);
                     }
                     if ended {
                         break Some("the harness stopped".to_owned());
@@ -664,6 +837,11 @@ impl Pump {
         if let Ok(session) = self.session.lock() {
             let _ = session.close();
         }
+        // What the closed harness left is saved before its directory goes.
+        let saved = self.end_turn();
+        if !saved.is_empty() {
+            self.send(session_id.as_ref(), saved);
+        }
         remove_area(&self.area);
         if let Ok(mut live) = self.live.lock()
             && live
@@ -698,6 +876,30 @@ impl Pump {
                  failed too: {error}"
             )),
         }
+    }
+
+    /// Ends the workspace's turn: the events saying what was set aside or should be known.
+    fn end_turn(&self) -> Vec<AssistantEvent> {
+        let Some(workspace) = &self.workspace else {
+            return Vec::new();
+        };
+        let Ok(mut workspace) = workspace.lock() else {
+            return vec![AssistantEvent::new(
+                EVENT_NOTICE,
+                Some("Moneypenny's workspace could not be saved: its lock failed.".to_owned()),
+            )];
+        };
+        let TurnEnd { memory, notices } = workspace.end_turn();
+        let mut events: Vec<AssistantEvent> = notices
+            .into_iter()
+            .map(|notice| AssistantEvent::new(EVENT_NOTICE, Some(notice)))
+            .collect();
+        if let Some((change, diff)) = memory {
+            let mut event = AssistantEvent::new(EVENT_MEMORY_CHANGES, Some(diff));
+            event.change = Some(change);
+            events.push(event);
+        }
+        events
     }
 
     fn remember(&self, session_id: &str) {
@@ -785,7 +987,15 @@ fn new_root() -> Result<PathBuf, String> {
         .keep())
 }
 
-/// Removes a conversation's directory [`Desk::area`] made, and nothing else.
+/// The file beside a conversation's directory that holds its harness's standing context:
+/// outside the directory, so nothing the harness writes there reaches its system prompt.
+fn context_file(area: &Path) -> Option<PathBuf> {
+    let name = area.file_name()?.to_str()?;
+    Some(area.parent()?.join(format!("{name}.context.md")))
+}
+
+/// Removes a conversation's directory [`Desk::area`] made, and its context file, and nothing
+/// else.
 fn remove_area(path: &str) {
     let path = Path::new(path);
     let root = path.parent();
@@ -800,6 +1010,9 @@ fn remove_area(path: &str) {
             .is_some_and(|name| name.len() == 32 && name.bytes().all(|b| b.is_ascii_hexdigit()));
     if !made_here {
         return;
+    }
+    if let Some(context) = context_file(path) {
+        let _ = std::fs::remove_file(context);
     }
     // Windows refuses to remove a directory a process still has open (os error 32), which a
     // harness's processes do for a moment after they have exited, so it is tried again.
@@ -821,6 +1034,33 @@ fn remove_area(path: &str) {
                 return;
             }
         }
+    }
+}
+
+/// Whether this Station runs elevated, asked once for its life; an error counts as elevated.
+fn station_elevated() -> bool {
+    static ELEVATED: OnceLock<bool> = OnceLock::new();
+    *ELEVATED.get_or_init(|| crate::station::elevation::is_elevated().unwrap_or(true))
+}
+
+/// Each way the roster's `[assistant]` settings are looser than the default, and this Station
+/// running elevated when they let Moneypenny run on it, as the check-in reports them.
+pub(super) fn weakenings(roster: &crate::directorates::m::roster::Roster) -> Vec<String> {
+    let mut weakened = roster.assistant().weakenings();
+    if roster.assistant().allow_elevated() && station_elevated() {
+        weakened.push(
+            "this Station runs elevated, and assistant.allow_elevated lets Moneypenny's harness \
+             run on it"
+                .to_owned(),
+        );
+    }
+    weakened
+}
+
+/// Lists [`weakenings`] for the operator.
+pub(super) fn log_weakenings(roster: &crate::directorates::m::roster::Roster) {
+    for weakened in weakenings(roster) {
+        eprintln!("ai6: weakening: {weakened}");
     }
 }
 
@@ -981,6 +1221,9 @@ mod tests {
 
     use super::super::tests::test_state;
     use super::*;
+    use crate::directorates::section_00::assistant::{
+        AssistantChange, AssistantCommit, AssistantWorkspace, COMMIT_SHARED,
+    };
     use crate::guatiao::library::ProviderError;
 
     /// Each start and resume, as the harness was asked for it.
@@ -1004,7 +1247,12 @@ mod tests {
         /// Starts answering and completes only when interrupted, as Claude Code and Codex end
         /// an interrupted turn.
         Works,
+        /// Writes a note and a memory in `personal/`, then answers and completes.
+        Writes,
     }
+
+    /// What [`Script::Writes`] puts in her memory.
+    const PREFERENCE: &str = "The person prefers tables over prose.\n";
 
     /// A harness that does what `script` says with every message; a resumed one does what
     /// `resumed` says, and one that dies when resumed never confirms its Session.
@@ -1020,6 +1268,8 @@ mod tests {
         events: Mutex<VecDeque<AgentEvent>>,
         asked: Arc<Mutex<Asked>>,
         script: Script,
+        /// The working directory it was started in.
+        dir: PathBuf,
     }
 
     /// The `failed` text a dying scripted harness reports.
@@ -1054,6 +1304,21 @@ mod tests {
                 Script::Hangs => {}
                 Script::Works => {
                     events.push_back(event(EVENT_TEXT, Some(&format!("working on: {message}"))));
+                }
+                Script::Writes => {
+                    let personal = self.dir.join(PERSONAL);
+                    std::fs::create_dir_all(personal.join("notes")).unwrap();
+                    std::fs::write(personal.join("notes").join("a.md"), message).unwrap();
+                    let memory = personal.join("memory");
+                    std::fs::write(memory.join("prefs.md"), PREFERENCE).unwrap();
+                    let index = std::fs::read_to_string(memory.join("MEMORY.md")).unwrap();
+                    std::fs::write(
+                        memory.join("MEMORY.md"),
+                        format!("{index}\n- prefs.md: {PREFERENCE}"),
+                    )
+                    .unwrap();
+                    events.push_back(event(EVENT_TEXT, Some("Noted.")));
+                    events.push_back(event("completed", Some("Noted.")));
                 }
             }
         }
@@ -1109,12 +1374,14 @@ mod tests {
             request: AgentStart,
         ) -> Result<Object<dyn AgentSession>, String> {
             let message = request.prompt.clone();
+            let dir = PathBuf::from(&request.working_directory);
             self.asked.lock().unwrap().starts.push(request);
             let session = ScriptedSession {
                 session_id: Some(SessionId::try_new("provider-assistant-1").unwrap()),
                 events: Mutex::default(),
                 asked: self.asked.clone(),
                 script: self.script,
+                dir,
             };
             session.answer(&message);
             Ok(session.into_object())
@@ -1130,12 +1397,14 @@ mod tests {
             }
             let message = request.message.clone().unwrap_or_default();
             let session_id = request.session_id.clone();
+            let dir = PathBuf::from(&request.working_directory);
             self.asked.lock().unwrap().resumes.push(request);
             let session = ScriptedSession {
                 session_id: (self.resumed != Script::Dies).then_some(session_id),
                 events: Mutex::default(),
                 asked: self.asked.clone(),
                 script: self.resumed,
+                dir,
             };
             session.answer(&message);
             Ok(session.into_object())
@@ -1151,7 +1420,17 @@ mod tests {
         desk: Desk,
         asked: Arc<Mutex<Asked>>,
         reports: Arc<Mutex<Vec<AssistantReport>>>,
+        /// What the desk wrote to the Station's log.
+        logged: Arc<Mutex<Vec<String>>>,
         _root: tempfile::TempDir,
+    }
+
+    impl Fixture {
+        /// The desk with the real `git` safe-house provider.
+        fn with_git(mut self) -> Self {
+            self.desk.houses = git_houses();
+            self
+        }
     }
 
     impl Drop for Fixture {
@@ -1168,11 +1447,27 @@ mod tests {
     }
 
     fn scripted(resumable: bool, idle: Duration, script: Script, resumed: Script) -> Fixture {
+        on_station(AGENTS, Ok(false), resumable, idle, script, resumed)
+    }
+
+    /// A desk on a Station whose roster's agents file is `agents` and whose elevation probe
+    /// answers `elevated` (the CI hosts' own answer differs by platform).
+    fn on_station(
+        agents: &str,
+        elevated: std::io::Result<bool>,
+        resumable: bool,
+        idle: Duration,
+        script: Script,
+        resumed: Script,
+    ) -> Fixture {
         let root = tempfile::tempdir().unwrap();
-        let state = test_state(root.path(), "", AGENTS);
+        let state = test_state(root.path(), "", agents);
         let asked = Arc::new(Mutex::new(Asked::default()));
         let reports = Arc::new(Mutex::new(Vec::new()));
         let sink = reports.clone();
+        let logged = Arc::new(Mutex::new(Vec::new()));
+        let log = logged.clone();
+        let elevated = Arc::new(Mutex::new(Some(elevated)));
         let desk = Desk::new(
             state,
             Arc::new(Scripted {
@@ -1184,13 +1479,131 @@ mod tests {
             Arc::new(move |report| sink.lock().unwrap().push(report)),
             "https://exports.example/v1/moneypenny/mcp".to_owned(),
         )
-        .with_limits(idle, 2);
+        .with_limits(idle, 2)
+        .with_elevation(
+            Arc::new(move || elevated.lock().unwrap().take().expect("the desk asks once")),
+            Arc::new(move |line: &str| log.lock().unwrap().push(line.to_owned())),
+        );
         Fixture {
             desk,
             asked,
             reports,
+            logged,
             _root: root,
         }
+    }
+
+    /// The `git` safe-house provider built beside the test binary, loaded from a copy of its
+    /// own: a library a test loads stays mapped, and locked on Windows, for the process.
+    fn git_houses() -> Houses {
+        static PLUGINS: OnceLock<Arc<crate::station::plugins::Plugins>> = OnceLock::new();
+        let plugins = PLUGINS
+            .get_or_init(|| {
+                let deps = std::env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .to_path_buf();
+                let library = std::fs::read_dir(&deps)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .filter(|path| {
+                        path.extension()
+                            .is_some_and(|extension| extension == std::env::consts::DLL_EXTENSION)
+                            && path.file_name().is_some_and(|name| {
+                                name.to_string_lossy().contains("ai6_safehouse_git")
+                            })
+                    })
+                    .max_by_key(|path| std::fs::metadata(path).and_then(|m| m.modified()).ok())
+                    .expect("the git safe-house provider is built beside the test binary");
+                let parent = deps.join("plugin-scratch");
+                std::fs::create_dir_all(&parent).unwrap();
+                let scratch = tempfile::Builder::new()
+                    .prefix("assistant-git-")
+                    .tempdir_in(parent)
+                    .unwrap()
+                    .keep();
+                std::fs::copy(&library, scratch.join(library.file_name().unwrap())).unwrap();
+                Arc::new(crate::station::plugins::Plugins::scan(&[scratch]))
+            })
+            .clone();
+        Arc::new(move || {
+            plugins
+                .safehouse(workspace::PROVIDER, None)
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    /// Runs `git` in `cwd` and answers what it printed.
+    fn git(cwd: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    fn workspace(personal: &Path) -> AssistantWorkspace {
+        AssistantWorkspace {
+            personal: personal.to_string_lossy().into_owned(),
+            shared: BTreeMap::new(),
+            author_name: "Eve Moneypenny".to_owned(),
+            author_email: "eve@example.invalid".to_owned(),
+            exposed: false,
+        }
+    }
+
+    /// A message job of a conversation whose workspace is `workspace`.
+    fn working(conversation: &str, message: &str, workspace: AssistantWorkspace) -> AssistantJob {
+        AssistantJob {
+            workspace: Some(workspace),
+            ..job(conversation, message)
+        }
+    }
+
+    /// A job that commits `change` to `repo` as the person.
+    fn committing(
+        conversation: &str,
+        kind: &str,
+        repo: &Path,
+        change: AssistantChange,
+    ) -> AssistantJob {
+        AssistantJob {
+            job_id: format!("commit-{}", &change.digest[..8]),
+            message: String::new(),
+            context: Vec::new(),
+            recap: None,
+            commit: Some(AssistantCommit {
+                kind: kind.to_owned(),
+                repo: repo.to_string_lossy().into_owned(),
+                change,
+                message: format!(
+                    "moneypenny: remember\n\nVia: Moneypenny (conversation {conversation})"
+                ),
+                author_name: "Eve Moneypenny".to_owned(),
+                author_email: "eve@example.invalid".to_owned(),
+            }),
+            ..job(conversation, "unused")
+        }
+    }
+
+    /// The events reported for `conversation`, oldest first.
+    fn events(fixture: &Fixture, conversation: &str) -> Vec<AssistantEvent> {
+        fixture
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|report| report.conversation_id == conversation)
+            .flat_map(|report| report.events.clone())
+            .collect()
     }
 
     fn job(conversation: &str, message: &str) -> AssistantJob {
@@ -1206,6 +1619,8 @@ mod tests {
             session_id: None,
             close: false,
             interrupt: false,
+            workspace: None,
+            commit: None,
         }
     }
 
@@ -1650,5 +2065,340 @@ mod tests {
         assert!(!area.exists());
         holder.wait().unwrap();
         std::fs::remove_dir(root).unwrap();
+    }
+
+    /// The memory change a conversation's events set aside.
+    fn set_aside(fixture: &Fixture, conversation: &str) -> (AssistantChange, String) {
+        let event = events(fixture, conversation)
+            .into_iter()
+            .find(|event| event.kind == EVENT_MEMORY_CHANGES)
+            .expect("a memory change");
+        (event.change.unwrap(), event.text.unwrap())
+    }
+
+    #[tokio::test]
+    async fn a_turn_commits_her_work_to_main_and_her_memory_once_it_is_let_through() {
+        let fixture = scripted(true, IDLE, Script::Writes, Script::Answers).with_git();
+        let people = tempfile::tempdir().unwrap();
+        let bare = people.path().join("eve.git");
+        fixture
+            .desk
+            .handle(working(
+                "c-w",
+                "Remember that I like tables.",
+                workspace(&bare),
+            ))
+            .await;
+        until(|| kinds(&fixture, "c-w").contains(&EVENT_COMPLETED.to_owned())).await;
+        let shown = kinds(&fixture, "c-w");
+        assert_eq!(
+            shown,
+            [
+                EVENT_ACCEPTED,
+                EVENT_TEXT,
+                EVENT_MEMORY_CHANGES,
+                EVENT_COMPLETED
+            ],
+            "the work is saved before the turn is reported over"
+        );
+
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let mode = start.assistant.clone().unwrap();
+        assert_eq!(mode.files, ["personal", "scratch"]);
+        let area = PathBuf::from(&start.working_directory);
+        let context = PathBuf::from(mode.context_file.unwrap());
+        assert_eq!(
+            context.parent(),
+            area.parent(),
+            "beside, not inside, the directory"
+        );
+        assert!(area.join("scratch").is_dir());
+        let claude = std::fs::read_to_string(area.join("CLAUDE.md")).unwrap();
+        assert!(claude.contains("@personal/memory/MEMORY.md"), "{claude}");
+
+        // Her note is on main, as the person, with the trailer; her memory is not, yet.
+        assert!(
+            bare.join("HEAD").exists(),
+            "the repository was made on first use"
+        );
+        let files = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+        assert!(
+            files.contains("notes/a.md") && files.contains("memory/MEMORY.md"),
+            "{files}"
+        );
+        assert!(!files.contains("memory/prefs.md"), "{files}");
+        let head = git(&bare, &["log", "-1", "--format=%an <%ae>%n%B", "main"]);
+        assert!(
+            head.starts_with("Eve Moneypenny <eve@example.invalid>\nmoneypenny: update notes/a.md"),
+            "{head}"
+        );
+        assert!(
+            head.contains("Via: Moneypenny (conversation c-w)"),
+            "{head}"
+        );
+        let memory = area.join("personal").join("memory");
+        assert!(
+            !memory.join("prefs.md").exists(),
+            "set aside in the working copy too"
+        );
+        assert!(
+            !std::fs::read_to_string(memory.join("MEMORY.md"))
+                .unwrap()
+                .contains(PREFERENCE)
+        );
+
+        let (change, diff) = set_aside(&fixture, "c-w");
+        assert_eq!(
+            change.files.get("memory/prefs.md"),
+            Some(&Some(PREFERENCE.to_owned()))
+        );
+        assert!(
+            change.files["memory/MEMORY.md"]
+                .as_ref()
+                .unwrap()
+                .contains(PREFERENCE)
+        );
+        assert!(diff.contains("+++ b/memory/prefs.md"), "{diff}");
+
+        // Let through, it lands on main beside her note and in the running workspace.
+        fixture
+            .desk
+            .handle(committing("c-w", COMMIT_MEMORY, &bare, change))
+            .await;
+        let landed = events(&fixture, "c-w")
+            .into_iter()
+            .rfind(|event| event.kind == EVENT_ACCEPTED)
+            .and_then(|event| event.text)
+            .unwrap();
+        assert!(landed.starts_with("committed "), "{landed}");
+        let files = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+        assert!(
+            files.contains("notes/a.md") && files.contains("memory/prefs.md"),
+            "{files}"
+        );
+        let head = git(&bare, &["log", "-1", "--format=%an%n%B", "main"]);
+        assert!(
+            head.starts_with("Eve Moneypenny\nmoneypenny: remember"),
+            "{head}"
+        );
+        assert!(
+            head.contains("Via: Moneypenny (conversation c-w)"),
+            "{head}"
+        );
+        assert!(memory.join("prefs.md").exists());
+
+        // The next message's turn starts from it: nothing is set aside again.
+        fixture
+            .desk
+            .handle(working("c-w", "Thanks.", workspace(&bare)))
+            .await;
+        until(|| {
+            kinds(&fixture, "c-w")
+                .iter()
+                .filter(|kind| *kind == EVENT_COMPLETED)
+                .count()
+                == 2
+        })
+        .await;
+        let changes: Vec<AssistantChange> = events(&fixture, "c-w")
+            .into_iter()
+            .filter_map(|event| event.change)
+            .collect();
+        assert_eq!(changes.len(), 2);
+        assert_eq!(
+            changes[1].files.keys().collect::<Vec<_>>(),
+            ["memory/MEMORY.md"],
+            "prefs.md is as committed; only the index she wrote again is set aside"
+        );
+
+        // Closed, its directory and context file go; the next conversation reads her memory.
+        fixture.desk.close_all();
+        until(|| kinds(&fixture, "c-w").contains(&EVENT_CLOSED.to_owned())).await;
+        until(|| !area.exists() && !context.exists()).await;
+        let next = scripted(true, IDLE, Script::Answers, Script::Answers).with_git();
+        next.desk
+            .handle(working("c-next", "What do I like?", workspace(&bare)))
+            .await;
+        until(|| kinds(&next, "c-next").contains(&EVENT_COMPLETED.to_owned())).await;
+        let start = next.asked.lock().unwrap().starts[0].clone();
+        let area = PathBuf::from(&start.working_directory);
+        let claude = std::fs::read_to_string(area.join("CLAUDE.md")).unwrap();
+        assert!(claude.contains("@personal/memory/MEMORY.md"), "{claude}");
+        let index = std::fs::read_to_string(area.join("personal").join("memory").join("MEMORY.md"))
+            .unwrap();
+        assert!(index.contains(PREFERENCE), "{index}");
+        let context =
+            std::fs::read_to_string(start.assistant.unwrap().context_file.unwrap()).unwrap();
+        assert!(
+            context.contains(PREFERENCE),
+            "the harness's system prompt holds it: {context}"
+        );
+        next.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_memory_change_nobody_lets_through_never_reaches_the_repository() {
+        let fixture = scripted(true, IDLE, Script::Writes, Script::Answers).with_git();
+        let people = tempfile::tempdir().unwrap();
+        let bare = people.path().join("eve.git");
+        let exposed = AssistantWorkspace {
+            exposed: true,
+            ..workspace(&bare)
+        };
+        fixture
+            .desk
+            .handle(working("c-x", "Remember this.", exposed))
+            .await;
+        until(|| kinds(&fixture, "c-x").contains(&EVENT_COMPLETED.to_owned())).await;
+        let (change, _) = set_aside(&fixture, "c-x");
+        assert!(change.files.contains_key("memory/prefs.md"));
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let agents =
+            std::fs::read_to_string(Path::new(&start.working_directory).join("AGENTS.md")).unwrap();
+        assert!(
+            agents.contains("waits until the person confirms"),
+            "{agents}"
+        );
+        fixture.desk.close_all();
+        until(|| kinds(&fixture, "c-x").contains(&EVENT_CLOSED.to_owned())).await;
+        let files = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+        assert!(files.contains("notes/a.md"), "{files}");
+        assert!(!files.contains("memory/prefs.md"), "{files}");
+        assert!(
+            !git(&bare, &["show", "main:memory/MEMORY.md"]).contains(PREFERENCE),
+            "the index is the one she started from"
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_repositories_are_checked_out_and_a_shared_commit_lands_on_main() {
+        let fixture = scripted(true, IDLE, Script::Answers, Script::Answers).with_git();
+        let repos = tempfile::tempdir().unwrap();
+        let ops = repos.path().join("ops");
+        std::fs::create_dir_all(&ops).unwrap();
+        git(&ops, &["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(ops.join("handbook.md"), "# Handbook\n").unwrap();
+        git(&ops, &["add", "handbook.md"]);
+        git(
+            &ops,
+            &[
+                "-c",
+                "user.name=Q",
+                "-c",
+                "user.email=q@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "seed",
+            ],
+        );
+        git(
+            &ops,
+            &["config", "receive.denyCurrentBranch", "updateInstead"],
+        );
+        let mut wanted = workspace(&repos.path().join("eve.git"));
+        wanted
+            .shared
+            .insert("ops".to_owned(), ops.to_string_lossy().into_owned());
+        wanted.shared.insert(
+            "gone".to_owned(),
+            repos
+                .path()
+                .join("missing.git")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        fixture.desk.handle(working("c-s", "hello", wanted)).await;
+        until(|| kinds(&fixture, "c-s").contains(&EVENT_COMPLETED.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let area = Path::new(&start.working_directory);
+        assert!(area.join("shared").join("ops").join("handbook.md").exists());
+        assert!(!area.join("shared").join("gone").exists());
+        let notices: Vec<String> = events(&fixture, "c-s")
+            .into_iter()
+            .filter(|event| event.kind == EVENT_NOTICE)
+            .filter_map(|event| event.text)
+            .collect();
+        assert!(
+            notices.iter().any(|notice| notice.contains("\"gone\"")),
+            "{notices:?}"
+        );
+        assert!(
+            !repos.path().join("missing.git").exists(),
+            "a shared one is never made"
+        );
+
+        let change = AssistantChange::new(BTreeMap::from([(
+            "handbook.md".to_owned(),
+            Some("# Handbook\n\nOn call: Q.\n".to_owned()),
+        )]));
+        fixture
+            .desk
+            .handle(committing("c-s", COMMIT_SHARED, &ops, change))
+            .await;
+        let landed = events(&fixture, "c-s")
+            .into_iter()
+            .rfind(|event| event.kind == EVENT_ACCEPTED)
+            .and_then(|event| event.text)
+            .unwrap();
+        assert!(landed.starts_with("committed "), "{landed}");
+        assert!(git(&ops, &["show", "main:handbook.md"]).contains("On call: Q."));
+        assert_eq!(
+            git(&ops, &["log", "-1", "--format=%an <%ae>", "main"]).trim(),
+            "Eve Moneypenny <eve@example.invalid>"
+        );
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn an_elevated_station_refuses_her_unless_the_roster_allows_it() {
+        for probe in [Ok(true), Err(std::io::Error::other("whoami did not run"))] {
+            let fixture = on_station(AGENTS, probe, true, IDLE, Script::Answers, Script::Answers);
+            fixture.desk.handle(job("c-e", "hello")).await;
+            assert_eq!(kinds(&fixture, "c-e"), [EVENT_REJECTED]);
+            let reason = events(&fixture, "c-e")[0].text.clone().unwrap();
+            assert!(reason.contains("assistant.allow_elevated"), "{reason}");
+            assert!(fixture.asked.lock().unwrap().starts.is_empty());
+        }
+
+        let allowed = format!("{AGENTS}[assistant]\nallow_elevated = true\n");
+        let fixture = on_station(
+            &allowed,
+            Ok(true),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        fixture.desk.handle(job("c-e", "hello")).await;
+        until(|| kinds(&fixture, "c-e").contains(&EVENT_COMPLETED.to_owned())).await;
+        let logged = fixture.logged.lock().unwrap().clone();
+        assert!(
+            logged
+                .iter()
+                .any(|line| line.starts_with("weakening: assistant.allow_elevated = true")),
+            "{logged:?}"
+        );
+        let roster = fixture.desk.state.current().roster.clone();
+        assert!(
+            weakenings(&roster)
+                .iter()
+                .any(|line| line.contains("assistant.allow_elevated")),
+            "the check-in names it"
+        );
+        fixture.desk.close_all();
+
+        let plain = on_station(
+            AGENTS,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        plain.desk.handle(job("c-e", "hello")).await;
+        until(|| kinds(&plain, "c-e").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert!(plain.logged.lock().unwrap().is_empty(), "nothing weakened");
+        plain.desk.close_all();
     }
 }

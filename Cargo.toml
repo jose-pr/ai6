@@ -59,6 +59,8 @@ rcgen = "0.14"
 # CPU and memory of a Station's host for placement; 0.38 is the last line within the 1.89 MSRV.
 sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 globset = "0.4"
+# The unified diff of an assistant's memory change, shown to the person who confirms it.
+similar = { version = "2.7", default-features = false, features = ["text"] }
 data-encoding = { version = "2", default-features = false }
 # Validates gateway origins and encodes Session IDs as URL path segments.
 url = { version = "2", default-features = false, features = ["std"] }

@@ -13,11 +13,11 @@ exclude = [".*", "*.local.*"]
 [features]
 default = []
 # The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
-daemon = ["gate", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "guatiao/load"]
+daemon = ["gate", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "guatiao/load"]
 # The harness gate's client of a Station's Cable endpoint (`ai6::directorates::section_00::gate`).
 gate = ["dep:ureq"]
 # Adds bounded background event publication to the Universal Exports gateway.
-publisher = ["daemon", "dep:ai6-diptel", "dep:url"]
+publisher = ["daemon", "dep:ai6-diptel", "dep:url", "dep:similar"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]
 station-tls = ["dep:coqui-peer-tls", "dep:rustls"]
 # A Registry and roster kept in a SQLite database file.
@@ -66,6 +66,7 @@ rustls-native-certs = { workspace = true, optional = true }
 tokio-postgres = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 regex.workspace = true
+similar = { workspace = true, optional = true }
 subtle = { workspace = true, optional = true }
 sysinfo = { workspace = true, optional = true }
 tempfile.workspace = true
@@ -81,6 +82,8 @@ zeroize.workspace = true
 # O_NOFOLLOW and O_NONBLOCK, to read a checkout's harness configuration without following
 # a link or waiting on a pipe.
 libc = "0.2.170"
+# The effective user, to tell a Station running as root; already built for tempfile.
+rustix = { version = "1.1.5", features = ["process"], optional = true }
 
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
@@ -94,3 +97,6 @@ coqui-access-local-plugin = { git = "https://github.com/Boriken-Dev/coqui-access
 coqui-access-peer-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d5146346951ec011a7332f04fff9e4863635152d" }
 coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d5146346951ec011a7332f04fff9e4863635152d" }
 coqui-roles-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d5146346951ec011a7332f04fff9e4863635152d" }
+# Built beside the test binaries for the same reason: the assistant desk's tests load it to
+# clone and commit real repositories.
+ai6-safehouse-git = { path = "../providers/safehouses/git" }

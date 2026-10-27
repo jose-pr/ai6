@@ -662,6 +662,8 @@ where
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
     vetting::log_weakenings(&roster);
+    #[cfg(feature = "publisher")]
+    assistant::log_weakenings(&roster);
     agents::log_retirements(&roster, Clock::system().now());
     let state = DaemonState {
         plugins,
@@ -1824,6 +1826,16 @@ fn publish_station_check_in(state: &DaemonState) {
             "plugins_weakened".to_owned(),
             serde_json::json!(plugins_weakened),
         );
+    }
+    #[cfg(feature = "publisher")]
+    {
+        let assistant_weakened = assistant::weakenings(&state.roster);
+        if !assistant_weakened.is_empty() {
+            info.insert(
+                "assistant_weakened".to_owned(),
+                serde_json::json!(assistant_weakened),
+            );
+        }
     }
     head_of_station::check_in(state, &mut info);
     if let Err(error) = state.intake.check_in(&state.station_id, info) {

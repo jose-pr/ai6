@@ -223,6 +223,8 @@ fn control_job(conversation: &Conversation, agent_id: &str, control: Control) ->
         session_id: conversation.session_id.clone(),
         close: control == Control::Close,
         interrupt: control == Control::Interrupt,
+        workspace: None,
+        commit: None,
     }
 }
 
@@ -447,6 +449,8 @@ impl Assistant {
                 session_id: conversation.session_id.clone(),
                 close: false,
                 interrupt: false,
+                workspace: None,
+                commit: None,
             };
             if let Some(text) = shown {
                 conversation.push(

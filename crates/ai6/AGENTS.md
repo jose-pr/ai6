@@ -349,6 +349,7 @@ impl Roster {
     /// Resolves every global Agent (extends, clearance, budget) now instead of on first use;
     /// an Operation's `.ai6/agents.toml` is not read.
     pub fn check_agents(&self) -> Result<(), RosterError>;
+    pub fn assistant(&self) -> &AssistantSettings;  // `[assistant]`; the default without one
 }
 #[must_use] #[derive(Default)]
 pub struct RosterBuilder;
@@ -357,10 +358,50 @@ impl RosterBuilder {
     pub fn agent(self, agent: Agent) -> Self;
     pub fn role(self, role: AgentRole) -> Self;
     pub fn cover(self, cover: Cover) -> Self;      // replaces a built-in of the same name
-    pub fn build(self) -> Result<Roster, RosterError>;   // Roster::from_parts
+    pub fn assistant(self, settings: AssistantSettings) -> Self;
+    pub fn build(self) -> Result<Roster, RosterError>;   // Roster::from_parts; settings validated
 }
 pub fn config_dir() -> Result<PathBuf, RosterError>;
+
+// ai6::directorates::m::assistant, re-exported at the crate root
+#[derive(Default, Serialize, Deserialize)] // serde: unknown keys refused
+pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, write}, org {repo, write}, allow_elevated
+impl AssistantSettings {
+    pub fn new() -> Self;                                  // keeps nothing, refuses elevated Stations
+    pub fn with_personal_repo(self, template: impl Into<String>) -> Self; // {person} | {person_digest}
+    pub fn with_shared(self, group: impl Into<String>, repo: SharedRepo) -> Self;
+    pub fn with_org(self, repo: SharedRepo) -> Self;       // checked out as "org"
+    pub fn with_allow_elevated(self, allow: bool) -> Self; // a weakening
+    pub fn personal_repo(&self) -> Option<&str>;
+    pub fn shared(&self) -> &BTreeMap<String, SharedRepo>;
+    pub fn org(&self) -> Option<&SharedRepo>;
+    pub fn allow_elevated(&self) -> bool;
+    pub fn validate(&self) -> Result<(), String>;          // "assistant.<key>: …"
+    pub fn personal_repo_for(&self, person: &str) -> Result<Option<String>, String>;
+    pub fn shared_for(&self, groups: &[String]) -> impl Iterator<Item = (&str, &SharedRepo)>;
+    pub fn shared_named(&self, name: &str, groups: &[String]) -> Option<&SharedRepo>;
+    pub fn weakenings(&self) -> Vec<String>;               // allow_elevated, each write = true
+}
+pub struct SharedRepo;  // SharedRepo::new(repo).writable(bool); repo(), write()
+#[non_exhaustive] pub enum RepoKind { Local, Remote }
+impl RepoKind { pub fn of(repo: &str) -> Result<Self, String>; }
+pub const PERSON_PLACEHOLDER: &str = "{person}";
+pub const PERSON_DIGEST_PLACEHOLDER: &str = "{person_digest}";
+pub const ORG_SHARED: &str = "org";
+pub fn person_digest(person: &str) -> String;  // 16 hex digits of SHA-256
+pub fn file_safe(name: &str) -> bool;          // 1-64 of letters, digits, . - _, not starting with .
 ```
+
+`[assistant]` lives in the global `agents.toml` only (an Operation's `.ai6/agents.toml` with
+one fails to resolve its Agents); the SQL configuration source has no table for it, so a SQL
+roster has the default settings. `RepoKind::of` refuses empty values, control characters, Git
+remote helpers (`::`) and schemes other than `file`, `ssh`, `git`, `http`, `https`; a local
+path or `file://` is `Local` (made bare on first use), the rest and `user@host:path` are
+`Remote` (must exist). `personal_repo_for` fills `{person_digest}` always and `{person}` only
+for an identifier of 1-64 letters, digits, `.`, `_`, `@`, `-` not starting with `.`; others are
+refused, naming `{person_digest}`. `validate` refuses other placeholders, group names that are
+not `file_safe` or are `org`, and repositories `RepoKind::of` refuses. `shared_for` yields the
+groups' repositories the person is a member of, then `org`.
 
 `load` reads `operations.toml` and `agents.toml`; missing files produce an empty roster and
 invalid files fail closed. `from_parts` (and `builder().build()`) is the way in without
@@ -2690,27 +2731,53 @@ pub const MAX_ASSISTANT_EVENT_BYTES: usize = 64 * 1024;       // longer event te
 pub const MAX_ASSISTANT_EVENTS: usize = 64;                   // per report
 pub const EVENT_ACCEPTED, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, EVENT_COMPLETED,
           EVENT_FAILED, EVENT_LIMIT, EVENT_INTERRUPTED, EVENT_CLOSED: &str; // "accepted", …
+pub const EVENT_MEMORY_CHANGES: &str = "memory_changes"; // text: unified diff; `change`: the files
+pub const EVENT_NOTICE: &str = "notice";       // text: work saved elsewhere than main, a repository not opened
+pub const COMMIT_MEMORY: &str = "memory"; pub const COMMIT_SHARED: &str = "shared";
+pub const MAX_ASSISTANT_CHANGE_BYTES: usize = 64 * 1024;  // text of one change or commit
+pub const MAX_ASSISTANT_CHANGE_FILES: usize = 32;
 pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
     pub message: String, pub context: Vec<String> /* default: standing context */,
     pub recap: Option<String> /* default, omitted when None: for a harness started afresh only */,
     pub mcp_token: String,
     pub token_expires_at: f64, pub session_id: Option<String> /* default */,
     pub close: bool /* default */,
-    pub interrupt: bool /* default */ }              // Debug redacts the token
+    pub interrupt: bool /* default */,
+    pub workspace: Option<AssistantWorkspace> /* default, omitted when None */,
+    pub commit: Option<AssistantCommit> /* default, omitted when None */ } // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
+pub struct AssistantWorkspace { pub personal: String /* the person's repository, expanded */,
+    pub shared: BTreeMap<String, String> /* default; checkout name (group or "org") -> repository */,
+    pub author_name: String, pub author_email: String /* the person's */,
+    pub exposed: bool /* default: the conversation read others' text */ }
+pub struct AssistantChange { pub digest: String /* hex SHA-256 of the files */,
+    pub files: BTreeMap<String, Option<String>> /* path -> new text, None removes */ }
+impl AssistantChange { pub fn new(files) -> Self; pub fn digest_of(&files) -> String;
+    pub fn validate(&self, memory: bool) -> Result<(), String>; }
+pub struct AssistantCommit { pub kind: String /* COMMIT_MEMORY | COMMIT_SHARED */,
+    pub repo: String, pub change: AssistantChange, pub message: String /* trailer included */,
+    pub author_name: String, pub author_email: String }
+impl AssistantCommit { pub fn validate(&self) -> Result<(), String>; }
+impl AssistantWorkspace { pub fn validate(&self) -> Result<(), String>; }
+pub fn repository_path(path: &str) -> bool; // 1-8 `/`-separated names, none starting with `.`
 pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
     pub job_id: Option<String>, pub session_id: Option<String>, pub events: Vec<AssistantEvent> }
-pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String> }
+pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,
+    pub change: Option<AssistantChange> /* default, omitted when None */ }
 impl AssistantEvent { pub fn new(kind: &str, text: Option<String>) -> Self; } // cuts text
 pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control characters
 ```
 
-All three are serde types with unknown fields refused. `validate` checks identities, a message
-of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close` or `interrupt`, which a job
-never sets both of), the context bound (context and recap together) and a
-token of 32-512 bytes without whitespace. A job's answer is one report with its `job_id` and
-one `accepted` or `rejected` event (text: the reason); the harness's own events follow in
-reports without a `job_id`.
+All are serde types with unknown fields refused. `validate` checks identities, a message
+of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`, `interrupt` or `commit`,
+of which a job sets one), the context bound (context and recap together), a
+token of 32-512 bytes without whitespace, a workspace (repositories of a known `RepoKind`,
+checkout names as `file_safe` names, an author without control characters, `<` or `>`) and a
+commit (a known kind; the change's 1-32 files within `MAX_ASSISTANT_CHANGE_BYTES`, each
+`repository_path`, under `memory/` for `COMMIT_MEMORY`, its digest matching; a message of
+1-4096 bytes). A job's answer is one report with its `job_id` and one `accepted` (for a
+commit, text saying where it landed) or `rejected` event (text: the reason); the harness's
+own events follow in reports without a `job_id`.
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
 `limit` set, in place of the `completed` or `failed` event the same output would
@@ -3264,7 +3331,36 @@ stopped`, `the Station is stopping`, …). An `interrupt` job calls the running 
 for up to 2 s while Windows still holds it. When Universal Exports refuses a job's
 `accepted` report with 403, 404 or 409 (the job moved to another Station or was given up), the
 desk closes the harness it started for that conversation. An assistant Session is not a Mission: no
-Operation, safe house, Cable endpoint, board entry or usage ledger record.
+Operation, Cable endpoint, board entry or usage ledger record.
+
+A job with a `workspace` gets, through the `git` safe-house provider (`SafeHouseSpec::clone`,
+`CheckpointSpec::branch`): `personal/`, a clone of `workspace.personal` on `main` (a missing
+local or `file://` repository is made bare first; a first use writes and commits
+`memory/MEMORY.md`); `shared/<name>/` per shared repository, cloned afresh at each harness
+start (one that cannot be opened is skipped with a `notice`); `scratch/`; `CLAUDE.md` (the
+desk's instructions, then `@personal/memory/MEMORY.md`) and `AGENTS.md` (the same with
+`MEMORY.md` inlined, at most 32 KiB); and `<conversation digest>.context.md` beside the
+directory with the `AGENTS.md` text. The harness's mode is `moneypenny()` with `files =
+["personal", "scratch"]` and that `context_file`. At each turn's start the desk copies
+`personal/memory/`; when the turn's `completed` arrives, and again after the harness closes,
+it puts that copy back, reports what she changed there as one `memory_changes` event (before
+`completed`; a change beyond the bounds, or a file that is not UTF-8, is dropped with a
+`notice`), and commits the rest of `personal/` to `main` as the person, message
+`moneypenny: update <paths>` (or `save her work`) with the trailer `Via: Moneypenny
+(conversation <id>)`; work `main` refuses twice lands on `moneypenny/<conversation digest>`
+with a `notice`. A `commit` job of `COMMIT_MEMORY` for a conversation running here is written
+into its `personal/` and copy, then saved the same way; otherwise, and for `COMMIT_SHARED`,
+the desk clones the commit's repository into a temporary directory, writes, commits and
+pushes there, and removes it.
+
+On a Station running elevated (`ai6::station::elevation::is_elevated() -> io::Result<bool>`,
+feature `daemon`: root on Unix, a High or
+System mandatory level from `%SystemRoot%\System32\whoami.exe /groups` on Windows; asked once,
+an error counts as elevated) every job is `rejected` naming `assistant.allow_elevated` unless
+the roster sets it; with it set, each harness start logs `ai6: weakening:
+assistant.allow_elevated = true: …`. The roster's assistant weakenings
+(`AssistantSettings::weakenings`, plus this Station running elevated when allowed) are logged
+at start and on a roster change, and published at check-in as `assistant_weakened`.
 
 ## Safe houses (`ai6::directorates::q::safehouse`, `ai6::station::safehouse`)
 
