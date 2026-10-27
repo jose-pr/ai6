@@ -248,9 +248,24 @@ fn string_list(input: &Map<String, Value>, name: &str) -> Vec<Value> {
 fn roster_kind() -> Value {
     json!({
         "type": "string",
-        "enum": ["operations", "agents", "roles", "covers"],
-        "description": "Which records."
+        "enum": ["operations", "agents", "roles", "covers", "assistant"],
+        "description": "Which records; assistant is your own settings, one record keyed assistant."
     })
+}
+
+/// The weakenings of an `assistant` record, for the person to see before confirming it, or
+/// why it is not acceptable settings under the key `assistant`.
+fn assistant_weakenings(key: &str, definition: &Value) -> Result<Vec<String>, String> {
+    if key != ai6::ConfigRecord::ASSISTANT_KEY {
+        return Err(format!(
+            "the assistant record is keyed {:?}",
+            ai6::ConfigRecord::ASSISTANT_KEY
+        ));
+    }
+    let settings = serde_json::from_value::<ai6::AssistantSettings>(definition.clone())
+        .map_err(|reason| format!("assistant: {reason}"))?;
+    settings.validate()?;
+    Ok(settings.weakenings())
 }
 
 /// Every write tool, sorted by name.
@@ -493,17 +508,18 @@ static WRITE_TOOLS: &[WriteTool] = &[
     WriteTool {
         name: "propose_roster_edit",
         description: "Propose adding or replacing one roster record (an Operation, Agent, \
-                      role or cover) with a definition: the keys of its table in the \
-                      configuration files. The roster checks the whole roster when it is \
-                      confirmed. Nothing changes until the person confirms it in the app. \
-                      Needs roster.manage.",
+                      role, cover, or your own [assistant] settings) with a definition: the \
+                      keys of its table in the configuration files. The roster checks the \
+                      whole roster when it is confirmed. Nothing changes until the person \
+                      confirms it in the app; a setting looser than its default is named in \
+                      the proposal. Needs roster.manage.",
         schema: || {
             object(
                 &[
                     ("kind", roster_kind()),
                     (
                         "key",
-                        text("The record's key: Operation, codename, role or cover."),
+                        text("The record's key: Operation, codename, role, cover or assistant."),
                     ),
                     (
                         "definition",
@@ -517,8 +533,15 @@ static WRITE_TOOLS: &[WriteTool] = &[
             let kind = string(input, "kind").ok_or("kind is required")?;
             let key = id(input, "key")?;
             let definition = input.get("definition").cloned().unwrap_or(json!({}));
+            let mut summary = format!("Set roster {kind}/{key} to {definition}");
+            if kind == "assistant" {
+                let weakened = assistant_weakenings(key, &definition)?;
+                if !weakened.is_empty() {
+                    summary.push_str(&format!(". Weakens: {}", weakened.join("; ")));
+                }
+            }
             Ok(Draft {
-                summary: format!("Set roster {kind}/{key} to {definition}"),
+                summary,
                 call: Call {
                     method: Method::PUT,
                     path: format!("/v1/user/roster/{}/{}", encode(kind), encode(key)),
@@ -634,6 +657,38 @@ mod tests {
             )
             .is_err()
         );
+        let strict = edit
+            .draft(
+                &json!({"kind": "assistant", "key": "assistant",
+                        "definition": {"personal_repo": "/srv/mp/{person_digest}.git"}}),
+                "p-2",
+            )
+            .unwrap();
+        assert_eq!(strict.call.path, "/v1/user/roster/assistant/assistant");
+        assert!(!strict.summary.contains("Weakens"), "{}", strict.summary);
+        let loose = edit
+            .draft(
+                &json!({"kind": "assistant", "key": "assistant",
+                        "definition": {"allow_elevated": true}}),
+                "p-3",
+            )
+            .unwrap();
+        assert!(
+            loose
+                .summary
+                .contains("Weakens: assistant.allow_elevated = true"),
+            "{}",
+            loose.summary
+        );
+        for refused in [
+            json!({"kind": "assistant", "key": "moneypenny", "definition": {}}),
+            json!({"kind": "assistant", "key": "assistant", "definition": {"unknown": 1}}),
+            json!({"kind": "assistant", "key": "assistant",
+                   "definition": {"personal_repo": "ext::sh"}}),
+        ] {
+            let error = edit.draft(&refused, "p").unwrap_err();
+            assert!(error.text.starts_with("INVALID_INPUT"), "{}", error.text);
+        }
         let control = write_tools()
             .iter()
             .find(|tool| tool.name == "propose_mission_control")

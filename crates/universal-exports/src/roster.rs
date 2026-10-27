@@ -1,12 +1,13 @@
-//! Roster administration: the Operations, Agents, Agent roles and cover policies every
-//! Station reads, edited through a roster source that takes changes (a SQL roster).
+//! Roster administration: the Operations, Agents, Agent roles, cover policies and Moneypenny's
+//! settings every Station reads, edited through a roster source that takes changes (a SQL
+//! roster).
 //!
 //! Every Station polls the same source, so an accepted change reaches each without a restart.
 //! The source checks the whole roster before it keeps a change: a refused edit changes
 //! nothing, and is audited as an accepted one is. The routes need `roster.read` or
 //! `roster.manage` on the resource `config:roster`.
 
-use ai6::{AuditRecord, ConfigRecord, Person, RosterErrorKind};
+use ai6::{AssistantSettings, AuditRecord, ConfigRecord, Person, RosterErrorKind};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -30,7 +31,7 @@ const MAX_KEY_BYTES: usize = 128;
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RosterRecord {
-    /// The Operation key, Agent codename, role ID or cover name.
+    /// The Operation key, Agent codename, role ID, cover name, or `assistant`.
     pub key: String,
     /// A JSON object with the keys of the record's table in the configuration files.
     pub definition: serde_json::Value,
@@ -40,7 +41,8 @@ pub struct RosterRecord {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RosterRecords {
-    /// `operations`, `agents`, `roles` or `covers`.
+    /// `operations`, `agents`, `roles`, `covers` or `assistant` (at most one record, keyed
+    /// `assistant`).
     pub kind: String,
     /// The roster revision they were read at, in decimal; Stations report the revision they
     /// run at check-in.
@@ -57,6 +59,10 @@ pub struct RosterRecords {
 pub struct RosterChange {
     /// The roster revision the edit moved to, in decimal.
     pub revision: String,
+    /// Each setting of the stored `assistant` record looser than its default
+    /// ([`AssistantSettings::weakenings`]); omitted when there is none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub weakened: Vec<String>,
 }
 
 /// Why the source refused an edit (HTTP 422).
@@ -71,6 +77,7 @@ fn kind_of(kind: &str) -> Result<ConfigRecord, ApiError> {
         "agents" => "agent",
         "roles" => "role",
         "covers" => "cover",
+        "assistant" => "assistant",
         _ => return Err(ApiError::not_found()),
     };
     ConfigRecord::from_name(name).ok_or_else(ApiError::not_found)
@@ -163,18 +170,21 @@ pub(crate) async fn records(
 }
 
 /// What an edit came to: accepted at a revision, refused with a reason, or a failure.
+/// `weakened` is what an accepted edit loosens.
 async fn settle(
     gateway: &Gateway,
     person: &Person,
     target: String,
     outcome: Result<Option<ai6::ConfigRevision>, ai6::RosterError>,
     accepted: &str,
+    weakened: Vec<String>,
 ) -> Result<Response, ApiError> {
     match outcome {
         Ok(Some(revision)) => {
             audit(gateway, person, accepted, &target).await?;
             Ok(Json(RosterChange {
                 revision: revision.get().to_string(),
+                weakened,
             })
             .into_response())
         }
@@ -202,8 +212,9 @@ async fn settle(
 }
 
 /// `PUT /v1/user/roster/{kind}/{key}` with the record's definition as a JSON object: needs
-/// `roster.manage`. 200 with the new revision; 422 with the reason when the roster it would
-/// leave is not acceptable; 409 when the source takes no edits.
+/// `roster.manage`. 200 with the new revision, and for the `assistant` record its weakenings;
+/// 422 with the reason when the roster it would leave is not acceptable; 409 when the source
+/// takes no edits.
 pub(crate) async fn put_record(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -225,11 +236,25 @@ pub(crate) async fn put_record(
     .await?;
     let source = source(&gateway)?;
     let target = format!("{} {key}", record.name());
+    // Reported only for an accepted edit, whose definition the source parsed the same way.
+    let weakened = (record == ConfigRecord::Assistant)
+        .then(|| serde_json::from_value::<AssistantSettings>(definition.clone()).ok())
+        .flatten()
+        .map(|settings| settings.weakenings())
+        .unwrap_or_default();
     let outcome = tokio::task::spawn_blocking(move || source.put(record, &key, &definition))
         .await
         .map_err(|_| ApiError::internal())?
         .map(Some);
-    settle(&gateway, &person, target, outcome, "roster.update").await
+    settle(
+        &gateway,
+        &person,
+        target,
+        outcome,
+        "roster.update",
+        weakened,
+    )
+    .await
 }
 
 /// `DELETE /v1/user/roster/{kind}/{key}`: needs `roster.manage`. 200 with the new revision;
@@ -255,7 +280,15 @@ pub(crate) async fn remove_record(
     let outcome = tokio::task::spawn_blocking(move || source.remove(record, &key))
         .await
         .map_err(|_| ApiError::internal())?;
-    settle(&gateway, &person, target, outcome, "roster.remove").await
+    settle(
+        &gateway,
+        &person,
+        target,
+        outcome,
+        "roster.remove",
+        Vec::new(),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -515,5 +548,125 @@ mod tests {
         )
         .await;
         assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[cfg(feature = "cli")]
+    #[tokio::test]
+    async fn the_assistant_record_is_edited_like_any_other_and_reports_its_weakenings() {
+        use ai6::{ConfigSource, SqlConfigSource};
+
+        let directory = tempfile::tempdir().unwrap();
+        let location = format!("sqlite:{}", directory.path().join("roster.db").display());
+        let source = Arc::new(SqlConfigSource::open(&location).unwrap());
+        let served = served_with_roster(ROLES, Some(source.clone())).await;
+
+        let listed: serde_json::Value = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::GET,
+            "roster/assistant",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(listed["kind"], "assistant");
+        assert_eq!(listed["writable"], true);
+        assert_eq!(listed["records"], json!([]));
+
+        let viewer_edit = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::PUT,
+            "roster/assistant/assistant",
+            Some(json!({"allow_elevated": true})),
+        )
+        .await;
+        assert_eq!(viewer_edit.status(), StatusCode::FORBIDDEN);
+
+        let strict = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/assistant/assistant",
+            Some(json!({"personal_repo": "/srv/mp/{person_digest}.git"})),
+        )
+        .await;
+        assert_eq!(strict.status(), StatusCode::OK);
+        let strict: serde_json::Value = strict.json().await.unwrap();
+        assert!(strict.get("weakened").is_none(), "{strict}");
+
+        let loose = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/assistant/assistant",
+            Some(json!({"allow_elevated": true, "org": {"repo": "/srv/org.git", "write": true}})),
+        )
+        .await;
+        assert_eq!(loose.status(), StatusCode::OK);
+        let loose: serde_json::Value = loose.json().await.unwrap();
+        let weakened = loose["weakened"].as_array().unwrap();
+        assert_eq!(weakened.len(), 2, "{loose}");
+        assert!(
+            weakened[0]
+                .as_str()
+                .unwrap()
+                .contains("assistant.allow_elevated"),
+            "{loose}"
+        );
+        let settings = source.load().unwrap().roster.assistant().clone();
+        assert!(settings.allow_elevated());
+        assert_eq!(
+            settings.personal_repo(),
+            None,
+            "the record is replaced whole"
+        );
+        let revision = source.revision().unwrap();
+
+        for (key, definition, reason) in [
+            ("moneypenny", json!({}), "\"assistant\""),
+            (
+                "assistant",
+                json!({"personal_repo": "ext::sh"}),
+                "assistant.personal_repo",
+            ),
+        ] {
+            let refused = call(
+                &served,
+                &served.operator,
+                reqwest::Method::PUT,
+                &format!("roster/assistant/{key}"),
+                Some(definition),
+            )
+            .await;
+            assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let refused: serde_json::Value = refused.json().await.unwrap();
+            assert!(
+                refused["refused"].as_str().unwrap().contains(reason),
+                "{refused}"
+            );
+        }
+        assert_eq!(source.revision().unwrap(), revision, "nothing changed");
+        assert_eq!(audits(&served, "roster.refused").len(), 2);
+        assert_eq!(
+            audits(&served, "roster.update")[0].target,
+            "assistant assistant"
+        );
+
+        let removed = call(
+            &served,
+            &served.operator,
+            reqwest::Method::DELETE,
+            "roster/assistant/assistant",
+            None,
+        )
+        .await;
+        assert_eq!(removed.status(), StatusCode::OK);
+        assert_eq!(
+            source.load().unwrap().roster.assistant(),
+            &ai6::AssistantSettings::default()
+        );
     }
 }

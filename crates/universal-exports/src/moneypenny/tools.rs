@@ -416,15 +416,16 @@ static READ_TOOLS: &[Tool] = &[
     },
     Tool {
         name: "roster",
-        description: "The roster every Station reads: its Operations, Agents, Agent roles or \
-                      cover policies, with the revision. Needs roster.read.",
+        description: "The roster every Station reads: its Operations, Agents, Agent roles, \
+                      cover policies or your own [assistant] settings, with the revision. \
+                      Needs roster.read.",
         schema: || {
             object(
                 &[(
                     "kind",
                     json!({
                         "type": "string",
-                        "enum": ["operations", "agents", "roles", "covers"],
+                        "enum": ["operations", "agents", "roles", "covers", "assistant"],
                         "description": "Which records."
                     }),
                 )],
