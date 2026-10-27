@@ -246,6 +246,7 @@ pub universal_exports::RetirementNotice::retire_on: alloc::string::String
 pub universal_exports::RetirementNotice::status: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::RosterChange
 pub universal_exports::RosterChange::revision: alloc::string::String
+pub universal_exports::RosterChange::weakened: alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::RosterRecord
 pub universal_exports::RosterRecord::definition: serde_json::value::Value
 pub universal_exports::RosterRecord::key: alloc::string::String

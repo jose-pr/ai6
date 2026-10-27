@@ -145,11 +145,13 @@ pub fn ai6::directorates::m::assistant::person_digest(&str) -> alloc::string::St
 pub mod ai6::directorates::m::config
 #[non_exhaustive] pub enum ai6::directorates::m::config::ConfigRecord
 pub ai6::directorates::m::config::ConfigRecord::Agent
+pub ai6::directorates::m::config::ConfigRecord::Assistant
 pub ai6::directorates::m::config::ConfigRecord::Cover
 pub ai6::directorates::m::config::ConfigRecord::Operation
 pub ai6::directorates::m::config::ConfigRecord::Role
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 4]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 5]
+pub const ai6::directorates::m::config::ConfigRecord::ASSISTANT_KEY: &'static str
 pub fn ai6::directorates::m::config::ConfigRecord::from_name(&str) -> core::option::Option<Self>
 pub const fn ai6::directorates::m::config::ConfigRecord::name(self) -> &'static str
 #[non_exhaustive] pub struct ai6::directorates::m::config::ConfigDefinitions
@@ -4298,11 +4300,13 @@ pub ai6::CableState::Queued
 pub ai6::CableState::Refused
 #[non_exhaustive] pub enum ai6::ConfigRecord
 pub ai6::ConfigRecord::Agent
+pub ai6::ConfigRecord::Assistant
 pub ai6::ConfigRecord::Cover
 pub ai6::ConfigRecord::Operation
 pub ai6::ConfigRecord::Role
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 4]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 5]
+pub const ai6::directorates::m::config::ConfigRecord::ASSISTANT_KEY: &'static str
 pub fn ai6::directorates::m::config::ConfigRecord::from_name(&str) -> core::option::Option<Self>
 pub const fn ai6::directorates::m::config::ConfigRecord::name(self) -> &'static str
 #[non_exhaustive] pub enum ai6::Decision
