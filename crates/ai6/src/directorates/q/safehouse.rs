@@ -117,7 +117,7 @@ pub struct CheckpointSpec {
 #[map(crate = ::guatiao)]
 pub struct CheckpointFile {
     /// The path, `/`-separated and relative to the repository's root; a path naming a parent
-    /// or a hidden directory is refused.
+    /// directory or `.git` is refused.
     pub path: String,
     /// The file's text; `None` removes it.
     pub text: Option<String>,

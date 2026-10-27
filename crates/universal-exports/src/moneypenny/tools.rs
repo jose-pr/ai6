@@ -15,17 +15,15 @@ use tower::ServiceExt;
 use super::guide;
 use crate::Gateway;
 
-/// The read tools whose answers carry text other people wrote (briefs, issue bodies, Agent
-/// output, audit targets): once one answers, the conversation is exposed and a change to her
-/// memory waits for the person.
-pub(crate) const EXPOSING_TOOLS: &[&str] = &[
-    "audit",
-    "held_briefs",
-    "mission",
-    "mission_proposals",
-    "missions",
-    "timeline",
-];
+/// The read tools known to return no free text written by an Agent, an outside source or
+/// another person: this guide, the person's own identity and permissions, and a Station's
+/// numeric limits. Every other read tool exposes the conversation, including any added later.
+pub(crate) const QUIET_TOOLS: [&str; 3] = ["field_guide", "profile", "station_settings"];
+
+/// Whether a successful call of read tool `name` exposes the conversation.
+pub(crate) fn exposes(name: &str) -> bool {
+    !QUIET_TOOLS.contains(&name)
+}
 
 /// The most bytes of a route's answer a tool reads.
 const MAX_ROUTE_BYTES: usize = 4 * 1024 * 1024;

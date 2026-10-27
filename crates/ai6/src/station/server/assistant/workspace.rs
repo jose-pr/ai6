@@ -10,8 +10,16 @@
 //! whatever she changed there is set aside (the copy is put back) and reported for the person
 //! to let through; everything else in `personal/` is committed to `main`, authored by the
 //! person. A `main` that refuses the work twice gets it on `moneypenny/<conversation digest>`.
+//!
+//! Exposure is Universal Exports' to record (`Conversation.exposed`), but the desk sees two
+//! ways in it cannot: text in `shared/`, which a conversation with any shared repository
+//! checked out counts as read from its start, and text she wrote in `personal/` while exposed.
+//! The paths of the latter are kept in the personal repository, in
+//! [`OUTSIDE_TEXT`] (a hidden file she cannot write), and a turn that reads, searches or
+//! lists files while any are recorded is exposed. The record is cleared by removing the files
+//! it names, or the record itself, in the repository.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,6 +51,11 @@ pub(super) const PROVIDER: &str = "git";
 const MAX_INLINED_MEMORY: usize = 32 * 1024;
 /// The most files of `personal/` looked at to name what a turn changed.
 const MAX_WALK: usize = 10_000;
+/// The record, in the personal repository, of the files she wrote while exposed: one path a
+/// line, relative to the repository.
+pub(super) const OUTSIDE_TEXT: &str = ".moneypenny/outside-text";
+/// The built-in tools that read files, or their names, for her.
+const READING_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
 
 /// `MEMORY.md` as a first use writes it.
 const MEMORY_INDEX: &str = "# Memory\n\nWhat Moneypenny remembers about the person she works \
@@ -67,6 +80,10 @@ pub(super) struct Workspace {
     files: BTreeMap<String, (u64, Option<SystemTime>)>,
     /// The harness closed and its directory is going: a commit goes to a clone of its own.
     closed: bool,
+    /// The conversation has read outside text, as far as the desk knows; never cleared.
+    exposed: bool,
+    /// The files of `personal/` she wrote while exposed ([`OUTSIDE_TEXT`]).
+    outside: BTreeSet<String>,
 }
 
 /// What the end of a turn found besides the work it saved.
@@ -88,10 +105,11 @@ impl Workspace {
         repos: &Path,
         context: &Path,
         conversation_id: &str,
-        digest: &str,
         job: &AssistantWorkspace,
+        exposed: bool,
     ) -> Result<(Self, Vec<String>), String> {
         let provider = houses()?;
+        let digest = &super::conversation_digest(conversation_id);
         let create = RepoKind::of(&job.personal)? == RepoKind::Local;
         let path = area.join(PERSONAL);
         let personal = open_clone(
@@ -114,7 +132,17 @@ impl Workspace {
             memory: BTreeMap::new(),
             files: BTreeMap::new(),
             closed: false,
+            // Text in a shared repository is outside text, read or not.
+            exposed: exposed || !job.shared.is_empty(),
+            outside: BTreeSet::new(),
         };
+        workspace.outside = fs::read_to_string(workspace.path.join(OUTSIDE_TEXT))
+            .unwrap_or_default()
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect();
         let mut notices = Vec::new();
         let index = workspace.path.join(MEMORY).join("MEMORY.md");
         if !index.exists() {
@@ -142,7 +170,7 @@ impl Workspace {
         }
         fs::create_dir_all(area.join(SCRATCH)).map_err(|error| error.to_string())?;
         let memory = fs::read_to_string(&index).unwrap_or_default();
-        let standing = instructions(job.exposed, &shared);
+        let standing = instructions(workspace.exposed, &shared);
         write_file(
             &area.join("CLAUDE.md"),
             &format!("{standing}\n## Memory\n\n@{PERSONAL}/{MEMORY}/MEMORY.md\n"),
@@ -153,8 +181,40 @@ impl Workspace {
         );
         write_file(&area.join("AGENTS.md"), &inlined)?;
         write_file(context, &inlined)?;
-        workspace.begin_turn();
+        workspace.begin_turn(false);
         Ok((workspace, notices))
+    }
+
+    /// Whether the conversation has read outside text, as far as the desk knows.
+    pub(super) fn exposed(&self) -> bool {
+        self.exposed
+    }
+
+    /// Notes the tools a turn called: reading, searching or listing files while the record
+    /// names any makes the conversation exposed. Answers the source to report when this call
+    /// is what exposed it.
+    pub(super) fn note_tools(&mut self, tools: &[String]) -> Option<String> {
+        let reads = tools
+            .iter()
+            .any(|tool| READING_TOOLS.contains(&tool.as_str()));
+        if self.exposed || !reads || self.outside.is_empty() {
+            return None;
+        }
+        self.exposed = true;
+        Some(format!(
+            "personal:{} (files written while exposed)",
+            self.outside
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(",")
+        ))
+    }
+
+    /// Notes that the conversation is exposed, as Universal Exports says or as the desk found.
+    pub(super) fn mark_exposed(&mut self) {
+        self.exposed = true;
     }
 
     /// Whether a commit of `repo` can be made here: the checkout is of it and still open.
@@ -169,8 +229,10 @@ impl Workspace {
         end
     }
 
-    /// Notes what `personal/` holds as a turn starts.
-    pub(super) fn begin_turn(&mut self) {
+    /// Notes what `personal/` holds as a turn starts, and whether the job said the
+    /// conversation is exposed.
+    pub(super) fn begin_turn(&mut self, exposed: bool) {
+        self.exposed |= exposed;
         self.memory = read_tree(&self.path.join(MEMORY), MEMORY);
         self.files = stat_tree(&self.path);
     }
@@ -218,6 +280,11 @@ impl Workspace {
                 "Moneypenny's work in personal/ could not be saved: {reason}"
             )),
         }
+        if let Err(reason) = self.record_outside_text(&changed) {
+            end.notices.push(format!(
+                "Which of Moneypenny's files hold outside text could not be recorded: {reason}"
+            ));
+        }
         if !files.is_empty() {
             let change = AssistantChange::new(files);
             let diff = unified_diff(&self.memory, &change);
@@ -234,7 +301,7 @@ impl Workspace {
                 )),
             }
         }
-        self.begin_turn();
+        self.begin_turn(false);
         end
     }
 
@@ -263,6 +330,54 @@ impl Workspace {
             ))
             .map_err(|error| error.to_string())?;
         Ok(landed(&saved, &self.repo))
+    }
+
+    /// Adds the files a turn changed to [`OUTSIDE_TEXT`] when the conversation is exposed,
+    /// drops those that no longer exist, and commits the record when it changed.
+    fn record_outside_text(&mut self, changed: &[String]) -> Result<(), String> {
+        let before = self.outside.clone();
+        if self.exposed {
+            self.outside.extend(changed.iter().cloned());
+        }
+        let path = self.path.clone();
+        self.outside.retain(|file| {
+            file.split('/')
+                .fold(path.clone(), |at, name| at.join(name))
+                .is_file()
+        });
+        if self.outside == before {
+            return Ok(());
+        }
+        let text = (!self.outside.is_empty()).then(|| {
+            self.outside
+                .iter()
+                .map(|file| format!("{file}\n"))
+                .collect::<String>()
+        });
+        let record = self.path.join(OUTSIDE_TEXT);
+        match &text {
+            Some(text) => write_file(&record, text)?,
+            None => {
+                let _ = fs::remove_file(&record);
+            }
+        }
+        let message = format!(
+            "moneypenny: record which files hold outside text\n\nVia: Moneypenny (conversation \
+             {})",
+            self.conversation_id
+        );
+        self.personal
+            .checkpoint(&self.spec(
+                message,
+                &self.author_name,
+                &self.author_email,
+                Some(vec![CheckpointFile {
+                    path: OUTSIDE_TEXT.to_owned(),
+                    text,
+                }]),
+            ))
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     /// Commits everything in `personal/` and pushes it; a notice when it landed elsewhere

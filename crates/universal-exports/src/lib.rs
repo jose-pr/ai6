@@ -1205,6 +1205,10 @@ impl Gateway {
             .route("/v1/moneypenny/mcp", post(moneypenny::mcp::endpoint))
             .route("/v1/station/assistant/next", get(moneypenny::next))
             .route("/v1/station/assistant/reports", post(moneypenny::reports))
+            .route(
+                "/v1/station/assistant/exposure",
+                get(moneypenny::exposure).post(moneypenny::expose),
+            )
             .route("/v1/auth/login", post(login))
             .route("/v1/auth/logout", post(logout))
             .route("/v1/auth/session", get(access_session))

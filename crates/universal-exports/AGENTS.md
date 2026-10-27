@@ -462,9 +462,13 @@ configuration directory's `agents.toml`; a SQL roster has none, so no workspace)
 in for the person signed in to the conversation (a person whose identifier cannot fill
 `{person}` gets an `unavailable` error instead of a job), the repositories of the person's
 Directory groups and `org`, the author (`display_name` else `name`, without control
-characters, `<` or `>`; `email` else `<16 hex>@people.ai6.invalid`) and `exposed`. A
-conversation is exposed for its life once `audit`, `held_briefs`, `mission`,
-`mission_proposals`, `missions` or `timeline` answers without error. A Station's
+characters, `<` or `>`; `email` else `<16 hex>@people.ai6.invalid`). Every job carries
+`exposed`, the conversation's one record of exposure (`Conversation.exposed`, never cleared):
+set once a read tool other than `field_guide`, `profile` and `station_settings` answers
+without error (before she gets the answer), from the first message of a workspace with any
+shared repository, and by the Station running the conversation through `POST
+/v1/station/assistant/exposure`, which also shows the person a `notice` naming the source the
+first time. A Station's
 `memory_changes` event (with `change`) in a conversation not exposed becomes a `notice`
 entry (`data.diff`) and a `memory` commit job (message `moneypenny: remember PATHS`, trailer
 `Via: Moneypenny (conversation ID)`) for that Station; in an exposed one, a `memory_commit`
@@ -719,6 +723,8 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most 25,000). |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries. |
+| `GET /v1/station/assistant/exposure?station=ID&conversation=ID` | Station bearer. `{"exposed": bool}` for a conversation the Station runs; `404` unknown conversation, `403` a Station that does not run it. |
+| `POST /v1/station/assistant/exposure` | Station bearer; body `{"station", "conversation", "source"}` (source 1-256 bytes). Marks the conversation exposed for good, `204`; `404`, `403` as for `GET`. |
 | `POST /v1/attach` | Requires exact `Origin` and trusted HTTPS proxy marker; exchanges token from JSON body for a scoped cookie. |
 | `GET /v1/socket/{session_id}?after={sequence}` | Requires the cookie, exact `Origin` and trusted HTTPS marker. Streams binary guatiao messages. |
 

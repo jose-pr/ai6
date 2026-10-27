@@ -143,8 +143,9 @@ pub(crate) async fn endpoint(
                 assistant.propose(&gateway, &granted, tool, &input).await
             } else {
                 let outcome = tools::run(&gateway, &granted.bearer, name, &input).await;
-                if !outcome.is_error && tools::EXPOSING_TOOLS.contains(&name) {
-                    assistant.expose(&granted);
+                // Marked before she reads the text, so whatever waits on exposure waits.
+                if !outcome.is_error && tools::exposes(name) {
+                    assistant.mark_exposed(&granted.conversation_id);
                 }
                 outcome
             };

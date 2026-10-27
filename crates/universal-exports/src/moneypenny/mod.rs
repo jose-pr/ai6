@@ -10,13 +10,18 @@
 //! When the roster's `[assistant]` gives people personal repositories, each message names the
 //! person's workspace (their repository, their groups' shared ones, their name for commits).
 //! A memory change the Station sets aside is committed at once in a conversation that has
-//! read nothing others wrote, and is a proposal once it has (a tool in
-//! [`tools::EXPOSING_TOOLS`] answered); a change to a shared repository is a proposal unless
-//! the group's repository is `write = true`.
+//! read nothing others wrote, and is a proposal once it has; a change to a shared repository
+//! is a proposal unless the group's repository is `write = true`.
+//!
+//! Exposure has one record, `Conversation.exposed`, never cleared. A read tool marks it
+//! unless it is one of [`tools::QUIET_TOOLS`]; a workspace with a shared repository marks it
+//! from the first message; a Station marks it (`POST /v1/station/assistant/exposure`) for what
+//! only it sees. Jobs carry it as [`ai6::AssistantJob::exposed`].
 //!
 //! Routes: `GET /v1/user/moneypenny` (the app's WebSocket), `POST /v1/moneypenny/mcp` (the
 //! harness's tools, with a token bound to the person and the conversation),
-//! `GET /v1/station/assistant/next` and `POST /v1/station/assistant/reports` (the Stations).
+//! `GET /v1/station/assistant/next`, `POST /v1/station/assistant/reports` and
+//! `GET`/`POST /v1/station/assistant/exposure` (the Stations).
 
 pub(crate) mod actions;
 mod guide;
@@ -244,6 +249,7 @@ fn control_job(
         session_id: conversation.session_id.clone(),
         close: *control == Control::Close,
         interrupt: *control == Control::Interrupt,
+        exposed: conversation.exposed,
         person_id: Some(conversation.person_id.clone()),
         workspace: None,
         commit,
@@ -318,7 +324,6 @@ fn workspace_for(
             .collect(),
         author_name,
         author_email,
-        exposed: false,
     }))
 }
 
@@ -623,11 +628,16 @@ impl Assistant {
                 session_id: conversation.session_id.clone(),
                 close: false,
                 interrupt: false,
+                // Text in a shared repository is outside text: a conversation with one checked
+                // out is exposed from its first message.
+                exposed: {
+                    conversation.exposed |= workspace
+                        .as_ref()
+                        .is_some_and(|workspace| !workspace.shared.is_empty());
+                    conversation.exposed
+                },
                 person_id: Some(person_id.to_owned()),
-                workspace: workspace.map(|workspace| AssistantWorkspace {
-                    exposed: conversation.exposed,
-                    ..workspace
-                }),
+                workspace,
                 commit: None,
             };
             conversation.workspace = job.workspace.clone();
@@ -1273,15 +1283,28 @@ impl Assistant {
             .or_else(|| healthy.into_iter().next())
     }
 
-    /// Marks the conversation exposed: a tool answered with text others wrote.
-    pub(crate) fn expose(&self, granted: &Granted) {
-        if let Some(conversation) = self
-            .desk()
-            .store
-            .owned(&granted.conversation_id, &granted.person_id)
-        {
+    /// Marks the conversation exposed for good: it read text written outside AI6's own
+    /// records. `Conversation.exposed` is the one record of it; jobs carry it to the Station.
+    pub(crate) fn mark_exposed(&self, conversation_id: &str) {
+        if let Some(conversation) = self.desk().store.conversations.get_mut(conversation_id) {
             conversation.exposed = true;
         }
+    }
+
+    /// The conversation `station` runs, whether it is exposed after `mark` marks it; `404`
+    /// for one this gateway does not hold, `403` for one another Station runs.
+    fn run_by(&self, station: &str, conversation_id: &str, mark: bool) -> Result<bool, ApiError> {
+        let mut desk = self.desk();
+        let conversation = desk
+            .store
+            .conversations
+            .get_mut(conversation_id)
+            .ok_or_else(ApiError::not_found)?;
+        if conversation.station.as_deref() != Some(station) {
+            return Err(ApiError::forbidden());
+        }
+        conversation.exposed |= mark;
+        Ok(conversation.exposed)
     }
 
     /// Runs [`actions::SHARED_CHANGE`]: a change to one file of a shared repository of a
@@ -2175,6 +2198,76 @@ pub(crate) async fn next(
             return Ok(StatusCode::NO_CONTENT.into_response());
         }
     }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ExposureQuery {
+    station: String,
+    conversation: String,
+}
+
+/// `GET /v1/station/assistant/exposure?station=ID&conversation=ID`: `{"exposed": bool}` for a
+/// conversation the Station runs; `404` for one this gateway does not hold, `403` for one
+/// another Station runs.
+pub(crate) async fn exposure(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Query(query): Query<ExposureQuery>,
+) -> Result<Json<Value>, ApiError> {
+    gateway.authenticate_station(bearer(&headers)?)?;
+    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    let exposed = assistant.run_by(&query.station, &query.conversation, false)?;
+    Ok(Json(json!({"exposed": exposed})))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Exposed {
+    station: String,
+    conversation: String,
+    /// Where the outside text came from, such as `personal:notes/a.md`.
+    source: String,
+}
+
+/// `POST /v1/station/assistant/exposure` with `{"station", "conversation", "source"}`: marks a
+/// conversation the Station runs exposed for good, `204`; `404` and `403` as for `GET`. The
+/// person is shown a notice naming the source the first time.
+pub(crate) async fn expose(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Json(exposed): Json<Exposed>,
+) -> Result<StatusCode, ApiError> {
+    gateway.authenticate_station(bearer(&headers)?)?;
+    if !ai6::directorates::section_00::assistant::valid_identity(&exposed.source) {
+        return Err(ApiError::bad_request());
+    }
+    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    let was = assistant.run_by(&exposed.station, &exposed.conversation, false)?;
+    assistant.run_by(&exposed.station, &exposed.conversation, true)?;
+    if !was {
+        let bounds = assistant.config.bounds();
+        if let Some(conversation) = assistant
+            .desk()
+            .store
+            .conversations
+            .get_mut(&exposed.conversation)
+        {
+            conversation.push(
+                Entry {
+                    role: Role::Notice,
+                    text: format!(
+                        "Moneypenny read text written outside AI6's own records ({}): from now \
+                         on her memory changes wait for your confirmation.",
+                        cut(&exposed.source, 200)
+                    ),
+                    at: now(),
+                    data: None,
+                },
+                bounds,
+            );
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /v1/station/assistant/reports`: what a Station's assistant harness did. `204`;

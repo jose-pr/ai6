@@ -50,7 +50,7 @@ const HIDDEN_DIRECTORIES: &str = ":(exclude,glob)**/.*/**";
 /// taken with it.
 fn stage_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failure> {
     for file in files {
-        if !ai6::directorates::section_00::assistant::repository_path(&file.path) {
+        if !exact_path(&file.path) {
             return Err(format!("{:?} is not a file a save may write", file.path));
         }
     }
@@ -85,6 +85,20 @@ fn stage_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failur
         }
     }
     Ok(())
+}
+
+/// Whether `path` may be given to an exact save: 1 to 8 `/`-separated names, none empty,
+/// `.`, `..` or `.git` in any case, none holding `\` or `:`. Hidden names are allowed: the
+/// caller chose the file, unlike the working tree's.
+fn exact_path(path: &str) -> bool {
+    let names: Vec<&str> = path.split('/').collect();
+    names.len() <= 8
+        && names.iter().all(|name| {
+            !matches!(*name, "" | "." | "..")
+                && !name.eq_ignore_ascii_case(".git")
+                && !name.contains(['\\', ':'])
+                && !name.chars().any(char::is_control)
+        })
 }
 
 /// Whether the index holds anything `HEAD` does not.

@@ -2744,14 +2744,14 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub token_expires_at: f64, pub session_id: Option<String> /* default */,
     pub close: bool /* default */,
     pub interrupt: bool /* default */,
+    pub exposed: bool /* default: Conversation.exposed at queue time, the one record of it */,
     pub person_id: Option<String> /* default, omitted when None; required with workspace or commit */,
     pub workspace: Option<AssistantWorkspace> /* default, omitted when None */,
     pub commit: Option<AssistantCommit> /* default, omitted when None */ } // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
 pub struct AssistantWorkspace { pub personal: String /* the person's repository, expanded */,
     pub shared: BTreeMap<String, String> /* default; checkout name (group or "org") -> repository */,
-    pub author_name: String, pub author_email: String /* the person's */,
-    pub exposed: bool /* default: the conversation read others' text */ }
+    pub author_name: String, pub author_email: String /* the person's */ }
 pub struct AssistantChange { pub digest: String /* hex SHA-256 of the files */,
     pub files: BTreeMap<String, Option<String>> /* path -> new text, None removes */ }
 impl AssistantChange { pub fn new(files) -> Self; pub fn digest_of(&files) -> String;
@@ -3361,6 +3361,17 @@ into its `personal/` and copy and committed exactly (`CheckpointSpec::files`: no
 in progress wrote goes with it); otherwise, and for `COMMIT_SHARED`,
 the desk clones the commit's repository into a temporary directory, writes, commits and
 pushes there, and removes it.
+
+Exposure is Universal Exports' record (`Conversation.exposed`); the desk reads it with `GET
+/v1/station/assistant/exposure?station&conversation` (`{"exposed"}`) when a turn ends and
+raises it with `POST` (`{"station","conversation","source"}`) for what only it sees: a
+workspace with any shared repository counts as exposed from its start, and a turn whose
+harness calls `Read`, `Grep` or `Glob` while `.moneypenny/outside-text` in the personal
+repository names any file is exposed at that call (source `personal:<paths>`). A turn ending
+exposed adds the files it changed in `personal/` to that record (committed by the Station
+with `CheckpointSpec::files`; files no longer there are dropped, and an empty record is
+removed). A failed `GET` counts as exposed; a memory change of a turn the desk found exposed
+is dropped with a `notice` when the `POST` fails.
 
 A job with a `workspace` or a `commit` must name `person_id`, and the Station refuses one whose
 repositories its own roster does not give: the personal repository must be

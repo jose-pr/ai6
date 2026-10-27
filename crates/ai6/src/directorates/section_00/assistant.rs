@@ -182,9 +182,6 @@ pub struct AssistantWorkspace {
     pub author_name: String,
     /// The email commits are authored with: the person's.
     pub author_email: String,
-    /// The conversation has read text others wrote, so a memory change waits for the person.
-    #[serde(default)]
-    pub exposed: bool,
 }
 
 /// A memory change the desk set aside, or the files of a commit: each path, relative to the
@@ -381,6 +378,11 @@ pub struct AssistantJob {
     /// `message` is empty. A harness that is not answering is left as it is.
     #[serde(default)]
     pub interrupt: bool,
+    /// The conversation has read text written outside AI6's own records, as Universal Exports
+    /// knows it when the job is queued (`Conversation.exposed` there is the one record of it):
+    /// a memory change then waits for the person, and so does whatever else waits on exposure.
+    #[serde(default)]
+    pub exposed: bool,
     /// The person the conversation is for. Required with `workspace` and `commit`: the
     /// Station fills the person's repository from its own roster and takes only that one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -575,6 +577,7 @@ mod tests {
             session_id: None,
             close: false,
             interrupt: false,
+            exposed: false,
             person_id: None,
             workspace: None,
             commit: None,
@@ -648,7 +651,6 @@ mod tests {
             shared: BTreeMap::new(),
             author_name: "Eve".to_owned(),
             author_email: "eve@example.invalid".to_owned(),
-            exposed: false,
         });
         assert!(working.validate().is_err(), "a remote helper is refused");
         let encoded = serde_json::to_value(&committing).unwrap();

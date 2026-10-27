@@ -1584,6 +1584,14 @@ fn workspace_roster() -> Arc<dyn ai6::ConfigSource> {
     ))
 }
 
+/// Personal repositories under `/srv/mp` and nothing shared.
+fn personal_roster() -> Arc<dyn ai6::ConfigSource> {
+    let settings = ai6::AssistantSettings::new().with_personal_repo("/srv/mp/{person}.git");
+    Arc::new(ai6::MemoryConfigSource::new(
+        ai6::Roster::builder().assistant(settings).build().unwrap(),
+    ))
+}
+
 /// The files of a memory change, as a Station reports it.
 fn remembered() -> AssistantChange {
     AssistantChange::new(BTreeMap::from([(
@@ -1636,7 +1644,10 @@ async fn each_person_works_in_their_own_repository_and_reads_only_their_groups()
         ["ops", "org"],
         "the group's and the organisation's"
     );
-    assert!(!mine.exposed);
+    assert!(
+        operator.exposed,
+        "a shared repository exposes from the first message"
+    );
     let theirs = viewer.workspace.clone().unwrap();
     assert_eq!(theirs.personal, "/srv/mp/viewer-007.git");
     assert_eq!(theirs.shared.keys().collect::<Vec<_>>(), ["org"]);
@@ -1654,7 +1665,7 @@ async fn each_person_works_in_their_own_repository_and_reads_only_their_groups()
 
 #[tokio::test]
 async fn a_clean_conversation_keeps_her_memory_and_an_exposed_one_asks_the_person() {
-    let served = served_with(AssistantConfig::default(), Some(workspace_roster())).await;
+    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
     let (mut app, job) = accepted(&served, &served.operator, "I like tables.").await;
 
     // Clean: the change goes straight back to the Station as a commit, and the person sees it.
@@ -1687,7 +1698,7 @@ async fn a_clean_conversation_keeps_her_memory_and_an_exposed_one_asks_the_perso
     // A tool that returns others' text exposes the conversation for good.
     say(&mut app, "What is mission-g about?", None).await;
     let second = take(&served, "hq").await;
-    assert!(!second.workspace.as_ref().unwrap().exposed);
+    assert!(!second.exposed);
     report(
         &served,
         "hq",
@@ -1741,10 +1752,7 @@ async fn a_clean_conversation_keeps_her_memory_and_an_exposed_one_asks_the_perso
     // Cancelled, nothing is sent: the Station set the change aside already.
     say(&mut app, "And remember this.", None).await;
     let third = take(&served, "hq").await;
-    assert!(
-        third.workspace.as_ref().unwrap().exposed,
-        "exposed for good"
-    );
+    assert!(third.exposed, "exposed for good");
     assert!(
         third.message.contains("memory_commit") || third.message.contains("Done"),
         "she hears how the confirmed change went: {}",
@@ -1890,4 +1898,101 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
             .all(|frame| frame["type"] != "proposal" && frame["entry"]["role"] != "proposal")
     );
     assert!(nothing_for(&served, "hq").await);
+}
+
+/// `GET /v1/station/assistant/exposure` as `station` asks it.
+async fn exposure_of(served: &Served, station: &str, conversation: &str) -> reqwest::Response {
+    reqwest::Client::new()
+        .get(format!(
+            "{}/v1/station/assistant/exposure?station={station}&conversation={conversation}",
+            served.base
+        ))
+        .bearer_auth(STATION_TOKEN)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// `POST /v1/station/assistant/exposure` as `station` sends it.
+async fn expose_as(served: &Served, station: &str, conversation: &str) -> StatusCode {
+    reqwest::Client::new()
+        .post(format!("{}/v1/station/assistant/exposure", served.base))
+        .bearer_auth(STATION_TOKEN)
+        .json(&json!({"station": station, "conversation": conversation,
+                      "source": "personal:notes/a.md"}))
+        .send()
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn the_station_raises_exposure_it_alone_sees_and_her_memory_then_waits() {
+    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
+    let (mut app, job) = accepted(&served, &served.operator, "What did I note?").await;
+    let conversation = &job.conversation_id;
+    let answer = exposure_of(&served, "hq", conversation).await;
+    assert_eq!(answer.status(), StatusCode::OK);
+    assert_eq!(
+        answer.json::<Value>().await.unwrap(),
+        json!({"exposed": false})
+    );
+    // Only the Station running the conversation, and only one this gateway holds.
+    assert_eq!(
+        exposure_of(&served, "worker", conversation).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        expose_as(&served, "worker", conversation).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        exposure_of(&served, "hq", "no-such-conversation")
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        expose_as(&served, "hq", conversation).await,
+        StatusCode::NO_CONTENT
+    );
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "notice").await;
+    let notice = frames.last().unwrap()["entry"]["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(notice.contains("personal:notes/a.md"), "{notice}");
+    assert_eq!(
+        exposure_of(&served, "hq", conversation)
+            .await
+            .json::<Value>()
+            .await
+            .unwrap(),
+        json!({"exposed": true})
+    );
+    // Her memory change now waits for the person, and the next job says so.
+    set_aside(&served, &job).await;
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
+    assert_eq!(proposal_of(&frames)["tool"], "memory_commit");
+    assert!(nothing_for(&served, "hq").await);
+    finish(&served, &mut app, &job).await;
+    say(&mut app, "Thanks.", None).await;
+    assert!(take(&served, "hq").await.exposed);
+}
+
+#[tokio::test]
+async fn a_read_tool_exposes_unless_it_quotes_no_one() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Who am I?").await;
+    let quiet = call_tool(&served, &job.mcp_token, "profile", json!({})).await;
+    assert_eq!(quiet["isError"], false);
+    let still = exposure_of(&served, "hq", &job.conversation_id).await;
+    assert_eq!(
+        still.json::<Value>().await.unwrap(),
+        json!({"exposed": false})
+    );
+    let board = call_tool(&served, &job.mcp_token, "board", json!({})).await;
+    assert_eq!(board["isError"], false);
+    let now = exposure_of(&served, "hq", &job.conversation_id).await;
+    assert_eq!(now.json::<Value>().await.unwrap(), json!({"exposed": true}));
 }
