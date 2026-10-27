@@ -7,7 +7,7 @@ ai6::guatiao::providers!(ClaudeHandler);
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{
@@ -497,6 +497,8 @@ struct ClaudeSession {
     /// The last lines Claude wrote that were not JSON: its own diagnostics, which say why it
     /// exited when it exits.
     tail: Mutex<VecDeque<String>>,
+    /// Numbers the control requests written to Claude, for their `request_id`.
+    requests: AtomicU64,
 }
 
 /// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
@@ -519,6 +521,7 @@ impl ClaudeSession {
             restricted: None,
             tripped: AtomicBool::new(false),
             tail: Mutex::new(VecDeque::new()),
+            requests: AtomicU64::new(0),
         }
     }
 
@@ -603,10 +606,16 @@ impl ClaudeSession {
         Some(event("failed", Some(reason)))
     }
 
+    /// Writes `input` as one line in a single write, so a line written from another thread (an
+    /// interrupt during a message) cannot land inside it.
+    fn write_line(&self, input: &impl Serialize) -> Result<(), ProviderError> {
+        let mut line = serde_json::to_vec(input).map_err(internal)?;
+        line.push(b'\n');
+        self.terminal.write(&line)
+    }
+
     fn send(&self, text: &str) -> Result<(), ProviderError> {
-        let line = serde_json::to_vec(&ClaudeInput::user(text)).map_err(internal)?;
-        self.terminal.write(&line)?;
-        self.terminal.write(b"\n")
+        self.write_line(&ClaudeInput::user(text))
     }
 
     fn read_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
@@ -688,17 +697,37 @@ impl ClaudeSession {
             }
             *lock(&self.session_id)? = Some(session_id);
         }
+        let kind = value.get("type").and_then(Value::as_str);
+        if kind == Some("control_response") {
+            control_answered(&value);
+        }
+        if matches!(kind, Some("user" | "control_response")) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            return self.read_event(remaining.as_millis().min(i64::MAX as u128) as i64);
+        }
         if let Some(event) = decode_event(&value, line.clone()) {
             if let Some(ended) = self.tripped(&event) {
                 return Ok(Some(ended));
             }
             return Ok(Some(event));
         }
-        if value.get("type").and_then(Value::as_str) == Some("user") {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            return self.read_event(remaining.as_millis().min(i64::MAX as u128) as i64);
-        }
         Ok(None)
+    }
+}
+
+/// Logs a `control_response` that reports an error; a success needs nothing. Claude Code
+/// 2.1.310 answers an interrupt with `success` (`{"still_queued":[]}`) even when no turn is
+/// running, and a request it does not support with `error` and its reason.
+fn control_answered(value: &Value) {
+    let Some(response) = value.get("response") else {
+        return;
+    };
+    if response.get("subtype").and_then(Value::as_str) == Some("error") {
+        let error = response
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("no reason given");
+        eprintln!("ai6: Claude Code refused a control request: {error}");
     }
 }
 
@@ -715,8 +744,15 @@ impl ai6::directorates::section_00::agent::AgentSession for ClaudeSession {
         self.read_event(timeout_ms.max(0))
     }
 
+    /// Stops the running turn with stream-json's `interrupt` control request, in the Agent
+    /// SDK's shape; the `control_response` Claude answers with is read and dropped.
     fn interrupt(&self) -> Result<(), ProviderError> {
-        self.terminal.write(&[3])
+        let number = self.requests.fetch_add(1, Ordering::Relaxed) + 1;
+        self.write_line(&json!({
+            "type": "control_request",
+            "request_id": format!("ai6-interrupt-{number}"),
+            "request": { "subtype": "interrupt" },
+        }))
     }
 
     fn close(&self) -> Result<(), ProviderError> {
@@ -1534,6 +1570,84 @@ mod tests {
             ]
         );
         assert_eq!(spec.lock().unwrap().as_ref().unwrap().cols, STREAM_COLS);
+    }
+
+    /// An interrupt is one stream-json control request; Claude's answers to it, the idle
+    /// `success` Claude Code 2.1.310 sends and an `error`, are consumed, never events.
+    #[test]
+    fn interrupt_writes_a_control_request_and_consumes_its_response() {
+        let mut input =
+            b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-42\"}\n"
+                .to_vec();
+        input.extend_from_slice(
+            b"{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\
+              \"request_id\":\"ai6-interrupt-1\",\"response\":{\"still_queued\":[]}}}\n",
+        );
+        input.extend_from_slice(
+            b"{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\
+              \"request_id\":\"ai6-interrupt-2\",\"error\":\"no turn to interrupt\"}}\n",
+        );
+        input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"stopped\"}\n");
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let terminal = ResumeTerminal {
+            spec: Arc::new(Mutex::new(None)),
+            input,
+            writes: writes.clone(),
+        };
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-test".to_owned(),
+        })
+        .unwrap();
+        let session = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-42".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-session-42").unwrap(),
+                    message: None,
+                    working_directory: "C:\\station\\mission-42".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+
+        session.interrupt().unwrap();
+        session.interrupt().unwrap();
+
+        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+        assert!(!written.contains('\u{3}'), "no ^C byte reaches the stream");
+        let requests = written
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            [1, 2].map(|number| json!({
+                "type": "control_request",
+                "request_id": format!("ai6-interrupt-{number}"),
+                "request": { "subtype": "interrupt" },
+            }))
+        );
+        assert!(written.ends_with('\n'));
+
+        let kinds_and_texts = std::iter::from_fn(|| session.next_event(50).unwrap())
+            .map(|event| (event.kind, event.text))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds_and_texts,
+            [
+                ("system".to_owned(), None),
+                ("completed".to_owned(), Some("stopped".to_owned())),
+            ]
+        );
     }
 
     #[test]

@@ -55,6 +55,17 @@ provider without a terminal (`pipe`) and refuses one that gives it a terminal: w
 Claude Code 2.1.310 exits at once when its standard input is a terminal ("Input must be
 provided either through stdin or as a prompt argument when using --print").
 
+`interrupt` writes one stream-json control request,
+`{"type":"control_request","request_id":"ai6-interrupt-N","request":{"subtype":"interrupt"}}`
+(`N` counts from 1 per Session), the shape the Agent SDK sends; no `^C` byte is written,
+since without a terminal it would reach Claude as data. Claude answers with a
+`control_response` line, which `next_event` reads and drops, never an event; one whose
+`response.subtype` is `error` is logged to standard error with its `error`. Claude Code
+2.1.310 answers an interrupt with `success` and `{"still_queued":[]}` even when no turn is
+running, and stays running (checked against that version over pipes, with no message sent).
+Each message and request is written in a single write, so an interrupt sent while a message
+is being written cannot land inside it.
+
 The terminal is opened at `STREAM_COLS` (32767) columns and read with
 `ai6::directorates::q::terminal::JsonLines`, so the controls ConPTY writes on Windows and a
 line it breaks are read as the stream Claude wrote; a line that is not JSON becomes an event

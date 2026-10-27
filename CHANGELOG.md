@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   harness that exits is noticed although ConPTY keeps the output open after its program has
   exited. `kill` returns once the program, and on Windows its whole Job Object, has exited
   (at most 2 s).
+- The Claude Code handler interrupts a turn with stream-json's `interrupt` control request
+  (`{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}`), which
+  stops Claude on `pipe`, where a written `^C` is only input. Claude's `control_response` is
+  read and dropped, never an event, and an `error` response is logged; Claude Code 2.1.310
+  answers `success` even when no turn is running. Each message is written in one write, so
+  an interrupt cannot land inside it.
 - The Claude Code and Codex handlers notice a harness that exits while its terminal keeps the
   output open (a timed-out read asks the terminal's exit status) and end the Session with one
   `failed` event naming the exit code or signal and quoting the last eight lines the harness
