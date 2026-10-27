@@ -31,13 +31,19 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   new branch named `saved.branch` at `saved.commit` (or the fetched tip when that commit is
   gone). The base is `saved.base` when it is an ancestor of the commit, else the commit
   itself. A local branch of that name already in `source` is refused by Git.
-- **A clone** (`clone = Some(SafeHouseClone { path, create_source })`, which overrides
-  everything above): `source` is a repository URL (`file://`, `ssh://`, `git://`,
+- **A clone** (`clone = Some(SafeHouseClone { path, create_source, git_dir })`, which
+  overrides everything above): `source` is a repository URL (`file://`, `ssh://`, `git://`,
   `http(s)://`), `user@host:path` or a local repository, bare or not; a remote helper
   (`ext::`, `fd::`) or another scheme is refused before Git runs. With `create_source` and a
   local path or `file://` URL that does not exist, `git init --bare` makes it first, its
   `HEAD` naming `spec.base`. Then `git clone -- <source> <path>` (the directory must not
-  exist; its parents are made) and `git checkout -B <base> --track origin/<base>`. A
+  exist; its parents are made; with `git_dir`, `--separate-git-dir=<git_dir>`, which must not
+  exist either, and the `.git` pointer file is removed, so the working tree holds no `.git`)
+  and `git checkout -B <base> --track origin/<base>`. Every command of a clone, the clone
+  itself included, names `--git-dir` and `--work-tree` outright and runs with
+  `core.hooksPath` set to a directory that does not exist, `core.fsmonitor=false` and
+  `commit.gpgsign=false`; the Station user's global and system configuration still apply
+  (credential helpers). A
   repository with no branch at all leaves `<base>` unborn (the base is empty); one with
   branches but not `<base>` is refused and the clone removed. Remote repositories are reached
   with the Station user's Git credentials.
@@ -81,7 +87,8 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   disappeared exports nothing.
 - `discard()`: `git worktree remove --force --force` and `git branch -D` of the Mission's
   branch, whatever they hold; what is already gone is skipped. A clone's directory is
-  removed, read-only object files included. An in-place session is refused.
+  removed, read-only object files included, and so is its separate git directory. An in-place
+  session is refused.
 - `finish()` on a clone: removed when clean and every commit is on an `origin` branch, else
   kept and its unpushed commits listed.
 

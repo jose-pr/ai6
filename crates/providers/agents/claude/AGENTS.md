@@ -147,12 +147,15 @@ Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task,A
 assistant Session's list is the same with `Skill` in place of `mcp__*`. An assistant whose
 mode names `files` instead gets `--tools Read,Write,Edit,Glob,Grep`, `--permission-mode
 dontAsk`, `--disallowedTools Bash,PowerShell,NotebookEdit,WebFetch,WebSearch,Task,Agent,
-TodoWrite,Skill` and `--allowedTools mcp__<server>,…,Read,Glob,Grep,Edit(/<dir>/**),…` (Edit
+TodoWrite,Skill,Edit(**/.*),Edit(**/.*/**)` (no path with a name starting with `.`) and `--allowedTools mcp__<server>,…,Read,Glob,Grep,Edit(/<dir>/**),…` (Edit
 rules cover Write; `/` is the working directory), and its tripwire lets those five tools
 through. Measured with 2.1.310 against a loopback stand-in for the API (no model reached):
 Write and Edit under `personal/` ran; Write to another directory, to the working directory's
 own `CLAUDE.md`, to `personal/.git/hooks` and to `personal/../x` were denied; `--restricted`
-refused Read outside the working directory. Under `--restricted` the working directory's
+refused Read outside the working directory. With the dot-path rules, Write and Edit to
+`.git/config`, `.GIT/config`, `.git./config`, `PERSONAL\.git\config`, `.gitattributes`,
+`notes/.hidden` and `scratch/.x` were refused on Windows, and so were writes through 8.3
+short names (`GIT~1\config`, `GITATT~1`) even after reading them. Under `--restricted` the working directory's
 `CLAUDE.md` does not load, with or without `--setting-sources user,project`, so a mode's
 `context_file` goes in with `--append-system-prompt-file`, which reached the request's
 system prompt. Every assistant Session also has `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.

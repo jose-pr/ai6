@@ -62,6 +62,10 @@ pub struct SafeHouseClone {
     /// First make `source` an empty bare repository whose `HEAD` is the spec's `base` when it
     /// is a local path or `file://` URL that does not exist.
     pub create_source: bool,
+    /// Keep the repository's git directory here, a directory that must not exist yet, instead
+    /// of `.git` inside `path`: the working directory then holds no `.git` at all, so whoever
+    /// writes there cannot reach the repository's configuration or hooks.
+    pub git_dir: Option<String>,
 }
 
 /// Work in progress saved where another Station can fetch it: a commit pushed to a branch.

@@ -3338,7 +3338,9 @@ A job with a `workspace` gets, through the `git` safe-house provider (`SafeHouse
 `CheckpointSpec::branch`): `personal/`, a clone of `workspace.personal` on `main` (a missing
 local or `file://` repository is made bare first; a first use writes and commits
 `memory/MEMORY.md`); `shared/<name>/` per shared repository, cloned afresh at each harness
-start (one that cannot be opened is skipped with a `notice`); `scratch/`; `CLAUDE.md` (the
+start (one that cannot be opened is skipped with a `notice`); every git directory in
+`<conversation digest>.git/{personal,shared/<name>}` beside the conversation's directory, so
+none is inside it (`SafeHouseClone::git_dir`); `scratch/`; `CLAUDE.md` (the
 desk's instructions, then `@personal/memory/MEMORY.md`) and `AGENTS.md` (the same with
 `MEMORY.md` inlined, at most 32 KiB); and `<conversation digest>.context.md` beside the
 directory with the `AGENTS.md` text. The harness's mode is `moneypenny()` with `files =
@@ -3412,6 +3414,7 @@ pub struct SafeHouseSpec {
 pub struct SafeHouseClone {
     pub path: String,          // the working directory; must not exist
     pub create_source: bool,   // first make a missing local/file:// `source` an empty bare repository
+    pub git_dir: Option<String>, // the git directory here instead of `.git` in `path`; none left there
 }
 pub struct CheckpointSpec {
     pub remote: String,    // Git remote name or URL

@@ -78,11 +78,13 @@ pub(super) struct TurnEnd {
 }
 
 impl Workspace {
-    /// Makes the workspace in `area`, the conversation's empty directory, and writes the
-    /// standing text to `context`; answers it with notices for the conversation.
+    /// Makes the workspace in `area`, the conversation's empty directory, with the
+    /// repositories' git directories in `repos` and the standing text in `context`, both
+    /// outside `area`; answers it with notices for the conversation.
     pub(super) fn prepare(
         houses: &Houses,
         area: &Path,
+        repos: &Path,
         context: &Path,
         conversation_id: &str,
         digest: &str,
@@ -91,8 +93,15 @@ impl Workspace {
         let provider = houses()?;
         let create = RepoKind::of(&job.personal)? == RepoKind::Local;
         let path = area.join(PERSONAL);
-        let personal = open_clone(provider.as_ref(), &job.personal, &path, create, digest)
-            .map_err(|reason| format!("the personal repository could not be opened: {reason}"))?;
+        let personal = open_clone(
+            provider.as_ref(),
+            &job.personal,
+            &path,
+            Some(&repos.join(PERSONAL)),
+            create,
+            digest,
+        )
+        .map_err(|reason| format!("the personal repository could not be opened: {reason}"))?;
         let mut workspace = Self {
             conversation_id: conversation_id.to_owned(),
             digest: digest.to_owned(),
@@ -114,7 +123,15 @@ impl Workspace {
         let mut shared = Vec::new();
         for (name, repo) in &job.shared {
             let target = area.join(SHARED).join(name);
-            match open_clone(provider.as_ref(), repo, &target, false, digest) {
+            let git_dir = repos.join(SHARED).join(name);
+            match open_clone(
+                provider.as_ref(),
+                repo,
+                &target,
+                Some(&git_dir),
+                false,
+                digest,
+            ) {
                 Ok(_) => shared.push(name.clone()),
                 Err(reason) => notices.push(format!(
                     "The shared repository {name:?} could not be opened, so shared/{name}/ is \
@@ -291,7 +308,14 @@ pub(super) fn commit_once(
         .map_err(|error| error.to_string())?;
     let create = commit.kind == COMMIT_MEMORY && RepoKind::of(&commit.repo)? == RepoKind::Local;
     let target = scratch.path().join("repository");
-    let house = open_clone(provider.as_ref(), &commit.repo, &target, create, digest)?;
+    let house = open_clone(
+        provider.as_ref(),
+        &commit.repo,
+        &target,
+        None,
+        create,
+        digest,
+    )?;
     let saved = write_change(&target, &commit.change).and_then(|()| {
         house
             .checkpoint(&CheckpointSpec {
@@ -328,10 +352,12 @@ fn landed(saved: &SafeHouseCheckpoint, repo: &str) -> String {
     }
 }
 
+/// Clones `repo` into `path` on `main`, its git directory in `git_dir` when given.
 fn open_clone(
     provider: &dyn SafeHouseProvider,
     repo: &str,
     path: &Path,
+    git_dir: Option<&Path>,
     create: bool,
     digest: &str,
 ) -> Result<SafeHouse, String> {
@@ -350,6 +376,7 @@ fn open_clone(
         clone: Some(SafeHouseClone {
             path: path.to_string_lossy().into_owned(),
             create_source: create,
+            git_dir: git_dir.map(|dir| dir.to_string_lossy().into_owned()),
         }),
     };
     SafeHouse::open(provider, &spec).map_err(|error| error.to_string())

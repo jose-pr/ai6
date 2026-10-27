@@ -589,13 +589,23 @@ impl Desk {
             return Ok((AssistantMode::moneypenny(), None, Vec::new()));
         };
         let area = PathBuf::from(area);
-        let context = context_file(&area).ok_or("the conversation's directory has no parent")?;
+        let (context, repos) = context_file(&area)
+            .zip(repos_dir(&area))
+            .ok_or("the conversation's directory has no parent")?;
         let houses = self.houses.clone();
         let conversation = job.conversation_id.clone();
         let digest = conversation_digest(&conversation);
         let file = context.clone();
         let (workspace, notices) = tokio::task::spawn_blocking(move || {
-            Workspace::prepare(&houses, &area, &file, &conversation, &digest, &wanted)
+            Workspace::prepare(
+                &houses,
+                &area,
+                &repos,
+                &file,
+                &conversation,
+                &digest,
+                &wanted,
+            )
         })
         .await
         .map_err(|error| error.to_string())?
@@ -1000,8 +1010,16 @@ fn context_file(area: &Path) -> Option<PathBuf> {
     Some(area.parent()?.join(format!("{name}.context.md")))
 }
 
-/// Removes a conversation's directory [`Desk::area`] made, and its context file, and nothing
-/// else.
+/// The directory beside a conversation's directory that holds its repositories' git
+/// directories: outside the directory, so the harness can reach no repository's
+/// configuration or hooks.
+fn repos_dir(area: &Path) -> Option<PathBuf> {
+    let name = area.file_name()?.to_str()?;
+    Some(area.parent()?.join(format!("{name}.git")))
+}
+
+/// Removes a conversation's directory [`Desk::area`] made, its context file and its git
+/// directories, and nothing else.
 fn remove_area(path: &str) {
     let path = Path::new(path);
     let root = path.parent();
@@ -1020,6 +1038,14 @@ fn remove_area(path: &str) {
     if let Some(context) = context_file(path) {
         let _ = std::fs::remove_file(context);
     }
+    if let Some(repos) = repos_dir(path) {
+        remove_tree(&repos);
+    }
+    remove_tree(path);
+}
+
+/// Removes `path` and everything under it, trying again while Windows still holds it.
+fn remove_tree(path: &Path) {
     // Windows refuses to remove a directory a process still has open (os error 32), which a
     // harness's processes do for a moment after they have exited, so it is tried again.
     let deadline = Instant::now() + REMOVE_RETRY;
@@ -2121,6 +2147,12 @@ mod tests {
         assert!(area.join("scratch").is_dir());
         let claude = std::fs::read_to_string(area.join("CLAUDE.md")).unwrap();
         assert!(claude.contains("@personal/memory/MEMORY.md"), "{claude}");
+        assert!(
+            !area.join("personal").join(".git").exists(),
+            "her repository's git directory is outside her workspace"
+        );
+        let repos = repos_dir(&area).unwrap();
+        assert!(repos.join("personal").join("HEAD").exists());
 
         // Her note is on main, as the person, with the trailer; her memory is not, yet.
         assert!(
@@ -2220,7 +2252,7 @@ mod tests {
         // Closed, its directory and context file go; the next conversation reads her memory.
         fixture.desk.close_all();
         until(|| kinds(&fixture, "c-w").contains(&EVENT_CLOSED.to_owned())).await;
-        until(|| !area.exists() && !context.exists()).await;
+        until(|| !area.exists() && !context.exists() && !repos.exists()).await;
         let next = scripted(true, IDLE, Script::Answers, Script::Answers).with_git();
         next.desk
             .handle(working("c-next", "What do I like?", workspace(&bare)))
@@ -2240,6 +2272,63 @@ mod tests {
             "the harness's system prompt holds it: {context}"
         );
         next.desk.close_all();
+    }
+
+    /// Writes an executable hook script that records it ran in `marker`.
+    fn hook(path: &Path, marker: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                "#!/bin/sh\necho ran > '{}'\nexit 0\n",
+                marker.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn hooks_and_a_monitor_in_her_repository_never_run_when_the_station_commits() {
+        let fixture = scripted(true, IDLE, Script::Works, Script::Answers).with_git();
+        let people = tempfile::tempdir().unwrap();
+        let bare = people.path().join("eve.git");
+        fixture
+            .desk
+            .handle(working("c-h", "Take notes.", workspace(&bare)))
+            .await;
+        until(|| kinds(&fixture, "c-h").contains(&EVENT_TEXT.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let area = PathBuf::from(&start.working_directory);
+        let git_dir = repos_dir(&area).unwrap().join("personal");
+        let marker = people.path().join("hook-ran");
+        let hooks = people.path().join("planted");
+        hook(&hooks.join("pre-commit"), &marker);
+        hook(&hooks.join("post-commit"), &marker);
+        hook(&hooks.join("monitor"), &marker);
+        let set = |key: &str, value: &Path| {
+            git(
+                people.path(),
+                &[
+                    &format!("--git-dir={}", git_dir.to_string_lossy()),
+                    "config",
+                    key,
+                    &value.to_string_lossy().replace('\\', "/"),
+                ],
+            );
+        };
+        set("core.hooksPath", &hooks);
+        set("core.fsmonitor", &hooks.join("monitor"));
+        std::fs::write(area.join("personal").join("notes.md"), "notes\n").unwrap();
+        fixture.desk.handle(interruption("c-h", "done")).await;
+        until(|| kinds(&fixture, "c-h").contains(&EVENT_INTERRUPTED.to_owned())).await;
+        assert_eq!(git(&bare, &["show", "main:notes.md"]), "notes\n");
+        assert!(!marker.exists(), "nothing the repository names ran");
+        fixture.desk.close_all();
     }
 
     #[tokio::test]

@@ -4,30 +4,90 @@
 
 //! A safe house that is a clone of a repository on one of its branches, saved by committing
 //! in place and pushing to a branch the clone shares with everyone else who uses it.
+//!
+//! The working directory may be written by someone the Station does not trust, so every Git
+//! command of a clone names its git directory and working tree outright (no `.git` in the
+//! working tree is ever looked for) and runs with no hooks, no filesystem monitor and no
+//! commit signing: settings a repository's configuration could otherwise turn into programs
+//! the Station runs. The Station user's global and system configuration still apply: they
+//! hold its credential helpers, and nothing in a working tree writes them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use ai6::RepoKind;
 use ai6::directorates::q::safehouse::{
-    CheckpointSpec, SafeHouseCheckpoint, SafeHouseReport, SafeHouseSpec,
+    CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseReport, SafeHouseSpec,
 };
 
-use crate::worktree::{Failure, Worktree, fail, git, git_path, git_with, resolve};
+use crate::worktree::{Failure, Worktree, fail, git, git_path, git_with};
 
-/// A setting the commits of a save run with: no signing, which could wait for a passphrase.
-const QUIET_COMMIT: [&str; 2] = ["-c", "commit.gpgsign=false"];
+/// The settings every command of a clone runs with. `core.hooksPath` names a directory that
+/// is never made, so no hook runs.
+fn hardened(git_dir: &Path) -> Vec<String> {
+    vec![
+        "-c".to_owned(),
+        format!(
+            "core.hooksPath={}",
+            git_dir.join("ai6-no-hooks").to_string_lossy()
+        ),
+        "-c".to_owned(),
+        "core.fsmonitor=false".to_owned(),
+        "-c".to_owned(),
+        "commit.gpgsign=false".to_owned(),
+    ]
+}
+
+/// A clone's git directory and working tree, and how a command runs against them.
+pub(crate) struct Repo<'a> {
+    git_dir: &'a Path,
+    work_tree: &'a Path,
+}
+
+impl<'a> Repo<'a> {
+    pub(crate) fn new(git_dir: &'a Path, work_tree: &'a Path) -> Self {
+        Self { git_dir, work_tree }
+    }
+
+    /// Runs `git args` with `env`, hardened, against this git directory and working tree.
+    pub(crate) fn run(&self, args: &[&str], env: &[(&str, String)]) -> Result<String, Failure> {
+        let mut all = vec![
+            format!("--git-dir={}", self.git_dir.to_string_lossy()),
+            format!("--work-tree={}", self.work_tree.to_string_lossy()),
+        ];
+        all.extend(hardened(self.git_dir));
+        all.extend(args.iter().map(|arg| (*arg).to_owned()));
+        let all: Vec<&str> = all.iter().map(String::as_str).collect();
+        git_with(self.work_tree, &all, env)
+    }
+
+    /// The commit `revision` names.
+    fn resolve(&self, revision: &str) -> Result<String, Failure> {
+        let commit = self
+            .run(
+                &["rev-parse", "--verify", &format!("{revision}^{{commit}}")],
+                &[],
+            )?
+            .trim()
+            .to_owned();
+        if commit.is_empty() {
+            return Err(format!("Git did not resolve {revision:?}"));
+        }
+        Ok(commit)
+    }
+}
 
 impl Worktree {
-    /// Clones `spec.source` into `target` on branch `spec.base`, after creating the source as
-    /// an empty bare repository when `create_source` says so and it is a local one that does
-    /// not exist. A repository with no branch at all gives an unborn `base`; one without
-    /// `base` but with other branches is refused.
+    /// Clones `spec.source` into `clone.path` on branch `spec.base`, after creating the source
+    /// as an empty bare repository when `clone.create_source` says so and it is a local one
+    /// that does not exist. With `clone.git_dir` the git directory goes there and the working
+    /// tree keeps no `.git`. A repository with no branch at all gives an unborn `base`; one
+    /// without `base` but with other branches is refused.
     pub(crate) fn clone_into(
         spec: &SafeHouseSpec,
-        target: &Path,
-        create_source: bool,
+        clone: &SafeHouseClone,
     ) -> Result<Self, Failure> {
+        let target = Path::new(&clone.path);
         if target.exists() {
             return Err(format!(
                 "safe-house path {} already exists",
@@ -42,7 +102,7 @@ impl Worktree {
         let parent = git_path(parent.canonicalize().map_err(|error| fail(parent, error))?);
         git(&parent, &["check-ref-format", "--branch", &spec.base])
             .map_err(|_| format!("{:?} is not a branch name", spec.base))?;
-        if create_source
+        if clone.create_source
             && kind == RepoKind::Local
             && let Some(local) = local_repository(&spec.source)
             && !local.exists()
@@ -54,12 +114,54 @@ impl Worktree {
             .ok_or_else(|| format!("{} has no name", target.display()))?
             .to_string_lossy()
             .into_owned();
-        git(&parent, &["clone", "--quiet", "--", &spec.source, &name])?;
         let path = parent.join(&name);
+        let git_dir = match &clone.git_dir {
+            Some(git_dir) => {
+                let git_dir = Path::new(git_dir);
+                if git_dir.exists() {
+                    return Err(format!(
+                        "git directory {} already exists",
+                        git_dir.display()
+                    ));
+                }
+                let above = git_dir
+                    .parent()
+                    .ok_or_else(|| format!("{} has no parent directory", git_dir.display()))?;
+                fs::create_dir_all(above).map_err(|error| fail(above, error))?;
+                git_path(above.canonicalize().map_err(|error| fail(above, error))?).join(
+                    git_dir
+                        .file_name()
+                        .ok_or_else(|| format!("{} has no name", git_dir.display()))?,
+                )
+            }
+            None => path.join(".git"),
+        };
+        let mut args = hardened(&git_dir);
+        args.extend(["clone".to_owned(), "--quiet".to_owned()]);
+        if clone.git_dir.is_some() {
+            args.push(format!("--separate-git-dir={}", git_dir.to_string_lossy()));
+        }
+        args.extend(["--".to_owned(), spec.source.clone(), name]);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        git(&parent, &args)?;
+        if clone.git_dir.is_some() {
+            // The pointer Git leaves in the working tree is not needed: every command names the
+            // git directory itself.
+            fs::remove_file(path.join(".git")).map_err(|error| fail(&path, error))?;
+        }
+        let house = Self {
+            repository: path.clone(),
+            path,
+            branch: Some(spec.base.clone()),
+            base: String::new(),
+            isolated: true,
+            cloned: true,
+            git_dir: Some(git_dir),
+        };
+        let repo = house.repo();
         let tracking = format!("refs/remotes/origin/{}", spec.base);
-        if resolve(&path, &tracking).is_ok() {
-            git(
-                &path,
+        if repo.resolve(&tracking).is_ok() {
+            repo.run(
                 &[
                     "checkout",
                     "--quiet",
@@ -68,28 +170,28 @@ impl Worktree {
                     "--track",
                     &format!("origin/{}", spec.base),
                 ],
+                &[],
             )?;
-        } else if git(&path, &["for-each-ref", "--count=1", "refs/remotes"])?
+        } else if repo
+            .run(&["for-each-ref", "--count=1", "refs/remotes"], &[])?
             .trim()
             .is_empty()
         {
-            git(
-                &path,
+            repo.run(
                 &["symbolic-ref", "HEAD", &format!("refs/heads/{}", spec.base)],
+                &[],
             )?;
         } else {
-            let _ = remove_clone(&path);
+            let _ = house.remove_clone();
             return Err(format!("{} has no branch {:?}", spec.source, spec.base));
         }
-        let base = resolve(&path, "HEAD").unwrap_or_default();
-        Ok(Self {
-            repository: path.clone(),
-            path,
-            branch: Some(spec.base.clone()),
-            base,
-            isolated: true,
-            cloned: true,
-        })
+        let base = repo.resolve("HEAD").unwrap_or_default();
+        Ok(Self { base, ..house })
+    }
+
+    /// How commands run against this clone.
+    fn repo(&self) -> Repo<'_> {
+        Repo::new(self.git_dir.as_deref().unwrap_or(&self.path), &self.path)
     }
 
     /// Commits everything in the working directory as `spec`'s author, then pushes `HEAD` to
@@ -116,22 +218,9 @@ impl Worktree {
                 env.push((key, value.clone()));
             }
         }
-        let quiet = |args: &[&str]| -> Vec<String> {
-            QUIET_COMMIT
-                .iter()
-                .chain(args)
-                .map(|arg| (*arg).to_owned())
-                .collect()
-        };
-        let run = |args: &[&str]| {
-            let args = quiet(args);
-            let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            git_with(&self.path, &args, &env)
-        };
-        let status = git(
-            &self.path,
-            &["status", "--porcelain", "--untracked-files=all"],
-        )?;
+        let repo = self.repo();
+        let run = |args: &[&str]| repo.run(args, &env);
+        let status = run(&["status", "--porcelain", "--untracked-files=all"])?;
         if !status.trim().is_empty() {
             run(&["add", "--all"])?;
             run(&["commit", "--quiet", "--no-verify", "-m", &spec.message])?;
@@ -140,81 +229,75 @@ impl Worktree {
             Ok(SafeHouseCheckpoint {
                 remote: spec.remote.clone(),
                 branch: landed.to_owned(),
-                commit: resolve(&self.path, "HEAD").unwrap_or_default(),
+                commit: repo.resolve("HEAD").unwrap_or_default(),
                 base: Some(self.base.clone()),
             })
         };
-        let Ok(head) = resolve(&self.path, "HEAD") else {
+        let Ok(head) = repo.resolve("HEAD") else {
             // An empty repository with nothing written: there is nothing to save.
             return saved(branch);
         };
         let tracking = format!("refs/remotes/{}/{branch}", spec.remote);
-        if resolve(&self.path, &tracking).is_ok_and(|pushed| pushed == head) {
+        if repo.resolve(&tracking).is_ok_and(|pushed| pushed == head) {
             return saved(branch);
         }
         let target = format!("HEAD:refs/heads/{branch}");
-        let Err(refused) = git(&self.path, &["push", "--quiet", &spec.remote, &target]) else {
+        let Err(refused) = run(&["push", "--quiet", &spec.remote, &target]) else {
             return saved(branch);
         };
-        let replayed = git(
-            &self.path,
-            &[
-                "fetch",
-                "--quiet",
-                "--no-tags",
-                &spec.remote,
-                &format!("refs/heads/{branch}"),
-            ],
-        )
+        let replayed = run(&[
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            &spec.remote,
+            &format!("refs/heads/{branch}"),
+        ])
         .and_then(|_| run(&["rebase", "--quiet", "FETCH_HEAD"]));
         if replayed.is_err() {
-            let _ = git(&self.path, &["rebase", "--abort"]);
-        } else if git(&self.path, &["push", "--quiet", &spec.remote, &target]).is_ok() {
+            let _ = run(&["rebase", "--abort"]);
+        } else if run(&["push", "--quiet", &spec.remote, &target]).is_ok() {
             return saved(branch);
         }
         let Some(fallback) = &spec.fallback else {
             return Err(refused);
         };
-        git(
-            &self.path,
-            &[
-                "push",
-                "--quiet",
-                "--force",
-                &spec.remote,
-                &format!("HEAD:refs/heads/{fallback}"),
-            ],
-        )?;
+        run(&[
+            "push",
+            "--quiet",
+            "--force",
+            &spec.remote,
+            &format!("HEAD:refs/heads/{fallback}"),
+        ])?;
         saved(fallback)
     }
 
     /// Removes a clone whose work is all on its remote; keeps one holding anything else.
     pub(crate) fn finish_clone(&self) -> Result<SafeHouseReport, Failure> {
-        let dirty = !git(
-            &self.path,
-            &["status", "--porcelain", "--untracked-files=all"],
-        )?
-        .trim()
-        .is_empty();
-        let unpushed = match resolve(&self.path, "HEAD") {
+        let repo = self.repo();
+        let dirty = !repo
+            .run(&["status", "--porcelain", "--untracked-files=all"], &[])?
+            .trim()
+            .is_empty();
+        let unpushed = match repo.resolve("HEAD") {
             Err(_) => Vec::new(),
-            Ok(_) => git(
-                &self.path,
-                &[
-                    "log",
-                    "--format=%h %s",
-                    "HEAD",
-                    "--not",
-                    "--remotes=origin/*",
-                ],
-            )?
-            .lines()
-            .map(str::to_owned)
-            .collect(),
+            Ok(_) => repo
+                .run(
+                    &[
+                        "log",
+                        "--format=%h %s",
+                        "HEAD",
+                        "--not",
+                        "--remotes=origin/*",
+                    ],
+                    &[],
+                )?
+                .lines()
+                .map(str::to_owned)
+                .collect(),
         };
         let kept = dirty || !unpushed.is_empty();
         if !kept {
-            remove_clone(&self.path)?;
+            self.remove_clone()?;
         }
         Ok(SafeHouseReport {
             path: self.path.to_string_lossy().into_owned(),
@@ -224,11 +307,20 @@ impl Worktree {
             changes: unpushed,
         })
     }
+
+    /// Removes the clone's working tree and its git directory.
+    pub(crate) fn remove_clone(&self) -> Result<(), Failure> {
+        remove_tree(&self.path)?;
+        match &self.git_dir {
+            Some(git_dir) if !git_dir.starts_with(&self.path) => remove_tree(git_dir),
+            _ => Ok(()),
+        }
+    }
 }
 
-/// Removes a clone's directory. Git writes its object files read-only, which Windows will not
+/// Removes a directory of a clone. Git writes its object files read-only, which Windows will not
 /// delete, so their attributes are cleared first.
-pub(crate) fn remove_clone(path: &Path) -> Result<(), Failure> {
+fn remove_tree(path: &Path) -> Result<(), Failure> {
     if !path.exists() {
         return Ok(());
     }
@@ -327,6 +419,7 @@ mod tests {
             clone: Some(SafeHouseClone {
                 path: target.to_string_lossy().into_owned(),
                 create_source: create,
+                git_dir: None,
             }),
         }
     }
@@ -485,6 +578,100 @@ mod tests {
             Worktree::open(&spec("ext::sh -c x", &root.path().join("z"), true)).is_err(),
             "a remote helper is refused before Git sees it"
         );
+    }
+
+    /// Writes an executable hook script that records it ran in `marker`.
+    fn hook(path: &Path, marker: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            path,
+            format!(
+                "#!/bin/sh\necho ran > '{}'\nexit 0\n",
+                marker.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_separate_git_dir_leaves_no_dot_git_and_planted_programs_never_run() {
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("eve.git");
+        let mut spec = spec(
+            &bare.to_string_lossy(),
+            &root.path().join("area").join("personal"),
+            true,
+        );
+        let git_dir = root.path().join("repos").join("personal");
+        if let Some(clone) = spec.clone.as_mut() {
+            clone.git_dir = Some(git_dir.to_string_lossy().into_owned());
+        }
+        let house = Worktree::open(&spec).unwrap();
+        assert!(
+            !house.path.join(".git").exists(),
+            "nothing of Git is left to write"
+        );
+        assert!(git_dir.join("HEAD").exists());
+
+        // A repository whose configuration names hooks and a filesystem monitor.
+        let hooks = root.path().join("planted");
+        let marker = root.path().join("hook-ran");
+        hook(&hooks.join("post-commit"), &marker);
+        hook(&hooks.join("pre-commit"), &marker);
+        let monitor = root.path().join("monitor-ran");
+        hook(&hooks.join("monitor"), &monitor);
+        let config = |key: &str, value: &str| {
+            run(
+                root.path(),
+                &[
+                    &format!("--git-dir={}", git_dir.to_string_lossy()),
+                    "config",
+                    key,
+                    value,
+                ],
+            );
+        };
+        config(
+            "core.hooksPath",
+            &hooks.to_string_lossy().replace('\\', "/"),
+        );
+        config(
+            "core.fsmonitor",
+            &hooks.join("monitor").to_string_lossy().replace('\\', "/"),
+        );
+        // Plain Git runs the planted hook: the plant works.
+        run(
+            root.path(),
+            &[
+                &format!("--git-dir={}", git_dir.to_string_lossy()),
+                &format!("--work-tree={}", house.path.to_string_lossy()),
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "control",
+            ],
+        );
+        assert!(marker.exists(), "the planted hook runs under plain Git");
+        fs::remove_file(&marker).unwrap();
+        let _ = fs::remove_file(&monitor);
+
+        fs::write(house.path.join("notes.md"), "notes\n").unwrap();
+        let saved = house.save(&save_spec("moneypenny: notes"), "main").unwrap();
+        assert_eq!(saved.branch, "main");
+        assert!(!marker.exists(), "no hook ran during the save");
+        assert!(
+            !monitor.exists(),
+            "no filesystem monitor ran during the save"
+        );
+        assert_eq!(run(&bare, &["show", "main:notes.md"]), "notes\n");
+        house.discard().unwrap();
+        assert!(!house.path.exists() && !git_dir.exists());
     }
 
     #[test]

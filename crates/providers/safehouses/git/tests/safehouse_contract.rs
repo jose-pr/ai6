@@ -45,6 +45,7 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
         clone: Some(SafeHouseClone {
             path: target.to_string_lossy().into_owned(),
             create_source: true,
+            git_dir: None,
         }),
         ..spec(&bare, &root.path().join("state"))
     };

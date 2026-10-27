@@ -70,9 +70,13 @@ MCP server. With a [workspace](#her-workspace-and-memory), Claude Code also gets
 tools (`Read`, `Write`, `Edit`, `Glob`, `Grep`) under `--permission-mode dontAsk`: she may
 read anything in her workspace (`--restricted` keeps the file tools inside it) and write
 only under `personal/` and `scratch/` (`Edit(/personal/**)`, `Edit(/scratch/**)`); every
-other write, including to `.git` and `.claude`, is denied without a prompt. Her standing
-context goes in with `--append-system-prompt-file`, from a file beside, not inside, her
-workspace. Every assistant Session runs with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so Claude
+other write is denied without a prompt, and so is any path with a name starting with `.`
+(`.git`, `.gitattributes`, `.claude`), case and Windows short-name variants included. Her
+repositories' git directories are not in her workspace at all: they sit beside it, and every
+Git command the Station runs on them names them outright, with hooks and filesystem
+monitors switched off, so nothing she writes can make the Station run a program. Her
+standing context goes in with `--append-system-prompt-file`, from a file beside, not inside,
+her workspace. Every assistant Session runs with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so Claude
 Code keeps no memory of its own beside hers. Codex refuses a workspace for now.
 
 A Station running elevated (as root, or on Windows with an administrator's elevated token)

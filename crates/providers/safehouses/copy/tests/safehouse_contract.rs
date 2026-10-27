@@ -150,6 +150,7 @@ fn a_clone_is_refused() {
         clone: Some(ai6::directorates::q::safehouse::SafeHouseClone {
             path: root.path().join("clone").to_string_lossy().into_owned(),
             create_source: false,
+            git_dir: None,
         }),
         ..spec(&source, &root.path().join("state"))
     };

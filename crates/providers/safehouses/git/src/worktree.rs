@@ -32,13 +32,15 @@ pub(crate) struct Worktree {
     pub(crate) base: String,
     pub(crate) isolated: bool,
     pub(crate) cloned: bool,
+    /// A clone's git directory: every command names it and the working tree outright.
+    pub(crate) git_dir: Option<PathBuf>,
 }
 
 impl Worktree {
     /// Creates, re-attaches or adopts the safe house `spec` describes.
     pub(crate) fn open(spec: &SafeHouseSpec) -> Result<Self, Failure> {
         if let Some(clone) = &spec.clone {
-            return Self::clone_into(spec, Path::new(&clone.path), clone.create_source);
+            return Self::clone_into(spec, clone);
         }
         match (&spec.reopen, spec.isolate) {
             (None, true) => Self::create(spec),
@@ -103,6 +105,7 @@ impl Worktree {
             base,
             isolated: true,
             cloned: false,
+            git_dir: None,
         })
     }
 
@@ -216,6 +219,7 @@ impl Worktree {
             base: base.clone(),
             isolated: true,
             cloned: false,
+            git_dir: None,
         })
     }
 
@@ -239,6 +243,7 @@ impl Worktree {
             base,
             isolated: false,
             cloned: false,
+            git_dir: None,
         })
     }
 
@@ -285,17 +290,15 @@ impl Worktree {
         if !self.path.exists() {
             return Ok(SafeHouseExports::default());
         }
-        let remotes: Vec<String> = git(&self.path, &["remote"])?
+        let remotes: Vec<String> = self
+            .here(&["remote"])?
             .lines()
             .map(str::trim)
             .filter(|remote| !remote.is_empty())
             .map(str::to_owned)
             .collect();
         for remote in &remotes {
-            git(
-                &self.path,
-                &["fetch", "--prune", "--quiet", "--no-tags", "--", remote],
-            )?;
+            self.here(&["fetch", "--prune", "--quiet", "--no-tags", "--", remote])?;
         }
         let range = self.since_base();
         let mut args = vec!["log".to_owned(), "--format=%h %s".to_owned(), range];
@@ -304,8 +307,7 @@ impl Worktree {
             args.extend(remotes.iter().map(|remote| format!("--remotes={remote}/*")));
         }
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let mut unexported: Vec<String> =
-            git(&self.path, &args)?.lines().map(str::to_owned).collect();
+        let mut unexported: Vec<String> = self.here(&args)?.lines().map(str::to_owned).collect();
         if self.path.join(".gitmodules").exists() {
             unexported.push("submodules: their own work is not checked".to_owned());
         }
@@ -314,31 +316,27 @@ impl Worktree {
         {
             unexported.push("Git LFS objects: whether they were pushed is not checked".to_owned());
         }
-        let dirty = !git(
-            &self.path,
-            &[
+        let dirty = !self
+            .here(&[
                 "status",
                 "--porcelain",
                 "--untracked-files=all",
                 "--ignore-submodules=none",
-            ],
-        )?
-        .trim()
-        .is_empty();
+            ])?
+            .trim()
+            .is_empty();
         // Ignored directories are listed whole, not file by file.
-        let ignored = git(
-            &self.path,
-            &[
+        let ignored = self
+            .here(&[
                 "status",
                 "--porcelain",
                 "--untracked-files=normal",
                 "--ignored=traditional",
-            ],
-        )?
-        .lines()
-        .filter_map(|line| line.strip_prefix("!! "))
-        .map(|path| path.trim_matches('"').trim_end_matches('/').to_owned())
-        .collect();
+            ])?
+            .lines()
+            .filter_map(|line| line.strip_prefix("!! "))
+            .map(|path| path.trim_matches('"').trim_end_matches('/').to_owned())
+            .collect();
         Ok(SafeHouseExports {
             unexported,
             dirty,
@@ -353,7 +351,7 @@ impl Worktree {
             return Err("a safe house in the Operation's own checkout is never removed".to_owned());
         }
         if self.cloned {
-            return crate::clone::remove_clone(&self.path);
+            return self.remove_clone();
         }
         if self.path.exists() {
             git(
@@ -377,6 +375,15 @@ impl Worktree {
         Ok(())
     }
 
+    /// Runs `git args` for this safe house: in its directory, or, for a clone, as
+    /// [`crate::clone::Repo`] runs it.
+    pub(crate) fn here(&self, args: &[&str]) -> Result<String, Failure> {
+        match &self.git_dir {
+            Some(git_dir) => crate::clone::Repo::new(git_dir, &self.path).run(args, &[]),
+            None => git(&self.path, args),
+        }
+    }
+
     /// The commits since the base, as a `git log` range: every commit of `HEAD` for a clone
     /// of an empty repository.
     pub(crate) fn since_base(&self) -> String {
@@ -389,22 +396,30 @@ impl Worktree {
 
     /// One-line summaries of the commits made since the base, newest first.
     pub(crate) fn summaries(&self) -> Result<Vec<String>, Failure> {
-        if self.base.is_empty() && resolve(&self.path, "HEAD").is_err() {
+        if self.base.is_empty()
+            && self
+                .here(&["rev-parse", "--verify", "HEAD^{commit}"])
+                .is_err()
+        {
             return Ok(Vec::new());
         }
-        let output = git(&self.path, &["log", "--format=%h %s", &self.since_base()])?;
+        let output = self.here(&["log", "--format=%h %s", &self.since_base()])?;
         Ok(output.lines().map(str::to_owned).collect())
     }
 
     /// Full commit identity and messages since the base, newest first.
     pub(crate) fn changes(&self) -> Result<Vec<Change>, Failure> {
-        if self.base.is_empty() && resolve(&self.path, "HEAD").is_err() {
+        if self.base.is_empty()
+            && self
+                .here(&["rev-parse", "--verify", "HEAD^{commit}"])
+                .is_err()
+        {
             return Ok(Vec::new());
         }
         let format = "%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e";
         let format_arg = format!("--format={format}");
         let range = self.since_base();
-        let output = git(&self.path, &["log", &format_arg, &range])?;
+        let output = self.here(&["log", &format_arg, &range])?;
         Ok(output
             .split('\u{1e}')
             .filter_map(|record| {

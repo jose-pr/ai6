@@ -271,8 +271,14 @@ const ASSISTANT_FILE_TOOLS: &str = "Read,Write,Edit,Glob,Grep";
 
 /// [`ASSISTANT_DENIED`] less [`ASSISTANT_FILE_TOOLS`]: what an assistant with file tools is
 /// still denied by name.
+/// The rules after the names deny writing any path with a name starting with `.` (`.git`,
+/// `.gitattributes`, `.claude`), whatever the allow rules say. Measured with Claude Code
+/// 2.1.310 on Windows against a loopback stand-in for the API: Write and Edit to `.git/config`,
+/// `.GIT/config`, `.git./config`, `PERSONAL\.git\config`, `.gitattributes`, `notes/.hidden`
+/// and `scratch/.x` were refused, and so were writes through 8.3 short names (`GIT~1\config`,
+/// `GITATT~1`), even after a read.
 const ASSISTANT_FILES_DENIED: &str = "Bash,PowerShell,NotebookEdit,WebFetch,WebSearch,Task,\
-                                      Agent,TodoWrite,Skill";
+                                      Agent,TodoWrite,Skill,Edit(**/.*),Edit(**/.*/**)";
 
 /// Adds the settings flags: assistant ([`add_assistant`]), answer-only ([`add_answer_only`]),
 /// or the project settings AI6 allowed, the Station's MCP servers and the green ink gate.
@@ -2678,6 +2684,8 @@ mod tests {
                 "WebSearch",
                 "Task",
                 "Skill",
+                "Edit(**/.*)",
+                "Edit(**/.*/**)",
             ] {
                 assert!(denied.split(',').any(|name| name == tool), "{denied}");
             }
