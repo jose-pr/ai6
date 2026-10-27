@@ -23,7 +23,9 @@ use uuid::Uuid;
 use super::actions::{self, CableHold, Draft, Proposal, Scope};
 use super::store::{Bounds, Conversation, Entry, Role};
 use super::tools::Call;
-use super::{Assistant, Control, audit, control_job, digest, expire_proposals, now};
+use super::{
+    Assistant, Control, PROPOSALS_FULL, audit, control_job, digest, now, room_for_proposal,
+};
 use crate::{Gateway, authorize_resource_action, resolve_user};
 
 /// What to do once the desk lock is released: audit records to write and notes to give
@@ -32,6 +34,8 @@ use crate::{Gateway, authorize_resource_action, resolve_user};
 pub(super) struct After {
     audits: Vec<AuditRecord>,
     notes: Vec<(String, String, String)>,
+    /// Held Cables to drop, by conversation, that could not become proposals.
+    discards: Vec<(String, CableHold)>,
 }
 
 /// The Operations where `person` may send or read Cables: those the Stations check in with,
@@ -94,7 +98,7 @@ pub(super) fn apply(
     match event.kind.as_str() {
         EVENT_CABLE_PROPOSAL => {
             if let Some(cable) = &event.cable {
-                propose(conversation, cable, station, bounds);
+                propose(conversation, cable, station, bounds, after);
             }
         }
         EVENT_CABLE_SENT => {
@@ -107,7 +111,13 @@ pub(super) fn apply(
 }
 
 /// A Cable the Station holds becomes a proposal the person confirms or cancels.
-fn propose(conversation: &mut Conversation, cable: &AssistantCable, station: &str, bounds: Bounds) {
+fn propose(
+    conversation: &mut Conversation,
+    cable: &AssistantCable,
+    station: &str,
+    bounds: Bounds,
+    after: &mut After,
+) {
     let Some(body) = cable.body.clone() else {
         return;
     };
@@ -142,14 +152,24 @@ fn propose(conversation: &mut Conversation, cable: &AssistantCable, station: &st
         );
         return;
     }
-    expire_proposals(conversation);
-    while conversation.proposals.len() >= actions::MAX_PROPOSALS {
-        let finished = conversation
-            .proposals
-            .iter()
-            .position(|proposal| proposal.status != "pending")
-            .unwrap_or(0);
-        conversation.proposals.remove(finished);
+    let hold = CableHold {
+        held_id: cable.id.clone(),
+        digest: cable.digest.clone(),
+        station: station.to_owned(),
+    };
+    if !room_for_proposal(conversation) {
+        // The Station drops what cannot be shown; nothing waits unseen.
+        conversation.push(
+            Entry {
+                role: Role::Error,
+                text: format!("Moneypenny asked to send a Cable, but {PROPOSALS_FULL}"),
+                at: now(),
+                data: None,
+            },
+            bounds,
+        );
+        after.discards.push((conversation.id.clone(), hold));
+        return;
     }
     let reply = cable.target.starts_with("reply:");
     let lifetime = match cable.ttl_seconds {
@@ -193,11 +213,7 @@ fn propose(conversation: &mut Conversation, cable: &AssistantCable, station: &st
         session: digest(&conversation.bearer),
         result: None,
         work: None,
-        cable: Some(CableHold {
-            held_id: cable.id.clone(),
-            digest: cable.digest.clone(),
-            station: station.to_owned(),
-        }),
+        cable: Some(hold),
     };
     conversation.push(
         Entry {
@@ -362,6 +378,10 @@ impl Assistant {
             if !matches!(written, Ok(Ok(()))) {
                 eprintln!("universal-exports: an audit record of Moneypenny's Cables was lost");
             }
+        }
+        for (conversation, hold) in after.discards {
+            let held = hold.held_id.clone();
+            self.discard_cable(&conversation, &held, hold);
         }
         for (conversation, person, note) in after.notes {
             let _ = self

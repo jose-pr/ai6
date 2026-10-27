@@ -2161,6 +2161,47 @@ fn held_cable(id: &str, body: &str) -> ai6::AssistantCable {
 }
 
 #[tokio::test]
+async fn a_full_list_of_proposals_refuses_a_held_cable_and_drops_none_waiting() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Tell everyone.").await;
+    let events = (0..=super::actions::MAX_PROPOSALS)
+        .map(|index| held(&format!("held-{index}"), &format!("Step {index}.")))
+        .collect();
+    report(&served, "hq", &job, None, events).await;
+    let frames = finish(&served, &mut app, &job).await;
+    let proposals = frames
+        .iter()
+        .filter(|frame| frame["entry"]["role"] == "proposal")
+        .count();
+    assert_eq!(proposals, super::actions::MAX_PROPOSALS);
+    assert!(
+        frames.iter().any(|frame| frame["entry"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("already wait"))),
+        "{frames:?}"
+    );
+    let discard = take(&served, "hq").await;
+    let last = format!("held-{}", super::actions::MAX_PROPOSALS);
+    assert_eq!(
+        discard.cable_discard.map(|decision| decision.id),
+        Some(last),
+        "the Station drops the one that could not be shown"
+    );
+    // The oldest shown still waits for the person, who can confirm it.
+    let oldest = frames
+        .iter()
+        .find(|frame| frame["entry"]["role"] == "proposal")
+        .map(|frame| frame["entry"]["data"].clone())
+        .unwrap();
+    decide(&mut app, "confirm", &oldest).await;
+    let control = take(&served, "hq").await;
+    assert_eq!(
+        control.cable_confirm.map(|decision| decision.id).as_deref(),
+        Some("held-0")
+    );
+}
+
+#[tokio::test]
 async fn a_held_cable_is_shown_whole_and_only_when_its_digest_is_what_is_shown() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, job) = accepted(&served, &served.operator, "Tell 008 to deploy.").await;

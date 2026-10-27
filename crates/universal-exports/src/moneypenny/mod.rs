@@ -1060,11 +1060,27 @@ impl Assistant {
             if let Some(body) = proposal.draft.call.body.as_mut() {
                 body["diff"] = json!(diff);
             }
-            conversation.notes.push(format!(
-                "[App: your memory change ({paths}) waits for the person's confirmation, \
-                 because this conversation read text others wrote.]"
-            ));
-            record_proposal(conversation, proposal, bounds);
+            if record_proposal(conversation, proposal, bounds) {
+                conversation.notes.push(format!(
+                    "[App: your memory change ({paths}) waits for the person's confirmation, \
+                     because this conversation read text others wrote.]"
+                ));
+            } else {
+                conversation.push(
+                    Entry {
+                        role: Role::Error,
+                        text: format!(
+                            "Moneypenny's memory change ({paths}) was not kept: {PROPOSALS_FULL}"
+                        ),
+                        at: now(),
+                        data: None,
+                    },
+                    bounds,
+                );
+                conversation.notes.push(format!(
+                    "[App: your memory change ({paths}) was not kept: {PROPOSALS_FULL}]"
+                ));
+            }
             return false;
         }
         conversation.push(
@@ -1156,7 +1172,9 @@ impl Assistant {
             else {
                 return tools::Outcome::error("The conversation is gone.");
             };
-            record_proposal(conversation, proposal, max_entries);
+            if !record_proposal(conversation, proposal, max_entries) {
+                return tools::Outcome::error(PROPOSALS_FULL);
+            }
         }
         tools::Outcome {
             text: format!(
@@ -1446,7 +1464,9 @@ impl Assistant {
         else {
             return tools::Outcome::error("The conversation is gone.");
         };
-        record_proposal(conversation, proposal, bounds);
+        if !record_proposal(conversation, proposal, bounds) {
+            return tools::Outcome::error(PROPOSALS_FULL);
+        }
         tools::Outcome {
             text: format!(
                 "Proposed as {id}: {summary}. Nothing has changed. The person confirms or \
@@ -1705,15 +1725,13 @@ async fn audit(
 
 /// Adds `proposal` to `conversation`, after expired ones are marked and room is made, and
 /// shows it.
-fn record_proposal(conversation: &mut Conversation, proposal: actions::Proposal, bounds: Bounds) {
-    expire_proposals(conversation);
-    while conversation.proposals.len() >= actions::MAX_PROPOSALS {
-        let finished = conversation
-            .proposals
-            .iter()
-            .position(|proposal| proposal.status != "pending")
-            .unwrap_or(0);
-        conversation.proposals.remove(finished);
+fn record_proposal(
+    conversation: &mut Conversation,
+    proposal: actions::Proposal,
+    bounds: Bounds,
+) -> bool {
+    if !room_for_proposal(conversation) {
+        return false;
     }
     conversation.push(
         Entry {
@@ -1725,6 +1743,28 @@ fn record_proposal(conversation: &mut Conversation, proposal: actions::Proposal,
         bounds,
     );
     conversation.proposals.push(proposal);
+    true
+}
+
+/// What she is told when a proposal does not fit.
+const PROPOSALS_FULL: &str = "32 proposals already wait for the person, so nothing was \
+                              proposed. Ask them to confirm or cancel some first.";
+
+/// Drops finished proposals until one more fits; `false` when every one kept still waits for
+/// the person or is being carried out, which are never dropped.
+fn room_for_proposal(conversation: &mut Conversation) -> bool {
+    expire_proposals(conversation);
+    while conversation.proposals.len() >= actions::MAX_PROPOSALS {
+        let Some(finished) = conversation
+            .proposals
+            .iter()
+            .position(|proposal| !matches!(proposal.status, "pending" | "confirming"))
+        else {
+            return false;
+        };
+        conversation.proposals.remove(finished);
+    }
+    true
 }
 
 /// A proposal whose confirmation has a Station make `commit`: `request` describes the commit

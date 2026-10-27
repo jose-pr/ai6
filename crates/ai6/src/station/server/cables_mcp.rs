@@ -1316,6 +1316,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_full_hold_refuses_a_send_rather_than_drop_one_the_person_has_not_seen_to() {
+        let (_directory, registry, relay, _agent) = station_with_agent_008().await;
+        let moneypenny = assistant(relay, registry).await;
+        moneypenny.gate.answer(Some(Standing {
+            exposed: true,
+            send: true,
+            read: true,
+        }));
+        let her = client(moneypenny.endpoint.url(), moneypenny.endpoint.token()).await;
+        let send = |key: String| {
+            serde_json::json!({
+                "operation": "operation-a", "scope": "agent", "target": "008",
+                "body": format!("Step {key}."), "idempotency_key": key
+            })
+        };
+        for step in 0..MAX_HELD {
+            let held = call(&her, "send_cable", send(step.to_string())).await;
+            assert!(held.starts_with("Held"), "{held}");
+        }
+        let refused = call(&her, "send_cable", send("last".to_owned())).await;
+        assert!(refused.contains("already wait"), "{refused}");
+        let proposals = events_of(&moneypenny, EVENT_CABLE_PROPOSAL);
+        assert_eq!(proposals.len(), MAX_HELD);
+        let first = proposals[0].cable.clone().unwrap();
+        assert!(
+            moneypenny
+                .endpoint
+                .confirm(&AssistantCableDecision {
+                    id: first.id,
+                    digest: first.digest,
+                })
+                .is_ok(),
+            "the oldest is still there to confirm"
+        );
+        her.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn her_cable_token_expires_with_the_jobs() {
         let (_directory, registry, relay, _agent) = station_with_agent_008().await;
         let expired = assistant_until(relay, registry, unix_now() - 1.0).await;
@@ -2295,15 +2333,12 @@ impl AssistantCableDesk {
             return "The Cable could not be held".to_owned();
         };
         held.retain(|_, cable| cable.held_at.elapsed() < HELD_TTL);
-        while held.len() >= MAX_HELD {
-            let oldest = held
-                .iter()
-                .min_by_key(|(_, cable)| cable.held_at)
-                .map(|(id, _)| id.clone());
-            match oldest {
-                Some(oldest) => held.remove(&oldest),
-                None => break,
-            };
+        // What waits for the person is theirs to decide; nothing is dropped to make room.
+        if held.len() >= MAX_HELD {
+            return format!(
+                "{MAX_HELD} Cables already wait for the person's confirmation, so nothing was \
+                 held or sent. Ask them to confirm or cancel some first."
+            );
         }
         held.insert(
             id.clone(),
