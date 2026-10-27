@@ -162,6 +162,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai6-terminal-pipe"
+version = "0.1.0"
+dependencies = [
+ "ai6",
+ "nix 0.28.0",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "ai6-terminal-pty"
 version = "0.1.0"
 dependencies = [
