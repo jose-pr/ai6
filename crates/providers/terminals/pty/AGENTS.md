@@ -35,10 +35,10 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   non-canonical mode with no echo (`ICANON`, `IEXTEN`, `ECHO`, `ECHONL` and `IXON` off;
   `VMIN` 1, `VTIME` 0), so an input line of any length reaches the program whole and what
   is written never comes back as output. `ISIG` stays on (a written `^C` is SIGINT to the
-  program, which is how the Claude Code handler interrupts), as do `ICRNL` (Enter typed in
-  an attached viewer arrives as CR) and `OPOST` (the program's LF is output as CRLF). A
-  program may set its own mode afterwards; nothing is restored. In canonical mode Linux
-  cuts a line at 4095 bytes and macOS never delivers one over 1024 (`MAX_CANON`).
+  program), as do `ICRNL` (Enter typed in an attached viewer arrives as CR) and `OPOST`
+  (the program's LF is output as CRLF). A program may set its own mode afterwards; nothing
+  is restored. In canonical mode Linux cuts a line at 4095 bytes and macOS never delivers
+  one over 1024 (`MAX_CANON`).
 - **ConPTY output is a rendering**, not the program's bytes: mode and title sequences come
   first, blank lines may become cursor moves, line-mode input is echoed, and a line longer
   than `cols` is broken with CRLF and a cursor move. Read JSON-line harnesses with

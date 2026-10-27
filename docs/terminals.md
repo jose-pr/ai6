@@ -50,6 +50,9 @@ sequence. Standard error goes into the same pipe as standard output, keeping the
 program wrote them in; the provider setting `stderr = "drop"` discards it instead. The output
 ends once the program has exited and its pipe has closed, or, when a process it left running
 holds the pipe, once it has exited and nothing has arrived for 200 ms. `resize` does nothing.
+With no terminal, a written `^C` is one more byte of input, not a signal, so a JSON harness is
+interrupted over its own protocol: Claude Code with a stream-json `control_request` of subtype
+`interrupt`, Codex with `turn/interrupt`.
 
 Kill takes the whole tree: on Unix the program leads a process group of its own, which gets
 `SIGKILL`; on Windows it runs in a Job Object that is terminated, and it starts with no console
