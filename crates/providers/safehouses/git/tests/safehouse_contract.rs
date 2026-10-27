@@ -51,7 +51,11 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
     };
     let session = Git.open(&spec.to_value().unwrap()).unwrap();
     let info = SafeHouseInfo::from_value(&session.info().unwrap()).unwrap();
-    assert_eq!(Path::new(&info.path), target);
+    // The provider reports the canonical path: a Windows short name or macOS /var is resolved.
+    assert_eq!(
+        fs::canonicalize(&info.path).unwrap(),
+        fs::canonicalize(&target).unwrap()
+    );
     assert_eq!(info.branch.as_deref(), Some("main"));
     fs::write(target.join("notes.md"), "notes\n").unwrap();
     let saved = SafeHouseCheckpoint::from_value(
