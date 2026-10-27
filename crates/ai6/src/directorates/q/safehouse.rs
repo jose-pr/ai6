@@ -114,6 +114,10 @@ pub struct CheckpointSpec {
     /// holding its path and a newline and named by the Git object ID of that text. The paths
     /// come from what is committed, so none is missed; a save that cannot name them fails.
     pub record: Option<String>,
+    /// With `branch` and no `files`: paths, relative to the repository's root, that the save
+    /// leaves out with everything under them, as it leaves out paths with a name starting
+    /// with `.`.
+    pub exclude: Option<Vec<String>>,
 }
 
 /// One file a save commits with exactly its text. Crosses as a value, inside a

@@ -395,7 +395,21 @@ impl Worktree {
         } else {
             let status = run(&["status", "--porcelain", "--untracked-files=all"])?;
             if !status.trim().is_empty() {
-                run(&["add", "--all", "--", ".", HIDDEN_FILES, HIDDEN_DIRECTORIES])?;
+                let mut add = vec![
+                    "add".to_owned(),
+                    "--all".to_owned(),
+                    "--".to_owned(),
+                    ".".to_owned(),
+                    HIDDEN_FILES.to_owned(),
+                    HIDDEN_DIRECTORIES.to_owned(),
+                ];
+                for path in spec.exclude.iter().flatten() {
+                    if !exact_path(path) {
+                        return Err(format!("{path:?} is not a path a save may leave out"));
+                    }
+                    add.push(format!(":(exclude,literal){path}"));
+                }
+                run(&add.iter().map(String::as_str).collect::<Vec<_>>())?;
                 let recorded = match &spec.record {
                     Some(record) => record_changes(&repo, record)?,
                     None => false,
@@ -629,6 +643,7 @@ mod tests {
             fallback: Some("moneypenny/conversation".to_owned()),
             files: None,
             record: None,
+            exclude: None,
         }
     }
 
@@ -930,6 +945,33 @@ mod tests {
         assert_eq!(files.trim(), "memory/m.md\ny.md", "{files}");
         a.discard().unwrap();
         b.discard().unwrap();
+    }
+
+    #[test]
+    fn a_save_leaves_out_what_it_is_told_to() {
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("eve.git");
+        let house = Worktree::open(&spec(
+            &bare.to_string_lossy(),
+            &root.path().join("personal"),
+            true,
+        ))
+        .unwrap();
+        fs::create_dir_all(house.path.join("memory").join("deep")).unwrap();
+        fs::write(house.path.join("memory").join("deep").join("m.md"), "m\n").unwrap();
+        fs::write(house.path.join("memory").join("MEMORY.md"), "#\n").unwrap();
+        fs::write(house.path.join("memoryless.md"), "kept\n").unwrap();
+        let mut leaving = save_spec("moneypenny: work");
+        leaving.exclude = Some(vec!["memory".to_owned()]);
+        house.save(&leaving, "main").unwrap();
+        assert_eq!(
+            run(&bare, &["ls-tree", "-r", "--name-only", "main"]).trim(),
+            "memoryless.md"
+        );
+        leaving.exclude = Some(vec!["../x".to_owned()]);
+        fs::write(house.path.join("more.md"), "more\n").unwrap();
+        assert!(house.save(&leaving, "main").is_err());
+        house.discard().unwrap();
     }
 
     #[test]

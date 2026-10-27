@@ -3352,8 +3352,9 @@ directory with the `AGENTS.md` text. The harness's mode is `moneypenny()` with `
 `personal/memory/`; when the turn's `completed` arrives, and again after the harness closes,
 it puts that copy back, reports what she changed there as one `memory_changes` event (before
 `completed`; a change beyond the bounds, or a file that is not UTF-8, is dropped with a
-`notice`), and commits the rest of `personal/` (paths with a name starting with `.` left out,
-in her memory too) to `main` as the person, message
+`notice`), and commits the rest of `personal/` (`memory/` and paths with a name starting with
+`.` left out: `CheckpointSpec::exclude`; nothing is saved when her memory could not be put
+back, with a `notice`) to `main` as the person, message
 `moneypenny: update <paths>` (or `save her work`) with the trailer `Via: Moneypenny
 (conversation <id>)`; work `main` refuses twice lands on `moneypenny/<conversation digest>`
 with a `notice`. A `commit` job of `COMMIT_MEMORY` for a conversation running here is written
@@ -3457,6 +3458,7 @@ pub struct CheckpointSpec {
     pub fallback: Option<String>, // with `branch`: where the work goes when that branch refuses it
     pub files: Option<Vec<CheckpointFile>>, // with `branch`: commit exactly these, nothing of the working directory
     pub record: Option<String>, // with `branch`, no `files`: a directory in which the same commit records each file it adds or changes
+    pub exclude: Option<Vec<String>>, // with `branch`, no `files`: paths left out with everything under them
 }
 pub struct CheckpointFile { pub path: String /* repository_path */, pub text: Option<String> /* None removes */ }
 pub struct SafeHouseCheckpoint { pub remote: String, pub branch: String, pub commit: String, pub base: Option<String> }

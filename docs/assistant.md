@@ -199,7 +199,8 @@ context file beside the workspace.
 
 After each answer, and when her harness closes, the Station saves her work: whatever she
 changed in `personal/` outside `memory/` is committed to `main`, authored by the person (a path
-with a name starting with `.`, such as `.gitattributes`, never is), with
+with a name starting with `.`, such as `.gitattributes`, never is, nor is anything in
+`memory/`; when her memory cannot be put back as it was, nothing is saved), with
 the message `moneypenny: update <paths>` and the trailer `Via: Moneypenny (conversation
 <id>)`. If `main` moved on meanwhile her commit is replayed on it once; if that conflicts, it
 is pushed to `moneypenny/<conversation digest>` instead and both of you are told.

@@ -73,7 +73,8 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   `HEAD` is force-pushed to `fallback` and the answer's `branch` says so, or, without a
   fallback, the first refusal is the error. Nothing to commit and `HEAD` already on
   `<remote>/<b>` pushes nothing; an unborn `HEAD` with nothing written answers an empty
-  `commit`. With `record` (a `repository_path` directory), the same commit gets one entry in
+  `commit`. Each `exclude` path (a `repository_path`) is left out too, with everything
+  under it (`:(exclude,literal)<path>`). With `record` (a `repository_path` directory), the same commit gets one entry in
   it for each file the index adds or changes against `HEAD` (`diff-index --cached
   --name-only --no-renames --diff-filter=d -z HEAD`; every staged file when `HEAD` is unborn;
   none for the directory's own files): a blob holding the path and a newline, named by its

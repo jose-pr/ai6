@@ -154,7 +154,26 @@ impl Workspace {
         let index = workspace.path.join(MEMORY).join("MEMORY.md");
         if fs::symlink_metadata(&index).is_err() {
             write_file(area, &index, MEMORY_INDEX)?;
-            notices.extend(workspace.save("start her memory")?);
+            let first = AssistantChange::new(BTreeMap::from([(
+                format!("{MEMORY}/MEMORY.md"),
+                Some(MEMORY_INDEX.to_owned()),
+            )]));
+            let message = format!(
+                "moneypenny: start her memory\n\nVia: Moneypenny (conversation {conversation_id})"
+            );
+            let spec = workspace.spec(
+                message,
+                &workspace.author_name,
+                &workspace.author_email,
+                Some(exactly(&first)),
+            );
+            let saved = workspace
+                .personal
+                .checkpoint(&spec)
+                .map_err(|error| error.to_string())?;
+            if saved.branch != MAIN {
+                notices.push(moved_on(&saved.branch));
+            }
         }
         let mut shared = Vec::new();
         for (name, repo) in &job.shared {
@@ -341,25 +360,39 @@ impl Workspace {
             }
         }
         // The memory goes back to what it was; the change waits for the person.
+        let mut restored = true;
         for path in now.keys() {
-            if !self.memory.contains_key(path) {
-                let _ = remove(self.area(), &self.path.join(path));
+            if !self.memory.contains_key(path)
+                && let Err(error) = remove(self.area(), &in_tree(&self.path, path))
+            {
+                restored = false;
+                end.notices
+                    .push(format!("{path} could not be removed: {error}"));
             }
         }
         for (path, bytes) in &self.memory {
             if now.get(path) != Some(bytes)
-                && let Err(error) = write_bytes(self.area(), &self.path.join(path), bytes)
+                && let Err(error) = write_bytes(self.area(), &in_tree(&self.path, path), bytes)
             {
+                restored = false;
                 end.notices
                     .push(format!("{path} could not be put back: {error}"));
             }
         }
         let changed = changed_files(&self.files, &stat_tree(&self.path));
-        match self.save(&summary(&changed)) {
-            Ok(notice) => end.notices.extend(notice),
-            Err(reason) => end.notices.push(format!(
-                "Moneypenny's work in personal/ could not be saved: {reason}"
-            )),
+        if !restored {
+            end.notices.push(
+                "Moneypenny's work in personal/ was not saved, since her memory could not be put \
+                 back as it was."
+                    .to_owned(),
+            );
+        } else {
+            match self.save(&summary(&changed)) {
+                Ok(notice) => end.notices.extend(notice),
+                Err(reason) => end.notices.push(format!(
+                    "Moneypenny's work in personal/ could not be saved: {reason}"
+                )),
+            }
         }
         if let Err(reason) = self.drop_gone_records() {
             end.notices.push(format!(
@@ -480,18 +513,14 @@ impl Workspace {
         // Written while exposed, each file it commits is recorded in the same commit, from
         // what is committed.
         spec.record = self.exposed.then(|| OUTSIDE_TEXT.to_owned());
+        // Her memory reaches the repository only as a change the person let through.
+        spec.exclude = Some(vec![MEMORY.to_owned()]);
         let saved = self
             .personal
             .checkpoint(&spec)
             .map_err(|error| error.to_string())?;
         self.outside = self.read_record().into_values().collect();
-        Ok((saved.branch != MAIN).then(|| {
-            format!(
-                "main of the personal repository moved on in a way that conflicts with \
-                 Moneypenny's work, so it was saved to its branch {}.",
-                saved.branch
-            )
-        }))
+        Ok((saved.branch != MAIN).then(|| moved_on(&saved.branch)))
     }
 
     fn spec(
@@ -510,6 +539,7 @@ impl Workspace {
             fallback: Some(fallback(&self.digest)),
             files,
             record: None,
+            exclude: None,
         }
     }
 }
@@ -548,6 +578,7 @@ pub(super) fn commit_once(
             fallback: Some(fallback(digest)),
             files: Some(exactly(&commit.change)),
             record: None,
+            exclude: None,
         })
         .map_err(|error| error.to_string());
     let _ = house.discard();
@@ -564,6 +595,14 @@ fn exactly(change: &AssistantChange) -> Vec<CheckpointFile> {
             text: text.clone(),
         })
         .collect()
+}
+
+/// The notice for work saved to `branch` because `main` refused it.
+fn moved_on(branch: &str) -> String {
+    format!(
+        "main of the personal repository moved on in a way that conflicts with Moneypenny's \
+         work, so it was saved to its branch {branch}."
+    )
 }
 
 /// The branch a conversation's work goes to when `main` refuses it.

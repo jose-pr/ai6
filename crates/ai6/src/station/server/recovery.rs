@@ -848,6 +848,7 @@ pub(super) fn checkpoint_due(state: &DaemonState) {
             fallback: None,
             files: None,
             record: None,
+            exclude: None,
         };
         let state = state.clone();
         tokio::task::spawn_blocking(move || {

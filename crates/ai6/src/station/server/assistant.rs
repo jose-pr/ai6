@@ -3184,6 +3184,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_turn_whose_memory_cannot_be_put_back_saves_nothing() {
+        let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Works);
+        let bare = people.path().join("eve.git");
+        fixture
+            .desk
+            .handle(working("c-m", "Take notes.", workspace(&bare)))
+            .await;
+        until(|| kinds(&fixture, "c-m").contains(&EVENT_TEXT.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let personal = PathBuf::from(&start.working_directory).join(PERSONAL);
+        // Her index made a directory: it cannot be written back where it was.
+        let index = personal.join("memory").join("MEMORY.md");
+        std::fs::remove_file(&index).unwrap();
+        std::fs::create_dir_all(index.join("held")).unwrap();
+        std::fs::write(index.join("held").join("x.md"), "x").unwrap();
+        std::fs::write(personal.join("notes.md"), "notes\n").unwrap();
+        fixture.desk.handle(interruption("c-m", "done")).await;
+        until(|| kinds(&fixture, "c-m").contains(&EVENT_INTERRUPTED.to_owned())).await;
+        let notices: Vec<String> = events(&fixture, "c-m")
+            .into_iter()
+            .filter(|event| event.kind == EVENT_NOTICE)
+            .filter_map(|event| event.text)
+            .collect();
+        assert!(
+            notices
+                .iter()
+                .any(|notice| notice.contains("was not saved")),
+            "{notices:?}"
+        );
+        let files = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+        assert_eq!(files.trim(), "memory/MEMORY.md", "{files}");
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
     async fn a_memory_change_nobody_lets_through_never_reaches_the_repository() {
         let people = tempfile::tempdir().unwrap();
         let fixture = git_fixture(people.path(), Script::Writes);

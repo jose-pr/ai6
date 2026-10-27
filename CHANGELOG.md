@@ -54,8 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   repository, created bare on request) and saves to a branch it shares
   (`CheckpointSpec::branch`): it commits in place, pushes as a fast-forward, replays once on
   a refusal, then pushes to `CheckpointSpec::fallback`; with `CheckpointSpec::record` the
-  commit also records each file it adds or changes in a directory, from what it commits. The
-  `copy` safe house refuses a clone.
+  commit also records each file it adds or changes in a directory, from what it commits, and
+  `CheckpointSpec::exclude` leaves paths out. The `copy` safe house refuses a clone.
 
 - Moneypenny's answer can be stopped: the app's **Stop** button, in place of Send while she
   answers, sends `{"type":"interrupt"}` on the chat socket, which acts only on the socket's

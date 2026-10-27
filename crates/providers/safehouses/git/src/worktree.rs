@@ -1047,6 +1047,7 @@ mod tests {
             fallback: None,
             files: None,
             record: None,
+            exclude: None,
         }
     }
 

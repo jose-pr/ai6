@@ -66,6 +66,7 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
                     fallback: None,
                     files: None,
                     record: None,
+                    exclude: None,
                 }
                 .to_value()
                 .unwrap(),
