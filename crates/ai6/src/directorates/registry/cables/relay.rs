@@ -108,6 +108,7 @@ pub struct CablePrincipal {
     station: String,
     session_id: Option<String>,
     mission_id: Option<String>,
+    on_behalf_of: Option<String>,
 }
 
 impl CablePrincipal {
@@ -139,7 +140,27 @@ impl CablePrincipal {
             station,
             session_id,
             mission_id,
+            on_behalf_of: None,
         })
+    }
+
+    /// Binds the person an assistant acts for. Its Cables carry the person, reach only
+    /// Agents of the principal's Operation other than itself, and replies to them reach only
+    /// the sending Session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `person` is empty, over 256 characters or has control
+    /// characters.
+    pub fn with_on_behalf_of(mut self, person: String) -> Result<Self, CableError> {
+        super::validate_text("Cable principal on_behalf_of", Some(&person), 256, true)?;
+        self.on_behalf_of = Some(person);
+        Ok(self)
+    }
+
+    /// Returns the person this principal acts for, when it is an assistant's.
+    pub fn on_behalf_of(&self) -> Option<&str> {
+        self.on_behalf_of.as_deref()
     }
 
     /// Returns the bound Agent identity.
@@ -440,6 +461,8 @@ pub struct CableAuditRecord {
     pub at: f64,
     /// Accepted Cable ID, when present.
     pub cable_id: Option<String>,
+    /// The person the sender acted for, when it is an assistant acting for one.
+    pub on_behalf_of: Option<String>,
 }
 
 /// Recipient identity shown to an authorized Cable approver without the message body.
@@ -488,6 +511,8 @@ pub struct CableSendRequest {
     ttl: f64,
     conversation_id: Option<String>,
     reply_to: Option<String>,
+    /// For a reply to a Cable sent for a person: only the Session that sent it.
+    to_session: Option<String>,
 }
 
 impl fmt::Debug for CableSendRequest {
@@ -500,6 +525,7 @@ impl fmt::Debug for CableSendRequest {
             .field("ttl", &self.ttl)
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
+            .field("to_session", &self.to_session)
             .finish()
     }
 }
@@ -530,6 +556,12 @@ pub struct CableDelivery {
     pub conversation_id: Option<String>,
     /// Parent Cable identity, when this is a reply.
     pub reply_to: Option<String>,
+    /// The person an assistant sent this Cable for, when it acted for one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_behalf_of: Option<String>,
+    /// How the sender is shown: `<from_agent> for <on_behalf_of>`, when sent for a person.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_as: Option<String>,
     /// Creation time as Unix seconds.
     pub created_at: f64,
     /// Expiration time as Unix seconds.
@@ -553,6 +585,7 @@ impl fmt::Debug for CableDelivery {
             .field("body", &"[redacted]")
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
+            .field("on_behalf_of", &self.on_behalf_of)
             .field("created_at", &self.created_at)
             .field("expires_at", &self.expires_at)
             .field("state", &self.state)
@@ -570,6 +603,7 @@ impl CableSendRequest {
             ttl: DEFAULT_CABLE_TTL,
             conversation_id: None,
             reply_to: None,
+            to_session: None,
         }
     }
 
@@ -1026,6 +1060,16 @@ impl CableRelay {
                 .map(str::to_owned)
                 .unwrap_or_else(|| original.id().to_owned()),
         );
+        // A Cable sent for a person came from one conversation of a shared assistant Agent;
+        // its reply goes back to that conversation alone, not to the Agent's others.
+        if original.on_behalf_of().is_some() {
+            request.to_session = Some(
+                original
+                    .session_id()
+                    .ok_or(CableRelayError::Unavailable)?
+                    .to_owned(),
+            );
+        }
         self.send(principal, request)
     }
 
@@ -1107,12 +1151,18 @@ impl CableRelay {
             .policy
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
-        let recipients = self.authorized_recipients(
-            &policy,
-            principal,
-            &request.target,
-            self.candidates(&request.target)?,
-        )?;
+        let mut candidates = self.candidates(&request.target)?;
+        if principal.on_behalf_of.is_some() {
+            // Acting for a person, an assistant reaches only the Operation it acts in.
+            candidates.retain(|endpoint| {
+                endpoint.operation == principal.operation && endpoint.agent != principal.agent
+            });
+        }
+        if let Some(session) = request.to_session.as_deref() {
+            candidates.retain(|endpoint| endpoint.session_id.as_deref() == Some(session));
+        }
+        let recipients =
+            self.authorized_recipients(&policy, principal, &request.target, candidates)?;
         if recipients.is_empty() || recipients.len() > self.max_fanout {
             self.record_event("cable_send", principal, &request.target, "denied", None);
             return Err(CableRelayError::Unavailable);
@@ -1200,6 +1250,9 @@ impl CableRelay {
         }
         if let Some(reply_to) = request.reply_to.as_deref() {
             draft = draft.with_reply_to(reply_to);
+        }
+        if let Some(person) = principal.on_behalf_of.as_deref() {
+            draft = draft.with_on_behalf_of(person);
         }
         Ok(draft)
     }
@@ -1332,6 +1385,7 @@ impl CableRelay {
             decision,
             at: (self.now)(),
             cable_id: cable.map(|item| item.id().to_owned()),
+            on_behalf_of: principal.on_behalf_of.clone(),
         };
         sink(&record);
     }
@@ -1391,6 +1445,10 @@ fn delivery_view(cable: &Cable, recipient: &CableRecipient) -> CableDelivery {
         body: cable.body().to_owned(),
         conversation_id: cable.conversation_id().map(str::to_owned),
         reply_to: cable.reply_to().map(str::to_owned),
+        on_behalf_of: cable.on_behalf_of().map(str::to_owned),
+        sent_as: cable
+            .on_behalf_of()
+            .map(|person| format!("{} for {person}", cable.sender_agent())),
         created_at: cable.created_at(),
         expires_at: cable.expires_at(),
         state: recipient.state(),
@@ -1535,6 +1593,136 @@ mod tests {
             ),
         );
         assert_eq!(denied.unwrap_err(), CableRelayError::Unavailable);
+    }
+
+    #[test]
+    fn a_cable_sent_for_a_person_stays_in_its_operation_and_its_reply_in_its_conversation() {
+        let root = tempfile::tempdir().unwrap();
+        let station = target(CableScope::Station, Some("station-a"));
+        let policy = CablePolicy::try_new(
+            ["moneypenny", "008", "009"]
+                .into_iter()
+                .flat_map(|agent| {
+                    [CableAction::Send, CableAction::Receive]
+                        .map(|action| grant(agent, action, station.clone()))
+                })
+                .collect(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let records = Arc::new(Mutex::new(Vec::new()));
+        let audit_records = records.clone();
+        let service = relay(
+            Arc::new(FileRegistry::open(root.path())),
+            policy,
+            vec![
+                endpoint("008", "operation-a", Some("session-008")),
+                endpoint("009", "operation-b", Some("session-009")),
+            ],
+        )
+        .with_audit_sink(move |record| audit_records.lock().unwrap().push(record.clone()));
+        // Two conversations of the same assistant Agent, for two people.
+        for (session, operation) in [
+            ("assistant-a", "operation-a"),
+            ("assistant-b", "operation-a"),
+        ] {
+            service
+                .register_endpoint(
+                    CableEndpoint::try_new(
+                        "moneypenny".into(),
+                        operation.into(),
+                        None,
+                        "station-a".into(),
+                        Some(session.into()),
+                        None,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+        let assistant = |session: &str, person: &str| {
+            CablePrincipal::try_new(
+                "moneypenny".into(),
+                "operation-a".into(),
+                None,
+                "station-a".into(),
+                Some(session.into()),
+                None,
+            )
+            .unwrap()
+            .with_on_behalf_of(person.into())
+            .unwrap()
+        };
+        let for_a = assistant("assistant-a", "person-a");
+        let sent = service
+            .send(
+                &for_a,
+                request(target(CableScope::Agent, Some("008")), "k1"),
+            )
+            .unwrap();
+        assert_eq!(sent.on_behalf_of(), Some("person-a"));
+        {
+            let records = records.lock().unwrap();
+            let last = records.last().unwrap();
+            assert_eq!(
+                (last.decision, last.on_behalf_of.as_deref()),
+                ("accepted", Some("person-a"))
+            );
+        }
+        assert_eq!(
+            service
+                .send(
+                    &for_a,
+                    request(target(CableScope::Agent, Some("009")), "k2")
+                )
+                .unwrap_err(),
+            CableRelayError::Unavailable,
+            "an Agent of another Operation is out of reach"
+        );
+        let broadcast = service
+            .send(&for_a, request(station.clone(), "k3"))
+            .unwrap();
+        let reached: Vec<_> = broadcast
+            .recipients()
+            .iter()
+            .map(|recipient| recipient.agent())
+            .collect();
+        assert_eq!(reached, ["008"], "neither another Operation nor itself");
+
+        let agent = CablePrincipal::try_new(
+            "008".into(),
+            "operation-a".into(),
+            None,
+            "station-a".into(),
+            Some("session-008".into()),
+            None,
+        )
+        .unwrap();
+        let delivered = service.inbox(&agent, 10).unwrap();
+        let first = delivered
+            .iter()
+            .find(|delivery| delivery.cable_id == sent.id())
+            .unwrap();
+        assert_eq!(first.sent_as.as_deref(), Some("moneypenny for person-a"));
+        let reply = service
+            .reply(&agent, sent.id(), "Done".into(), "r1".into())
+            .unwrap();
+        let sessions: Vec<_> = reply
+            .recipients()
+            .iter()
+            .map(|recipient| recipient.session_id())
+            .collect();
+        assert_eq!(
+            sessions,
+            [Some("assistant-a")],
+            "the other person's conversation is not told"
+        );
+        assert!(
+            service
+                .inbox(&assistant("assistant-b", "person-b"), 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -200,6 +200,8 @@ pub struct Cable {
     session_id: Option<String>,
     conversation_id: Option<String>,
     reply_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    on_behalf_of: Option<String>,
     id: String,
     created_at: f64,
     expires_at: f64,
@@ -233,6 +235,8 @@ pub struct CableDraft {
     pub conversation_id: Option<String>,
     /// Parent Cable identity, when this is a reply.
     pub reply_to: Option<String>,
+    /// The person an assistant sent this Cable for, when it was sent on a person's behalf.
+    pub on_behalf_of: Option<String>,
     /// Unique Cable identifier supplied by the relay.
     pub id: String,
     /// Creation time as Unix seconds.
@@ -269,6 +273,7 @@ impl CableDraft {
             session_id: None,
             conversation_id: None,
             reply_to: None,
+            on_behalf_of: None,
             id,
             created_at,
             expires_at,
@@ -304,6 +309,12 @@ impl CableDraft {
         self.reply_to = Some(cable_id.into());
         self
     }
+
+    /// Names the person the sending assistant acts for.
+    pub fn with_on_behalf_of(mut self, person: impl Into<String>) -> Self {
+        self.on_behalf_of = Some(person.into());
+        self
+    }
 }
 
 impl fmt::Debug for CableDraft {
@@ -322,6 +333,7 @@ impl fmt::Debug for CableDraft {
             .field("session_id", &self.session_id)
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
+            .field("on_behalf_of", &self.on_behalf_of)
             .field("id", &self.id)
             .field("created_at", &self.created_at)
             .field("expires_at", &self.expires_at)
@@ -345,6 +357,7 @@ impl fmt::Debug for Cable {
             .field("session_id", &self.session_id)
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
+            .field("on_behalf_of", &self.on_behalf_of)
             .field("id", &self.id)
             .field("created_at", &self.created_at)
             .field("expires_at", &self.expires_at)
@@ -372,6 +385,8 @@ struct CableWire {
     conversation_id: Option<String>,
     #[serde(deserialize_with = "deserialize_required_option")]
     reply_to: Option<String>,
+    #[serde(default)]
+    on_behalf_of: Option<String>,
     id: String,
     created_at: f64,
     expires_at: f64,
@@ -394,6 +409,7 @@ impl TryFrom<CableWire> for Cable {
             session_id: wire.session_id,
             conversation_id: wire.conversation_id,
             reply_to: wire.reply_to,
+            on_behalf_of: wire.on_behalf_of,
             id: wire.id,
             created_at: wire.created_at,
             expires_at: wire.expires_at,
@@ -461,6 +477,7 @@ impl Cable {
             ("session_id", draft.session_id.as_deref(), 512),
             ("conversation_id", draft.conversation_id.as_deref(), 64),
             ("reply_to", draft.reply_to.as_deref(), 64),
+            ("on_behalf_of", draft.on_behalf_of.as_deref(), 256),
         ] {
             if let Some(value) = value {
                 validate_text(&format!("Cable {label}"), Some(value), limit, true)?;
@@ -494,6 +511,7 @@ impl Cable {
             session_id: draft.session_id,
             conversation_id: draft.conversation_id,
             reply_to: draft.reply_to,
+            on_behalf_of: draft.on_behalf_of,
             id: draft.id,
             created_at: draft.created_at,
             expires_at: draft.expires_at,
@@ -560,6 +578,12 @@ impl Cable {
         self.reply_to.as_deref()
     }
 
+    /// Returns the person an assistant sent this Cable for, when it acted for one;
+    /// recipients see the sender as `<sender agent> for <person>`.
+    pub fn on_behalf_of(&self) -> Option<&str> {
+        self.on_behalf_of.as_deref()
+    }
+
     /// Returns this Cable's relay-generated identity.
     pub fn id(&self) -> &str {
         &self.id
@@ -596,6 +620,7 @@ impl Cable {
             && self.session_id == other.session_id
             && self.conversation_id == other.conversation_id
             && self.reply_to == other.reply_to
+            && self.on_behalf_of == other.on_behalf_of
     }
 
     /// Returns a copy with one recipient's permitted delivery transition applied.
@@ -716,6 +741,21 @@ mod tests {
         assert_eq!(value["recipients"][0]["state"], "queued");
         assert_eq!(serde_json::from_value::<Cable>(value).unwrap(), cable);
         assert!(!format!("{cable:?}").contains("Need a review"));
+    }
+
+    #[test]
+    fn the_person_a_cable_was_sent_for_is_kept_and_omitted_when_none() {
+        let plain = serde_json::to_value(Cable::try_new(draft()).unwrap()).unwrap();
+        assert!(plain.get("on_behalf_of").is_none());
+        assert!(serde_json::from_value::<Cable>(plain).is_ok());
+
+        let cable = Cable::try_new(draft().with_on_behalf_of("person-007")).unwrap();
+        assert_eq!(cable.on_behalf_of(), Some("person-007"));
+        let value = serde_json::to_value(&cable).unwrap();
+        assert_eq!(value["on_behalf_of"], "person-007");
+        assert_eq!(serde_json::from_value::<Cable>(value).unwrap(), cable);
+        assert!(!cable.same_request(&Cable::try_new(draft()).unwrap()));
+        assert!(Cable::try_new(draft().with_on_behalf_of("a\nb")).is_err());
     }
 
     #[test]

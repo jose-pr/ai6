@@ -24,13 +24,16 @@ use serde::Deserialize;
 /// `*`.
 pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
 
-/// The actions the gateway checks, for writing roles.
+/// The actions the gateway checks, for writing roles. `cable.send` and `cable.read` on
+/// `operation:<id>` bound what Moneypenny may do with Cables on the person's behalf.
 pub const ACTIONS: &[&str] = &[
     "agent.configure",
     "agent.read",
     "approval.class",
     "approval.decide",
     "audit.read",
+    "cable.read",
+    "cable.send",
     "mission.control",
     "mission.create",
     "mission.read",

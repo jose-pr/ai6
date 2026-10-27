@@ -625,6 +625,7 @@ where
     let cable_sessions = sessions.clone();
     let cable_site = station_id.clone();
     let (sender_rate, sender_burst, scope_rate, scope_burst) = cable_config.quota_limits();
+    let (audit_registry, audit_station) = (intake.clone(), station_id.clone());
     let cables = CableRelay::new(
         intake.clone(),
         cable_config
@@ -636,6 +637,9 @@ where
         },
         cable_config.channels().clone(),
     )
+    .with_audit_sink(move |record| {
+        audit_cable_for_person(audit_registry.as_ref(), &audit_station, record);
+    })
     .with_limits(
         cable_config.max_fanout(),
         sender_rate,
@@ -838,6 +842,49 @@ async fn list_intake_briefs(
         .list_new()
         .map(Json)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
+/// Records in the audit log a Cable an assistant sent, or was refused, on a person's behalf:
+/// action `cable.send`, the person as actor, `<agent> <decision> <target> <cable id>` as
+/// target. Other relay records are metadata the relay keeps to itself.
+fn audit_cable_for_person(
+    registry: &dyn RegistryBackend,
+    station: &str,
+    record: &crate::directorates::registry::cables::CableAuditRecord,
+) {
+    let Some(person) = &record.on_behalf_of else {
+        return;
+    };
+    if !matches!(record.event, "cable_send" | "cable_retry") {
+        return;
+    }
+    let target = match &record.target_name {
+        Some(name) => format!("{:?}:{name}", record.target_scope).to_lowercase(),
+        None => format!("{:?}", record.target_scope).to_lowercase(),
+    };
+    let mut target = format!(
+        "{} {} {target} {}",
+        record.agent,
+        record.decision,
+        record.cable_id.as_deref().unwrap_or("-")
+    );
+    let mut end = target.len().min(500);
+    while !target.is_char_boundary(end) {
+        end -= 1;
+    }
+    target.truncate(end);
+    let audit = crate::directorates::registry::store::AuditRecord {
+        id: format!("cable.send-{}", uuid::Uuid::new_v4().simple()),
+        actor: person.clone(),
+        action: "cable.send".to_owned(),
+        operation: record.operation.clone(),
+        resource: Some(format!("station:{station}")),
+        target,
+        at: record.at,
+    };
+    if let Err(error) = registry.record_audit(&audit) {
+        eprintln!("ai6: the audit record of a Cable sent for a person was not written: {error}");
+    }
 }
 
 fn cable_endpoints(
