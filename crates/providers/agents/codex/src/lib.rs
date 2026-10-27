@@ -3171,6 +3171,46 @@ mod tests {
     }
 
     #[test]
+    fn an_assistant_with_cable_grants_gets_both_servers() {
+        let environment = BTreeMap::from([
+            (
+                "AI6_MONEYPENNY_MCP_URL".to_owned(),
+                "https://exports.example/v1/moneypenny/mcp".to_owned(),
+            ),
+            ("AI6_MONEYPENNY_MCP_TOKEN".to_owned(), "token".to_owned()),
+            (
+                "AI6_ASSISTANT_CABLE_MCP_URL".to_owned(),
+                "http://127.0.0.1:4100/mcp".to_owned(),
+            ),
+            (
+                "AI6_ASSISTANT_CABLE_MCP_TOKEN".to_owned(),
+                "cable-token".to_owned(),
+            ),
+        ]);
+        let argv = assistant_argv(
+            "codex",
+            &environment,
+            &AssistantMode::moneypenny().with_cables(),
+        )
+        .unwrap();
+        let (key, value) = argv[3].split_once('=').unwrap();
+        let parsed: toml::Table = toml::from_str(&format!("{key} = {value}")).unwrap();
+        assert_eq!(
+            parsed["mcp_servers"],
+            toml::Value::Table(
+                toml::from_str(
+                    "moneypenny = { url = \"https://exports.example/v1/moneypenny/mcp\", \
+                     bearer_token_env_var = \"AI6_MONEYPENNY_MCP_TOKEN\" }\n\
+                     cables = { url = \"http://127.0.0.1:4100/mcp\", \
+                     bearer_token_env_var = \"AI6_ASSISTANT_CABLE_MCP_TOKEN\" }"
+                )
+                .unwrap()
+            )
+        );
+        assert!(!argv.iter().any(|a| a.contains("cable-token")));
+    }
+
+    #[test]
     fn an_answer_only_app_server_has_no_mcp_server_at_all() {
         let argv = answer_only_argv("codex");
         assert_eq!(argv[..4], ["codex", "app-server", "-c", "mcp_servers={}"]);

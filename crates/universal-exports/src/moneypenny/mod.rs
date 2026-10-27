@@ -25,6 +25,7 @@
 //! `GET`/`POST /v1/station/assistant/exposure` (the Stations).
 
 pub(crate) mod actions;
+pub(crate) mod cables;
 mod guide;
 pub(crate) mod mcp;
 mod store;
@@ -39,9 +40,9 @@ use std::time::{Duration, Instant};
 use ai6::{
     AssistantChange, AssistantCommit, AssistantEvent, AssistantJob, AssistantReport,
     AssistantSettings, AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED, EVENT_ACCEPTED,
-    EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
-    EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
-    MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES,
+    EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED,
+    EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT,
+    EVENT_TOOL, MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES,
 };
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
@@ -227,10 +228,14 @@ enum Control {
         proposal: Option<String>,
         what: String,
     },
+    /// Send the Cable held for the proposal with this ID.
+    CableConfirm(String),
+    /// Drop the Cable held for the proposal with this ID.
+    CableDiscard(String),
 }
 
 /// A job that closes or interrupts the harness of `conversation`, or makes `commit`, sending
-/// no message.
+/// no message; a Cable decision is the caller's to fill in.
 fn control_job(
     conversation: &Conversation,
     agent_id: &str,
@@ -254,6 +259,9 @@ fn control_job(
         person_id: Some(conversation.person_id.clone()),
         workspace: None,
         commit,
+        cables: Vec::new(),
+        cable_confirm: None,
+        cable_discard: None,
     }
 }
 
@@ -570,6 +578,8 @@ impl Assistant {
                     format!("Moneypenny cannot keep a workspace for you: {reason}"),
                 )
             })?;
+        // Read again for every message, so a permission removed reaches her next turn.
+        let cables = cables::grants(gateway, &person).await;
         {
             let mut desk = self.desk();
             let conversation = desk
@@ -634,6 +644,9 @@ impl Assistant {
                 person_id: Some(person_id.to_owned()),
                 workspace,
                 commit: None,
+                cables,
+                cable_confirm: None,
+                cable_discard: None,
             };
             conversation.workspace = job.workspace.clone();
             if let Some(text) = shown {
@@ -841,7 +854,8 @@ impl Assistant {
         let max_entries = self.config.bounds();
         let mut refused = false;
         let mut notify = false;
-        {
+        let mut after = cables::After::default();
+        'locked: {
             let mut desk = self.desk();
             if let Some(job_id) = &report.job_id
                 && let Some(control) = desk.controlling.remove(job_id)
@@ -871,19 +885,24 @@ impl Assistant {
                         max_entries,
                     );
                 }
-                if let Control::Commit { proposal, what } = control
-                    && let Some(conversation) =
-                        desk.store.conversations.get_mut(&report.conversation_id)
-                {
-                    committed(
-                        conversation,
-                        proposal.as_deref(),
-                        &what,
-                        &report,
-                        max_entries,
-                    );
+                let conversation = desk.store.conversations.get_mut(&report.conversation_id);
+                match (control, conversation) {
+                    (Control::Commit { proposal, what }, Some(conversation)) => {
+                        committed(
+                            conversation,
+                            proposal.as_deref(),
+                            &what,
+                            &report,
+                            max_entries,
+                        );
+                    }
+                    (Control::CableConfirm(proposal), Some(conversation)) => {
+                        let reason = refused.map(|event| event.text.clone().unwrap_or_default());
+                        cables::answered(conversation, &proposal, reason, &mut after);
+                    }
+                    _ => {}
                 }
-                return Ok(());
+                break 'locked;
             }
             let conversation = desk
                 .store
@@ -936,6 +955,13 @@ impl Assistant {
                     (Some(change), EVENT_MEMORY_CHANGES) => {
                         set_aside.push((change.clone(), event.text.clone().unwrap_or_default()));
                     }
+                    (_, EVENT_CABLE_PROPOSAL | EVENT_CABLE_SENT) => cables::apply(
+                        conversation,
+                        event,
+                        &report.station_id,
+                        max_entries,
+                        &mut after,
+                    ),
                     _ => apply(conversation, event, max_entries),
                 }
             }
@@ -953,6 +979,7 @@ impl Assistant {
                 desk.store.trim_person(&person, self.config.person_bytes);
             }
         }
+        self.follow_up(gateway, after).await;
         if notify {
             self.ready.notify_waiters();
         }
@@ -1104,6 +1131,7 @@ impl Assistant {
             session: digest(&granted.bearer),
             result: None,
             work: None,
+            cable: None,
         };
         let max_entries = self.config.bounds();
         {
@@ -1163,6 +1191,12 @@ impl Assistant {
         };
         if let Some(commit) = draft.work.clone() {
             self.confirm_commit(gateway, conversation_id, person, &draft, commit)
+                .await;
+            return Ok(());
+        }
+        // A held Cable is sent by the Station that holds it, which reports how it went.
+        if let Some(hold) = draft.cable.clone() {
+            self.confirm_cable(gateway, conversation_id, person, &draft, hold)
                 .await;
             return Ok(());
         }
@@ -1557,6 +1591,11 @@ impl Assistant {
             shown.draft.summary
         ));
         conversation.show_proposal(&shown);
+        drop(desk);
+        // A held Cable is dropped by the Station that holds it.
+        if let Some(hold) = shown.cable {
+            self.discard_cable(conversation_id, proposal_id, hold);
+        }
         Ok(())
     }
 
@@ -1707,6 +1746,7 @@ fn commit_proposal(
         session,
         result: None,
         work: Some(commit),
+        cable: None,
     }
 }
 
@@ -2252,7 +2292,7 @@ pub(crate) async fn expose(
                     role: Role::Notice,
                     text: format!(
                         "Moneypenny read text written outside AI6's own records ({}): from now \
-                         on her memory changes wait for your confirmation.",
+                         on her memory changes and Cables wait for your confirmation.",
                         cut(&exposed.source, 200)
                     ),
                     at: now(),

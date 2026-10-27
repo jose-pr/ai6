@@ -54,7 +54,7 @@ const ROLES: &str = r#"
     actions = ["mission.read"]
 
     [role.operator]
-    actions = ["mission.read", "audit.read"]
+    actions = ["mission.read", "audit.read", "cable.send", "cable.read"]
 
     [role.roster-reader]
     actions = ["roster.read", "roster.manage"]
@@ -1995,4 +1995,268 @@ async fn a_read_tool_exposes_unless_it_quotes_no_one() {
     assert_eq!(board["isError"], false);
     let now = exposure_of(&served, "hq", &job.conversation_id).await;
     assert_eq!(now.json::<Value>().await.unwrap(), json!({"exposed": true}));
+}
+
+/// What `GET /v1/station/assistant/exposure` answers `station`, with its status.
+async fn exposure(served: &Served, station: &str, conversation: &str) -> (StatusCode, Value) {
+    let response = exposure_of(served, station, conversation).await;
+    let status = response.status();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn cable_grants_follow_the_persons_permissions_and_outside_text_exposes() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Ask 008 about the build.").await;
+    assert_eq!(job.person_id.as_deref(), Some("operator-007"));
+    assert_eq!(
+        job.cables,
+        [ai6::AssistantCableGrant {
+            operation: "G".to_owned(),
+            send: true,
+            read: true,
+        }]
+    );
+    assert!(!job.exposed);
+    let conversation = job.conversation_id.as_str();
+    assert_eq!(
+        exposure(&served, "hq", conversation).await,
+        (StatusCode::OK, json!({"exposed": false}))
+    );
+    assert_eq!(
+        exposure(&served, "worker", conversation).await.0,
+        StatusCode::FORBIDDEN,
+        "only the Station that runs it may ask"
+    );
+    assert_eq!(
+        exposure(&served, "hq", "no-such-conversation").await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    // The person's own profile quotes nobody; a Mission's brief is someone else's text.
+    call_tool(&served, &job.mcp_token, "profile", json!({})).await;
+    assert_eq!(
+        exposure(&served, "hq", conversation).await.1["exposed"],
+        false
+    );
+    call_tool(
+        &served,
+        &job.mcp_token,
+        "mission",
+        json!({"operation_id": "G", "mission_id": "mission-g"}),
+    )
+    .await;
+    assert_eq!(
+        exposure(&served, "hq", conversation).await.1["exposed"],
+        true
+    );
+    finish(&served, &mut app, &job).await;
+    say(&mut app, "And now?", None).await;
+    assert!(take(&served, "hq").await.exposed, "it stays exposed");
+
+    let (_viewer, theirs) = accepted(&served, &served.viewer, "Ask 008.").await;
+    assert!(
+        theirs.cables.is_empty(),
+        "no Cable permission, no Cable server"
+    );
+}
+
+/// The proposal a Station reports when Moneypenny asks to send `body` while exposed.
+fn held(id: &str, body: &str) -> AssistantEvent {
+    AssistantEvent {
+        cable: Some(ai6::AssistantCable {
+            id: id.to_owned(),
+            operation: "G".to_owned(),
+            target: "agent:008".to_owned(),
+            body: Some(body.to_owned()),
+            digest: format!("{id}-digest"),
+            cable_id: None,
+        }),
+        ..AssistantEvent::new(ai6::EVENT_CABLE_PROPOSAL, None)
+    }
+}
+
+async fn decide(app: &mut Socket, kind: &str, proposal: &Value) {
+    app.send(WsMessage::Text(
+        json!({"type": kind, "proposal": proposal["id"]})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_held_cable_is_sent_only_when_the_person_confirms_it() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Tell 008 to deploy.").await;
+    assert_eq!(
+        expose_as(&served, "hq", &job.conversation_id).await,
+        StatusCode::NO_CONTENT
+    );
+    report(
+        &served,
+        "hq",
+        &job,
+        None,
+        vec![held("held-1", "Deploy now.")],
+    )
+    .await;
+    let frames = finish(&served, &mut app, &job).await;
+    assert_eq!(
+        exposure(&served, "hq", &job.conversation_id).await.1["exposed"],
+        true
+    );
+    let proposal = proposal_of(&frames);
+    assert_eq!(proposal["status"], "pending");
+    assert_eq!(proposal["tool"], "send_cable");
+    assert_eq!(proposal["request"]["method"], "CABLE");
+    assert_eq!(proposal["request"]["path"], "agent:008");
+    assert_eq!(proposal["request"]["body"]["body"], "Deploy now.");
+    assert_eq!(
+        proposal["needs"],
+        json!({"action": "cable.send", "on": "operation:G"})
+    );
+    assert!(nothing_for(&served, "hq").await, "nothing is sent unseen");
+
+    // Confirmed: audited first, then the Station that holds it is told to send it.
+    decide(&mut app, "confirm", &proposal).await;
+    let control = take(&served, "hq").await;
+    let confirmed = audits(&served, "moneypenny.confirmed");
+    assert_eq!(confirmed.len(), 1);
+    assert_eq!(confirmed[0].actor, "operator-007");
+    assert_eq!(confirmed[0].operation, "G");
+    assert_eq!(
+        control.cable_confirm,
+        Some(ai6::AssistantCableDecision {
+            id: "held-1".to_owned(),
+            digest: "held-1-digest".to_owned(),
+        })
+    );
+    assert!(control.message.is_empty());
+    let sent = AssistantEvent {
+        cable: Some(ai6::AssistantCable {
+            id: "held-1".to_owned(),
+            operation: "G".to_owned(),
+            target: "agent:008".to_owned(),
+            body: None,
+            digest: "held-1-digest".to_owned(),
+            cable_id: Some("cable-9".to_owned()),
+        }),
+        ..AssistantEvent::new(ai6::EVENT_CABLE_SENT, None)
+    };
+    assert_eq!(
+        report(&served, "hq", &job, None, vec![sent]).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &control,
+            Some(&control.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "proposal" && frame["proposal"]["status"] == "done"
+    })
+    .await;
+    assert!(
+        proposal_of(&frames)["result"]
+            .as_str()
+            .unwrap()
+            .contains("cable-9")
+    );
+    let sent = audits(&served, "moneypenny.cable.sent");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        (sent[0].actor.as_str(), sent[0].operation.as_str()),
+        ("operator-007", "G")
+    );
+    assert_eq!(sent[0].target, format!("{} cable-9", job.conversation_id));
+    let told = take(&served, "hq").await;
+    assert!(
+        told.message
+            .starts_with("[App: the person confirmed proposal-"),
+        "{}",
+        told.message
+    );
+    report(
+        &served,
+        "hq",
+        &told,
+        Some(&told.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    finish(&served, &mut app, &told).await;
+
+    // Cancelled: the Station drops it, and nothing is sent or audited as sent.
+    report(
+        &served,
+        "hq",
+        &job,
+        None,
+        vec![held("held-2", "Roll back.")],
+    )
+    .await;
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "entry" && frame["entry"]["role"] == "proposal"
+    })
+    .await;
+    decide(&mut app, "cancel", &proposal_of(&frames)).await;
+    let discard = take(&served, "hq").await;
+    assert_eq!(
+        discard
+            .cable_discard
+            .as_ref()
+            .map(|decision| decision.id.as_str()),
+        Some("held-2")
+    );
+    assert!(discard.cable_confirm.is_none());
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &discard,
+            Some(&discard.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::NO_CONTENT,
+        "an answered discard is not a stale job"
+    );
+    assert_eq!(audits(&served, "moneypenny.cable.sent").len(), 1);
+    assert_eq!(audits(&served, "moneypenny.confirmed").len(), 1);
+}
+
+#[tokio::test]
+async fn a_held_cable_is_not_sent_for_a_person_without_cable_send() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.viewer, "Tell 008 to deploy.").await;
+    report(
+        &served,
+        "hq",
+        &job,
+        None,
+        vec![held("held-1", "Deploy now.")],
+    )
+    .await;
+    let frames = finish(&served, &mut app, &job).await;
+    decide(&mut app, "confirm", &proposal_of(&frames)).await;
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "proposal" && frame["proposal"]["status"] == "failed"
+    })
+    .await;
+    let result = proposal_of(&frames)["result"].as_str().unwrap().to_owned();
+    assert!(result.contains("cable.send"), "{result}");
+    assert!(audits(&served, "moneypenny.confirmed").is_empty());
+    let told = take(&served, "hq").await;
+    assert!(
+        told.cable_confirm.is_none(),
+        "no Station is asked to send it"
+    );
 }

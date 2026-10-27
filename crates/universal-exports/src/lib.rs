@@ -2343,6 +2343,8 @@ async fn user_profile(
                 "agent.configure",
                 "pool.read",
                 "pool.manage",
+                "cable.send",
+                "cable.read",
             ] {
                 let allowed = authorizer
                     .authorize(AuthorizationRequest {

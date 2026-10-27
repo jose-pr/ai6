@@ -29,6 +29,17 @@ pub const ASSISTANT_MCP_TOKEN_ENV: &str = "AI6_MONEYPENNY_MCP_TOKEN";
 /// The name the harness knows the endpoint by: Claude Code calls its tools
 /// `mcp__moneypenny__<tool>`.
 pub const ASSISTANT_MCP_SERVER: &str = "moneypenny";
+/// The prefix of the environment variables holding the Station's Cable endpoint for an
+/// assistant (`AI6_ASSISTANT_CABLE_MCP_URL`, `AI6_ASSISTANT_CABLE_MCP_TOKEN`).
+pub const ASSISTANT_CABLE_MCP_ENV_PREFIX: &str = "AI6_ASSISTANT_CABLE_MCP";
+/// The environment variable holding the URL of an assistant's Cable endpoint.
+pub const ASSISTANT_CABLE_MCP_URL_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_URL";
+/// The environment variable holding the bearer token of an assistant's Cable endpoint.
+pub const ASSISTANT_CABLE_MCP_TOKEN_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_TOKEN";
+/// The name the harness knows an assistant's Cable endpoint by (`mcp__cables__<tool>`).
+pub const ASSISTANT_CABLE_MCP_SERVER: &str = "cables";
+/// The most Operations a job grants Cable actions in.
+pub const MAX_ASSISTANT_CABLE_GRANTS: usize = 64;
 
 impl AssistantMode {
     /// The mode of a Moneypenny Session that has only her own tools: the Universal Exports
@@ -45,6 +56,17 @@ impl AssistantMode {
             files: Vec::new(),
             context_file: None,
         }
+    }
+
+    /// This mode with the Station's Cable endpoint as a further server,
+    /// [`ASSISTANT_CABLE_MCP_SERVER`], reached through [`ASSISTANT_CABLE_MCP_ENV_PREFIX`].
+    #[must_use]
+    pub fn with_cables(mut self) -> Self {
+        self.mcp_servers.push(McpServerRef {
+            name: ASSISTANT_CABLE_MCP_SERVER.to_owned(),
+            env_prefix: ASSISTANT_CABLE_MCP_ENV_PREFIX.to_owned(),
+        });
+        self
     }
 
     /// Checks the parts: at least one server; server names of letters, digits, `-` and `_`;
@@ -157,6 +179,11 @@ pub const EVENT_MEMORY_CHANGES: &str = "memory_changes";
 /// saved to a branch of its own because `main` refused it, or a repository that could not be
 /// opened.
 pub const EVENT_NOTICE: &str = "notice";
+/// The assistant asked to send a Cable while exposed: nothing was sent, and
+/// [`AssistantEvent::cable`] is what waits for the person's confirmation.
+pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal";
+/// A Cable left on the person's behalf; [`AssistantEvent::cable`] says which.
+pub const EVENT_CABLE_SENT: &str = "cable_sent";
 
 /// An [`AssistantCommit`] to the personal repository's `memory/`.
 pub const COMMIT_MEMORY: &str = "memory";
@@ -434,14 +461,70 @@ pub struct AssistantJob {
     /// `accepted` with where the commit landed, or `rejected` with why it did not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<AssistantCommit>,
+    /// The Operations where the person may send or read Cables, at most
+    /// [`MAX_ASSISTANT_CABLE_GRANTS`]; empty, the harness has no Cable endpoint. Requires
+    /// `person_id`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cables: Vec<AssistantCableGrant>,
+    /// Send the Cable held for the person's confirmation instead of a message; `message` is
+    /// empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cable_confirm: Option<AssistantCableDecision>,
+    /// Drop the Cable held for the person's confirmation; `message` is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cable_discard: Option<AssistantCableDecision>,
+}
+
+/// What a person may do with Cables in one Operation, through the assistant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantCableGrant {
+    /// The Operation.
+    pub operation: String,
+    /// The person holds `cable.send` there.
+    pub send: bool,
+    /// The person holds `cable.read` there.
+    pub read: bool,
+}
+
+/// The person's answer to a Cable the assistant was holding for confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantCableDecision {
+    /// The desk's ID for the held Cable, as its [`EVENT_CABLE_PROPOSAL`] reported it.
+    pub id: String,
+    /// The digest that event reported; the desk sends only the Cable it names.
+    pub digest: String,
+}
+
+/// A Cable an assistant proposed or sent on the person's behalf.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantCable {
+    /// The desk's ID for a held Cable; for one sent at once, the relay's Cable ID.
+    pub id: String,
+    /// The Operation it is sent in.
+    pub operation: String,
+    /// Its audience, as `<scope>:<name>` (`agent:007`, `station:hq`, `global`), or
+    /// `reply:<cable id>` for a reply.
+    pub target: String,
+    /// The body, for a proposal; a sent Cable's event does not repeat it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// SHA-256 of the request, lowercase hex.
+    pub digest: String,
+    /// The relay's Cable ID, once sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cable_id: Option<String>,
 }
 
 impl AssistantJob {
     /// Checks the job's bounds: identities of 1 to 256 bytes without control characters, a
-    /// message within [`MAX_ASSISTANT_MESSAGE_BYTES`] (empty only to close, interrupt or
-    /// commit, of which a job does one), context within [`MAX_ASSISTANT_CONTEXT_BYTES`], a
-    /// token of 32 to 512 bytes, and a workspace and commit as their own `validate` checks
-    /// them.
+    /// message within [`MAX_ASSISTANT_MESSAGE_BYTES`] (empty only to close, interrupt, commit,
+    /// or confirm or discard a held Cable, of which a job does one), context within
+    /// [`MAX_ASSISTANT_CONTEXT_BYTES`], a token of 32 to 512 bytes, a workspace and commit as
+    /// their own `validate` checks them, and Cable grants for at most
+    /// [`MAX_ASSISTANT_CABLE_GRANTS`] distinct Operations, with the person they are for.
     ///
     /// # Errors
     ///
@@ -463,9 +546,18 @@ impl AssistantJob {
         {
             return Err("session_id is empty, too long or has control characters".to_owned());
         }
-        let controls = [self.close, self.interrupt, self.commit.is_some()];
+        let controls = [
+            self.close,
+            self.interrupt,
+            self.commit.is_some(),
+            self.cable_confirm.is_some(),
+            self.cable_discard.is_some(),
+        ];
         if controls.iter().filter(|set| **set).count() > 1 {
-            return Err("a job closes, interrupts or commits, only one".to_owned());
+            return Err(
+                "a job closes, interrupts, commits, or confirms or discards a Cable, only one"
+                    .to_owned(),
+            );
         }
         let control = controls.contains(&true);
         if self.message.len() > MAX_ASSISTANT_MESSAGE_BYTES
@@ -478,8 +570,26 @@ impl AssistantJob {
         {
             return Err("person_id is empty, too long or has control characters".to_owned());
         }
-        if (self.workspace.is_some() || self.commit.is_some()) && self.person_id.is_none() {
-            return Err("a workspace or a commit needs person_id".to_owned());
+        if (self.workspace.is_some() || self.commit.is_some() || !self.cables.is_empty())
+            && self.person_id.is_none()
+        {
+            return Err("a workspace, a commit or Cable grants need person_id".to_owned());
+        }
+        for decision in self.cable_confirm.iter().chain(&self.cable_discard) {
+            if !valid_identity(&decision.id) || !valid_identity(&decision.digest) {
+                return Err("a Cable decision's id or digest is not valid".to_owned());
+            }
+        }
+        if self.cables.len() > MAX_ASSISTANT_CABLE_GRANTS {
+            return Err(format!(
+                "Cable grants name more than {MAX_ASSISTANT_CABLE_GRANTS} Operations"
+            ));
+        }
+        let mut operations = std::collections::BTreeSet::new();
+        for grant in &self.cables {
+            if !valid_identity(&grant.operation) || !operations.insert(grant.operation.as_str()) {
+                return Err("a Cable grant's Operation is not valid or repeated".to_owned());
+            }
         }
         if let Some(workspace) = &self.workspace {
             workspace
@@ -531,6 +641,9 @@ impl fmt::Debug for AssistantJob {
                 "commit",
                 &self.commit.as_ref().map(|commit| commit.kind.as_str()),
             )
+            .field("cables", &self.cables)
+            .field("cable_confirm", &self.cable_confirm)
+            .field("cable_discard", &self.cable_discard)
             .finish()
     }
 }
@@ -569,6 +682,9 @@ pub struct AssistantEvent {
     /// The memory change an [`EVENT_MEMORY_CHANGES`] event set aside.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change: Option<AssistantChange>,
+    /// The Cable of an [`EVENT_CABLE_PROPOSAL`] or [`EVENT_CABLE_SENT`] event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cable: Option<AssistantCable>,
 }
 
 impl AssistantEvent {
@@ -580,6 +696,7 @@ impl AssistantEvent {
             text: text.map(|text| cut(text, MAX_ASSISTANT_EVENT_BYTES)),
             tools: Vec::new(),
             change: None,
+            cable: None,
         }
     }
 }
@@ -621,7 +738,49 @@ mod tests {
             person_id: None,
             workspace: None,
             commit: None,
+            cables: Vec::new(),
+            cable_confirm: None,
+            cable_discard: None,
         }
+    }
+
+    #[test]
+    fn cable_grants_are_bounded_and_name_their_person() {
+        let grant = |operation: &str| AssistantCableGrant {
+            operation: operation.to_owned(),
+            send: true,
+            read: false,
+        };
+        let mut granted = job();
+        granted.cables = vec![grant("G")];
+        assert!(granted.validate().is_err(), "whose grants?");
+        granted.person_id = Some("person-007".to_owned());
+        assert_eq!(granted.validate(), Ok(()));
+        granted.cables.push(grant("G"));
+        assert!(granted.validate().is_err(), "an Operation once");
+        granted.cables = (0..=MAX_ASSISTANT_CABLE_GRANTS)
+            .map(|index| grant(&format!("op-{index}")))
+            .collect();
+        assert!(granted.validate().is_err());
+        let encoded = serde_json::to_value(job()).unwrap();
+        assert!(encoded.get("cables").is_none());
+
+        let mut confirm = job();
+        confirm.message = String::new();
+        confirm.cable_confirm = Some(AssistantCableDecision {
+            id: "held-1".to_owned(),
+            digest: "d".repeat(64),
+        });
+        assert_eq!(
+            confirm.validate(),
+            Ok(()),
+            "a confirmation carries no message"
+        );
+        confirm.close = true;
+        assert!(confirm.validate().is_err());
+        confirm.close = false;
+        confirm.cable_discard = confirm.cable_confirm.clone();
+        assert!(confirm.validate().is_err());
     }
 
     fn change() -> AssistantChange {

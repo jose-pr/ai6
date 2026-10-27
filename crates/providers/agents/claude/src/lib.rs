@@ -2753,6 +2753,50 @@ mod tests {
     }
 
     #[test]
+    fn an_assistant_with_cable_grants_gets_the_cable_server_beside_her_own() {
+        let mut environment = assistant_environment();
+        let cables = AssistantMode::moneypenny().with_cables();
+        let mut argv = Vec::new();
+        assert!(
+            add_assistant(&mut argv, &environment, &cables).is_err(),
+            "no Cable endpoint in the environment"
+        );
+        environment.insert(
+            "AI6_ASSISTANT_CABLE_MCP_URL".to_owned(),
+            "http://127.0.0.1:4100/mcp".to_owned(),
+        );
+        environment.insert(
+            "AI6_ASSISTANT_CABLE_MCP_TOKEN".to_owned(),
+            "cable-token".to_owned(),
+        );
+        let mut argv = Vec::new();
+        add_assistant(&mut argv, &environment, &cables).unwrap();
+        let after = |flag: &str| {
+            let position = argv.iter().position(|a| a == flag).unwrap();
+            argv[position + 1].clone()
+        };
+        assert_eq!(after("--allowedTools"), "mcp__moneypenny,mcp__cables");
+        let servers: Value = serde_json::from_str(&after("--mcp-config")).unwrap();
+        assert_eq!(
+            servers,
+            json!({"mcpServers": {
+                "moneypenny": {
+                    "type": "http",
+                    "url": "${AI6_MONEYPENNY_MCP_URL}",
+                    "headers": {"Authorization": "Bearer ${AI6_MONEYPENNY_MCP_TOKEN}"}
+                },
+                "cables": {
+                    "type": "http",
+                    "url": "${AI6_ASSISTANT_CABLE_MCP_URL}",
+                    "headers": {"Authorization": "Bearer ${AI6_ASSISTANT_CABLE_MCP_TOKEN}"}
+                }
+            }}),
+            "a Mission's Cable server of the environment stays out"
+        );
+        assert!(!argv.iter().any(|a| a.contains("cable-token")));
+    }
+
+    #[test]
     fn an_assistant_mode_the_handler_cannot_confine_is_refused() {
         let environment = assistant_environment();
         let mut interpreters = AssistantMode::moneypenny();

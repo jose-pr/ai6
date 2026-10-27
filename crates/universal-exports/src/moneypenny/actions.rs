@@ -66,6 +66,20 @@ pub(crate) struct Proposal {
     /// A commit a Station makes once the person confirms, in place of `draft.call`, which then
     /// only describes it.
     pub(crate) work: Option<ai6::AssistantCommit>,
+    /// For a Cable Moneypenny asked to send after reading outside text: the Station holding
+    /// it, which sends it once confirmed. Such a proposal is not a gateway request.
+    pub(crate) cable: Option<CableHold>,
+}
+
+/// Where a Cable waiting for the person's confirmation is held.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CableHold {
+    /// The Station desk's ID for it.
+    pub(crate) held_id: String,
+    /// SHA-256 of the request, as the Station reported it.
+    pub(crate) digest: String,
+    /// The Station whose desk holds it.
+    pub(crate) station: String,
 }
 
 /// The proposal of a memory change her conversation set aside: confirmed, a Station commits
@@ -187,7 +201,7 @@ impl WriteTool {
 /// Refuses text holding characters that render as nothing (direction controls, zero-width
 /// characters, tags, selectors, fillers, as AI6's vetting counts them): a person confirming
 /// a proposal must see every character of what runs.
-fn hidden_characters(value: &Value, at: &str) -> Result<(), String> {
+pub(crate) fn hidden_characters(value: &Value, at: &str) -> Result<(), String> {
     match value {
         Value::String(text) => match text
             .chars()

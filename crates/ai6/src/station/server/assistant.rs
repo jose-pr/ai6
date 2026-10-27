@@ -12,8 +12,12 @@
 //! fails, when asked or before the resumed harness confirms its Session, goes to the
 //! Station's log and the conversation starts afresh with its recap.
 //!
-//! An assistant Session is not a Mission: it has no Operation and no Cable endpoint, and is
-//! never on the board. It works in a directory of its own, named for its conversation inside
+//! An assistant Session is not a Mission: it has no Operation, and is never on the board. A
+//! job that grants the person Cable actions in some Operations gives the harness a further
+//! MCP server, this Station's Cable endpoint for the conversation
+//! ([`super::cables_mcp::AssistantEndpoint`]), which sends as the assistant for the person and
+//! holds a send for the person's confirmation once the conversation has read outside text.
+//! It works in a directory of its own, named for its conversation inside
 //! one the desk made readable by the Station's user only: the same directory each time the
 //! conversation's harness starts, because Claude Code finds a Session to resume only from the
 //! directory it was recorded in. The directory goes when the harness closes. A job that names
@@ -37,6 +41,8 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use url::Url;
 
+#[cfg(feature = "cables-mcp")]
+use super::cables_mcp::{AssistantEndpoint, AssistantIdentity};
 use super::{DaemonState, medical, station_terminal, unix_now, vetting};
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::q::terminal::TerminalBridge;
@@ -227,6 +233,9 @@ struct Live {
     token_expires_at: f64,
     flags: Arc<Flags>,
     workspace: Option<SharedWorkspace>,
+    /// The conversation's Cable endpoint, while its harness runs.
+    #[cfg(feature = "cables-mcp")]
+    cables: Option<Arc<AssistantEndpoint>>,
 }
 
 /// The assistant Sessions of one Station.
@@ -402,9 +411,16 @@ impl Desk {
         if job.commit.is_some() {
             return self.commit(job).await.map(Some);
         }
+        if job.cable_confirm.is_some() || job.cable_discard.is_some() {
+            return self.decide_cable(job).await.map(|()| None);
+        }
         let running = self.running(&job.conversation_id);
         if let Some((session, flags, expires, workspace)) = running {
             if expires > unix_now() + TOKEN_MARGIN_SECS {
+                #[cfg(feature = "cables-mcp")]
+                if let Some(cables) = self.cables_of(&job.conversation_id) {
+                    cables.update(&job.cables, job.exposed);
+                }
                 flags.interrupting.store(false, Ordering::Release);
                 // A message that reaches a harness still answering (Universal Exports gave the
                 // answer up) joins the turn in progress, whose memory copy stays the one taken
@@ -513,7 +529,8 @@ impl Desk {
                  this elevated Station",
             );
         }
-        let (mode, workspace, notices) = match self.workspace(job, &area).await {
+        #[cfg_attr(not(feature = "cables-mcp"), allow(unused_mut))]
+        let (mut mode, workspace, notices) = match self.workspace(job, &area).await {
             Ok(prepared) => prepared,
             Err(reason) => {
                 remove_area(&area);
@@ -524,6 +541,17 @@ impl Desk {
         let mut environment = vetting::review_environment(&agent.env);
         environment.insert(ASSISTANT_MCP_URL_ENV.to_owned(), self.mcp_url.clone());
         environment.insert(ASSISTANT_MCP_TOKEN_ENV.to_owned(), job.mcp_token.clone());
+        #[cfg(feature = "cables-mcp")]
+        let cables = match self
+            .open_cables(job, &agent.id, &mut mode, &mut environment)
+            .await
+        {
+            Ok(cables) => cables,
+            Err(reason) => {
+                remove_area(&area);
+                return Err(reason);
+            }
+        };
         let mission_id = MissionId::try_new(format!(
             "assistant--{}",
             conversation_digest(&job.conversation_id)
@@ -632,6 +660,8 @@ impl Desk {
                     token_expires_at: job.token_expires_at,
                     flags: flags.clone(),
                     workspace: workspace.clone(),
+                    #[cfg(feature = "cables-mcp")]
+                    cables,
                 },
             );
         let pump = Pump {
@@ -655,6 +685,103 @@ impl Desk {
             .spawn(move || pump.run())
             .map_err(|error| format!("the assistant pump did not start: {error}"))?;
         Ok(())
+    }
+
+    /// With Cable grants, serves the conversation its Cable endpoint, as a further server of
+    /// `mode` reached through `environment`; `None` without grants.
+    #[cfg(feature = "cables-mcp")]
+    async fn open_cables(
+        &self,
+        job: &AssistantJob,
+        agent: &str,
+        mode: &mut AssistantMode,
+        environment: &mut BTreeMap<String, String>,
+    ) -> Result<Option<Arc<AssistantEndpoint>>, String> {
+        let Some(person) = job.person_id.clone().filter(|_| !job.cables.is_empty()) else {
+            return Ok(None);
+        };
+        let (report, station, conversation) = (
+            self.report.clone(),
+            self.state.station_id.clone(),
+            job.conversation_id.clone(),
+        );
+        let reporter = Arc::new(move |event: AssistantEvent| {
+            report(AssistantReport {
+                station_id: station.clone(),
+                conversation_id: conversation.clone(),
+                job_id: None,
+                session_id: None,
+                events: vec![event],
+            });
+        });
+        let (asked, marked, conversation) = (
+            self.exposure.clone(),
+            self.exposure.clone(),
+            job.conversation_id.clone(),
+        );
+        let marking = conversation.clone();
+        let endpoint = AssistantEndpoint::start(
+            self.state.cables.clone(),
+            self.state.intake.clone(),
+            AssistantIdentity {
+                agent: agent.to_owned(),
+                station: self.state.station_id.clone(),
+                session: format!("assistant-{}", conversation_digest(&job.conversation_id)),
+                person,
+            },
+            job.cables.clone(),
+            job.exposed,
+            reporter,
+            Arc::new(move || asked.exposed(&conversation).ok()),
+            Arc::new(move |source| marked.mark(&marking, source).is_ok()),
+        )
+        .await
+        .map_err(|error| format!("the conversation's Cable endpoint did not start: {error}"))?;
+        endpoint.add_environment(environment);
+        *mode = std::mem::replace(mode, AssistantMode::moneypenny()).with_cables();
+        Ok(Some(Arc::new(endpoint)))
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    fn cables_of(&self, conversation: &str) -> Option<Arc<AssistantEndpoint>> {
+        self.live
+            .lock()
+            .ok()?
+            .get(conversation)
+            .and_then(|live| live.cables.clone())
+    }
+
+    /// Sends or drops the Cable the conversation's endpoint holds for the person; a confirm
+    /// that sends nothing is refused with the reason.
+    async fn decide_cable(&self, job: &AssistantJob) -> Result<(), String> {
+        #[cfg(feature = "cables-mcp")]
+        {
+            let cables = self.cables_of(&job.conversation_id);
+            if let Some(decision) = job.cable_discard.clone() {
+                if let Some(cables) = cables {
+                    cables.discard(&decision.id);
+                }
+                return Ok(());
+            }
+            let (Some(cables), Some(decision)) = (cables, job.cable_confirm.clone()) else {
+                return Err(
+                    "nothing is held here: the conversation's harness closed, so the Cable was \
+                     dropped"
+                        .to_owned(),
+                );
+            };
+            tokio::task::spawn_blocking(move || cables.confirm(&decision))
+                .await
+                .map_err(|error| error.to_string())?
+                .map(|_| ())
+        }
+        #[cfg(not(feature = "cables-mcp"))]
+        {
+            if job.cable_discard.is_some() {
+                return Ok(());
+            }
+            Err("this Station serves no Cables".to_owned())
+        }
     }
 
     fn running(&self, conversation: &str) -> Option<Running> {
@@ -2071,6 +2198,9 @@ mod tests {
             person_id: None,
             workspace: None,
             commit: None,
+            cables: Vec::new(),
+            cable_confirm: None,
+            cable_discard: None,
         }
     }
 
@@ -2490,6 +2620,184 @@ mod tests {
             "started afresh with the recap"
         );
         drop(asked);
+        fixture.desk.close_all();
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn cable_grants_give_her_a_cable_server_that_sends_for_the_person() {
+        use rmcp::ServiceExt;
+        use rmcp::model::{CallToolRequestParams, ContentBlock};
+        use rmcp::transport::StreamableHttpClientTransport;
+        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+
+        use crate::directorates::registry::cables::{
+            CableAction, CableEndpoint, CableGrant, CablePolicy, CableRelay, CableScope,
+            CableTarget,
+        };
+        use crate::directorates::section_00::assistant::{
+            ASSISTANT_CABLE_MCP_TOKEN_ENV, ASSISTANT_CABLE_MCP_URL_ENV, AssistantCableDecision,
+            AssistantCableGrant, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT,
+        };
+
+        let mut fixture = fixture(true, IDLE);
+        let registry = fixture.desk.state.intake.clone();
+        let station = CableTarget::try_new(CableScope::Station, Some("test".to_owned())).unwrap();
+        let grants = ["moneypenny", "008"]
+            .into_iter()
+            .flat_map(|agent| {
+                [CableAction::Send, CableAction::Receive].map(|action| {
+                    CableGrant::try_new(agent.to_owned(), action, station.clone()).unwrap()
+                })
+            })
+            .collect();
+        let audit = registry.clone();
+        fixture.desk.state.cables = Arc::new(
+            CableRelay::new(
+                registry.clone(),
+                CablePolicy::try_new(grants, BTreeMap::new()).unwrap(),
+                || {
+                    vec![
+                        CableEndpoint::try_new(
+                            "008".to_owned(),
+                            "G".to_owned(),
+                            None,
+                            "test".to_owned(),
+                            Some("session-8".to_owned()),
+                            Some("mission-1".to_owned()),
+                        )
+                        .unwrap(),
+                    ]
+                },
+                BTreeMap::new(),
+            )
+            .with_audit_sink(move |record| {
+                super::super::audit_cable_for_person(audit.as_ref(), "test", record);
+            }),
+        );
+
+        let mut granted = job("c-cable", "Ask 008 whether the build is green.");
+        granted.person_id = Some("person-007".to_owned());
+        granted.cables = vec![AssistantCableGrant {
+            operation: "G".to_owned(),
+            send: true,
+            read: true,
+        }];
+        fixture.desk.handle(granted.clone()).await;
+        until(|| kinds(&fixture, "c-cable").contains(&EVENT_COMPLETED.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        assert_eq!(
+            start.assistant,
+            Some(AssistantMode::moneypenny().with_cables()),
+            "her own server and the Station's Cable server"
+        );
+        let url = start.environment[ASSISTANT_CABLE_MCP_URL_ENV].clone();
+        let token = start.environment[ASSISTANT_CABLE_MCP_TOKEN_ENV].clone();
+
+        // The harness calls the Cable server, as Claude Code would.
+        let client = ()
+            .serve(StreamableHttpClientTransport::from_config(
+                StreamableHttpClientTransportConfig::with_uri(url).auth_header(token),
+            ))
+            .await
+            .unwrap();
+        let send = |operation: &str, key: &str| {
+            let arguments = serde_json::json!({
+                "operation": operation, "scope": "agent", "target": "008",
+                "body": "Is the build green?", "idempotency_key": key
+            });
+            client.call_tool(
+                CallToolRequestParams::new("send_cable")
+                    .with_arguments(serde_json::from_value(arguments).unwrap()),
+            )
+        };
+        let text = |result: rmcp::model::CallToolResult| match result.content.first() {
+            Some(ContentBlock::Text(text)) => text.text.clone(),
+            _ => panic!("the tool answers in text"),
+        };
+        assert_eq!(
+            text(send("H", "k0").await.unwrap()),
+            "Cable target is unavailable or not authorized",
+            "no grant in Operation H"
+        );
+        let sent: serde_json::Value =
+            serde_json::from_str(&text(send("G", "k1").await.unwrap())).unwrap();
+        let cable = registry
+            .get_cable(sent["cable_id"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(cable.on_behalf_of(), Some("person-007"));
+        assert!(
+            registry
+                .audit_records()
+                .unwrap()
+                .iter()
+                .any(|record| record.action == "cable.send" && record.actor == "person-007")
+        );
+        until(|| kinds(&fixture, "c-cable").contains(&EVENT_CABLE_SENT.to_owned())).await;
+
+        // The next message says the conversation is exposed: a send waits for the person.
+        let mut exposed = job("c-cable", "Tell 008 to deploy.");
+        exposed.person_id = granted.person_id.clone();
+        exposed.cables = granted.cables.clone();
+        exposed.exposed = true;
+        fixture.desk.handle(exposed).await;
+        let held = text(send("G", "k2").await.unwrap());
+        assert!(
+            held.starts_with("Held for the person's confirmation"),
+            "{held}"
+        );
+        until(|| kinds(&fixture, "c-cable").contains(&EVENT_CABLE_PROPOSAL.to_owned())).await;
+        let proposal = fixture
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|report| report.events.iter())
+            .find_map(|event| {
+                event
+                    .cable
+                    .clone()
+                    .filter(|_| event.kind == EVENT_CABLE_PROPOSAL)
+            })
+            .unwrap();
+        let mut confirm = job("c-cable", "unused");
+        confirm.job_id = "confirm-1".to_owned();
+        confirm.message = String::new();
+        confirm.cable_confirm = Some(AssistantCableDecision {
+            id: proposal.id.clone(),
+            digest: proposal.digest.clone(),
+        });
+        fixture.desk.handle(confirm.clone()).await;
+        let answer = |job_id: &str| {
+            fixture
+                .reports
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|report| report.job_id.as_deref() == Some(job_id))
+                .map(|report| report.events[0].kind.clone())
+        };
+        assert_eq!(answer("confirm-1").as_deref(), Some(EVENT_ACCEPTED));
+        let confirmed_sends = fixture
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|report| report.events.iter())
+            .filter(|event| event.kind == EVENT_CABLE_SENT)
+            .filter_map(|event| event.cable.clone())
+            .filter(|cable| cable.id == proposal.id)
+            .count();
+        assert_eq!(confirmed_sends, 1);
+        confirm.job_id = "confirm-2".to_owned();
+        fixture.desk.handle(confirm).await;
+        assert_eq!(
+            answer("confirm-2").as_deref(),
+            Some(EVENT_REJECTED),
+            "a held Cable is sent once"
+        );
+        client.cancel().await.unwrap();
         fixture.desk.close_all();
     }
 
