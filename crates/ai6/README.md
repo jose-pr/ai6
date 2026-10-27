@@ -79,8 +79,9 @@ ai6 sleeper [--config-dir PATH] authorize OPERATION NAME
 ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
 ```
 
-- `ai6 serve` runs the Station. Harnesses run in an available terminal provider,
-  preferring `pty`; `--terminal` pins one. Agents and handlers do not choose it. `--role` and `--label` configure placement;
+- `ai6 serve` runs the Station. Harnesses run in an available terminal provider that suits
+  the handler (`pipe` for one that speaks JSON, else `pty`, preferred); `--terminal` pins one.
+  Agents and handlers do not choose it. `--role` and `--label` configure placement;
   both roles are on by default. `--resources-every` (default 60, `0` off) sets how often each
   remote Theater's CPUs, load and memory are sampled for placement. Watchdog defaults are set with `--stall-timeout`,
   `--loop-timeout`, `--loop-min-lines`, `--blocked-after`, `--max-runtime`, `--history`

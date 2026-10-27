@@ -279,7 +279,7 @@ runner = { command = "/opt/ai6/bin/ai6", plugin_paths = ["/opt/ai6/lib"] }
 | `command` | `ai6` on the Theater's `PATH`; on the Station's own host, the Station's own binary. |
 | `state_dir` | `runner` in AI6's state directory on the Theater. |
 | `plugin_paths` | None: give the directories or libraries that hold the harness's handler and a terminal provider on the Theater. |
-| `terminal` | An available terminal provider on the Theater, preferring `pty`. |
+| `terminal` | An available terminal provider on the Theater that suits the handler: `pipe` preferred for a JSON harness, `pty` otherwise. A pin that gives a JSON harness a terminal is refused. |
 
 A Station starts the runner when none answers, then starts each Session's harness on it. A
 Station that is shut down, killed or fenced out leaves the harness running, and its Mission

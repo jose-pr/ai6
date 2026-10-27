@@ -198,6 +198,7 @@ it from the stream so an attached viewer's emulator does not answer a second tim
 | `crates/ai6ctl/` | Rust | The operator command |
 | `crates/providers/agents/` | Rust | Claude and Codex AgentHandler providers |
 | `crates/providers/terminals/pty/` | Rust | The `pty` terminal provider (openpty / ConPTY) |
+| `crates/providers/terminals/pipe/` | Rust | The `pipe` terminal provider: plain pipes, no terminal, for JSON harnesses |
 | `crates/providers/transports/` | Rust | The `local`, `ssh`, `adb`, `container` and `qemu` transport providers: how a Station reaches a Theater |
 | `crates/providers/theaters/` | Rust | The `ephemeral-container` Theater provider: a fresh container per Mission |
 | `crates/providers/safehouses/` | Rust | The `git` (worktree) and `copy` (plain directory) safe-house providers |

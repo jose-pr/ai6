@@ -16,6 +16,14 @@ provider-issued Session ID; AI6 retains that ID when resuming the same Session. 
 loads handler libraries the way it loads every provider: by pin or publisher signature
 under the `strict` profile ([Stations](stations.md#provider-libraries-pins-and-publishers)).
 
+A handler declares how its harness talks over standard input and output
+(`AgentHandler::stdio`), never which terminal provider it runs in. Claude Code
+(`claude -p --input-format stream-json`) and Codex (`codex app-server`) speak JSON, so both
+handlers declare `json`, and the Station starts them in a provider without a terminal,
+`pipe`; with `-p`, Claude Code exits at once when its standard input is a terminal. A handler
+that declares nothing gets `terminal`, and `pty` is preferred for it
+([Terminals](terminals.md#the-station-chooses-the-terminal)).
+
 ## Agents and roles
 
 An Agent is a codename that owns its occupant: the `handler` provider, `model` and

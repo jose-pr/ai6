@@ -52,9 +52,10 @@ servers in Docker. Building the `sqlite` feature compiles SQLite, so it needs a 
   authenticated public API; Moneypenny and `ai6ctl` are its clients and never reach a
   Station directly.
 - An Agent (codename) owns its handler, model and effort; a role is purpose and policy
-  only. Terminal providers are interchangeable: the Station picks an available one
-  (preferring `pty`) unless pinned with `--terminal`; neither the Agent nor the handler
-  chooses.
+  only. The Station picks an available terminal provider that meets the handler's stdio
+  requirement (a JSON handler gets one without a terminal, `pipe`; otherwise `pty` is
+  preferred) unless pinned with `--terminal`, and refuses a pin that does not meet it; the
+  handler declares the requirement, and neither the Agent nor the handler names a provider.
 - Agent identity, role, Operation policy, Mission ID and provider-issued Session ID are
   distinct contracts.
 - Directorates are modules of the `ai6` crate. Providers live under `crates/providers/` and

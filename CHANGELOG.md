@@ -20,6 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   with the feature list): a `-c mcp_servers` table adds to the user's servers rather than
   replacing them. A server list that cannot be read, or a name that cannot be addressed,
   fails the check. `tools.view_image`, which Codex reports as unrecognized, is not passed.
+- The `pipe` terminal provider (`ai6-terminal-pipe`): the program gets plain pipes for its
+  standard input and output and no terminal, so its output arrives byte for byte and a
+  harness that checks for a terminal reads its input. Standard error is merged into the
+  output (`stderr = "merge"`, the default) or dropped (`"drop"`). Kill takes the whole tree:
+  a process group on Unix, a Job Object on Windows.
+- A handler declares how its harness talks (`AgentHandler::stdio`: `terminal` by default,
+  `json` for the Claude Code and Codex handlers) and a terminal provider whether it gives a
+  terminal (`Terminal::tty`). A Station, its assistant desk and the field runner give a JSON
+  harness a provider without a terminal, preferring `pipe`, and refuse the Mission at start
+  with the reason when none is available or `--terminal` pins one that gives a terminal;
+  other harnesses prefer `pty`. `ai6::choose_terminal` and
+  `Plugins::choose_terminal` apply the rule, and `ai6::DEFAULT_TERMINAL` is in
+  `ai6::directorates::q::terminal` beside `DEFAULT_PIPE`. Claude Code 2.1.310 with `-p` exits
+  at once when its standard input is a terminal, so it runs under `pipe`.
 - The `pty` terminal reports the end of a program's output (`read` returns `0`) once the
   program has exited and its output has been quiet for 200 ms, on every platform, so a
   harness that exits is noticed although ConPTY keeps the output open after its program has

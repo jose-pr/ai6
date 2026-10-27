@@ -95,8 +95,10 @@ those hosting the Operation.
 ## Terminal
 
 The Station, not the Agent, decides which terminal provider harnesses run in. It uses
-an available provider, preferring `pty`; `ai6 serve --terminal ID` pins one. See
-[Terminals](terminals.md).
+an available provider that suits what the handler declares: one without a terminal,
+preferring `pipe`, for a harness that speaks JSON (Claude Code, Codex), else preferring
+`pty`. `ai6 serve --terminal ID` pins one, and a Mission whose harness the pin does not suit
+is refused at start. See [Terminals](terminals.md).
 
 ## Shared Registry
 

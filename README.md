@@ -115,6 +115,7 @@ ai6ctl session interrupt SESSION_ID
 | `ai6-diptel` | The wire contract for Session lifecycle and terminal frames |
 | `ai6-agent-claude`, `ai6-agent-codex` | AgentHandler providers |
 | `ai6-terminal-pty` | The `pty` terminal provider |
+| `ai6-terminal-pipe` | The `pipe` terminal provider, for harnesses that speak JSON |
 | `coqui-access`, `coqui-roles` (shared) | Access kinds, the role authorizer and the access providers AI6 loads |
 | `coqui-peer-tls` (shared) | Station mutual TLS |
 

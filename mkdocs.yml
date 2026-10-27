@@ -54,6 +54,7 @@ nav:
           - ai6-agent-claude: https://jose-pr.github.io/ai6/rust/ai6_agent_claude/index.html
           - ai6-agent-codex: https://jose-pr.github.io/ai6/rust/ai6_agent_codex/index.html
           - ai6-terminal-pty: https://jose-pr.github.io/ai6/rust/ai6_terminal_pty/index.html
+          - ai6-terminal-pipe: https://jose-pr.github.io/ai6/rust/ai6_terminal_pipe/index.html
           - ai6-transport-local: https://jose-pr.github.io/ai6/rust/ai6_transport_local/index.html
           - ai6-transport-ssh: https://jose-pr.github.io/ai6/rust/ai6_transport_ssh/index.html
           - ai6-transport-adb: https://jose-pr.github.io/ai6/rust/ai6_transport_adb/index.html
