@@ -32,6 +32,8 @@ pub(crate) enum Role {
     Proposal,
     /// A view Moneypenny showed; `data` is `{id, view}`.
     View,
+    /// What happened to the conversation itself, such as an answer the person stopped.
+    Notice,
 }
 
 /// One item of a conversation as the app shows it.

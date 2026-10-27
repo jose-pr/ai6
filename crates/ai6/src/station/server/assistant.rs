@@ -40,7 +40,7 @@ use crate::directorates::section_00::agent::{
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
     AssistantJob, AssistantReport, EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED,
-    EVENT_LIMIT, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
+    EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
 };
 use crate::guatiao::library::Object;
 
@@ -152,6 +152,9 @@ struct Flags {
     alive: AtomicBool,
     /// Asks the pump to close the harness.
     stop: AtomicBool,
+    /// The person stopped the answer: the harness's next `completed` is reported as
+    /// `interrupted`.
+    interrupting: AtomicBool,
     last_active: Mutex<Instant>,
 }
 
@@ -225,9 +228,13 @@ impl Desk {
             self.close(&job.conversation_id);
             return Ok(());
         }
+        if job.interrupt {
+            return self.interrupt(&job.conversation_id).await;
+        }
         let running = self.running(&job.conversation_id);
         if let Some((session, flags, expires)) = running {
             if expires > unix_now() + TOKEN_MARGIN_SECS {
+                flags.interrupting.store(false, Ordering::Release);
                 flags.busy.store(true, Ordering::Release);
                 *flags
                     .last_active
@@ -380,6 +387,7 @@ impl Desk {
             busy: AtomicBool::new(true),
             alive: AtomicBool::new(true),
             stop: AtomicBool::new(false),
+            interrupting: AtomicBool::new(false),
             last_active: Mutex::new(Instant::now()),
         });
         let session = Arc::new(Mutex::new(session));
@@ -424,6 +432,33 @@ impl Desk {
                 entry.token_expires_at,
             )
         })
+    }
+
+    /// Stops the answer the conversation's harness is giving, through its handler's
+    /// interrupt; its pump reports `interrupted` when the turn ends. A harness that is not
+    /// answering, or not running here, is left as it is.
+    async fn interrupt(&self, conversation: &str) -> Result<(), String> {
+        let Some((session, flags, _)) = self.running(conversation) else {
+            return Ok(());
+        };
+        if !flags.busy.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        flags.interrupting.store(true, Ordering::Release);
+        let interrupted = tokio::task::spawn_blocking(move || {
+            session
+                .lock()
+                .map_err(|_| "assistant Session lock failed".to_owned())?
+                .interrupt()
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|interrupted| interrupted);
+        if interrupted.is_err() {
+            flags.interrupting.store(false, Ordering::Release);
+        }
+        interrupted.map_err(|error| format!("the harness could not be interrupted: {error}"))
     }
 
     /// Asks the conversation's harness to close; its pump reports `closed`.
@@ -553,13 +588,20 @@ impl Pump {
                 Ok(Some(event)) => {
                     heard = Instant::now();
                     let ended = matches!(event.kind.as_str(), "failed" | LIMIT_EVENT);
+                    let mut stopped = false;
                     if event.kind == "completed" {
                         self.flags.busy.store(false, Ordering::Release);
                         if let Ok(mut last) = self.flags.last_active.lock() {
                             *last = Instant::now();
                         }
+                        stopped = self.flags.interrupting.swap(false, Ordering::AcqRel);
                     }
-                    if let Some(event) = translate(&event) {
+                    let shown = if stopped {
+                        Some(AssistantEvent::new(EVENT_INTERRUPTED, None))
+                    } else {
+                        translate(&event)
+                    };
+                    if let Some(event) = shown {
                         self.send(session_id.as_ref(), vec![event]);
                     }
                     if ended {
@@ -928,6 +970,7 @@ mod tests {
         starts: Vec<AgentStart>,
         resumes: Vec<AgentResume>,
         messages: Vec<String>,
+        interrupts: usize,
     }
 
     /// What a scripted harness does with a message.
@@ -939,6 +982,9 @@ mod tests {
         Dies,
         /// Never writes anything.
         Hangs,
+        /// Starts answering and completes only when interrupted, as Claude Code and Codex end
+        /// an interrupted turn.
+        Works,
     }
 
     /// A harness that does what `script` says with every message; a resumed one does what
@@ -987,6 +1033,9 @@ mod tests {
                     events.push_back(event("failed", Some(DIED)));
                 }
                 Script::Hangs => {}
+                Script::Works => {
+                    events.push_back(event(EVENT_TEXT, Some(&format!("working on: {message}"))));
+                }
             }
         }
     }
@@ -1015,6 +1064,13 @@ mod tests {
         }
 
         fn interrupt(&self) -> Result<(), ProviderError> {
+            self.asked.lock().unwrap().interrupts += 1;
+            if self.script == Script::Works {
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push_back(event("completed", Some("[Request interrupted by user]")));
+            }
             Ok(())
         }
 
@@ -1130,6 +1186,19 @@ mod tests {
             token_expires_at: unix_now() + 3_600.0,
             session_id: None,
             close: false,
+            interrupt: false,
+        }
+    }
+
+    /// A job that stops the conversation's answer.
+    fn interruption(conversation: &str, id: &str) -> AssistantJob {
+        AssistantJob {
+            job_id: format!("interrupt-{id}"),
+            message: String::new(),
+            context: Vec::new(),
+            recap: None,
+            interrupt: true,
+            ..job(conversation, "unused")
         }
     }
 
@@ -1476,6 +1545,42 @@ mod tests {
         let reason = text_of(&fixture, "c-hung", EVENT_FAILED).unwrap();
         assert!(reason.contains("wrote nothing"), "{reason}");
         assert!(fixture.desk.live.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_interrupt_stops_the_answer_through_the_handler_and_keeps_the_harness() {
+        let fixture = scripted(true, IDLE, Script::Works, Script::Answers);
+        fixture.desk.handle(interruption("c-stop", "early")).await;
+        assert_eq!(
+            kinds(&fixture, "c-stop"),
+            [EVENT_ACCEPTED],
+            "with no harness running it is a no-op"
+        );
+
+        fixture.desk.handle(job("c-stop", "a long answer")).await;
+        until(|| kinds(&fixture, "c-stop").contains(&EVENT_TEXT.to_owned())).await;
+        fixture.desk.handle(interruption("c-stop", "now")).await;
+        until(|| kinds(&fixture, "c-stop").contains(&EVENT_INTERRUPTED.to_owned())).await;
+        assert_eq!(fixture.asked.lock().unwrap().interrupts, 1);
+        let mut reported = kinds(&fixture, "c-stop");
+        reported.retain(|kind| kind != EVENT_ACCEPTED);
+        assert_eq!(
+            reported,
+            [EVENT_TEXT, EVENT_INTERRUPTED],
+            "the turn the handler ended is reported as interrupted, not completed"
+        );
+
+        // The harness is idle now: another interrupt does nothing, and it takes the next
+        // message itself.
+        fixture.desk.handle(interruption("c-stop", "again")).await;
+        fixture.desk.handle(job("c-stop", "next")).await;
+        until(|| fixture.asked.lock().unwrap().messages == ["next"]).await;
+        let asked = fixture.asked.lock().unwrap();
+        assert_eq!(asked.interrupts, 1, "an idle harness is not interrupted");
+        assert_eq!(asked.starts.len(), 1, "the harness kept running");
+        drop(asked);
+        assert!(!kinds(&fixture, "c-stop").contains(&EVENT_CLOSED.to_owned()));
+        fixture.desk.close_all();
     }
 
     /// Claude Code reads the message before it says whether the Session it was asked to

@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use ai6::{
     AssistantEvent, AssistantJob, AssistantReport, EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_LIMIT, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MAX_ASSISTANT_CONTEXT_BYTES,
-    MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES,
+    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
+    MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES,
 };
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
@@ -195,10 +195,35 @@ struct Desk {
     tokens: HashMap<String, Grant>,
     /// Tool calls in the current minute, by conversation.
     calls: HashMap<String, (Instant, u32)>,
-    /// Jobs that close a harness, by the Station that runs it.
-    closes: Vec<(String, AssistantJob)>,
-    /// The IDs of close jobs a Station has not answered yet.
-    closing: std::collections::HashSet<String>,
+    /// Jobs that close or interrupt a harness, by the Station that runs it.
+    controls: Vec<(String, AssistantJob)>,
+    /// The control jobs a Station has not answered yet, by ID.
+    controlling: HashMap<String, Control>,
+}
+
+/// What a control job asks of a Station's harness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Control {
+    Close,
+    Interrupt,
+}
+
+/// A job that closes or interrupts the harness of `conversation`, sending no message.
+fn control_job(conversation: &Conversation, agent_id: &str, control: Control) -> AssistantJob {
+    AssistantJob {
+        job_id: Uuid::new_v4().to_string(),
+        conversation_id: conversation.id.clone(),
+        agent_id: agent_id.to_owned(),
+        message: String::new(),
+        context: Vec::new(),
+        recap: None,
+        // Never accepted anywhere: a control starts no harness.
+        mcp_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+        token_expires_at: now() + 60.0,
+        session_id: conversation.session_id.clone(),
+        close: control == Control::Close,
+        interrupt: control == Control::Interrupt,
+    }
 }
 
 impl Desk {
@@ -213,23 +238,11 @@ impl Desk {
         let Some(station) = conversation.station.clone() else {
             return;
         };
-        let job = AssistantJob {
-            job_id: Uuid::new_v4().to_string(),
-            conversation_id: conversation_id.to_owned(),
-            agent_id: agent_id.to_owned(),
-            message: String::new(),
-            context: Vec::new(),
-            recap: None,
-            // Never accepted anywhere: a close starts no harness.
-            mcp_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
-            token_expires_at: now() + 60.0,
-            session_id: conversation.session_id.clone(),
-            close: true,
-        };
+        let job = control_job(conversation, agent_id, Control::Close);
         self.tokens
             .retain(|_, grant| grant.conversation_id != conversation_id);
-        self.closing.insert(job.job_id.clone());
-        self.closes.push((station, job));
+        self.controlling.insert(job.job_id.clone(), Control::Close);
+        self.controls.push((station, job));
     }
 }
 
@@ -433,6 +446,7 @@ impl Assistant {
                 token_expires_at: 0.0,
                 session_id: conversation.session_id.clone(),
                 close: false,
+                interrupt: false,
             };
             if let Some(text) = shown {
                 conversation.push(
@@ -603,17 +617,17 @@ impl Assistant {
         }
     }
 
-    /// The next job for `station`: a close first, then the oldest message.
+    /// The next job for `station`: a close or interrupt first, then the oldest message.
     async fn take(&self, gateway: &Gateway, station: &str) -> Option<AssistantJob> {
         self.sweep(gateway).await;
         let now = now();
         let mut desk = self.desk();
         if let Some(index) = desk
-            .closes
+            .controls
             .iter()
             .position(|(held_by, _)| held_by == station)
         {
-            return Some(desk.closes.remove(index).1);
+            return Some(desk.controls.remove(index).1);
         }
         desk.store
             .conversations
@@ -641,9 +655,33 @@ impl Assistant {
         {
             let mut desk = self.desk();
             if let Some(job_id) = &report.job_id
-                && desk.closing.remove(job_id)
+                && let Some(control) = desk.controlling.remove(job_id)
             {
-                // The answer to a close: the harness reports `closed` when it is gone.
+                // The answer to a close or an interrupt: the harness reports `closed` when it
+                // is gone and `interrupted` when its turn stops. An interrupt the Station could
+                // not make is shown, since the answer goes on.
+                let refused = report
+                    .events
+                    .first()
+                    .filter(|event| event.kind == EVENT_REJECTED);
+                if control == Control::Interrupt
+                    && let Some(refused) = refused
+                    && let Some(conversation) =
+                        desk.store.conversations.get_mut(&report.conversation_id)
+                {
+                    conversation.push(
+                        Entry {
+                            role: Role::Error,
+                            text: format!(
+                                "Moneypenny could not be stopped: {}",
+                                or_unknown(refused.text.as_deref().unwrap_or_default())
+                            ),
+                            at: now(),
+                            data: None,
+                        },
+                        max_entries,
+                    );
+                }
                 return Ok(());
             }
             let conversation = desk
@@ -1037,6 +1075,48 @@ impl Assistant {
         Ok(())
     }
 
+    /// Stops the answer the person's conversation waits for: a message no harness has yet is
+    /// withdrawn, and the Station whose harness is answering is asked to interrupt it, which it
+    /// reports as `interrupted`. `Ok(false)` when nothing is being answered.
+    fn interrupt(
+        &self,
+        conversation_id: &str,
+        person_id: &str,
+    ) -> Result<bool, (&'static str, String)> {
+        let bounds = self.config.bounds();
+        let mut desk = self.desk();
+        let conversation = desk
+            .store
+            .owned(conversation_id, person_id)
+            .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
+        if !conversation.busy {
+            return Ok(false);
+        }
+        conversation
+            .notes
+            .push("[App: the person stopped your last answer.]".to_owned());
+        let station = conversation.station.clone();
+        // A Station that already took a withdrawn message has its late `accepted` refused,
+        // which makes it close the harness it started.
+        if conversation.pending.take().is_some() || station.is_none() {
+            stopped(conversation, bounds);
+            return Ok(true);
+        }
+        let job = control_job(conversation, &self.config.agent_id, Control::Interrupt);
+        let asked = desk
+            .controls
+            .iter()
+            .any(|(_, queued)| queued.interrupt && queued.conversation_id == conversation_id);
+        if !asked && let Some(station) = station {
+            desk.controlling
+                .insert(job.job_id.clone(), Control::Interrupt);
+            desk.controls.push((station, job));
+            drop(desk);
+            self.ready.notify_waiters();
+        }
+        Ok(true)
+    }
+
     /// Counts one tool call of the conversation; `false` past the minute's allowance.
     pub(crate) fn count_call(&self, conversation_id: &str) -> bool {
         let mut desk = self.desk();
@@ -1197,6 +1277,10 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: B
             conversation.push(entry(Role::Error, what), max_entries);
             conversation.set_busy(false);
         }
+        // Only the answer being given can be the one stopped; a later message is not.
+        EVENT_INTERRUPTED if conversation.busy && conversation.pending.is_none() => {
+            stopped(conversation, max_entries);
+        }
         EVENT_CLOSED if !conversation.busy || conversation.pending.is_some() => {
             // An idle harness closed, or the one a new job replaces.
             conversation.live = false;
@@ -1217,6 +1301,22 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: B
         }
         _ => {}
     }
+}
+
+/// Ends the answer the person stopped, and shows that it was stopped.
+fn stopped(conversation: &mut Conversation, bounds: Bounds) {
+    conversation.pending = None;
+    conversation.answered = false;
+    conversation.push(
+        Entry {
+            role: Role::Notice,
+            text: "You stopped Moneypenny's answer.".to_owned(),
+            at: now(),
+            data: None,
+        },
+        bounds,
+    );
+    conversation.set_busy(false);
 }
 
 fn or_unknown(text: &str) -> &str {
@@ -1281,6 +1381,7 @@ enum FromApp {
         view: String,
         values: serde_json::Map<String, Value>,
     },
+    Interrupt {},
 }
 
 fn frame(value: &Value) -> Message {
@@ -1375,6 +1476,15 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
                                 .await
                                 && sender.send(frame(&problem(code, &message))).await.is_err()
                             {
+                                break;
+                            }
+                        }
+                        Ok(FromApp::Interrupt {}) => {
+                            let answer = match assistant.interrupt(&conversation_id, &person.id) {
+                                Ok(stopping) => json!({"type": "interrupt", "stopping": stopping}),
+                                Err((code, message)) => problem(code, &message),
+                            };
+                            if sender.send(frame(&answer)).await.is_err() {
                                 break;
                             }
                         }

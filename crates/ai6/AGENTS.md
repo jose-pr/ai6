@@ -2680,13 +2680,14 @@ pub const MAX_ASSISTANT_CONTEXT_BYTES: usize = 24 * 1024;     // all context ite
 pub const MAX_ASSISTANT_EVENT_BYTES: usize = 64 * 1024;       // longer event text is cut
 pub const MAX_ASSISTANT_EVENTS: usize = 64;                   // per report
 pub const EVENT_ACCEPTED, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, EVENT_COMPLETED,
-          EVENT_FAILED, EVENT_LIMIT, EVENT_CLOSED: &str;      // "accepted", "rejected", …
+          EVENT_FAILED, EVENT_LIMIT, EVENT_INTERRUPTED, EVENT_CLOSED: &str; // "accepted", …
 pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
     pub message: String, pub context: Vec<String> /* default: standing context */,
     pub recap: Option<String> /* default, omitted when None: for a harness started afresh only */,
     pub mcp_token: String,
     pub token_expires_at: f64, pub session_id: Option<String> /* default */,
-    pub close: bool /* default */ }                  // Debug redacts the token
+    pub close: bool /* default */,
+    pub interrupt: bool /* default */ }              // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
 pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
     pub job_id: Option<String>, pub session_id: Option<String>, pub events: Vec<AssistantEvent> }
@@ -2696,8 +2697,8 @@ pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control 
 ```
 
 All three are serde types with unknown fields refused. `validate` checks identities, a message
-of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`), the context bound (context
-and recap together) and a
+of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close` or `interrupt`, which a job
+never sets both of), the context bound (context and recap together) and a
 token of 32-512 bytes without whitespace. A job's answer is one report with its `job_id` and
 one `accepted` or `rejected` event (text: the reason); the harness's own events follow in
 reports without a `job_id`.
@@ -3237,7 +3238,10 @@ reported to the conversation. Handler events `text`, `tool`, `completed`, `faile
 `limit` are reported; `failed` and `limit` close the harness at once, freeing its slot, and
 a harness busy answering that reports nothing for ten minutes is closed after a `failed`
 event saying so. A closed harness reports `closed` with the reason (`idle`, `the harness
-stopped`, `the Station is stopping`, …). Its directory is removed after `close`, tried again
+stopped`, `the Station is stopping`, …). An `interrupt` job calls the running harness's
+`AgentSession::interrupt` while it is answering (nothing when it is idle or not running there;
+`rejected` with the reason when the handler fails), and that turn's `completed` is reported as
+`interrupted`; the harness stays up for the next message. Its directory is removed after `close`, tried again
 for up to 2 s while Windows still holds it. When Universal Exports refuses a job's
 `accepted` report with 403, 404 or 409 (the job moved to another Station or was given up), the
 desk closes the harness it started for that conversation. An assistant Session is not a Mission: no

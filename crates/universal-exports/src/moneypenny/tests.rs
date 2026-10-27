@@ -1289,6 +1289,216 @@ async fn a_harness_that_fails_releases_its_conversation_at_once() {
     assert_eq!(job.message, "three");
 }
 
+/// Sends `{"type":"interrupt"}` and returns the gateway's answer to it.
+async fn interrupt(socket: &mut Socket) -> Value {
+    socket
+        .send(WsMessage::Text(
+            json!({"type": "interrupt"}).to_string().into(),
+        ))
+        .await
+        .unwrap();
+    receive_until(socket, |frame| {
+        frame["type"] == "interrupt" || frame["type"] == "error"
+    })
+    .await
+    .pop()
+    .unwrap()
+}
+
+/// Whether `station` has no job waiting, after a short poll.
+async fn nothing_for(served: &Served, station: &str) -> bool {
+    reqwest::Client::new()
+        .get(format!(
+            "{}/v1/station/assistant/next?station={station}&wait_ms=200",
+            served.base
+        ))
+        .bearer_auth(STATION_TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .status()
+        == StatusCode::NO_CONTENT
+}
+
+#[tokio::test]
+async fn an_interrupt_goes_to_the_station_answering_and_only_its_owner_can_send_it() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, first) = accepted(&served, &served.operator, "first").await;
+    finish(&served, &mut app, &first).await;
+    assert_eq!(
+        interrupt(&mut app).await,
+        json!({"type": "interrupt", "stopping": false}),
+        "with nothing being answered it is a no-op"
+    );
+    assert!(nothing_for(&served, "hq").await);
+
+    // hq refuses the next message, so the harness answering it runs on worker.
+    say(&mut app, "second", None).await;
+    let refused = take(&served, "hq").await;
+    report(
+        &served,
+        "hq",
+        &refused,
+        Some(&refused.job_id),
+        vec![AssistantEvent::new(
+            EVENT_REJECTED,
+            Some("as many as it may".to_owned()),
+        )],
+    )
+    .await;
+    let answering = take(&served, "worker").await;
+    assert_eq!(
+        report(
+            &served,
+            "worker",
+            &answering,
+            Some(&answering.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+
+    // Another person reaches only a conversation of their own, where nothing is answered.
+    let url = format!(
+        "{}/v1/user/moneypenny",
+        served.base.replacen("http", "ws", 1)
+    );
+    let (mut stranger, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    stranger
+        .send(WsMessage::Text(
+            json!({"type": "hello", "token": served.viewer, "conversation": answering.conversation_id})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert_ne!(
+        receive(&mut stranger).await["conversation"],
+        json!(answering.conversation_id)
+    );
+    assert_eq!(interrupt(&mut stranger).await["stopping"], false);
+    assert!(
+        nothing_for(&served, "worker").await,
+        "nothing reached worker"
+    );
+
+    assert_eq!(interrupt(&mut app).await["stopping"], true);
+    assert!(
+        nothing_for(&served, "hq").await,
+        "not the Headquarters Station"
+    );
+    let control = take(&served, "worker").await;
+    assert!(control.interrupt && !control.close, "{control:?}");
+    assert_eq!(control.conversation_id, answering.conversation_id);
+    assert!(control.message.is_empty());
+    assert_eq!(
+        mcp(&served, &control.mcp_token, "tools/list", json!({}))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "a control carries no working token"
+    );
+    assert_eq!(
+        report(
+            &served,
+            "worker",
+            &control,
+            Some(&control.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    report(
+        &served,
+        "worker",
+        &answering,
+        None,
+        vec![AssistantEvent::new(EVENT_INTERRUPTED, None)],
+    )
+    .await;
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+    assert!(
+        frames.iter().any(|frame| frame["type"] == "entry"
+            && frame["entry"]["role"] == "notice"
+            && frame["entry"]["text"] == "You stopped Moneypenny's answer."),
+        "{frames:?}"
+    );
+
+    say(&mut app, "third", None).await;
+    let next = take(&served, "worker").await;
+    assert!(
+        next.message
+            .starts_with("[App: the person stopped your last answer.]"),
+        "{}",
+        next.message
+    );
+}
+
+#[tokio::test]
+async fn an_interrupt_withdraws_a_message_no_harness_has_and_shows_a_refusal() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, _) = open(&served, &served.operator).await;
+    say(&mut app, "slow", None).await;
+    let taken = take(&served, "hq").await;
+    assert_eq!(interrupt(&mut app).await["stopping"], true);
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+    assert!(
+        frames
+            .iter()
+            .any(|frame| frame["type"] == "entry" && frame["entry"]["role"] == "notice"),
+        "{frames:?}"
+    );
+    assert!(
+        nothing_for(&served, "hq").await,
+        "no control for a withdrawn message"
+    );
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &taken,
+            Some(&taken.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::CONFLICT,
+        "a late accept is refused, so the Station closes what it started"
+    );
+
+    // A Station that cannot interrupt its harness says why, and the answer goes on.
+    let (mut app, job) = accepted(&served, &served.operator, "again").await;
+    assert_eq!(interrupt(&mut app).await["stopping"], true);
+    let control = take(&served, "hq").await;
+    report(
+        &served,
+        "hq",
+        &control,
+        Some(&control.job_id),
+        vec![AssistantEvent::new(
+            EVENT_REJECTED,
+            Some("the harness could not be interrupted: broken pipe".to_owned()),
+        )],
+    )
+    .await;
+    let frames = receive_until(&mut app, |frame| frame["type"] == "entry").await;
+    assert_eq!(frames.last().unwrap()["entry"]["role"], "error");
+    assert!(
+        frames.last().unwrap()["entry"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("broken pipe")
+    );
+    finish(&served, &mut app, &job).await;
+}
+
 #[tokio::test]
 async fn an_accepted_answer_that_never_comes_is_given_up() {
     let served =

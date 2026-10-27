@@ -122,6 +122,9 @@ pub const EVENT_COMPLETED: &str = "completed";
 pub const EVENT_FAILED: &str = "failed";
 /// The model's provider refused more work until a quota resets.
 pub const EVENT_LIMIT: &str = "limit";
+/// The assistant stopped answering because the person interrupted it; the harness stays up
+/// for the next message.
+pub const EVENT_INTERRUPTED: &str = "interrupted";
 /// The Station closed the conversation's harness (idle, closed by request, or stopping). The
 /// provider Session can be resumed by a later job.
 pub const EVENT_CLOSED: &str = "closed";
@@ -163,12 +166,17 @@ pub struct AssistantJob {
     /// Close the conversation's harness instead of sending a message; `message` is empty.
     #[serde(default)]
     pub close: bool,
+    /// Stop the answer the conversation's harness is giving instead of sending a message;
+    /// `message` is empty. A harness that is not answering is left as it is.
+    #[serde(default)]
+    pub interrupt: bool,
 }
 
 impl AssistantJob {
     /// Checks the job's bounds: identities of 1 to 256 bytes without control characters, a
-    /// message within [`MAX_ASSISTANT_MESSAGE_BYTES`] (empty only to close), context within
-    /// [`MAX_ASSISTANT_CONTEXT_BYTES`] and a token of 32 to 512 bytes.
+    /// message within [`MAX_ASSISTANT_MESSAGE_BYTES`] (empty only to close or interrupt, which
+    /// a job does not both), context within [`MAX_ASSISTANT_CONTEXT_BYTES`] and a token of 32
+    /// to 512 bytes.
     ///
     /// # Errors
     ///
@@ -190,8 +198,11 @@ impl AssistantJob {
         {
             return Err("session_id is empty, too long or has control characters".to_owned());
         }
+        if self.close && self.interrupt {
+            return Err("a job closes or interrupts, not both".to_owned());
+        }
         if self.message.len() > MAX_ASSISTANT_MESSAGE_BYTES
-            || (self.message.trim().is_empty() && !self.close)
+            || (self.message.trim().is_empty() && !self.close && !self.interrupt)
         {
             return Err("message is empty or too long".to_owned());
         }
@@ -228,6 +239,7 @@ impl fmt::Debug for AssistantJob {
             .field("token_expires_at", &self.token_expires_at)
             .field("session_id", &self.session_id)
             .field("close", &self.close)
+            .field("interrupt", &self.interrupt)
             .finish()
     }
 }
@@ -309,6 +321,7 @@ mod tests {
             token_expires_at: 1_800_000_000.0,
             session_id: None,
             close: false,
+            interrupt: false,
         }
     }
 
@@ -322,6 +335,10 @@ mod tests {
         assert!(blank.validate().is_err());
         blank.close = true;
         assert_eq!(blank.validate(), Ok(()), "a close carries no message");
+        blank.interrupt = true;
+        assert!(blank.validate().is_err(), "a job closes or interrupts");
+        blank.close = false;
+        assert_eq!(blank.validate(), Ok(()), "nor does an interrupt");
         let mut long = job();
         long.message = "x".repeat(MAX_ASSISTANT_MESSAGE_BYTES + 1);
         assert!(long.validate().is_err());
