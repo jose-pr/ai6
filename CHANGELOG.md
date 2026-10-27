@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   anything in her workspace through a link, junction or other reparse point, and paths with
   a name starting with `.` are neither written by her nor committed. A starting desk removes
   what desks that are gone left in the temporary directory.
+- A SQL roster keeps the `[assistant]` settings as one record of the new kind
+  `ConfigRecord::Assistant` (`assistant`, `ConfigRecord::ASSISTANT_KEY`), the row
+  `assistant` of `ai6_config_assistant` in SQLite and PostgreSQL, checked with
+  `AssistantSettings::validate` like any other change; without it the roster has the
+  defaults. `TomlConfigDir::definitions` lists the global `[assistant]` table under the same
+  kind. The roster routes take `assistant` (`/v1/user/roster/assistant/assistant`, under
+  `roster.read` and `roster.manage`) and an accepted edit answers with the settings it loosens
+  (`RosterChange::weakened`); Moneypenny's `roster` and `propose_roster_edit` tools take it
+  too, a proposal naming each weakening in its summary.
 - One record of a Moneypenny conversation's exposure, `Conversation.exposed` in Universal
   Exports, carried to the Station as `AssistantJob::exposed`: every read tool sets it but
   `field_guide`, `profile` and `station_settings`, and the Station sets it (`POST

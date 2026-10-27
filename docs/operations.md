@@ -321,7 +321,9 @@ table (`ai6_config_operations`, `ai6_config_agents`, `ai6_config_roles`,
 `ai6_config_covers`): its key and a JSON object with the keys its table has in the files,
 so `[operation.G]` with `roster = ["007"]` is the row `G` holding `{"roster": ["007"]}`.
 The rows get the files' checks, `extends` included; an Operation's own `.ai6/agents.toml`
-still applies. `put` and `remove` on the source change one record and refuse a change that
+still applies. Moneypenny's `[assistant]` settings are the one row of `ai6_config_assistant`,
+keyed `assistant` ([her workspace](assistant.md#her-workspace-and-memory)); without it the
+roster has the defaults. `put` and `remove` on the source change one record and refuse a change that
 would leave the roster invalid. Each change moves the roster to its next revision (the
 `config` row of `ai6_clock`); a tool that edits the tables directly advances that row in
 the same transaction.

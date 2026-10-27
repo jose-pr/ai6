@@ -113,7 +113,7 @@ says so. When the person signs out, her tools stop working.
 | `pools` | Account pools: Sessions, quota windows, tokens today |
 | `held_briefs`, `mission_proposals` | Work waiting for a person |
 | `green_ink`, `class_authorizations` | Irreversible steps waiting for green ink, standing approvals |
-| `roster` | Operations, Agents, roles and covers |
+| `roster` | Operations, Agents, roles, covers and her own `[assistant]` settings |
 | `audit` | Audit records |
 | `agent_roles`, `quarantines`, `placement_preview`, `station_settings` | Operation and Station settings |
 | `profile` | Who the person is and what they may do |
@@ -146,7 +146,10 @@ can confirm it, within an hour; she has no way to. A confirmed proposal is first
 the audit log (`moneypenny.confirmed`: who, which conversation and proposal, which request),
 then sent through the same route as the app's own request, with its usual checks and its own
 audit record: a roster edit is still checked against the whole roster and refused if it
-would leave it unacceptable. She is told how it went.
+would leave it unacceptable. She is told how it went. She may propose her own settings too
+(`propose_roster_edit` with kind `assistant`, key `assistant`): the proposal is checked as
+settings before it is shown, and its summary ends with `Weakens: …` naming each setting it
+makes looser than its default, so that is in view before anyone confirms it.
 
 So text she reads cannot act through her: an issue body that tells her to change the roster
 can at most make her propose it, in plain view, to a person who decides. Irreversible steps
@@ -156,8 +159,7 @@ keep [green ink](missions.md#green-ink): she cannot sign it, only point you to t
 
 When the roster gives people personal repositories, Moneypenny keeps her work and her
 memory of each person in that person's own repository, so both outlive the conversation and
-the Station. In the global `agents.toml` (the roster a configuration directory holds; the SQL
-roster has no `[assistant]` table yet):
+the Station. In the global `agents.toml` of a configuration directory:
 
 ```toml
 [assistant]
@@ -186,6 +188,17 @@ workspace; without `personal_repo` nothing changes from a plain conversation. A 
 no repository on Universal Exports' word: it fills the person's in from its own roster's
 `[assistant]` and refuses a message or commit naming any repository that roster does not give,
 so the gateway and every Station must read the same roster.
+
+A SQL roster (`sqlite:` or `postgres://`, shared by the Stations of an HA deployment) keeps the
+same keys as one record of kind `assistant`, keyed `assistant`, in the table
+`ai6_config_assistant`: the row `assistant` holding `{"personal_repo":
+"/srv/moneypenny/{person_digest}.git"}` is the first line above. An administrator with
+`roster.manage` sets it with `PUT /v1/user/roster/assistant/assistant` (the definition as a
+JSON object, replacing the whole record) or removes it to go back to the defaults. It is
+checked as the table is: an unknown key, a repository AI6 refuses or a record under another key
+is refused with `422` and changes nothing. The answer lists each setting the record makes
+looser than its default (`weakened`), and every Station logs and reports them as it takes the
+change up.
 
 Her workspace on the Station holds:
 
@@ -361,6 +374,6 @@ answered does nothing.
 | Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `AssistantConfig::with_live_conversations_per_person` |
 | How long an answer may go without word from its Station | 10 minutes, then it is given up | `AssistantConfig::with_answer_deadline` |
 | Memory kept | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `AssistantConfig::with_memory_limits` |
-| Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml` |
+| Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml`, or the `assistant` record of a SQL roster |
 | Shared repositories | none | `[assistant.shared.<group>]`, `[assistant.org]` (`write = false`) |
 | Run on an elevated Station | no | `[assistant] allow_elevated` |
