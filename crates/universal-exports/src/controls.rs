@@ -267,13 +267,25 @@ struct Target {
     session: Option<String>,
 }
 
+/// Where a control for a Mission goes.
+enum Routing {
+    To(Target),
+    /// Nothing in the Registry or on the board knows the Mission.
+    Unknown,
+    /// The Mission is known, but no Station that could act on it is checking in.
+    NoStation,
+}
+
 /// The Station that should act on a Mission: the one holding its latest Session record, else
 /// the one holding its brief's lease, else the Headquarters Station. A Station that has gone
-/// dark is passed over.
+/// dark is passed over. A Mission with no Session record, no lease, no queued brief of
+/// `operation` and nothing on the board (`on_board`) is unknown.
 fn control_target(
     registry: &dyn RegistryBackend,
+    operation: &str,
     mission_id: &str,
-) -> std::io::Result<Option<Target>> {
+    on_board: bool,
+) -> std::io::Result<Routing> {
     let live = registry
         .stations(GONE_DARK_AFTER)?
         .into_iter()
@@ -294,7 +306,7 @@ fn control_target(
     if let Some(record) = &latest
         && live.contains(&record.station)
     {
-        return Ok(Some(Target {
+        return Ok(Routing::To(Target {
             station: record.station.clone(),
             session,
         }));
@@ -306,13 +318,23 @@ fn control_target(
             .and_then(serde_json::Value::as_str)
             == Some(mission_id)
     });
-    if let Some(lease) = leased
+    if let Some(lease) = &leased
         && live.iter().any(|station| station == lease.station())
     {
-        return Ok(Some(Target {
+        return Ok(Routing::To(Target {
             station: lease.station().to_owned(),
             session,
         }));
+    }
+    let known = on_board
+        || latest.is_some()
+        || leased.is_some()
+        // A queued brief's Mission ID is its key until a Station places it.
+        || registry.list_new()?.iter().any(|brief| {
+            brief.key() == mission_id && brief.operation.as_deref().is_none_or(|op| op == operation)
+        });
+    if !known {
+        return Ok(Routing::Unknown);
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -320,9 +342,11 @@ fn control_target(
     Ok(registry
         .headquarters()?
         .filter(|lease| lease.expires() > now && live.iter().any(|s| s == lease.station()))
-        .map(|lease| Target {
-            station: lease.station().to_owned(),
-            session,
+        .map_or(Routing::NoStation, |lease| {
+            Routing::To(Target {
+                station: lease.station().to_owned(),
+                session,
+            })
         }))
 }
 
@@ -388,7 +412,7 @@ pub(crate) async fn request_control(
         Some(None) => return Err(ApiError::from(GatewayError::Conflict)),
         None => {}
     }
-    {
+    let on_board = {
         let inner = gateway.inner.lock().await;
         let elsewhere = inner
             .sessions
@@ -397,15 +421,29 @@ pub(crate) async fn request_control(
         if elsewhere {
             return Err(ApiError::not_found());
         }
-    }
+        inner
+            .sessions
+            .values()
+            .any(|session| session.mission_id == mission)
+            || inner
+                .missions
+                .contains_key(&(operation.clone(), mission.clone()))
+    };
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let lookup = registry.clone();
-    let wanted = mission.to_string();
-    let target = tokio::task::spawn_blocking(move || control_target(lookup.as_ref(), &wanted))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|_| ApiError::internal())?
-        .ok_or_else(no_station)?;
+    let (wanted_operation, wanted) = (operation.to_string(), mission.to_string());
+    let routing = tokio::task::spawn_blocking(move || {
+        control_target(lookup.as_ref(), &wanted_operation, &wanted, on_board)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    // Refused before anything is audited or queued.
+    let target = match routing {
+        Routing::To(target) => target,
+        Routing::Unknown => return Err(ApiError::not_found()),
+        Routing::NoStation => return Err(no_station()),
+    };
     let session = match (expected_session, &target.session) {
         (Some(expected), Some(current)) if expected.as_str() != current => {
             return Err(ApiError::from(GatewayError::Conflict));
@@ -985,11 +1023,29 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_mission_without_a_session_goes_to_the_headquarters_station() {
         let served = served().await;
+        let brief = ai6::Brief {
+            title: "Queued".to_owned(),
+            body: "Not placed yet.".to_owned(),
+            id: "mission-new".to_owned(),
+            source: "universal-exports".to_owned(),
+            operation: Some("G".to_owned()),
+            agent: None,
+            role: None,
+            tags: Vec::new(),
+            stations: Vec::new(),
+            priority: 0,
+            url: None,
+            data: BTreeMap::new(),
+            created: String::new(),
+            version: 1,
+            provenance: None,
+        };
+        served.registry.submit_brief(&brief).unwrap();
         let asked = ask(
             &served,
             &served.operator,
             "G",
-            "mission-new",
+            &brief.key(),
             serde_json::json!({"action": "retry", "agent": "008", "idempotency_key": "r"}),
         )
         .await;
@@ -1013,11 +1069,34 @@ pub(crate) mod tests {
             .unwrap(),
             Arc::new(FileRegistry::open(empty.path())),
         );
-        assert!(
-            control_target(alone.registry.as_deref().unwrap(), "mission-g")
-                .unwrap()
-                .is_none()
-        );
+        let registry = alone.registry.as_deref().unwrap();
+        assert!(matches!(
+            control_target(registry, "G", "mission-g", true).unwrap(),
+            Routing::NoStation
+        ));
+        assert!(matches!(
+            control_target(registry, "G", "mission-g", false).unwrap(),
+            Routing::Unknown
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_mission_is_refused_before_it_is_audited_or_queued() {
+        let served = served().await;
+        for mission in ["mission-nobody-knows", "mission-l"] {
+            let asked = ask(
+                &served,
+                &served.operator,
+                "G",
+                mission,
+                serde_json::json!({"action": "cancel", "idempotency_key": "c"}),
+            )
+            .await;
+            assert_eq!(asked.status(), StatusCode::NOT_FOUND, "{mission}");
+        }
+        assert!(served.registry.list_audit(10).unwrap().is_empty());
+        assert!(take(&served, "hq").await.is_none());
+        assert!(take(&served, "worker").await.is_none());
     }
 
     #[test]
