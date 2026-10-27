@@ -14,17 +14,19 @@
 //! Exposure is Universal Exports' to record (`Conversation.exposed`), but the desk sees one
 //! way in it cannot: text she wrote in `personal/` while exposed. (The repositories in
 //! `shared/` are trusted text and expose nothing.) Their paths are kept in the personal
-//! repository, in [`OUTSIDE_TEXT`] (a hidden file she cannot write). A file tool call that can
-//! answer with one of them exposes the conversation: a `Read` or `Edit` of one, a `Grep` or
-//! `Glob` whose search covers one, or a call whose input the desk cannot read. So does a
-//! `MEMORY.md` that imports one. Reading other files does not. The record is cleared by
-//! removing the files it names, or the record itself, in the repository.
+//! repository, in [`OUTSIDE_TEXT`] (a hidden directory she cannot write). A file tool call
+//! that can answer with one of them exposes the conversation: a `Read` or `Edit` of one, a
+//! `Grep` or `Glob` whose search covers one, or a call whose input the desk cannot read. So
+//! does a `MEMORY.md` that imports one. Reading other files does not. The record is cleared
+//! by removing the files it names, or the record itself, in the repository.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
+
+use sha2::{Digest, Sha256};
 
 use crate::directorates::m::assistant::RepoKind;
 use crate::directorates::q::safehouse::{
@@ -52,8 +54,9 @@ pub(super) const PROVIDER: &str = "git";
 const MAX_INLINED_MEMORY: usize = 32 * 1024;
 /// The most files of `personal/` looked at to name what a turn changed.
 const MAX_WALK: usize = 10_000;
-/// The record, in the personal repository, of the files she wrote while exposed: one path a
-/// line, relative to the repository.
+/// The record, in the personal repository, of the files she wrote while exposed: a directory
+/// of entries, each holding one path relative to the repository and named by the SHA-256 of
+/// it, so conversations adding to it at once never touch the same file.
 pub(super) const OUTSIDE_TEXT: &str = ".moneypenny/outside-text";
 /// The built-in tools that answer with text of a file or its name: `Read`, `Grep` and `Glob`,
 /// and `Edit`, whose answer quotes the lines around its change.
@@ -142,13 +145,7 @@ impl Workspace {
             outside: BTreeSet::new(),
             found: None,
         };
-        workspace.outside = read_text(area, &workspace.path.join(OUTSIDE_TEXT))
-            .unwrap_or_default()
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(str::to_owned)
-            .collect();
+        workspace.outside = workspace.read_record().into_values().collect();
         if !workspace.exposed
             && let Some(file) = workspace.imported_outside()
         {
@@ -317,6 +314,8 @@ impl Workspace {
     /// conversation is exposed.
     pub(super) fn begin_turn(&mut self, exposed: bool) {
         self.exposed |= exposed;
+        // Another conversation's save this one replayed on may have added to the record.
+        self.outside = self.read_record().into_values().collect();
         self.memory = read_tree(&self.path.join(MEMORY), MEMORY);
         self.files = stat_tree(&self.path);
     }
@@ -413,34 +412,67 @@ impl Workspace {
                 Some(exactly(&commit.change)),
             ))
             .map_err(|error| error.to_string())?;
+        self.outside = self.read_record().into_values().collect();
         Ok(landed(&saved, &self.repo))
     }
 
-    /// Adds the files a turn changed to [`OUTSIDE_TEXT`] when the conversation is exposed,
-    /// drops those that no longer exist, and commits the record when it changed.
-    fn record_outside_text(&mut self, changed: &[String]) -> Result<(), String> {
-        let before = self.outside.clone();
-        if self.exposed {
-            self.outside.extend(changed.iter().cloned());
+    /// The record's entries in `personal/`: entry name and the path it names.
+    fn read_record(&self) -> BTreeMap<String, String> {
+        let dir = in_tree(&self.path, OUTSIDE_TEXT);
+        let mut found = BTreeMap::new();
+        if no_links(self.area(), &dir).is_err() {
+            return found;
         }
-        let path = self.path.clone();
-        self.outside.retain(|file| {
-            fs::symlink_metadata(in_tree(&path, file)).is_ok_and(|metadata| metadata.is_file())
-        });
-        if self.outside == before {
+        for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(text) = read_text(self.area(), &entry.path()) {
+                let named = text.trim();
+                if !named.is_empty() {
+                    found.insert(name, named.to_owned());
+                }
+            }
+        }
+        found
+    }
+
+    /// Adds the files a turn changed to [`OUTSIDE_TEXT`] when the conversation is exposed and
+    /// drops the entries of files that no longer exist, writing and committing only those
+    /// entries: what other conversations recorded meanwhile stays, and is read back after.
+    fn record_outside_text(&mut self, changed: &[String]) -> Result<(), String> {
+        let record = self.read_record();
+        let known: BTreeSet<&String> = record.values().collect();
+        let exists = |file: &str| {
+            fs::symlink_metadata(in_tree(&self.path, file)).is_ok_and(|metadata| metadata.is_file())
+        };
+        let mut files = Vec::new();
+        if self.exposed {
+            for file in changed {
+                if !known.contains(file) && exists(file) {
+                    files.push(CheckpointFile {
+                        path: format!("{OUTSIDE_TEXT}/{}", record_entry(file)),
+                        text: Some(format!("{file}\n")),
+                    });
+                }
+            }
+        }
+        for (entry, file) in &record {
+            if !exists(file) {
+                files.push(CheckpointFile {
+                    path: format!("{OUTSIDE_TEXT}/{entry}"),
+                    text: None,
+                });
+            }
+        }
+        if files.is_empty() {
+            self.outside = record.into_values().collect();
             return Ok(());
         }
-        let text = (!self.outside.is_empty()).then(|| {
-            self.outside
-                .iter()
-                .map(|file| format!("{file}\n"))
-                .collect::<String>()
-        });
-        let record = self.path.join(OUTSIDE_TEXT);
-        match &text {
-            Some(text) => write_file(self.area(), &record, text)?,
-            None => {
-                let _ = remove(self.area(), &record);
+        // Written here too, so this checkout reads what it committed.
+        for file in &files {
+            let at = in_tree(&self.path, &file.path);
+            match &file.text {
+                Some(text) => write_file(self.area(), &at, text)?,
+                None => remove(self.area(), &at).map_err(|error| error.to_string())?,
             }
         }
         let message = format!(
@@ -448,18 +480,13 @@ impl Workspace {
              {})",
             self.conversation_id
         );
-        self.personal
-            .checkpoint(&self.spec(
-                message,
-                &self.author_name,
-                &self.author_email,
-                Some(vec![CheckpointFile {
-                    path: OUTSIDE_TEXT.to_owned(),
-                    text,
-                }]),
-            ))
+        let saved = self
+            .personal
+            .checkpoint(&self.spec(message, &self.author_name, &self.author_email, Some(files)))
             .map(|_| ())
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string());
+        self.outside = self.read_record().into_values().collect();
+        saved
     }
 
     /// Commits everything in `personal/` and pushes it; a notice when it landed elsewhere
@@ -549,6 +576,14 @@ fn exactly(change: &AssistantChange) -> Vec<CheckpointFile> {
             path: path.clone(),
             text: text.clone(),
         })
+        .collect()
+}
+
+/// The name of `file`'s entry in [`OUTSIDE_TEXT`]: the SHA-256 of its path, in hex.
+pub(super) fn record_entry(file: &str) -> String {
+    Sha256::digest(file.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 

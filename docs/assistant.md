@@ -217,8 +217,9 @@ A conversation is exposed, for good, when:
 - any of her read tools answers other than `field_guide`, `profile` and `station_settings`
   (every other one can quote an Agent, a brief or another person);
 - she reads one of the files she wrote in an exposed conversation. The Station keeps their
-  paths in `.moneypenny/outside-text` in the personal repository, a hidden file she cannot
-  write, and counts as reading one a `Read` or `Edit` of it, a `Grep` or `Glob` whose search
+  paths in `.moneypenny/outside-text/` in the personal repository, a hidden directory she
+  cannot write with one entry per file (so two conversations recording at once keep both),
+  and counts as reading one a `Read` or `Edit` of it, a `Grep` or `Glob` whose search
   covers it, a file tool call it cannot read the input of, and a `memory/MEMORY.md` that
   imports it (`@path`). Reading other files does not expose the conversation. Removing those
   files, or the record, in the repository clears it.

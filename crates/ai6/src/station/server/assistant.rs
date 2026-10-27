@@ -2935,7 +2935,17 @@ mod tests {
             "{agents}"
         );
         assert_eq!(
-            git(&bare, &["show", "main:.moneypenny/outside-text"]),
+            git(
+                &bare,
+                &[
+                    "show",
+                    &format!(
+                        "main:{}/{}",
+                        workspace::OUTSIDE_TEXT,
+                        workspace::record_entry("notes/a.md")
+                    )
+                ]
+            ),
             "notes/a.md\n"
         );
         writes.desk.close_all();
@@ -3042,6 +3052,115 @@ mod tests {
             "an empty record is removed"
         );
         clears.desk.close_all();
+    }
+
+    /// The paths the record on `main` of `bare` names.
+    fn recorded(bare: &Path) -> Vec<String> {
+        let mut paths: Vec<String> = git(
+            bare,
+            &[
+                "ls-tree",
+                "-r",
+                "--name-only",
+                "main",
+                "--",
+                workspace::OUTSIDE_TEXT,
+            ],
+        )
+        .lines()
+        .map(|entry| {
+            git(bare, &["show", &format!("main:{entry}")])
+                .trim()
+                .to_owned()
+        })
+        .collect();
+        paths.sort();
+        paths
+    }
+
+    #[tokio::test]
+    async fn two_conversations_add_to_the_record_at_once_and_a_third_reads_both() {
+        let people = tempfile::tempdir().unwrap();
+        let bare = people.path().join("eve.git");
+        // A clean conversation that starts before either records anything.
+        let reader = git_fixture(people.path(), Script::Reads);
+        let scratch = r#"Read {"file_path":"{area}/scratch/x.md"}"#;
+        reader
+            .desk
+            .handle(working("c-3", scratch, workspace(&bare)))
+            .await;
+        until(|| kinds(&reader, "c-3").contains(&EVENT_COMPLETED.to_owned())).await;
+
+        // Two exposed conversations of the same person, each writing a file of its own, both
+        // started before either saves.
+        let writers = git_fixture(people.path(), Script::Works);
+        let mut areas = Vec::new();
+        for conversation in ["c-1", "c-2"] {
+            writers.exposure.mark(conversation, "test").unwrap();
+            let mut job = working(conversation, "Note it.", workspace(&bare));
+            job.exposed = true;
+            writers.desk.handle(job).await;
+            until(|| kinds(&writers, conversation).contains(&EVENT_TEXT.to_owned())).await;
+        }
+        for start in writers.asked.lock().unwrap().starts.clone() {
+            areas.push(PathBuf::from(start.working_directory));
+        }
+        for (area, name) in areas.iter().zip(["one", "two"]) {
+            let notes = area.join(PERSONAL).join("notes");
+            std::fs::create_dir_all(&notes).unwrap();
+            std::fs::write(notes.join(format!("{name}.md")), name).unwrap();
+        }
+        for conversation in ["c-1", "c-2"] {
+            writers
+                .desk
+                .handle(interruption(conversation, "done"))
+                .await;
+            until(|| kinds(&writers, conversation).contains(&EVENT_INTERRUPTED.to_owned())).await;
+        }
+        assert_eq!(
+            recorded(&bare),
+            ["notes/one.md", "notes/two.md"],
+            "neither conversation's record replaced the other's"
+        );
+        writers.desk.close_all();
+
+        // The third conversation's next save replays on both; it reads the record again, so
+        // reading either file exposes it.
+        let start = reader.asked.lock().unwrap().starts[0].clone();
+        std::fs::write(
+            Path::new(&start.working_directory)
+                .join(PERSONAL)
+                .join("mine.md"),
+            "mine",
+        )
+        .unwrap();
+        let completed = |count: usize| {
+            kinds(&reader, "c-3")
+                .iter()
+                .filter(|kind| *kind == EVENT_COMPLETED)
+                .count()
+                >= count
+        };
+        reader
+            .desk
+            .handle(working("c-3", scratch, workspace(&bare)))
+            .await;
+        until(|| completed(2)).await;
+        assert!(marks(&reader, "c-3").is_empty());
+        reader
+            .desk
+            .handle(working(
+                "c-3",
+                r#"Read {"file_path":"{area}/personal/notes/one.md"}"#,
+                workspace(&bare),
+            ))
+            .await;
+        until(|| completed(3)).await;
+        assert_eq!(
+            marks(&reader, "c-3"),
+            ["personal:notes/one.md (read by Read)"]
+        );
+        reader.desk.close_all();
     }
 
     #[tokio::test]

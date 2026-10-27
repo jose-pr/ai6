@@ -36,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Exports, carried to the Station as `AssistantJob::exposed`: every read tool sets it but
   `field_guide`, `profile` and `station_settings`, and the Station sets it (`POST
   /v1/station/assistant/exposure`, read with `GET`) when she reads a file her repository
-  records as written while exposed (`.moneypenny/outside-text`): a `Read` or `Edit` of it, a
+  records as written while exposed (`.moneypenny/outside-text/`, one entry per file, which
+  conversations add to at once without replacing each other's): a `Read` or `Edit` of it, a
   `Grep` or `Glob` whose search covers it, a call whose input cannot be read, or a
   `MEMORY.md` that imports it. Reading other files does not. Group and organisation
   repositories are trusted text and expose nothing.
