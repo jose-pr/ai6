@@ -31,10 +31,11 @@ its last words; so is one that writes nothing for ten minutes while answering. A
 cannot be resumed is noted in the Station's log, and the conversation starts afresh with a
 recap.
 
-An assistant Session is not a Mission: it has no Operation, safe house or Cable endpoint,
-and never appears on the board. It works in a directory of its own, the same one each time
-its conversation's harness starts on that Station, because Claude Code resumes a Session only
-from the directory that recorded it; the directory is removed when the harness closes. A
+An assistant Session is not a Mission: it has no Operation or Cable endpoint, and never
+appears on the board. It works in a directory of its own, the same one each time its
+conversation's harness starts on that Station, because Claude Code resumes a Session only
+from the directory that recorded it; the directory is removed when the harness closes. With
+[personal repositories](#her-workspace-and-memory) the directory is her workspace. A
 harness that starts afresh is given her instructions and a recap of the conversation; a
 resumed one only her instructions, which Claude Code uses once the prompt it recorded with
 the Session is gone (after compaction). Of its Agent's environment it keeps only what reaches the model, as a
@@ -62,9 +63,23 @@ outcome, since `exec` reaches nested tools such as `apply_patch`. Run her on Cla
 Either harness that calls a tool outside her server anyway is ended at once ([restricted
 Sessions](agents.md#chief-of-staff)).
 
-The mode is built from parts (MCP servers, interpreters, skills, network policy) so later
-releases can widen it; today a handler refuses to start an assistant that asks for an
-interpreter, a skill or a network beyond its MCP server.
+The mode is built from parts (MCP servers, interpreters, skills, network policy, the
+directories she may write, a context file) so later releases can widen it; today a handler
+refuses to start an assistant that asks for an interpreter, a skill or a network beyond its
+MCP server. With a [workspace](#her-workspace-and-memory), Claude Code also gets its file
+tools (`Read`, `Write`, `Edit`, `Glob`, `Grep`) under `--permission-mode dontAsk`: she may
+read anything in her workspace (`--restricted` keeps the file tools inside it) and write
+only under `personal/` and `scratch/` (`Edit(/personal/**)`, `Edit(/scratch/**)`); every
+other write, including to `.git` and `.claude`, is denied without a prompt. Her standing
+context goes in with `--append-system-prompt-file`, from a file beside, not inside, her
+workspace. Every assistant Session runs with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so Claude
+Code keeps no memory of its own beside hers. Codex refuses a workspace for now.
+
+A Station running elevated (as root, or on Windows with an administrator's elevated token)
+refuses every assistant message unless the roster's `[assistant]` sets `allow_elevated =
+true`. That setting is a weakening: each harness started under it logs `ai6: weakening:
+assistant.allow_elevated = true: …`, and the Station reports it at check-in
+(`assistant_weakened`).
 
 ## Her tools
 
@@ -111,6 +126,7 @@ Moneypenny changes nothing herself. Her write tools only propose:
 | `propose_roster_edit`, `propose_roster_removal` | A roster record set or removed | `roster.manage` |
 | `propose_station_settings` | A Station's limits | `station.configure` |
 | `propose_class_authorization` | A class authorisation | `approval.class` |
+| `propose_shared_change` | One file of a group's shared repository ([workspace](#her-workspace-and-memory)) | membership of the group |
 
 A proposal shows in the chat with the exact request, a summary and the permission it needs,
 and **Confirm** and **Cancel**. If the person lacks that permission, there is no proposal at
@@ -126,6 +142,69 @@ would leave it unacceptable. She is told how it went.
 So text she reads cannot act through her: an issue body that tells her to change the roster
 can at most make her propose it, in plain view, to a person who decides. Irreversible steps
 keep [green ink](missions.md#green-ink): she cannot sign it, only point you to the Green ink page.
+
+## Her workspace and memory
+
+When the roster gives people personal repositories, Moneypenny keeps her work and her
+memory of each person in that person's own repository, so both outlive the conversation and
+the Station. In the global `agents.toml` (the roster a configuration directory holds; the SQL
+roster has no `[assistant]` table yet):
+
+```toml
+[assistant]
+personal_repo = "/srv/moneypenny/{person}.git"   # or {person_digest}
+allow_elevated = false
+
+[assistant.shared.ops]          # a directory group
+repo = "ssh://git@git.example/ops/handbook.git"
+write = false
+
+[assistant.org]                 # everyone
+repo = "https://git.example/org/handbook.git"
+```
+
+`{person}` is the person's identifier when it is 1 to 64 letters, digits, `.`, `_`, `@` and
+`-` not starting with `.`; any other identifier is refused, and `{person_digest}` (16 hex
+digits of its SHA-256) always works. A local path or `file://` repository is created, empty
+and bare, the first time it is used; `ssh://`, `https://` and `user@host:` repositories are
+reached with the Station user's Git credentials and must exist. Universal Exports reads the
+table from the roster it serves (`--roster`) and sends each message with the person's
+workspace; without `personal_repo` nothing changes from a plain conversation.
+
+Her workspace on the Station holds:
+
+| Path | What |
+| --- | --- |
+| `personal/` | A clone of the person's repository on `main`: her working directory for them |
+| `personal/memory/` | Her memory of the person, indexed by `memory/MEMORY.md` (written on first use) |
+| `shared/<group>/`, `shared/org/` | The repositories of the person's directory groups and the organisation's, cloned afresh at each start, read-only for her |
+| `scratch/` | Anything temporary, gone with the workspace |
+| `CLAUDE.md`, `AGENTS.md` | Where things are and how her memory is kept; `CLAUDE.md` imports `@personal/memory/MEMORY.md`, `AGENTS.md` holds it |
+
+Claude Code started with `--restricted` does not load a working directory's `CLAUDE.md`, so
+the same text, `MEMORY.md` included (at most 32 KiB), reaches her system prompt through a
+context file beside the workspace.
+
+After each answer, and when her harness closes, the Station saves her work: whatever she
+changed in `personal/` outside `memory/` is committed to `main`, authored by the person, with
+the message `moneypenny: update <paths>` and the trailer `Via: Moneypenny (conversation
+<id>)`. If `main` moved on meanwhile her commit is replayed on it once; if that conflicts, it
+is pushed to `moneypenny/<conversation digest>` instead and both of you are told.
+
+Her memory is never written unseen. At the start of each answer the Station copies
+`memory/`; at the end it puts that copy back and sends Universal Exports what she changed
+there, with a diff. In a conversation that has read nothing other people wrote, it is
+committed at once and the conversation shows what she kept. Once one of her tools has
+returned text others wrote (`mission`, `missions`, `held_briefs`, `mission_proposals`,
+`timeline` or `audit`), the change becomes a **proposal** with the diff: **Confirm** commits
+it (audited `moneypenny.confirmed`), **Cancel** discards it. Either way she is told.
+
+A change to a shared repository is a proposal too, through `propose_shared_change` (the
+group, a file path, its new text and a commit subject), and only for a member of that group;
+anyone else's request is refused. Confirmed, it is committed under the person's name with the
+same trailer. With `write = true` for that group (or for `org`) it is committed at once and
+audited `moneypenny.shared.write`; that setting is a weakening, as are `allow_elevated` and
+any `write = true`, and each is logged when a Station starts or its roster changes.
 
 ## Views she shows
 
@@ -181,3 +260,6 @@ answered does nothing.
 | Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `AssistantConfig::with_live_conversations_per_person` |
 | How long an answer may go without word from its Station | 10 minutes, then it is given up | `AssistantConfig::with_answer_deadline` |
 | Memory kept | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `AssistantConfig::with_memory_limits` |
+| Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml` |
+| Shared repositories | none | `[assistant.shared.<group>]`, `[assistant.org]` (`write = false`) |
+| Run on an elevated Station | no | `[assistant] allow_elevated` |

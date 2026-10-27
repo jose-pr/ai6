@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Moneypenny keeps each person's work and memory in their own repository. The global
+  `agents.toml` takes an `[assistant]` table (`ai6::AssistantSettings`, also
+  `RosterBuilder::assistant`): `personal_repo` (`{person}` or `{person_digest}`; a local or
+  `file://` repository is created bare on first use), `[assistant.shared.<group>]` and
+  `[assistant.org]` repositories (`write = false`), and `allow_elevated` (false). Universal
+  Exports sends each message with the person's workspace (`AssistantJob::workspace`); the
+  Station clones `personal/` and `shared/<name>/` into the conversation's directory, writes
+  `CLAUDE.md` (importing `memory/MEMORY.md`), `AGENTS.md` and a context file beside it, and
+  after each answer commits `personal/` to `main` as the person with a `Via: Moneypenny
+  (conversation <id>)` trailer, replaying once and falling back to
+  `moneypenny/<conversation digest>`. Changes to `memory/` are set aside and reported
+  (`memory_changes`): committed at once in a conversation that has read nothing others wrote,
+  a `memory_commit` proposal once it has. `propose_shared_change` proposes a change to a
+  group's shared repository for its members, or commits it at once (audited
+  `moneypenny.shared.write`) when the group's repository has `write = true`.
+- An assistant mode names the directories she may write (`AssistantMode::files`) and a
+  context file (`AssistantMode::context_file`): Claude Code gets its file tools under
+  `--permission-mode dontAsk` with `Edit(/<dir>/**)` rules and the file through
+  `--append-system-prompt-file`; every assistant Session runs with
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The Codex handler refuses both.
+- A Station running elevated (root, or an administrator's elevated token on Windows;
+  `ai6::station::elevation::is_elevated`) refuses every assistant job unless
+  `assistant.allow_elevated` is set, which is logged as a weakening at each harness start and
+  published at check-in (`assistant_weakened`) with the other `[assistant]` weakenings.
+- The `git` safe house clones a repository (`SafeHouseSpec::clone`, a URL or local
+  repository, created bare on request) and saves to a branch it shares
+  (`CheckpointSpec::branch`): it commits in place, pushes as a fast-forward, replays once on
+  a refusal, then pushes to `CheckpointSpec::fallback`. The `copy` safe house refuses a clone.
+
 - Moneypenny's answer can be stopped: the app's **Stop** button, in place of Send while she
   answers, sends `{"type":"interrupt"}` on the chat socket, which acts only on the socket's
   own conversation and is a no-op (`stopping: false`) when nothing is being answered. A
