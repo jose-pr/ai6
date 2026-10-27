@@ -1189,6 +1189,12 @@ mod tests {
             ),
             ("operation-a", "agent:008", Some("Deploy now."))
         );
+        assert_eq!(first.recipient, "agent:008");
+        assert_eq!(
+            first.digest,
+            first.request_digest(),
+            "Universal Exports can check it"
+        );
 
         let decision = |cable: &AssistantCable, digest: &str| AssistantCableDecision {
             id: cable.id.clone(),
@@ -2237,16 +2243,32 @@ impl AssistantCableDesk {
     }
 
     /// The audience as the person reads it, and SHA-256 of the whole request.
-    fn describe(operation: &str, action: &Held, body: &str) -> (String, String) {
-        let (label, ttl) = match action {
-            Held::Send { target, ttl } => (target_label(target), *ttl),
-            Held::Reply { cable_id } => (format!("reply:{cable_id}"), None),
+    fn describe(&self, id: String, operation: &str, action: &Held, body: &str) -> AssistantCable {
+        let (target, recipient, ttl_seconds) = match action {
+            Held::Send { target, ttl } => (target_label(target), target_label(target), *ttl),
+            Held::Reply { cable_id } => (
+                format!("reply:{cable_id}"),
+                self.intake
+                    .get_cable(cable_id)
+                    .ok()
+                    .flatten()
+                    .map(|original| format!("agent:{}", original.sender_agent()))
+                    .unwrap_or_default(),
+                None,
+            ),
         };
-        let request = serde_json::json!({
-            "operation": operation, "target": label, "body": body, "ttl_seconds": ttl
-        });
-        let digest = hex(&Sha256::digest(request.to_string().as_bytes()));
-        (label, digest)
+        let mut cable = AssistantCable {
+            id,
+            operation: operation.to_owned(),
+            target,
+            recipient,
+            ttl_seconds,
+            body: Some(body.to_owned()),
+            digest: String::new(),
+            cable_id: None,
+        };
+        cable.digest = cable.request_digest();
+        cable
     }
 
     /// Keeps the request for the person to confirm and tells Universal Exports; sends nothing.
@@ -2266,8 +2288,9 @@ impl AssistantCableDesk {
                 u32::from(hidden)
             );
         }
-        let (label, digest) = Self::describe(operation, &action, &body);
         let id = format!("held-{}", Uuid::new_v4().simple());
+        let proposal = self.describe(id.clone(), operation, &action, &body);
+        let digest = proposal.digest.clone();
         let Ok(mut held) = self.held.lock() else {
             return "The Cable could not be held".to_owned();
         };
@@ -2295,14 +2318,7 @@ impl AssistantCableDesk {
         );
         drop(held);
         (self.report)(AssistantEvent {
-            cable: Some(AssistantCable {
-                id: id.clone(),
-                operation: operation.to_owned(),
-                target: label,
-                body: Some(body),
-                digest,
-                cable_id: None,
-            }),
+            cable: Some(proposal),
             ..AssistantEvent::new(EVENT_CABLE_PROPOSAL, None)
         });
         format!(
@@ -2322,7 +2338,7 @@ impl AssistantCableDesk {
         held: Option<&str>,
     ) -> Result<Cable, CableRelayError> {
         let principal = self.principal(operation)?;
-        let (label, digest) = Self::describe(operation, action, &body);
+        let mut described = self.describe(String::new(), operation, action, &body);
         let key = self.key(idempotency_key);
         let cable = match action {
             Held::Send { target, ttl } => {
@@ -2334,15 +2350,11 @@ impl AssistantCableDesk {
             }
             Held::Reply { cable_id } => self.relay.reply(&principal, cable_id, body, key)?,
         };
+        described.id = held.unwrap_or(cable.id()).to_owned();
+        described.body = None;
+        described.cable_id = Some(cable.id().to_owned());
         (self.report)(AssistantEvent {
-            cable: Some(AssistantCable {
-                id: held.unwrap_or(cable.id()).to_owned(),
-                operation: operation.to_owned(),
-                target: label,
-                body: None,
-                digest,
-                cable_id: Some(cable.id().to_owned()),
-            }),
+            cable: Some(described),
             ..AssistantEvent::new(EVENT_CABLE_SENT, None)
         });
         Ok(cable)

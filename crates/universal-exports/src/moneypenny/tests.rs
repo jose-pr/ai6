@@ -2139,16 +2139,72 @@ async fn a_confirmed_cable_no_station_sends_in_time_fails() {
 /// The proposal a Station reports when Moneypenny asks to send `body` while exposed.
 fn held(id: &str, body: &str) -> AssistantEvent {
     AssistantEvent {
-        cable: Some(ai6::AssistantCable {
-            id: id.to_owned(),
-            operation: "G".to_owned(),
-            target: "agent:008".to_owned(),
-            body: Some(body.to_owned()),
-            digest: format!("{id}-digest"),
-            cable_id: None,
-        }),
+        cable: Some(held_cable(id, body)),
         ..AssistantEvent::new(ai6::EVENT_CABLE_PROPOSAL, None)
     }
+}
+
+/// A Cable to Agent 008 in G for ten minutes, held as `id`, with its digest.
+fn held_cable(id: &str, body: &str) -> ai6::AssistantCable {
+    let mut cable = ai6::AssistantCable {
+        id: id.to_owned(),
+        operation: "G".to_owned(),
+        target: "agent:008".to_owned(),
+        recipient: "agent:008".to_owned(),
+        ttl_seconds: Some(600),
+        body: Some(body.to_owned()),
+        digest: String::new(),
+        cable_id: None,
+    };
+    cable.digest = cable.request_digest();
+    cable
+}
+
+#[tokio::test]
+async fn a_held_cable_is_shown_whole_and_only_when_its_digest_is_what_is_shown() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Tell 008 to deploy.").await;
+    // A digest of some other request: the person would confirm one thing and send another.
+    let mut swapped = held_cable("held-1", "Deploy now.");
+    swapped.body = Some("Delete the release branch.".to_owned());
+    report(
+        &served,
+        "hq",
+        &job,
+        None,
+        vec![
+            AssistantEvent {
+                cable: Some(swapped),
+                ..AssistantEvent::new(ai6::EVENT_CABLE_PROPOSAL, None)
+            },
+            held("held-2", "Deploy now."),
+        ],
+    )
+    .await;
+    let frames = finish(&served, &mut app, &job).await;
+    assert!(
+        frames.iter().any(|frame| frame["entry"]["role"] == "error"
+            && frame["entry"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("cannot be shown"))),
+        "{frames:?}"
+    );
+    let proposals: Vec<_> = frames
+        .iter()
+        .filter(|frame| frame["entry"]["role"] == "proposal")
+        .map(|frame| frame["entry"]["data"].clone())
+        .collect();
+    assert_eq!(proposals.len(), 1, "only the honest one is a proposal");
+    assert_eq!(
+        proposals[0]["request"]["body"],
+        json!({"operation": "G", "recipient": "agent:008", "ttl_seconds": 600,
+               "body": "Deploy now."})
+    );
+    let summary = proposals[0]["summary"].as_str().unwrap();
+    assert!(
+        summary.contains("agent:008") && summary.contains("600 seconds"),
+        "{summary}"
+    );
 }
 
 async fn decide(app: &mut Socket, kind: &str, proposal: &Value) {
@@ -2205,7 +2261,7 @@ async fn a_held_cable_is_sent_only_when_the_person_confirms_it() {
         control.cable_confirm,
         Some(ai6::AssistantCableDecision {
             id: "held-1".to_owned(),
-            digest: "held-1-digest".to_owned(),
+            digest: held_cable("held-1", "Deploy now.").digest,
         })
     );
     assert!(control.message.is_empty());
@@ -2226,12 +2282,9 @@ async fn a_held_cable_is_sent_only_when_the_person_confirms_it() {
     );
     let sent = AssistantEvent {
         cable: Some(ai6::AssistantCable {
-            id: "held-1".to_owned(),
-            operation: "G".to_owned(),
-            target: "agent:008".to_owned(),
             body: None,
-            digest: "held-1-digest".to_owned(),
             cable_id: Some("cable-9".to_owned()),
+            ..held_cable("held-1", "Deploy now.")
         }),
         ..AssistantEvent::new(ai6::EVENT_CABLE_SENT, None)
     };

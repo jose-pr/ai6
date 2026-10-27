@@ -112,11 +112,19 @@ fn propose(conversation: &mut Conversation, cable: &AssistantCable, station: &st
         return;
     };
     let valid = ai6::directorates::section_00::assistant::valid_identity;
-    let shown = json!({"operation": cable.operation, "body": body});
+    // What the person sees is everything the Station will send, and the digest the Station
+    // checks at confirmation is computed here again from exactly that.
+    let shown = json!({
+        "operation": cable.operation,
+        "recipient": cable.recipient,
+        "ttl_seconds": cable.ttl_seconds,
+        "body": body,
+    });
     if !valid(&cable.id)
         || !valid(&cable.operation)
         || !valid(&cable.target)
-        || !valid(&cable.digest)
+        || !valid(&cable.recipient)
+        || cable.request_digest() != cable.digest
         || body.len() > ai6::directorates::registry::cables::MAX_CABLE_BODY_BYTES
         || actions::hidden_characters(&shown, "cable").is_err()
         || actions::hidden_characters(&Value::String(cable.target.clone()), "target").is_err()
@@ -144,13 +152,22 @@ fn propose(conversation: &mut Conversation, cable: &AssistantCable, station: &st
         conversation.proposals.remove(finished);
     }
     let reply = cable.target.starts_with("reply:");
+    let lifetime = match cable.ttl_seconds {
+        Some(ttl) => format!("{ttl} seconds"),
+        None => "15 minutes".to_owned(),
+    };
     let summary = format!(
-        "{} {} in Operation {}, held because Moneypenny has read text from outside AI6",
+        "{} {} in Operation {}, valid for {lifetime}, held because Moneypenny has read text \
+         from outside AI6",
         if reply { "Reply" } else { "Send a Cable to" },
         if reply {
-            format!("to Cable {}", cable.target.trim_start_matches("reply:"))
+            format!(
+                "to Cable {} (to {})",
+                cable.target.trim_start_matches("reply:"),
+                cable.recipient
+            )
         } else {
-            cable.target.clone()
+            cable.recipient.clone()
         },
         cable.operation
     );

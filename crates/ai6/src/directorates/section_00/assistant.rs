@@ -508,10 +508,15 @@ pub struct AssistantCable {
     /// Its audience, as `<scope>:<name>` (`agent:007`, `station:hq`, `global`), or
     /// `reply:<cable id>` for a reply.
     pub target: String,
+    /// Who it goes to: the audience of a send, `agent:<sender>` of the Cable a reply answers.
+    pub recipient: String,
+    /// The lifetime asked for, in seconds; `None` is the relay's default (15 minutes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u32>,
     /// The body, for a proposal; a sent Cable's event does not repeat it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    /// SHA-256 of the request, lowercase hex.
+    /// [`AssistantCable::request_digest`] of the request, held or sent.
     pub digest: String,
     /// The relay's Cable ID, once sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -645,6 +650,36 @@ impl fmt::Debug for AssistantJob {
             .field("cable_confirm", &self.cable_confirm)
             .field("cable_discard", &self.cable_discard)
             .finish()
+    }
+}
+
+impl AssistantCable {
+    /// SHA-256, lowercase hex, of the Operation, target, recipient, lifetime and body, each
+    /// prefixed with its length in bytes, so a Station and Universal Exports agree on what the
+    /// person confirms whatever their JSON settings.
+    pub fn request_digest(&self) -> String {
+        use sha2::{Digest, Sha256};
+
+        let ttl = self
+            .ttl_seconds
+            .map(|ttl| ttl.to_string())
+            .unwrap_or_default();
+        let mut hasher = Sha256::new();
+        for part in [
+            self.operation.as_str(),
+            self.target.as_str(),
+            self.recipient.as_str(),
+            ttl.as_str(),
+            self.body.as_deref().unwrap_or_default(),
+        ] {
+            hasher.update(format!("{}:", part.len()).as_bytes());
+            hasher.update(part.as_bytes());
+        }
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 }
 
@@ -856,6 +891,58 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<AssistantJob>(encoded).unwrap(),
             committing
+        );
+    }
+
+    #[test]
+    fn a_held_cables_digest_covers_everything_the_person_confirms() {
+        let cable = AssistantCable {
+            id: "held-1".to_owned(),
+            operation: "G".to_owned(),
+            target: "agent:008".to_owned(),
+            recipient: "agent:008".to_owned(),
+            ttl_seconds: Some(600),
+            body: Some("Deploy now.".to_owned()),
+            digest: String::new(),
+            cable_id: None,
+        };
+        let digest = cable.request_digest();
+        assert_eq!(digest.len(), 64);
+        let changed = [
+            AssistantCable {
+                operation: "H".to_owned(),
+                ..cable.clone()
+            },
+            AssistantCable {
+                recipient: "agent:009".to_owned(),
+                ..cable.clone()
+            },
+            AssistantCable {
+                ttl_seconds: None,
+                ..cable.clone()
+            },
+            AssistantCable {
+                body: Some("Deploy now!".to_owned()),
+                ..cable.clone()
+            },
+            // Moving a byte between fields is a different request too.
+            AssistantCable {
+                target: "agent:00".to_owned(),
+                recipient: "8agent:008".to_owned(),
+                ..cable.clone()
+            },
+        ];
+        for other in changed {
+            assert_ne!(other.request_digest(), digest, "{other:?}");
+        }
+        assert_eq!(
+            AssistantCable {
+                id: "held-2".to_owned(),
+                ..cable.clone()
+            }
+            .request_digest(),
+            digest,
+            "the desk's ID is not part of the request"
         );
     }
 
