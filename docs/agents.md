@@ -151,13 +151,15 @@ Answer-only is the `answer_only` field of the handler's start request. Claude Co
 `--restricted` (2.1.248 or later), `--tools=` (no built-in tool), `--disallowedTools` naming
 its shell, file, web, sub-agent and every MCP tool, `--setting-sources user` and
 `--strict-mcp-config` with an empty `--mcp-config`. Codex gets its command execution off
-(`features.shell_tool = false`), local image attachment off (`tools.view_image = false`), web
-search, sub-agents (`features.multi_agent`, `agents.enabled`) and app connectors off, an empty
-skills catalog (`skills.max_context_tokens = 1`), every other feature it enables switched
-off, the user's MCP servers replaced by none and the working directory's project layer
-skipped, and its thread in the `read-only` sandbox with approval policy `never`; it starts
-only after the [tool check](#codex-tool-check) finds it offers no tool at all. A Claude Code
-too old for one of its flags refuses to start, which ends the review without an answer.
+(`features.shell_tool = false`), web search, sub-agents (`features.multi_agent`,
+`agents.enabled`) and app connectors off, questions to the user off
+(`tools.experimental_request_user_input`), an empty skills catalog
+(`skills.max_context_tokens = 1`), every other feature it enables switched off, each of the
+user's MCP servers switched off by name and the working directory's project layer skipped,
+and its thread in the `read-only` sandbox with approval policy `never`; it starts only after
+the [tool check](#codex-tool-check) finds it offers no tool at all, which Codex 0.164 never
+does. A Claude Code too old for one of its flags refuses to start, which ends the review
+without an answer.
 
 It ends with one JSON object: `{"verdict": "clear"}`, or `{"verdict": "hold", "findings":
 [{"kind": "duplicate" | "scope" | "manipulation", "detail": "..."}]}`. A clear verdict lets
@@ -204,36 +206,49 @@ same Codex with the same settings, environment and working directory:
 
 1. `codex features list`, then switches off every enabled feature except
    `secret_auth_storage`, `enable_request_compression`, `system_proxy_fallback` and
-   `unbounded_connection_retries` (`ai6_agent_codex::KEPT_FEATURES`: how it stores its login
-   and reaches its service). A line that is not `name stage state` fails the check. The list
-   is reused for 15 minutes for the same executable, `--version`, settings and configuration
-   environment (`CODEX_HOME`, `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`,
-   `XDG_CONFIG_HOME`, `PATH`);
-2. `codex debug prompt-input` with those settings and the thread's model, on every start,
-   which renders what the model would be given without asking it anything. Its output must
-   be one JSON array of input items, at least one a `message` and the rest
+   `unbounded_connection_retries` (how it stores its login and reaches its service) and
+   `incremental_tools` (`ai6_agent_codex::KEPT_FEATURES`; without it step 3 renders no tool
+   while the app server still sends some). A line that is not `name stage state` fails the
+   check;
+2. `codex mcp list --json` with those settings, then switches off
+   (`mcp_servers.<name>.enabled = false`) every server it lists that is not one of the
+   thread's: Codex adds the thread's `mcp_servers` to the user's own instead of replacing
+   them. Output that is not one JSON array of named servers fails the check, as does a server
+   whose name is not a bare TOML key (letters, digits, `_`, `-`), which Codex cannot address
+   from the command line;
+3. `codex debug prompt-input` with all of those settings and the thread's model, on every
+   start, which renders what the model would be given without asking it anything. Its output
+   must be one JSON array of input items, at least one a `message` and the rest
    `additional_tools`, with nothing after it, or the check fails.
 
+Steps 1 and 2 are reused for 15 minutes for the same executable, `--version`, settings and
+configuration environment (`CODEX_HOME`, `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`,
+`XDG_CONFIG_HOME`, `PATH`). `prompt-input` does not show the user's MCP servers, so a server
+added to the user's Codex configuration within those 15 minutes stays on until they pass.
+
 The thread starts only when the tools offered are exactly those of its MCP servers
-(`mcp__<server>.<tool>`; none for answer-only) and every server offers at least one. With
-Codex 0.164.0 an answer-only thread passes with no tool at all, while Moneypenny does not
-start: that release offers its models MCP tools only inside `functions.exec`, and with code
-mode off it offers them none.
+(`mcp__<server>.<tool>`; none for answer-only) and every server offers at least one. **With
+Codex 0.164 no restricted thread passes in `strict`**: every model in its catalog is sent
+code mode's `functions.exec` and `functions.wait`, which no setting removes, so Chief of
+Staff reviews and Moneypenny on Codex are refused, and a review then holds its brief with a
+`review-error` finding. That is the safe outcome: `exec` runs JavaScript whose nested tools
+include `apply_patch`. Run the Chief of Staff and Moneypenny on Claude Code, or accept the
+weakening with `warn` below.
 
 | `AI6_CODEX_TOOL_CHECK` in the Agent's environment | When the check fails |
 | --- | --- |
 | `strict` (the default, also when unset) | The thread does not start, and the error names what was found |
 | `warn` | The thread starts; what was found is logged on the Station as a weakening and is the Session's first event (kind `weakened`) |
 
-Any other value refuses to start. The features are switched off in both modes.
+Any other value refuses to start. The features and the user's MCP servers are switched off in
+both modes.
 
-The check is only as good as `codex debug prompt-input`. With Codex 0.164.0 its tools match
-the request `codex exec` sends for the same model with Codex's default features, but not
-with every feature off: there `codex exec` still sends `functions.exec`, `functions.wait`
-and `functions.request_user_input`, while `prompt-input` renders none. The app server's own
-feature state (`experimentalFeature/list`) matches `codex features list` under the same
-settings; whether its threads are sent what `prompt-input` renders is not established, which
-is why a restricted thread that uses a tool anyway is ended (above).
+The check is only as good as `codex debug prompt-input`. With Codex 0.164.0 and
+`incremental_tools` on, its tools matched what an app-server thread was sent in every case
+compared (both modes, default and restricted settings); with `incremental_tools` off it
+renders no tool while the thread is still sent `functions.exec` and `functions.wait`. It
+never shows the user's MCP servers, which are deferred tools inside `functions.exec`, hence
+step 2. A restricted thread that uses a tool anyway is ended (above).
 
 ## Cables
 

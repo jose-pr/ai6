@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The Codex tool check sees what an app-server thread is sent: it keeps `incremental_tools`
+  on (`ai6_agent_codex::KEPT_FEATURES`), without which `codex debug prompt-input` renders no
+  tool while the thread is still sent `functions.exec` and `functions.wait`. Codex 0.164 sends
+  those two to every model in its catalog and no setting removes them, so in `strict` Codex
+  answer-only (Chief of Staff) and assistant threads are refused on that release. Restricted
+  threads also get `tools.experimental_request_user_input={enabled=false}`, and every MCP
+  server of the user's own Codex configuration that is not the thread's is switched off
+  (`mcp_servers.<name>.enabled=false`, names from `codex mcp list --json`, read and cached
+  with the feature list): a `-c mcp_servers` table adds to the user's servers rather than
+  replacing them. A server list that cannot be read, or a name that cannot be addressed,
+  fails the check. `tools.view_image`, which Codex reports as unrecognized, is not passed.
 - The `pty` terminal reports the end of a program's output (`read` returns `0`) once the
   program has exited and its output has been quiet for 200 ms, on every platform, so a
   harness that exits is noticed although ConPTY keeps the output open after its program has

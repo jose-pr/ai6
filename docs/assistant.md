@@ -49,16 +49,18 @@ denied by name, `--setting-sources user`, and `--strict-mcp-config` with only th
 whose tools it may call without asking, and runs with `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1`:
 Claude Code otherwise attaches its server-side advisor tool, which none of those flags
 removes. Codex gets its command execution switched off
-(`features.shell_tool = false`), local image attachment off (`tools.view_image = false`), web
-search, sub-agents and app connectors off, an empty skills catalog, every other feature it
-enables switched off but four that only store its login and reach its service, its MCP
-servers replaced by that one server, and, as a further line, the read-only sandbox (no
-writes, no network) with approvals off. Then the [tool check](agents.md#codex-tool-check)
-renders what Codex would offer the model and starts her only if that is exactly her server's
-tools. Codex 0.164 offers its models MCP tools only through its code-mode JavaScript tool
-(`functions.exec`), which this check refuses, so with that release she does not start on
-Codex; run her on Claude Code. Either harness that calls a tool outside her server anyway
-is ended at once ([restricted Sessions](agents.md#chief-of-staff)).
+(`features.shell_tool = false`), web search, sub-agents, app connectors and questions to the
+user off, an empty skills catalog, every other feature it enables switched off but those
+that only store its login and reach its service and the one its tool check reads through,
+that one server added and each of the user's own MCP servers switched off by name, and, as a
+further line, the read-only sandbox (no writes, no network) with approvals off. Then the
+[tool check](agents.md#codex-tool-check) renders what Codex would offer the model and starts
+her only if that is exactly her server's tools. Codex 0.164 gives every model its code-mode
+JavaScript tools (`functions.exec`, `functions.wait`) and offers MCP tools only through
+them, which this check refuses, so with that release she does not start on Codex: the safe
+outcome, since `exec` reaches nested tools such as `apply_patch`. Run her on Claude Code.
+Either harness that calls a tool outside her server anyway is ended at once ([restricted
+Sessions](agents.md#chief-of-staff)).
 
 The mode is built from parts (MCP servers, interpreters, skills, network policy) so later
 releases can widen it; today a handler refuses to start an assistant that asks for an

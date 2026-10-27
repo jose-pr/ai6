@@ -86,17 +86,19 @@ granted it. That the default is untrusted for an app-server session is not confi
 the Codex documentation. Not exercised against a live Codex.
 When `AgentStart::answer_only` (or `AgentResume::answer_only`) is `true`, which AI6 sets for
 a Chief of Staff review, app-server receives `-c mcp_servers={}`, `-c` for
-`features.shell_tool=false`, `tools.view_image=false`, `web_search="disabled"`,
-`features.multi_agent=false`, `agents.enabled=false`, `features.apps=false` and
-`skills.max_context_tokens=1`, and the untrusted-project override and none of AI6's servers;
-the Session has no gate, and `thread/start` and `thread/resume` carry `sandbox =
-"read-only"`, `approvalPolicy = "never"` and `config = {"web_search": "disabled"}`. An
-assistant (`AgentStart::assistant`) gets the same, with `mcp_servers` holding exactly its
-servers. Checked against the app-server protocol source (`ThreadStartParams`: `sandbox`,
-`approvalPolicy`, `config`; the `web_search` key and its `disabled` value): those for
-`thread/start`. Inferred: that `thread/resume` takes `config` as well, that the read-only
-sandbox has no network, and that the `mcp_servers` override replaces the user's table
-rather than merging into it.
+`features.shell_tool=false`, `web_search="disabled"`, `features.multi_agent=false`,
+`agents.enabled=false`, `features.apps=false`, `skills.max_context_tokens=1` and
+`tools.experimental_request_user_input={enabled=false}` (which removes `request_user_input`
+and `request_user_input_async`; no feature does), and the untrusted-project override and none
+of AI6's servers; the Session has no gate, and `thread/start` and `thread/resume` carry
+`sandbox = "read-only"`, `approvalPolicy = "never"` and `config = {"web_search":
+"disabled"}`. An assistant (`AgentStart::assistant`) gets the same, with `mcp_servers`
+holding exactly its servers. Codex merges that table into the user's own MCP servers rather
+than replacing them (0.164.0: a user's `node_repl` started in an answer-only thread), so the
+tool check below also switches off each of the user's servers by name. Checked against the
+app-server protocol source (`ThreadStartParams`: `sandbox`, `approvalPolicy`, `config`; the
+`web_search` key and its `disabled` value): those for `thread/start`. Inferred: that
+`thread/resume` takes `config` as well, and that the read-only sandbox has no network.
 
 A restricted thread that uses a tool anyway is killed, ends with a `failed` event naming
 it, and nothing read after that becomes an event: any server request but
@@ -110,34 +112,47 @@ Both are restricted threads, which start or resume only after the tool check:
 
 ```rust
 pub const TOOL_CHECK_ENV: &str = "AI6_CODEX_TOOL_CHECK"; // strict (default, also unset) | warn; other values refuse
-pub const KEPT_FEATURES: [&str; 4] = ["secret_auth_storage", "enable_request_compression",
-                                      "system_proxy_fallback", "unbounded_connection_retries"];
+pub const KEPT_FEATURES: [&str; 5] = ["secret_auth_storage", "enable_request_compression",
+                                      "system_proxy_fallback", "unbounded_connection_retries",
+                                      "incremental_tools"];
 ```
+
+`incremental_tools` is kept because without it `codex debug prompt-input` renders no tool
+while the app server still sends the tools of the model's catalog entry (0.164.0); with it
+kept, `prompt-input` matched the app server's request in every case compared.
 
 Through the terminal AI6 supplies, with the app server's `-c` settings, environment and
 working directory, the handler runs `codex --version`, then `codex features list` and adds
 `-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES` (a non-blank line
-that is not `name stage state` fails the check), then `codex debug prompt-input` with all of
-those and `-c model="<model>"` when the request names one (what Codex offers depends on the
-model). It reads the offered tools from the `additional_tools` items (`namespace.tool` inside
-a namespace) of the one JSON array that opens `[`, `{`, `"type"`; output with no such array,
-anything but whitespace after it, no `message` item, or an item of another type is
-unreadable. The
-thread passes when every offered tool is `mcp__<server>.<tool>` for one of its servers and
-each server offers at least one (answer-only: no tool). On a failure `strict` refuses with
-`GUATIAO_ERR_UNSUPPORTED` naming what was found, before any app server starts; `warn`
-starts it, prints `ai6: weakening: …` on standard error and queues an event of kind
-`weakened` with that text first. The feature switches apply in both. The feature list is
-cached in the process for 15 minutes by executable, `--version` output, settings (without
-the working directory's `projects` entry), mode and the values of `CODEX_HOME`, `HOME`,
-`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME` and `PATH`; a failed read is not
-cached. `prompt-input` runs on every start and resume.
-With Codex 0.164.0 an answer-only thread passes with no tool; an assistant does not, because
-that release offers its models MCP tools only inside code mode's `functions.exec` (fixtures
-in `tests/fixtures/codex-0.164.0/`). `codex debug prompt-input` is trusted to render what a
-thread is sent; with every feature off `codex exec` (0.164.0) was seen to send
-`functions.exec`, `functions.wait` and `functions.request_user_input` where it renders
-none, and the app server's case is not established.
+that is not `name stage state` fails the check), then `codex mcp list --json` with those and
+adds `-c mcp_servers.<name>.enabled=false` for every listed server that is not one of the
+thread's (output that is not one JSON array of objects with a string `name`, with nothing
+after it, fails the check, as does a name that is not a bare TOML key: Codex splits a `-c`
+key at every dot, so such a server cannot be switched off; only the names are kept, since
+the output also holds each server's environment values), then `codex debug prompt-input`
+with all of those and `-c model="<model>"` when the request names one (what Codex offers
+depends on the model). It reads the offered tools from the `additional_tools` items
+(`namespace.tool` inside a namespace) of the one JSON array that opens `[`, `{`, `"type"`;
+output with no such array, anything but whitespace after it, no `message` item, or an item
+of another type is unreadable. The thread passes when every offered tool is
+`mcp__<server>.<tool>` for one of its servers and each server offers at least one
+(answer-only: no tool). On a failure `strict` refuses with `GUATIAO_ERR_UNSUPPORTED` naming
+what was found, before any app server starts; `warn` starts it, prints `ai6: weakening: …` on
+standard error and queues an event of kind `weakened` with that text first. The feature and
+server switches apply in both. The feature list and the server list are cached together in
+the process for 15 minutes by executable, `--version` output, settings (without the working
+directory's `projects` entry), mode and the values of `CODEX_HOME`, `HOME`, `USERPROFILE`,
+`APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME` and `PATH`; a failed read is not cached.
+`prompt-input` runs on every start and resume, but does not render the user's MCP servers
+(they are deferred tools inside `functions.exec`): a server added to the user's configuration
+within the 15 minutes is switched off only once the cached list expires.
+With Codex 0.164.0 every model in the catalog is sent `functions.exec` and `functions.wait`
+(code mode; `tool_mode = "code_mode_only"`), and no setting this handler passes removes them,
+so in `strict` both answer-only and assistant threads are refused on that release; `warn`
+starts them as a weakening (fixtures in `tests/fixtures/codex-0.164.0/`). An MCP server's
+tools are offered only inside `functions.exec` there, so an assistant also finds its server
+missing. A server whose name collides with one of the user's is merged with it: with a stdio
+server of that name Codex refuses its configuration and the check fails.
 
 The terminal is opened at `STREAM_COLS` (32767) columns and read with
 `ai6::directorates::q::terminal::JsonLines`: ConPTY's controls, its echo of the requests

@@ -2626,10 +2626,11 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // only reads and answers. Claude Code: `--restricted --tools= --disallowedTools <all of its own,
 // web, sub-agent and mcp__*> --setting-sources user --strict-mcp-config --mcp-config
 // {"mcpServers":{}}`, and no AI6 servers or gate. Codex: `-c mcp_servers={}` plus `-c` for
-// `features.shell_tool=false`, `tools.view_image=false`, `web_search="disabled"`,
-// `features.multi_agent=false`, `agents.enabled=false`, `features.apps=false`,
-// `skills.max_context_tokens=1`, every other enabled feature switched off and a tool check
-// before start (see `ai6-agent-codex`), the project marked untrusted, thread
+// `features.shell_tool=false`, `web_search="disabled"`, `features.multi_agent=false`,
+// `agents.enabled=false`, `features.apps=false`, `skills.max_context_tokens=1`,
+// `tools.experimental_request_user_input={enabled=false}`, every other enabled feature and
+// every MCP server of the user's switched off and a tool check before start (see
+// `ai6-agent-codex`; Codex 0.164 fails it), the project marked untrusted, thread
 // `sandbox: "read-only"`, `approvalPolicy: "never"`, `config: {"web_search": "disabled"}`, and
 // no gate.
 // And `assistant: Option<AssistantMode>` (serde default None), set for Moneypenny: wins over
