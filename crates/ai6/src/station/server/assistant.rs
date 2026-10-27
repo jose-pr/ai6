@@ -89,11 +89,24 @@ pub(super) trait Harness: Send + Sync {
 /// The Station's handlers, each on the terminal provider the Station chooses for it.
 struct StationHarness(DaemonState);
 
-/// A handler and the terminal its harness is to start in.
+/// A handler, the terminal its harness is to start in, and that terminal's provider.
 type Launch = (
     Box<dyn AgentHandler>,
     Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+    String,
 );
+
+/// Logs which handler and terminal provider an assistant harness got; `session` is the
+/// `assistant--<conversation digest>` its Session is started under.
+fn log_start(session: &MissionId, how: &str, handler: &str, terminal: &str) {
+    let conversation = session.as_str().trim_start_matches("assistant--");
+    super::log_harness_start(
+        &format!("assistant conversation {conversation}"),
+        how,
+        handler,
+        terminal,
+    );
+}
 
 impl StationHarness {
     /// `handler`, and a terminal that suits what it declares.
@@ -110,7 +123,7 @@ impl StationHarness {
             .plugins
             .terminal(&provider, None)
             .map_err(|error| error.to_string())?;
-        Ok((handler, TerminalBridge::agent_terminal(terminal)))
+        Ok((handler, TerminalBridge::agent_terminal(terminal), provider))
     }
 }
 
@@ -126,10 +139,13 @@ impl Harness for StationHarness {
         handler: &str,
         request: AgentStart,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let (handler, terminal) = self.handler(handler)?;
-        handler
+        let (launch, terminal, provider) = self.handler(handler)?;
+        let session = request.mission_id.clone();
+        let started = launch
             .start(request, terminal)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        log_start(&session, "started", handler, &provider);
+        Ok(started)
     }
 
     fn resume(
@@ -137,10 +153,13 @@ impl Harness for StationHarness {
         handler: &str,
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let (handler, terminal) = self.handler(handler)?;
-        handler
+        let (launch, terminal, provider) = self.handler(handler)?;
+        let session = request.mission_id.clone();
+        let resumed = launch
             .resume(request, terminal)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        log_start(&session, "resumed", handler, &provider);
+        Ok(resumed)
     }
 }
 

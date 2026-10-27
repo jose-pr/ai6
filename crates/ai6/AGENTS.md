@@ -2752,6 +2752,12 @@ construction to report. Unpinned, `Json` gets `DEFAULT_PIPE`, else the first off
 terminal, else `NoPipe` (`NoneAvailable` with no offers); `Terminal` gets `DEFAULT_TERMINAL`,
 else the first offer with a terminal, else the first offer, else `NoneAvailable`.
 
+The daemon logs the handler and terminal provider of each harness it starts or resumes:
+`ai6: Mission "<id>": started the <handler> harness in the <terminal> terminal` (`resumed`;
+`runner Session "<key>" runs` when a field runner chose the terminal), and
+`ai6: assistant conversation <digest>: …` for Moneypenny. A Mission's Session record also keeps
+both, in `SessionLaunch { handler, terminal }`; an assistant Session has no record.
+
 A handler whose harness writes one JSON value per line reads it with `JsonLines`, because a
 pseudo-terminal is not a pipe: ConPTY on Windows renders a console, so its output carries
 mode and title sequences, may move the cursor instead of writing a line break, and breaks a

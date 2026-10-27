@@ -2231,8 +2231,21 @@ impl HarnessTerminal {
     }
 }
 
+/// Notes in the Station's log the handler and terminal provider a harness started with, as
+/// `ai6: WHO: HOW the HANDLER harness in the TERMINAL terminal`. A Mission's Session record
+/// also keeps them (`SessionLaunch`); an assistant Session has no record.
+pub(super) fn log_harness_start(who: &str, how: &str, handler: &str, terminal: &str) {
+    eprintln!("ai6: {who}: {how} the {handler} harness in the {terminal} terminal");
+}
+
 /// Records which runner Session a Mission's harness is, and the terminal the runner chose.
 fn record_runner_session(state: &DaemonState, mission_id: &str, report: &SessionReport) {
+    log_harness_start(
+        &format!("Mission {mission_id:?}"),
+        &format!("runner Session {:?} runs", report.key),
+        &report.handler,
+        &report.terminal,
+    );
     let Ok(mut missions) = state.missions.lock() else {
         return;
     };
@@ -3899,6 +3912,14 @@ async fn start_mission(
             return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
         }
     };
+    if runner.is_none() {
+        log_harness_start(
+            &format!("Mission {mission_id:?}"),
+            "started",
+            &handler_provider,
+            &terminal_provider,
+        );
+    }
     let identity = tokio::task::spawn_blocking(move || {
         let session_id = session.session_id();
         (session, session_id)
@@ -4604,6 +4625,14 @@ async fn resume_mission(
             });
         }
     };
+    if runner.is_none() {
+        log_harness_start(
+            &format!("Mission {mission_id:?}"),
+            "resumed",
+            &handler_provider,
+            &terminal_provider,
+        );
+    }
     let resumed = Arc::new(Mutex::new(resumed));
     state.sessions.lock().map_err(|_| internal_error())?.insert(
         mission_id.clone(),
