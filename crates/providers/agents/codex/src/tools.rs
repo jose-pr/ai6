@@ -2,8 +2,10 @@
 //!
 //! A Codex release can offer the model tools that no setting this handler passes switches off,
 //! and a new release adds more. So before a restricted app server starts, the handler runs the
-//! same Codex with the same settings, environment and working directory twice: `codex features
-//! list`, to switch off every enabled feature not on [`KEPT_FEATURES`], then `codex debug
+//! same Codex with the same settings, environment and working directory: `codex features list`,
+//! to switch off every enabled feature not on [`KEPT_FEATURES`], `codex mcp list --json`, to
+//! switch off every MCP server of the user's configuration that is not the thread's (a `-c
+//! mcp_servers` table adds to the user's servers instead of replacing them), then `codex debug
 //! prompt-input`, which renders what the model would be given without asking it anything. The
 //! thread starts only when the tools offered are exactly those of its MCP servers (none for an
 //! answer-only thread). With `AI6_CODEX_TOOL_CHECK=warn` in the Agent's environment it starts
@@ -110,6 +112,59 @@ pub(crate) fn feature_list(output: &[u8]) -> Option<FeatureList> {
         }
     }
     (read > 0).then_some(list)
+}
+
+/// The server names in `codex mcp list --json` output; `None` unless it is one JSON array of
+/// objects, each with a string `name`, with nothing after it. The output also holds each
+/// server's environment values, so nothing else of it is kept.
+pub(crate) fn mcp_server_names(output: &[u8]) -> Option<Vec<String>> {
+    // Pretty-printed JSON, as `offered_tools` reads it: every line break can go.
+    let mut text = strip_controls(output);
+    text.retain(|byte| !matches!(byte, b'\r' | b'\n'));
+    let start = (0..text.len()).find(|&at| opens_server_list(&text[at..]))?;
+    let servers: Value = serde_json::from_slice(&text[start..]).ok()?;
+    servers
+        .as_array()?
+        .iter()
+        .map(|server| Some(server.get("name")?.as_str()?.to_owned()))
+        .collect()
+}
+
+/// Whether `text` starts `[`, then `{` or `]`, with only whitespace between.
+fn opens_server_list(text: &[u8]) -> bool {
+    let mut rest = text.iter().skip_while(|byte| byte.is_ascii_whitespace());
+    rest.next() == Some(&b'[')
+        && matches!(
+            rest.find(|byte| !byte.is_ascii_whitespace()),
+            Some(b'{' | b']')
+        )
+}
+
+/// Codex splits a `-c` key at every dot and reads no quoted part, so only a name that is a
+/// bare TOML key can be addressed as `mcp_servers.<name>`.
+fn addressable(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+}
+
+/// `-c` overrides that switch off every listed MCP server that is not one of the thread's,
+/// and the listed names that cannot be addressed, which stay on.
+pub(crate) fn switch_off_servers(
+    listed: &[String],
+    servers: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let mut overrides = Vec::new();
+    let mut unaddressable = Vec::new();
+    for name in listed.iter().filter(|name| !servers.contains(name)) {
+        if addressable(name) {
+            overrides.extend(["-c".to_owned(), format!("mcp_servers.{name}.enabled=false")]);
+        } else {
+            unaddressable.push(format!("{name:?}"));
+        }
+    }
+    (overrides, unaddressable)
 }
 
 /// The tools `codex debug prompt-input` output offers the model, named `namespace.tool` inside
@@ -270,7 +325,8 @@ struct FeaturesKey {
     check: ToolCheck,
 }
 
-/// The features last switched off for a key, and what a `warn` check found reading them.
+/// The features and MCP servers last switched off for a key, as `-c` overrides, and what a
+/// `warn` check found reading them.
 type SwitchedOff = (Vec<String>, Option<String>);
 
 fn feature_lists() -> &'static Mutex<HashMap<FeaturesKey, (Instant, SwitchedOff)>> {
@@ -292,10 +348,11 @@ pub(crate) struct Probe<'a> {
 }
 
 impl Probe<'_> {
-    /// Runs the check. The features to switch off are reused for the same Codex, settings and
-    /// configuration environment for [`CHECK_LIFETIME`]; what Codex offers is rendered on
-    /// every start, so a change the key cannot see (a configuration file edited) is still
-    /// caught there.
+    /// Runs the check. The features and MCP servers to switch off are reused for the same
+    /// Codex, settings and configuration environment for [`CHECK_LIFETIME`]; what Codex offers
+    /// is rendered on every start, so a change the key cannot see (a configuration file
+    /// edited) is caught there, except an MCP server added to the user's configuration, whose
+    /// tools `prompt-input` does not render: it is switched off once the lifetime has passed.
     pub(crate) fn check(&self) -> Result<Checked, ProviderError> {
         let check = ToolCheck::from_environment(self.environment)?;
         let version = String::from_utf8_lossy(&strip_controls(
@@ -354,7 +411,8 @@ impl Probe<'_> {
     }
 
     /// The `-c` overrides that switch off every enabled feature not kept, from `codex features
-    /// list`, and what a `warn` check found reading it.
+    /// list`, and every MCP server of the user's that is not the thread's, from `codex mcp list
+    /// --json` with those features off; and what a `warn` check found reading them.
     fn switch_off(&self, check: ToolCheck) -> Result<SwitchedOff, ProviderError> {
         let mut found = Vec::new();
         let list = feature_list(&self.capture(&self.command(&["features", "list"], &[]))?);
@@ -371,13 +429,34 @@ impl Probe<'_> {
             })),
         }
         refuse_if_strict(&found, check)?;
-        let overrides = list
+        let mut overrides = list
             .map(|list| list.enabled)
             .unwrap_or_default()
             .into_iter()
             .filter(|name| !KEPT_FEATURES.contains(&name.as_str()))
             .flat_map(|name| ["-c".to_owned(), format!("features.{name}=false")])
             .collect::<Vec<_>>();
+        let listed =
+            mcp_server_names(&self.capture(&self.command(&["mcp", "list", "--json"], &overrides))?);
+        match listed {
+            None => found.push(
+                "the MCP servers of Codex's configuration could not be read from \
+                 `codex mcp list --json`, so none of the user's is switched off"
+                    .to_owned(),
+            ),
+            Some(listed) => {
+                let (off, unaddressable) = switch_off_servers(&listed, self.servers);
+                overrides.extend(off);
+                if !unaddressable.is_empty() {
+                    found.push(format!(
+                        "MCP server {} of Codex's configuration cannot be switched off by \
+                         name and stays on",
+                        unaddressable.join(", ")
+                    ));
+                }
+            }
+        }
+        refuse_if_strict(&found, check)?;
         Ok((overrides, (!found.is_empty()).then(|| found.join("; "))))
     }
 
@@ -437,12 +516,13 @@ impl Probe<'_> {
 mod tests {
     use super::*;
 
-    /// `codex debug prompt-input` and `codex features list` output of Codex 0.164.0 on
-    /// Windows, model descriptions shortened and message text replaced (it holds the
-    /// machine's paths): with the settings this handler passed before the tool check, with
-    /// those it passes now (answer-only, and an assistant with one MCP server, `moneypenny`,
-    /// model `gpt-6.1-sol`), and with code mode kept and that server's namespace exposed
-    /// directly.
+    /// `codex debug prompt-input`, `codex features list` and `codex mcp list --json` output
+    /// of Codex 0.164.0 on Windows, model descriptions shortened, message text and server
+    /// commands and environment values replaced (they hold the machine's paths): with the
+    /// settings this handler passed before the tool check, with those it passes now
+    /// (answer-only, and an assistant with one MCP server, `moneypenny`, model `gpt-6.1-sol`,
+    /// a user configuration holding one stdio server, `node_repl`), and with code mode kept
+    /// and that server's namespace exposed directly.
     const BEFORE: &str = include_str!("../tests/fixtures/codex-0.164.0/prompt-input-main.json");
     const ANSWER_ONLY: &str =
         include_str!("../tests/fixtures/codex-0.164.0/prompt-input-answer-only.json");
@@ -451,6 +531,9 @@ mod tests {
     const CODE_MODE: &str =
         include_str!("../tests/fixtures/codex-0.164.0/prompt-input-code-mode.json");
     const FEATURES: &str = include_str!("../tests/fixtures/codex-0.164.0/features-list.txt");
+    const MCP_LIST: &str = include_str!("../tests/fixtures/codex-0.164.0/mcp-list.json");
+    const MCP_LIST_ASSISTANT: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/mcp-list-assistant.json");
 
     fn moneypenny() -> Vec<String> {
         vec!["moneypenny".to_owned()]
@@ -505,6 +588,78 @@ mod tests {
                 && refused.contains("no tool of MCP server moneypenny"),
             "{refused}"
         );
+    }
+
+    #[test]
+    fn the_users_mcp_servers_but_the_threads_are_switched_off_by_name() {
+        assert_eq!(
+            mcp_server_names(MCP_LIST.as_bytes()).unwrap(),
+            ["node_repl"]
+        );
+        let listed = mcp_server_names(MCP_LIST_ASSISTANT.as_bytes()).unwrap();
+        assert_eq!(
+            listed,
+            ["moneypenny", "node_repl"],
+            "the thread's server is listed beside the user's"
+        );
+        assert_eq!(
+            switch_off_servers(&listed, &moneypenny()),
+            (
+                vec![
+                    "-c".to_owned(),
+                    "mcp_servers.node_repl.enabled=false".to_owned()
+                ],
+                Vec::new()
+            )
+        );
+        assert_eq!(
+            switch_off_servers(&listed, &[]).0,
+            [
+                "-c",
+                "mcp_servers.moneypenny.enabled=false",
+                "-c",
+                "mcp_servers.node_repl.enabled=false"
+            ]
+        );
+        let odd = [
+            "we.ird".to_owned(),
+            "sp ace".to_owned(),
+            "ok-name_1".to_owned(),
+        ];
+        assert_eq!(
+            switch_off_servers(&odd, &[]),
+            (
+                vec![
+                    "-c".to_owned(),
+                    "mcp_servers.ok-name_1.enabled=false".to_owned()
+                ],
+                vec!["\"we.ird\"".to_owned(), "\"sp ace\"".to_owned()]
+            ),
+            "a name Codex cannot address by a dotted key stays on and is reported"
+        );
+    }
+
+    #[test]
+    fn mcp_list_output_is_read_exactly_or_not_at_all() {
+        assert_eq!(mcp_server_names(b"[]\n"), Some(Vec::new()));
+        let mut rendered = b"\x1b[?25l\x1b]0;codex\x07\r\n".to_vec();
+        rendered.extend_from_slice(MCP_LIST.replace('\n', "\r\n").as_bytes());
+        assert_eq!(
+            mcp_server_names(&rendered),
+            mcp_server_names(MCP_LIST.as_bytes())
+        );
+        for output in [
+            "",
+            "No MCP servers configured yet. Try `codex mcp add my-tool -- my-command`.",
+            "Error: failed to load bootstrap configuration\n\nCaused by:\n    invalid transport",
+            "[{\"enabled\":true}]",
+            "[{\"name\":7}]",
+            "{\"name\":\"node_repl\"}",
+            "[] trailing",
+            "[{\"name\":\"a\"}] [{\"name\":\"b\"}]",
+        ] {
+            assert_eq!(mcp_server_names(output.as_bytes()), None, "{output}");
+        }
     }
 
     #[test]

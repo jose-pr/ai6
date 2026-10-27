@@ -1,0 +1,40 @@
+[
+  {
+    "name": "node_repl",
+    "enabled": true,
+    "disabled_reason": null,
+    "transport": {
+      "type": "stdio",
+      "command": "(trimmed)",
+      "args": [],
+      "env": {
+        "SKY_CUA_NATIVE_PIPE_DIRECTORY": "(trimmed)",
+        "NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER": "(trimmed)",
+        "BROWSER_USE_CODEX_APP_BUILD_FLAVOR": "(trimmed)",
+        "SKY_CUA_NATIVE_PIPE": "(trimmed)",
+        "NODE_REPL_UNTRUSTED_ENV_ALLOWLIST": "(trimmed)",
+        "NODE_REPL_TRUSTED_CODE_PATHS": "(trimmed)",
+        "CODEX_HOME": "(trimmed)",
+        "NODE_REPL_NODE_MODULE_DIRS": "(trimmed)",
+        "NODE_REPL_NODE_PATH": "(trimmed)",
+        "NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS": "(trimmed)",
+        "BROWSER_USE_AVAILABLE_BACKENDS": "(trimmed)",
+        "BROWSER_USE_CODEX_APP_VERSION": "(trimmed)",
+        "BROWSER_USE_TINYSKY_ENABLED": "(trimmed)",
+        "NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME": "(trimmed)",
+        "NODE_REPL_TRUSTED_SERVICES": "(trimmed)",
+        "CODEX_CLI_PATH": "(trimmed)"
+      },
+      "env_vars": [
+        "BROWSER_USE_ACCESS_EXECUTOR_ID",
+        "BROWSER_USE_ACCESS_PIPE_PATH",
+        "BROWSER_USE_ACCESS_VERIFYING_IDENTITY",
+        "CODEX_WINDOWS_REGISTERED_CORE"
+      ],
+      "cwd": null
+    },
+    "startup_timeout_sec": 120.0,
+    "tool_timeout_sec": null,
+    "auth_status": "unsupported"
+  }
+]

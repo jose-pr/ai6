@@ -1080,8 +1080,8 @@ fn app_server_argv(
 /// (learn.chatgpt.com/docs/config-file/config-reference), but for
 /// `tools.experimental_request_user_input`: switched off, it removes `request_user_input` and
 /// `request_user_input_async`, which no feature does (Codex 0.164.0). Every other
-/// feature Codex enables is switched off by the tool check ([`tools`]), and the read-only
-/// sandbox and approval policy `never` stay as a further line.
+/// feature Codex enables, and every MCP server of the user's, is switched off by the tool check
+/// ([`tools`]), and the read-only sandbox and approval policy `never` stay as a further line.
 const NO_BUILT_IN_TOOLS: [&str; 7] = [
     "features.shell_tool=false",
     "web_search=\"disabled\"",
@@ -1100,8 +1100,9 @@ fn no_built_in_tools() -> Vec<String> {
         .collect()
 }
 
-/// The app server of an answer-only thread: the user's MCP servers replaced by none for this
-/// process, AI6's left out, and no built-in tool ([`NO_BUILT_IN_TOOLS`]).
+/// The app server of an answer-only thread: an empty `mcp_servers` table, AI6's servers left
+/// out, and no built-in tool ([`NO_BUILT_IN_TOOLS`]). Codex merges the table into the user's
+/// own servers, which the tool check switches off by name ([`tools`]).
 fn answer_only_argv(executable: &str) -> Vec<String> {
     let mut argv = vec![
         executable.to_owned(),
@@ -1114,9 +1115,10 @@ fn answer_only_argv(executable: &str) -> Vec<String> {
 }
 
 /// The app server of an assistant thread, built from its mode's parts: `mcp_servers` set to
-/// one inline table holding exactly the mode's servers, which replaces the user's servers for
-/// this process, each with its URL and the name of the variable holding its bearer token, and
-/// no built-in tool ([`NO_BUILT_IN_TOOLS`]): no shell, no file or image reading, no web. The
+/// one inline table holding exactly the mode's servers, which Codex merges into the user's own
+/// (the tool check switches those off by name, [`tools`]), each with its URL and the name of
+/// the variable holding its bearer token, and no built-in tool ([`NO_BUILT_IN_TOOLS`]): no
+/// shell, no file or image reading, no web. The
 /// thread itself runs as an answer-only one ([`restrict_to_answer_only`]). Interpreters,
 /// skills and any network beyond the servers are refused until this handler can confine them.
 fn assistant_argv(
@@ -1413,6 +1415,11 @@ mod tests {
                     ]
                     .join("\n")
                 });
+                answer(&mut stdout, &output)
+            }
+            Some("mcp") => {
+                let output =
+                    std::env::var("CODEX_FIXTURE_MCP_LIST").unwrap_or_else(|_| "[]".to_owned());
                 answer(&mut stdout, &output)
             }
             Some("debug") => {
@@ -2531,6 +2538,10 @@ mod tests {
                 "http://127.0.0.1:1/mcp".to_owned(),
             ),
             ("AI6_CABLE_MCP_TOKEN".to_owned(), "cable-token".to_owned()),
+            (
+                "CODEX_FIXTURE_MCP_LIST".to_owned(),
+                MCP_LIST_ASSISTANT.replace('\n', ""),
+            ),
         ]);
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-assistant-fixture".to_owned(),
@@ -2613,14 +2624,37 @@ mod tests {
         ]
         .concat();
         // The fixture's feature list enables code_mode_host, secret_auth_storage and
-        // tool_suggest; the kept one stays on.
-        let switched_off = [
+        // tool_suggest; the kept one stays on. Codex lists the user's node_repl beside the
+        // thread's own server.
+        let features_off = [
             "-c",
             "features.code_mode_host=false",
             "-c",
             "features.tool_suggest=false",
         ]
         .map(str::to_owned);
+        let switched_off = [
+            features_off.to_vec(),
+            vec![
+                "-c".to_owned(),
+                "mcp_servers.node_repl.enabled=false".to_owned(),
+            ],
+        ]
+        .concat();
+        let listed = all_specs
+            .iter()
+            .find(|spec| spec.argv[1] == "mcp")
+            .expect("the MCP servers were listed");
+        assert_eq!(
+            listed.argv[1..],
+            [
+                vec!["mcp".to_owned(), "list".to_owned(), "--json".to_owned()],
+                settings.clone(),
+                features_off.to_vec()
+            ]
+            .concat(),
+            "with the thread's settings and features"
+        );
         let expected = [
             vec![
                 "codex-assistant-fixture".to_owned(),
@@ -2697,6 +2731,11 @@ mod tests {
     /// brings `functions.exec` and `functions.wait`.
     const ANSWER_ONLY_PROMPT: &str =
         include_str!("../tests/fixtures/codex-0.164.0/prompt-input-answer-only.json");
+    /// `codex mcp list --json` of Codex 0.164.0 for a user with one stdio server, `node_repl`,
+    /// alone and beside an assistant's `moneypenny`.
+    const MCP_LIST: &str = include_str!("../tests/fixtures/codex-0.164.0/mcp-list.json");
+    const MCP_LIST_ASSISTANT: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/mcp-list-assistant.json");
 
     #[test]
     fn an_answer_only_thread_codex_still_gives_exec_and_wait_is_not_started() {
@@ -2713,6 +2752,10 @@ mod tests {
             (
                 "CODEX_FIXTURE_FEATURES".to_owned(),
                 include_str!("../tests/fixtures/codex-0.164.0/features-list.txt").to_owned(),
+            ),
+            (
+                "CODEX_FIXTURE_MCP_LIST".to_owned(),
+                MCP_LIST.replace('\n', ""),
             ),
         ]);
         let refused = match handler.start(
@@ -2732,12 +2775,10 @@ mod tests {
             .iter()
             .find(|spec| spec.argv.len() > 2 && spec.argv[1..3] == ["debug", "prompt-input"])
             .unwrap();
+        let has = |setting: &str| checked.argv.iter().any(|argument| argument == setting);
         assert!(
-            checked
-                .argv
-                .iter()
-                .any(|argument| argument == "features.code_mode_host=false"),
-            "rendered with the features off: {:?}",
+            has("mcp_servers.node_repl.enabled=false") && has("features.code_mode_host=false"),
+            "rendered with the user's server and the features off: {:?}",
             checked.argv
         );
         assert!(
@@ -2747,6 +2788,93 @@ mod tests {
                 .any(|argument| argument.starts_with("features.incremental_tools")),
             "kept on, or prompt-input renders no tool"
         );
+    }
+
+    #[test]
+    fn the_users_mcp_servers_are_switched_off_on_the_app_server() {
+        let terminal = ProcessTerminal::new();
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-user-servers-fixture".to_owned(),
+        })
+        .unwrap();
+        let environment = BTreeMap::from([(
+            "CODEX_FIXTURE_MCP_LIST".to_owned(),
+            MCP_LIST.replace('\n', ""),
+        )]);
+        let session = handler
+            .start(
+                answer_only_start(environment),
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        session.close().unwrap();
+        let specs = terminal.specs.lock().unwrap();
+        let server = specs
+            .iter()
+            .find(|spec| spec.argv[1] == "app-server")
+            .unwrap();
+        assert!(
+            server
+                .argv
+                .windows(2)
+                .any(|pair| pair == ["-c", "mcp_servers.node_repl.enabled=false"]),
+            "{:?}",
+            server.argv
+        );
+    }
+
+    #[test]
+    fn an_mcp_list_it_cannot_read_refuses_unless_warned() {
+        for (index, output, found) in [
+            (
+                0,
+                "Error: failed to load bootstrap configuration",
+                "none of the user's is switched off",
+            ),
+            (
+                1,
+                "[{\"name\":\"we.ird\",\"enabled\":true}]",
+                "\"we.ird\" of Codex's configuration cannot be switched off",
+            ),
+        ] {
+            // An executable of its own, so the warned start reads its own list.
+            let handler = CodexHandler::try_from(CodexConfig {
+                executable: format!("codex-mcp-unread-fixture-{index}"),
+            })
+            .unwrap();
+            let mut environment =
+                BTreeMap::from([("CODEX_FIXTURE_MCP_LIST".to_owned(), output.to_owned())]);
+            let terminal = ProcessTerminal::new();
+            let refused = match handler.start(
+                answer_only_start(environment.clone()),
+                terminal.clone().into_object(),
+            ) {
+                Ok(_) => panic!("{output}: started"),
+                Err(error) => error.to_string(),
+            };
+            assert!(refused.contains(found), "{refused}");
+            assert!(
+                terminal
+                    .specs
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .all(|spec| spec.argv[1] != "app-server" && spec.argv[1] != "debug"),
+                "refused before anything else ran"
+            );
+            environment.insert(TOOL_CHECK_ENV.to_owned(), "warn".to_owned());
+            let session = handler
+                .start(
+                    answer_only_start(environment),
+                    ProcessTerminal::new().into_object(),
+                )
+                .unwrap();
+            let first = session.next_event(1_000).unwrap().unwrap();
+            assert_eq!(first.kind, "weakened");
+            let text = first.text.unwrap();
+            assert!(text.contains(found), "{text}");
+            session.close().unwrap();
+        }
     }
 
     #[test]
@@ -2877,6 +3005,11 @@ mod tests {
             count("features"),
             2,
             "another CODEX_HOME is another configuration"
+        );
+        assert_eq!(
+            count("mcp"),
+            2,
+            "the MCP servers are reused with the features"
         );
         assert_eq!(
             count("debug"),
