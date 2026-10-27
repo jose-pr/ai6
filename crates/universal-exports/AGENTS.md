@@ -430,7 +430,8 @@ runs, and identifiers are percent-encoded into paths. Results are JSON inside
 `agent_roles`, `audit`, `board` (`/v1/stations` and `/v1/board`), `class_authorizations`,
 `field_guide` (the `docs/` pages, compiled in), `green_ink`, `held_briefs`, `mission`,
 `mission_proposals`, `missions`, `placement_preview`, `pools`, `profile`, `quarantines`,
-`roster`, `station_settings`, `timeline`; all read only.
+`roster`, `station_settings`, `timeline`; all read only. `propose_shared_change` is listed
+with the write tools.
 
 Write tools only propose (an input whose text holds a character AI6 vetting counts as invisible is refused, `INVALID_INPUT`): `propose_class_authorization` (approval.class), `propose_held_brief_decision`
 (release or refuse; mission.create), `propose_mission` (mission.create),
@@ -454,6 +455,35 @@ run. The proposal becomes `done` or `failed` with AI6's answer, sent as
 Moneypenny is told (`[App: the person confirmed …]`) at once when she is idle, else with the
 next message; a cancellation is told with the next message. 32 proposals are kept per
 conversation.
+
+Workspaces come from the `[assistant]` table of the roster `with_roster` serves (a
+configuration directory's `agents.toml`; a SQL roster has none, so no workspace). With
+`personal_repo` set, each message job carries `ai6::AssistantWorkspace`: the template filled
+in for the person signed in to the conversation (a person whose identifier cannot fill
+`{person}` gets an `unavailable` error instead of a job), the repositories of the person's
+Directory groups and `org`, the author (`display_name` else `name`, without control
+characters, `<` or `>`; `email` else `<16 hex>@people.ai6.invalid`) and `exposed`. A
+conversation is exposed for its life once `audit`, `held_briefs`, `mission`,
+`mission_proposals`, `missions` or `timeline` answers without error. A Station's
+`memory_changes` event (with `change`) in a conversation not exposed becomes a `notice`
+entry (`data.diff`) and a `memory` commit job (message `moneypenny: remember PATHS`, trailer
+`Via: Moneypenny (conversation ID)`) for that Station; in an exposed one, a `memory_commit`
+proposal (request method `COMMIT`, body `{message, files, diff}`, needs `your confirmation`
+on `your memory`) and a note telling her it waits. Confirmed, a commit proposal is audited
+`moneypenny.confirmed` (resource `config:assistant`) and sent as a commit job to the
+conversation's Station (else the first healthy one), staying `confirming` until the Station
+answers; cancelled, nothing is sent (`memory_discard`: the Station set it aside already). A
+commit job's answer becomes a `notice` (or `error`) entry, settles its proposal `done` or
+`failed`, and is told to her with the next message. A `notice` event becomes a `notice`
+entry and a note for her.
+
+`propose_shared_change {group, path, content, message}` (group a `file_safe` name or `org`,
+path a repository path, content ≤ 64 KiB, message one line ≤ 200 characters, no hidden
+characters) is refused ("Refused: …") unless the person is in the group and it shares a
+repository (`org` is everyone's). With that repository's `write = true` it is audited
+`moneypenny.shared.write` (resource `config:assistant`, target `CONVERSATION GROUP PATH`) and
+sent at once as a `shared` commit job; otherwise it is a proposal (needs `membership` on
+`group:<group>`) handled as above.
 
 The `show` tool takes `{"view": VIEW}` in the strict view schema version 1 (serde, unknown
 fields refused): `{"version": 1, "title"?, "blocks": [1..=24]}`, each block tagged by `kind`:

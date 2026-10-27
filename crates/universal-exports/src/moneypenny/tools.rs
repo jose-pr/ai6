@@ -15,6 +15,18 @@ use tower::ServiceExt;
 use super::guide;
 use crate::Gateway;
 
+/// The read tools whose answers carry text other people wrote (briefs, issue bodies, Agent
+/// output, audit targets): once one answers, the conversation is exposed and a change to her
+/// memory waits for the person.
+pub(crate) const EXPOSING_TOOLS: &[&str] = &[
+    "audit",
+    "held_briefs",
+    "mission",
+    "mission_proposals",
+    "missions",
+    "timeline",
+];
+
 /// The most bytes of a route's answer a tool reads.
 const MAX_ROUTE_BYTES: usize = 4 * 1024 * 1024;
 /// The most characters of a result Moneypenny is given; past it the result is cut, and says so.

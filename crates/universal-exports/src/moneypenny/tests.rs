@@ -31,11 +31,17 @@ impl Authenticator for People {
 }
 
 impl Directory for People {
+    /// Operator 007 is in directory group `ops`; viewer 007 in none.
     fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
         Ok(["operator-007", "viewer-007"]
             .contains(&lookup.value.as_str())
             .then(|| Person {
                 id: lookup.value.clone(),
+                groups: if lookup.value == "operator-007" {
+                    vec!["ops".to_owned()]
+                } else {
+                    Vec::new()
+                },
                 name: lookup.value,
                 ..Person::default()
             }))
@@ -1564,4 +1570,322 @@ async fn views_are_held_to_a_budget_and_ready_sends_only_the_newest() {
         .count();
     assert!(views < 12, "older views gave way: {views}");
     assert!(ready["earlier"].as_u64().unwrap() > 0 || views < 12);
+}
+
+/// Personal repositories under `/srv/mp`, `ops` shared and changed by proposal, and the
+/// organisation's repository shared with everyone and written at once.
+fn workspace_roster() -> Arc<dyn ai6::ConfigSource> {
+    let settings = ai6::AssistantSettings::new()
+        .with_personal_repo("/srv/mp/{person}.git")
+        .with_shared("ops", ai6::SharedRepo::new("/srv/ops.git"))
+        .with_org(ai6::SharedRepo::new("/srv/org.git").writable(true));
+    Arc::new(ai6::MemoryConfigSource::new(
+        ai6::Roster::builder().assistant(settings).build().unwrap(),
+    ))
+}
+
+/// The files of a memory change, as a Station reports it.
+fn remembered() -> AssistantChange {
+    AssistantChange::new(BTreeMap::from([(
+        "memory/prefs.md".to_owned(),
+        Some("The person prefers tables.\n".to_owned()),
+    )]))
+}
+
+/// Reports the memory change of `job`'s turn from `hq`.
+async fn set_aside(served: &Served, job: &AssistantJob) {
+    let mut event = AssistantEvent::new(
+        EVENT_MEMORY_CHANGES,
+        Some("+++ b/memory/prefs.md\n+The person prefers tables.\n".to_owned()),
+    );
+    event.change = Some(remembered());
+    assert_eq!(
+        report(served, "hq", job, None, vec![event]).await,
+        StatusCode::NO_CONTENT
+    );
+}
+
+/// The Station's answer to a commit job.
+async fn answer_commit(served: &Served, job: &AssistantJob, landed: &str) {
+    assert_eq!(
+        report(
+            served,
+            "hq",
+            job,
+            Some(&job.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, Some(landed.to_owned()))],
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+}
+
+#[tokio::test]
+async fn each_person_works_in_their_own_repository_and_reads_only_their_groups() {
+    let served = served_with(AssistantConfig::default(), Some(workspace_roster())).await;
+    let (_operator_app, operator) = accepted(&served, &served.operator, "Hello.").await;
+    let (_viewer_app, viewer) = accepted(&served, &served.viewer, "Hello.").await;
+    let mine = operator.workspace.clone().unwrap();
+    assert_eq!(mine.personal, "/srv/mp/operator-007.git");
+    assert_eq!(mine.author_name, "operator-007");
+    assert!(mine.author_email.ends_with("@people.ai6.invalid"));
+    assert_eq!(
+        mine.shared.keys().collect::<Vec<_>>(),
+        ["ops", "org"],
+        "the group's and the organisation's"
+    );
+    assert!(!mine.exposed);
+    let theirs = viewer.workspace.clone().unwrap();
+    assert_eq!(theirs.personal, "/srv/mp/viewer-007.git");
+    assert_eq!(theirs.shared.keys().collect::<Vec<_>>(), ["org"]);
+    let named = serde_json::to_string(&viewer).unwrap();
+    assert!(
+        !named.contains("operator-007"),
+        "the viewer's job never names the operator's repository: {named}"
+    );
+
+    // Without personal repositories a job carries no workspace, as before.
+    let plain = served_with(AssistantConfig::default(), None).await;
+    let (_app, job) = accepted(&plain, &plain.operator, "Hello.").await;
+    assert_eq!(job.workspace, None);
+}
+
+#[tokio::test]
+async fn a_clean_conversation_keeps_her_memory_and_an_exposed_one_asks_the_person() {
+    let served = served_with(AssistantConfig::default(), Some(workspace_roster())).await;
+    let (mut app, job) = accepted(&served, &served.operator, "I like tables.").await;
+
+    // Clean: the change goes straight back to the Station as a commit, and the person sees it.
+    set_aside(&served, &job).await;
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "notice").await;
+    let notice = frames.last().unwrap()["entry"]["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(notice.contains("memory/prefs.md"), "{notice}");
+    let commit_job = take(&served, "hq").await;
+    let commit = commit_job.commit.clone().expect("a commit job");
+    assert_eq!(commit.kind, COMMIT_MEMORY);
+    assert_eq!(commit.repo, "/srv/mp/operator-007.git");
+    assert_eq!(commit.change, remembered());
+    assert!(commit.message.ends_with(&format!(
+        "Via: Moneypenny (conversation {})",
+        job.conversation_id
+    )));
+    assert_eq!(commit.author_name, "operator-007");
+    answer_commit(&served, &commit_job, "committed 0123456789ab to main").await;
+    receive_until(&mut app, |frame| {
+        frame["entry"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("committed 0123456789ab"))
+    })
+    .await;
+    finish(&served, &mut app, &job).await;
+
+    // A tool that returns others' text exposes the conversation for good.
+    say(&mut app, "What is mission-g about?", None).await;
+    let second = take(&served, "hq").await;
+    assert!(!second.workspace.as_ref().unwrap().exposed);
+    report(
+        &served,
+        "hq",
+        &second,
+        Some(&second.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    let read = call_tool(
+        &served,
+        &second.mcp_token,
+        "mission",
+        json!({"operation_id": "G", "mission_id": "mission-g"}),
+    )
+    .await;
+    assert_eq!(read["isError"], false);
+    set_aside(&served, &second).await;
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
+    let proposal = proposal_of(&frames);
+    assert_eq!(proposal["tool"], "memory_commit");
+    assert_eq!(proposal["status"], "pending");
+    assert_eq!(
+        proposal["request"]["body"]["files"]["memory/prefs.md"],
+        "The person prefers tables.\n"
+    );
+    assert!(proposal["request"]["body"]["diff"].is_string());
+    assert!(
+        nothing_for(&served, "hq").await,
+        "nothing is committed unasked"
+    );
+    finish(&served, &mut app, &second).await;
+
+    // Confirmed, it is audited and committed.
+    app.send(WsMessage::Text(
+        json!({"type": "confirm", "proposal": proposal["id"]})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
+    let commit_job = take(&served, "hq").await;
+    assert_eq!(commit_job.commit.as_ref().unwrap().change, remembered());
+    assert_eq!(audits(&served, "moneypenny.confirmed").len(), 1);
+    answer_commit(&served, &commit_job, "committed 89abcdef0123 to main").await;
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "proposal" && frame["proposal"]["status"] != "confirming"
+    })
+    .await;
+    assert_eq!(proposal_of(&frames)["status"], "done");
+
+    // Cancelled, nothing is sent: the Station set the change aside already.
+    say(&mut app, "And remember this.", None).await;
+    let third = take(&served, "hq").await;
+    assert!(
+        third.workspace.as_ref().unwrap().exposed,
+        "exposed for good"
+    );
+    assert!(
+        third.message.contains("memory_commit") || third.message.contains("Done"),
+        "she hears how the confirmed change went: {}",
+        third.message
+    );
+    report(
+        &served,
+        "hq",
+        &third,
+        Some(&third.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    set_aside(&served, &third).await;
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
+    let proposal = proposal_of(&frames);
+    app.send(WsMessage::Text(
+        json!({"type": "cancel", "proposal": proposal["id"]})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
+    let frames = receive_until(&mut app, |frame| frame["type"] == "proposal").await;
+    assert_eq!(proposal_of(&frames)["status"], "cancelled");
+    assert!(
+        nothing_for(&served, "hq").await,
+        "a cancelled change is never sent"
+    );
+    assert_eq!(audits(&served, "moneypenny.confirmed").len(), 1);
+}
+
+#[tokio::test]
+async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_member() {
+    let served = served_with(AssistantConfig::default(), Some(workspace_roster())).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Update the handbook.").await;
+    let change = |group: &str| {
+        json!({"group": group, "path": "docs/on-call.md", "content": "On call: Q.\n",
+               "message": "Name who is on call"})
+    };
+
+    // `ops` changes only by proposal.
+    let proposed = call_tool(
+        &served,
+        &job.mcp_token,
+        "propose_shared_change",
+        change("ops"),
+    )
+    .await;
+    assert_eq!(proposed["isError"], false, "{proposed}");
+    assert!(
+        proposed["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Nothing has changed")
+    );
+    assert!(nothing_for(&served, "hq").await);
+    let frames = finish(&served, &mut app, &job).await;
+    let proposal = proposal_of(&frames);
+    assert_eq!(proposal["tool"], "propose_shared_change");
+    assert_eq!(proposal["needs"]["on"], "group:ops");
+    app.send(WsMessage::Text(
+        json!({"type": "confirm", "proposal": proposal["id"]})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
+    let commit = take(&served, "hq").await.commit.unwrap();
+    assert_eq!(commit.kind, COMMIT_SHARED);
+    assert_eq!(commit.repo, "/srv/ops.git");
+    assert_eq!(
+        commit.change.files["docs/on-call.md"].as_deref(),
+        Some("On call: Q.\n")
+    );
+    assert!(
+        commit
+            .message
+            .starts_with("Name who is on call\n\nVia: Moneypenny")
+    );
+
+    // The organisation's repository is written at once, and audited.
+    say(&mut app, "And the org's.", None).await;
+    let second = take(&served, "hq").await;
+    report(
+        &served,
+        "hq",
+        &second,
+        Some(&second.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    let direct = call_tool(
+        &served,
+        &second.mcp_token,
+        "propose_shared_change",
+        change("org"),
+    )
+    .await;
+    assert_eq!(direct["isError"], false, "{direct}");
+    assert!(
+        direct["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("at once")
+    );
+    let commit = take(&served, "hq").await.commit.unwrap();
+    assert_eq!(commit.repo, "/srv/org.git");
+    assert_eq!(audits(&served, "moneypenny.shared.write").len(), 1);
+
+    // A path out of the repository is refused before anything else.
+    let escape = call_tool(
+        &served,
+        &second.mcp_token,
+        "propose_shared_change",
+        json!({"group": "ops", "path": "../x.md", "content": "x", "message": "x"}),
+    )
+    .await;
+    assert_eq!(escape["isError"], true);
+    finish(&served, &mut app, &second).await;
+
+    // A non-member gets a refusal, and nothing.
+    let (mut theirs, viewer) = accepted(&served, &served.viewer, "Update ops.").await;
+    let refused = call_tool(
+        &served,
+        &viewer.mcp_token,
+        "propose_shared_change",
+        change("ops"),
+    )
+    .await;
+    assert_eq!(refused["isError"], true);
+    assert!(
+        refused["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Refused"),
+        "{refused}"
+    );
+    let frames = finish(&served, &mut theirs, &viewer).await;
+    assert!(
+        frames
+            .iter()
+            .all(|frame| frame["type"] != "proposal" && frame["entry"]["role"] != "proposal")
+    );
+    assert!(nothing_for(&served, "hq").await);
 }

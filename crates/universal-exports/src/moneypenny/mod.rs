@@ -7,6 +7,13 @@
 //! the app, and serves her tools on an MCP endpoint of its own. A tool runs as the person
 //! who is chatting, through the same routes and authorization as the app.
 //!
+//! When the roster's `[assistant]` gives people personal repositories, each message names the
+//! person's workspace (their repository, their groups' shared ones, their name for commits).
+//! A memory change the Station sets aside is committed at once in a conversation that has
+//! read nothing others wrote, and is a proposal once it has (a tool in
+//! [`tools::EXPOSING_TOOLS`] answered); a change to a shared repository is a proposal unless
+//! the group's repository is `write = true`.
+//!
 //! Routes: `GET /v1/user/moneypenny` (the app's WebSocket), `POST /v1/moneypenny/mcp` (the
 //! harness's tools, with a token bound to the person and the conversation),
 //! `GET /v1/station/assistant/next` and `POST /v1/station/assistant/reports` (the Stations).
@@ -24,8 +31,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use ai6::{
-    AssistantEvent, AssistantJob, AssistantReport, EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
+    AssistantChange, AssistantCommit, AssistantEvent, AssistantJob, AssistantReport,
+    AssistantSettings, AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED, EVENT_ACCEPTED,
+    EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
+    EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
     MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES,
 };
 use axum::Json;
@@ -201,15 +210,27 @@ struct Desk {
     controlling: HashMap<String, Control>,
 }
 
-/// What a control job asks of a Station's harness.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a control job asks of a Station.
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Control {
     Close,
     Interrupt,
+    /// A commit: a memory change or a shared change, the proposal it carries out when the
+    /// person confirmed one, and what it is, for the note that tells her how it went.
+    Commit {
+        proposal: Option<String>,
+        what: String,
+    },
 }
 
-/// A job that closes or interrupts the harness of `conversation`, sending no message.
-fn control_job(conversation: &Conversation, agent_id: &str, control: Control) -> AssistantJob {
+/// A job that closes or interrupts the harness of `conversation`, or makes `commit`, sending
+/// no message.
+fn control_job(
+    conversation: &Conversation,
+    agent_id: &str,
+    control: &Control,
+    commit: Option<AssistantCommit>,
+) -> AssistantJob {
     AssistantJob {
         job_id: Uuid::new_v4().to_string(),
         conversation_id: conversation.id.clone(),
@@ -221,10 +242,10 @@ fn control_job(conversation: &Conversation, agent_id: &str, control: Control) ->
         mcp_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
         token_expires_at: now() + 60.0,
         session_id: conversation.session_id.clone(),
-        close: control == Control::Close,
-        interrupt: control == Control::Interrupt,
+        close: *control == Control::Close,
+        interrupt: *control == Control::Interrupt,
         workspace: None,
-        commit: None,
+        commit,
     }
 }
 
@@ -240,12 +261,142 @@ impl Desk {
         let Some(station) = conversation.station.clone() else {
             return;
         };
-        let job = control_job(conversation, agent_id, Control::Close);
+        let job = control_job(conversation, agent_id, &Control::Close, None);
         self.tokens
             .retain(|_, grant| grant.conversation_id != conversation_id);
         self.controlling.insert(job.job_id.clone(), Control::Close);
         self.controls.push((station, job));
     }
+
+    /// Queues `commit` of `conversation_id` for `station`; its answer is handled as `control`.
+    fn queue_commit(
+        &mut self,
+        conversation_id: &str,
+        agent_id: &str,
+        station: String,
+        commit: AssistantCommit,
+        control: Control,
+    ) {
+        let Some(conversation) = self.store.conversations.get(conversation_id) else {
+            return;
+        };
+        let job = control_job(conversation, agent_id, &control, Some(commit));
+        self.controlling.insert(job.job_id.clone(), control);
+        self.controls.push((station, job));
+    }
+}
+
+/// The settings of Moneypenny's workspaces: the roster's `[assistant]`, the default without a
+/// roster.
+async fn assistant_settings(gateway: &Gateway) -> Result<AssistantSettings, String> {
+    let Some(source) = gateway.roster.clone() else {
+        return Ok(AssistantSettings::default());
+    };
+    tokio::task::spawn_blocking(move || source.load())
+        .await
+        .map_err(|error| error.to_string())?
+        .map(|snapshot| snapshot.roster.assistant().clone())
+        .map_err(|error| format!("the roster could not be read: {error}"))
+}
+
+/// Where `person`'s conversations keep their work, `None` when the deployment gives nobody a
+/// personal repository; an `Err` says why this person cannot have one.
+fn workspace_for(
+    settings: &AssistantSettings,
+    person: &ai6::Person,
+) -> Result<Option<AssistantWorkspace>, String> {
+    let Some(personal) = settings.personal_repo_for(&person.id)? else {
+        return Ok(None);
+    };
+    let (author_name, author_email) = author_of(person);
+    Ok(Some(AssistantWorkspace {
+        personal,
+        shared: settings
+            .shared_for(&person.groups)
+            .map(|(name, repo)| (name.to_owned(), repo.repo().to_owned()))
+            .collect(),
+        author_name,
+        author_email,
+        exposed: false,
+    }))
+}
+
+/// The name and email `person`'s commits are authored with: the directory's, without control
+/// characters, `<` or `>`; an email under the reserved `.invalid` domain when it has none.
+fn author_of(person: &ai6::Person) -> (String, String) {
+    let printable = |value: &str| -> String {
+        value
+            .chars()
+            .map(|c| {
+                if c.is_control() || matches!(c, '<' | '>') {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .collect::<String>()
+            .trim()
+            .chars()
+            .take(200)
+            .collect()
+    };
+    let name = printable(person.display_name.as_deref().unwrap_or(&person.name));
+    let email = person
+        .email
+        .as_deref()
+        .map(printable)
+        .filter(|email| !email.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}@people.ai6.invalid",
+                ai6::directorates::m::assistant::person_digest(&person.id)
+            )
+        });
+    let name = if name.is_empty() {
+        printable(&person.id)
+    } else {
+        name
+    };
+    (name, email)
+}
+
+/// Settles proposal `id` of `conversation` as done or failed with `result`, and tells her
+/// with the next message.
+fn settle(conversation: &mut Conversation, id: &str, done: bool, result: &str) {
+    let Some(proposal) = conversation
+        .proposals
+        .iter_mut()
+        .find(|proposal| proposal.id == id)
+    else {
+        return;
+    };
+    proposal.status = if done { "done" } else { "failed" };
+    proposal.result = Some(result.to_owned());
+    let shown = proposal.clone();
+    conversation.show_proposal(&shown);
+    conversation.notes.push(format!(
+        "[App: the person confirmed {id} ({}). {}: {result}]",
+        shown.draft.summary,
+        if done { "Done" } else { "It failed" }
+    ));
+}
+
+/// The audit resource of commits to the repositories of the roster's `[assistant]` table.
+const ASSISTANT_AUDIT_RESOURCE: &str = "config:assistant";
+
+/// The commit trailer naming Moneypenny and the conversation.
+fn trailer(conversation_id: &str) -> String {
+    format!("Via: Moneypenny (conversation {conversation_id})")
+}
+
+/// The paths of a change, for a summary.
+fn paths(change: &AssistantChange) -> String {
+    change
+        .files
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Moneypenny's state in one gateway.
@@ -390,6 +541,28 @@ impl Assistant {
         shown: Option<&str>,
     ) -> Result<(), (&'static str, String)> {
         let now = now();
+        // The workspace is the person's, as their own sign-in names them.
+        let bearer = self
+            .desk()
+            .store
+            .owned(conversation_id, person_id)
+            .map(|conversation| conversation.bearer.clone())
+            .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
+        let person = resolve_user(gateway, &bearer).await.map_err(|_| {
+            (
+                "unauthorized",
+                "Sign in again to talk to Moneypenny.".to_owned(),
+            )
+        })?;
+        let workspace = assistant_settings(gateway)
+            .await
+            .and_then(|settings| workspace_for(&settings, &person))
+            .map_err(|reason| {
+                (
+                    "unavailable",
+                    format!("Moneypenny cannot keep a workspace for you: {reason}"),
+                )
+            })?;
         {
             let mut desk = self.desk();
             let conversation = desk
@@ -449,9 +622,13 @@ impl Assistant {
                 session_id: conversation.session_id.clone(),
                 close: false,
                 interrupt: false,
-                workspace: None,
+                workspace: workspace.map(|workspace| AssistantWorkspace {
+                    exposed: conversation.exposed,
+                    ..workspace
+                }),
                 commit: None,
             };
+            conversation.workspace = job.workspace.clone();
             if let Some(text) = shown {
                 conversation.push(
                     Entry {
@@ -656,6 +833,7 @@ impl Assistant {
         }
         let max_entries = self.config.bounds();
         let mut refused = false;
+        let mut notify = false;
         {
             let mut desk = self.desk();
             if let Some(job_id) = &report.job_id
@@ -683,6 +861,18 @@ impl Assistant {
                             at: now(),
                             data: None,
                         },
+                        max_entries,
+                    );
+                }
+                if let Control::Commit { proposal, what } = control
+                    && let Some(conversation) =
+                        desk.store.conversations.get_mut(&report.conversation_id)
+                {
+                    committed(
+                        conversation,
+                        proposal.as_deref(),
+                        &what,
+                        &report,
                         max_entries,
                     );
                 }
@@ -729,20 +919,126 @@ impl Assistant {
             {
                 conversation.session_id = Some(session_id);
             }
+            let mut set_aside = Vec::new();
             for event in report
                 .events
                 .iter()
                 .filter(|event| report.job_id.is_none() || event.kind != EVENT_ACCEPTED)
             {
-                apply(conversation, event, max_entries);
+                match (&event.change, event.kind.as_str()) {
+                    (Some(change), EVENT_MEMORY_CHANGES) => {
+                        set_aside.push((change.clone(), event.text.clone().unwrap_or_default()));
+                    }
+                    _ => apply(conversation, event, max_entries),
+                }
             }
-            let person = conversation.person_id.clone();
-            desk.store.trim_person(&person, self.config.person_bytes);
+            for (change, diff) in set_aside {
+                notify |= self.memory_change(
+                    &mut desk,
+                    &report.conversation_id,
+                    &report.station_id,
+                    change,
+                    &diff,
+                );
+            }
+            if let Some(conversation) = desk.store.conversations.get(&report.conversation_id) {
+                let person = conversation.person_id.clone();
+                desk.store.trim_person(&person, self.config.person_bytes);
+            }
+        }
+        if notify {
+            self.ready.notify_waiters();
         }
         if refused {
             self.place(gateway, &report.conversation_id).await;
         }
         Ok(())
+    }
+
+    /// Handles a memory change a Station set aside for `conversation_id`: in a conversation
+    /// that read others' text it becomes a proposal the person confirms (`memory_commit`) or
+    /// cancels (`memory_discard`: it was set aside already); otherwise `station` is asked to
+    /// commit it at once, and the person sees what was kept. Answers whether a job was
+    /// queued.
+    fn memory_change(
+        &self,
+        desk: &mut Desk,
+        conversation_id: &str,
+        station: &str,
+        change: AssistantChange,
+        diff: &str,
+    ) -> bool {
+        let bounds = self.config.bounds();
+        let Some(conversation) = desk.store.conversations.get_mut(conversation_id) else {
+            return false;
+        };
+        let Some(workspace) = conversation.workspace.clone() else {
+            return false;
+        };
+        if let Err(reason) = change.validate(true) {
+            conversation.push(
+                Entry {
+                    role: Role::Error,
+                    text: format!("Moneypenny's memory change was refused: {reason}."),
+                    at: now(),
+                    data: None,
+                },
+                bounds,
+            );
+            return false;
+        }
+        let paths = paths(&change);
+        let commit = AssistantCommit {
+            kind: COMMIT_MEMORY.to_owned(),
+            repo: workspace.personal.clone(),
+            change,
+            message: format!(
+                "moneypenny: remember {paths}\n\n{}",
+                trailer(conversation_id)
+            ),
+            author_name: workspace.author_name.clone(),
+            author_email: workspace.author_email.clone(),
+        };
+        if conversation.exposed {
+            let mut proposal = commit_proposal(
+                actions::MEMORY_COMMIT,
+                digest(&conversation.bearer),
+                "memory/ of your personal repository".to_owned(),
+                actions::Scope::Resource("your memory".to_owned()),
+                "your confirmation",
+                format!("Remember: {paths}"),
+                commit,
+            );
+            if let Some(body) = proposal.draft.call.body.as_mut() {
+                body["diff"] = json!(diff);
+            }
+            conversation.notes.push(format!(
+                "[App: your memory change ({paths}) waits for the person's confirmation, \
+                 because this conversation read text others wrote.]"
+            ));
+            record_proposal(conversation, proposal, bounds);
+            return false;
+        }
+        conversation.push(
+            Entry {
+                role: Role::Notice,
+                text: format!("Moneypenny is saving to her memory: {paths}."),
+                at: now(),
+                data: Some(json!({"diff": diff})),
+            },
+            bounds,
+        );
+        desk.queue_commit(
+            conversation_id,
+            &self.config.agent_id,
+            station.to_owned(),
+            commit,
+            Control::Commit {
+                proposal: None,
+                what: format!("Saving {paths} to Moneypenny's memory"),
+            },
+        );
+        true
     }
 
     /// The conversation `token` serves, its person and the person's access token, while the
@@ -800,6 +1096,7 @@ impl Assistant {
             created_at: now(),
             session: digest(&granted.bearer),
             result: None,
+            work: None,
         };
         let max_entries = self.config.bounds();
         {
@@ -810,25 +1107,7 @@ impl Assistant {
             else {
                 return tools::Outcome::error("The conversation is gone.");
             };
-            expire_proposals(conversation);
-            while conversation.proposals.len() >= actions::MAX_PROPOSALS {
-                let finished = conversation
-                    .proposals
-                    .iter()
-                    .position(|proposal| proposal.status != "pending")
-                    .unwrap_or(0);
-                conversation.proposals.remove(finished);
-            }
-            conversation.push(
-                Entry {
-                    role: Role::Proposal,
-                    text: summary.clone(),
-                    at: proposal.created_at,
-                    data: Some(proposal.shown()),
-                },
-                max_entries,
-            );
-            conversation.proposals.push(proposal);
+            record_proposal(conversation, proposal, max_entries);
         }
         tools::Outcome {
             text: format!(
@@ -875,6 +1154,11 @@ impl Assistant {
             conversation.show_proposal(&shown);
             shown
         };
+        if let Some(commit) = draft.work.clone() {
+            self.confirm_commit(gateway, conversation_id, person, &draft, commit)
+                .await;
+            return Ok(());
+        }
         let outcome = self
             .execute(gateway, conversation_id, person, token, &draft)
             .await;
@@ -917,6 +1201,193 @@ impl Assistant {
         Ok(())
     }
 
+    /// Audits a confirmed commit proposal, then asks a Station to make the commit; the
+    /// Station's answer settles the proposal ([`Self::report`]). One that cannot be audited
+    /// or sent fails here.
+    async fn confirm_commit(
+        &self,
+        gateway: &Gateway,
+        conversation_id: &str,
+        person: &ai6::Person,
+        proposal: &actions::Proposal,
+        commit: AssistantCommit,
+    ) {
+        let target = format!(
+            "{conversation_id} {} {} {}",
+            proposal.id, proposal.tool, proposal.draft.call.path
+        );
+        let sent = match audit(
+            gateway,
+            person,
+            "moneypenny.confirmed",
+            String::new(),
+            Some(ASSISTANT_AUDIT_RESOURCE.to_owned()),
+            &target,
+        )
+        .await
+        {
+            Ok(()) => self
+                .commit_station(gateway, conversation_id)
+                .await
+                .ok_or_else(|| "no Station is checking in".to_owned()),
+            Err(reason) => Err(reason),
+        };
+        let mut desk = self.desk();
+        match sent {
+            Ok(station) => {
+                desk.queue_commit(
+                    conversation_id,
+                    &self.config.agent_id,
+                    station,
+                    commit,
+                    Control::Commit {
+                        proposal: Some(proposal.id.clone()),
+                        what: proposal.draft.summary.clone(),
+                    },
+                );
+                drop(desk);
+                self.ready.notify_waiters();
+            }
+            Err(reason) => {
+                if let Some(conversation) = desk.store.owned(conversation_id, &person.id) {
+                    settle(conversation, &proposal.id, false, &reason);
+                }
+            }
+        }
+    }
+
+    /// The Station a commit of `conversation_id` goes to: the one running its harness when
+    /// it is healthy, else the first healthy one.
+    async fn commit_station(&self, gateway: &Gateway, conversation_id: &str) -> Option<String> {
+        let preferred = self
+            .desk()
+            .store
+            .conversations
+            .get(conversation_id)
+            .and_then(|conversation| conversation.station.clone());
+        let healthy = healthy_stations(gateway).await;
+        preferred
+            .filter(|station| healthy.contains(station))
+            .or_else(|| healthy.into_iter().next())
+    }
+
+    /// Marks the conversation exposed: a tool answered with text others wrote.
+    pub(crate) fn expose(&self, granted: &Granted) {
+        if let Some(conversation) = self
+            .desk()
+            .store
+            .owned(&granted.conversation_id, &granted.person_id)
+        {
+            conversation.exposed = true;
+        }
+    }
+
+    /// Runs [`actions::SHARED_CHANGE`]: a change to one file of a shared repository of a
+    /// group the person is in, proposed, or sent at once (audited `moneypenny.shared.write`)
+    /// when the deployment lets that group's changes through.
+    pub(crate) async fn propose_shared(
+        &self,
+        gateway: &Gateway,
+        granted: &Granted,
+        input: &Value,
+    ) -> tools::Outcome {
+        let (group, path, content, message) = match actions::shared_change(input) {
+            Ok(change) => change,
+            Err(outcome) => return outcome,
+        };
+        let Ok(person) = resolve_user(gateway, &granted.bearer).await else {
+            return tools::Outcome::error("The person's sign-in has ended; nothing was proposed.");
+        };
+        let settings = match assistant_settings(gateway).await {
+            Ok(settings) => settings,
+            Err(reason) => return tools::Outcome::error(format!("Nothing was proposed: {reason}")),
+        };
+        let Some(shared) = settings.shared_named(group, &person.groups) else {
+            return tools::Outcome::error(format!(
+                "Refused: the person is not a member of {group:?}, or it shares no repository, \
+                 so nothing was proposed. Tell them so; do not try another way."
+            ));
+        };
+        let (author_name, author_email) = author_of(&person);
+        let commit = AssistantCommit {
+            kind: COMMIT_SHARED.to_owned(),
+            repo: shared.repo().to_owned(),
+            change: AssistantChange::new(std::collections::BTreeMap::from([(
+                path.to_owned(),
+                Some(content.to_owned()),
+            )])),
+            message: format!("{message}\n\n{}", trailer(&granted.conversation_id)),
+            author_name,
+            author_email,
+        };
+        let summary = format!("Write {path} in {group}'s shared repository: {message}");
+        if shared.write() {
+            let target = format!("{} {group} {path}", granted.conversation_id);
+            if let Err(reason) = audit(
+                gateway,
+                &person,
+                "moneypenny.shared.write",
+                String::new(),
+                Some(ASSISTANT_AUDIT_RESOURCE.to_owned()),
+                &target,
+            )
+            .await
+            {
+                return tools::Outcome::error(format!("Nothing was written: {reason}."));
+            }
+            let Some(station) = self.commit_station(gateway, &granted.conversation_id).await else {
+                return tools::Outcome::error("Nothing was written: no Station is checking in.");
+            };
+            let mut desk = self.desk();
+            desk.queue_commit(
+                &granted.conversation_id,
+                &self.config.agent_id,
+                station,
+                commit,
+                Control::Commit {
+                    proposal: None,
+                    what: summary,
+                },
+            );
+            drop(desk);
+            self.ready.notify_waiters();
+            return tools::Outcome {
+                text: format!(
+                    "Sent to be committed to {group}'s repository at once: the deployment lets \
+                     {group}'s changes through without a confirmation. You will be told how it \
+                     went."
+                ),
+                is_error: false,
+            };
+        }
+        let proposal = commit_proposal(
+            actions::SHARED_CHANGE,
+            digest(&granted.bearer),
+            format!("{group} shared repository: {path}"),
+            actions::Scope::Resource(format!("group:{group}")),
+            "membership",
+            summary.clone(),
+            commit,
+        );
+        let id = proposal.id.clone();
+        let bounds = self.config.bounds();
+        let mut desk = self.desk();
+        let Some(conversation) = desk
+            .store
+            .owned(&granted.conversation_id, &granted.person_id)
+        else {
+            return tools::Outcome::error("The conversation is gone.");
+        };
+        record_proposal(conversation, proposal, bounds);
+        tools::Outcome {
+            text: format!(
+                "Proposed as {id}: {summary}. Nothing has changed. The person confirms or \
+                 cancels it in the app; you will be told which."
+            ),
+            is_error: false,
+        }
+    }
+
     /// Audits, then sends, a confirmed proposal's request as the person; the text is what
     /// AI6 answered, wrapped as data, or why it did not run.
     async fn execute(
@@ -927,34 +1398,24 @@ impl Assistant {
         token: &str,
         proposal: &actions::Proposal,
     ) -> Result<String, String> {
-        let registry = gateway
-            .registry
-            .clone()
-            .ok_or("this gateway keeps no audit log, so it ran nothing")?;
         let (operation, resource) = match &proposal.draft.scope {
             actions::Scope::Operation(operation) => (operation.clone(), None),
             actions::Scope::Resource(resource) => (String::new(), Some(resource.clone())),
         };
-        let audit = ai6::AuditRecord {
-            id: Uuid::new_v4().to_string(),
-            actor: person.id.clone(),
-            action: "moneypenny.confirmed".to_owned(),
+        let target = format!(
+            "{conversation_id} {} {} {}",
+            proposal.id, proposal.tool, proposal.draft.call.path
+        );
+        // Recorded before it runs: a confirmation that cannot be audited is not carried out.
+        audit(
+            gateway,
+            person,
+            "moneypenny.confirmed",
             operation,
             resource,
-            target: cut(
-                &format!(
-                    "{conversation_id} {} {} {}",
-                    proposal.id, proposal.tool, proposal.draft.call.path
-                ),
-                512,
-            ),
-            at: now(),
-        };
-        // Recorded before it runs: a confirmation that cannot be audited is not carried out.
-        tokio::task::spawn_blocking(move || registry.record_audit(&audit))
-            .await
-            .map_err(|_| "it could not be audited, so it did not run".to_owned())?
-            .map_err(|_| "it could not be audited, so it did not run".to_owned())?;
+            &target,
+        )
+        .await?;
         match tools::route(gateway, token, &proposal.draft.call).await {
             Ok((status, value)) if status.is_success() => Ok(format!(
                 "AI6 answered {}: {}",
@@ -1106,7 +1567,12 @@ impl Assistant {
             stopped(conversation, bounds);
             return Ok(true);
         }
-        let job = control_job(conversation, &self.config.agent_id, Control::Interrupt);
+        let job = control_job(
+            conversation,
+            &self.config.agent_id,
+            &Control::Interrupt,
+            None,
+        );
         let asked = desk
             .controls
             .iter()
@@ -1133,6 +1599,94 @@ impl Assistant {
             .or_insert_with(|| (Instant::now(), 0));
         *calls += 1;
         *calls <= limit
+    }
+}
+
+/// Records `action` by `person` in the audit log; `Err` says that nothing may run.
+async fn audit(
+    gateway: &Gateway,
+    person: &ai6::Person,
+    action: &str,
+    operation: String,
+    resource: Option<String>,
+    target: &str,
+) -> Result<(), String> {
+    let registry = gateway
+        .registry
+        .clone()
+        .ok_or("this gateway keeps no audit log, so it ran nothing")?;
+    let record = ai6::AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor: person.id.clone(),
+        action: action.to_owned(),
+        operation,
+        resource,
+        target: cut(target, 512),
+        at: now(),
+    };
+    tokio::task::spawn_blocking(move || registry.record_audit(&record))
+        .await
+        .map_err(|_| "it could not be audited, so it did not run".to_owned())?
+        .map_err(|_| "it could not be audited, so it did not run".to_owned())
+}
+
+/// Adds `proposal` to `conversation`, after expired ones are marked and room is made, and
+/// shows it.
+fn record_proposal(conversation: &mut Conversation, proposal: actions::Proposal, bounds: Bounds) {
+    expire_proposals(conversation);
+    while conversation.proposals.len() >= actions::MAX_PROPOSALS {
+        let finished = conversation
+            .proposals
+            .iter()
+            .position(|proposal| proposal.status != "pending")
+            .unwrap_or(0);
+        conversation.proposals.remove(finished);
+    }
+    conversation.push(
+        Entry {
+            role: Role::Proposal,
+            text: proposal.draft.summary.clone(),
+            at: proposal.created_at,
+            data: Some(proposal.shown()),
+        },
+        bounds,
+    );
+    conversation.proposals.push(proposal);
+}
+
+/// A proposal whose confirmation has a Station make `commit`: `request` describes the commit
+/// for the person (its message, every file's new text), `needs` what it rests on.
+fn commit_proposal(
+    tool: &'static str,
+    session: String,
+    target: String,
+    scope: actions::Scope,
+    needs: &'static str,
+    summary: String,
+    commit: AssistantCommit,
+) -> actions::Proposal {
+    actions::Proposal {
+        id: format!("proposal-{}", Uuid::new_v4().simple()),
+        tool,
+        draft: actions::Draft {
+            call: tools::Call {
+                method: axum::http::Method::from_bytes(b"COMMIT")
+                    .unwrap_or(axum::http::Method::POST),
+                path: target,
+                body: Some(json!({
+                    "message": commit.message,
+                    "files": commit.change.files,
+                })),
+            },
+            scope,
+            action: needs,
+            summary,
+        },
+        status: "pending",
+        created_at: now(),
+        session,
+        result: None,
+        work: Some(commit),
     }
 }
 
@@ -1281,6 +1835,11 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: B
             conversation.push(entry(Role::Error, what), max_entries);
             conversation.set_busy(false);
         }
+        // What she and the person should know about her workspace.
+        EVENT_NOTICE if !text.trim().is_empty() => {
+            conversation.notes.push(format!("[Station: {text}]"));
+            conversation.push(entry(Role::Notice, text), max_entries);
+        }
         // Only the answer being given can be the one stopped; a later message is not.
         EVENT_INTERRUPTED if conversation.busy && conversation.pending.is_none() => {
             stopped(conversation, max_entries);
@@ -1304,6 +1863,40 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: B
             conversation.set_busy(false);
         }
         _ => {}
+    }
+}
+
+/// Records a Station's answer to a commit job: an entry for the person, then the proposal it
+/// carried out settled, or a note telling Moneypenny with her next message.
+fn committed(
+    conversation: &mut Conversation,
+    proposal: Option<&str>,
+    what: &str,
+    report: &AssistantReport,
+    bounds: Bounds,
+) {
+    let answer = report.events.first();
+    let done = answer.is_some_and(|event| event.kind == EVENT_ACCEPTED);
+    let text = answer
+        .and_then(|event| event.text.clone())
+        .unwrap_or_default();
+    let line = if done {
+        format!("{what}: {}.", or_unknown(&text))
+    } else {
+        format!("{what} failed: {}.", or_unknown(&text))
+    };
+    conversation.push(
+        Entry {
+            role: if done { Role::Notice } else { Role::Error },
+            text: line.clone(),
+            at: now(),
+            data: None,
+        },
+        bounds,
+    );
+    match proposal {
+        Some(id) => settle(conversation, id, done, or_unknown(&text)),
+        None => conversation.notes.push(format!("[Station: {line}]")),
     }
 }
 

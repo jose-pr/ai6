@@ -63,6 +63,79 @@ pub(crate) struct Proposal {
     /// SHA-256 of the access token of the session it was proposed in.
     pub(crate) session: String,
     pub(crate) result: Option<String>,
+    /// A commit a Station makes once the person confirms, in place of `draft.call`, which then
+    /// only describes it.
+    pub(crate) work: Option<ai6::AssistantCommit>,
+}
+
+/// The proposal of a memory change her conversation set aside: confirmed, a Station commits
+/// it (`memory_commit`); cancelled, it is discarded (`memory_discard`).
+pub(crate) const MEMORY_COMMIT: &str = "memory_commit";
+
+/// The write tool that proposes writing one file of a shared repository.
+pub(crate) const SHARED_CHANGE: &str = "propose_shared_change";
+
+pub(crate) const SHARED_CHANGE_DESCRIPTION: &str = "Propose writing one file of a repository the person's directory group shares (shared/<group>/ \
+     in your workspace, or shared/org/), committed under the person's name. Nothing changes \
+     until the person confirms it in the app, unless the deployment lets that group's changes \
+     through at once. Refused when the person is not in the group.";
+
+/// The input of [`SHARED_CHANGE`].
+pub(crate) fn shared_change_schema() -> Value {
+    object(
+        &[
+            (
+                "group",
+                text("The directory group whose repository it is, or \"org\"."),
+            ),
+            (
+                "path",
+                text("The file, relative to the repository's root (docs/on-call.md)."),
+            ),
+            ("content", text("The file's whole new text.")),
+            (
+                "message",
+                text("The commit's subject: what changes and why."),
+            ),
+        ],
+        &["group", "path", "content", "message"],
+    )
+}
+
+/// Checks [`SHARED_CHANGE`]'s input: the schema, no hidden character, a repository path, at
+/// most [`ai6::MAX_ASSISTANT_CHANGE_BYTES`] of text and a one-line subject of 1 to 200
+/// characters. Answers group, path, content and subject.
+pub(crate) fn shared_change(input: &Value) -> Result<(&str, &str, &str, &str), Outcome> {
+    let invalid = |problem: String| Outcome::error(format!("INVALID_INPUT: {problem}"));
+    check(&shared_change_schema(), input, "input").map_err(invalid)?;
+    hidden_characters(input, "input").map_err(invalid)?;
+    let field = |name| input[name].as_str().unwrap_or_default();
+    let (group, path, content, message) = (
+        field("group"),
+        field("path"),
+        field("content"),
+        field("message"),
+    );
+    if !ai6::directorates::m::assistant::file_safe(group) {
+        return Err(invalid(format!("{group:?} is not a group")));
+    }
+    if !ai6::directorates::section_00::assistant::repository_path(path) {
+        return Err(invalid(format!(
+            "{path:?} is not a file path inside a repository"
+        )));
+    }
+    if content.len() > ai6::MAX_ASSISTANT_CHANGE_BYTES {
+        return Err(invalid(format!(
+            "content is longer than {} bytes",
+            ai6::MAX_ASSISTANT_CHANGE_BYTES
+        )));
+    }
+    if message.trim().is_empty() || message.chars().count() > 200 || message.contains('\n') {
+        return Err(invalid(
+            "message is one line of 1 to 200 characters".to_owned(),
+        ));
+    }
+    Ok((group, path, content, message))
 }
 
 impl Proposal {

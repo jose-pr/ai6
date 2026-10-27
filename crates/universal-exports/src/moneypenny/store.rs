@@ -9,7 +9,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
-use ai6::AssistantJob;
+use ai6::{AssistantJob, AssistantWorkspace};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -91,6 +91,11 @@ pub(crate) struct Conversation {
     pub(crate) token: Option<(String, String, f64)>,
     /// The size of `entries`, as the app is sent them, in bytes.
     pub(crate) bytes: usize,
+    /// A tool answered with text others wrote; for the conversation's life, a memory change
+    /// waits for the person.
+    pub(crate) exposed: bool,
+    /// The workspace the last job named, for the commits its reports lead to.
+    pub(crate) workspace: Option<AssistantWorkspace>,
 }
 
 /// How much one conversation keeps.
@@ -115,6 +120,7 @@ impl fmt::Debug for Conversation {
             .field("entries", &self.entries.len())
             .field("station", &self.station)
             .field("busy", &self.busy)
+            .field("exposed", &self.exposed)
             .field("bearer", &"[REDACTED]")
             .finish_non_exhaustive()
     }
@@ -140,6 +146,8 @@ impl Conversation {
             heard_at: now,
             token: None,
             bytes: 0,
+            exposed: false,
+            workspace: None,
         }
     }
 
