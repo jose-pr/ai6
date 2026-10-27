@@ -7,7 +7,7 @@
 //!
 //! ```toml
 //! [assistant]
-//! personal_repo = "/srv/moneypenny/{person}.git"
+//! personal_repo = "/srv/moneypenny/{person_digest}.git"
 //! allow_elevated = false
 //!
 //! [assistant.shared.ops]

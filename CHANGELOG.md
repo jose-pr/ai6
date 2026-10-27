@@ -21,9 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (conversation <id>)` trailer, replaying once and falling back to
   `moneypenny/<conversation digest>`. Changes to `memory/` are set aside and reported
   (`memory_changes`): committed at once in a conversation that has read nothing others wrote,
-  a `memory_commit` proposal once it has. `propose_shared_change` proposes a change to a
-  group's shared repository for its members, or commits it at once (audited
-  `moneypenny.shared.write`) when the group's repository has `write = true`.
+  a `memory_commit` proposal once it has, and a confirmed one commits exactly the confirmed
+  files. `propose_shared_change` proposes a change to a group's shared repository for its
+  members, or commits it at once (audited `moneypenny.shared.write`) when the group's
+  repository has `write = true`. `{person}` takes lowercase identifiers only;
+  `{person_digest}` works for all. A Station takes only the repositories its own roster gives
+  the job's `person_id`. Her repositories' git directories live beside her workspace, every
+  Git command the Station runs on them has hooks and filesystem monitors off, and paths with
+  a name starting with `.` are neither written by her nor committed. A starting desk removes
+  what desks that are gone left in the temporary directory.
+- One record of a Moneypenny conversation's exposure, `Conversation.exposed` in Universal
+  Exports, carried to the Station as `AssistantJob::exposed`: every read tool sets it but
+  `field_guide`, `profile` and `station_settings`; so does a workspace with a shared
+  repository, from the first message; and the Station sets it (`POST
+  /v1/station/assistant/exposure`, read with `GET`) when she reads files while her repository
+  records files written while exposed (`.moneypenny/outside-text`).
 - An assistant mode names the directories she may write (`AssistantMode::files`) and a
   context file (`AssistantMode::context_file`): Claude Code gets its file tools under
   `--permission-mode dontAsk` with `Edit(/<dir>/**)` rules and the file through
