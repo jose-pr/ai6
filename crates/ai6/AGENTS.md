@@ -398,7 +398,8 @@ roster has the default settings. `RepoKind::of` refuses empty values, control ch
 remote helpers (`::`) and schemes other than `file`, `ssh`, `git`, `http`, `https`; a local
 path or `file://` is `Local` (made bare on first use), the rest and `user@host:path` are
 `Remote` (must exist). `personal_repo_for` fills `{person_digest}` always and `{person}` only
-for an identifier of 1-64 letters, digits, `.`, `_`, `@`, `-` not starting with `.`; others are
+for an identifier of 1-64 lowercase letters, digits, `.`, `_`, `@`, `-` not starting with `.`
+(so identifiers differing only in case never share a repository); others are
 refused, naming `{person_digest}`. `validate` refuses other placeholders, group names that are
 not `file_safe` or are `org`, and repositories `RepoKind::of` refuses. `shared_for` yields the
 groups' repositories the person is a member of, then `org`.

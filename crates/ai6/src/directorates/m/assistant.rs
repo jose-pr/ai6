@@ -234,8 +234,9 @@ impl AssistantSettings {
     /// # Errors
     ///
     /// A message when the template names [`PERSON_PLACEHOLDER`] and `person` is not 1 to 64
-    /// letters, digits, `.`, `_`, `@` and `-` starting with something other than `.`, which
-    /// [`PERSON_DIGEST_PLACEHOLDER`] avoids.
+    /// lowercase letters, digits, `.`, `_`, `@` and `-` starting with something other than `.`
+    /// (two identifiers differing only in case would share a repository on a case-insensitive
+    /// filesystem), which [`PERSON_DIGEST_PLACEHOLDER`] avoids.
     pub fn personal_repo_for(&self, person: &str) -> Result<Option<String>, String> {
         let Some(template) = &self.personal_repo else {
             return Ok(None);
@@ -313,13 +314,14 @@ pub fn person_digest(person: &str) -> String {
         .collect()
 }
 
-/// Whether `person` may stand in a path or URL as it is.
+/// Whether `person` may stand in a path or URL as it is: lowercase only, so no two
+/// identifiers name one repository on a case-insensitive filesystem.
 fn person_safe(person: &str) -> bool {
     (1..=64).contains(&person.len())
         && !person.starts_with('.')
-        && person
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '@' | '-'))
+        && person.chars().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '@' | '-')
+        })
 }
 
 /// Whether `name` is a safe directory name: 1 to 64 of letters, digits, `.`, `-` and `_`,
@@ -352,7 +354,16 @@ mod tests {
             plain.personal_repo_for("q.branch@sis"),
             Ok(Some("/srv/mp/q.branch@sis.git".to_owned()))
         );
-        for unsafe_id in ["../root", ".hidden", "a/b", "a b", "", &"x".repeat(65)] {
+        for unsafe_id in [
+            "../root",
+            ".hidden",
+            "a/b",
+            "a b",
+            "",
+            &"x".repeat(65),
+            "Alice",
+            "q.Branch",
+        ] {
             let refused = plain.personal_repo_for(unsafe_id).unwrap_err();
             assert!(
                 refused.contains("{person_digest}"),

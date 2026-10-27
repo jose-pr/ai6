@@ -152,7 +152,7 @@ roster has no `[assistant]` table yet):
 
 ```toml
 [assistant]
-personal_repo = "/srv/moneypenny/{person}.git"   # or {person_digest}
+personal_repo = "/srv/moneypenny/{person_digest}.git"   # or {person}
 allow_elevated = false
 
 [assistant.shared.ops]          # a directory group
@@ -163,9 +163,11 @@ write = false
 repo = "https://git.example/org/handbook.git"
 ```
 
-`{person}` is the person's identifier when it is 1 to 64 letters, digits, `.`, `_`, `@` and
-`-` not starting with `.`; any other identifier is refused, and `{person_digest}` (16 hex
-digits of its SHA-256) always works. A local path or `file://` repository is created, empty
+`{person_digest}` (16 hex digits of the SHA-256 of the person's identifier) works for every
+identifier and is the one to use. `{person}` is the identifier itself, and only when it is 1
+to 64 lowercase letters, digits, `.`, `_`, `@` and `-` not starting with `.`: any other
+identifier is refused, so two people whose identifiers differ only in case never share a
+repository on a case-insensitive filesystem. A local path or `file://` repository is created, empty
 and bare, the first time it is used; `ssh://`, `https://` and `user@host:` repositories are
 reached with the Station user's Git credentials and must exist. Universal Exports reads the
 table from the roster it serves (`--roster`) and sends each message with the person's
