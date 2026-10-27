@@ -218,7 +218,7 @@ pub(super) struct Desk {
     live: Arc<Mutex<BTreeMap<String, Live>>>,
     known: Arc<Mutex<BTreeMap<String, String>>>,
     /// Where the conversations' working directories go, made at the first start.
-    areas: Mutex<Option<PathBuf>>,
+    areas: Mutex<Option<Root>>,
     /// Opens the safe houses of the workspaces' repositories.
     houses: Houses,
     elevated: ElevationProbe,
@@ -748,8 +748,8 @@ impl Desk {
             .lock()
             .map_err(|_| "assistant lock failed".to_owned())?;
         let root = match &*areas {
-            Some(root) => root.clone(),
-            None => areas.insert(new_root()?).clone(),
+            Some(root) => root.path.clone(),
+            None => areas.insert(new_root()?).path.clone(),
         };
         let area = root.join(conversation_digest(conversation));
         std::fs::create_dir_all(&area)
@@ -1039,24 +1039,82 @@ fn conversation_digest(conversation: &str) -> String {
 
 impl Drop for Desk {
     /// Removes the directory of working directories once its harnesses have removed theirs; a
-    /// harness still closing leaves it behind.
+    /// harness still closing leaves it behind, for [`sweep_stale_roots`].
     fn drop(&mut self) {
         if let Ok(mut areas) = self.areas.lock()
             && let Some(root) = areas.take()
         {
-            let _ = std::fs::remove_dir(root);
+            let path = root.path.clone();
+            drop(root);
+            let _ = std::fs::remove_file(path.join(ROOT_LOCK));
+            let _ = std::fs::remove_dir(path);
         }
     }
 }
 
-/// A new empty directory under the temporary directory, named at random and readable by the
-/// Station's user only, for the conversations' working directories.
-fn new_root() -> Result<PathBuf, String> {
-    Ok(tempfile::Builder::new()
+/// The file in a desk's directory of working directories that the desk holds locked while it
+/// runs.
+const ROOT_LOCK: &str = "desk.lock";
+/// How old a directory of working directories without a lock file must be to be swept.
+const UNLOCKED_STALE: Duration = Duration::from_secs(3_600);
+
+/// A desk's directory of working directories, and the lock that says the desk still runs.
+struct Root {
+    path: PathBuf,
+    _lock: std::fs::File,
+}
+
+/// A new empty directory under the temporary directory, named at random, readable by the
+/// Station's user only and locked, for the conversations' working directories.
+fn new_root() -> Result<Root, String> {
+    use fs2::FileExt;
+    let path = tempfile::Builder::new()
         .prefix(AREA_PREFIX)
         .tempdir()
         .map_err(|error| format!("assistant working directory not made: {error}"))?
-        .keep())
+        .keep();
+    let lock = std::fs::File::create(path.join(ROOT_LOCK))
+        .and_then(|lock| lock.try_lock_exclusive().map(|()| lock))
+        .map_err(|error| format!("assistant working directory not locked: {error}"))?;
+    Ok(Root { path, _lock: lock })
+}
+
+/// Removes what desks that are gone left in `temp`: their directories of working directories,
+/// with the conversations' directories, context files (her memory, inlined) and git
+/// directories in them. A directory whose lock another desk holds is left alone, and so is one
+/// without a lock file younger than [`UNLOCKED_STALE`]. Answers how many were removed.
+fn sweep_stale_roots(temp: &Path) -> usize {
+    use fs2::FileExt;
+    let Ok(entries) = std::fs::read_dir(temp) else {
+        return 0;
+    };
+    let mut swept = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ours = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(AREA_PREFIX));
+        if !ours || !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let stale = match std::fs::OpenOptions::new()
+            .write(true)
+            .open(path.join(ROOT_LOCK))
+        {
+            Ok(lock) => lock.try_lock_exclusive().is_ok(),
+            Err(_) => entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age >= UNLOCKED_STALE),
+        };
+        if stale && std::fs::remove_dir_all(&path).is_ok() {
+            swept += 1;
+        }
+    }
+    swept
 }
 
 /// The file beside a conversation's directory that holds its harness's standing context:
@@ -1157,6 +1215,10 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     let Some(publisher) = &state.publisher else {
         return Ok(None);
     };
+    let swept = sweep_stale_roots(&std::env::temp_dir());
+    if swept > 0 {
+        eprintln!("ai6: removed {swept} assistant directories desks that are gone left behind");
+    }
     let (origin, token) = publisher.link();
     let mcp_url = origin
         .join(ASSISTANT_MCP_PATH)
@@ -1544,8 +1606,10 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             self.desk.close_all();
-            if let Some(areas) = self.desk.areas.lock().unwrap().take() {
-                let _ = std::fs::remove_dir_all(areas);
+            if let Some(root) = self.desk.areas.lock().unwrap().take() {
+                let path = root.path.clone();
+                drop(root);
+                let _ = std::fs::remove_dir_all(path);
             }
         }
     }
@@ -2157,7 +2221,7 @@ mod tests {
     #[test]
     fn a_working_directory_still_in_use_for_a_moment_is_removed_once_free() {
         let root = new_root().unwrap();
-        let area = root.join("0123456789abcdef0123456789abcdef");
+        let area = root.path.join("0123456789abcdef0123456789abcdef");
         std::fs::create_dir_all(&area).unwrap();
         #[cfg(windows)]
         let mut holder = std::process::Command::new("ping")
@@ -2175,7 +2239,46 @@ mod tests {
         remove_area(&area.to_string_lossy());
         assert!(!area.exists());
         holder.wait().unwrap();
-        std::fs::remove_dir(root).unwrap();
+        let path = root.path.clone();
+        drop(root);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn a_starting_desk_sweeps_what_gone_desks_left_and_nothing_a_live_one_holds() {
+        use fs2::FileExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = |name: &str| {
+            let path = temp.path().join(format!("{AREA_PREFIX}{name}"));
+            let area = path.join("0123456789abcdef0123456789abcdef");
+            std::fs::create_dir_all(&area).unwrap();
+            std::fs::write(
+                path.join("0123456789abcdef0123456789abcdef.context.md"),
+                "her memory",
+            )
+            .unwrap();
+            path
+        };
+        let gone = root("gone");
+        std::fs::File::create(gone.join(ROOT_LOCK)).unwrap();
+        let live = root("live");
+        let held = std::fs::File::create(live.join(ROOT_LOCK)).unwrap();
+        held.try_lock_exclusive().unwrap();
+        let unlocked = root("young");
+        let other = temp.path().join("someone-else");
+        std::fs::create_dir_all(&other).unwrap();
+
+        assert_eq!(sweep_stale_roots(temp.path()), 1);
+        assert!(!gone.exists(), "its context file went with it");
+        assert!(
+            live.join("0123456789abcdef0123456789abcdef.context.md")
+                .exists()
+        );
+        assert!(unlocked.exists(), "too young to judge without a lock");
+        assert!(other.exists(), "not a desk's");
+        drop(held);
+        assert_eq!(sweep_stale_roots(temp.path()), 1, "once its desk lets go");
+        assert!(!live.exists());
     }
 
     /// The memory change a conversation's events set aside.
