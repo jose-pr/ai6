@@ -90,8 +90,8 @@ pub use directorates::q::provision::{
     Requirements, StepStatus, Unmet, probe_resources,
 };
 pub use directorates::q::safehouse::{
-    Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseExports, SafeHouseInfo,
-    SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
+    Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseExports,
+    SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
 };
 pub use directorates::q::terminal::{
     AgentTerminal, DEFAULT_PIPE, DEFAULT_TERMINAL, ExitInfo, HarnessStdio, READ_TIMED_OUT, Spec,
