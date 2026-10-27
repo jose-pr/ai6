@@ -8,6 +8,7 @@ pub struct ai6_agent_claude::ClaudeHandler
 impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_claude::ClaudeHandler
 pub fn ai6_agent_claude::ClaudeHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_claude::ClaudeHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl core::convert::TryFrom<ai6_agent_claude::ClaudeConfig> for ai6_agent_claude::ClaudeHandler
 pub type ai6_agent_claude::ClaudeHandler::Error = guatiao::library::kind::ProviderError
 pub fn ai6_agent_claude::ClaudeHandler::try_from(ai6_agent_claude::ClaudeConfig) -> core::result::Result<Self, Self::Error>

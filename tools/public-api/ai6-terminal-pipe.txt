@@ -1,0 +1,23 @@
+pub mod ai6_terminal_pipe
+pub enum ai6_terminal_pipe::StderrMode
+pub ai6_terminal_pipe::StderrMode::Drop
+pub ai6_terminal_pipe::StderrMode::Merge
+pub struct ai6_terminal_pipe::Pipe
+impl ai6_terminal_pipe::Pipe
+pub fn ai6_terminal_pipe::Pipe::new(ai6_terminal_pipe::PipeConfig) -> Self
+impl ai6::directorates::q::terminal::Terminal for ai6_terminal_pipe::Pipe
+pub fn ai6_terminal_pipe::Pipe::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_terminal_pipe::Pipe::tty(&self) -> bool
+impl core::convert::TryFrom<ai6_terminal_pipe::PipeConfig> for ai6_terminal_pipe::Pipe
+pub type ai6_terminal_pipe::Pipe::Error = guatiao::library::kind::ProviderError
+pub fn ai6_terminal_pipe::Pipe::try_from(ai6_terminal_pipe::PipeConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_terminal_pipe::Pipe
+pub const ai6_terminal_pipe::Pipe::KINDS: &'static [&'static str]
+pub fn ai6_terminal_pipe::Pipe::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub struct ai6_terminal_pipe::PipeConfig
+pub ai6_terminal_pipe::PipeConfig::stderr: ai6_terminal_pipe::StderrMode
+impl core::convert::TryFrom<ai6_terminal_pipe::PipeConfig> for ai6_terminal_pipe::Pipe
+pub type ai6_terminal_pipe::Pipe::Error = guatiao::library::kind::ProviderError
+pub fn ai6_terminal_pipe::Pipe::try_from(ai6_terminal_pipe::PipeConfig) -> core::result::Result<Self, Self::Error>
+#[no_mangle] pub static ai6_terminal_pipe::guatiao_declares: [u8; 19]
+#[no_mangle] pub unsafe c fn ai6_terminal_pipe::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

@@ -16,6 +16,7 @@ $packages = @(
     'ai6-agent-claude',
     'ai6-agent-codex',
     'ai6-terminal-pty',
+    'ai6-terminal-pipe',
     'ai6-transport-local',
     'ai6-transport-ssh',
     'ai6-transport-adb',

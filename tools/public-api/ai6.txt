@@ -1311,12 +1311,23 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
 pub mod ai6::directorates::q::terminal
 pub use ai6::directorates::q::terminal::guatiao
+pub enum ai6::directorates::q::terminal::HarnessStdio
+pub ai6::directorates::q::terminal::HarnessStdio::Json
+pub ai6::directorates::q::terminal::HarnessStdio::Terminal
 pub enum ai6::directorates::q::terminal::StreamLine
 pub ai6::directorates::q::terminal::StreamLine::Json
 pub ai6::directorates::q::terminal::StreamLine::Json::rebuilt: bool
 pub ai6::directorates::q::terminal::StreamLine::Json::text: alloc::vec::Vec<u8>
 pub ai6::directorates::q::terminal::StreamLine::Json::value: serde_json::value::Value
 pub ai6::directorates::q::terminal::StreamLine::Text(alloc::string::String)
+#[non_exhaustive] pub enum ai6::directorates::q::terminal::TerminalRefusal
+pub ai6::directorates::q::terminal::TerminalRefusal::NoPipe
+pub ai6::directorates::q::terminal::TerminalRefusal::NoneAvailable
+pub ai6::directorates::q::terminal::TerminalRefusal::PinnedHasTerminal
+pub ai6::directorates::q::terminal::TerminalRefusal::PinnedHasTerminal::provider: alloc::string::String
+impl core::error::Error for ai6::directorates::q::terminal::TerminalRefusal
+impl core::fmt::Display for ai6::directorates::q::terminal::TerminalRefusal
+pub fn ai6::directorates::q::terminal::TerminalRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::q::terminal::ExitInfo
 pub ai6::directorates::q::terminal::ExitInfo::code: core::option::Option<i64>
 pub ai6::directorates::q::terminal::ExitInfo::running: bool
@@ -1339,6 +1350,11 @@ pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::box
 impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub struct ai6::directorates::q::terminal::TerminalOffer
+pub ai6::directorates::q::terminal::TerminalOffer::id: alloc::string::String
+pub ai6::directorates::q::terminal::TerminalOffer::tty: bool
+pub const ai6::directorates::q::terminal::DEFAULT_PIPE: &str
+pub const ai6::directorates::q::terminal::DEFAULT_TERMINAL: &str
 pub const ai6::directorates::q::terminal::MAX_JSON_LINE: usize
 pub const ai6::directorates::q::terminal::READ_TIMED_OUT: i64
 pub const ai6::directorates::q::terminal::STREAM_COLS: u16
@@ -1353,10 +1369,13 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal:
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 pub trait ai6::directorates::q::terminal::Terminal: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::terminal::Terminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::Terminal::tty(&self) -> bool
 impl ai6::directorates::q::terminal::Terminal for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>::tty(&self) -> bool
 impl ai6::directorates::q::terminal::Terminal for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>::tty(&self) -> bool
 pub trait ai6::directorates::q::terminal::TerminalSession: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::terminal::TerminalSession::exit_status(&self, i64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::terminal::TerminalSession::exit_status_in(&self, i64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -1375,6 +1394,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal:
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::read(&self, &mut [u8], i64) -> core::result::Result<i64, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::resize(&self, i64, i64) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::TerminalSession>::write(&self, &[u8]) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6::directorates::q::terminal::TerminalOffer], core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::directorates::q::terminal::strip_controls(&[u8]) -> alloc::vec::Vec<u8>
 pub mod ai6::directorates::q::transport
 pub mod ai6::directorates::q::transport::contract
@@ -3736,12 +3756,15 @@ pub const ai6::directorates::section_00::agent::LIMIT_EVENT: &str
 pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub trait ai6::directorates::section_00::agent::AgentSession: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::section_00::agent::AgentSession::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentSession::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
@@ -3914,6 +3937,7 @@ pub fn ai6::station::plugins::Plugins::authenticator(&self, &str, core::option::
 pub fn ai6::station::plugins::Plugins::authenticators(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::authorizer(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn coqui_access::kind::Authorizer>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::authorizers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::choose_terminal(&self, ai6::directorates::q::terminal::HarnessStdio, core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::station::plugins::Plugins::directories(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::directory(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn coqui_access::kind::Directory>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::handler(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::station::plugins::PluginBuildError>
@@ -3926,6 +3950,7 @@ pub fn ai6::station::plugins::Plugins::scan_with(&[std::path::PathBuf], &ai6::st
 pub fn ai6::station::plugins::Plugins::source(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::sources::Source>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::sources(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::terminal(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::terminal_offers(&self) -> alloc::vec::Vec<ai6::directorates::q::terminal::TerminalOffer>
 pub fn ai6::station::plugins::Plugins::terminals(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::theater_provider(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::ephemeral::TheaterProvider>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::theater_providers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
@@ -4041,7 +4066,6 @@ pub const ai6::station::server::DEFAULT_CONFIG_POLL: core::time::Duration
 pub const ai6::station::server::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::station::server::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
 pub const ai6::station::server::DEFAULT_RESOURCES_EVERY: core::time::Duration
-pub const ai6::station::server::DEFAULT_TERMINAL: &str
 pub async fn ai6::station::server::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_capacity<F>(core::net::socket_addr::SocketAddr, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_config_dir<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], &std::path::Path, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
@@ -4189,6 +4213,9 @@ pub ai6::Fire::Queued
 #[non_exhaustive] pub enum ai6::GreenInkPreset
 pub ai6::GreenInkPreset::Licensed
 pub ai6::GreenInkPreset::Strict
+pub enum ai6::HarnessStdio
+pub ai6::HarnessStdio::Json
+pub ai6::HarnessStdio::Terminal
 #[non_exhaustive] pub enum ai6::IncidentKind
 pub ai6::IncidentKind::Blown
 pub ai6::IncidentKind::Budget
@@ -4381,6 +4408,14 @@ pub ai6::StepStatus::Ok
 pub ai6::StepStatus::WouldChange
 impl ai6::directorates::q::provision::StepStatus
 pub fn ai6::directorates::q::provision::StepStatus::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::TerminalRefusal
+pub ai6::TerminalRefusal::NoPipe
+pub ai6::TerminalRefusal::NoneAvailable
+pub ai6::TerminalRefusal::PinnedHasTerminal
+pub ai6::TerminalRefusal::PinnedHasTerminal::provider: alloc::string::String
+impl core::error::Error for ai6::directorates::q::terminal::TerminalRefusal
+impl core::fmt::Display for ai6::directorates::q::terminal::TerminalRefusal
+pub fn ai6::directorates::q::terminal::TerminalRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum ai6::TheaterAccess
 pub ai6::TheaterAccess::Ephemeral(ai6::directorates::m::theaters::EphemeralAccess)
 pub ai6::TheaterAccess::Local
@@ -6273,6 +6308,9 @@ pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::box
 impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub struct ai6::TerminalOffer
+pub ai6::TerminalOffer::id: alloc::string::String
+pub ai6::TerminalOffer::tty: bool
 #[non_exhaustive] pub struct ai6::Theater
 pub ai6::Theater::access: ai6::directorates::m::theaters::TheaterAccess
 pub ai6::Theater::agents: ai6::directorates::m::theaters::AgentMode
@@ -6554,6 +6592,7 @@ pub const ai6::DEFAULT_MAX_OUTPUT: u64
 pub const ai6::DEFAULT_MAX_PER_HOUR: u32
 pub const ai6::DEFAULT_MAX_PER_SOURCE_PER_HOUR: u32
 pub const ai6::DEFAULT_MIN_FREE_MEMORY_MB: u64
+pub const ai6::DEFAULT_PIPE: &str
 pub const ai6::DEFAULT_PROTECTED: [&str; 4]
 pub const ai6::DEFAULT_READ_LIMIT: u64
 pub const ai6::DEFAULT_REQUEST_TTL: core::time::Duration
@@ -6664,12 +6703,15 @@ pub fn ai6::directorates::registry::store::FileRegistry::withdraw_account(&self,
 pub trait ai6::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub trait ai6::AgentRecordStore
 pub fn ai6::AgentRecordStore::agent_record(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::agent_records::AgentRecord>>
 pub fn ai6::AgentRecordStore::agent_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::agent_records::AgentRecord>>
@@ -7063,10 +7105,13 @@ pub fn ai6::directorates::registry::store::FileRegistry::station_settings(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
 pub trait ai6::Terminal: core::marker::Send + core::marker::Sync
 pub fn ai6::Terminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::Terminal::tty(&self) -> bool
 impl ai6::directorates::q::terminal::Terminal for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::terminal::Terminal>::tty(&self) -> bool
 impl ai6::directorates::q::terminal::Terminal for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::Terminal>::tty(&self) -> bool
 pub trait ai6::TerminalSession: core::marker::Send + core::marker::Sync
 pub fn ai6::TerminalSession::exit_status(&self, i64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::TerminalSession::exit_status_in(&self, i64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -7212,6 +7257,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &st
 pub fn ai6::cable_source(&str) -> alloc::string::String
 pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
 pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
+pub fn ai6::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6::directorates::q::terminal::TerminalOffer], core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::classify(&str, &dyn ai6::directorates::m::approvals::Repository) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub fn ai6::clearance_at_least(&str, &str) -> bool
