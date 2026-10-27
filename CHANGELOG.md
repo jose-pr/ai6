@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Moneypenny's answer can be stopped: the app's **Stop** button, in place of Send while she
+  answers, sends `{"type":"interrupt"}` on the chat socket, which acts only on the socket's
+  own conversation and is a no-op (`stopping: false`) when nothing is being answered. A
+  message no Station has accepted is withdrawn; otherwise Universal Exports queues an
+  interrupt job (`AssistantJob::interrupt`) for the Station running her harness, whose
+  desk calls the handler's interrupt (stream-json for Claude Code, `turn/interrupt` for
+  Codex) and reports the turn as `interrupted` (`EVENT_INTERRUPTED`). The conversation
+  shows a `notice` entry, the harness stays up for the next message, and she is told the
+  person stopped her.
+- `POST /v1/user/operations/{operation}/missions/{mission}/actions` answers `404` for a
+  Mission nothing knows (no Session record, brief lease, queued brief of the Operation or
+  board entry) before anything is audited or queued; the Headquarters Station takes only
+  known Missions no other Station holds.
+- Windows exit codes are reported as signed 32-bit values by the `pipe` and `pty` terminals
+  (`0xFFFFFFFF` is `-1`), and the Claude Code and Codex handlers show a negative one with its
+  NTSTATUS hex (`exited with code -1073741510 (0xC000013A)`, through
+  `ai6::directorates::q::terminal::exit_code_text`).
+- The Station logs the handler and terminal provider of each harness it starts or resumes,
+  for Missions and Moneypenny alike (`ai6: Mission "<id>": started the claude harness in the
+  pipe terminal`).
 - The Codex tool check sees what an app-server thread is sent: it keeps `incremental_tools`
   on (`ai6_agent_codex::KEPT_FEATURES`), without which `codex debug prompt-input` renders no
   tool while the thread is still sent `functions.exec` and `functions.wait`. Codex 0.164 sends

@@ -159,6 +159,15 @@ her views and her proposals (with **Confirm** and **Cancel**) appear in the pane
 Conversations are kept per person (20 each, for a week) in Universal Exports' memory;
 reopening one shows what was said. One message is answered at a time.
 
+While she answers, **Stop** takes the place of Send. It sends `{"type":"interrupt"}` on the
+socket, which only ever reaches the person's own conversation. A message no Station has
+taken up yet is simply withdrawn; otherwise Universal Exports asks the Station running her
+harness to interrupt it, and that Station's handler stops the turn the way the harness
+expects (a stream-json interrupt request for Claude Code, `turn/interrupt` for Codex). The
+conversation then shows "You stopped Moneypenny's answer.", her harness stays up for the next
+message, and she is told with that message that she was stopped. Stop with nothing being
+answered does nothing.
+
 ## Settings
 
 | Setting | Default | Where |

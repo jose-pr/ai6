@@ -64,6 +64,8 @@ curl -f -X POST "$AI6_EXPORTS_URL/v1/user/operations/G/missions/mission-007/acti
   -d '{"action":"resume","message":"The review is unblocked; carry on.","idempotency_key":"resume-1"}'
 ```
 
+A Mission Universal Exports knows nothing of (no Session record, brief lease, queued brief of
+the Operation or board entry) is refused `404`, before anything is audited. Otherwise
 Universal Exports audits the request (`mission.cancel`, `mission.retry`, `mission.resume`,
 `session.interrupt`) and queues the control for the Station holding the Mission's latest
 Session record; failing that, the Station holding its brief's lease; failing that, the

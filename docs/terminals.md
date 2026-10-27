@@ -22,6 +22,13 @@ start with the reason, never silently replaced. A field runner chooses the same 
 providers it loads, under its own `terminal` setting or the Station's. A resumed Session
 reuses the terminal it started with.
 
+The Station's log names the handler and terminal of every harness it starts or resumes, for
+Missions and Moneypenny alike (`ai6: Mission "mission-007": started the claude harness in the
+pipe terminal`); a Mission's Session record keeps both as well. A program's exit code is
+reported as a signed 32-bit number on every platform, so a Windows status such as
+`0xC000013A` reads `-1073741510`, which the Claude Code and Codex handlers show with its hex
+(`exited with code -1073741510 (0xC000013A)`).
+
 ## Shipped providers
 
 | Provider | Platforms | Terminal | Behavior |
