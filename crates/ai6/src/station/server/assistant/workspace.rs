@@ -436,7 +436,7 @@ fn stat_tree(root: &Path) -> BTreeMap<String, (u64, Option<SystemTime>)> {
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name == ".git" || name == MEMORY {
+        if name.starts_with('.') || name == MEMORY {
             continue;
         }
         walk(&entry.path(), &name, &mut |path, file| {
@@ -461,6 +461,10 @@ fn walk(path: &Path, name: &str, visit: &mut dyn FnMut(String, &Path)) {
     {
         for entry in entries.flatten() {
             let child = entry.file_name().to_string_lossy().into_owned();
+            // Hidden paths are never saved, so they are never part of her work or memory.
+            if child.starts_with('.') {
+                continue;
+            }
             walk(&entry.path(), &format!("{name}/{child}"), visit);
         }
     }

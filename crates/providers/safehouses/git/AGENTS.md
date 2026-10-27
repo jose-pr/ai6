@@ -65,7 +65,8 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   untouched. Answers the remote, branch, commit and base. An in-place session has no branch
   and is refused.
 - `checkpoint(CheckpointSpec { branch: Some(b), fallback, .. })`, meant for a clone: commits
-  everything in the working directory itself (`git add --all`, `git commit --no-verify` with
+  everything in the working directory itself but paths with a name starting with `.` (`git add
+  --all -- . :(exclude,glob)**/.* :(exclude,glob)**/.*/**`, `git commit --no-verify` with
   `commit.gpgsign=false`, author and committer `spec.author_*`), so `HEAD` moves, then
   `git push <remote> HEAD:refs/heads/<b>` without force. A refused push fetches `<b>`,
   rebases onto it and pushes once more; when that fails too (a conflict aborts the rebase),

@@ -3348,7 +3348,8 @@ directory with the `AGENTS.md` text. The harness's mode is `moneypenny()` with `
 `personal/memory/`; when the turn's `completed` arrives, and again after the harness closes,
 it puts that copy back, reports what she changed there as one `memory_changes` event (before
 `completed`; a change beyond the bounds, or a file that is not UTF-8, is dropped with a
-`notice`), and commits the rest of `personal/` to `main` as the person, message
+`notice`), and commits the rest of `personal/` (paths with a name starting with `.` left out,
+in her memory too) to `main` as the person, message
 `moneypenny: update <paths>` (or `save her work`) with the trailer `Via: Moneypenny
 (conversation <id>)`; work `main` refuses twice lands on `moneypenny/<conversation digest>`
 with a `notice`. A `commit` job of `COMMIT_MEMORY` for a conversation running here is written

@@ -2332,6 +2332,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hidden_files_in_her_repository_are_never_saved_or_set_aside() {
+        let fixture = scripted(true, IDLE, Script::Works, Script::Answers).with_git();
+        let people = tempfile::tempdir().unwrap();
+        let bare = people.path().join("eve.git");
+        fixture
+            .desk
+            .handle(working("c-d", "Take notes.", workspace(&bare)))
+            .await;
+        until(|| kinds(&fixture, "c-d").contains(&EVENT_TEXT.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let personal = PathBuf::from(&start.working_directory).join("personal");
+        std::fs::write(personal.join(".gitattributes"), "* filter=lfs diff=lfs\n").unwrap();
+        std::fs::write(personal.join(".gitmodules"), "[submodule \"x\"]\n").unwrap();
+        std::fs::create_dir_all(personal.join("notes")).unwrap();
+        std::fs::write(personal.join("notes").join(".hidden"), "hidden").unwrap();
+        std::fs::write(personal.join("memory").join(".evil.md"), "evil").unwrap();
+        std::fs::write(personal.join("notes").join("a.md"), "a\n").unwrap();
+        fixture.desk.handle(interruption("c-d", "done")).await;
+        until(|| kinds(&fixture, "c-d").contains(&EVENT_INTERRUPTED.to_owned())).await;
+        let files = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+        assert!(files.contains("notes/a.md"), "{files}");
+        assert!(!files.contains("/.") && !files.starts_with('.'), "{files}");
+        assert!(
+            !kinds(&fixture, "c-d").contains(&EVENT_MEMORY_CHANGES.to_owned()),
+            "a hidden memory file is no memory change"
+        );
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
     async fn a_memory_change_nobody_lets_through_never_reaches_the_repository() {
         let fixture = scripted(true, IDLE, Script::Writes, Script::Answers).with_git();
         let people = tempfile::tempdir().unwrap();

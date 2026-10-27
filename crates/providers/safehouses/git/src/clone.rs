@@ -38,6 +38,21 @@ fn hardened(git_dir: &Path) -> Vec<String> {
     ]
 }
 
+/// Pathspecs leaving out of a save every path with a name starting with `.`
+/// (`.gitattributes`, `.gitmodules`, `.lfsconfig`, `notes/.x`): files that change how Git or
+/// its tools treat the repository are never committed unseen.
+const HIDDEN_FILES: &str = ":(exclude,glob)**/.*";
+const HIDDEN_DIRECTORIES: &str = ":(exclude,glob)**/.*/**";
+
+/// Whether the index holds anything `HEAD` does not.
+fn staged(repo: &Repo<'_>) -> Result<bool, Failure> {
+    let tree = repo.run(&["write-tree"], &[])?.trim().to_owned();
+    match repo.run(&["rev-parse", "--verify", "HEAD^{tree}"], &[]) {
+        Ok(head) => Ok(head.trim() != tree),
+        Err(_) => Ok(!repo.run(&["ls-files"], &[])?.trim().is_empty()),
+    }
+}
+
 /// A clone's git directory and working tree, and how a command runs against them.
 pub(crate) struct Repo<'a> {
     git_dir: &'a Path,
@@ -194,7 +209,8 @@ impl Worktree {
         Repo::new(self.git_dir.as_deref().unwrap_or(&self.path), &self.path)
     }
 
-    /// Commits everything in the working directory as `spec`'s author, then pushes `HEAD` to
+    /// Commits everything in the working directory but hidden paths ([`HIDDEN_FILES`]) as
+    /// `spec`'s author, then pushes `HEAD` to
     /// `branch` of `spec.remote` without force. A refused push is tried once more after the
     /// work is replayed on the remote branch; if that fails too, `HEAD` goes to
     /// `spec.fallback` (forced, since only this work uses it) or the refusal is the error.
@@ -222,8 +238,10 @@ impl Worktree {
         let run = |args: &[&str]| repo.run(args, &env);
         let status = run(&["status", "--porcelain", "--untracked-files=all"])?;
         if !status.trim().is_empty() {
-            run(&["add", "--all"])?;
-            run(&["commit", "--quiet", "--no-verify", "-m", &spec.message])?;
+            run(&["add", "--all", "--", ".", HIDDEN_FILES, HIDDEN_DIRECTORIES])?;
+            if staged(&repo)? {
+                run(&["commit", "--quiet", "--no-verify", "-m", &spec.message])?;
+            }
         }
         let saved = |landed: &str| -> Result<SafeHouseCheckpoint, Failure> {
             Ok(SafeHouseCheckpoint {
@@ -672,6 +690,34 @@ mod tests {
         assert_eq!(run(&bare, &["show", "main:notes.md"]), "notes\n");
         house.discard().unwrap();
         assert!(!house.path.exists() && !git_dir.exists());
+    }
+
+    #[test]
+    fn hidden_paths_are_never_committed_by_a_save() {
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("eve.git");
+        let house = Worktree::open(&spec(
+            &bare.to_string_lossy(),
+            &root.path().join("personal"),
+            true,
+        ))
+        .unwrap();
+        fs::write(house.path.join(".gitattributes"), "* filter=lfs\n").unwrap();
+        fs::write(house.path.join(".lfsconfig"), "[lfs]\n").unwrap();
+        fs::create_dir_all(house.path.join("notes").join(".cache")).unwrap();
+        fs::write(house.path.join("notes").join(".x"), "x").unwrap();
+        fs::write(house.path.join("notes").join(".cache").join("y"), "y").unwrap();
+        let nothing = house
+            .save(&save_spec("moneypenny: hidden only"), "main")
+            .unwrap();
+        assert_eq!(nothing.commit, "", "only hidden paths: nothing to save");
+        fs::write(house.path.join("notes").join("a.md"), "a\n").unwrap();
+        house.save(&save_spec("moneypenny: notes"), "main").unwrap();
+        assert_eq!(
+            run(&bare, &["ls-tree", "-r", "--name-only", "main"]).trim(),
+            "notes/a.md"
+        );
+        house.discard().unwrap();
     }
 
     #[test]
