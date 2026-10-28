@@ -22,6 +22,7 @@ use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status, ToValue};
 use serde_json::Value;
 
+use crate::sandbox::SCRIPT_FEATURES;
 use crate::{internal, refuse};
 
 /// The environment variable that chooses what a failed tool check does: `strict` (the
@@ -227,12 +228,20 @@ fn collect(list: &[Value], prefix: &str, tools: &mut Vec<String>) -> Option<()> 
     Some(())
 }
 
+/// The tools of Codex's code mode: `exec` runs JavaScript that calls the thread's other tools
+/// (its MCP servers' and the command tools) and `wait` waits on it. A scripts thread is offered
+/// these alone.
+pub(crate) const CODE_MODE_TOOLS: [&str; 2] = ["functions.exec", "functions.wait"];
+
 /// Judges the offered tools against the MCP servers a thread may use: each tool must belong
-/// to one of them (`mcp__<server>.<tool>`) and each must offer at least one. `Ok(None)` passes;
-/// `Ok(Some(found))` is a failure a `warn` check starts with; `Err` refuses.
+/// to one of them (`mcp__<server>.<tool>`) and each must offer at least one. With `scripts`,
+/// [`CODE_MODE_TOOLS`] are allowed too, and a server need not offer a tool directly, since
+/// code mode nests every tool in `exec`. `Ok(None)` passes; `Ok(Some(found))` is a failure a
+/// `warn` check starts with; `Err` refuses.
 pub(crate) fn judge(
     offered: Option<&[String]>,
     servers: &[String],
+    scripts: bool,
     check: ToolCheck,
 ) -> Result<Option<String>, String> {
     let found = match offered {
@@ -241,10 +250,11 @@ pub(crate) fn judge(
         }
         Some(offered) => {
             let allowed = |tool: &str| {
-                servers.iter().any(|server| {
-                    tool.strip_prefix(&format!("mcp__{server}."))
-                        .is_some_and(|rest| !rest.is_empty())
-                })
+                (scripts && CODE_MODE_TOOLS.contains(&tool))
+                    || servers.iter().any(|server| {
+                        tool.strip_prefix(&format!("mcp__{server}."))
+                            .is_some_and(|rest| !rest.is_empty())
+                    })
             };
             let extra = offered
                 .iter()
@@ -253,6 +263,7 @@ pub(crate) fn judge(
                 .collect::<BTreeSet<_>>();
             let missing = servers
                 .iter()
+                .filter(|_| !scripts)
                 .filter(|server| {
                     !offered
                         .iter()
@@ -304,7 +315,7 @@ fn refuse_if_strict(found: &[String], check: ToolCheck) -> Result<(), ProviderEr
 }
 
 /// The environment variables that decide which Codex runs and which configuration it reads.
-const CONFIG_ENVIRONMENT: [&str; 7] = [
+pub(crate) const CONFIG_ENVIRONMENT: [&str; 7] = [
     "CODEX_HOME",
     "HOME",
     "USERPROFILE",
@@ -315,7 +326,7 @@ const CONFIG_ENVIRONMENT: [&str; 7] = [
 ];
 
 /// What a feature list depends on but the working directory, which only names the project
-/// marked untrusted.
+/// marked untrusted and the paths of the scripts' sandbox profile.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct FeaturesKey {
     executable: String,
@@ -323,6 +334,7 @@ struct FeaturesKey {
     overrides: Vec<String>,
     environment: Vec<(String, Option<String>)>,
     check: ToolCheck,
+    scripts: bool,
 }
 
 /// The features and MCP servers last switched off for a key, as `-c` overrides, and what a
@@ -345,6 +357,10 @@ pub(crate) struct Probe<'a> {
     pub(crate) model: Option<&'a str>,
     /// The MCP servers the thread may use.
     pub(crate) servers: &'a [String],
+    /// Whether the thread runs scripts in Codex's sandbox: it keeps
+    /// [`SCRIPT_FEATURES`](crate::sandbox::SCRIPT_FEATURES) and may be offered
+    /// [`CODE_MODE_TOOLS`].
+    pub(crate) scripts: bool,
 }
 
 impl Probe<'_> {
@@ -366,7 +382,9 @@ impl Probe<'_> {
             overrides: self
                 .overrides
                 .iter()
-                .filter(|value| !value.starts_with("projects="))
+                .filter(|value| {
+                    !value.starts_with("projects=") && !value.starts_with("permissions.")
+                })
                 .cloned()
                 .collect(),
             environment: CONFIG_ENVIRONMENT
@@ -374,6 +392,7 @@ impl Probe<'_> {
                 .map(|name| ((*name).to_owned(), self.environment.get(*name).cloned()))
                 .collect(),
             check,
+            scripts: self.scripts,
         };
         let cached = feature_lists().lock().ok().and_then(|lists| {
             lists
@@ -399,7 +418,7 @@ impl Probe<'_> {
             argv.extend(["-c".to_owned(), format!("model={model}")]);
         }
         let offered = offered_tools(&self.capture(&argv)?);
-        if let Some(found) = judge(offered.as_deref(), self.servers, check)
+        if let Some(found) = judge(offered.as_deref(), self.servers, self.scripts, check)
             .map_err(|reason| refuse(Status::GUATIAO_ERR_UNSUPPORTED, reason))?
         {
             weakenings.push(found);
@@ -434,6 +453,7 @@ impl Probe<'_> {
             .unwrap_or_default()
             .into_iter()
             .filter(|name| !KEPT_FEATURES.contains(&name.as_str()))
+            .filter(|name| !(self.scripts && SCRIPT_FEATURES.contains(&name.as_str())))
             .flat_map(|name| ["-c".to_owned(), format!("features.{name}=false")])
             .collect::<Vec<_>>();
         let listed =
@@ -551,7 +571,7 @@ mod tests {
         ] {
             assert!(offered.iter().any(|t| t == tool), "{tool}: {offered:?}");
         }
-        let refused = judge(Some(&offered), &[], ToolCheck::Strict).unwrap_err();
+        let refused = judge(Some(&offered), &[], false, ToolCheck::Strict).unwrap_err();
         assert!(refused.contains("functions.exec") && refused.contains("mcp__cua_repl.js"));
     }
 
@@ -563,17 +583,17 @@ mod tests {
             ["functions.exec", "functions.wait"],
             "request_user_input is switched off; exec and wait come with the model"
         );
-        let refused = judge(Some(&offered), &[], ToolCheck::Strict).unwrap_err();
+        let refused = judge(Some(&offered), &[], false, ToolCheck::Strict).unwrap_err();
         assert!(
             refused.contains("functions.exec, functions.wait"),
             "{refused}"
         );
-        let weakening = judge(Some(&offered), &[], ToolCheck::Warn)
+        let weakening = judge(Some(&offered), &[], false, ToolCheck::Warn)
             .unwrap()
             .unwrap();
         assert!(weakening.contains("functions.exec"), "{weakening}");
         assert_eq!(
-            judge(Some(&[]), &[], ToolCheck::Strict),
+            judge(Some(&[]), &[], false, ToolCheck::Strict),
             Ok(None),
             "an answer-only thread passes with no tool at all"
         );
@@ -582,7 +602,7 @@ mod tests {
     #[test]
     fn an_assistant_whose_server_codex_does_not_offer_is_refused() {
         let offered = offered_tools(ASSISTANT.as_bytes()).unwrap();
-        let refused = judge(Some(&offered), &moneypenny(), ToolCheck::Strict).unwrap_err();
+        let refused = judge(Some(&offered), &moneypenny(), false, ToolCheck::Strict).unwrap_err();
         assert!(
             refused.contains("functions.exec, functions.wait")
                 && refused.contains("no tool of MCP server moneypenny"),
@@ -666,7 +686,7 @@ mod tests {
     fn extra_tools_are_refused_and_named_or_started_as_a_weakening() {
         let offered = offered_tools(CODE_MODE.as_bytes()).unwrap();
         assert!(offered.iter().any(|tool| tool == "mcp__moneypenny.board"));
-        let refused = judge(Some(&offered), &moneypenny(), ToolCheck::Strict).unwrap_err();
+        let refused = judge(Some(&offered), &moneypenny(), false, ToolCheck::Strict).unwrap_err();
         assert!(
             refused.contains("functions.exec, functions.request_user_input"),
             "{refused}"
@@ -675,10 +695,42 @@ mod tests {
             !refused.contains("board"),
             "the server's own tool is allowed"
         );
-        let weakening = judge(Some(&offered), &moneypenny(), ToolCheck::Warn)
+        let weakening = judge(Some(&offered), &moneypenny(), false, ToolCheck::Warn)
             .unwrap()
             .unwrap();
         assert!(weakening.contains("functions.exec"), "{weakening}");
+    }
+
+    /// `codex debug prompt-input` of Codex 0.164.0 for an assistant with scripts: the kept
+    /// script features, the sandbox profile and one MCP server, `moneypenny`.
+    const SCRIPTS: &str = include_str!("../tests/fixtures/codex-0.164.0/prompt-input-scripts.json");
+
+    #[test]
+    fn a_scripts_thread_is_offered_code_mode_alone_and_passes_only_with_scripts() {
+        let offered = offered_tools(SCRIPTS.as_bytes()).unwrap();
+        assert_eq!(
+            offered, CODE_MODE_TOOLS,
+            "the server's tools are nested in exec"
+        );
+        assert_eq!(
+            judge(Some(&offered), &moneypenny(), true, ToolCheck::Strict),
+            Ok(None)
+        );
+        let refused = judge(Some(&offered), &moneypenny(), false, ToolCheck::Strict).unwrap_err();
+        assert!(
+            refused.contains("functions.exec, functions.wait"),
+            "{refused}"
+        );
+        let more = [
+            offered.clone(),
+            vec!["functions.request_user_input".to_owned()],
+        ]
+        .concat();
+        let refused = judge(Some(&more), &moneypenny(), true, ToolCheck::Strict).unwrap_err();
+        assert!(
+            refused.contains("functions.request_user_input") && !refused.contains("exec"),
+            "only code mode is admitted: {refused}"
+        );
     }
 
     #[test]
@@ -688,11 +740,11 @@ mod tests {
             "mcp__moneypenny.missions".to_owned(),
         ];
         assert_eq!(
-            judge(Some(&offered), &moneypenny(), ToolCheck::Strict),
+            judge(Some(&offered), &moneypenny(), false, ToolCheck::Strict),
             Ok(None)
         );
         let lookalike = vec!["mcp__moneypenny_evil.board".to_owned()];
-        assert!(judge(Some(&lookalike), &moneypenny(), ToolCheck::Strict).is_err());
+        assert!(judge(Some(&lookalike), &moneypenny(), false, ToolCheck::Strict).is_err());
     }
 
     #[test]
@@ -712,8 +764,8 @@ mod tests {
         ] {
             let offered = offered_tools(output.as_bytes());
             assert_eq!(offered, None, "{output}");
-            assert!(judge(None, &[], ToolCheck::Strict).is_err());
-            assert!(judge(None, &[], ToolCheck::Warn).unwrap().is_some());
+            assert!(judge(None, &[], false, ToolCheck::Strict).is_err());
+            assert!(judge(None, &[], false, ToolCheck::Warn).unwrap().is_some());
         }
     }
 

@@ -1,0 +1,156 @@
+[
+  {
+    "type": "additional_tools",
+    "id": "at_01a182db-8636-7521-b762-13944836f61d",
+    "role": "developer",
+    "tools": [
+      {
+        "type": "namespace",
+        "name": "functions",
+        "description": "",
+        "tools": [
+          {
+            "type": "custom",
+            "name": "exec",
+            "description": "Run JavaScript code to orchestrate/compose tool calls\n- Evaluates the provided JavaScript code in a fresh V8 isolate as ",
+            "format": {
+              "type": "grammar",
+              "syntax": "lark",
+              "definition": "\nstart: pragma_source | plain_source\npragma_source: PRAGMA_LINE NEWLINE SOURCE\nplain_source: SOURCE\n\nPRAGMA_LINE: /[ \\t]*\\/\\/ @exec:[^\\r\\n]*/\nNEWLINE: /\\r?\\n/\nSOURCE: /[\\s\\S]+/\n"
+            }
+          },
+          {
+            "type": "function",
+            "name": "wait",
+            "description": "Waits on a yielded `exec` cell and returns new output or completion.\n- Use `wait` only after `exec` returns `Script runn",
+            "strict": false,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "cell_id": {
+                  "type": "string",
+                  "description": "Identifier of the running exec cell."
+                },
+                "max_tokens": {
+                  "type": "number",
+                  "description": "Output token budget for this wait call. Defaults to 10000 tokens."
+                },
+                "terminate": {
+                  "type": "boolean",
+                  "description": "True stops the running exec cell; false or omitted waits for output."
+                },
+                "yield_time_ms": {
+                  "type": "number",
+                  "description": "Wait before yielding more output. Defaults to 10000 ms."
+                }
+              },
+              "required": [
+                "cell_id"
+              ],
+              "additionalProperties": false
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "id": "msg_01a182db-8636-7521-b762-13a6443156f2",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "[message text replaced]"
+      }
+    ],
+    "internal_chat_message_metadata_passthrough": {
+      "turn_id": "auto-compact-0",
+      "create_time": 1793196787.2542608,
+      "content_item_kinds": [
+        "model.base_instructions"
+      ],
+      "content_item_metadata": [
+        {
+          "provenance": {
+            "type": "harness",
+            "hook": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "message",
+    "id": "msg_01a182db-8636-7521-b762-13bdc680eb15",
+    "role": "developer",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "[message text replaced]"
+      },
+      {
+        "type": "input_text",
+        "text": "[message text replaced]"
+      },
+      {
+        "type": "input_text",
+        "text": "[message text replaced]"
+      }
+    ],
+    "internal_chat_message_metadata_passthrough": {
+      "turn_id": "auto-compact-0",
+      "create_time": 1793196787.2542615,
+      "content_item_kinds": [
+        "host_skills.instructions",
+        "permissions.instructions",
+        "collaboration_mode.instructions"
+      ],
+      "content_item_metadata": [
+        {
+          "provenance": {
+            "type": "skills"
+          }
+        },
+        {
+          "provenance": {
+            "type": "harness",
+            "hook": false
+          }
+        },
+        {
+          "provenance": {
+            "type": "harness",
+            "hook": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "message",
+    "id": "msg_01a182db-8636-7521-b762-13caf9f622e8",
+    "role": "user",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "[message text replaced]"
+      }
+    ],
+    "internal_chat_message_metadata_passthrough": {
+      "turn_id": "auto-compact-0",
+      "create_time": 1793196787.2542617,
+      "content_item_kinds": [
+        "environments.environment_context"
+      ],
+      "content_item_metadata": [
+        {
+          "provenance": {
+            "type": "harness",
+            "hook": false
+          }
+        }
+      ]
+    }
+  }
+]

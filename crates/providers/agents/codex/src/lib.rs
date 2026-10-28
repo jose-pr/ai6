@@ -5,6 +5,7 @@
 
 ai6::guatiao::providers!(CodexHandler);
 
+mod sandbox;
 mod tools;
 
 pub use tools::{KEPT_FEATURES, TOOL_CHECK_ENV};
@@ -71,6 +72,20 @@ impl AgentHandler for CodexHandler {
         Ok(ai6::HarnessStdio::Json)
     }
 
+    /// Asks Codex to run a command in the sandbox an assistant's scripts would get (`codex
+    /// sandbox -P`, no model involved; on Windows MXC), with `environment`; the answer stands
+    /// 15 minutes per executable and configuration environment.
+    fn assistant_scripts(
+        &self,
+        environment: std::collections::BTreeMap<String, String>,
+    ) -> Result<Option<String>, ProviderError> {
+        Ok(sandbox::unavailable(&self.config.executable, &environment))
+    }
+
+    fn assistant_skills(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(NO_SKILL_LIST.to_owned()))
+    }
+
     fn start(
         &self,
         request: AgentStart,
@@ -99,10 +114,12 @@ impl AgentHandler for CodexHandler {
         )?;
         let gate = station_gate(&request.environment)
             .filter(|_| !(request.answer_only || request.assistant.is_some()));
+        let scripts = Scripts::of(request.assistant.as_ref());
         let mut session = CodexSession::new(process, request.effort)
             .with_gate(gate)
             .with_weakening(weakening)
-            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
+            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()))
+            .reporting_commands(scripts != Scripts::None);
         session.request(
             "initialize",
             json!({
@@ -121,6 +138,7 @@ impl AgentHandler for CodexHandler {
             &mut params,
             &request.environment,
             request.answer_only || request.assistant.is_some(),
+            scripts,
         );
         let response = match session.request("thread/resume", params, Duration::from_secs(30)) {
             Ok(response) => response,
@@ -162,6 +180,11 @@ impl CodexHandler {
         terminal: Object<dyn AgentTerminal>,
         gate: Option<Gate>,
     ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
+        let scripts = Scripts::of(request.assistant.as_ref());
+        let mut instructions = request.initial_context.clone();
+        if let Some(mode) = &request.assistant {
+            instructions.extend(assistant_instructions(mode, scripts)?);
+        }
         let (process, weakening) = spawn(
             terminal,
             &self.config.executable,
@@ -178,7 +201,8 @@ impl CodexHandler {
         let mut session = CodexSession::new(process, request.effort)
             .with_gate(gate)
             .with_weakening(weakening)
-            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
+            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()))
+            .reporting_commands(scripts != Scripts::None);
         session.request(
             "initialize",
             json!({
@@ -193,12 +217,13 @@ impl CodexHandler {
             &mut params,
             &request.environment,
             request.answer_only || request.assistant.is_some(),
+            scripts,
         );
         if let Some(model) = request.model {
             params["model"] = json!(model);
         }
-        if !request.initial_context.is_empty() {
-            params["developerInstructions"] = json!(request.initial_context.join("\n\n"));
+        if !instructions.is_empty() {
+            params["developerInstructions"] = json!(instructions.join("\n\n"));
         }
         let response = session.request("thread/start", params, Duration::from_secs(30))?;
         let thread_id = response
@@ -217,18 +242,116 @@ impl CodexHandler {
     }
 }
 
-/// The MCP servers a restricted (answer-only or assistant) thread may call, `None` for a thread
-/// that is not restricted.
-fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<Vec<String>> {
+/// What a restricted (answer-only or assistant) thread may use besides answering.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Restriction {
+    /// The MCP servers whose tools it may call.
+    servers: Vec<String>,
+    /// Whether it may run commands: an assistant with scripts.
+    commands: bool,
+    /// Whether it may change files through Codex's own patch tool: an assistant with scripts
+    /// and directories to write.
+    file_changes: bool,
+}
+
+/// What a restricted thread may use, `None` for a thread that is not restricted.
+fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<Restriction> {
     match assistant {
-        Some(mode) => Some(
-            mode.mcp_servers
-                .iter()
-                .map(|server| server.name.clone())
-                .collect(),
-        ),
-        None => answer_only.then(Vec::new),
+        Some(mode) => {
+            let commands = Scripts::of(Some(mode)) != Scripts::None;
+            Some(Restriction {
+                servers: mode
+                    .mcp_servers
+                    .iter()
+                    .map(|server| server.name.clone())
+                    .collect(),
+                commands,
+                file_changes: commands && (mode.unsandboxed || !mode.files.is_empty()),
+            })
+        }
+        None => answer_only.then(Restriction::default),
     }
+}
+
+/// Where an assistant's scripts run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scripts {
+    /// No scripts: no interpreter, or no assistant.
+    None,
+    /// In Codex's sandbox, under [`sandbox::PROFILE`].
+    Sandboxed,
+    /// Without a sandbox (`AssistantMode::unsandboxed`).
+    Unsandboxed,
+}
+
+impl Scripts {
+    fn of(assistant: Option<&AssistantMode>) -> Self {
+        match assistant {
+            Some(mode) if !mode.interpreters.is_empty() && mode.unsandboxed => Self::Unsandboxed,
+            Some(mode) if !mode.interpreters.is_empty() => Self::Sandboxed,
+            _ => Self::None,
+        }
+    }
+}
+
+/// Why this handler loads no skill for an assistant.
+const NO_SKILL_LIST: &str = "Codex has no list of allowed skills: it loads the skills of the \
+                             project, of the user's home directory and of the system, and its own \
+                             bundled ones";
+
+/// The most a context file may hold.
+const MAX_CONTEXT_FILE_BYTES: u64 = 1024 * 1024;
+
+/// The developer instructions an assistant thread gets besides its initial context: the text
+/// of its `context_file`, and what it cannot do here that its mode suggests it could.
+fn assistant_instructions(
+    mode: &AssistantMode,
+    scripts: Scripts,
+) -> Result<Vec<String>, ProviderError> {
+    let mut parts = Vec::new();
+    if let Some(file) = &mode.context_file {
+        let size = std::fs::metadata(file)
+            .map_err(|error| {
+                refuse(
+                    Status::GUATIAO_ERR_BAD_VALUE,
+                    format!("context file: {error}"),
+                )
+            })?
+            .len();
+        if size > MAX_CONTEXT_FILE_BYTES {
+            return Err(refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                format!("the context file holds {size} bytes, more than {MAX_CONTEXT_FILE_BYTES}"),
+            ));
+        }
+        let text = std::fs::read_to_string(file).map_err(|error| {
+            refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                format!("context file: {error}"),
+            )
+        })?;
+        parts.push(text);
+    }
+    if scripts == Scripts::None && !mode.files.is_empty() {
+        parts.push(
+            "You have no file tools in this conversation: you cannot create or change files, \
+             your memory among them. Say so when the person asks you to save or remember \
+             something."
+                .to_owned(),
+        );
+    }
+    if scripts == Scripts::Sandboxed && !mode.network.reaches_nothing() {
+        eprintln!(
+            "ai6: Moneypenny's scripts run with no network under Codex: its app server enforces \
+             no host list for them, so they get none"
+        );
+        parts.push(
+            "Your scripts have no network access in this conversation: say so when the person \
+             asks for something that needs it."
+                .to_owned(),
+        );
+    }
+    Ok(parts)
 }
 
 /// Decides whether a command Codex asks to run may go ahead, given its working directory.
@@ -247,13 +370,26 @@ fn station_gate(environment: &std::collections::BTreeMap<String, String>) -> Opt
 /// never asks (its sandbox is read-only, and in remote-hands mode the Station gates
 /// `theater_run`); with a green ink gate it asks (`untrusted`) for every command outside
 /// Codex's own list of safe reads, so the gate sees each one.
+/// An assistant with scripts never asks either, and runs them in the sandbox its app server's
+/// profile describes (no `sandbox` here: Codex does not combine the two), or with none when
+/// unsandboxed.
 fn set_approval_policy(
     params: &mut Value,
     environment: &std::collections::BTreeMap<String, String>,
     answer_only: bool,
+    scripts: Scripts,
 ) {
     if answer_only {
         restrict_to_answer_only(params);
+        match scripts {
+            Scripts::None => {}
+            Scripts::Sandboxed => {
+                if let Some(params) = params.as_object_mut() {
+                    params.remove("sandbox");
+                }
+            }
+            Scripts::Unsandboxed => params["sandbox"] = json!("danger-full-access"),
+        }
     } else if is_remote_hands(environment) {
         restrict_to_remote_hands(params);
     } else if GateClient::from_environment(environment).is_some() {
@@ -271,8 +407,12 @@ struct CodexSession {
     effort: Option<String>,
     /// The latest quota window the account reported as used up.
     exhausted: Mutex<Option<UsageLimit>>,
-    /// For a restricted (answer-only or assistant) thread, the MCP servers it may call.
-    restricted: Option<Vec<String>>,
+    /// For a restricted (answer-only or assistant) thread, what it may use.
+    restricted: Option<Restriction>,
+    /// Whether a command it starts is reported as the tool `exec_command`: an assistant with
+    /// scripts, whose commands may read any file of her working directory and, unsandboxed,
+    /// reach any host.
+    reports_commands: bool,
     /// Set once a restricted thread used a tool it may not, and was ended.
     tripped: AtomicBool,
     /// The command of each command execution item the thread started, by item id.
@@ -308,6 +448,7 @@ impl CodexSession {
             effort,
             exhausted: Mutex::new(None),
             restricted: None,
+            reports_commands: false,
             tripped: AtomicBool::new(false),
             started: Mutex::default(),
             ended: AtomicBool::new(false),
@@ -371,8 +512,13 @@ impl CodexSession {
     }
 
     /// Restricts the thread to the tools of `servers`: any other tool it uses ends it.
-    fn restricted_to(mut self, servers: Option<Vec<String>>) -> Self {
-        self.restricted = servers;
+    fn restricted_to(mut self, restriction: Option<Restriction>) -> Self {
+        self.restricted = restriction;
+        self
+    }
+
+    fn reporting_commands(mut self, reports: bool) -> Self {
+        self.reports_commands = reports;
         self
     }
 
@@ -539,8 +685,8 @@ impl CodexSession {
         if self.tripped.load(Ordering::Acquire) {
             return Ok(());
         }
-        if let Some(servers) = &self.restricted
-            && let Some(what) = forbidden_use(&message, servers)
+        if let Some(restriction) = &self.restricted
+            && let Some(what) = forbidden_use(&message, restriction)
         {
             return self.trip(&what);
         }
@@ -567,11 +713,24 @@ impl CodexSession {
             *lock(&self.exhausted)? = Some(exhausted);
         }
         let hint = lock(&self.exhausted)?.clone();
-        if let Some(event) = decode_event(&message, hint.as_ref()) {
+        if let Some(mut event) = decode_event(&message, hint.as_ref()) {
+            if self.reports_commands && started_item(&message) == Some("commandExecution") {
+                event.tools.push(COMMAND_TOOL.to_owned());
+            }
             lock(&self.events)?.push_back(event);
         }
         Ok(())
     }
+}
+
+/// The tool name a scripts thread's command executions are reported under.
+const COMMAND_TOOL: &str = "exec_command";
+
+/// The type of the item an `item/started` notification starts.
+fn started_item(message: &Value) -> Option<&str> {
+    (message.get("method")?.as_str()? == "item/started")
+        .then(|| message.pointer("/params/item/type")?.as_str())
+        .flatten()
 }
 
 /// The app-server's request to approve a command before it runs.
@@ -589,12 +748,12 @@ const RESTRICTED_ITEMS: [&str; 7] = [
     "exitedReviewMode",
 ];
 
-/// What `message` shows a restricted thread doing that it may not, for a thread whose only
-/// tools are those of `servers`: any request from the server but token refresh and
-/// attestation (approvals, tool calls, questions, elicitation), or an `item/started` or
-/// `item/completed` of any other kind than [`RESTRICTED_ITEMS`] or an MCP call to one of
-/// `servers`.
-fn forbidden_use(message: &Value, servers: &[String]) -> Option<String> {
+/// What `message` shows a restricted thread doing that it may not: any request from the server
+/// but token refresh and attestation (approvals, tool calls, questions, elicitation), or an
+/// `item/started` or `item/completed` of any other kind than [`RESTRICTED_ITEMS`], an MCP call
+/// to one of its servers, and, as `restriction` allows, a command execution or a file change.
+fn forbidden_use(message: &Value, restriction: &Restriction) -> Option<String> {
+    let servers = &restriction.servers;
     let method = message.get("method")?.as_str()?;
     if message.get("id").is_some() {
         return (!matches!(
@@ -614,6 +773,8 @@ fn forbidden_use(message: &Value, servers: &[String]) -> Option<String> {
     };
     match field("type") {
         kind if RESTRICTED_ITEMS.contains(&kind) => None,
+        "commandExecution" if restriction.commands => None,
+        "fileChange" if restriction.file_changes => None,
         "mcpToolCall" if servers.iter().any(|server| server == field("server")) => None,
         "mcpToolCall" => Some(format!(
             "the tool {:?} of MCP server {:?}",
@@ -1008,7 +1169,7 @@ fn spawn(
     mode: Mode<'_>,
 ) -> Result<(Object<dyn TerminalSession>, Option<String>), ProviderError> {
     let mut argv = if let Some(assistant) = mode.assistant {
-        assistant_argv(executable, environment, assistant)?
+        assistant_argv(executable, environment, assistant, cwd)?
     } else if mode.answer_only {
         answer_only_argv(executable)
     } else {
@@ -1017,6 +1178,7 @@ fn spawn(
     if !mode.project_settings || mode.answer_only {
         argv.extend(untrusted_project(cwd));
     }
+    let scripts = Scripts::of(mode.assistant);
     let mut weakening = None;
     if mode.answer_only {
         let servers = mode
@@ -1037,10 +1199,27 @@ fn spawn(
             environment,
             model: mode.model,
             servers: &servers,
+            scripts: scripts != Scripts::None,
         }
         .check()?;
         argv.extend(checked.overrides);
         weakening = checked.weakening;
+    }
+    if let Some(assistant) = mode.assistant.filter(|_| scripts != Scripts::None) {
+        let admitted = format!(
+            "Codex gives Moneypenny's thread functions.exec and functions.wait (code mode): her \
+             scripts may run any command {}, not only {}",
+            if scripts == Scripts::Sandboxed {
+                "inside Codex's sandbox"
+            } else {
+                "with no sandbox"
+            },
+            assistant.interpreters.join(", ")
+        );
+        weakening = Some(match weakening {
+            Some(found) => format!("{admitted}; {found}"),
+            None => admitted,
+        });
     }
     let spec = Spec {
         argv,
@@ -1097,10 +1276,11 @@ const NO_BUILT_IN_TOOLS: [&str; 7] = [
     "tools.experimental_request_user_input={enabled=false}",
 ];
 
-/// `-c` overrides for [`NO_BUILT_IN_TOOLS`].
-fn no_built_in_tools() -> Vec<String> {
+/// `-c` overrides for [`NO_BUILT_IN_TOOLS`]; with `shell`, the command tools stay on.
+fn no_built_in_tools(shell: bool) -> Vec<String> {
     NO_BUILT_IN_TOOLS
         .iter()
+        .filter(|setting| !(shell && setting.starts_with("features.shell_tool=")))
         .flat_map(|setting| ["-c".to_owned(), (*setting).to_owned()])
         .collect()
 }
@@ -1115,44 +1295,36 @@ fn answer_only_argv(executable: &str) -> Vec<String> {
         "-c".to_owned(),
         "mcp_servers={}".to_owned(),
     ];
-    argv.extend(no_built_in_tools());
+    argv.extend(no_built_in_tools(false));
     argv
 }
 
 /// The app server of an assistant thread, built from its mode's parts: `mcp_servers` set to
 /// one inline table holding exactly the mode's servers, which Codex merges into the user's own
-/// (the tool check switches those off by name, [`tools`]), each with its URL and the name of
-/// the variable holding its bearer token, and no built-in tool ([`NO_BUILT_IN_TOOLS`]): no
-/// shell, no file or image reading, no web. The
-/// thread itself runs as an answer-only one ([`restrict_to_answer_only`]). Interpreters,
-/// skills and any network beyond the servers are refused until this handler can confine them.
+/// (the tool check switches those off by name, [`tools`]), each with its URL, the name of the
+/// variable holding its bearer token and its tools approved without asking (under approval
+/// `never` Codex 0.164.0 fails every MCP call it would ask about); no built-in tool
+/// ([`NO_BUILT_IN_TOOLS`]); and no project instructions file (`project_doc_max_bytes=0`), since
+/// its standing context is the mode's `context_file`, which the thread gets as developer
+/// instructions.
+///
+/// With interpreters the command tools stay on and the thread's commands run under
+/// [`sandbox::overrides`]: the mode's `files` directories writable, nothing outside the working
+/// directory readable, no network; unsandboxed, under none. Without interpreters `exec` is not
+/// offered, so `files` gives no tool to write with. Skills are refused: Codex keeps no list of
+/// allowed skills.
 fn assistant_argv(
     executable: &str,
     environment: &std::collections::BTreeMap<String, String>,
     mode: &AssistantMode,
+    cwd: &str,
 ) -> Result<Vec<String>, ProviderError> {
     mode.validate()
         .map_err(|reason| refuse(Status::GUATIAO_ERR_BAD_VALUE, reason))?;
-    if !mode.interpreters.is_empty() || !mode.skills.is_empty() {
-        return Err(refuse(
-            Status::GUATIAO_ERR_UNSUPPORTED,
-            "this Codex handler runs no interpreter or skill for an assistant",
-        ));
+    if !mode.skills.is_empty() {
+        return Err(refuse(Status::GUATIAO_ERR_UNSUPPORTED, NO_SKILL_LIST));
     }
-    // Codex's file edits go through its own tools, which a read-only assistant thread does not
-    // have; a writable workspace waits for its sandboxed mode.
-    if !mode.files.is_empty() || mode.context_file.is_some() {
-        return Err(refuse(
-            Status::GUATIAO_ERR_UNSUPPORTED,
-            "this Codex handler gives an assistant no files to write and no context file",
-        ));
-    }
-    if !mode.network.reaches_nothing() {
-        return Err(refuse(
-            Status::GUATIAO_ERR_UNSUPPORTED,
-            "this Codex handler gives an assistant no network beyond its MCP servers",
-        ));
-    }
+    let scripts = Scripts::of(Some(mode));
     let mut servers = Vec::new();
     for server in &mode.mcp_servers {
         let prefix = &server.env_prefix;
@@ -1172,7 +1344,8 @@ fn assistant_argv(
         let url = serde_json::to_string(url).map_err(internal)?;
         let token = serde_json::to_string(&format!("{prefix}_TOKEN")).map_err(internal)?;
         servers.push(format!(
-            "{}={{url={url},bearer_token_env_var={token}}}",
+            "{}={{url={url},bearer_token_env_var={token},\
+             default_tools_approval_mode=\"approve\"}}",
             server.name
         ));
     }
@@ -1182,7 +1355,11 @@ fn assistant_argv(
         "-c".to_owned(),
         format!("mcp_servers={{{}}}", servers.join(",")),
     ];
-    argv.extend(no_built_in_tools());
+    argv.extend(no_built_in_tools(scripts != Scripts::None));
+    argv.extend(["-c".to_owned(), "project_doc_max_bytes=0".to_owned()]);
+    if scripts == Scripts::Sandboxed {
+        argv.extend(sandbox::overrides(executable, cwd, environment, mode));
+    }
     Ok(argv)
 }
 
@@ -1579,6 +1756,8 @@ mod tests {
                                 "sandbox": message.pointer("/params/sandbox"),
                                 "approvalPolicy": message.pointer("/params/approvalPolicy"),
                                 "config": message.pointer("/params/config"),
+                                "developerInstructions":
+                                    message.pointer("/params/developerInstructions"),
                             });
                             writeln!(
                                 stdout,
@@ -1965,11 +2144,11 @@ mod tests {
             ("AI6_CABLE_MCP_TOKEN".to_owned(), "token".to_owned()),
         ]);
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &cable, false);
+        set_approval_policy(&mut params, &cable, false, Scripts::None);
         assert_eq!(params["approvalPolicy"], "untrusted");
 
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &cable, true);
+        set_approval_policy(&mut params, &cable, true, Scripts::None);
         assert_eq!(
             params["sandbox"], "read-only",
             "answer-only wins over the gate"
@@ -1984,14 +2163,19 @@ mod tests {
         );
         remote.insert("AI6_THEATER_MCP_TOKEN".to_owned(), "theater".to_owned());
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &remote, false);
+        set_approval_policy(&mut params, &remote, false, Scripts::None);
         assert_eq!(
             params["approvalPolicy"], "never",
             "the Station gates theater_run"
         );
 
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &std::collections::BTreeMap::new(), false);
+        set_approval_policy(
+            &mut params,
+            &std::collections::BTreeMap::new(),
+            false,
+            Scripts::None,
+        );
         assert!(
             params.get("approvalPolicy").is_none(),
             "no gate, Codex's own policy"
@@ -2629,10 +2813,12 @@ mod tests {
             vec![
                 "-c".to_owned(),
                 "mcp_servers={moneypenny={url=\"https://exports.example/v1/moneypenny/mcp\",\
-                 bearer_token_env_var=\"AI6_MONEYPENNY_MCP_TOKEN\"}}"
+                 bearer_token_env_var=\"AI6_MONEYPENNY_MCP_TOKEN\",\
+                 default_tools_approval_mode=\"approve\"}}"
                     .to_owned(),
             ],
-            no_built_in_tools(),
+            no_built_in_tools(false),
+            vec!["-c".to_owned(), "project_doc_max_bytes=0".to_owned()],
             untrusted_project(&cwd).to_vec(),
         ]
         .concat();
@@ -2708,6 +2894,214 @@ mod tests {
                 .iter()
                 .all(|argument| !argument.contains("conversation-token"))
         }));
+    }
+
+    /// `codex debug prompt-input` of Codex 0.164.0 for an assistant with scripts.
+    const SCRIPTS_PROMPT: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/prompt-input-scripts.json");
+
+    /// An assistant Session's environment and start request, with `mode`.
+    fn assistant_start(mode: AssistantMode, prompt: &str) -> AgentStart {
+        let environment = BTreeMap::from([
+            (
+                "CODEX_FIXTURE_THREAD_ID".to_owned(),
+                "codex-scripts-thread".to_owned(),
+            ),
+            ("CODEX_FIXTURE_SHOW_POLICY".to_owned(), "1".to_owned()),
+            (
+                "CODEX_FIXTURE_PROMPT_INPUT".to_owned(),
+                SCRIPTS_PROMPT.replace('\n', ""),
+            ),
+            (
+                "AI6_MONEYPENNY_MCP_URL".to_owned(),
+                "https://exports.example/v1/moneypenny/mcp".to_owned(),
+            ),
+            (
+                "AI6_MONEYPENNY_MCP_TOKEN".to_owned(),
+                "conversation-token".to_owned(),
+            ),
+        ]);
+        AgentStart {
+            mission_id: "assistant--scripts".parse().unwrap(),
+            agent_id: "moneypenny".to_owned(),
+            prompt: prompt.to_owned(),
+            initial_context: vec!["You are Moneypenny.".to_owned()],
+            working_directory: std::env::current_dir()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            clearance: "desk".to_owned(),
+            environment,
+            model: Some("gpt-6.1-sol".to_owned()),
+            effort: None,
+            max_cost_micro_usd: None,
+            project_settings: false,
+            project_mcp: false,
+            answer_only: false,
+            assistant: Some(mode),
+        }
+    }
+
+    fn reported_policy(events: &[AgentEvent]) -> Value {
+        let policy = events
+            .iter()
+            .find_map(|event| event.text.as_deref()?.strip_prefix("policy: "))
+            .expect("the thread's policy was reported");
+        serde_json::from_str(policy).unwrap()
+    }
+
+    #[test]
+    fn an_assistant_with_scripts_runs_them_in_the_sandbox_profile_as_a_weakening() {
+        let context =
+            std::env::temp_dir().join(format!("ai6-codex-context-{}.md", std::process::id()));
+        std::fs::write(&context, "CONTEXT-FILE-MARKER: her memory\n").unwrap();
+        let mut mode = AssistantMode::moneypenny();
+        mode.interpreters.push("python3".to_owned());
+        mode.files = vec!["personal".to_owned(), "scratch".to_owned()];
+        mode.context_file = Some(context.to_string_lossy().into_owned());
+        mode.network.allowed_hosts.push("example.com".to_owned());
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-scripts-fixture".to_owned(),
+        })
+        .unwrap();
+        let terminal = ProcessTerminal::new();
+        let start = assistant_start(mode.clone(), "Chart it.");
+        let session = handler
+            .start(start.clone(), terminal.clone().into_object())
+            .unwrap();
+        let events = read_to_completion(&session);
+        session.close().unwrap();
+        let _ = std::fs::remove_file(&context);
+        assert_eq!(events[0].kind, "weakened", "{events:?}");
+        let weakening = events[0].text.clone().unwrap();
+        assert!(
+            weakening.contains("functions.exec and functions.wait")
+                && weakening.contains("inside Codex's sandbox, not only python3"),
+            "{weakening}"
+        );
+        let policy = reported_policy(&events);
+        assert_eq!(
+            policy["sandbox"],
+            Value::Null,
+            "the profile decides: {policy}"
+        );
+        assert_eq!(policy["approvalPolicy"], "never");
+        let instructions = policy["developerInstructions"].as_str().unwrap();
+        assert!(
+            instructions.starts_with("You are Moneypenny.")
+                && instructions.contains("CONTEXT-FILE-MARKER: her memory")
+                && instructions.contains("no network access"),
+            "{instructions}"
+        );
+
+        let specs = terminal.specs.lock().unwrap();
+        let server = specs
+            .iter()
+            .find(|spec| spec.argv[1] == "app-server")
+            .unwrap();
+        let has = |setting: &str| server.argv.iter().any(|argument| argument == setting);
+        let starts = |prefix: &str| {
+            server
+                .argv
+                .iter()
+                .any(|argument| argument.starts_with(prefix))
+        };
+        assert!(
+            starts("permissions.ai6_assistant={filesystem={")
+                && has("default_permissions=\"ai6_assistant\"")
+                && starts("shell_environment_policy.include_only=[")
+                && has("project_doc_max_bytes=0"),
+            "{:?}",
+            server.argv
+        );
+        assert_eq!(has("windows.sandbox=\"mxc\""), cfg!(windows));
+        assert!(
+            !has("features.shell_tool=false") && !has("features.code_mode_host=false"),
+            "exec and its command tools stay on: {:?}",
+            server.argv
+        );
+        assert!(has("features.tool_suggest=false"), "other features go");
+        let checked = specs
+            .iter()
+            .find(|spec| spec.argv.len() > 2 && spec.argv[1..3] == ["debug", "prompt-input"])
+            .unwrap();
+        assert!(
+            !checked
+                .argv
+                .iter()
+                .any(|a| a == "features.shell_tool=false")
+        );
+        drop(specs);
+
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: start.mission_id.clone(),
+                    session_id: SessionId::try_new("codex-scripts-thread").unwrap(),
+                    message: Some("Again.".to_owned()),
+                    working_directory: start.working_directory.clone(),
+                    environment: start.environment.clone(),
+                    model: start.model.clone(),
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: Some(mode),
+                    initial_context: Vec::new(),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        let events = read_to_completion(&resumed);
+        resumed.close().unwrap();
+        let policy = reported_policy(&events);
+        assert_eq!(policy["sandbox"], Value::Null);
+        assert_eq!(policy["approvalPolicy"], "never");
+    }
+
+    #[test]
+    fn scripted_commands_run_and_are_reported_as_a_tool() {
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-commands-fixture".to_owned(),
+        })
+        .unwrap();
+        for unsandboxed in [false, true] {
+            let mut mode = AssistantMode::moneypenny();
+            mode.interpreters.push("python3".to_owned());
+            mode.unsandboxed = unsandboxed;
+            let terminal = ProcessTerminal::new();
+            let session = handler
+                .start(
+                    assistant_start(mode, "item: commandExecution"),
+                    terminal.clone().into_object(),
+                )
+                .unwrap();
+            let events = until_end(&session);
+            session.close().unwrap();
+            assert_eq!(events.last().unwrap().kind, "completed", "{events:?}");
+            let reported = events
+                .iter()
+                .any(|event| event.tools.iter().any(|tool| tool == "exec_command"));
+            assert!(reported, "a script may read her files: {events:?}");
+            let policy = reported_policy(&events);
+            let specs = terminal.specs.lock().unwrap();
+            let server = specs
+                .iter()
+                .find(|spec| spec.argv[1] == "app-server")
+                .unwrap();
+            let profiled = server
+                .argv
+                .iter()
+                .any(|argument| argument.starts_with("permissions."));
+            if unsandboxed {
+                assert_eq!(policy["sandbox"], "danger-full-access");
+                assert!(!profiled);
+            } else {
+                assert_eq!(policy["sandbox"], Value::Null);
+                assert!(profiled);
+            }
+        }
     }
 
     fn answer_only_start(environment: BTreeMap<String, String>) -> AgentStart {
@@ -3115,27 +3509,57 @@ mod tests {
 
     #[test]
     fn a_restricted_thread_may_call_its_own_servers_and_talk() {
+        let nothing = Restriction::default();
         assert_eq!(
             forbidden_use(
                 &json!({"method":"item/started","params":{"item":{
                     "type":"mcpToolCall","server":"moneypenny","tool":"board"}}}),
-                &["moneypenny".to_owned()]
+                &Restriction {
+                    servers: vec!["moneypenny".to_owned()],
+                    ..Restriction::default()
+                }
             ),
             None
         );
         for kind in ["agentMessage", "reasoning", "userMessage"] {
             let message = json!({"method":"item/completed","params":{"item":{"type":kind}}});
-            assert_eq!(forbidden_use(&message, &[]), None, "{kind}");
+            assert_eq!(forbidden_use(&message, &nothing), None, "{kind}");
         }
         let unknown = json!({"method":"item/started","params":{"item":{"type":"hologram"}}});
         assert!(
-            forbidden_use(&unknown, &[]).is_some(),
+            forbidden_use(&unknown, &nothing).is_some(),
             "an unknown item is a tool"
         );
         let question = json!({"id": 4, "method": "item/tool/requestUserInput", "params": {}});
-        assert!(forbidden_use(&question, &[]).is_some());
+        assert!(forbidden_use(&question, &nothing).is_some());
         let refresh = json!({"id": 5, "method": "account/chatgptAuthTokens/refresh"});
-        assert_eq!(forbidden_use(&refresh, &[]), None, "plumbing is not a tool");
+        assert_eq!(
+            forbidden_use(&refresh, &nothing),
+            None,
+            "plumbing is not a tool"
+        );
+    }
+
+    #[test]
+    fn scripts_admit_commands_and_only_with_directories_file_changes() {
+        let item = |kind: &str| json!({"method":"item/started","params":{"item":{"type":kind}}});
+        let mut mode = AssistantMode::moneypenny();
+        mode.interpreters.push("python3".to_owned());
+        let scripts = restriction(false, Some(&mode)).unwrap();
+        assert_eq!(forbidden_use(&item("commandExecution"), &scripts), None);
+        assert!(
+            forbidden_use(&item("fileChange"), &scripts).is_some(),
+            "no directory to write"
+        );
+        assert!(forbidden_use(&item("webSearch"), &scripts).is_some());
+        mode.files.push("personal".to_owned());
+        let files = restriction(false, Some(&mode)).unwrap();
+        assert_eq!(forbidden_use(&item("fileChange"), &files), None);
+        let approval = json!({"id": 3, "method": COMMAND_APPROVAL, "params": {}});
+        assert!(
+            forbidden_use(&approval, &files).is_some(),
+            "a thread that never asks has nothing to approve"
+        );
     }
 
     #[test]
@@ -3155,25 +3579,68 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
         );
-        let mut open = AssistantMode::moneypenny();
-        open.network.policy = "open".to_owned();
-        let mut files = AssistantMode::moneypenny();
-        files.files.push("personal".to_owned());
-        let mut context = AssistantMode::moneypenny();
-        context.context_file = Some(
-            std::env::temp_dir()
-                .join("context.md")
-                .to_string_lossy()
-                .into_owned(),
-        );
-        for mode in [skills, open, files, context] {
-            let refused = assistant_argv("codex", &environment, &mode).unwrap_err();
-            assert_eq!(refused.status, Status::GUATIAO_ERR_UNSUPPORTED, "{mode:?}");
-        }
+        let refused = assistant_argv("codex", &environment, &skills, "/work").unwrap_err();
+        assert_eq!(refused.status, Status::GUATIAO_ERR_UNSUPPORTED);
         assert!(
-            assistant_argv("codex", &BTreeMap::new(), &AssistantMode::moneypenny()).is_err(),
+            refused.to_string().contains("no list of allowed skills"),
+            "{refused}"
+        );
+        assert!(
+            assistant_argv(
+                "codex",
+                &BTreeMap::new(),
+                &AssistantMode::moneypenny(),
+                "/work"
+            )
+            .is_err(),
             "no endpoint in the environment"
         );
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex".to_owned(),
+        })
+        .unwrap();
+        assert!(
+            handler.assistant_skills().unwrap().is_some(),
+            "a Station installs no skill for it"
+        );
+    }
+
+    #[test]
+    fn without_interpreters_files_and_a_network_add_no_tool_and_she_is_told() {
+        let environment = BTreeMap::from([
+            (
+                "AI6_MONEYPENNY_MCP_URL".to_owned(),
+                "https://exports.example/v1/moneypenny/mcp".to_owned(),
+            ),
+            ("AI6_MONEYPENNY_MCP_TOKEN".to_owned(), "token".to_owned()),
+        ]);
+        let mut mode = AssistantMode::moneypenny();
+        mode.files.push("personal".to_owned());
+        mode.network.policy = "open".to_owned();
+        let argv = assistant_argv("codex", &environment, &mode, "/work").unwrap();
+        assert_no_built_in_tools(&argv);
+        assert!(
+            !argv
+                .iter()
+                .any(|argument| argument.starts_with("permissions.")),
+            "no sandbox profile without scripts: {argv:?}"
+        );
+        assert_eq!(
+            restriction(false, Some(&mode)),
+            Some(Restriction {
+                servers: vec!["moneypenny".to_owned()],
+                commands: false,
+                file_changes: false,
+            })
+        );
+        let told = assistant_instructions(&mode, Scripts::None).unwrap();
+        assert!(
+            told.iter().any(|line| line.contains("no file tools")),
+            "{told:?}"
+        );
+        let mut params = json!({ "cwd": "/work" });
+        set_approval_policy(&mut params, &environment, true, Scripts::None);
+        assert_eq!(params["sandbox"], "read-only");
     }
 
     #[test]
@@ -3197,6 +3664,7 @@ mod tests {
             "codex",
             &environment,
             &AssistantMode::moneypenny().with_cables(),
+            "/work",
         )
         .unwrap();
         let (key, value) = argv[3].split_once('=').unwrap();
@@ -3206,9 +3674,11 @@ mod tests {
             toml::Value::Table(
                 toml::from_str(
                     "moneypenny = { url = \"https://exports.example/v1/moneypenny/mcp\", \
-                     bearer_token_env_var = \"AI6_MONEYPENNY_MCP_TOKEN\" }\n\
+                     bearer_token_env_var = \"AI6_MONEYPENNY_MCP_TOKEN\", \
+                     default_tools_approval_mode = \"approve\" }\n\
                      cables = { url = \"http://127.0.0.1:4100/mcp\", \
-                     bearer_token_env_var = \"AI6_ASSISTANT_CABLE_MCP_TOKEN\" }"
+                     bearer_token_env_var = \"AI6_ASSISTANT_CABLE_MCP_TOKEN\", \
+                     default_tools_approval_mode = \"approve\" }"
                 )
                 .unwrap()
             )

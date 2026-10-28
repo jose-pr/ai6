@@ -93,10 +93,41 @@ and `request_user_input_async`; no feature does), and the untrusted-project over
 of AI6's servers; the Session has no gate, and `thread/start` and `thread/resume` carry
 `sandbox = "read-only"`, `approvalPolicy = "never"` and `config = {"web_search":
 "disabled"}`. An assistant (`AgentStart::assistant`) gets the same, with `mcp_servers`
-holding exactly its servers; a mode with `files`, a `context_file`, interpreters, skills or a
-network reaching more than its servers is refused (`GUATIAO_ERR_UNSUPPORTED`). The handler
-keeps `AgentHandler::assistant_scripts`'s default (it runs no interpreter for an assistant),
-so a Station starts Moneypenny on Codex without scripts and tells her so. Codex merges that table into the user's own MCP servers rather
+holding exactly its servers, each with `default_tools_approval_mode="approve"` (under approval
+`never` Codex 0.164.0 fails every MCP call it would ask about), and `-c
+project_doc_max_bytes=0`: no `AGENTS.md` is read, and the mode's `context_file` (at most 1 MiB;
+unreadable or larger refuses the start) is appended to the developer instructions on start,
+after `initial_context`. A mode with skills is refused (`GUATIAO_ERR_UNSUPPORTED`: Codex keeps
+no list of allowed skills), and `assistant_skills` says so, so a Station installs none.
+
+With interpreters the thread runs scripts. Sandboxed (not `unsandboxed`), the command tools
+stay on (`features.shell_tool=false` is left out), `thread/start` and `thread/resume` carry no
+`sandbox` (Codex does not combine one with a permissions profile) and the app server gets:
+
+```text
+-c windows.sandbox="mxc"                       (Windows only: the implementation that denies reads)
+-c permissions.ai6_assistant={filesystem={":root"="deny",":minimal"="read","<cwd>"="read",
+     "<dir>"="read" (codex executable's, each interpreter's), "<cwd>/<files dir>"="write"}}
+-c default_permissions="ai6_assistant"
+-c shell_environment_policy.include_only=[ai6::SCRIPT_ENVIRONMENT]
+```
+
+An executable or interpreter is found on the environment's `PATH` (Windows `PATHEXT`) with
+links followed; its directory is left out when it is or holds the home directory
+(`HOME`/`USERPROFILE`), the working directory, its parent or a credential directory
+(`ai6::credential_dir_var`), or lies inside a credential directory. The profile has no network:
+measured with Codex 0.164.0, app-server threads ran no proxy for a profile's network, so a
+script reached unlisted hosts and host loopback; scripts get none under every policy, which a
+developer-instructions line tells her (when the policy names hosts) and standard error logs.
+Unsandboxed, `sandbox = "danger-full-access"` and no profile. Without interpreters the thread
+stays read-only and, with `files`, is told it has no file tools (nothing offers one outside
+`exec`). Every command execution item a scripts thread starts is reported as tool
+`exec_command`. `assistant_scripts` runs `<executable> [-c windows.sandbox="mxc"] -c
+permissions.ai6_assistant_probe={…} sandbox -P ai6_assistant_probe -- cmd.exe /d /c echo …`
+(`/bin/sh -c 'echo …'` elsewhere) from a fresh temporary directory with exactly the given
+environment (`std::process`, 60 s), and answers `None` only when it exits successfully having
+printed the marker; the answer is cached 15 minutes per executable and configuration
+environment. Codex merges the `mcp_servers` table into the user's own MCP servers rather
 than replacing them (0.164.0: a user's `node_repl` started in an answer-only thread), so the
 tool check below also switches off each of the user's servers by name. Checked against the
 app-server protocol source (`ThreadStartParams`: `sandbox`, `approvalPolicy`, `config`; the
@@ -107,9 +138,10 @@ A restricted thread that uses a tool anyway is killed, ends with a `failed` even
 it, and nothing read after that becomes an event: any server request but
 `account/chatgptAuthTokens/refresh` and `attestation/generate`, or an `item/started` /
 `item/completed` whose item type is not `userMessage`, `agentMessage`, `reasoning`, `plan`,
-`contextCompaction`, `enteredReviewMode` or `exitedReviewMode`, or an `mcpToolCall` to a
-server outside the thread's (an unknown item type counts as a tool; item types from
-`codex app-server generate-json-schema`, 0.164.0).
+`contextCompaction`, `enteredReviewMode` or `exitedReviewMode`, an `mcpToolCall` to one of the
+thread's servers, and, for an assistant with scripts, `commandExecution` and (with `files`, or
+unsandboxed) `fileChange` (an unknown item type counts as a tool; item types from `codex
+app-server generate-json-schema`, 0.164.0).
 
 Both are restricted threads, which start or resume only after the tool check:
 
@@ -126,7 +158,8 @@ kept, `prompt-input` matched the app server's request in every case compared.
 
 Through the terminal AI6 supplies, with the app server's `-c` settings, environment and
 working directory, the handler runs `codex --version`, then `codex features list` and adds
-`-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES` (a non-blank line
+`-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES` (with scripts,
+nor `code_mode_host`, `shell_tool` or `unified_exec`) (a non-blank line
 that is not `name stage state` fails the check), then `codex mcp list --json` with those and
 adds `-c mcp_servers.<name>.enabled=false` for every listed server that is not one of the
 thread's (output that is not one JSON array of objects with a string `name`, with nothing
@@ -139,22 +172,27 @@ depends on the model). It reads the offered tools from the `additional_tools` it
 output with no such array, anything but whitespace after it, no `message` item, or an item
 of another type is unreadable. The thread passes when every offered tool is
 `mcp__<server>.<tool>` for one of its servers and each server offers at least one
-(answer-only: no tool). On a failure `strict` refuses with `GUATIAO_ERR_UNSUPPORTED` naming
+(answer-only: no tool); with scripts `functions.exec` and `functions.wait` are allowed too and
+a server need not offer a tool directly (code mode nests them in `exec`), and the start is
+reported as a weakening in either mode (`Codex gives Moneypenny's thread functions.exec and
+functions.wait (code mode): her scripts may run any command inside Codex's sandbox, not only
+<interpreters>`, before any weakening the check found). On a failure `strict` refuses with `GUATIAO_ERR_UNSUPPORTED` naming
 what was found, before any app server starts; `warn` starts it, prints `ai6: weakening: …` on
 standard error and queues an event of kind `weakened` with that text first. The feature and
 server switches apply in both. The feature list and the server list are cached together in
 the process for 15 minutes by executable, `--version` output, settings (without the working
-directory's `projects` entry), mode and the values of `CODEX_HOME`, `HOME`, `USERPROFILE`,
+directory's `projects` entry and the scripts profile), mode, scripts and the values of `CODEX_HOME`, `HOME`, `USERPROFILE`,
 `APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME` and `PATH`; a failed read is not cached.
 `prompt-input` runs on every start and resume, but does not render the user's MCP servers
 (they are deferred tools inside `functions.exec`): a server added to the user's configuration
 within the 15 minutes is switched off only once the cached list expires.
 With Codex 0.164.0 every model in the catalog is sent `functions.exec` and `functions.wait`
 (code mode; `tool_mode = "code_mode_only"`), and no setting this handler passes removes them,
-so in `strict` both answer-only and assistant threads are refused on that release; `warn`
-starts them as a weakening (fixtures in `tests/fixtures/codex-0.164.0/`). An MCP server's
-tools are offered only inside `functions.exec` there, so an assistant also finds its server
-missing. A server whose name collides with one of the user's is merged with it: with a stdio
+so in `strict` answer-only threads and assistants without scripts are refused on that
+release; `warn` starts them as a weakening (fixtures in `tests/fixtures/codex-0.164.0/`). An
+MCP server's tools are offered only inside `functions.exec` there, so an assistant without
+scripts also finds its server missing; one with scripts is offered exactly
+`functions.exec` and `functions.wait` (`prompt-input-scripts.json`) and passes. A server whose name collides with one of the user's is merged with it: with a stdio
 server of that name Codex refuses its configuration and the check fails.
 
 `stdio()` answers `HarnessStdio::Json`, so the Station starts the app server in a terminal
