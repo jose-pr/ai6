@@ -15,17 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `[assistant.group.<group>]` and `[assistant.person.<id>]` tables may narrow and never widen
   (a widening table fails the roster load naming the key; `AssistantSettings::reach_for`,
   `AssistantNarrowing`, `NetworkPolicy`). Universal Exports sends each message's reach
-  (`AssistantJob::reach`, `AssistantReach`), which the Station caps by its own roster. Claude
-  Code gets `Bash` allowed only as `Bash(<interpreter> *)` under `dontAsk`, a sandbox that
-  exits rather than run unsandboxed, writes only in her working directory (not `shared/`,
-  `CLAUDE.md`, `AGENTS.md`), reads nothing of the Station user's home, AI6's directories or
-  other conversations, no credential variables, and only the allowed hosts; `WebFetch` only
-  for those hosts, held to them by a `PreToolUse` hook (`ai6 assistant web-gate`), and
-  `WebSearch` only under `open`. A Station whose harness has no sandbox (native Windows, or
-  Linux without `bwrap` and `socat`: `AgentHandler::assistant_scripts`) starts her without
-  scripts and tells her so, unless `unsandboxed_scripts` allows them, logged as a weakening;
-  `network = "open"` is a weakening too. A `WebFetch` or `WebSearch` call, or a script that
-  can reach a host, exposes the conversation.
+  (`AssistantJob::reach`, `AssistantReach`), with the person's directory groups
+  (`AssistantJob::groups`) so the Station re-caps by the same tables and refuses rather than
+  skip a per-group narrowing it cannot apply; a job with no person takes the strictest reach.
+  The Station recomputes the cap on every message and restarts the harness when it changed.
+  Claude Code gets `Bash` allowed only as `Bash(<interpreter> *)` under `dontAsk`, a sandbox
+  that exits rather than run unsandboxed and denies reads everywhere (`denyRead: ["/"]`) but
+  the working directory and the system directories an interpreter needs, so the Station user's
+  home, AI6's files, `/proc` and other conversations stay unreadable; writes only in her
+  working directory, never a `.git` under it; the model credentials and every non-essential
+  environment variable hidden (`credentials.envVars`); and each conversation its own temporary
+  and Claude Code configuration directory (`credentials.files`), so transcripts and any stored
+  login are isolated. `WebFetch` is held to the allowed hosts by a `PreToolUse` hook (`ai6
+  assistant web-gate`), which also refuses this deployment's own hosts, loopback and the
+  metadata address even under `open`; `WebSearch` only under `open`. A Station whose harness
+  has no sandbox (native Windows, or Linux without `bwrap` and `socat`:
+  `AgentHandler::assistant_scripts`) starts her without scripts and tells her so, unless
+  `unsandboxed_scripts` allows them, logged as a loud weakening; `network = "open"` and a shell
+  interpreter are weakenings too. A `WebFetch` or `WebSearch` call, or a script that can reach
+  a host, exposes the conversation at once, with or without a workspace, and the hold on her
+  Cables sees it the same turn.
 - Moneypenny keeps each person's work and memory in their own repository. The global
   `agents.toml` takes an `[assistant]` table (`ai6::AssistantSettings`, also
   `RosterBuilder::assistant`): `personal_repo` (`{person}` or `{person_digest}`; a local or

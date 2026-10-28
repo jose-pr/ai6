@@ -327,17 +327,34 @@ than assistant.network`). Universal Exports works out what each message may use 
 person's groups and their own table, and every Station caps it by its own roster again, so
 nothing widens on the way.
 
-Her scripts run only as the interpreters named (`python3 personal/calc.py`; `sh -c …` is
-refused) and only inside the sandbox:
+The sandbox, not the interpreter list, is the boundary: a script runs as the interpreter named
+(`python3 personal/calc.py`), but an interpreter can run any program the sandbox allows (a
+Python script may call `os.system`, and Claude Code's read-only built-ins run), so what keeps
+a script in bounds is where the sandbox lets it read, write and connect, not which tool it is:
 
 - They write in her working directory, `personal/` and `scratch/` among it, but not in
-  `shared/`, `CLAUDE.md` or `AGENTS.md`, and what they leave in `personal/` is saved after the
-  answer like anything else she writes there.
-- They read nothing in the Station user's home directory, AI6's configuration, state and
-  Registry directories, or other conversations' directories.
-- They see none of the harness's credentials: the model's key or login, her tool tokens.
+  `shared/`, `CLAUDE.md`, `AGENTS.md`, or a `.git` directory under the working directory.
+  What they leave in `personal/` is saved after the answer like anything else she writes there.
+- They read nothing outside her working directory but the system directories an interpreter
+  needs (`/usr`, `/bin`, `/lib`, `/etc` and the like): not the Station user's home, not AI6's
+  configuration, state, roster or Registry, not her own configuration directory or another
+  conversation's, not `/proc`. Reads are denied everywhere and re-opened only for those.
+- They see none of the harness's environment variables that could hold a credential: the
+  model's key or login, her tool tokens, a proxy URL's basic-auth.
 - They reach only `allowed_hosts` under `limited`, nothing under `denied`, and any host
-  under `open`; a host outside the list is refused, never asked about.
+  under `open` except this deployment's own (the gateway, the Station), loopback and the
+  cloud metadata address; a host outside what is allowed is refused, never asked about.
+
+Each conversation keeps its own: its own temporary directory, and its own Claude Code
+configuration directory, so one person's transcripts and any stored login never sit where
+another's scripts could reach. Her login must be a token (`CLAUDE_CODE_OAUTH_TOKEN` or an API
+key in the Agent's environment): a shared login directory is not carried into her Sessions.
+Claude Code's own managed settings on the Station still apply to her harness and merge with
+these limits; a Station that has them as files logs it each time her harness starts, since an
+`allowManagedHooksOnly` there would drop the hook that keeps her web fetches to their hosts.
+
+A shell in the interpreter list (`bash`, `sh`, `env`) runs any program the sandbox allows, not
+only the shell, so the Station logs it as a weakening; prefer a single scripting interpreter.
 
 Her web tools follow the same policy. Under `limited` she may fetch pages from the hosts
 listed (`*.example.com` covers every name under `example.com`), and a hook refuses every other
@@ -349,15 +366,24 @@ servers are the harness's own connections and need no entry.
 
 Claude Code's sandbox runs on macOS, and on Linux and WSL2 with `bubblewrap` and `socat`
 installed. On native Windows, or a Linux Station without them, she starts without scripts:
-she is told they are unavailable on this Station, and the Station's log says why. With
-`unsandboxed_scripts = true` such a Station runs her scripts anyway, with no limit on what they
-read, write or reach; each harness started so logs `ai6: weakening: assistant scripts run
-unsandboxed: files and network not enforced for them`. A sandbox that fails anyway never runs
-her scripts without it: Claude Code exits as it starts, which ends her answer with the reason,
-or refuses each script. `network = "open"` and
-`unsandboxed_scripts = true` are weakenings: a Station logs them when it starts and reports
-them at check-in, and `open` is logged again with each harness it starts. Codex runs her
-without scripts and refuses a network beyond her MCP servers.
+she is told they are unavailable on this Station, and the Station's log says why. A sandbox
+that fails anyway never runs her scripts without it: Claude Code exits as it starts, which
+ends her answer with the reason, or refuses each script.
+
+!!! danger "`unsandboxed_scripts = true` gives every person and every page a shell"
+
+    With `unsandboxed_scripts = true`, a Station whose harness has no sandbox runs her scripts
+    with no limit on what they read, write or reach. Because the model can be steered by any
+    text she reads — a page she fetches, a brief, another Agent's output — this effectively
+    hands every person she serves, and every page she fetches, a shell running as the
+    Station's own user: able to read its credentials, every other conversation and the Station
+    itself. Turn it on only where the Station's user is already confined some other way (a
+    container, a VM). Each harness started under it logs `ai6: weakening: assistant scripts run
+    unsandboxed: …`, and the Station reports it at check-in.
+
+`network = "open"` and `unsandboxed_scripts = true` are weakenings: a Station logs them when it
+starts and reports them at check-in, and `open` is logged again with each harness it starts.
+Codex runs her without scripts and refuses a network beyond her MCP servers.
 
 ## Cables
 
