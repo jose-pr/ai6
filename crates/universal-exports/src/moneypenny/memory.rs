@@ -417,6 +417,7 @@ impl Assistant {
             memory: Some(op),
             // Runs nothing.
             reach: Default::default(),
+            skills: Vec::new(),
             groups: None,
         };
         job.validate()

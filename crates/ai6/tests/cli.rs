@@ -104,6 +104,66 @@ fn harness_pin_prints_the_manifest_and_its_pin() {
     );
 }
 
+/// The pin `ai6 assistant pin-skill` prints is the one a roster takes and a Station checks its
+/// copy against: the digest of [`ai6::ProjectManifest::read_tree`].
+#[test]
+fn assistant_pin_skill_prints_the_pin_the_roster_takes() {
+    let config = tempfile::tempdir().unwrap();
+    let skill = config.path().join("skills").join("charts");
+    std::fs::create_dir_all(skill.join("scripts")).unwrap();
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: charts\ndescription: Draws charts.\n---\nDraw.\n",
+    )
+    .unwrap();
+    std::fs::write(skill.join("scripts").join("plot.py"), "print(1)\n").unwrap();
+    let output = ai6()
+        .args(["assistant", "pin-skill"])
+        .arg(&skill)
+        .output()
+        .expect("the AI6 command should start");
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("  SKILL.md") && text.contains("  scripts/plot.py"),
+        "{text}"
+    );
+    let pin = text
+        .lines()
+        .last()
+        .and_then(|line| line.strip_prefix("pin = \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        pin,
+        ai6::ProjectManifest::read_tree(&skill)
+            .unwrap()
+            .digest()
+            .to_string()
+    );
+    std::fs::write(
+        config.path().join("agents.toml"),
+        format!("[assistant.skills.charts]\npath = \"skills/charts\"\npin = \"{pin}\"\n"),
+    )
+    .unwrap();
+    let roster = ai6::Roster::load(config.path()).unwrap();
+    assert_eq!(
+        roster.assistant().skills()["charts"]
+            .pin()
+            .unwrap()
+            .to_string(),
+        pin
+    );
+
+    let missing = ai6()
+        .args(["assistant", "pin-skill"])
+        .arg(config.path().join("missing"))
+        .output()
+        .expect("the AI6 command should start");
+    assert!(!missing.status.success());
+}
+
 #[test]
 fn a_safe_house_cache_that_is_not_a_plain_directory_name_stops_the_station() {
     let directory = tempfile::tempdir().unwrap();

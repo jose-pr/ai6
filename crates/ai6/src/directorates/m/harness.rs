@@ -246,6 +246,32 @@ impl ProjectManifest {
         })
     }
 
+    /// Reads the manifest of every regular file under `root`, a directory such as a skill
+    /// (`ai6 assistant pin-skill DIR`), with the same rules and limits as [`read`](Self::read);
+    /// paths are relative to `root`.
+    ///
+    /// # Errors
+    ///
+    /// As [`read`](Self::read), or `root` not being a directory reached without a link.
+    pub fn read_tree(root: &Path) -> Result<Self, String> {
+        let metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
+        if !metadata.is_dir() {
+            return Err("not a directory (a link is never followed)".to_owned());
+        }
+        let mut reader = ManifestReader {
+            root,
+            files: BTreeMap::new(),
+            contents: Vec::new(),
+            bytes: 0,
+        };
+        for name in sorted_entries(root, "")? {
+            reader.walk(&name)?;
+        }
+        Ok(Self {
+            files: reader.files,
+        })
+    }
+
     /// The manifest's digest under SHA-256, what `pin` holds.
     pub fn digest(&self) -> PeerId {
         self.digest_with(Digest::Sha256)
@@ -291,16 +317,7 @@ impl ManifestReader<'_> {
         if !metadata.is_dir() {
             return self.file(relative, false);
         }
-        let mut entries: Vec<String> = fs::read_dir(&path)
-            .map_err(|error| format!("{relative}: {error}"))?
-            .map(|entry| {
-                entry
-                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                    .map_err(|error| format!("{relative}: {error}"))
-            })
-            .collect::<Result<_, _>>()?;
-        entries.sort();
-        for name in entries {
+        for name in sorted_entries(&path, relative)? {
             self.walk(&format!("{relative}/{name}"))?;
         }
         Ok(())
@@ -349,6 +366,20 @@ impl ManifestReader<'_> {
         }
         Ok(())
     }
+}
+
+/// The names in the directory `path`, sorted; `relative` names it in errors.
+fn sorted_entries(path: &Path, relative: &str) -> Result<Vec<String>, String> {
+    let mut entries: Vec<String> = fs::read_dir(path)
+        .map_err(|error| format!("{relative}: {error}"))?
+        .map(|entry| {
+            entry
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .map_err(|error| format!("{relative}: {error}"))
+        })
+        .collect::<Result<_, _>>()?;
+    entries.sort();
+    Ok(entries)
 }
 
 /// Reads a file that was a regular file of `expected` bytes, without following a link that
@@ -658,5 +689,33 @@ mod tests {
         assert_eq!(inside(root, "../elsewhere/c.sh"), None);
         assert_eq!(inside(root, "node"), None);
         assert_eq!(inside(root, "https://example.invalid/x"), None);
+    }
+
+    #[test]
+    fn a_tree_manifest_holds_every_file_and_changes_with_any_byte() {
+        let root = tempfile::tempdir().unwrap();
+        let write = |relative: &str, text: &str| {
+            let path = root.path().join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        write("SKILL.md", "---\nname: charts\n---\n");
+        write("scripts/plot.py", "print(1)");
+        write(".hidden", "x");
+        let manifest = ProjectManifest::read_tree(root.path()).unwrap();
+        let paths: Vec<&str> = manifest.files.keys().map(String::as_str).collect();
+        assert_eq!(paths, [".hidden", "SKILL.md", "scripts/plot.py"]);
+        let pin = manifest.digest();
+        assert_eq!(
+            ProjectManifest::read_tree(root.path()).unwrap().digest(),
+            pin
+        );
+        write("scripts/plot.py", "print(2)");
+        assert_ne!(
+            ProjectManifest::read_tree(root.path()).unwrap().digest(),
+            pin
+        );
+        assert!(ProjectManifest::read_tree(&root.path().join("SKILL.md")).is_err());
+        assert!(ProjectManifest::read_tree(&root.path().join("missing")).is_err());
     }
 }

@@ -648,7 +648,8 @@ impl Roster {
                     .roles
                     .insert(id.clone(), definition.resolve(id, &agents_file.display())?);
             }
-            if let Some(assistant) = document.assistant {
+            if let Some(mut assistant) = document.assistant {
+                assistant.resolve_paths(&root);
                 assistant
                     .validate()
                     .map_err(|reason| error(format!("{}: {reason}", agents_file.display())))?;
@@ -2366,6 +2367,37 @@ sources = {{ jira = \"GUA\" }}\n",
                 .assistant(AssistantSettings::new().with_personal_repo("fd::3"))
                 .build()
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn a_skill_path_in_agents_toml_is_relative_to_its_directory_and_its_skill_md_is_read() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "skills/charts/SKILL.md",
+            "---\nname: charts\ndescription: Draws charts.\nallowed-tools: Bash\n---\nDraw.\n",
+        );
+        let pin = crate::ProjectManifest::read_tree(&directory.0.join("skills/charts"))
+            .unwrap()
+            .digest();
+        let agents = |extra: &str| {
+            format!(
+                "[assistant]\n{extra}[assistant.skills.charts]\npath = \"skills/charts\"\n\
+                 pin = \"{pin}\"\n"
+            )
+        };
+        directory.write("agents.toml", &agents(""));
+        let refused = Roster::load(&directory.0).unwrap_err().to_string();
+        assert!(
+            refused.contains("assistant.skills.charts") && refused.contains("allowed-tools"),
+            "{refused}"
+        );
+        directory.write("agents.toml", &agents("skills_allow_tools = true\n"));
+        let roster = Roster::load(&directory.0).unwrap();
+        let path = roster.assistant().skills()["charts"].path();
+        assert_eq!(
+            Path::new(path),
+            directory.0.join("skills").join("charts").as_path()
         );
     }
 

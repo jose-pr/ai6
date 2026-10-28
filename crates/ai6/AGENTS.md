@@ -373,9 +373,10 @@ pub fn config_dir() -> Result<PathBuf, RosterError>;
 #[derive(Default, Serialize, Deserialize)] // serde: unknown keys refused
 pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, write}, org {repo, write}, allow_elevated,
                                 // interpreters (["python3"]), network ("limited"), allowed_hosts ([]),
-                                // unsandboxed_scripts (false), group.<group> and person.<id> narrowing tables
+                                // unsandboxed_scripts (false), skills.<name> {path, pin}, skills_unpinned,
+                                // skills_allow_tools, group.<group> and person.<id> narrowing tables
 impl AssistantSettings {
-    pub fn new() -> Self;   // keeps nothing, python3 in the sandbox, no host, refuses elevated Stations
+    pub fn new() -> Self;   // keeps nothing, python3 in the sandbox, no host, no skill, refuses elevated Stations
     pub fn with_personal_repo(self, template: impl Into<String>) -> Self; // {person} | {person_digest}
     pub fn with_shared(self, group: impl Into<String>, repo: SharedRepo) -> Self;
     pub fn with_org(self, repo: SharedRepo) -> Self;       // checked out as "org"
@@ -383,6 +384,9 @@ impl AssistantSettings {
     pub fn with_interpreters(self, interpreters: Vec<String>) -> Self;  // empty: no scripts
     pub fn with_network(self, policy: NetworkPolicy, allowed_hosts: Vec<String>) -> Self; // Open: a weakening
     pub fn with_unsandboxed_scripts(self, allow: bool) -> Self;         // a weakening
+    pub fn with_skill(self, name: impl Into<String>, skill: SkillEntry) -> Self;
+    pub fn with_skills_unpinned(self, allow: bool) -> Self;     // a weakening
+    pub fn with_skills_allow_tools(self, allow: bool) -> Self;  // a weakening
     pub fn with_group(self, group: impl Into<String>, narrowing: AssistantNarrowing) -> Self;
     pub fn with_person(self, person: impl Into<String>, narrowing: AssistantNarrowing) -> Self;
     pub fn personal_repo(&self) -> Option<&str>;
@@ -397,28 +401,40 @@ impl AssistantSettings {
     pub fn has_group_narrowing(&self) -> bool;             // any [assistant.group.<g>] table
     /// The deployment's reach capped by every group table of `groups` and the person's own.
     pub fn reach_for(&self, person: &str, groups: &[String]) -> AssistantReach;
-    pub fn validate(&self) -> Result<(), String>;          // "assistant.<key>: …"; a table that widens
-                                                           // fails naming "assistant.group.<g>.<key>"
+    pub fn skills(&self) -> &BTreeMap<String, SkillEntry>;
+    pub fn skills_unpinned(&self) -> bool;
+    pub fn skills_allow_tools(&self) -> bool;
+    pub fn skills_for(&self, person: &str, groups: &[String]) -> Vec<String>; // catalog less what tables leave out
+    pub fn validate(&self) -> Result<(), String>;          // "assistant.<key>: …"; reads each SKILL.md; a table
+                                                           // that widens fails naming "assistant.group.<g>.<key>"
     pub fn personal_repo_for(&self, person: &str) -> Result<Option<String>, String>;
     pub fn shared_for(&self, groups: &[String]) -> impl Iterator<Item = (&str, &SharedRepo)>;
     pub fn shared_named(&self, name: &str, groups: &[String]) -> Option<&SharedRepo>;
-    /// allow_elevated, each write = true, network = "open", unsandboxed_scripts = true
+    /// allow_elevated, each write = true, network = "open", unsandboxed_scripts = true,
+    /// skills_unpinned, skills_allow_tools, each SHA-1 skill pin
     pub fn weakenings(&self) -> Vec<String>;
 }
 #[non_exhaustive] #[derive(Default, PartialOrd, Ord)] // serde lowercase; Denied < Limited < Open
 pub enum NetworkPolicy { Denied, #[default] Limited, Open }
 impl NetworkPolicy { pub fn as_str(self) -> &'static str; }
 #[derive(Default, Serialize, Deserialize)] // serde: unknown keys refused; every key optional
-pub struct AssistantNarrowing;  // interpreters, network, allowed_hosts, unsandboxed_scripts
+pub struct AssistantNarrowing;  // interpreters, network, allowed_hosts, unsandboxed_scripts, skills
 impl AssistantNarrowing {
     pub fn new() -> Self;                                     // narrows nothing
     pub fn with_interpreters(self, interpreters: Vec<String>) -> Self; // a subset of the deployment's
     pub fn with_network(self, network: NetworkPolicy) -> Self;        // no looser than the deployment's
     pub fn with_allowed_hosts(self, hosts: Vec<String>) -> Self;     // under limited, a subset
     pub fn with_unsandboxed_scripts(self, allow: bool) -> Self;       // true only if the deployment allows
+    pub fn with_skills(self, skills: Vec<String>) -> Self;            // catalog skills only
+    pub fn skills(&self) -> Option<&[String]>;
 }
 pub const DEFAULT_INTERPRETER: &str = "python3";
 pub struct SharedRepo;  // SharedRepo::new(repo).writable(bool); repo(), write()
+pub struct SkillEntry;  // SkillEntry::new(path).pinned(PeerId); path(), pin() -> Option<PeerId>
+pub const SKILLS_PLUGIN: &str = "ai6";             // Claude Code calls each installed skill `ai6:<name>`
+pub const SKILL_INERT_KEYS: [&str; 12];            // front matter keys that load without skills_allow_tools
+pub fn skill_name(name: &str) -> bool;             // 1-64 of a-z, 0-9, -, starting with a letter or digit
+pub fn check_skill(dir: &Path, name: &str, allow_tools: bool) -> Result<(), String>;
 #[non_exhaustive] pub enum RepoKind { Local, Remote }
 impl RepoKind { pub fn of(repo: &str) -> Result<Self, String>; }
 pub const PERSON_PLACEHOLDER: &str = "{person}";
@@ -440,6 +456,20 @@ for an identifier of 1-64 lowercase letters, digits, `.`, `_`, `@`, `-` not star
 refused, naming `{person_digest}`. `validate` refuses other placeholders, group names that are
 not `file_safe` or are `org`, and repositories `RepoKind::of` refuses. `shared_for` yields the
 groups' repositories the person is a member of, then `org`.
+
+The skills catalog: `validate` refuses a name `skill_name` refuses, a `path` that is not
+absolute (`Roster::load` first makes `agents.toml`'s relative paths absolute under the
+configuration directory; a SQL roster or a builder must give absolute ones), a skill without
+a `pin` unless `skills_unpinned`, a skill `check_skill` refuses, and a group or person table
+naming a skill the catalog lacks. `check_skill` reads `<dir>/SKILL.md` (a regular file of at
+most `MAX_MANIFEST_FILE_BYTES`, never through a link): front matter between two `---` lines
+must parse as a YAML mapping (`serde-saphyr`; duplicate keys refused, merge keys expanded) with
+`name` equal to the catalog's name and a non-empty `description`; unless `allow_tools`, it
+may hold only `SKILL_INERT_KEYS` and no injected command (any `` !` ``, or a fence of three or
+more backticks or tildes followed by `!`). So the skill directories must be readable wherever
+the roster is loaded, Stations and Universal Exports alike. `skills_for` intersects the
+catalog with each table of the person's groups and the person's own; a key a table leaves
+out narrows nothing.
 
 `load` reads `operations.toml` and `agents.toml`; missing files produce an empty roster and
 invalid files fail closed. `from_parts` (and `builder().build()`) is the way in without
@@ -497,9 +527,14 @@ impl HarnessPolicy {
 #[non_exhaustive] pub struct ProjectManifest { pub files: BTreeMap<String, PeerId> } // path -> sha256
 impl ProjectManifest {
     pub fn read(root: &Path) -> Result<Self, String>;
+    pub fn read_tree(root: &Path) -> Result<Self, String>; // every regular file under a directory
     pub fn digest(&self) -> PeerId;  pub fn digest_with(&self, algorithm: coqui_peer::Digest) -> PeerId;
 }
 ```
+
+`read_tree` reads a whole directory (a skill: `ai6 assistant pin-skill DIR`) with the same
+rules and limits, paths relative to it; `root` itself must be a directory reached without a
+link.
 
 The manifest is every regular file under `PROJECT_DIRECTORIES`, each of `PROJECT_FILES`, and
 every file inside the working directory that a `command` or `args` value names (JSON and
@@ -2783,6 +2818,8 @@ pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
                            pub interpreters: Vec<String> /* serde default */,
                            pub unsandboxed: bool /* serde default; scripts without the sandbox, a weakening */,
                            pub skills: Vec<String> /* serde default */,
+                           pub skills_dir: Option<String> /* serde default; absolute; required with skills */,
+                           pub skill_commands: bool /* serde default; false: injected commands off */,
                            pub network: AssistantNetwork /* serde default */,
                            pub files: Vec<String> /* serde default; directories it may write */,
                            pub read_only: Vec<String> /* serde default; relative paths scripts may not write */,
@@ -2802,18 +2839,23 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // "headers":{"Authorization":"Bearer ${P_TOKEN}"}}}}`, no gate. Codex: `-c mcp_servers=
 // {<name>={url="…",bearer_token_env_var="P_TOKEN"}}` (replacing the user's servers), the same
 // `-c` settings that switch its built-in tools off as answer-only, the project untrusted, and
-// the answer-only thread policy. Both refuse to start (UNSUPPORTED) with skills, Codex also
+// the answer-only thread policy. Both refuse to start (UNSUPPORTED) with skills when they
+// cannot install them (Codex always; Claude Code without an absolute `skills_dir`), Codex also
 // with interpreters or a network reaching more than the servers, and (BAD_VALUE) when the
 // environment lacks a server's URL or token; tokens never reach a command line.
 // `validate` also checks `files` and `read_only` (1 to 8 `/`-separated names of letters,
 // digits, `.`, `-`, `_`, none starting with `.`), interpreters (`interpreter_name`), hosts
-// (`host_pattern`) and that `context_file` is absolute. Claude Code offers
+// (`host_pattern`), that `context_file` is absolute, and that `skills` come with an absolute
+// `skills_dir`: a Claude Code plugin directory (`skills/<name>/SKILL.md`,
+// `.claude-plugin/plugin.json` naming `ai6`). Claude Code offers
 // exactly the built-in tools the parts call for in `--tools` (none: `--tools=`) under
 // `--permission-mode dontAsk`, denies the rest by name: with `files`, `Read,Write,Edit,Glob,
 // Grep` and `--allowedTools …,Read,Glob,Grep,Edit(/<dir>/**),…` (no path with a name starting
 // with `.`); with interpreters, `Bash` and `Bash(<interpreter> *)`; with a `limited` network
 // that lists hosts, `WebFetch` and `WebFetch(domain:<host>)`; with `open`, `WebFetch`,
-// `WebSearch`, `WebFetch(domain:*)` and `WebSearch`. Interpreters add `--settings` with the
+// `WebSearch`, `WebFetch(domain:*)` and `WebSearch`; with `skills`, `Skill`,
+// `Skill(ai6:<name>)` per skill and `--plugin-dir <skills_dir>`. One `--settings` value holds
+// every setting the parts call for. Interpreters add the
 // sandbox (`enabled`, `failIfUnavailable`, `autoAllowBashIfSandboxed: false`,
 // `allowUnsandboxedCommands: false`, `filesystem` {`allowWrite`: the `files` directories,
 // `denyWrite`: `read_only`, `.claude` and the `.git` of the working directory and each writable
@@ -2825,7 +2867,8 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // and the model credentials, `credentials.files` denying the credential directories
 // (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `*_HOME`)) and
 // `permissions.blockReadsOutsideWorkingDirectories`;
-// `unsandboxed` makes it `{"sandbox":{"enabled":false},…}`. Any network but `denied` adds a
+// `unsandboxed` makes it `{"sandbox":{"enabled":false},…}`. Skills without `skill_commands`
+// add `"disableSkillShellExecution": true`. Any network but `denied` adds a
 // `PreToolUse` hook on `WebFetch` running `<gate program> assistant web-gate [--hosts …]
 // [--deny …]` (`onFailure: block`). A network reaching nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1`;
 // a `context_file` is `--append-system-prompt-file`; every assistant Session has
@@ -2878,10 +2921,13 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub cable_discard: Option<AssistantCableDecision> /* default, omitted when None */,
     pub memory: Option<MemoryOp> /* default, omitted when None: the person's memory from the app */,
     pub reach: AssistantReach /* default: runs and reaches nothing */,
+    pub skills: Vec<String> /* default, omitted when empty: catalog skills the person is given */,
     pub groups: Option<Vec<String>> /* default, omitted when None; the person's directory groups,
-                                       so the Station re-caps by its per-group tables; requires
-                                       person_id; None makes a group-narrowing roster refuse */ }
+                                       so the Station re-caps reach and skills by its per-group
+                                       tables; requires person_id; None makes a group-narrowing
+                                       roster refuse */ }
                                                      // Debug redacts the token
+pub const MAX_ASSISTANT_SKILLS: usize = 64;
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
 pub struct MemoryOp { pub repo: String /* the person's personal repository */,
     pub action: MemoryAction }
@@ -2957,13 +3003,14 @@ recap together), a token of 32-512 bytes without whitespace, a workspace (reposi
 known `RepoKind`, checkout names as `file_safe` names, an author without control characters,
 `<` or `>`), a commit (a known kind; the change's 1-32 files within
 `MAX_ASSISTANT_CHANGE_BYTES`, each `repository_path`, under `memory/` for `COMMIT_MEMORY`, its
-digest matching; a message of 1-4096 bytes), and at most `MAX_ASSISTANT_CABLE_GRANTS` Cable
-grants for distinct valid Operations, which need `person_id`, and a memory operation (a
+digest matching; a message of 1-4096 bytes), at most `MAX_ASSISTANT_CABLE_GRANTS` Cable
+grants for distinct valid Operations, which need `person_id`, a memory operation (a
 repository of a known kind; a `memory_path`; text within `MAX_ASSISTANT_CHANGE_BYTES`; a base
 of 64 hex digits; a commit message of 1-4096 bytes and an author as for a commit), which needs
-`person_id` too. A job's answer is one report with its `job_id` and one `accepted` (for a
-commit, text saying where it landed) or `rejected` event (text: the reason), a memory job's
-with its `memory` answer; the harness's own events follow in reports without a `job_id`.
+`person_id` too, and at most `MAX_ASSISTANT_SKILLS` distinct `skill_name` skills. A job's
+answer is one report with its `job_id` and one `accepted` (for a commit, text saying where it
+landed) or `rejected` event (text: the reason), a memory job's with its `memory` answer; the
+harness's own events follow in reports without a `job_id`.
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
 `limit` set, in place of the `completed` or `failed` event the same output would
@@ -3528,6 +3575,22 @@ conversation, and for a message nothing more of that conversation is reported un
 harness has closed. An assistant Session is not a Mission: no
 Operation, board entry or usage ledger record.
 
+A job's `skills` must all be ones this Station's own roster gives its person
+(`roster.assistant().skills_for(person_id, groups)`, the groups as for its reach; a job with no
+`person_id` is given none), or the job is `rejected` naming the first one that is not; a
+running harness started with other skills is restarted, as for a changed reach. Before the harness starts (and
+before a workspace is prepared), the desk empties `<conversation dir>/.claude` and copies each
+skill's directory into `.claude/skills/<name>/` (regular files and directories only: a link,
+device or pipe anywhere, or the `ProjectManifest` limits passed, leaves the skill out), then
+checks the copy: `ProjectManifest::read_tree(copy).digest_with(pin.digest()) == pin` when the
+skill has a pin, and `check_skill(copy, name, skills_allow_tools)`. A skill that fails is
+removed, logged (`ai6: assistant skill <name> does not match its pin`, or `… was not
+installed: <reason>`), filed as a `StationReport` with one `provider` warning finding of the
+same text, and reported to the conversation as a `notice` with its first event. With one skill
+or more it writes `.claude/.claude-plugin/plugin.json` (`{"name":"ai6",…}`) and starts the
+harness with `skills` (those installed), `skills_dir` (`.claude`) and `skill_commands =
+skills_allow_tools`; the workspace's standing text lists them.
+
 A job with a `workspace` gets, through the `git` safe-house provider (`SafeHouseSpec::clone`,
 `CheckpointSpec::branch`): `personal/`, a clone of `workspace.personal` on `main` (a missing
 local or `file://` repository is made bare first; a first use writes and commits
@@ -3856,6 +3919,9 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
   on any command must name an existing file; only the default `plugins.toml` may be absent.
 - `ai6 harness pin DIR` prints a working directory's harness manifest (`# sha256:..  PATH`
   per file) and the `pin = "sha256:..."` line for `[operation.ID.harness]`.
+- `ai6 assistant pin-skill DIR` prints a skill directory's manifest
+  (`ProjectManifest::read_tree`, `# sha256:..  PATH` per file) and the `pin = "sha256:..."`
+  line for `[assistant.skills.NAME]`; a directory it cannot read exits non-zero.
 - `ai6 theater provision` also takes `--plugin-pins` and `--plugin-profile`.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.

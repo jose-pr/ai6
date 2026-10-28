@@ -273,7 +273,8 @@ fn control_job(
         cable_discard: None,
         memory: None,
         reach: AssistantReach::default(),
-        // A control starts no harness, so it carries no reach or groups.
+        skills: Vec::new(),
+        // A control starts no harness, so it carries no reach, skills or groups.
         groups: None,
     }
 }
@@ -596,8 +597,10 @@ impl Assistant {
                 format!("Moneypenny cannot keep a workspace for you: {reason}"),
             )
         })?;
-        // Read again for every message, so a narrowed table reaches her next turn.
+        // Read again for every message, so a narrowed table reaches her next turn: her reach,
+        // and her skills, the catalog's less what the person's group and person tables leave out.
         let reach = settings.reach_for(&person.id, &person.groups);
+        let skills = settings.skills_for(&person.id, &person.groups);
         // Read again for every message, so a permission removed reaches her next turn.
         let cables = cables::grants(gateway, &person).await;
         {
@@ -669,6 +672,7 @@ impl Assistant {
                 cable_discard: None,
                 memory: None,
                 reach,
+                skills,
                 // The person's directory groups, so the Station applies its per-group narrowing.
                 groups: Some(person.groups.clone()),
             };

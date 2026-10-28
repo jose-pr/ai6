@@ -26,7 +26,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::directorates::m::assistant::RepoKind;
+use crate::directorates::m::assistant::{RepoKind, SKILLS_PLUGIN};
 use crate::directorates::q::safehouse::{
     CheckpointFile, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseProvider,
     SafeHouseSpec,
@@ -114,6 +114,7 @@ impl Workspace {
     /// Makes the workspace in `area`, the conversation's empty directory, with the
     /// repositories' git directories in `repos` and the standing text in `context`, both
     /// outside `area`; answers it with notices for the conversation.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn prepare(
         houses: &Houses,
         area: &Path,
@@ -122,6 +123,7 @@ impl Workspace {
         conversation_id: &str,
         job: &AssistantWorkspace,
         exposed: bool,
+        skills: &[String],
     ) -> Result<(Self, Vec<String>), String> {
         let provider = houses()?;
         let digest = &super::conversation_digest(conversation_id);
@@ -204,7 +206,7 @@ impl Workspace {
         }
         fs::create_dir_all(area.join(SCRATCH)).map_err(|error| error.to_string())?;
         let memory = read_text(area, &index).unwrap_or_default();
-        let standing = instructions(workspace.exposed, &shared);
+        let standing = instructions(workspace.exposed, &shared, skills);
         write_file(
             area,
             &area.join("CLAUDE.md"),
@@ -690,7 +692,20 @@ pub(super) fn open_clone(
 }
 
 /// What the desk tells her about her workspace, before her memory.
-fn instructions(exposed: bool, shared: &[String]) -> String {
+fn instructions(exposed: bool, shared: &[String], skills: &[String]) -> String {
+    let skills = if skills.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "- `.claude/skills/` holds the skills you may use, read-only: {}. Call one with the \
+             Skill tool as `{SKILLS_PLUGIN}:<name>`.\n",
+            skills
+                .iter()
+                .map(|name| format!("`{name}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
     let memory = if exposed {
         "In this conversation you have read text other people wrote, so a change to your \
          memory waits until the person confirms it."
@@ -720,6 +735,7 @@ fn instructions(exposed: bool, shared: &[String]) -> String {
          - {shared}\n\
          - `{SCRATCH}/` is for anything temporary; it goes when this conversation's session \
          closes.\n\
+         {skills}\
          - Nothing else here is yours to change.\n"
     )
 }
@@ -956,7 +972,7 @@ pub(super) fn no_links(root: &Path, path: &Path) -> std::io::Result<()> {
 }
 
 /// Whether `metadata` is of a link: a symbolic link, or on Windows any reparse point.
-fn is_link(metadata: &fs::Metadata) -> bool {
+pub(super) fn is_link(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -1371,6 +1387,19 @@ mod tests {
             under: true,
         };
         assert!(!other.covers(&key), "a name's prefix is not its directory");
+    }
+
+    #[test]
+    fn her_standing_text_names_the_skills_installed_for_her() {
+        let without = instructions(false, &[], &[]);
+        assert!(!without.contains(".claude/skills"), "{without}");
+        let with = instructions(false, &[], &["charts".to_owned(), "slides".to_owned()]);
+        assert!(
+            with.contains("`.claude/skills/`")
+                && with.contains("`charts`, `slides`")
+                && with.contains("`ai6:<name>`"),
+            "{with}"
+        );
     }
 
     #[test]

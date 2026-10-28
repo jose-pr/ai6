@@ -22,7 +22,8 @@
 //! conversation's harness starts, because Claude Code finds a Session to resume only from the
 //! directory it was recorded in. The directory goes when the harness closes. A job that names
 //! a workspace fills it with the person's repositories and saves her work after each answer
-//! ([`workspace`]).
+//! ([`workspace`]); one that gives skills has them installed there from this Station's own
+//! catalog, each checked against its pin ([`skills`]).
 //!
 //! A Station running elevated (root, or an administrator's elevated token) refuses every job
 //! unless the roster's `assistant.allow_elevated` is set, which is logged as a weakening each
@@ -34,6 +35,7 @@
 //! [`MemoryOp`]: crate::directorates::section_00::assistant::MemoryOp
 
 mod memory;
+mod skills;
 mod workspace;
 
 use std::collections::BTreeMap;
@@ -50,6 +52,7 @@ use url::Url;
 #[cfg(feature = "cables-mcp")]
 use super::cables_mcp::{AssistantEndpoint, AssistantIdentity, CableGate, Standing};
 use super::{DaemonState, medical, station_terminal, unix_now, vetting};
+use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::section_00::agent::{
@@ -261,12 +264,14 @@ impl CableGate for ExportsGate {
     }
 }
 
-/// A running harness: its Session, flags, token expiry and workspace.
+/// A running harness: its Session, flags, token expiry, the reach and skills it started
+/// with, and its workspace.
 type Running = (
     SharedSession,
     Arc<Flags>,
     f64,
     AssistantReach,
+    Vec<String>,
     Option<SharedWorkspace>,
 );
 
@@ -400,6 +405,8 @@ struct Live {
     /// started: kept so a later job whose cap changed restarts the harness instead of reaching
     /// it warm.
     reach: AssistantReach,
+    /// The skills the job gave it at start, kept for the same reason.
+    skills: Vec<String>,
     /// Raised for good once the conversation reads outside text (a web tool, a reaching
     /// script), shared with the pump and the Cable endpoint; sticky for the harness's life.
     exposed: Arc<AtomicBool>,
@@ -559,6 +566,31 @@ impl Desk {
         Ok(())
     }
 
+    /// Refuses a job giving a skill this Station's own roster does not give its person: one
+    /// outside the catalog (`[assistant.skills]`), or one a table of the person or of a group
+    /// the job names leaves out ([`AssistantSettings::skills_for`]); a job with no `person_id`
+    /// is given none. Universal Exports' word is not taken for what she may load.
+    ///
+    /// [`AssistantSettings::skills_for`]: crate::directorates::m::assistant::AssistantSettings::skills_for
+    fn check_skills(&self, job: &AssistantJob) -> Result<(), String> {
+        if job.skills.is_empty() {
+            return Ok(());
+        }
+        let state = self.state.current();
+        let settings = state.roster.assistant();
+        let given = match job.person_id.as_deref() {
+            Some(person) => settings.skills_for(person, job_groups(job, settings)?),
+            None => Vec::new(),
+        };
+        match job.skills.iter().find(|skill| !given.contains(skill)) {
+            Some(skill) => Err(format!(
+                "skill {skill:?} is not one this Station's roster ([assistant.skills]) gives the \
+                 person, so nothing was done"
+            )),
+            None => Ok(()),
+        }
+    }
+
     /// Takes one job and reports whether the harness has the message, or how a commit went.
     /// Nothing the harness says about a message is reported before Universal Exports has
     /// its `accepted`, and nothing at all once Universal Exports refused that `accepted`: it
@@ -656,6 +688,7 @@ impl Desk {
         job.validate()?;
         self.check_elevation()?;
         self.check_repositories(job)?;
+        self.check_skills(job)?;
         if job.close {
             self.close(&job.conversation_id);
             return Ok(None);
@@ -670,8 +703,8 @@ impl Desk {
             return self.decide_cable(job).await.map(|()| None);
         }
         // What this job may run and reach, capped by the Station's roster; a job the roster
-        // narrows (a group or person table, or a changed deployment) restarts the harness
-        // rather than reach it warm with the reach it started under.
+        // narrows (a group or person table, or a changed deployment), or whose skills changed,
+        // restarts the harness rather than reach it warm with what it started under.
         let reach = self.capped_reach(job)?;
         // Universal Exports' record of exposure only ever rises; a running harness's flag (read
         // by its Cable endpoint) follows it at once.
@@ -682,8 +715,11 @@ impl Desk {
             entry.exposed.store(true, Ordering::Release);
         }
         let running = self.running(&job.conversation_id);
-        if let Some((session, flags, expires, started_reach, workspace)) = running {
-            if expires > unix_now() + TOKEN_MARGIN_SECS && started_reach == reach {
+        if let Some((session, flags, expires, started_reach, started_skills, workspace)) = running {
+            if expires > unix_now() + TOKEN_MARGIN_SECS
+                && started_reach == reach
+                && started_skills == job.skills
+            {
                 #[cfg(feature = "cables-mcp")]
                 if let Some(cables) = self.cables_of(&job.conversation_id) {
                     cables.update(&job.cables, job.exposed);
@@ -722,7 +758,8 @@ impl Desk {
                 .map_err(|error| error.to_string())?
                 .map(|()| None);
             }
-            // Its token is about to expire, or its reach changed: the harness starts again.
+            // Its token is about to expire, or its reach or skills changed: the harness starts
+            // again.
             self.close(&job.conversation_id);
         }
         // A harness that has stopped may still be removing the directory the next one uses.
@@ -796,14 +833,27 @@ impl Desk {
                  this elevated Station",
             );
         }
-        #[cfg_attr(not(feature = "cables-mcp"), allow(unused_mut))]
-        let (mut mode, workspace, notices) = match self.workspace(job, &area).await {
-            Ok(prepared) => prepared,
+        let installed = match self.install_skills(job, &area).await {
+            Ok(installed) => installed,
             Err(reason) => {
                 remove_area(&area);
                 return Err(reason);
             }
         };
+        let (mut mode, workspace, mut notices) =
+            match self.workspace(job, &area, &installed.names).await {
+                Ok(prepared) => prepared,
+                Err(reason) => {
+                    remove_area(&area);
+                    return Err(reason);
+                }
+            };
+        notices.extend(installed.notices);
+        if let Some(dir) = installed.dir {
+            mode.skills = installed.names;
+            mode.skills_dir = Some(dir.to_string_lossy().into_owned());
+            mode.skill_commands = state.roster.assistant().skills_allow_tools();
+        }
         let reach = match self.capped_reach(job) {
             Ok(reach) => reach,
             Err(reason) => {
@@ -966,6 +1016,7 @@ impl Desk {
                     token_expires_at: job.token_expires_at,
                     flags: flags.clone(),
                     reach: reach.clone(),
+                    skills: job.skills.clone(),
                     exposed: exposed.clone(),
                     workspace: workspace.clone(),
                     #[cfg(feature = "cables-mcp")]
@@ -1012,18 +1063,7 @@ impl Desk {
             // No person: the strictest reach, whatever the roster allows anyone.
             return Ok(job_reach.capped_by(&AssistantReach::default()));
         };
-        let groups = match (&job.groups, settings.has_group_narrowing()) {
-            (Some(groups), _) => groups.as_slice(),
-            (None, false) => &[],
-            (None, true) => {
-                return Err(
-                    "this Station's roster narrows scripts and network by directory group, but \
-                     the job carries no group membership, so nothing was done"
-                        .to_owned(),
-                );
-            }
-        };
-        Ok(job_reach.capped_by(&settings.reach_for(person, groups)))
+        Ok(job_reach.capped_by(&settings.reach_for(person, job_groups(job, &settings)?)))
     }
 
     /// Gives `mode` what `reach` lets her run and reach: the network policy, and the
@@ -1203,18 +1243,45 @@ impl Desk {
                 entry.flags.clone(),
                 entry.token_expires_at,
                 entry.reach.clone(),
+                entry.skills.clone(),
                 entry.workspace.clone(),
             )
         })
     }
 
+    /// Installs the skills `job` gives her in `area` ([`skills::install`]).
+    async fn install_skills(
+        &self,
+        job: &AssistantJob,
+        area: &str,
+    ) -> Result<skills::Installed, String> {
+        if job.skills.is_empty() {
+            return Ok(skills::Installed::default());
+        }
+        let (state, log, area, wanted) = (
+            self.state.clone(),
+            self.log.clone(),
+            PathBuf::from(area),
+            job.skills.clone(),
+        );
+        tokio::task::spawn_blocking(move || {
+            let current = state.current();
+            skills::install(&state, &log, &area, current.roster.assistant(), &wanted)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|reason| format!("the assistant's skills could not be installed: {reason}"))
+    }
+
     /// The mode a job's harness starts in, and its workspace with the notices preparing it
     /// left: Moneypenny's own tools only without one; with one, the repositories cloned into
-    /// `area` and the file tools for `personal/` and `scratch/`.
+    /// `area` and the file tools for `personal/` and `scratch/`, its standing text naming
+    /// `skills`, those installed.
     async fn workspace(
         &self,
         job: &AssistantJob,
         area: &str,
+        skills: &[String],
     ) -> Result<(AssistantMode, Option<SharedWorkspace>, Vec<String>), String> {
         let Some(wanted) = job.workspace.clone() else {
             return Ok((AssistantMode::moneypenny(), None, Vec::new()));
@@ -1227,6 +1294,7 @@ impl Desk {
         let conversation = job.conversation_id.clone();
         let file = context.clone();
         let exposed = job.exposed;
+        let skills = skills.to_vec();
         let (mut workspace, notices) = tokio::task::spawn_blocking(move || {
             Workspace::prepare(
                 &houses,
@@ -1236,6 +1304,7 @@ impl Desk {
                 &conversation,
                 &wanted,
                 exposed,
+                &skills,
             )
         })
         .await
@@ -1272,7 +1341,7 @@ impl Desk {
     /// interrupt; its pump reports `interrupted` when the turn ends. A harness that is not
     /// answering, or not running here, is left as it is.
     async fn interrupt(&self, conversation: &str) -> Result<(), String> {
-        let Some((session, flags, _, _, _)) = self.running(conversation) else {
+        let Some((session, flags, _, _, _, _)) = self.running(conversation) else {
             return Ok(());
         };
         if !flags.busy.load(Ordering::Acquire) {
@@ -1687,6 +1756,25 @@ fn report_resume_failure(conversation: &str, resumed: &str, error: &str) {
          starts afresh with its recap: {error}",
         conversation_digest(conversation)
     );
+}
+
+/// The directory groups `job`'s person is capped by under `settings`: the job's own list, or
+/// none when the roster has no group table; `Err` when it has one and the job carries no list
+/// (the gateway did not resolve the person's groups), so the Station refuses rather than skip
+/// a narrowing and widen.
+fn job_groups<'a>(
+    job: &'a AssistantJob,
+    settings: &AssistantSettings,
+) -> Result<&'a [String], String> {
+    match (&job.groups, settings.has_group_narrowing()) {
+        (Some(groups), _) => Ok(groups.as_slice()),
+        (None, false) => Ok(&[]),
+        (None, true) => Err(
+            "this Station's roster narrows scripts, network and skills by directory group, but \
+             the job carries no group membership, so nothing was done"
+                .to_owned(),
+        ),
+    }
 }
 
 /// A file-safe name for a conversation, the same on every Station.
@@ -2746,6 +2834,7 @@ mod tests {
             cable_discard: None,
             memory: None,
             reach: Default::default(),
+            skills: Vec::new(),
             groups: None,
         }
     }
@@ -5125,5 +5214,222 @@ mod tests {
                     && source.contains("outside-text")),
             "{marks:?}"
         );
+    }
+
+    /// A catalog of two skills under `catalog`, each pinned as `ai6 assistant pin-skill`
+    /// prints it: the roster's agents file.
+    fn skills_catalog(catalog: &Path) -> String {
+        let mut agents = AGENTS.to_owned();
+        for name in ["charts", "report-writer"] {
+            let dir = catalog.join(name);
+            std::fs::create_dir_all(dir.join("scripts")).unwrap();
+            std::fs::write(
+                dir.join("SKILL.md"),
+                format!(
+                    "---\nname: {name}\ndescription: Makes {name}.\n---\n\nSee reference.md.\n"
+                ),
+            )
+            .unwrap();
+            std::fs::write(dir.join("reference.md"), "How it is done.\n").unwrap();
+            std::fs::write(dir.join("scripts").join("run.py"), "print('done')\n").unwrap();
+            let pin = crate::ProjectManifest::read_tree(&dir).unwrap().digest();
+            agents.push_str(&format!(
+                "[assistant.skills.{name}]\npath = '{}'\npin = '{pin}'\n",
+                dir.display()
+            ));
+        }
+        agents
+    }
+
+    #[tokio::test]
+    async fn a_pinned_skill_is_installed_for_her_and_a_changed_one_is_left_out_and_reported() {
+        use crate::directorates::registry::logbook::StationFindingKind;
+
+        let catalog = tempfile::tempdir().unwrap();
+        let fixture = on_station(
+            &skills_catalog(catalog.path()),
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        // One byte of report-writer changes after the roster pinned it.
+        std::fs::write(
+            catalog.path().join("report-writer").join("reference.md"),
+            "How it is done!\n",
+        )
+        .unwrap();
+        let given = AssistantJob {
+            skills: vec!["charts".to_owned(), "report-writer".to_owned()],
+            // Skills are given to a person.
+            person_id: Some("eve".to_owned()),
+            ..job("c-k", "Chart the week.")
+        };
+        fixture.desk.handle(given).await;
+        until(|| kinds(&fixture, "c-k").contains(&EVENT_COMPLETED.to_owned())).await;
+
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let mode = start.assistant.clone().unwrap();
+        let area = Path::new(&start.working_directory);
+        let plugin = area.join(".claude");
+        assert_eq!(mode.skills, ["charts"]);
+        assert_eq!(
+            mode.skills_dir.as_deref(),
+            Some(plugin.to_string_lossy().as_ref())
+        );
+        assert!(!mode.skill_commands);
+        let installed = plugin.join("skills").join("charts");
+        for file in ["SKILL.md", "reference.md", "scripts/run.py"] {
+            assert!(installed.join(file).is_file(), "{file}");
+        }
+        assert_eq!(
+            crate::ProjectManifest::read_tree(&installed)
+                .unwrap()
+                .digest(),
+            crate::ProjectManifest::read_tree(&catalog.path().join("charts"))
+                .unwrap()
+                .digest(),
+            "the copy is what was pinned"
+        );
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(plugin.join(".claude-plugin").join("plugin.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["name"], "ai6");
+        assert!(!plugin.join("skills").join("report-writer").exists());
+
+        let logged = fixture.logged.lock().unwrap().clone();
+        assert!(
+            logged
+                .iter()
+                .any(|line| line == "assistant skill report-writer does not match its pin"),
+            "{logged:?}"
+        );
+        let logbook = fixture.desk.state.intake.logbook("test").unwrap();
+        let finding = &logbook.last().unwrap().findings[0];
+        assert_eq!(finding.kind, StationFindingKind::Provider);
+        assert_eq!(
+            finding.text,
+            "assistant skill report-writer does not match its pin"
+        );
+        let notices: Vec<String> = events(&fixture, "c-k")
+            .into_iter()
+            .filter(|event| event.kind == EVENT_NOTICE)
+            .filter_map(|event| event.text)
+            .collect();
+        assert!(
+            notices
+                .iter()
+                .any(|notice| notice.contains("\"report-writer\"")),
+            "{notices:?}"
+        );
+        fixture.desk.close_all();
+
+        // A skill the Station's own catalog lacks is refused, and nothing starts.
+        let unknown = AssistantJob {
+            skills: vec!["lockpicking".to_owned()],
+            person_id: Some("eve".to_owned()),
+            ..job("c-u", "Open it.")
+        };
+        fixture.desk.handle(unknown).await;
+        assert_eq!(kinds(&fixture, "c-u"), [EVENT_REJECTED]);
+        let reason = events(&fixture, "c-u")[0].text.clone().unwrap();
+        assert!(reason.contains("\"lockpicking\""), "{reason}");
+        assert_eq!(fixture.asked.lock().unwrap().starts.len(), 1);
+
+        // Without skills she starts as before: no Skill tool, no plugin directory.
+        fixture.desk.handle(job("c-n", "Hello.")).await;
+        until(|| kinds(&fixture, "c-n").contains(&EVENT_COMPLETED.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[1].clone();
+        let mode = start.assistant.unwrap();
+        assert!(mode.skills.is_empty() && mode.skills_dir.is_none());
+        assert!(!Path::new(&start.working_directory).join(".claude").exists());
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_skill_the_stations_tables_leave_out_is_refused_and_a_changed_list_restarts_her() {
+        let catalog = tempfile::tempdir().unwrap();
+        let agents = format!(
+            "{}[assistant.group.contractors]\nskills = ['charts']\n",
+            skills_catalog(catalog.path())
+        );
+        let fixture = on_station(
+            &agents,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        let given = |conversation: &str, message: &str, skills: &[&str]| AssistantJob {
+            skills: skills.iter().map(|name| (*name).to_owned()).collect(),
+            person_id: Some("eve".to_owned()),
+            groups: Some(vec!["contractors".to_owned()]),
+            ..job(conversation, message)
+        };
+
+        // The gateway gave a contractor a skill the Station's group table leaves out.
+        fixture
+            .desk
+            .handle(given("c-w", "Write it up.", &["report-writer"]))
+            .await;
+        assert_eq!(kinds(&fixture, "c-w"), [EVENT_REJECTED]);
+        let reason = events(&fixture, "c-w")[0].text.clone().unwrap();
+        assert!(reason.contains("\"report-writer\""), "{reason}");
+
+        // With no group list the Station cannot apply the table: refused, not skipped.
+        let unresolved = AssistantJob {
+            groups: None,
+            ..given("c-v", "Chart it.", &["charts"])
+        };
+        fixture.desk.handle(unresolved).await;
+        assert_eq!(kinds(&fixture, "c-v"), [EVENT_REJECTED]);
+        let reason = events(&fixture, "c-v")[0].text.clone().unwrap();
+        assert!(reason.contains("directory group"), "{reason}");
+
+        // No person, no skills.
+        let anonymous = AssistantJob {
+            person_id: None,
+            groups: None,
+            ..given("c-z", "Chart it.", &["charts"])
+        };
+        fixture.desk.handle(anonymous).await;
+        assert_eq!(kinds(&fixture, "c-z"), [EVENT_REJECTED]);
+        assert!(fixture.asked.lock().unwrap().starts.is_empty());
+
+        // A skill it gives starts her with it; the next message without it restarts her.
+        fixture
+            .desk
+            .handle(given("c-c", "first", &["charts"]))
+            .await;
+        until(|| kinds(&fixture, "c-c").contains(&EVENT_COMPLETED.to_owned())).await;
+        let mode = fixture.asked.lock().unwrap().starts[0]
+            .assistant
+            .clone()
+            .unwrap();
+        assert_eq!(mode.skills, ["charts"]);
+        fixture.desk.handle(given("c-c", "second", &[])).await;
+        until(|| {
+            let asked = fixture.asked.lock().unwrap();
+            asked.starts.len() > 1 || !asked.resumes.is_empty()
+        })
+        .await;
+        let asked = fixture.asked.lock().unwrap();
+        let mode = asked
+            .resumes
+            .first()
+            .and_then(|resume| resume.assistant.clone())
+            .or_else(|| {
+                asked
+                    .starts
+                    .get(1)
+                    .and_then(|start| start.assistant.clone())
+            })
+            .unwrap();
+        assert!(mode.skills.is_empty(), "restarted without the skill");
+        drop(asked);
+        fixture.desk.close_all();
     }
 }

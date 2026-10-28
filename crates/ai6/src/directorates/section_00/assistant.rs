@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::agent::{AssistantMode, AssistantNetwork, McpServerRef};
-use crate::directorates::m::assistant::{RepoKind, file_safe};
+use crate::directorates::m::assistant::{RepoKind, file_safe, skill_name};
 
 /// The prefix of the environment variables holding the assistant's MCP endpoint
 /// (`AI6_MONEYPENNY_MCP_URL`, `AI6_MONEYPENNY_MCP_TOKEN`).
@@ -55,6 +55,8 @@ impl AssistantMode {
             interpreters: Vec::new(),
             unsandboxed: false,
             skills: Vec::new(),
+            skills_dir: None,
+            skill_commands: false,
             network: AssistantNetwork::default(),
             files: Vec::new(),
             read_only: Vec::new(),
@@ -78,8 +80,8 @@ impl AssistantMode {
     /// letters, digits, `.`, `-` and `_`; a known network policy and hosts as [`host_pattern`]
     /// accepts them; writable directories of one to eight `/`-separated names of letters,
     /// digits, `.`, `-` and `_`, none starting with `.`; a context file and unreadable paths
-    /// given as absolute paths. A handler checks this before building settings from the
-    /// names.
+    /// given as absolute paths; skills only with an absolute `skills_dir`. A handler checks
+    /// this before building settings from the names.
     ///
     /// # Errors
     ///
@@ -135,6 +137,12 @@ impl AssistantMode {
             && (file.chars().any(char::is_control) || !std::path::Path::new(file).is_absolute())
         {
             return Err(format!("context file {file:?} is not an absolute path"));
+        }
+        let absolute = |dir: &String| {
+            !dir.chars().any(char::is_control) && std::path::Path::new(dir).is_absolute()
+        };
+        if !self.skills.is_empty() && !self.skills_dir.as_ref().is_some_and(absolute) {
+            return Err("skills need an absolute skills_dir to be installed in".to_owned());
         }
         Ok(())
     }
@@ -793,13 +801,22 @@ pub struct AssistantJob {
     /// roster's `[assistant]` and never widens it. The default runs and reaches nothing.
     #[serde(default)]
     pub reach: AssistantReach,
-    /// The person's directory groups, so the Station can apply its roster's per-group script
-    /// and network narrowing; `None` when Universal Exports did not resolve them, which makes
-    /// a Station whose roster narrows by group refuse rather than skip a narrowing. Requires
-    /// `person_id`.
+    /// The skills of the roster's catalog the person is given (`[assistant.skills]`, less what
+    /// their group and person tables leave out), at most [`MAX_ASSISTANT_SKILLS`]; the Station
+    /// installs each from its own catalog and refuses one its own roster does not give the
+    /// person.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    /// The person's directory groups, so the Station can apply its roster's per-group script,
+    /// network and skill narrowing; `None` when Universal Exports did not resolve them, which
+    /// makes a Station whose roster narrows by group refuse rather than skip a narrowing.
+    /// Requires `person_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<String>>,
 }
+
+/// The most skills a job gives the assistant.
+pub const MAX_ASSISTANT_SKILLS: usize = 64;
 
 /// What a person may do with Cables in one Operation, through the assistant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -855,8 +872,8 @@ impl AssistantJob {
     /// confirm or discard a held Cable, or look at or change the person's memory, of which a
     /// job does one), context within [`MAX_ASSISTANT_CONTEXT_BYTES`], a token of 32 to 512
     /// bytes, a workspace, commit and memory operation as their own `validate` checks them,
-    /// and Cable grants for at most [`MAX_ASSISTANT_CABLE_GRANTS`] distinct Operations, with
-    /// the person they are for.
+    /// Cable grants for at most [`MAX_ASSISTANT_CABLE_GRANTS`] distinct Operations, with the
+    /// person they are for, and at most [`MAX_ASSISTANT_SKILLS`] distinct skill names.
     ///
     /// # Errors
     ///
@@ -937,6 +954,17 @@ impl AssistantJob {
                 return Err("a Cable grant's Operation is not valid or repeated".to_owned());
             }
         }
+        let mut skills = std::collections::BTreeSet::new();
+        if self.skills.len() > MAX_ASSISTANT_SKILLS
+            || !self
+                .skills
+                .iter()
+                .all(|skill| skill_name(skill) && skills.insert(skill.as_str()))
+        {
+            return Err(format!(
+                "skills are more than {MAX_ASSISTANT_SKILLS}, repeated or not skill names"
+            ));
+        }
         if let Some(workspace) = &self.workspace {
             workspace
                 .validate()
@@ -1008,6 +1036,7 @@ impl fmt::Debug for AssistantJob {
                 }),
             )
             .field("reach", &self.reach)
+            .field("skills", &self.skills)
             .field("groups", &self.groups)
             .finish()
     }
@@ -1143,6 +1172,7 @@ mod tests {
             cable_discard: None,
             memory: None,
             reach: AssistantReach::default(),
+            skills: Vec::new(),
             groups: None,
         }
     }
@@ -1532,6 +1562,38 @@ mod tests {
         let mut control = job();
         control.conversation_id = "a\nb".to_owned();
         assert!(control.validate().is_err());
+    }
+
+    #[test]
+    fn a_job_names_its_skills_once_each_and_a_mode_installs_them_somewhere() {
+        let mut given = job();
+        given.skills = vec!["charts".to_owned(), "report-writer".to_owned()];
+        assert_eq!(given.validate(), Ok(()));
+        for skills in [
+            vec!["charts".to_owned(), "charts".to_owned()],
+            vec!["../charts".to_owned()],
+            vec!["Charts".to_owned()],
+            (0..=MAX_ASSISTANT_SKILLS)
+                .map(|n| format!("skill-{n}"))
+                .collect(),
+        ] {
+            let mut bad = job();
+            bad.skills = skills;
+            assert!(bad.validate().is_err(), "{:?}", bad.skills);
+        }
+
+        let mut mode = AssistantMode::moneypenny();
+        mode.skills.push("charts".to_owned());
+        assert!(mode.validate().is_err(), "skills need a directory");
+        mode.skills_dir = Some("relative/.claude".to_owned());
+        assert!(mode.validate().is_err(), "an absolute one");
+        mode.skills_dir = Some(
+            std::env::temp_dir()
+                .join(".claude")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        assert_eq!(mode.validate(), Ok(()));
     }
 
     #[test]

@@ -3149,6 +3149,12 @@ mod tests {
         ]);
         let mut skills = AssistantMode::moneypenny();
         skills.skills.push("pdf".to_owned());
+        skills.skills_dir = Some(
+            std::env::temp_dir()
+                .join(".claude")
+                .to_string_lossy()
+                .into_owned(),
+        );
         let mut open = AssistantMode::moneypenny();
         open.network.policy = "open".to_owned();
         let mut files = AssistantMode::moneypenny();

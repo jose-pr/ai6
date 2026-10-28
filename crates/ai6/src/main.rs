@@ -57,7 +57,7 @@ enum Command {
         #[command(subcommand)]
         command: GreenInkCommand,
     },
-    /// Moneypenny's harness hooks.
+    /// Moneypenny's harness hooks and settings (`[assistant]` in agents.toml).
     Assistant {
         #[command(subcommand)]
         command: AssistantCommand,
@@ -123,6 +123,12 @@ enum AssistantCommand {
         /// Hosts she may never fetch, separated by commas, whatever --hosts says.
         #[arg(long, value_delimiter = ',')]
         deny: Vec<String>,
+    },
+    /// Print the files of a skill directory, each with its SHA-256, and the `pin` its
+    /// `[assistant.skills.NAME]` entry needs: the digest a Station checks its copy against.
+    PinSkill {
+        /// The skill's directory, holding SKILL.md.
+        dir: PathBuf,
     },
 }
 
@@ -397,9 +403,22 @@ async fn main() -> ExitCode {
         Command::GreenInk {
             command: GreenInkCommand::Gate { cable_url },
         } => green_ink_gate(cable_url).await,
-        Command::Assistant {
-            command: AssistantCommand::WebGate { hosts, deny },
-        } => assistant_web_gate(&hosts, &deny),
+        Command::Assistant { command } => match command {
+            AssistantCommand::WebGate { hosts, deny } => assistant_web_gate(&hosts, &deny),
+            AssistantCommand::PinSkill { dir } => match ai6::ProjectManifest::read_tree(&dir) {
+                Ok(manifest) => {
+                    for (path, digest) in &manifest.files {
+                        println!("# {digest}  {path}");
+                    }
+                    println!("pin = \"{}\"", manifest.digest());
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("ai6: {}: {error}", dir.display());
+                    ExitCode::FAILURE
+                }
+            },
+        },
         Command::Plugins {
             command: PluginsCommand::Pin { paths },
         } => {

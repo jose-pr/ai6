@@ -75,10 +75,19 @@ pub struct AssistantMode {
     /// interpreters a handler cannot confine.
     #[serde(default)]
     pub unsandboxed: bool,
-    /// Skills the harness may load, by name; empty means none. A handler that cannot limit
-    /// skills to a list refuses a non-empty one.
+    /// Skills the harness may load, by name, each installed in `skills_dir`; empty means none.
+    /// A handler that cannot limit skills to a list refuses a non-empty one.
     #[serde(default)]
     pub skills: Vec<String>,
+    /// The absolute directory the Station installed `skills` in, laid out as a plugin of the
+    /// harness: `skills/<name>/SKILL.md` with each skill's files, and a manifest
+    /// `.claude-plugin/plugin.json` naming the plugin `ai6`. Required with `skills`.
+    #[serde(default)]
+    pub skills_dir: Option<String>,
+    /// Whether a skill's injected commands (`` !`command` ``) may run, through the harness's
+    /// permission rules; `false` has the harness replace them with a notice.
+    #[serde(default)]
+    pub skill_commands: bool,
     /// What the harness's own web tools and its interpreters may reach besides the MCP
     /// servers, which are always reachable.
     #[serde(default)]

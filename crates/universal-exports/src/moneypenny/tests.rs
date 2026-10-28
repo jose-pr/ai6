@@ -1593,6 +1593,43 @@ fn workspace_roster() -> Arc<dyn ai6::ConfigSource> {
     ))
 }
 
+#[tokio::test]
+async fn a_group_table_keeps_a_skill_out_of_its_members_jobs() {
+    let catalog = tempfile::tempdir().unwrap();
+    let mut settings = ai6::AssistantSettings::new();
+    for name in ["charts", "report-writer"] {
+        let dir = catalog.path().join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: Makes {name}.\n---\nDo it.\n"),
+        )
+        .unwrap();
+        let pin = ai6::ProjectManifest::read_tree(&dir).unwrap().digest();
+        settings = settings.with_skill(
+            name,
+            ai6::SkillEntry::new(dir.to_string_lossy()).pinned(pin),
+        );
+    }
+    // The operator is in `ops`; the viewer is not.
+    let settings = settings.with_group(
+        "ops",
+        ai6::AssistantNarrowing::new().with_skills(vec!["charts".to_owned()]),
+    );
+    let roster: Arc<dyn ai6::ConfigSource> = Arc::new(ai6::MemoryConfigSource::new(
+        ai6::Roster::builder().assistant(settings).build().unwrap(),
+    ));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    let (_operator_app, operator) = accepted(&served, &served.operator, "Hello.").await;
+    let (_viewer_app, viewer) = accepted(&served, &served.viewer, "Hello.").await;
+    assert_eq!(operator.skills, ["charts"]);
+    assert_eq!(viewer.skills, ["charts", "report-writer"]);
+
+    let plain = served_with(AssistantConfig::default(), None).await;
+    let (_app, job) = accepted(&plain, &plain.operator, "Hello.").await;
+    assert!(job.skills.is_empty(), "no roster, no skills");
+}
+
 /// Personal repositories under `/srv/mp` and nothing shared.
 fn personal_roster() -> Arc<dyn ai6::ConfigSource> {
     let settings = ai6::AssistantSettings::new().with_personal_repo("/srv/mp/{person}.git");

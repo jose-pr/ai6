@@ -71,6 +71,7 @@ subtle = { workspace = true, optional = true }
 sysinfo = { workspace = true, optional = true }
 tempfile.workspace = true
 toml.workspace = true
+serde-saphyr.workspace = true
 tokio = { workspace = true, optional = true }
 ureq = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
