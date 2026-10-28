@@ -435,6 +435,8 @@ pub(crate) struct Assistant {
     config: AssistantConfig,
     desk: Mutex<Desk>,
     ready: Notify,
+    /// Told when a Station reports shared bases.
+    based: Notify,
 }
 
 impl fmt::Debug for Assistant {
@@ -461,6 +463,8 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_WAIT_MS: u64 = 25_000;
 /// How often an open conversation socket looks for jobs no Station took up.
 const SWEEP_EVERY: Duration = Duration::from_secs(1);
+/// How long a shared change call waits for its Station's report of what it was made from.
+const SHARED_BASE_WAIT: Duration = Duration::from_secs(5);
 
 fn digest(token: &str) -> String {
     Sha256::digest(token.as_bytes())
@@ -479,6 +483,7 @@ impl Assistant {
             config,
             desk: Mutex::default(),
             ready: Notify::new(),
+            based: Notify::new(),
         }
     }
 
@@ -886,6 +891,7 @@ impl Assistant {
         let max_entries = self.config.bounds();
         let mut refused = false;
         let mut notify = false;
+        let mut based = false;
         let mut after = cables::After::default();
         'locked: {
             let mut desk = self.desk();
@@ -991,6 +997,10 @@ impl Assistant {
                 .iter()
                 .filter(|event| report.job_id.is_none() || event.kind != EVENT_ACCEPTED)
             {
+                if !event.shared.is_empty() {
+                    conversation.keep_shared_bases(&event.shared);
+                    based = true;
+                }
                 match (&event.change, event.kind.as_str()) {
                     (Some(change), EVENT_MEMORY_CHANGES) => {
                         set_aside.push((change.clone(), event.text.clone().unwrap_or_default()));
@@ -1022,6 +1032,9 @@ impl Assistant {
         self.follow_up(gateway, after).await;
         if notify {
             self.ready.notify_waiters();
+        }
+        if based {
+            self.based.notify_waiters();
         }
         if refused {
             self.place(gateway, &report.conversation_id).await;
@@ -1396,7 +1409,9 @@ impl Assistant {
 
     /// Runs [`actions::SHARED_CHANGE`]: a change to one file of a shared repository of a
     /// group the person is in, proposed, or sent at once (audited `moneypenny.shared.write`)
-    /// when the deployment lets that group's changes through.
+    /// when the deployment lets that group's changes through. The change carries what the
+    /// file held when she made the call ([`Self::shared_base`]), so its commit is refused when
+    /// the repository's `main` has changed the file since; a call without one is refused.
     pub(crate) async fn propose_shared(
         &self,
         gateway: &Gateway,
@@ -1420,14 +1435,25 @@ impl Assistant {
                  so nothing was proposed. Tell them so; do not try another way."
             ));
         };
+        let Some(base) = self
+            .shared_base(&granted.conversation_id, group, path, content)
+            .await
+        else {
+            return tools::Outcome::error(format!(
+                "Nothing was proposed: the Station running this conversation did not say what \
+                 {path} held in shared/{group}/ when you called, so a change made to it since \
+                 could not be caught. Check that shared/{group}/ is in your workspace, then \
+                 call again."
+            ));
+        };
         let (author_name, author_email) = author_of(&person);
         let commit = AssistantCommit {
             kind: COMMIT_SHARED.to_owned(),
             repo: shared.repo().to_owned(),
-            change: AssistantChange::new(std::collections::BTreeMap::from([(
-                path.to_owned(),
-                Some(content.to_owned()),
-            )])),
+            change: AssistantChange::based(
+                std::collections::BTreeMap::from([(path.to_owned(), Some(content.to_owned()))]),
+                std::collections::BTreeMap::from([(path.to_owned(), base)]),
+            ),
             message: format!("{message}\n\n{}", trailer(&granted.conversation_id)),
             author_name,
             author_email,
@@ -1499,6 +1525,38 @@ impl Assistant {
                  cancels it in the app; you will be told which."
             ),
             is_error: false,
+        }
+    }
+
+    /// What the file `path` of `group`'s repository held when the conversation's call that
+    /// writes `content` to it was made, as its Station reported it ([`ai6::AssistantSharedBase`]):
+    /// its hex SHA-256, or `None` for no such file. The report and the call reach the gateway
+    /// separately, so this waits up to [`SHARED_BASE_WAIT`] for it; `None` when none came.
+    async fn shared_base(
+        &self,
+        conversation_id: &str,
+        group: &str,
+        path: &str,
+        content: &str,
+    ) -> Option<Option<String>> {
+        let content = digest(content);
+        let deadline = tokio::time::Instant::now() + SHARED_BASE_WAIT;
+        loop {
+            let notified = self.based.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let taken = self
+                .desk()
+                .store
+                .conversations
+                .get_mut(conversation_id)
+                .and_then(|conversation| conversation.take_shared_base(group, path, &content));
+            if let Some(taken) = taken {
+                return Some(taken.base);
+            }
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                return None;
+            }
         }
     }
 

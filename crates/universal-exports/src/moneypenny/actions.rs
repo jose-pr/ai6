@@ -87,7 +87,7 @@ pub(crate) struct CableHold {
 pub(crate) const MEMORY_COMMIT: &str = "memory_commit";
 
 /// The write tool that proposes writing one file of a shared repository.
-pub(crate) const SHARED_CHANGE: &str = "propose_shared_change";
+pub(crate) const SHARED_CHANGE: &str = ai6::ASSISTANT_SHARED_CHANGE_TOOL;
 
 pub(crate) const SHARED_CHANGE_DESCRIPTION: &str = "Propose writing one file of a repository the person's directory group shares (shared/<group>/ \
      in your workspace, or shared/org/), committed under the person's name. Nothing changes \

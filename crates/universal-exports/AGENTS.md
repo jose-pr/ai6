@@ -492,7 +492,12 @@ entry and a note for her.
 `propose_shared_change {group, path, content, message}` (group a `file_safe` name or `org`,
 path a repository path, content ≤ 64 KiB, message one line ≤ 200 characters, no hidden
 characters) is refused ("Refused: …") unless the person is in the group and it shares a
-repository (`org` is everyone's). With that repository's `write = true` it is audited
+repository (`org` is everyone's). It then waits up to 5 s for the conversation's Station to
+report the call's `ai6::AssistantSharedBase` (on a `tool` event's `shared`, matched by group,
+path and the SHA-256 of `content`, used once; a conversation keeps at most
+`MAX_ASSISTANT_SHARED_BASES`) and is refused ("Nothing was proposed: …") without one. The
+change carries it as `AssistantChange::base`, so the commit is refused when the file changed
+on `main` since. With that repository's `write = true` it is audited
 `moneypenny.shared.write` (resource `config:assistant`, target `CONVERSATION GROUP PATH`) and
 sent at once as a `shared` commit job; otherwise it is a proposal (needs `membership` on
 `group:<group>`) handled as above.

@@ -1831,6 +1831,27 @@ async fn a_clean_conversation_keeps_her_memory_and_an_exposed_one_asks_the_perso
     assert_eq!(audits(&served, "moneypenny.confirmed").len(), 1);
 }
 
+/// What the Station reports for a `propose_shared_change` call that writes `content` to
+/// `path` of `group`'s repository, made where the file held `base` (`None`: no such file).
+async fn called_shared(
+    served: &Served,
+    job: &AssistantJob,
+    group: &str,
+    path: &str,
+    content: &str,
+    base: Option<&str>,
+) -> StatusCode {
+    let mut called = AssistantEvent::new(EVENT_TOOL, None);
+    called.tools = vec!["mcp__moneypenny__propose_shared_change".to_owned()];
+    called.shared = vec![ai6::AssistantSharedBase {
+        group: group.to_owned(),
+        path: path.to_owned(),
+        content: digest(content),
+        base: base.map(digest),
+    }];
+    report(served, "hq", job, None, vec![called]).await
+}
+
 #[tokio::test]
 async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_member() {
     let served = served_with(AssistantConfig::default(), Some(workspace_roster())).await;
@@ -1840,7 +1861,16 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
                "message": "Name who is on call"})
     };
 
-    // `ops` changes only by proposal.
+    // `ops` changes only by proposal, made from the file as her checkout held it.
+    called_shared(
+        &served,
+        &job,
+        "ops",
+        "docs/on-call.md",
+        "On call: Q.\n",
+        Some("On call: M.\n"),
+    )
+    .await;
     let proposed = call_tool(
         &served,
         &job.mcp_token,
@@ -1874,13 +1904,18 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
         commit.change.files["docs/on-call.md"].as_deref(),
         Some("On call: Q.\n")
     );
+    assert_eq!(
+        commit.change.base["docs/on-call.md"],
+        Some(digest("On call: M.\n"))
+    );
+    assert_eq!(commit.change.validate(false), Ok(()));
     assert!(
         commit
             .message
             .starts_with("Name who is on call\n\nVia: Moneypenny")
     );
 
-    // The organisation's repository is written at once, and audited.
+    // The organisation's repository is written at once, and audited; it had no such file.
     say(&mut app, "And the org's.", None).await;
     let second = take(&served, "hq").await;
     report(
@@ -1889,6 +1924,15 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
         &second,
         Some(&second.job_id),
         vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    called_shared(
+        &served,
+        &second,
+        "org",
+        "docs/on-call.md",
+        "On call: Q.\n",
+        None,
     )
     .await;
     let direct = call_tool(
@@ -1907,6 +1951,7 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
     );
     let commit = take(&served, "hq").await.commit.unwrap();
     assert_eq!(commit.repo, "/srv/org.git");
+    assert_eq!(commit.change.base["docs/on-call.md"], None);
     assert_eq!(audits(&served, "moneypenny.shared.write").len(), 1);
 
     // A path out of the repository is refused before anything else.
@@ -1944,6 +1989,65 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
             .all(|frame| frame["type"] != "proposal" && frame["entry"]["role"] != "proposal")
     );
     assert!(nothing_for(&served, "hq").await);
+}
+
+#[tokio::test]
+async fn a_shared_change_waits_for_its_base_and_is_refused_without_one() {
+    let served = served_with(AssistantConfig::default(), Some(workspace_roster())).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Update the handbook.").await;
+    let change = json!({"group": "ops", "path": "docs/on-call.md", "content": "On call: Q.\n",
+                        "message": "Name who is on call"});
+
+    // The call can reach the gateway before the Station's report of it.
+    let (proposed, _) = tokio::join!(
+        call_tool(
+            &served,
+            &job.mcp_token,
+            "propose_shared_change",
+            change.clone()
+        ),
+        async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            called_shared(
+                &served,
+                &job,
+                "ops",
+                "docs/on-call.md",
+                "On call: Q.\n",
+                Some("On call: M.\n"),
+            )
+            .await
+        }
+    );
+    assert_eq!(proposed["isError"], false, "{proposed}");
+
+    // A base is used once, and one for other text is not this call's: refused, unproposed.
+    called_shared(
+        &served,
+        &job,
+        "ops",
+        "docs/on-call.md",
+        "On call: 007.\n",
+        Some("On call: M.\n"),
+    )
+    .await;
+    let started = std::time::Instant::now();
+    let refused = call_tool(&served, &job.mcp_token, "propose_shared_change", change).await;
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(
+        refused["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Nothing was proposed"),
+        "{refused}"
+    );
+    assert!(started.elapsed() >= SHARED_BASE_WAIT);
+    let frames = finish(&served, &mut app, &job).await;
+    let proposals = frames
+        .iter()
+        .filter(|frame| frame["entry"]["role"] == "proposal")
+        .count();
+    assert_eq!(proposals, 1, "{frames:?}");
 }
 
 /// `GET /v1/station/assistant/exposure` as `station` asks it.

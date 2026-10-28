@@ -9,7 +9,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
-use ai6::{AssistantJob, AssistantWorkspace};
+use ai6::{AssistantJob, AssistantSharedBase, AssistantWorkspace};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -99,6 +99,9 @@ pub(crate) struct Conversation {
     /// Whether any job of the conversation let her scripts reach a host, so a script brings in
     /// outside text; raised for good, never lowered by a narrower later job.
     pub(crate) scripts_reach_hosts: bool,
+    /// What the Station running the harness reported each shared change call was made from,
+    /// oldest first, until the call takes it; at most [`ai6::MAX_ASSISTANT_SHARED_BASES`].
+    pub(crate) shared_bases: VecDeque<AssistantSharedBase>,
 }
 
 /// How much one conversation keeps.
@@ -152,7 +155,36 @@ impl Conversation {
             exposed: false,
             workspace: None,
             scripts_reach_hosts: false,
+            shared_bases: VecDeque::new(),
         }
+    }
+
+    /// Keeps the shared bases a Station reported, dropping the oldest past
+    /// [`ai6::MAX_ASSISTANT_SHARED_BASES`] and any [`AssistantSharedBase::validate`] refuses.
+    pub(crate) fn keep_shared_bases(&mut self, reported: &[AssistantSharedBase]) {
+        for base in reported.iter().take(ai6::MAX_ASSISTANT_SHARED_BASES) {
+            if base.validate().is_ok() {
+                if self.shared_bases.len() == ai6::MAX_ASSISTANT_SHARED_BASES {
+                    self.shared_bases.pop_front();
+                }
+                self.shared_bases.push_back(base.clone());
+            }
+        }
+    }
+
+    /// Takes the base reported for the call that changes `path` of `group`'s repository to
+    /// the text whose hex SHA-256 is `content`.
+    pub(crate) fn take_shared_base(
+        &mut self,
+        group: &str,
+        path: &str,
+        content: &str,
+    ) -> Option<AssistantSharedBase> {
+        let index = self
+            .shared_bases
+            .iter()
+            .position(|base| base.group == group && base.path == path && base.content == content)?;
+        self.shared_bases.remove(index)
     }
 
     /// Adds an entry, keeping the newest that fit `bounds`, and tells the app.
