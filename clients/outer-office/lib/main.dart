@@ -26,8 +26,8 @@ import 'pools/pools_page.dart';
 import 'roster/roster_page.dart';
 import 'timeline/timeline_page.dart';
 
-const _apiOverride = String.fromEnvironment('MONEYPENNY_API');
-const _demoMode = bool.fromEnvironment('MONEYPENNY_DEMO');
+const _apiOverride = String.fromEnvironment('OO_API');
+const _demoMode = bool.fromEnvironment('OO_DEMO');
 
 Uri _apiOrigin() => _apiOverride.isNotEmpty
     ? Uri.parse(_apiOverride)
@@ -58,12 +58,12 @@ Future<void> _startWeb() async {
     apiOrigin: _apiOrigin(),
     demo: _demoMode,
     terminalRuntimeError: terminalRuntimeError,
-    lightTheme: preferences.getBool('moneypenny.lightTheme') ?? false,
+    lightTheme: preferences.getBool('oo.lightTheme') ?? false,
     onThemeChanged: (lightTheme) =>
-        preferences.setBool('moneypenny.lightTheme', lightTheme),
+        preferences.setBool('oo.lightTheme', lightTheme),
   );
 
-  runApp(MoneypennyApp(board: board, desktopWindows: false));
+  runApp(OuterOfficeApp(board: board, desktopWindows: false));
 }
 
 void _startDesktop() {
@@ -72,16 +72,14 @@ void _startDesktop() {
     apiOrigin: _apiOrigin(),
     demo: _demoMode,
     onThemeChanged: (lightTheme) async {
-      await (await preferences).setBool('moneypenny.lightTheme', lightTheme);
+      await (await preferences).setBool('oo.lightTheme', lightTheme);
     },
   );
   runWidget(_DesktopWindowHost(board: board));
   unawaited(
     preferences
         .then((preferences) {
-          board.restoreTheme(
-            preferences.getBool('moneypenny.lightTheme') ?? false,
-          );
+          board.restoreTheme(preferences.getBool('oo.lightTheme') ?? false);
         })
         .catchError((Object _) {}),
   );
@@ -170,7 +168,7 @@ class MissionBoard extends ChangeNotifier {
           actor: 'operator-007',
           action: 'mission.create.requested',
           operation: 'G',
-          target: 'moneypenny--mission-007',
+          target: 'oo--mission-007',
           at: 1_798_000_000,
         ),
       ];
@@ -427,7 +425,7 @@ class MissionBoard extends ChangeNotifier {
       body: jsonEncode({
         'action': action,
         'idempotency_key':
-            'moneypenny-${DateTime.now().microsecondsSinceEpoch}-${_controlSerial++}',
+            'oo-${DateTime.now().microsecondsSinceEpoch}-${_controlSerial++}',
         'agent': ?agent,
         'message': ?message,
         'session_id': ?sessionId,
@@ -1415,7 +1413,7 @@ class MissionBoard extends ChangeNotifier {
       );
       if (response.statusCode != 201) {
         loginError = credentials.isEmpty
-            ? 'Organization sign-in was rejected. Open Moneypenny through your authenticated organization proxy and check its gateway configuration.'
+            ? 'Organization sign-in was rejected. Open Outer Office through your authenticated organization proxy and check its gateway configuration.'
             : 'Sign-in was rejected. Check the account and gateway.';
         notifyListeners();
         return;
@@ -2287,7 +2285,7 @@ class _DesktopWindowHostState extends State<_DesktopWindowHost> {
     super.initState();
     _mainWindow = WindowController(
       size: const Size(1280, 820),
-      title: 'Moneypenny | AI6',
+      title: 'Outer Office | AI6',
       delegate: _MainWindowDelegate(),
     );
   }
@@ -2304,7 +2302,7 @@ class _DesktopWindowHostState extends State<_DesktopWindowHost> {
       WindowEntry(
         controller: _mainWindow,
         builder: (_) =>
-            MoneypennyApp(board: widget.board, desktopWindows: true),
+            OuterOfficeApp(board: widget.board, desktopWindows: true),
       ),
     ],
   );
@@ -2539,8 +2537,8 @@ class MissionAttemptSummary {
   ].join(' · ');
 }
 
-class MoneypennyApp extends StatelessWidget {
-  const MoneypennyApp({
+class OuterOfficeApp extends StatelessWidget {
+  const OuterOfficeApp({
     required this.board,
     required this.desktopWindows,
     super.key,
@@ -2553,10 +2551,10 @@ class MoneypennyApp extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: board,
     builder: (context, _) => MaterialApp(
-      title: 'Moneypenny | AI6',
+      title: 'Outer Office | AI6',
       debugShowCheckedModeBanner: false,
-      theme: _moneypennyLightTheme(),
-      darkTheme: _moneypennyTheme(),
+      theme: _outerOfficeLightTheme(),
+      darkTheme: _outerOfficeTheme(),
       themeMode: board.lightTheme ? ThemeMode.light : ThemeMode.dark,
       home: _AccessGate(board: board, desktopWindows: desktopWindows),
     ),
@@ -2629,7 +2627,7 @@ class _LoginPageState extends State<_LoginPage> {
         children: [
           Icon(Icons.radar, color: Color(0xff61d6bd)),
           SizedBox(width: 12),
-          Text('Moneypenny'),
+          Text('Outer Office'),
         ],
       ),
     ),
@@ -2700,7 +2698,7 @@ class _LoginPageState extends State<_LoginPage> {
   );
 }
 
-ThemeData _moneypennyTheme() => ThemeData(
+ThemeData _outerOfficeTheme() => ThemeData(
   useMaterial3: true,
   colorScheme: ColorScheme.fromSeed(
     seedColor: const Color(0xff61d6bd),
@@ -2713,7 +2711,7 @@ ThemeData _moneypennyTheme() => ThemeData(
   ),
 );
 
-ThemeData _moneypennyLightTheme() => ThemeData.light(useMaterial3: true)
+ThemeData _outerOfficeLightTheme() => ThemeData.light(useMaterial3: true)
     .copyWith(
       colorScheme: ColorScheme.fromSeed(
         seedColor: const Color(0xff168c79),
@@ -3561,7 +3559,7 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
                       !settings.executionEnabled
                           ? 'This Station does not have the execution role, so it cannot run Missions.'
                           : settings.configured
-                          ? 'Configured through Moneypenny. Changes apply to new Missions.'
+                          ? 'Configured through Outer Office. Changes apply to new Missions.'
                           : 'Current Station value. Save to establish an authorized live setting.',
                     ),
                     const SizedBox(height: 16),
@@ -5015,7 +5013,7 @@ void _openSessionWindow(
   late final WindowEntry entry;
   final controller = WindowController(
     size: const Size(900, 680),
-    title: 'Session ${session.sessionId} | Moneypenny',
+    title: 'Session ${session.sessionId} | Outer Office',
     delegate: _WindowDelegate(onDestroyed: () => registry.unregister(entry)),
   );
   entry = WindowEntry(
@@ -5024,8 +5022,8 @@ void _openSessionWindow(
       animation: board,
       builder: (context, _) => MaterialApp(
         title: 'Session ${session.sessionId}',
-        theme: _moneypennyLightTheme(),
-        darkTheme: _moneypennyTheme(),
+        theme: _outerOfficeLightTheme(),
+        darkTheme: _outerOfficeTheme(),
         themeMode: board.lightTheme ? ThemeMode.light : ThemeMode.dark,
         home: SessionWindow(session: session, board: board),
       ),
@@ -5297,7 +5295,7 @@ class _DemoBanner extends StatelessWidget {
             SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Demo preview · sign-in is unavailable. Open the authenticated Moneypenny site.',
+                'Demo preview · sign-in is unavailable. Open the authenticated Outer Office site.',
               ),
             ),
           ],
@@ -5321,9 +5319,7 @@ class _GatewayUnavailable extends StatelessWidget {
           SizedBox(height: 12),
           Text('Universal Exports is offline'),
           SizedBox(height: 4),
-          Text(
-            'Start the gateway, or launch with MONEYPENNY_DEMO=true to preview.',
-          ),
+          Text('Start the gateway, or launch with OO_DEMO=true to preview.'),
         ],
       ),
     ),
@@ -5341,7 +5337,7 @@ class _ErrorBanner extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
     child: MaterialBanner(
       content: Text(
-        'Could not reach Moneypenny at ${apiOrigin.host}:${apiOrigin.port}.',
+        'Could not reach Universal Exports at ${apiOrigin.host}:${apiOrigin.port}.',
       ),
       leading: const Icon(Icons.cloud_off),
       actions: [TextButton(onPressed: onRetry, child: const Text('Retry'))],

@@ -13,7 +13,7 @@ import 'package:material_ui/material_ui.dart'
         ScaffoldMessenger,
         SwitchListTile,
         TextField;
-import 'package:moneypenny/main.dart';
+import 'package:outer_office/main.dart';
 
 String stationBoardResponse() => jsonEncode({
   'headquarters_station': 'station-alpha',
@@ -188,7 +188,7 @@ void main() {
     tester,
   ) async {
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       demo: true,
       pollInterval: null,
     );
@@ -199,7 +199,7 @@ void main() {
 
     expect(
       find.text(
-        'Demo preview · sign-in is unavailable. Open the authenticated Moneypenny site.',
+        'Demo preview · sign-in is unavailable. Open the authenticated Outer Office site.',
       ),
       findsOneWidget,
     );
@@ -209,7 +209,7 @@ void main() {
     tester,
   ) async {
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       demo: true,
       pollInterval: null,
     );
@@ -230,7 +230,7 @@ void main() {
     'Mission proposal preview shows provenance and disables decisions',
     (tester) async {
       final board = MissionBoard(
-        apiOrigin: Uri.parse('https://moneypenny.example'),
+        apiOrigin: Uri.parse('https://oo.example'),
         demo: true,
         pollInterval: null,
       );
@@ -267,7 +267,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
     );
     board.accessToken = 'user-token';
@@ -278,7 +278,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
 
     expect(navLabel('Stations'), findsOneWidget);
     expect(navLabel('Operations'), findsOneWidget);
@@ -295,7 +297,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final requests = <http.Request>[];
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
       client: MockClient((request) async {
         requests.add(request);
@@ -334,7 +336,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.tap(navLabel('Administration'));
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
@@ -382,7 +386,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final requests = <http.Request>[];
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
       client: MockClient((request) async {
         requests.add(request);
@@ -418,7 +422,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.tap(navLabel('Administration'));
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
@@ -453,7 +459,7 @@ void main() {
     () async {
       final requests = <http.Request>[];
       final board = MissionBoard(
-        apiOrigin: Uri.parse('https://moneypenny.example'),
+        apiOrigin: Uri.parse('https://oo.example'),
         pollInterval: null,
         client: MockClient((request) async {
           requests.add(request);
@@ -514,7 +520,7 @@ void main() {
       expect(
         board.loginError,
         contains(
-          'Open Moneypenny through your authenticated organization proxy',
+          'Open Outer Office through your authenticated organization proxy',
         ),
       );
       expect(board.loginError, isNot(contains('Check the account')));
@@ -526,7 +532,7 @@ void main() {
     () async {
       final requests = <http.Request>[];
       final board = MissionBoard(
-        apiOrigin: Uri.parse('https://moneypenny.example'),
+        apiOrigin: Uri.parse('https://oo.example'),
         pollInterval: null,
         client: MockClient((request) async {
           requests.add(request);
@@ -540,7 +546,7 @@ void main() {
             return http.Response(
               jsonEncode({
                 'operation_id': 'operation-alpha',
-                'mission_id': 'moneypenny--mission-123',
+                'mission_id': 'oo--mission-123',
                 'state': 'queued',
               }),
               202,
@@ -570,7 +576,7 @@ void main() {
         prompt: 'Review the current Operation and report findings.',
       );
 
-      expect(missionId, 'moneypenny--mission-123');
+      expect(missionId, 'oo--mission-123');
       expect(requests.map((request) => request.url.path), [
         '/v1/user/operations/operation-alpha/missions',
         '/v1/board',
@@ -586,7 +592,7 @@ void main() {
     () async {
       final requests = <http.Request>[];
       final board = MissionBoard(
-        apiOrigin: Uri.parse('https://moneypenny.example'),
+        apiOrigin: Uri.parse('https://oo.example'),
         pollInterval: null,
         client: MockClient((request) async {
           requests.add(request);
@@ -671,7 +677,7 @@ void main() {
       final requests = <http.Request>[];
       final themeWrites = <bool>[];
       final board = MissionBoard(
-        apiOrigin: Uri.parse('https://moneypenny.example'),
+        apiOrigin: Uri.parse('https://oo.example'),
         pollInterval: null,
         onThemeChanged: (lightTheme) async => themeWrites.add(lightTheme),
         client: MockClient((request) async {
@@ -718,7 +724,7 @@ void main() {
     () async {
       final requests = <http.Request>[];
       final board = MissionBoard(
-        apiOrigin: Uri.parse('https://moneypenny.example'),
+        apiOrigin: Uri.parse('https://oo.example'),
         pollInterval: null,
         client: MockClient((request) async {
           requests.add(request);
@@ -756,7 +762,7 @@ void main() {
     () async {
       final requests = <http.Request>[];
       final board = MissionBoard(
-        apiOrigin: Uri.parse('https://moneypenny.example'),
+        apiOrigin: Uri.parse('https://oo.example'),
         pollInterval: null,
         client: MockClient((request) async {
           requests.add(request);
@@ -811,7 +817,7 @@ void main() {
   test('session attachment exchanges a scoped grant for a cookie', () async {
     final requests = <http.Request>[];
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
       client: MockClient((request) async {
         requests.add(request);
@@ -852,7 +858,7 @@ void main() {
       'session_id': 'agent-session-1',
       'mode': 'read',
     });
-    expect(requests.last.headers['origin'], 'https://moneypenny.example');
+    expect(requests.last.headers['origin'], 'https://oo.example');
     expect(requests.last.headers['x-forwarded-proto'], 'https');
     expect(jsonDecode(requests.last.body), {'token': 'scoped-grant'});
     expect(
@@ -869,7 +875,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
       client: MockClient((request) async {
         if (request.method == 'POST') {
@@ -1033,7 +1039,9 @@ void main() {
     addTearDown(board.dispose);
     await board.login('operator', 'secret');
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
 
     expect(find.text('Operations'), findsNWidgets(2));
     expect(find.text('operation-alpha'), findsOneWidget);
@@ -1227,7 +1235,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.tap(find.text('preview-session-007'));
     await tester.pumpAndSettle();
 
@@ -1268,7 +1278,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.tap(find.text('preview-session-007'));
     await tester.pumpAndSettle();
 
@@ -1298,7 +1310,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.tap(navLabel('Audit log'));
     await tester.pumpAndSettle();
 
@@ -1307,7 +1321,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.textContaining('Operation G · moneypenny--mission-007'),
+      find.textContaining('Operation G · oo--mission-007'),
       findsOneWidget,
     );
     expect(find.textContaining('prompt'), findsNothing);
@@ -1321,7 +1335,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
       client: MockClient((request) async {
         if (request.url.path == '/v1/user/profile') {
@@ -1365,7 +1379,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     expect(find.text('O'), findsOneWidget);
     await tester.tap(find.byTooltip('Operator account and preferences'));
     await tester.pumpAndSettle();
@@ -1391,7 +1407,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
       client: MockClient((request) async {
         expect(request.url.path, '/v1/user/audit');
@@ -1419,7 +1435,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.tap(navLabel('Audit log'));
     await tester.pumpAndSettle();
 
@@ -1438,7 +1456,7 @@ void main() {
   testWidgets('sign in loads only the authenticated board', (tester) async {
     final requests = <http.Request>[];
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
       client: MockClient((request) async {
         requests.add(request);
@@ -1478,7 +1496,9 @@ void main() {
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     expect(find.text('Sign in'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField).at(0), 'operator');
@@ -1506,13 +1526,15 @@ void main() {
     tester,
   ) async {
     final board = MissionBoard(
-      apiOrigin: Uri.parse('https://moneypenny.example'),
+      apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
       client: MockClient((_) async => http.Response('', 500)),
     );
     addTearDown(board.dispose);
 
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
 
     FilledButton button() =>
         tester.widget<FilledButton>(find.byType(FilledButton));

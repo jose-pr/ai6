@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
     show FilledButton, Key, NavigationBar;
-import 'package:moneypenny/main.dart';
+import 'package:outer_office/main.dart';
 
 Finder navLabel(String label) =>
     find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
@@ -19,7 +19,7 @@ MissionBoard signedIn(
   http.Response Function(http.Request) respond,
 ) {
   final board = MissionBoard(
-    apiOrigin: Uri.parse('https://moneypenny.example'),
+    apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
     client: MockClient((request) async {
       requests.add(request);
@@ -92,7 +92,7 @@ Future<void> openRoster(WidgetTester tester, MissionBoard board) async {
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(board.dispose);
-  await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+  await tester.pumpWidget(OuterOfficeApp(board: board, desktopWindows: false));
   await tester.tap(navLabel('Administration'));
   await tester.pumpAndSettle();
 }

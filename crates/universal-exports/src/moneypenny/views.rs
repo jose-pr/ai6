@@ -566,7 +566,7 @@ mod tests {
     /// same file.
     pub(crate) fn fixture() -> Value {
         serde_json::from_str(include_str!(
-            "../../../../clients/moneypenny/test/fixtures/assistant_views.json"
+            "../../../../clients/outer-office/test/fixtures/assistant_views.json"
         ))
         .unwrap()
     }

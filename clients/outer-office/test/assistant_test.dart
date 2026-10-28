@@ -4,9 +4,9 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:moneypenny/assistant/assistant_controller.dart';
-import 'package:moneypenny/assistant/assistant_panel.dart';
-import 'package:moneypenny/assistant/assistant_view.dart';
+import 'package:outer_office/assistant/assistant_controller.dart';
+import 'package:outer_office/assistant/assistant_panel.dart';
+import 'package:outer_office/assistant/assistant_view.dart';
 
 /// One view of every kind and the views Universal Exports refuses, shared with its tests.
 final Map<String, Object?> fixture = (jsonDecode(

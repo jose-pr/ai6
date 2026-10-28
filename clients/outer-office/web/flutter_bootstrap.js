@@ -11,7 +11,7 @@ _flutter.loader.load({
       const startup = document.querySelector('#startup');
       if (startup) {
         startup.setAttribute('aria-live', 'assertive');
-        startup.textContent = 'Moneypenny could not start. Reload this page to try again.';
+        startup.textContent = 'Outer Office could not start. Reload this page to try again.';
         const reload = document.createElement('button');
         reload.type = 'button';
         reload.textContent = 'Reload page';

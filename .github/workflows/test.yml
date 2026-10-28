@@ -116,12 +116,12 @@ jobs:
       - run: cargo check -p ai6-diptel --target wasm32-unknown-unknown
         if: matrix.os == 'ubuntu-latest' && matrix.toolchain == 'stable'
 
-  moneypenny:
-    name: Moneypenny app (Windows, Flutter main)
+  outer-office:
+    name: Outer Office app (Windows, Flutter main)
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: clients/moneypenny
+        working-directory: clients/outer-office
     steps:
       - uses: actions/checkout@v4
         with:

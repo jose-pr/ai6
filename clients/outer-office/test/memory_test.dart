@@ -5,10 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:moneypenny/assistant/assistant_controller.dart';
-import 'package:moneypenny/assistant/assistant_panel.dart';
-import 'package:moneypenny/assistant/memory_page.dart';
-import 'package:moneypenny/main.dart';
+import 'package:outer_office/assistant/assistant_controller.dart';
+import 'package:outer_office/assistant/assistant_panel.dart';
+import 'package:outer_office/assistant/memory_page.dart';
+import 'package:outer_office/main.dart';
 
 const _json = {'content-type': 'application/json'};
 
@@ -97,7 +97,7 @@ class MemoryGateway {
 
 MissionBoard signedIn(MemoryGateway gateway) {
   final board = MissionBoard(
-    apiOrigin: Uri.parse('https://moneypenny.example'),
+    apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
     client: MockClient((request) async {
       if (request.url.path.startsWith('/v1/user/assistant/memory')) {

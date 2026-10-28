@@ -5,8 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart' show TextField;
-import 'package:moneypenny/controls/mission_actions.dart';
-import 'package:moneypenny/main.dart';
+import 'package:outer_office/controls/mission_actions.dart';
+import 'package:outer_office/main.dart';
 
 /// A signed-in board whose gateway shows one Mission with an earlier, queued attempt and a
 /// later, working one; every request is kept in [requests].
@@ -17,7 +17,7 @@ Future<MissionBoard> signedIn(
   String current = 'working',
 }) async {
   final board = MissionBoard(
-    apiOrigin: Uri.parse('https://moneypenny.example'),
+    apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
     client: MockClient((request) async {
       requests.add(request);
@@ -159,12 +159,14 @@ void main() {
       control: (body) {
         expect(body['action'], 'interrupt');
         expect(body['session_id'], 'claude-session-002');
-        expect(body['idempotency_key'], startsWith('moneypenny-'));
+        expect(body['idempotency_key'], startsWith('oo-'));
         return outcome('interrupt', 'applied', state: 'blocked');
       },
     );
     addTearDown(board.dispose);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
 
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
@@ -222,7 +224,9 @@ void main() {
       },
     );
     addTearDown(board.dispose);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
 
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
@@ -256,7 +260,9 @@ void main() {
       },
     );
     addTearDown(board.dispose);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
 
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
@@ -278,7 +284,9 @@ void main() {
     final requests = <http.Request>[];
     final board = await signedIn(requests, actions: const ['mission.read']);
     addTearDown(board.dispose);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
 
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
@@ -303,7 +311,9 @@ void main() {
     final requests = <http.Request>[];
     final board = await signedIn(requests);
     addTearDown(board.dispose);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
 
     await tester.tap(find.text('claude-session-002'));
     await tester.pumpAndSettle();

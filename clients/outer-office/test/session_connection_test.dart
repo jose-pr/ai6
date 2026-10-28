@@ -7,8 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guatiao/wire.dart' as wire;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:moneypenny/main.dart';
-import 'package:moneypenny/terminal/session_connection.dart';
+import 'package:outer_office/main.dart';
+import 'package:outer_office/terminal/session_connection.dart';
 
 void main() {
   test(

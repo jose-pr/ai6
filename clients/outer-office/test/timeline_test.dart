@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
     show DropdownButton, NavigationBar, Text, TextField, TextInputAction;
-import 'package:moneypenny/main.dart';
+import 'package:outer_office/main.dart';
 
 Finder navLabel(String label) =>
     find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
@@ -79,7 +79,7 @@ Future<MissionBoard> signedIn(
   List<String> actions = const ['mission.read', 'audit.read'],
 }) async {
   final board = MissionBoard(
-    apiOrigin: Uri.parse('https://moneypenny.example'),
+    apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
     client: MockClient((request) async {
       final path = request.url.path;
@@ -121,7 +121,9 @@ void main() {
     final timeline = FakeTimeline();
     final board = await signedIn(timeline);
     addTearDown(board.dispose);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.tap(navLabel('Timeline'));
     await tester.pumpAndSettle();
 
@@ -159,7 +161,9 @@ void main() {
     final timeline = FakeTimeline();
     final board = await signedIn(timeline);
     addTearDown(board.dispose);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.tap(navLabel('Timeline'));
     await tester.pumpAndSettle();
 
@@ -183,7 +187,9 @@ void main() {
     final timeline = FakeTimeline();
     final board = await signedIn(timeline, actions: const ['mission.read']);
     addTearDown(board.dispose);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     expect(navLabel('Timeline'), findsNothing);
     expect(timeline.asked, isEmpty);
   });

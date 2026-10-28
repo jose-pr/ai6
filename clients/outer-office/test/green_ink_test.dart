@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart' show Tab, TextField;
-import 'package:moneypenny/main.dart';
+import 'package:outer_office/main.dart';
 
 const requestId = 'green-ink-0123';
 const classId = 'class-77';
@@ -81,7 +81,7 @@ Future<MissionBoard> signedIn(
   ],
 }) async {
   final board = MissionBoard(
-    apiOrigin: Uri.parse('https://moneypenny.example'),
+    apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
     client: MockClient((request) async {
       gateway.requests.add(request);
@@ -134,7 +134,7 @@ Future<void> openAdministration(WidgetTester tester, MissionBoard board) async {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
-  await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+  await tester.pumpWidget(OuterOfficeApp(board: board, desktopWindows: false));
   await tester.tap(find.text('Administration'));
   await tester.pumpAndSettle();
 }
@@ -147,7 +147,9 @@ void main() {
     final board = await signedIn(gateway);
     addTearDown(board.dispose);
     expect(board.sessions.single.reason, 'green-ink');
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.pumpAndSettle();
     expect(find.text('BLOCKED · GREEN INK'), findsOneWidget);
   });
@@ -255,7 +257,9 @@ void main() {
     addTearDown(board.dispose);
     expect(board.greenInkOperations, isEmpty);
     expect(board.classAuthorizationOperations, isEmpty);
-    await tester.pumpWidget(MoneypennyApp(board: board, desktopWindows: false));
+    await tester.pumpWidget(
+      OuterOfficeApp(board: board, desktopWindows: false),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Administration'), findsNothing);
     expect(

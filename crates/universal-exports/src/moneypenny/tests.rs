@@ -1063,7 +1063,7 @@ async fn views_are_shown_only_when_they_fit_the_schema_and_forms_become_proposal
     let (mut app, job) = accepted(&served, &served.operator, "Show me the Stations.").await;
     let token = &job.mcp_token;
     let fixture: Value = serde_json::from_str(include_str!(
-        "../../../../clients/moneypenny/test/fixtures/assistant_views.json"
+        "../../../../clients/outer-office/test/fixtures/assistant_views.json"
     ))
     .unwrap();
 
