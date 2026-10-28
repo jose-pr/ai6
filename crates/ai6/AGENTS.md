@@ -413,6 +413,10 @@ impl AssistantSettings {
     /// allow_elevated, each write = true, network = "open", unsandboxed_scripts = true,
     /// skills_unpinned, skills_allow_tools, each SHA-1 skill pin
     pub fn weakenings(&self) -> Vec<String>;
+    /// What replacing `current` loosens or redirects: weakenings `current` lacks, interpreters,
+    /// hosts or a looser network, a changed personal/shared/org repository, a skill added or
+    /// with another path or pin, a group or person table removed or a key it set changed
+    pub fn changes_from(&self, current: &AssistantSettings) -> Vec<String>;
 }
 #[non_exhaustive] #[derive(Default, PartialOrd, Ord)] // serde lowercase; Denied < Limited < Open
 pub enum NetworkPolicy { Denied, #[default] Limited, Open }

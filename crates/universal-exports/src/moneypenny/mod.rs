@@ -1172,7 +1172,14 @@ impl Assistant {
         input: &Value,
     ) -> tools::Outcome {
         let id = format!("proposal-{}", Uuid::new_v4().simple());
-        let draft = match tool.draft(input, &id) {
+        // An edit of her own settings is shown against the settings in force.
+        let current = match input.as_object() {
+            Some(fields) if actions::edits_assistant(tool.name, fields) => {
+                assistant_settings(gateway).await.ok()
+            }
+            _ => None,
+        };
+        let draft = match tool.draft(input, &id, current.as_ref()) {
             Ok(draft) => draft,
             Err(outcome) => return outcome,
         };

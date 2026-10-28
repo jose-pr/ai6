@@ -59,8 +59,8 @@ pub struct RosterRecords {
 pub struct RosterChange {
     /// The roster revision the edit moved to, in decimal.
     pub revision: String,
-    /// Each setting of the stored `assistant` record looser than its default
-    /// ([`AssistantSettings::weakenings`]); omitted when there is none.
+    /// What the stored `assistant` record loosens or redirects against the settings in force
+    /// before it ([`AssistantSettings::changes_from`]); omitted when there is nothing.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub weakened: Vec<String>,
 }
@@ -212,7 +212,8 @@ async fn settle(
 }
 
 /// `PUT /v1/user/roster/{kind}/{key}` with the record's definition as a JSON object: needs
-/// `roster.manage`. 200 with the new revision, and for the `assistant` record its weakenings;
+/// `roster.manage`. 200 with the new revision, and for the `assistant` record what it loosens
+/// or redirects against the settings in force (`weakened`);
 /// 422 with the reason when the roster it would leave is not acceptable; 409 when the source
 /// takes no edits.
 pub(crate) async fn put_record(
@@ -236,16 +237,27 @@ pub(crate) async fn put_record(
     .await?;
     let source = source(&gateway)?;
     let target = format!("{} {key}", record.name());
-    // Reported only for an accepted edit, whose definition the source parsed the same way.
-    let weakened = (record == ConfigRecord::Assistant)
-        .then(|| serde_json::from_value::<AssistantSettings>(definition.clone()).ok())
-        .flatten()
-        .map(|settings| settings.weakenings())
-        .unwrap_or_default();
-    let outcome = tokio::task::spawn_blocking(move || source.put(record, &key, &definition))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map(Some);
+    let outcome = tokio::task::spawn_blocking(move || {
+        // What an `assistant` record changes is told against the settings in force just
+        // before it, and only for an accepted edit, whose definition the source parsed the
+        // same way.
+        let current = (record == ConfigRecord::Assistant)
+            .then(|| source.load())
+            .transpose()?
+            .map(|snapshot| snapshot.roster.assistant().clone());
+        let revision = source.put(record, &key, &definition)?;
+        let weakened = current
+            .zip(serde_json::from_value::<AssistantSettings>(definition).ok())
+            .map(|(current, settings)| settings.changes_from(&current))
+            .unwrap_or_default();
+        Ok((revision, weakened))
+    })
+    .await
+    .map_err(|_| ApiError::internal())?;
+    let (outcome, weakened) = match outcome {
+        Ok((revision, weakened)) => (Ok(Some(revision)), weakened),
+        Err(error) => (Err(error), Vec::new()),
+    };
     settle(
         &gateway,
         &person,
@@ -595,7 +607,19 @@ mod tests {
         .await;
         assert_eq!(strict.status(), StatusCode::OK);
         let strict: serde_json::Value = strict.json().await.unwrap();
-        assert!(strict.get("weakened").is_none(), "{strict}");
+        // Looser than nothing in force, but it moves where people's memory goes.
+        assert_eq!(
+            strict["weakened"].as_array().map(Vec::len),
+            Some(1),
+            "{strict}"
+        );
+        assert!(
+            strict["weakened"][0]
+                .as_str()
+                .unwrap()
+                .starts_with("assistant.personal_repo changes"),
+            "{strict}"
+        );
 
         let loose = call(
             &served,
@@ -608,7 +632,7 @@ mod tests {
         assert_eq!(loose.status(), StatusCode::OK);
         let loose: serde_json::Value = loose.json().await.unwrap();
         let weakened = loose["weakened"].as_array().unwrap();
-        assert_eq!(weakened.len(), 2, "{loose}");
+        assert_eq!(weakened.len(), 4, "{loose}");
         assert!(
             weakened[0]
                 .as_str()
@@ -616,6 +640,18 @@ mod tests {
                 .contains("assistant.allow_elevated"),
             "{loose}"
         );
+        // The same record again changes nothing in force, so nothing is reported.
+        let again = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/assistant/assistant",
+            Some(json!({"allow_elevated": true, "org": {"repo": "/srv/org.git", "write": true}})),
+        )
+        .await;
+        assert_eq!(again.status(), StatusCode::OK);
+        let again: serde_json::Value = again.json().await.unwrap();
+        assert!(again.get("weakened").is_none(), "{again}");
         let settings = source.load().unwrap().roster.assistant().clone();
         assert!(settings.allow_elevated());
         assert_eq!(

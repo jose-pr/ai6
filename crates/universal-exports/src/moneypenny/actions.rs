@@ -186,16 +186,43 @@ impl WriteTool {
         (self.schema)()
     }
 
-    /// Checks `input` and drafts the request.
-    pub(crate) fn draft(&self, input: &Value, proposal_id: &str) -> Result<Draft, Outcome> {
-        check(&self.schema(), input, "input")
-            .map_err(|problem| Outcome::error(format!("INVALID_INPUT: {problem}")))?;
-        hidden_characters(input, "input")
-            .map_err(|problem| Outcome::error(format!("INVALID_INPUT: {problem}")))?;
+    /// Checks `input` and drafts the request. An edit of her own settings (`assistant`) needs
+    /// `current`, the settings in force, and its summary ends with what it loosens or
+    /// redirects against them ([`ai6::AssistantSettings::changes_from`]).
+    pub(crate) fn draft(
+        &self,
+        input: &Value,
+        proposal_id: &str,
+        current: Option<&ai6::AssistantSettings>,
+    ) -> Result<Draft, Outcome> {
+        let invalid = |problem: String| Outcome::error(format!("INVALID_INPUT: {problem}"));
+        check(&self.schema(), input, "input").map_err(invalid)?;
+        hidden_characters(input, "input").map_err(invalid)?;
         let empty = Map::new();
-        (self.plan)(input.as_object().unwrap_or(&empty), proposal_id)
-            .map_err(|problem| Outcome::error(format!("INVALID_INPUT: {problem}")))
+        let input = input.as_object().unwrap_or(&empty);
+        let mut draft = (self.plan)(input, proposal_id).map_err(invalid)?;
+        if edits_assistant(self.name, input) {
+            let settings = assistant_record(input).map_err(invalid)?;
+            let current = current.ok_or_else(|| {
+                Outcome::error(
+                    "Nothing was proposed: the settings in force could not be read, so what \
+                     this changes could not be shown.",
+                )
+            })?;
+            let changes = settings.changes_from(current);
+            if !changes.is_empty() {
+                draft
+                    .summary
+                    .push_str(&format!(". Weakens: {}", changes.join("; ")));
+            }
+        }
+        Ok(draft)
     }
+}
+
+/// Whether `tool` with `input` proposes an edit of her own settings, the `assistant` record.
+pub(crate) fn edits_assistant(tool: &str, input: &Map<String, Value>) -> bool {
+    tool == "propose_roster_edit" && input.get("kind").and_then(Value::as_str) == Some("assistant")
 }
 
 /// Refuses text holding characters that render as nothing (direction controls, zero-width
@@ -253,19 +280,21 @@ fn roster_kind() -> Value {
     })
 }
 
-/// The weakenings of an `assistant` record, for the person to see before confirming it, or
-/// why it is not acceptable settings under the key `assistant`.
-fn assistant_weakenings(key: &str, definition: &Value) -> Result<Vec<String>, String> {
+/// The settings a `propose_roster_edit` of the `assistant` record sets, or why they are not
+/// acceptable settings under the key `assistant`.
+fn assistant_record(input: &Map<String, Value>) -> Result<ai6::AssistantSettings, String> {
+    let key = input.get("key").and_then(Value::as_str).unwrap_or_default();
     if key != ai6::ConfigRecord::ASSISTANT_KEY {
         return Err(format!(
             "the assistant record is keyed {:?}",
             ai6::ConfigRecord::ASSISTANT_KEY
         ));
     }
-    let settings = serde_json::from_value::<ai6::AssistantSettings>(definition.clone())
+    let definition = input.get("definition").cloned().unwrap_or(json!({}));
+    let settings = serde_json::from_value::<ai6::AssistantSettings>(definition)
         .map_err(|reason| format!("assistant: {reason}"))?;
     settings.validate()?;
-    Ok(settings.weakenings())
+    Ok(settings)
 }
 
 /// Every write tool, sorted by name.
@@ -533,13 +562,8 @@ static WRITE_TOOLS: &[WriteTool] = &[
             let kind = string(input, "kind").ok_or("kind is required")?;
             let key = id(input, "key")?;
             let definition = input.get("definition").cloned().unwrap_or(json!({}));
-            let mut summary = format!("Set roster {kind}/{key} to {definition}");
-            if kind == "assistant" {
-                let weakened = assistant_weakenings(key, &definition)?;
-                if !weakened.is_empty() {
-                    summary.push_str(&format!(". Weakens: {}", weakened.join("; ")));
-                }
-            }
+            // What an `assistant` record changes is added by `WriteTool::draft`.
+            let summary = format!("Set roster {kind}/{key} to {definition}");
             Ok(Draft {
                 summary,
                 call: Call {
@@ -646,6 +670,7 @@ mod tests {
             .draft(
                 &json!({"kind": "agents", "key": "007/../x", "definition": {"handler": "claude"}}),
                 "p-1",
+                None,
             )
             .unwrap();
         assert_eq!(draft.call.path, "/v1/user/roster/agents/007%2F..%2Fx");
@@ -653,7 +678,8 @@ mod tests {
         assert!(
             edit.draft(
                 &json!({"kind": "secrets", "key": "k", "definition": {}}),
-                "p"
+                "p",
+                None,
             )
             .is_err()
         );
@@ -662,6 +688,10 @@ mod tests {
                 &json!({"kind": "assistant", "key": "assistant",
                         "definition": {"personal_repo": "/srv/mp/{person_digest}.git"}}),
                 "p-2",
+                Some(
+                    &ai6::AssistantSettings::new()
+                        .with_personal_repo("/srv/mp/{person_digest}.git"),
+                ),
             )
             .unwrap();
         assert_eq!(strict.call.path, "/v1/user/roster/assistant/assistant");
@@ -671,6 +701,7 @@ mod tests {
                 &json!({"kind": "assistant", "key": "assistant",
                         "definition": {"allow_elevated": true}}),
                 "p-3",
+                Some(&ai6::AssistantSettings::default()),
             )
             .unwrap();
         assert!(
@@ -686,9 +717,34 @@ mod tests {
             json!({"kind": "assistant", "key": "assistant",
                    "definition": {"personal_repo": "ext::sh"}}),
         ] {
-            let error = edit.draft(&refused, "p").unwrap_err();
+            let error = edit
+                .draft(&refused, "p", Some(&ai6::AssistantSettings::default()))
+                .unwrap_err();
             assert!(error.text.starts_with("INVALID_INPUT"), "{}", error.text);
         }
+        // Compared with the settings in force, not the defaults: a record that drops a group's
+        // narrowing and moves the personal repository weakens nothing against the defaults.
+        let current = ai6::AssistantSettings::new()
+            .with_personal_repo("/srv/mp/{person_digest}.git")
+            .with_group(
+                "contractors",
+                ai6::AssistantNarrowing::new().with_interpreters(Vec::new()),
+            );
+        let quiet = json!({"kind": "assistant", "key": "assistant",
+                           "definition": {"personal_repo": "/srv/other/{person_digest}.git"}});
+        let moved = edit.draft(&quiet, "p-4", Some(&current)).unwrap();
+        for named in [
+            "assistant.group.contractors is removed",
+            "assistant.personal_repo changes",
+        ] {
+            assert!(moved.summary.contains(named), "{}", moved.summary);
+        }
+        let unknown = edit.draft(&quiet, "p-5", None).unwrap_err();
+        assert!(
+            unknown.text.starts_with("Nothing was proposed"),
+            "{}",
+            unknown.text
+        );
         let control = write_tools()
             .iter()
             .find(|tool| tool.name == "propose_mission_control")
@@ -696,6 +752,7 @@ mod tests {
             .draft(
                 &json!({"operation_id": "G", "mission_id": "m", "action": "cancel"}),
                 "p-7",
+                None,
             )
             .unwrap();
         assert_eq!(
@@ -716,6 +773,7 @@ mod tests {
                     &json!({"operation_id": "G", "title": "Tidy up",
                             "prompt": format!("Delete the cache{hidden}")}),
                     "p",
+                    None,
                 )
                 .unwrap_err();
             assert!(
@@ -730,8 +788,8 @@ mod tests {
             .unwrap();
         let nested = json!({"kind": "agents", "key": "008",
                             "definition": {"context": ["fine", "sneaky\u{2066}"]}});
-        assert!(edit.draft(&nested, "p").is_err());
+        assert!(edit.draft(&nested, "p", None).is_err());
         let plain = json!({"operation_id": "G", "title": "Tidy up", "prompt": "Delete the cache"});
-        assert!(mission.draft(&plain, "p").is_ok());
+        assert!(mission.draft(&plain, "p", None).is_ok());
     }
 }

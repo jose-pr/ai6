@@ -1037,6 +1037,114 @@ impl AssistantSettings {
         }
         weakened
     }
+
+    /// What replacing `current` with these settings loosens or redirects, each in a sentence
+    /// an operator can act on: a weakening `current` does not have, an interpreter, host or
+    /// network policy it does not allow, a personal, shared or organisation repository that
+    /// changes, a catalog skill added or with another path or pin, and a group or person
+    /// table that is removed or changes a key it set. Empty when nothing does.
+    pub fn changes_from(&self, current: &AssistantSettings) -> Vec<String> {
+        let mut changes: Vec<String> = {
+            let before = current.weakenings();
+            self.weakenings()
+                .into_iter()
+                .filter(|weakened| !before.contains(weakened))
+                .collect()
+        };
+        for name in self
+            .interpreters
+            .iter()
+            .filter(|name| !current.interpreters.contains(name))
+        {
+            changes.push(format!("assistant.interpreters adds {name:?}"));
+        }
+        if self.network > current.network {
+            changes.push(format!(
+                "assistant.network loosens from {:?} to {:?}",
+                current.network.as_str(),
+                self.network.as_str()
+            ));
+        }
+        for host in self
+            .allowed_hosts
+            .iter()
+            .filter(|host| !current.allowed_hosts.contains(host))
+        {
+            changes.push(format!("assistant.allowed_hosts adds {host:?}"));
+        }
+        if self.personal_repo != current.personal_repo {
+            changes.push(format!(
+                "assistant.personal_repo changes from {:?} to {:?}: each person's work and \
+                 memory go to another repository",
+                current.personal_repo.as_deref().unwrap_or("none"),
+                self.personal_repo.as_deref().unwrap_or("none")
+            ));
+        }
+        let repos = |settings: &AssistantSettings| -> BTreeMap<String, String> {
+            settings
+                .shared
+                .iter()
+                .map(|(group, repo)| (format!("assistant.shared.{group}"), repo.repo.clone()))
+                .chain(
+                    settings
+                        .org
+                        .iter()
+                        .map(|repo| ("assistant.org".to_owned(), repo.repo.clone())),
+                )
+                .collect()
+        };
+        let before = repos(current);
+        for (key, repo) in repos(self) {
+            match before.get(&key) {
+                Some(was) if *was == repo => {}
+                Some(was) => changes.push(format!("{key}.repo changes from {was:?} to {repo:?}")),
+                None => changes.push(format!("{key}.repo is added: {repo:?}")),
+            }
+        }
+        for (name, skill) in &self.skills {
+            match current.skills.get(name) {
+                None => changes.push(format!("assistant.skills.{name} is added")),
+                Some(was) if was.path != skill.path => changes.push(format!(
+                    "assistant.skills.{name}.path changes from {:?} to {:?}",
+                    was.path, skill.path
+                )),
+                Some(was) if was.pin != skill.pin => changes.push(format!(
+                    "assistant.skills.{name}.pin changes from {} to {}",
+                    was.pin.map_or("none".to_owned(), |pin| pin.to_string()),
+                    skill.pin.map_or("none".to_owned(), |pin| pin.to_string())
+                )),
+                Some(_) => {}
+            }
+        }
+        for (kind, now, before) in [
+            ("group", &self.group, &current.group),
+            ("person", &self.person, &current.person),
+        ] {
+            for (name, was) in before {
+                let key = format!("assistant.{kind}.{name}");
+                let Some(table) = now.get(name) else {
+                    changes.push(format!("{key} is removed: it no longer narrows anything"));
+                    continue;
+                };
+                let (Ok(serde_json::Value::Object(was)), Ok(table)) =
+                    (serde_json::to_value(was), serde_json::to_value(table))
+                else {
+                    continue;
+                };
+                for (field, value) in was.iter().filter(|(_, value)| !value.is_null()) {
+                    let is = &table[field.as_str()];
+                    if is.is_null() {
+                        changes.push(format!(
+                            "{key}.{field} is removed: it no longer narrows {field}"
+                        ));
+                    } else if is != value {
+                        changes.push(format!("{key}.{field} changes from {value} to {is}"));
+                    }
+                }
+            }
+        }
+        changes
+    }
 }
 
 /// 16 hex digits of the SHA-256 of `person`, the same everywhere.
@@ -1248,6 +1356,66 @@ mod tests {
         for repo in ["ext::sh -c touch% /tmp/x", "fd::3", "gopher://x", "", " a"] {
             assert!(RepoKind::of(repo).is_err(), "{repo:?}");
         }
+    }
+
+    #[test]
+    fn what_a_record_changes_is_listed_against_the_current_one() {
+        let current: AssistantSettings = toml::from_str(
+            "personal_repo = \"/srv/mp/{person_digest}.git\"\n\
+             network = \"denied\"\n\
+             allow_elevated = true\n\
+             [shared.ops]\nrepo = \"/srv/ops.git\"\n\
+             [skills.report]\npath = \"/skills/report\"\n\
+             [group.contractors]\ninterpreters = []\nnetwork = \"denied\"\n\
+             [person.\"eve@sis\"]\nskills = []\n",
+        )
+        .unwrap();
+        assert!(current.changes_from(&current).is_empty());
+        // Weakening nothing against the defaults, yet loosening and redirecting what is set.
+        let next: AssistantSettings = toml::from_str(
+            "personal_repo = \"/srv/elsewhere/{person_digest}.git\"\n\
+             network = \"limited\"\n\
+             allowed_hosts = [\"docs.python.org\"]\n\
+             allow_elevated = true\n\
+             [shared.ops]\nrepo = \"/srv/ops-2.git\"\n\
+             [org]\nrepo = \"/srv/org.git\"\n\
+             [skills.report]\npath = \"/skills/report-2\"\n\
+             [skills.extra]\npath = \"/skills/extra\"\n\
+             [group.contractors]\nnetwork = \"denied\"\n",
+        )
+        .unwrap();
+        assert!(
+            next.weakenings()
+                .iter()
+                .all(|weakened| weakened.contains("allow_elevated")),
+            "{:?}",
+            next.weakenings()
+        );
+        let changes = next.changes_from(&current);
+        for expected in [
+            "assistant.network loosens from \"denied\" to \"limited\"",
+            "assistant.allowed_hosts adds \"docs.python.org\"",
+            "assistant.personal_repo changes from \"/srv/mp/{person_digest}.git\" to",
+            "assistant.shared.ops.repo changes from \"/srv/ops.git\" to \"/srv/ops-2.git\"",
+            "assistant.org.repo is added",
+            "assistant.skills.report.path changes",
+            "assistant.skills.extra is added",
+            "assistant.group.contractors.interpreters is removed",
+            "assistant.person.eve@sis is removed",
+        ] {
+            assert!(
+                changes.iter().any(|change| change.starts_with(expected)),
+                "{expected}: {changes:#?}"
+            );
+        }
+        // A weakening already in force is not news.
+        assert!(
+            !changes
+                .iter()
+                .any(|change| change.contains("allow_elevated")),
+            "{changes:#?}"
+        );
+        assert_eq!(changes.len(), 9, "{changes:#?}");
     }
 
     #[test]

@@ -154,8 +154,12 @@ then sent through the same route as the app's own request, with its usual checks
 audit record: a roster edit is still checked against the whole roster and refused if it
 would leave it unacceptable. She is told how it went. She may propose her own settings too
 (`propose_roster_edit` with kind `assistant`, key `assistant`): the proposal is checked as
-settings before it is shown, and its summary ends with `Weakens: …` naming each setting it
-makes looser than its default, so that is in view before anyone confirms it.
+settings before it is shown, and its summary ends with `Weakens: …` naming what it loosens or
+redirects against the settings in force: a weakening not already set, an interpreter, host or
+looser network policy, a personal, shared or organisation repository that changes, a skill
+added or with another path or pin, and a group or person table removed or changed. So that is
+in view before anyone confirms it; when the settings in force cannot be read, nothing is
+proposed.
 
 So text she reads cannot act through her: an issue body that tells her to change the roster
 can at most make her propose it, in plain view, to a person who decides. Irreversible steps
@@ -205,9 +209,9 @@ same keys as one record of kind `assistant`, keyed `assistant`, in the table
 JSON object, replacing the whole record) or removes it to go back to the defaults, through the
 API or on the app's Roster page under **Moneypenny's settings**. It is
 checked as the table is: an unknown key, a repository AI6 refuses or a record under another key
-is refused with `422` and changes nothing. The answer lists each setting the record makes
-looser than its default (`weakened`), and every Station logs and reports them as it takes the
-change up.
+is refused with `422` and changes nothing. The answer lists what the record loosens or
+redirects against the settings it replaced (`weakened`, as her proposals word it), and every
+Station logs and reports each setting looser than its default as it takes the change up.
 
 Her workspace on the Station holds:
 
