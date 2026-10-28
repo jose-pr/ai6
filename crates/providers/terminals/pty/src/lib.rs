@@ -30,6 +30,9 @@ mod os;
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod os;
+#[cfg(unix)]
+#[path = "../../process_tree/unix.rs"]
+mod process_tree;
 
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -119,7 +122,7 @@ impl PtySession {
             cmd.cwd(dir);
         }
         let child = pair.slave.spawn_command(cmd).map_err(internal)?;
-        let tree = match ProcessTree::adopt(child.process_id()) {
+        let tree = match os::adopt(child.process_id()) {
             Ok(tree) => tree,
             Err(error) => {
                 let mut child = child;
@@ -286,7 +289,8 @@ impl TerminalSession for PtySession {
     }
 
     fn kill(&self) -> Result<(), ProviderError> {
-        self.tree.kill().map_err(internal)?;
+        let leader_alive = lock(&self.exit)?.is_none();
+        self.tree.kill(leader_alive).map_err(internal)?;
         // An error here means it already exited, which is what was asked.
         let _ = lock(&self.child)?.kill();
         // Killing is asynchronous; a caller may remove the working directory next.

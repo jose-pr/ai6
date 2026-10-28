@@ -23,6 +23,9 @@ mod os;
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod os;
+#[cfg(unix)]
+#[path = "../../process_tree/unix.rs"]
+mod process_tree;
 
 use std::io::{Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -157,7 +160,7 @@ impl PipeSession {
             .map_err(|error| internal(format!("cannot start {program:?}: {error}")))?;
         // The command holds the pipe's write ends; until they close, the output never ends.
         drop(cmd);
-        let tree = match ProcessTree::adopt(&child) {
+        let tree = match os::adopt(&child) {
             Ok(tree) => tree,
             Err(error) => {
                 let _ = child.kill();
@@ -293,7 +296,8 @@ impl TerminalSession for PipeSession {
     }
 
     fn kill(&self) -> Result<(), ProviderError> {
-        self.tree.kill().map_err(internal)?;
+        let leader_alive = lock(&self.exit)?.is_none();
+        self.tree.kill(leader_alive).map_err(internal)?;
         // An error here means it already exited, which is what was asked.
         let _ = lock(&self.child)?.kill();
         // Killing is asynchronous; a caller may remove the working directory next.

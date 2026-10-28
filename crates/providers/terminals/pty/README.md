@@ -16,7 +16,8 @@ child's process tree, translating input) live in `unix.rs` and `windows.rs`. See
 
 - Interactive pseudo-terminal Sessions for agent harnesses, with resize and bounded reads.
 - On Unix, no line editing or echo: an input line of any length reaches the harness whole.
-- Kills the whole process tree: the process group on Unix, a Job Object on Windows.
+- Kills the whole process tree: the process group and the processes found by parent from it on
+  Unix, a Job Object on Windows.
 - Builds as both a Rust library and the Guatiao provider library a Station loads.
 
 ## Installation

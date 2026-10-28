@@ -36,10 +36,15 @@ unsafe impl Send for ProcessTree {}
 // SAFETY: as for Send.
 unsafe impl Sync for ProcessTree {}
 
+/// The child's process tree: see [`ProcessTree::adopt`].
+pub(crate) fn adopt(child: &Child) -> io::Result<ProcessTree> {
+    ProcessTree::adopt(child)
+}
+
 impl ProcessTree {
     /// Puts the child in a kill-on-close Job Object, so killing the job kills every process the
     /// child started.
-    pub(crate) fn adopt(child: &Child) -> io::Result<Self> {
+    fn adopt(child: &Child) -> io::Result<Self> {
         // SAFETY: a null name and security descriptor create a private Job Object.
         let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
         if job.is_null() {
@@ -68,7 +73,7 @@ impl ProcessTree {
         Ok(tree)
     }
 
-    pub(crate) fn kill(&self) -> io::Result<()> {
+    pub(crate) fn kill(&self, _leader_alive: bool) -> io::Result<()> {
         // SAFETY: `self.0` is owned and stays open until Drop.
         if unsafe { TerminateJobObject(self.0, 1) } == 0 {
             return Err(io::Error::last_os_error());

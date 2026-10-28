@@ -18,7 +18,8 @@ render or refuse. See the
 - Output exactly as the program wrote it: no line-break translation, no control sequences.
 - Input of any length reaches the program whole; nothing is echoed.
 - Standard error merged into the output (the default) or dropped.
-- Kills the whole process tree: a process group on Unix, a Job Object on Windows.
+- Kills the whole process tree: a process group and the processes found by parent from it on
+  Unix, a Job Object on Windows.
 - Builds as both a Rust library and the Guatiao provider library a Station loads.
 
 ## Installation

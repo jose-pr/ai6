@@ -24,10 +24,15 @@ pub(crate) struct ProcessTree(HANDLE);
 unsafe impl Send for ProcessTree {}
 unsafe impl Sync for ProcessTree {}
 
+/// The child's process tree: see [`ProcessTree::adopt`].
+pub(crate) fn adopt(pid: Option<u32>) -> io::Result<ProcessTree> {
+    ProcessTree::adopt(pid)
+}
+
 impl ProcessTree {
     /// Puts the child in a kill-on-close Job Object, so killing the job kills every
     /// process the child started.
-    pub(crate) fn adopt(pid: Option<u32>) -> io::Result<Self> {
+    fn adopt(pid: Option<u32>) -> io::Result<Self> {
         let pid = pid.ok_or_else(|| {
             io::Error::other("portable-pty did not return the Windows process ID")
         })?;
@@ -74,7 +79,7 @@ impl ProcessTree {
         Ok(Self(job))
     }
 
-    pub(crate) fn kill(&self) -> io::Result<()> {
+    pub(crate) fn kill(&self, _leader_alive: bool) -> io::Result<()> {
         // SAFETY: `self.0` is owned and remains open until Drop.
         if unsafe { TerminateJobObject(self.0, 1) } == 0 {
             return Err(io::Error::last_os_error());

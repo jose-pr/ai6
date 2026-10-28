@@ -61,9 +61,11 @@ With no terminal, a written `^C` is one more byte of input, not a signal, so a J
 interrupted over its own protocol: Claude Code with a stream-json `control_request` of subtype
 `interrupt`, Codex with `turn/interrupt`.
 
-Kill takes the whole tree: on Unix the program leads a process group of its own, which gets
-`SIGKILL`; on Windows it runs in a Job Object that is terminated, and it starts with no console
-window. On Windows a bare program name is found on the child's `PATH` with each `PATHEXT`
+Kill takes the whole tree: on Unix the program leads a process group of its own; the group,
+and every process whose parent is in the tree, are stopped and then killed with `SIGKILL`, so
+a process that left the group (`setsid`) goes too, unless its parent exited first and it was
+reparented away. On Windows it runs in a Job Object that is terminated, and it starts with no
+console window. On Windows a bare program name is found on the child's `PATH` with each `PATHEXT`
 extension, so `codex` finds npm's `codex.cmd`.
 
 ## Terminal mode on Unix

@@ -5,10 +5,11 @@ for AI6, so it can be used without reading its source. It ships inside the packa
 self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
-No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features); `nix` (`signal`)
-on Unix and `windows-sys` on Windows. The library is both an `rlib` and the Guatiao `cdylib` a
-Station loads. Provider ID: `pipe`. Unsafe code is limited to the Job Object calls in
-`windows.rs`, each with a safety comment; the rest of the crate denies it.
+No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features); `libc` on Unix
+and `windows-sys` on Windows. The library is both an `rlib` and the Guatiao `cdylib` a
+Station loads. Provider ID: `pipe`. Unsafe code is limited to the platform calls that own the
+process tree (`../process_tree/`, shared with `pty`) and start the child, each with a safety
+comment; the rest of the crate denies it.
 
 ## Exports
 
@@ -47,9 +48,13 @@ Station loads. Provider ID: `pipe`. Unsafe code is limited to the Job Object cal
 - **Exit** is asked of the child. On Unix a signal is reported by number; on Windows the exit
   code is reported as the standard library's signed 32-bit value (`0xFFFFFFFF` is `-1`,
   `0xC000013A` is `-1073741510`), and `kill` makes it `1`.
-- **Kill** takes the whole process tree. On Unix the child leads a new process group, which is
-  killed with `SIGKILL`; a process that left the group (`setsid`) survives. On Windows the child
-  is assigned to a Job Object with `KILL_ON_JOB_CLOSE` right after it starts, and is started
+- **Kill** takes the whole process tree. On Unix the child leads a new process group; every
+  process of the group, and every process whose parent is in the tree (found from `/proc` on
+  Linux and Android, from `ps` elsewhere, until a scan finds nothing new), is stopped with
+  `SIGSTOP`, then all are killed with `SIGKILL`, so a process that left the group (`setsid`,
+  `setpgid`) is killed too. A process reparented away from the tree (its parent exited first)
+  is not found, unless it is still in the child's group. On Windows the child is assigned to a
+  Job Object with `KILL_ON_JOB_CLOSE` right after it starts, and is started
   with `CREATE_NO_WINDOW`, so a Station without a console opens no window. `kill` returns once
   the child has exited and, on Windows, the Job Object has no process left, or after 2 s. It is
   idempotent.

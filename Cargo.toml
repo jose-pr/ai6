@@ -12,6 +12,8 @@ members = [
     "crates/providers/theaters/*",
     "crates/providers/transports/*",
 ]
+# Source shared by the `pipe` and `pty` providers through `#[path]`, not a crate.
+exclude = ["crates/providers/terminals/process_tree"]
 
 [workspace.package]
 version = "0.1.0"

@@ -172,7 +172,7 @@ name = "ai6-terminal-pipe"
 version = "0.1.0"
 dependencies = [
  "ai6",
- "nix 0.28.0",
+ "libc",
  "windows-sys 0.61.2",
 ]
 

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Unix: the child leads a process group of its own, which is its whole tree.
+//! Unix: the child leads a process group of its own, and its tree is found from it.
 
 #![forbid(unsafe_code)]
 
@@ -12,32 +12,13 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus};
 
 use ai6::directorates::q::terminal::ExitInfo;
-use nix::sys::signal::{Signal, killpg};
-use nix::unistd::Pid;
 
-pub(crate) struct ProcessTree(Pid);
+pub(crate) use crate::process_tree::ProcessTree;
 
-impl ProcessTree {
-    /// The child's process group, which [`own_process_tree`] made with the child's pid as its id.
-    pub(crate) fn adopt(child: &Child) -> io::Result<Self> {
-        i32::try_from(child.id())
-            .ok()
-            .filter(|&pid| pid > 0)
-            .map(|pid| Self(Pid::from_raw(pid)))
-            .ok_or_else(|| io::Error::other("the child's process ID is out of range"))
-    }
-
-    pub(crate) fn kill(&self) -> io::Result<()> {
-        // An error means the group is already gone, which is what was asked.
-        let _ = killpg(self.0, Signal::SIGKILL);
-        Ok(())
-    }
-
-    /// Always `false`: a Unix directory or file can be removed while processes still use it,
-    /// so nothing waits on the rest of the group once the child itself has exited.
-    pub(crate) fn running(&self) -> bool {
-        false
-    }
+/// The child's process tree, rooted at its process group, which [`own_process_tree`] made with
+/// the child's pid as its id.
+pub(crate) fn adopt(child: &Child) -> io::Result<ProcessTree> {
+    ProcessTree::of(Some(child.id()))
 }
 
 /// Starts the child as the leader of a new process group, so killing the group kills every

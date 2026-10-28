@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Unix: the child is a session leader, so its process group is its whole tree, and the
+//! Unix: the child is a session leader, its tree is found from its process group, and the
 //! terminal has no line editing or echo.
 
 use std::borrow::Cow;
@@ -13,29 +13,12 @@ use std::os::unix::fs::OpenOptionsExt;
 use nix::sys::termios::{self, InputFlags, LocalFlags, SetArg, SpecialCharacterIndices};
 use portable_pty::MasterPty;
 
-pub(crate) struct ProcessTree(libc::pid_t);
+pub(crate) use crate::process_tree::ProcessTree;
 
-impl ProcessTree {
-    /// `portable-pty` starts the child with `setsid`, so its process group id is its pid.
-    pub(crate) fn adopt(pid: Option<u32>) -> io::Result<Self> {
-        pid.and_then(|pid| libc::pid_t::try_from(pid).ok())
-            .filter(|&pid| pid > 0)
-            .map(Self)
-            .ok_or_else(|| io::Error::other("portable-pty did not return the child's process ID"))
-    }
-
-    pub(crate) fn kill(&self) -> io::Result<()> {
-        // SAFETY: killpg takes plain integers and touches no memory. An error means the
-        // group is already gone, which is what was asked.
-        unsafe { libc::killpg(self.0, libc::SIGKILL) };
-        Ok(())
-    }
-
-    /// Always `false`: a Unix directory or file can be removed while processes still use it,
-    /// so nothing waits on the rest of the group once the child itself has exited.
-    pub(crate) fn running(&self) -> bool {
-        false
-    }
+/// The child's process tree: `portable-pty` starts the child with `setsid`, so its process
+/// group and session ids are its pid.
+pub(crate) fn adopt(pid: Option<u32>) -> io::Result<ProcessTree> {
+    ProcessTree::of(pid)
 }
 
 /// Turns off line editing and echo on the terminal before the program starts, so input of any

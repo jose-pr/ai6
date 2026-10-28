@@ -273,7 +273,9 @@ fn pipe_grandchild() {
 
 /// A child that starts [`pipe_grandchild`] with its own environment, which inherits the
 /// child's output, then says so; with `AI6_PIPE_PARENT=exit` it exits with code 4, otherwise
-/// it waits for the grandchild.
+/// it waits for the grandchild. With `AI6_PIPE_PARENT=detach` the grandchild leaves the child's
+/// session and process group (`setsid`), or on Windows starts detached in a process group of
+/// its own.
 #[test]
 fn pipe_parent() {
     let Some(mode) = std::env::var_os("AI6_PIPE_PARENT") else {
@@ -282,6 +284,9 @@ fn pipe_parent() {
     let mut command = std::process::Command::new(std::env::current_exe().unwrap());
     command.args(["--exact", "pipe_grandchild", "--nocapture"]);
     command.env_remove("AI6_PIPE_PARENT");
+    if mode == "detach" {
+        detach(&mut command);
+    }
     let mut grandchild = command.spawn().unwrap();
     println!("AI6_PIPE_SPAWNED");
     std::io::stdout().flush().unwrap();
@@ -291,6 +296,26 @@ fn pipe_parent() {
     let _ = grandchild.wait();
 }
 
+#[cfg(unix)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: setsid is async-signal-safe and touches no memory of the parent.
+    unsafe {
+        command.pre_exec(|| match libc::setsid() {
+            -1 => Err(std::io::Error::last_os_error()),
+            _ => Ok(()),
+        });
+    }
+}
+
+#[cfg(windows)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+}
+
 fn size(path: &Path) -> u64 {
     std::fs::metadata(path).map_or(0, |meta| meta.len())
 }
@@ -298,13 +323,23 @@ fn size(path: &Path) -> u64 {
 /// `kill` ends the program's grandchildren too, and returns once the program has exited.
 #[test]
 fn kill_ends_a_grandchild() {
-    let dir = tempfile_dir("kill");
+    kill_ends_a_grandchild_started("sleep");
+}
+
+/// `kill` also ends a grandchild that left the program's session and process group.
+#[test]
+fn kill_ends_a_grandchild_that_left_the_process_group() {
+    kill_ends_a_grandchild_started("detach");
+}
+
+fn kill_ends_a_grandchild_started(mode: &str) {
+    let dir = tempfile_dir(&format!("kill-{mode}"));
     let beat = dir.join("beat");
     let session = start_child(
         Pipe::default(),
         "pipe_parent",
         &[
-            ("AI6_PIPE_PARENT", "sleep".to_owned()),
+            ("AI6_PIPE_PARENT", mode.to_owned()),
             ("AI6_PIPE_BEAT", beat.to_string_lossy().into_owned()),
         ],
     );

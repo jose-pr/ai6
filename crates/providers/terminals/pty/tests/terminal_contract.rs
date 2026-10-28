@@ -338,3 +338,114 @@ fn kill_ends_a_running_pty_process() {
     session.kill().unwrap();
     assert!(!wait_for_exit(&session).running);
 }
+
+/// A grandchild: appends a byte to the file `AI6_PTY_BEAT` names every 20 ms, for at most 30 s.
+#[test]
+fn pty_grandchild() {
+    let Some(beat) = std::env::var_os("AI6_PTY_BEAT") else {
+        return;
+    };
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&beat)
+            .unwrap();
+        file.write_all(b".").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A child that starts [`pty_grandchild`] outside its own session and process group
+/// (`setsid`), or on Windows detached in a process group of its own, says so, and waits for it.
+#[test]
+fn pty_detacher() {
+    if std::env::var_os("AI6_PTY_DETACH").is_none() {
+        return;
+    }
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.args(["--exact", "pty_grandchild", "--nocapture"]);
+    command.env_remove("AI6_PTY_DETACH");
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    detach(&mut command);
+    let mut grandchild = command.spawn().unwrap();
+    println!("AI6_PTY_SPAWNED");
+    std::io::stdout().flush().unwrap();
+    let _ = grandchild.wait();
+}
+
+#[cfg(unix)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: setsid is async-signal-safe and touches no memory of the parent.
+    unsafe {
+        command.pre_exec(|| match libc::setsid() {
+            -1 => Err(std::io::Error::last_os_error()),
+            _ => Ok(()),
+        });
+    }
+}
+
+#[cfg(windows)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+}
+
+/// `kill` ends a grandchild that left the program's session and process group.
+#[test]
+fn kill_ends_a_grandchild_that_left_the_process_group() {
+    let dir = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("pty-scratch")
+        .join(format!("detach-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let beat = dir.join("beat");
+    let mut env: BTreeMap<String, String> = std::env::vars().collect();
+    env.insert("AI6_PTY_DETACH".to_owned(), "1".to_owned());
+    env.insert(
+        "AI6_PTY_BEAT".to_owned(),
+        beat.to_string_lossy().into_owned(),
+    );
+    let argv = vec![
+        std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        "--exact".to_owned(),
+        "pty_detacher".to_owned(),
+        "--nocapture".to_owned(),
+    ];
+    let session = Pty
+        .spawn(
+            &Spec {
+                env: Some(env),
+                ..spec(argv)
+            }
+            .to_value()
+            .unwrap(),
+        )
+        .unwrap();
+    read_until(&session, b"AI6_PTY_SPAWNED");
+    let size = || std::fs::metadata(&beat).map_or(0, |meta| meta.len());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while size() < 3 {
+        assert!(Instant::now() < deadline, "the grandchild never beat");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    session.kill().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let after_kill = size();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(size(), after_kill, "the grandchild still runs");
+    let _ = std::fs::remove_dir_all(dir);
+}

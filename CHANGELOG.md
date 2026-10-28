@@ -213,6 +213,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Mission nothing knows (no Session record, brief lease, queued brief of the Operation or
   board entry) before anything is audited or queued; the Headquarters Station takes only
   known Missions no other Station holds.
+- On Unix, killing a `pipe` or `pty` Session also kills the processes that left its process
+  group (`setsid`, `setpgid`): every process whose parent is in the tree is found and stopped
+  before all are killed.
 - Windows exit codes are reported as signed 32-bit values by the `pipe` and `pty` terminals
   (`0xFFFFFFFF` is `-1`), and the Claude Code and Codex handlers show a negative one with its
   NTSTATUS hex (`exited with code -1073741510 (0xC000013A)`, through

@@ -9,8 +9,8 @@ No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) and
 `portable-pty`; `libc` and `nix` (`term`) on Unix and `windows-sys` on Windows. The crate root exports
 `Pty`, which implements `ai6::directorates::q::terminal::Terminal`; the library is both an
 `rlib` and the Guatiao `cdylib` a Station loads. Provider ID: `pty`. Unsafe code is
-limited to the platform calls in `unix.rs` (`killpg`) and `windows.rs` (Job Objects),
-each with a safety comment.
+limited to the platform calls that own the process tree (`../process_tree/`, shared with
+`pipe`, and `windows.rs`), each with a safety comment.
 
 `tty()` answers `true`. A Station prefers `pty` for a harness whose handler does not declare
 JSON over standard input and output (`HarnessStdio::Json`), when several terminal providers
@@ -53,9 +53,13 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   running keeps the terminal open; either way the caller sees the end after the child's
   last output. A waiting `read` asks for the exit every 50 ms. After the first `0`, every
   `read` returns `0`.
-- **Kill** takes the whole process tree. On Unix the child is a session leader, so its
-  process group is killed (`killpg`, SIGKILL). On Windows the child is assigned to a Job
-  Object with `KILL_ON_JOB_CLOSE`. `kill` returns once the child has exited and, on Windows,
+- **Kill** takes the whole process tree. On Unix the child is a session leader; every process
+  of its group and, on Linux and Android, its session, and every process whose parent is in the
+  tree (found from `/proc` on Linux and Android, from `ps` elsewhere, until a scan finds
+  nothing new), is stopped with `SIGSTOP`, then all are killed with `SIGKILL`, so a process
+  that left the group (`setsid`, `setpgid`) is killed too. A process reparented away from the
+  tree (its parent exited first) and outside the group and session is not found. On Windows
+  the child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`. `kill` returns once the child has exited and, on Windows,
   the Job Object has no process left, or after 2 s. Windows may still refuse to remove the
   child's working directory for a few tens of milliseconds after that (os error 32): retry.
 - **Input** is passed through on Unix. On Windows, ConPTY reads Enter as CR, so a bare LF
