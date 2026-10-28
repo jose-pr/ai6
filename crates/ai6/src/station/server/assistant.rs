@@ -61,9 +61,10 @@ use crate::directorates::section_00::agent::{
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
-    AssistantJob, AssistantReach, AssistantReport, COMMIT_MEMORY, EVENT_ACCEPTED, EVENT_CLOSED,
-    EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES,
-    EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
+    AssistantJob, AssistantReach, AssistantReport, AssistantSharedBase, COMMIT_MEMORY,
+    EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
+    EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer,
+    outside_tool,
 };
 use crate::guatiao::library::Object;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
@@ -1500,8 +1501,10 @@ impl Pump {
             match read {
                 Ok(Some(event)) => {
                     heard = Instant::now();
+                    let mut shared = Vec::new();
                     if !event.tools.is_empty() {
                         self.note_tools(&event.tools, event.data.as_deref());
+                        shared = self.shared_bases(&event);
                     }
                     let ended = matches!(event.kind.as_str(), "failed" | LIMIT_EVENT);
                     let mut stopped = false;
@@ -1524,7 +1527,12 @@ impl Pump {
                     } else {
                         translate(&event)
                     };
-                    events.extend(shown);
+                    events.extend(shown.map(|mut shown| {
+                        if shown.kind == EVENT_TOOL {
+                            shown.shared = shared;
+                        }
+                        shown
+                    }));
                     if !events.is_empty() {
                         self.send(session_id.as_ref(), events);
                     }
@@ -1686,6 +1694,16 @@ impl Pump {
         {
             self.expose(&source);
         }
+    }
+
+    /// What each shared change `event` calls was made from, for its [`EVENT_TOOL`] event to
+    /// carry; none without a workspace.
+    fn shared_bases(&self, event: &AgentEvent) -> Vec<AssistantSharedBase> {
+        self.workspace
+            .as_ref()
+            .and_then(|workspace| workspace.lock().ok())
+            .map(|workspace| workspace.shared_bases(event.data.as_deref()))
+            .unwrap_or_default()
     }
 
     /// Raises the conversation's exposed flag and tells Universal Exports; logs a failure to
@@ -4679,17 +4697,26 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn shared_repositories_are_checked_out_and_a_shared_commit_lands_on_main() {
-        let repos = tempfile::tempdir().unwrap();
-        let fixture = git_fixture(repos.path(), Script::Answers);
-        let ops = repos.path().join("ops");
+    /// A shared repository `ops` under `root` whose `main` holds `handbook.md`, and which
+    /// takes pushes to it.
+    fn shared_ops(root: &Path) -> PathBuf {
+        let ops = root.join("ops");
         std::fs::create_dir_all(&ops).unwrap();
         git(&ops, &["init", "--quiet", "--initial-branch=main"]);
-        std::fs::write(ops.join("handbook.md"), "# Handbook\n").unwrap();
-        git(&ops, &["add", "handbook.md"]);
+        commit_ops(&ops, "# Handbook\n");
         git(
             &ops,
+            &["config", "receive.denyCurrentBranch", "updateInstead"],
+        );
+        ops
+    }
+
+    /// Commits `text` as `handbook.md` of `ops`, as someone else.
+    fn commit_ops(ops: &Path, text: &str) {
+        std::fs::write(ops.join("handbook.md"), text).unwrap();
+        git(ops, &["add", "handbook.md"]);
+        git(
+            ops,
             &[
                 "-c",
                 "user.name=Q",
@@ -4698,13 +4725,16 @@ mod tests {
                 "commit",
                 "--quiet",
                 "-m",
-                "seed",
+                "edit",
             ],
         );
-        git(
-            &ops,
-            &["config", "receive.denyCurrentBranch", "updateInstead"],
-        );
+    }
+
+    #[tokio::test]
+    async fn shared_repositories_are_checked_out_and_a_shared_commit_lands_on_main() {
+        let repos = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(repos.path(), Script::Answers);
+        let ops = shared_ops(repos.path());
         let mut wanted = workspace(&repos.path().join("eve.git"));
         wanted
             .shared
@@ -4756,6 +4786,107 @@ mod tests {
             git(&ops, &["log", "-1", "--format=%an <%ae>", "main"]).trim(),
             "Eve Moneypenny <eve@example.invalid>"
         );
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_shared_change_confirmed_after_its_file_changed_on_main_is_refused() {
+        let repos = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(repos.path(), Script::Reads);
+        let ops = shared_ops(repos.path());
+        let mut wanted = workspace(&repos.path().join("eve.git"));
+        wanted
+            .shared
+            .insert("ops".to_owned(), ops.to_string_lossy().into_owned());
+        let call = |group: &str, path: &str| {
+            format!(
+                "mcp__moneypenny__propose_shared_change {{\"group\": \"{group}\", \"path\": \
+                 \"{path}\", \"content\": \"On call: Q.\\n\", \"message\": \"Name who is on \
+                 call\"}}"
+            )
+        };
+        for (n, (group, path)) in [
+            ("ops", "handbook.md"),
+            ("ops", "rota.md"),
+            ("gone", "handbook.md"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            fixture
+                .desk
+                .handle(working("c-s", &call(group, path), wanted.clone()))
+                .await;
+            until(|| {
+                kinds(&fixture, "c-s")
+                    .iter()
+                    .filter(|kind| *kind == EVENT_COMPLETED)
+                    .count()
+                    > n
+            })
+            .await;
+        }
+        let reported: Vec<AssistantSharedBase> = events(&fixture, "c-s")
+            .into_iter()
+            .filter(|event| event.kind == EVENT_TOOL)
+            .flat_map(|event| event.shared)
+            .collect();
+        let content = workspace::sha256_hex(b"On call: Q.\n");
+        assert_eq!(
+            reported,
+            [
+                AssistantSharedBase {
+                    group: "ops".to_owned(),
+                    path: "handbook.md".to_owned(),
+                    content: content.clone(),
+                    base: Some(workspace::sha256_hex(b"# Handbook\n")),
+                },
+                AssistantSharedBase {
+                    group: "ops".to_owned(),
+                    path: "rota.md".to_owned(),
+                    content,
+                    base: None,
+                },
+            ],
+            "a repository not checked out gives no base"
+        );
+        // The change as Universal Exports makes it from her call and its base.
+        let change = |base: &AssistantSharedBase| {
+            AssistantChange::based(
+                BTreeMap::from([(base.path.clone(), Some("On call: Q.\n".to_owned()))]),
+                BTreeMap::from([(base.path.clone(), base.base.clone())]),
+            )
+        };
+
+        // Meanwhile someone else changed the handbook on `main`.
+        commit_ops(&ops, "# Handbook\n\nOn call: M.\n");
+        fixture
+            .desk
+            .handle(committing("c-s", COMMIT_SHARED, &ops, change(&reported[0])))
+            .await;
+        let refused = events(&fixture, "c-s")
+            .into_iter()
+            .rfind(|event| event.kind == EVENT_REJECTED)
+            .and_then(|event| event.text)
+            .unwrap_or_default();
+        assert!(refused.contains("handbook.md changed on main"), "{refused}");
+        assert_eq!(
+            git(&ops, &["show", "main:handbook.md"]),
+            "# Handbook\n\nOn call: M.\n"
+        );
+
+        // A file nobody has made since lands.
+        fixture
+            .desk
+            .handle(committing("c-s", COMMIT_SHARED, &ops, change(&reported[1])))
+            .await;
+        let landed = events(&fixture, "c-s")
+            .into_iter()
+            .rfind(|event| event.kind == EVENT_ACCEPTED)
+            .and_then(|event| event.text)
+            .unwrap_or_default();
+        assert!(landed.starts_with("committed "), "{landed}");
+        assert_eq!(git(&ops, &["show", "main:rota.md"]), "On call: Q.\n");
         fixture.desk.close_all();
     }
 

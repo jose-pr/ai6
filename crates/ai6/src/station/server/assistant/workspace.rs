@@ -11,6 +11,10 @@
 //! to let through; everything else in `personal/` is committed to `main`, authored by the
 //! person. A `main` that refuses the work twice gets it on `moneypenny/<conversation digest>`.
 //!
+//! Each `propose_shared_change` call is reported with what the file it changes held in her
+//! `shared/` checkout ([`AssistantSharedBase`]), so its commit is refused when that
+//! repository's `main` has changed the file since.
+//!
 //! Exposure is Universal Exports' to record (`Conversation.exposed`), but the desk sees one
 //! way in it cannot: text she wrote in `personal/` while exposed. (The repositories in
 //! `shared/` are trusted text and expose nothing.) Their paths are kept in the personal
@@ -32,7 +36,9 @@ use crate::directorates::q::safehouse::{
     SafeHouseSpec,
 };
 use crate::directorates::section_00::assistant::{
-    AssistantChange, AssistantCommit, AssistantWorkspace, COMMIT_MEMORY, MAX_ASSISTANT_EVENT_BYTES,
+    ASSISTANT_MCP_SERVER, ASSISTANT_SHARED_CHANGE_TOOL, AssistantChange, AssistantCommit,
+    AssistantSharedBase, AssistantWorkspace, COMMIT_MEMORY, MAX_ASSISTANT_EVENT_BYTES,
+    MAX_ASSISTANT_SHARED_BASES, repository_path,
 };
 use crate::station::safehouse::SafeHouse;
 
@@ -99,6 +105,8 @@ pub(super) struct Workspace {
     outside: BTreeSet<String>,
     /// What exposed the conversation as the workspace was prepared, until it is reported.
     found: Option<String>,
+    /// The shared repositories checked out under `shared/`, by name.
+    shared: BTreeSet<String>,
 }
 
 /// What the end of a turn found besides the work it saved.
@@ -152,6 +160,7 @@ impl Workspace {
             exposed,
             outside: BTreeSet::new(),
             found: None,
+            shared: BTreeSet::new(),
         };
         workspace.outside = workspace.read_record().into_values().collect();
         if !workspace.exposed
@@ -207,6 +216,7 @@ impl Workspace {
         fs::create_dir_all(area.join(SCRATCH)).map_err(|error| error.to_string())?;
         let memory = read_text(area, &index).unwrap_or_default();
         let standing = instructions(workspace.exposed, &shared, skills);
+        workspace.shared = shared.into_iter().collect();
         write_file(
             area,
             &area.join("CLAUDE.md"),
@@ -262,6 +272,32 @@ impl Workspace {
             self.exposed = true;
         }
         source
+    }
+
+    /// What each [`ASSISTANT_SHARED_CHANGE_TOOL`] call in a harness event's raw line (`data`)
+    /// was made from: the file it changes as her `shared/<group>/` checkout holds it. A call
+    /// naming a repository not checked out, a path that is not a plain file or no file, or
+    /// one the desk cannot read gets none, and Universal Exports then refuses it.
+    pub(super) fn shared_bases(&self, data: Option<&[u8]>) -> Vec<AssistantSharedBase> {
+        shared_change_calls(data)
+            .into_iter()
+            .filter(|(group, path, _)| self.shared.contains(group) && repository_path(path))
+            .filter_map(|(group, path, content)| {
+                let file = in_tree(&self.area().join(SHARED).join(&group), &path);
+                no_links(self.area(), &file).ok()?;
+                let base = match fs::symlink_metadata(&file) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    _ => Some(file_digest(&file)?),
+                };
+                Some(AssistantSharedBase {
+                    group,
+                    path,
+                    content: sha256_hex(content.as_bytes()),
+                    base,
+                })
+            })
+            .take(MAX_ASSISTANT_SHARED_BASES)
+            .collect()
     }
 
     /// Her working directory, holding `personal/`.
@@ -627,10 +663,11 @@ fn exactly(change: &AssistantChange) -> Vec<CheckpointFile> {
 /// The hex SHA-256 of `bytes`: a file's [`AssistantChange::base`].
 pub(super) fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex(&Sha256::digest(bytes))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The notice for work saved to `branch` because `main` refused it.
@@ -766,6 +803,17 @@ fn read_tree(root: &Path, prefix: &str) -> BTreeMap<String, Vec<u8>> {
 /// is not read through. `None` when it cannot be opened, is not a plain file, or is a link.
 fn read_capped(path: &Path, limit: usize) -> Option<Vec<u8>> {
     use std::io::Read;
+    let mut bytes = Vec::new();
+    open_plain(path)?
+        .take(limit as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    Some(bytes)
+}
+
+/// The plain file `path`, opened for reading as [`read_capped`] opens it; `None` when it
+/// cannot be opened, is not a plain file, or is a link.
+fn open_plain(path: &Path) -> Option<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -787,9 +835,7 @@ fn read_capped(path: &Path, limit: usize) -> Option<Vec<u8>> {
     if !metadata.is_file() || is_link(&metadata) {
         return None;
     }
-    let mut bytes = Vec::new();
-    file.take(limit as u64).read_to_end(&mut bytes).ok()?;
-    Some(bytes)
+    Some(file)
 }
 
 /// The files of `personal/` outside `.git` and `memory/`, with size and modification time.
@@ -1077,6 +1123,51 @@ fn reading_calls(data: Option<&[u8]>) -> Option<Vec<(String, Scope)>> {
         }
     }
     (!calls.is_empty()).then_some(calls)
+}
+
+/// The `group`, `path` and `content` of each [`ASSISTANT_SHARED_CHANGE_TOOL`] call in a
+/// harness event's raw line, as Claude Code's `stream-json` writes it.
+fn shared_change_calls(data: Option<&[u8]>) -> Vec<(String, String, String)> {
+    let tool = format!("mcp__{ASSISTANT_MCP_SERVER}__{ASSISTANT_SHARED_CHANGE_TOOL}");
+    let Some(value) = data.and_then(|data| serde_json::from_slice::<serde_json::Value>(data).ok())
+    else {
+        return Vec::new();
+    };
+    let blocks = value
+        .pointer("/message/content")
+        .and_then(serde_json::Value::as_array);
+    blocks
+        .into_iter()
+        .flatten()
+        .filter(|block| {
+            block.get("type").and_then(serde_json::Value::as_str) == Some("tool_use")
+                && block.get("name").and_then(serde_json::Value::as_str) == Some(tool.as_str())
+        })
+        .filter_map(|block| {
+            let field = |name: &str| block.pointer(&format!("/input/{name}"))?.as_str();
+            Some((
+                field("group")?.to_owned(),
+                field("path")?.to_owned(),
+                field("content")?.to_owned(),
+            ))
+        })
+        .collect()
+}
+
+/// The hex SHA-256 of the plain file `path`'s bytes, opened as [`open_plain`] opens it.
+fn file_digest(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = open_plain(path)?;
+    let mut hasher = Sha256::new();
+    let mut chunk = vec![0; 64 * 1024];
+    loop {
+        match file.read(&mut chunk).ok()? {
+            0 => break,
+            read => hasher.update(&chunk[..read]),
+        }
+    }
+    Some(hex(&hasher.finalize()))
 }
 
 /// The directories a glob pattern names before its first wildcard or escape.

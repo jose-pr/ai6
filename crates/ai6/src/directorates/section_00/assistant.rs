@@ -356,6 +356,12 @@ pub const COMMIT_SHARED: &str = "shared";
 pub const MAX_ASSISTANT_CHANGE_BYTES: usize = 64 * 1024;
 /// The most files one memory change or commit carries.
 pub const MAX_ASSISTANT_CHANGE_FILES: usize = 32;
+/// Moneypenny's tool that changes one file of a shared repository, as Universal Exports
+/// serves it; Claude Code calls it `mcp__moneypenny__propose_shared_change`.
+pub const ASSISTANT_SHARED_CHANGE_TOOL: &str = "propose_shared_change";
+/// The most [`AssistantSharedBase`]s one event carries, and the most Universal Exports keeps
+/// for one conversation until their calls arrive.
+pub const MAX_ASSISTANT_SHARED_BASES: usize = 32;
 /// The most files a [`MemoryAction::List`] answer names, within [`MAX_MEMORY_LIST_BYTES`] of
 /// paths; [`MemoryAnswer::more`] says there are others.
 pub const MAX_MEMORY_FILES: usize = 1_000;
@@ -480,10 +486,7 @@ impl AssistantChange {
             }
         }
         for (path, digest) in &self.base {
-            let hex = |digest: &String| {
-                digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
-            };
-            if !self.files.contains_key(path) || !digest.as_ref().is_none_or(hex) {
+            if !self.files.contains_key(path) || !digest.as_deref().is_none_or(hex_digest) {
                 return Err(format!("the base of {path:?} is not one of its files'"));
             }
         }
@@ -1113,6 +1116,10 @@ pub struct AssistantEvent {
     /// event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryAnswer>,
+    /// What each [`ASSISTANT_SHARED_CHANGE_TOOL`] call of an [`EVENT_TOOL`] event was made
+    /// from, at most [`MAX_ASSISTANT_SHARED_BASES`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared: Vec<AssistantSharedBase>,
 }
 
 impl AssistantEvent {
@@ -1126,8 +1133,52 @@ impl AssistantEvent {
             change: None,
             cable: None,
             memory: None,
+            shared: Vec::new(),
         }
     }
+}
+
+/// What the file an [`ASSISTANT_SHARED_CHANGE_TOOL`] call changes held in the assistant's
+/// checkout of its shared repository (`shared/<group>/`) when she made the call. Universal
+/// Exports attaches it to the change as its [`AssistantChange::base`], so the commit is
+/// refused when the repository's `main` has changed that file since.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantSharedBase {
+    /// The call's `group`: the name the repository is checked out under.
+    pub group: String,
+    /// The call's `path`, relative to the repository.
+    pub path: String,
+    /// The hex SHA-256 of the call's `content`, which ties this to the one call.
+    pub content: String,
+    /// The hex SHA-256 of the file's bytes in the checkout, or `None` when it had no such file.
+    pub base: Option<String>,
+}
+
+impl AssistantSharedBase {
+    /// Checks it: `group` a [`file_safe`] name, `path` a [`repository_path`], and the
+    /// digests 64 hex digits.
+    ///
+    /// # Errors
+    ///
+    /// A message naming what is out of bounds.
+    pub fn validate(&self) -> Result<(), String> {
+        if !file_safe(&self.group) || !repository_path(&self.path) {
+            return Err(format!(
+                "{:?} in {:?} is not a shared file",
+                self.path, self.group
+            ));
+        }
+        if !hex_digest(&self.content) || !self.base.as_deref().is_none_or(hex_digest) {
+            return Err(format!("the base of {:?} is not a digest", self.path));
+        }
+        Ok(())
+    }
+}
+
+/// Whether `digest` is a hex SHA-256: 64 hex digits.
+fn hex_digest(digest: &str) -> bool {
+    digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// Whether `value` is 1 to 256 bytes without control characters.
@@ -1638,6 +1689,43 @@ mod tests {
         let kept = event.text.unwrap();
         assert!(kept.len() <= MAX_ASSISTANT_EVENT_BYTES);
         assert!(kept.chars().all(|c| c == 'é'));
+    }
+
+    #[test]
+    fn a_shared_base_names_a_repository_file_and_two_digests() {
+        let digest = "ab".repeat(32);
+        let base = AssistantSharedBase {
+            group: "ops".to_owned(),
+            path: "docs/on-call.md".to_owned(),
+            content: digest.clone(),
+            base: None,
+        };
+        assert_eq!(base.validate(), Ok(()));
+        for wrong in [
+            AssistantSharedBase {
+                group: "../ops".to_owned(),
+                ..base.clone()
+            },
+            AssistantSharedBase {
+                path: ".git/config".to_owned(),
+                ..base.clone()
+            },
+            AssistantSharedBase {
+                content: "ab".to_owned(),
+                ..base.clone()
+            },
+            AssistantSharedBase {
+                base: Some(format!("{}zz", &digest[2..])),
+                ..base.clone()
+            },
+        ] {
+            assert!(wrong.validate().is_err(), "{wrong:?}");
+        }
+        let event: AssistantEvent = serde_json::from_value(serde_json::json!({
+            "kind": EVENT_TOOL, "shared": [base]
+        }))
+        .unwrap();
+        assert_eq!(event.shared.len(), 1);
     }
 
     #[test]

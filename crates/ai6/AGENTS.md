@@ -2991,8 +2991,17 @@ pub struct AssistantReport { pub station_id: String, pub conversation_id: String
 pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,
     pub change: Option<AssistantChange> /* default, omitted when None */,
     pub cable: Option<AssistantCable> /* default, omitted when None */,
-    pub memory: Option<MemoryAnswer> /* default, omitted when None: a memory job's answer */ }
+    pub memory: Option<MemoryAnswer> /* default, omitted when None: a memory job's answer */,
+    pub shared: Vec<AssistantSharedBase> /* default, omitted when empty: on a `tool` event,
+        one per propose_shared_change call, at most MAX_ASSISTANT_SHARED_BASES */ }
 impl AssistantEvent { pub fn new(kind: &str, text: Option<String>) -> Self; } // cuts text
+pub const ASSISTANT_SHARED_CHANGE_TOOL: &str = "propose_shared_change";
+pub const MAX_ASSISTANT_SHARED_BASES: usize = 32; // per event, and kept per conversation
+pub struct AssistantSharedBase { pub group: String /* the call's, the checkout name */,
+    pub path: String, pub content: String /* hex SHA-256 of the call's content */,
+    pub base: Option<String> /* hex SHA-256 of the file in her shared/<group>/ checkout, None = no file */ }
+impl AssistantSharedBase { pub fn validate(&self) -> Result<(), String>; } // file_safe group,
+    // repository_path, 64-hex digests
 pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control characters
 ```
 
@@ -3614,7 +3623,12 @@ with a `notice`. A `commit` job of `COMMIT_MEMORY` for a conversation running he
 into its `personal/` and copy and committed exactly (`CheckpointSpec::files`: nothing else a turn
 in progress wrote goes with it); otherwise, and for `COMMIT_SHARED`,
 the desk clones the commit's repository into a temporary directory, commits the files'
-text there exactly without writing them, pushes, and removes it. The desk never reads, writes
+text there exactly without writing them, pushes, and removes it; a file whose
+`AssistantChange::base` differs from what `main` holds refuses the commit. A `tool` event whose raw
+line is Claude Code's call of `mcp__moneypenny__propose_shared_change` carries, in `shared`,
+the SHA-256 of the file it names in that `shared/<group>/` checkout (`None` when there is no
+such file); a call naming a checkout that is not there, or a path that is not a plain file,
+gets none. The desk never reads, writes
 or removes a file in the conversation's directory through a symbolic link, junction or other
 reparse point (refused, or skipped when it walks a tree), and the provider checks links out as
 plain files.
