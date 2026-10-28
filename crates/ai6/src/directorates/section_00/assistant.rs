@@ -546,6 +546,12 @@ pub struct AssistantCommit {
     pub kind: String,
     /// The repository: the person's personal repository, or a shared one.
     pub repo: String,
+    /// For a [`COMMIT_SHARED`] commit, the directory group whose repository it is, or
+    /// [`ORG_SHARED`](crate::directorates::m::assistant::ORG_SHARED); the job carrying it names
+    /// the person's groups, so a Station checks the repository is that group's and the person
+    /// a member. `None` for a memory commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     /// What to write.
     pub change: AssistantChange,
     /// The commit message, its trailer included.
@@ -557,7 +563,8 @@ pub struct AssistantCommit {
 }
 
 impl AssistantCommit {
-    /// Checks the commit: a known kind, a repository of a known kind, the change as
+    /// Checks the commit: a known kind, a group name (`file_safe`) for a shared commit and none
+    /// for a memory one, a repository of a known kind, the change as
     /// [`AssistantChange::validate`] checks it, a message of 1 to 4,096 bytes and an author
     /// without control characters or `<`, `>`.
     ///
@@ -570,6 +577,14 @@ impl AssistantCommit {
             COMMIT_SHARED => false,
             other => return Err(format!("{other:?} is not a kind of commit")),
         };
+        match (&self.group, memory) {
+            (None, true) => {}
+            (Some(group), false) if crate::directorates::m::assistant::file_safe(group) => {}
+            (Some(_), true) => return Err("a memory commit names no group".to_owned()),
+            (_, false) => {
+                return Err("a shared commit names the group whose repository it is".to_owned());
+            }
+        }
         RepoKind::of(&self.repo)?;
         self.change.validate(memory)?;
         if self.message.trim().is_empty() || self.message.len() > 4_096 {
@@ -1505,6 +1520,7 @@ mod tests {
         AssistantCommit {
             kind: COMMIT_MEMORY.to_owned(),
             repo: "/srv/mp/eve.git".to_owned(),
+            group: None,
             change: change(),
             message: "moneypenny: remember\n\nVia: Moneypenny (conversation c-1)".to_owned(),
             author_name: "Eve".to_owned(),
@@ -1538,10 +1554,19 @@ mod tests {
             "a memory commit writes memory/ only"
         );
         outside.kind = COMMIT_SHARED.to_owned();
+        assert!(
+            outside.validate().is_err(),
+            "a shared commit names its group"
+        );
+        outside.group = Some("ops".to_owned());
         assert_eq!(outside.validate(), Ok(()));
+        let mut grouped = commit();
+        grouped.group = Some("ops".to_owned());
+        assert!(grouped.validate().is_err(), "a memory commit names none");
         for path in [".git/config", "memory/../x", "/etc/passwd", "a\\b"] {
             let mut bad = commit();
             bad.kind = COMMIT_SHARED.to_owned();
+            bad.group = Some("ops".to_owned());
             bad.change = AssistantChange::new(BTreeMap::from([(path.to_owned(), None)]));
             assert!(bad.validate().is_err(), "{path}");
         }

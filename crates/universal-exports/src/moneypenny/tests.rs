@@ -1897,8 +1897,20 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
     ))
     .await
     .unwrap();
-    let commit = take(&served, "hq").await.commit.unwrap();
+    let committing = take(&served, "hq").await;
+    // The group and the person's groups go with it, so the Station checks the repository is
+    // that group's and the person a member.
+    assert!(
+        committing
+            .groups
+            .as_ref()
+            .is_some_and(|groups| groups.contains(&"ops".to_owned())),
+        "{:?}",
+        committing.groups
+    );
+    let commit = committing.commit.unwrap();
     assert_eq!(commit.kind, COMMIT_SHARED);
+    assert_eq!(commit.group.as_deref(), Some("ops"));
     assert_eq!(commit.repo, "/srv/ops.git");
     assert_eq!(
         commit.change.files["docs/on-call.md"].as_deref(),
@@ -1949,7 +1961,10 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
             .unwrap()
             .contains("at once")
     );
-    let commit = take(&served, "hq").await.commit.unwrap();
+    let committing = take(&served, "hq").await;
+    assert!(committing.groups.is_some());
+    let commit = committing.commit.unwrap();
+    assert_eq!(commit.group.as_deref(), Some("org"));
     assert_eq!(commit.repo, "/srv/org.git");
     assert_eq!(commit.change.base["docs/on-call.md"], None);
     assert_eq!(audits(&served, "moneypenny.shared.write").len(), 1);

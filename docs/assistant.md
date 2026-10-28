@@ -198,8 +198,9 @@ credentials and must exist. Universal Exports reads the
 table from the roster it serves (`--roster`) and sends each message with the person's
 workspace; without `personal_repo` nothing changes from a plain conversation. A Station takes
 no repository on Universal Exports' word: it fills the person's in from its own roster's
-`[assistant]` and refuses a message or commit naming any repository that roster does not give,
-so the gateway and every Station must read the same roster.
+`[assistant]` and refuses a message or commit naming any repository that roster does not give
+that person: a group's shared repository only for a member, by the groups each message and
+each shared commit carries. So the gateway and every Station must read the same roster.
 
 A SQL roster (`sqlite:` or `postgres://`, shared by the Stations of an HA deployment) keeps the
 same keys as one record of kind `assistant`, keyed `assistant`, in the table

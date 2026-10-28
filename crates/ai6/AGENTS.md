@@ -2937,8 +2937,9 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub skills: Vec<String> /* default, omitted when empty: catalog skills the person is given */,
     pub groups: Option<Vec<String>> /* default, omitted when None; the person's directory groups,
                                        so the Station re-caps reach and skills by its per-group
-                                       tables; requires person_id; None makes a group-narrowing
-                                       roster refuse */ }
+                                       tables and takes only those groups' shared repositories;
+                                       requires person_id; None makes a group-narrowing roster
+                                       refuse and gives no group's repository */ }
                                                      // Debug redacts the token
 pub const MAX_ASSISTANT_SKILLS: usize = 64;
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
@@ -2986,7 +2987,10 @@ impl AssistantChange { pub fn new(files) -> Self /* no base */; pub fn based(fil
     pub fn digest_of(&files) -> String; pub fn digest_over(&files, &base) -> String;
     pub fn validate(&self, memory: bool) -> Result<(), String>; } // bases only of its files, 64 hex
 pub struct AssistantCommit { pub kind: String /* COMMIT_MEMORY | COMMIT_SHARED */,
-    pub repo: String, pub change: AssistantChange, pub message: String /* trailer included */,
+    pub repo: String,
+    pub group: Option<String> /* default, omitted when None; required for COMMIT_SHARED (a group
+                                 or "org", file_safe), refused for COMMIT_MEMORY */,
+    pub change: AssistantChange, pub message: String /* trailer included */,
     pub author_name: String, pub author_email: String }
 impl AssistantCommit { pub fn validate(&self) -> Result<(), String>; }
 impl AssistantWorkspace { pub fn validate(&self) -> Result<(), String>; }
@@ -3706,9 +3710,10 @@ is dropped with a `notice` when the `POST` fails.
 
 A job with a `workspace`, a `commit` or `memory` must name `person_id`, and the Station refuses
 one whose repositories its own roster does not give: the personal repository (of a workspace or
-a memory job) must be `personal_repo_for(person_id)` of its `[assistant]`, each shared one the
-repository its roster gives that name (`org` or a group), and a commit's repository the
-person's (memory) or one of the shared ones.
+a memory job) must be `personal_repo_for(person_id)` of its `[assistant]`, each shared one
+`shared_named(name, job.groups)` (`org`, or a group the job puts the person in), and a commit's
+repository the person's (memory) or `shared_named(commit.group, job.groups)` (shared): Universal
+Exports sends a shared commit's job with the person's groups as they are when it is sent.
 
 On a Station running elevated (`ai6::station::elevation::is_elevated() -> io::Result<bool>`,
 feature `daemon`: root on Unix, a High or

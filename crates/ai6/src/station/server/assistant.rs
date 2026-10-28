@@ -526,23 +526,20 @@ impl Desk {
     }
 
     /// Refuses a job naming a repository this Station's own roster does not give: the person's
-    /// personal repository filled in for `person_id`, the shared repositories by name, and a
-    /// commit only to one of those. Universal Exports' word is not taken for where a person's
-    /// work and memory go.
+    /// personal repository filled in for `person_id`, the shared repositories of the groups the
+    /// job names (`groups`, none when it names none) and the organisation's, and a commit only
+    /// to one of those, a shared one under the group it names. Universal Exports' word is not
+    /// taken for where a person's work and memory go.
     fn check_repositories(&self, job: &AssistantJob) -> Result<(), String> {
         let state = self.state.current();
         let settings = state.roster.assistant();
         let person = job.person_id.as_deref().unwrap_or_default();
+        let groups = job.groups.as_deref().unwrap_or_default();
         let personal = || -> Result<Option<String>, String> { settings.personal_repo_for(person) };
         let shared = |name: &str| {
-            if name == crate::directorates::m::assistant::ORG_SHARED {
-                settings.org().map(|repo| repo.repo().to_owned())
-            } else {
-                settings
-                    .shared()
-                    .get(name)
-                    .map(|repo| repo.repo().to_owned())
-            }
+            settings
+                .shared_named(name, groups)
+                .map(|repo| repo.repo().to_owned())
         };
         let refused = |what: &str| {
             Err(format!(
@@ -568,11 +565,11 @@ impl Desk {
             let given = if commit.kind == COMMIT_MEMORY {
                 personal()?.as_deref() == Some(commit.repo.as_str())
             } else {
-                settings
-                    .shared()
-                    .values()
-                    .chain(settings.org())
-                    .any(|repo| repo.repo() == commit.repo)
+                commit
+                    .group
+                    .as_deref()
+                    .and_then(shared)
+                    .is_some_and(|repo| repo == commit.repo)
             };
             if !given {
                 return refused("the commit's repository");
@@ -2839,16 +2836,19 @@ mod tests {
         }
     }
 
-    /// A message job of a conversation whose workspace is `workspace`.
+    /// A message job of a conversation whose workspace is `workspace`, for a person in the
+    /// groups `ops` and `gone` ([`station_agents`]).
     fn working(conversation: &str, message: &str, workspace: AssistantWorkspace) -> AssistantJob {
         AssistantJob {
             workspace: Some(workspace),
             person_id: Some("eve".to_owned()),
+            groups: Some(vec!["ops".to_owned(), "gone".to_owned()]),
             ..job(conversation, message)
         }
     }
 
-    /// A job that commits `change` to `repo` as the person.
+    /// A job that commits `change` to `repo` as the person, a member of `ops`; a shared commit
+    /// is to `ops`'s repository.
     fn committing(
         conversation: &str,
         kind: &str,
@@ -2860,9 +2860,11 @@ mod tests {
             message: String::new(),
             context: Vec::new(),
             recap: None,
+            groups: Some(vec!["ops".to_owned()]),
             commit: Some(AssistantCommit {
                 kind: kind.to_owned(),
                 repo: repo.to_string_lossy().into_owned(),
+                group: (kind == COMMIT_SHARED).then(|| "ops".to_owned()),
                 change,
                 message: format!(
                     "moneypenny: remember\n\nVia: Moneypenny (conversation {conversation})"
@@ -4089,6 +4091,36 @@ mod tests {
             .handle(committing("c-5", COMMIT_SHARED, &theirs, shared))
             .await;
         assert!(reason("c-5").contains("commit"), "{}", reason("c-5"));
+        // The roster's own repository of a group, for a person the job does not put in it.
+        let ops = people.path().join("ops");
+        let mut outsider = workspace(&mine);
+        outsider
+            .shared
+            .insert("ops".to_owned(), ops.to_string_lossy().into_owned());
+        let mut not_member = working("c-7", "hi", outsider);
+        not_member.groups = Some(vec!["gone".to_owned()]);
+        fixture.desk.handle(not_member).await;
+        assert!(
+            reason("c-7").contains("shared repository"),
+            "{}",
+            reason("c-7")
+        );
+        let edit = AssistantChange::new(BTreeMap::from([(
+            "handbook.md".to_owned(),
+            Some("y".to_owned()),
+        )]));
+        let mut not_member = committing("c-8", COMMIT_SHARED, &ops, edit.clone());
+        not_member.groups = None;
+        fixture.desk.handle(not_member).await;
+        assert!(reason("c-8").contains("commit"), "{}", reason("c-8"));
+        // One group's repository under another's name.
+        let mut renamed = committing("c-9", COMMIT_SHARED, &ops, edit);
+        renamed.groups = Some(vec!["ops".to_owned(), "gone".to_owned()]);
+        if let Some(commit) = renamed.commit.as_mut() {
+            commit.group = Some("gone".to_owned());
+        }
+        fixture.desk.handle(renamed).await;
+        assert!(reason("c-9").contains("commit"), "{}", reason("c-9"));
         assert!(fixture.asked.lock().unwrap().starts.is_empty());
         assert!(!theirs.exists(), "nothing was made where it was told to");
 

@@ -300,18 +300,21 @@ impl Desk {
     }
 
     /// Queues `commit` of `conversation_id` for `station`; its answer is handled as `control`.
+    /// A shared commit's job names `groups`, the person's directory groups, so the Station
+    /// checks the repository is theirs.
     fn queue_commit(
         &mut self,
         conversation_id: &str,
         agent_id: &str,
         station: String,
-        commit: AssistantCommit,
+        (commit, groups): (AssistantCommit, Option<Vec<String>>),
         control: Control,
     ) {
         let Some(conversation) = self.store.conversations.get(conversation_id) else {
             return;
         };
-        let job = control_job(conversation, agent_id, &control, Some(commit));
+        let mut job = control_job(conversation, agent_id, &control, Some(commit));
+        job.groups = groups;
         self.controlling
             .insert(job.job_id.clone(), (station.clone(), control));
         self.controls.push((station, job));
@@ -1078,6 +1081,7 @@ impl Assistant {
         let commit = AssistantCommit {
             kind: COMMIT_MEMORY.to_owned(),
             repo: workspace.personal.clone(),
+            group: None,
             change,
             message: format!(
                 "moneypenny: remember {paths}\n\n{}",
@@ -1135,7 +1139,7 @@ impl Assistant {
             conversation_id,
             &self.config.agent_id,
             station.to_owned(),
-            commit,
+            (commit, None),
             Control::Commit {
                 proposal: None,
                 what: format!("Saving {paths} to Moneypenny's memory"),
@@ -1354,11 +1358,13 @@ impl Assistant {
         let mut desk = self.desk();
         match sent {
             Ok(station) => {
+                // A shared commit is checked against the person's groups as they are now.
+                let groups = commit.group.is_some().then(|| person.groups.clone());
                 desk.queue_commit(
                     conversation_id,
                     &self.config.agent_id,
                     station,
-                    commit,
+                    (commit, groups),
                     Control::Commit {
                         proposal: Some(proposal.id.clone()),
                         what: proposal.draft.summary.clone(),
@@ -1457,6 +1463,7 @@ impl Assistant {
         let commit = AssistantCommit {
             kind: COMMIT_SHARED.to_owned(),
             repo: shared.repo().to_owned(),
+            group: Some(group.to_owned()),
             change: AssistantChange::based(
                 std::collections::BTreeMap::from([(path.to_owned(), Some(content.to_owned()))]),
                 std::collections::BTreeMap::from([(path.to_owned(), base)]),
@@ -1488,7 +1495,7 @@ impl Assistant {
                 &granted.conversation_id,
                 &self.config.agent_id,
                 station,
-                commit,
+                (commit, Some(person.groups.clone())),
                 Control::Commit {
                     proposal: None,
                     what: summary,
