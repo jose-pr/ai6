@@ -124,9 +124,11 @@ pub fn ai6::directorates::m::assistant::RepoKind::of(&str) -> core::result::Resu
 pub struct ai6::directorates::m::assistant::AssistantNarrowing
 impl ai6::directorates::m::assistant::AssistantNarrowing
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::new() -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::skills(&self) -> core::option::Option<&[alloc::string::String]>
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_allowed_hosts(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_network(self, ai6::directorates::m::assistant::NetworkPolicy) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_skills(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_unsandboxed_scripts(self, bool) -> Self
 pub struct ai6::directorates::m::assistant::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
@@ -144,6 +146,10 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::reach_for(&self, &str
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::assistant::SharedRepo>
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared_for<'a>(&'a self, &[alloc::string::String]) -> impl core::iter::traits::iterator::Iterator<Item = (&'a str, &'a ai6::directorates::m::assistant::SharedRepo)>
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared_named(&self, &str, &[alloc::string::String]) -> core::option::Option<&ai6::directorates::m::assistant::SharedRepo>
+pub fn ai6::directorates::m::assistant::AssistantSettings::skills(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::assistant::SkillEntry>
+pub fn ai6::directorates::m::assistant::AssistantSettings::skills_allow_tools(&self) -> bool
+pub fn ai6::directorates::m::assistant::AssistantSettings::skills_for(&self, &str, &[alloc::string::String]) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::skills_unpinned(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
@@ -155,6 +161,9 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::with_org(self, ai6::d
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_person(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_personal_repo(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_shared(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::SharedRepo) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_skill(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::SkillEntry) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_allow_tools(self, bool) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_unpinned(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_unsandboxed_scripts(self, bool) -> Self
 impl core::default::Default for ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::default() -> Self
@@ -164,12 +173,22 @@ pub fn ai6::directorates::m::assistant::SharedRepo::new(impl core::convert::Into
 pub fn ai6::directorates::m::assistant::SharedRepo::repo(&self) -> &str
 pub fn ai6::directorates::m::assistant::SharedRepo::writable(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::SharedRepo::write(&self) -> bool
+pub struct ai6::directorates::m::assistant::SkillEntry
+impl ai6::directorates::m::assistant::SkillEntry
+pub fn ai6::directorates::m::assistant::SkillEntry::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::SkillEntry::path(&self) -> &str
+pub fn ai6::directorates::m::assistant::SkillEntry::pin(&self) -> core::option::Option<coqui_peer::id::PeerId>
+pub fn ai6::directorates::m::assistant::SkillEntry::pinned(self, coqui_peer::id::PeerId) -> Self
 pub const ai6::directorates::m::assistant::DEFAULT_INTERPRETER: &str
 pub const ai6::directorates::m::assistant::ORG_SHARED: &str
 pub const ai6::directorates::m::assistant::PERSON_DIGEST_PLACEHOLDER: &str
 pub const ai6::directorates::m::assistant::PERSON_PLACEHOLDER: &str
+pub const ai6::directorates::m::assistant::SKILLS_PLUGIN: &str
+pub const ai6::directorates::m::assistant::SKILL_INERT_KEYS: [&str; 12]
+pub fn ai6::directorates::m::assistant::check_skill(&std::path::Path, &str, bool) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::file_safe(&str) -> bool
 pub fn ai6::directorates::m::assistant::person_digest(&str) -> alloc::string::String
+pub fn ai6::directorates::m::assistant::skill_name(&str) -> bool
 pub mod ai6::directorates::m::config
 #[non_exhaustive] pub enum ai6::directorates::m::config::ConfigRecord
 pub ai6::directorates::m::config::ConfigRecord::Agent
@@ -336,6 +355,7 @@ impl ai6::directorates::m::harness::ProjectManifest
 pub fn ai6::directorates::m::harness::ProjectManifest::digest(&self) -> coqui_peer::id::PeerId
 pub fn ai6::directorates::m::harness::ProjectManifest::digest_with(&self, coqui_peer::id::Digest) -> coqui_peer::id::PeerId
 pub fn ai6::directorates::m::harness::ProjectManifest::read(&std::path::Path) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::directorates::m::harness::ProjectManifest::read_tree(&std::path::Path) -> core::result::Result<Self, alloc::string::String>
 pub const ai6::directorates::m::harness::MAX_MANIFEST_BYTES: u64
 pub const ai6::directorates::m::harness::MAX_MANIFEST_FILES: usize
 pub const ai6::directorates::m::harness::MAX_MANIFEST_FILE_BYTES: u64
@@ -3818,7 +3838,9 @@ pub ai6::directorates::section_00::agent::AssistantMode::interpreters: alloc::ve
 pub ai6::directorates::section_00::agent::AssistantMode::mcp_servers: alloc::vec::Vec<ai6::directorates::section_00::agent::McpServerRef>
 pub ai6::directorates::section_00::agent::AssistantMode::network: ai6::directorates::section_00::agent::AssistantNetwork
 pub ai6::directorates::section_00::agent::AssistantMode::read_only: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::agent::AssistantMode::skill_commands: bool
 pub ai6::directorates::section_00::agent::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::agent::AssistantMode::skills_dir: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::unsandboxed: bool
 impl ai6::directorates::section_00::agent::AssistantMode
 pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
@@ -3959,6 +3981,7 @@ pub ai6::directorates::section_00::assistant::AssistantJob::person_id: core::opt
 pub ai6::directorates::section_00::assistant::AssistantJob::reach: ai6::directorates::section_00::assistant::AssistantReach
 pub ai6::directorates::section_00::assistant::AssistantJob::recap: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantJob::skills: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::token_expires_at: f64
 pub ai6::directorates::section_00::assistant::AssistantJob::workspace: core::option::Option<ai6::directorates::section_00::assistant::AssistantWorkspace>
 impl ai6::directorates::section_00::assistant::AssistantJob
@@ -4037,6 +4060,7 @@ pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_CONTEXT_BYTES:
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENTS: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENT_BYTES: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_MESSAGE_BYTES: usize
+pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_SKILLS: usize
 pub const ai6::directorates::section_00::assistant::MAX_MEMORY_FILES: usize
 pub const ai6::directorates::section_00::assistant::MAX_MEMORY_LIST_BYTES: usize
 pub fn ai6::directorates::section_00::assistant::host_pattern(&str) -> bool
@@ -5026,6 +5050,7 @@ pub ai6::AssistantJob::person_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::reach: ai6::directorates::section_00::assistant::AssistantReach
 pub ai6::AssistantJob::recap: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::session_id: core::option::Option<alloc::string::String>
+pub ai6::AssistantJob::skills: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantJob::token_expires_at: f64
 pub ai6::AssistantJob::workspace: core::option::Option<ai6::directorates::section_00::assistant::AssistantWorkspace>
 impl ai6::directorates::section_00::assistant::AssistantJob
@@ -5039,7 +5064,9 @@ pub ai6::AssistantMode::interpreters: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::mcp_servers: alloc::vec::Vec<ai6::directorates::section_00::agent::McpServerRef>
 pub ai6::AssistantMode::network: ai6::directorates::section_00::agent::AssistantNetwork
 pub ai6::AssistantMode::read_only: alloc::vec::Vec<alloc::string::String>
+pub ai6::AssistantMode::skill_commands: bool
 pub ai6::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
+pub ai6::AssistantMode::skills_dir: core::option::Option<alloc::string::String>
 pub ai6::AssistantMode::unsandboxed: bool
 impl ai6::directorates::section_00::agent::AssistantMode
 pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
@@ -5048,9 +5075,11 @@ pub fn ai6::directorates::section_00::agent::AssistantMode::with_cables(self) ->
 pub struct ai6::AssistantNarrowing
 impl ai6::directorates::m::assistant::AssistantNarrowing
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::new() -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::skills(&self) -> core::option::Option<&[alloc::string::String]>
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_allowed_hosts(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_network(self, ai6::directorates::m::assistant::NetworkPolicy) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_skills(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_unsandboxed_scripts(self, bool) -> Self
 pub struct ai6::AssistantNetwork
 pub ai6::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
@@ -5090,6 +5119,10 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::reach_for(&self, &str
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::assistant::SharedRepo>
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared_for<'a>(&'a self, &[alloc::string::String]) -> impl core::iter::traits::iterator::Iterator<Item = (&'a str, &'a ai6::directorates::m::assistant::SharedRepo)>
 pub fn ai6::directorates::m::assistant::AssistantSettings::shared_named(&self, &str, &[alloc::string::String]) -> core::option::Option<&ai6::directorates::m::assistant::SharedRepo>
+pub fn ai6::directorates::m::assistant::AssistantSettings::skills(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::assistant::SkillEntry>
+pub fn ai6::directorates::m::assistant::AssistantSettings::skills_allow_tools(&self) -> bool
+pub fn ai6::directorates::m::assistant::AssistantSettings::skills_for(&self, &str, &[alloc::string::String]) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::skills_unpinned(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
@@ -5101,6 +5134,9 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::with_org(self, ai6::d
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_person(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_personal_repo(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_shared(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::SharedRepo) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_skill(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::SkillEntry) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_allow_tools(self, bool) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_unpinned(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_unsandboxed_scripts(self, bool) -> Self
 impl core::default::Default for ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::default() -> Self
@@ -6007,6 +6043,7 @@ impl ai6::directorates::m::harness::ProjectManifest
 pub fn ai6::directorates::m::harness::ProjectManifest::digest(&self) -> coqui_peer::id::PeerId
 pub fn ai6::directorates::m::harness::ProjectManifest::digest_with(&self, coqui_peer::id::Digest) -> coqui_peer::id::PeerId
 pub fn ai6::directorates::m::harness::ProjectManifest::read(&std::path::Path) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::directorates::m::harness::ProjectManifest::read_tree(&std::path::Path) -> core::result::Result<Self, alloc::string::String>
 #[non_exhaustive] pub struct ai6::Promotion
 pub ai6::Promotion::from: alloc::string::String
 pub ai6::Promotion::reason: alloc::string::String
@@ -6436,6 +6473,12 @@ pub fn ai6::directorates::m::assistant::SharedRepo::new(impl core::convert::Into
 pub fn ai6::directorates::m::assistant::SharedRepo::repo(&self) -> &str
 pub fn ai6::directorates::m::assistant::SharedRepo::writable(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::SharedRepo::write(&self) -> bool
+pub struct ai6::SkillEntry
+impl ai6::directorates::m::assistant::SkillEntry
+pub fn ai6::directorates::m::assistant::SkillEntry::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::SkillEntry::path(&self) -> &str
+pub fn ai6::directorates::m::assistant::SkillEntry::pin(&self) -> core::option::Option<coqui_peer::id::PeerId>
+pub fn ai6::directorates::m::assistant::SkillEntry::pinned(self, coqui_peer::id::PeerId) -> Self
 pub struct ai6::Sleeper
 pub ai6::Sleeper::agent: core::option::Option<alloc::string::String>
 pub ai6::Sleeper::each_station: bool
