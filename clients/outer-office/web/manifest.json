@@ -3,7 +3,7 @@
     "short_name": "Outer Office",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#020405",
+    "background_color": "#010406",
     "theme_color": "#0a1114",
     "description": "AI6 Mission board for desktop and web.",
     "orientation": "portrait-primary",

@@ -1,4 +1,4 @@
-![Moneypenny](../../docs/assets/moneypenny-header.png)
+![Outer Office](../../docs/assets/outer-office-header.png)
 
 # Moneypenny
 
