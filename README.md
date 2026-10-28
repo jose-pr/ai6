@@ -11,7 +11,7 @@
 AI6 is a self-hosted control plane for coding agents. **Register your projects as
 Operations, hand AI6 Missions, and its Stations post an Agent to each one and run it as
 a Claude Code or Codex Session in its own Git worktree, under a watchdog** — while
-operators follow and steer the work from the Moneypenny app. Read the
+operators follow and steer the work from Outer Office, the operator app. Read the
 [documentation](https://jose-pr.github.io/ai6/).
 
 ## Features
@@ -27,7 +27,8 @@ operators follow and steer the work from the Moneypenny app. Read the
 - **Cables** - permission-scoped agent-to-agent messages through per-Session MCP tools.
 - **Universal Exports** - the authenticated public API: pluggable authentication and
   directories, per-Operation authorization, read-first terminal attachment, audit.
-- **Moneypenny** - the Flutter desktop and web operator app; `ai6ctl` for the terminal.
+- **Outer Office** - the Flutter desktop and web operator app, where Moneypenny, the AI
+  assistant, answers; `ai6ctl` for the terminal.
 - **Cross-platform terminal** - the `pty` provider uses openpty on Unix and ConPTY with
   Job Objects on Windows.
 
@@ -41,8 +42,8 @@ cd ai6
 cargo build --workspace --all-features
 ```
 
-The Moneypenny app needs the Flutter `main` SDK; see
-[its README](https://github.com/jose-pr/ai6/blob/main/clients/moneypenny/README.md).
+Outer Office needs the Flutter `main` SDK; see
+[its README](https://github.com/jose-pr/ai6/blob/main/clients/outer-office/README.md).
 
 ## Quick start
 
@@ -64,12 +65,12 @@ curl -f -X POST http://127.0.0.1:7081/internal/missions \
   -d '{"mission_id":"mission-quickstart","operation_id":"G","prompt":"Summarize README.md","role":"case-officer"}'
 ```
 
-For a clickable board with sample data and no gateway, run the Moneypenny web preview
-from `clients/moneypenny`:
+For a clickable board with sample data and no gateway, run the Outer Office web preview
+from `clients/outer-office`:
 
 ```bash
 flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release \
-  --dart-define=MONEYPENNY_DEMO=true
+  --dart-define=OO_DEMO=true
 ```
 
 ## Command line
@@ -167,7 +168,7 @@ cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 pwsh -File tools/public-api.ps1 -Mode check
 
-cd clients/moneypenny
+cd clients/outer-office
 flutter analyze --fatal-infos
 flutter test
 ```

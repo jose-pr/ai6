@@ -85,7 +85,7 @@ Nothing falls back to a model the operator did not choose: a role with no other 
 Agent fails, and a queued Mission with no backup waits, with the reason on the Mission and a
 `waiting` event on the Operation's timeline. Within `retire_warning_days` of the
 date each Station logs the coming retirement and lists it in its check-in (`retirements`),
-which the Agents view in Moneypenny and `ai6ctl agents` show. Changing `model` and clearing
+which the Agents view in Outer Office and `ai6ctl agents` show. Changing `model` and clearing
 `retire_on` re-occupies the slot: the codename and its record carry on, and the record opens
 a new model tenure with the next Mission.
 
@@ -106,7 +106,7 @@ See the [SIS intelligence officer role descriptions](https://www.sis.gov.uk/inte
 
 `examples/config/agents.toml` defines these roles with `007`, its backup `008` and a
 `desk`-clearance `Tanner` for reports and reviews. Authorized operators may override a role's purpose
-and policy per Operation in Moneypenny. An Operation's local `.ai6/agents.toml` may refine
+and policy per Operation in Outer Office. An Operation's local `.ai6/agents.toml` may refine
 Agent entries but cannot change role policy or grant permissions.
 
 ## 00 coordination
@@ -305,7 +305,7 @@ The Station that runs a Session counts its outcome in the Agent's **record**: Mi
 failed, blown, abandoned and stalled, and the incidents charged to it (quarantines, budget
 stops, green ink refused), per Operation and by clearance, under the model the Session was
 launched with. A Session lost with its Station or runner counts as `lost`, never as the
-Agent's failure; Chief of Staff reviews are not counted. Moneypenny's Agents view and `ai6ctl
+Agent's failure; Chief of Staff reviews are not counted. Outer Office's Agents view and `ai6ctl
 agents --operation ID` show an Operation's records (`agent.read`), nothing of other
 Operations'. Promotion counts only the Missions of the model that occupies the codename now.
 
@@ -333,7 +333,7 @@ quiet_on = ["blown", "stalled", "quarantined", "budget_stop", "green_ink_rejecte
 ```
 
 Lowering trust needs no green ink. A person with `agent.configure` may hold an Agent at a
-lower clearance in an Operation (Moneypenny, `ai6ctl agents lower`), which only ever lowers
+lower clearance in an Operation (Outer Office, `ai6ctl agents lower`), which only ever lowers
 it, and may remove the grant to return it to its configured clearance (`ai6ctl agents
 restore`). A quarantine takes back a raised grant the moment it is stored. While a person's
 lower grant stands, M files no promotion for that Agent there, and a promotion approved

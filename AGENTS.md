@@ -14,7 +14,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The operator command: reads, and cancels, retries, resumes and interrupts Missions |
 | `crates/providers/{agents,terminals,transports,theaters,safehouses,sources}/` | Guatiao providers: Claude/Codex handlers, the `pty` terminal, the `local`, `ssh`, `adb`, `container` and `qemu` transports, the `ephemeral-container` Theater provider, the `git` and `copy` safe houses, GitHub and Jira Sources |
-| `clients/moneypenny/` | Moneypenny, the Flutter desktop/web operator app |
+| `clients/outer-office/` | Outer Office (short name OO), the Flutter desktop/web operator app; Moneypenny is the AI assistant inside it |
 | `examples/config/` | A runnable Operation and Agent roster |
 | `docs/`, `mkdocs.yml` | Narrative guides; the Rust API reference is published under `/rust/` |
 | `tools/public-api.ps1`, `tools/public-api/` | Checked public API snapshots of the library crates |
@@ -33,7 +33,7 @@ pwsh -File tools/public-api.ps1 -Mode check
 ```
 
 The Flutter app needs the isolated Flutter `main` SDK described in
-`clients/moneypenny/README.md`, because native desktop windowing is not in stable Flutter.
+`clients/outer-office/README.md`, because native desktop windowing is not in stable Flutter.
 
 The Registry test suite runs every case on the file Registry and SQLite. With
 `AI6_TEST_POSTGRES_URL` set to a `postgres://…?sslmode=disable` server whose user may
@@ -49,7 +49,7 @@ servers in Docker. Building the `sqlite` feature compiles SQLite, so it needs a 
 - Work and infrastructure are separate: Operation → Mission → Session is the work;
   Station → Theater is where it runs. Operations are global; no Station owns one.
 - The Station (`ai6`) owns Missions, Agent Sessions and policy. Universal Exports owns the
-  authenticated public API; Moneypenny and `ai6ctl` are its clients and never reach a
+  authenticated public API; Outer Office and `ai6ctl` are its clients and never reach a
   Station directly.
 - An Agent (codename) owns its handler, model and effort; a role is purpose and policy
   only. The Station picks an available terminal provider that meets the handler's stdio

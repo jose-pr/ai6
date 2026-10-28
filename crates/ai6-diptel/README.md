@@ -7,7 +7,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/ai6/test.yml)](https://github.com/jose-pr/ai6/actions/workflows/test.yml)
 
 DipTels: the native and WebAssembly wire contract between a Station, Universal Exports
-and the Moneypenny app. **One identity contract and one guatiao frame format** carry
+and Outer Office, the operator app. **One identity contract and one guatiao frame format** carry
 Session lifecycle events, terminal bytes, terminal geometry and operator controls. See the
 [crate API header](https://github.com/jose-pr/ai6/blob/main/crates/ai6-diptel/AGENTS.md).
 

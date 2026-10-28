@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "Shared Station, Mission and agent Session wire contract for AI6 Moneypenny"
+description = "Shared Station, Mission and agent Session wire contract for AI6 and Outer Office"
 readme = "README.md"
 exclude = [".*", "*.local.*"]
 

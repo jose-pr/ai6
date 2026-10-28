@@ -14,8 +14,8 @@ cargo run -p ai6 --features cli -- serve --config-dir ./examples/config --plugin
 Sign in through Universal Exports and submit a brief to an Operation with
 `mission.create`. The HTTP request and response contract are documented in
 [Missions and intake](missions.md#queue-a-mission-through-universal-exports). The
-Moneypenny app's Operations view offers the same form.
+Outer Office's Operations view offers the same form.
 
-For a Moneypenny preview with sample data and no connection, follow
-[`clients/moneypenny/README.md`](https://github.com/jose-pr/ai6/blob/main/clients/moneypenny/README.md)
-and enable `MONEYPENNY_DEMO=true`.
+For an Outer Office preview with sample data and no connection, follow
+[`clients/outer-office/README.md`](https://github.com/jose-pr/ai6/blob/main/clients/outer-office/README.md)
+and enable `OO_DEMO=true`.

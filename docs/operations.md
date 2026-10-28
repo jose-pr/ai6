@@ -339,7 +339,7 @@ Sessions use it, while a Session already running keeps the roster it started wit
 Station sharing a SQL roster therefore takes up an edit within one poll. A new revision is
 checked as the files are checked, every Agent resolved; one that fails is refused once:
 the Station logs why, records a `config.refused` audit event under its own `station:<id>`,
-reports the reason at check-in (Moneypenny shows it beside the roster), and keeps running
+reports the reason at check-in (Outer Office shows it beside the roster), and keeps running
 the last good roster. A source it cannot reach is logged, not audited, and changes
 nothing.
 
@@ -357,12 +357,12 @@ capacity and watchdog defaults.
 Universal Exports edits the roster for operators when it is started with the same
 location (`--roster`, `AI6_EXPORTS_ROSTER`): `roster.read` and `roster.manage` on the
 scope `config:roster` (for example `scope = "config:roster"` in `access.toml`) let a person
-list and change Operations, Agents, roles and covers from Moneypenny's Administration.
+list and change Operations, Agents, roles and covers from Outer Office's Administration.
 The source checks the whole roster before it keeps an edit; an accepted edit is audited as
 `roster.update` or `roster.remove`, a refused one answers with the reason and is audited as
 `roster.refused`. A configuration directory is listed read-only: its files are edited by
 hand, and every Station using it takes up the change at its next poll.
 
-Missions and provider Sessions are visible in the Moneypenny app and through `ai6ctl`. The Mission ID identifies
+Missions and provider Sessions are visible in Outer Office and through `ai6ctl`. The Mission ID identifies
 the work; the provider-issued Session ID identifies one resumable agent run. See
 [Missions and intake](missions.md) and [Agents and clearance](agents.md).

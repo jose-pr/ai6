@@ -7,7 +7,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/ai6/test.yml)](https://github.com/jose-pr/ai6/actions/workflows/test.yml)
 
 Universal Exports is AI6's public front: the authenticated HTTP and WebSocket API that the
-Moneypenny app and `ai6ctl` reach instead of a Station. **M retains authority
+Outer Office app and `ai6ctl` reach instead of a Station. **M retains authority
 over Operation access; the gateway enforces the scoped grants M issues.** See the
 [crate API header](https://github.com/jose-pr/ai6/blob/main/crates/universal-exports/AGENTS.md).
 

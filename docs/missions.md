@@ -38,7 +38,7 @@ curl -f -X POST "$AI6_EXPORTS_URL/v1/user/operations/G/missions" \
   -d '{"title":"Fix the flaky watchdog test","prompt":"Investigate the intermittent failure."}'
 ```
 
-The Moneypenny app's Operations view offers the same action. The AI6 daemon claims the brief
+Outer Office's Operations view offers the same action. The AI6 daemon claims the brief
 from the shared file-backed Registry, then resolves the Agent role, Operation
 cover, Station capacity and provider handler before it starts a Session.
 
@@ -78,7 +78,7 @@ the control with `GET .../actions/{control_id}`; one no Station acts on within t
 is `expired`. Repeating a request with the same `idempotency_key` returns the first one.
 
 `ai6ctl mission cancel|retry|resume` and `ai6ctl session interrupt` do the same and wait for
-the outcome; Moneypenny offers them in each Mission card's menu, with the reason any action
+the outcome; Outer Office offers them in each Mission card's menu, with the reason any action
 is unavailable. Closing a Session view never sends a control.
 
 ## Green ink
@@ -102,7 +102,7 @@ While a request is pending the Mission's [Watchdog](watchdog.md) is paused: wait
 person is not a stall, and terminal output or an operator message does not end the wait.
 If the Agent's turn ends meanwhile, the Session closes and the Mission stays blocked.
 
-An operator with `approval.decide` on the Operation sees the waiting steps in Moneypenny's
+An operator with `approval.decide` on the Operation sees the waiting steps in Outer Office's
 Administration → Green ink, or from `GET /v1/user/operations/{operation_id}/green-ink`,
 and approves one for a chosen time (one hour unless chosen) or rejects it with a reason.
 The signer is always the signed-in person. The Station holding the Mission tells the Agent
@@ -123,7 +123,7 @@ the use is counted and audited as `class_authorization.used` by `class:<id>`. A 
 has read untrusted input never uses one under the default exposure policy (the `approvals`
 restriction, see [Exposure](medical.md#exposure)). Operators with `approval.class` grant,
 list and revoke them from `/v1/user/operations/{operation_id}/class-authorizations` or
-Moneypenny's Class authorisations tab.
+Outer Office's Class authorisations tab.
 
 A class authorisation of kind `proposal` lets M promote Agents' Mission proposals without
 asking: its target pattern is matched against the proposal's title, its Agents against the
@@ -219,7 +219,7 @@ Theater are outside that, which is why the Station reports them as weakenings.
 ## Activity timeline
 
 An operator with `audit.read` on an Operation reads what changed across it, newest first,
-from `GET /v1/user/operations/{operation_id}/timeline` or Moneypenny's Timeline view:
+from `GET /v1/user/operations/{operation_id}/timeline` or Outer Office's Timeline view:
 
 | Kind | Recorded by | What it says |
 | --- | --- | --- |
@@ -274,7 +274,7 @@ start exposed (`brief:registry_drop`, see [Medical](medical.md#exposure)), and a
 brief named `source:PROVIDER` is reported to that Source only when it has a `source`
 provenance for it naming that provider and item, and its Operation is the one its Source
 data names. The Mission record, the gateway's Mission detail (`brief.provenance`) and
-Moneypenny's Mission brief page show the origin. Anything that can write the Registry's own
+Outer Office's Mission brief page show the origin. Anything that can write the Registry's own
 records can still forge them: the queue is the integration point this separates.
 
 Distributed Registry placement is not implemented. A Session runs on its Station's host,
@@ -392,7 +392,7 @@ the hand-off says the work could not be recovered.
 
 The attempts are on the Mission: `GET /v1/missions` and the Mission detail list each one's
 Station, Theater, status, why it was lost and the branch it was checkpointed to, and
-Moneypenny shows them on the Mission card.
+Outer Office shows them on the Mission card.
 
 ### Provider limits: park and resume
 
@@ -431,7 +431,7 @@ An Operation chooses the response with `on_limit` ([settings](operations.md#prov
   one), starting a new provider Session in the same safe house with a note that an earlier
   attempt stopped at a limit. With no such Agent available it parks instead.
 
-The Moneypenny board shows `parked` as a Session state, and the stream of Mission events
+The Outer Office board shows `parked` as a Session state, and the stream of Mission events
 carries the `limit` event.
 
 The Headquarters Station also keeps a brief **queued** while every account of the pools its
@@ -439,7 +439,7 @@ Agent would draw from is limited or at its `max_concurrent`, instead of starting
 that cannot run. The reason ("no account with headroom in pools …", with the first reset
 when every account is limited) is recorded once on the Operation's timeline (`account` /
 `waiting`), and the brief is placed on the first pass after an account frees up.
-Moneypenny's **Account pools** view and `ai6ctl pools --operation <id>` show each account's
+Outer Office's **Account pools** view and `ai6ctl pools --operation <id>` show each account's
 Sessions, quota used, limit and tokens today (`pool.read`).
 
 ### Budgets, exposure and quarantine
@@ -451,12 +451,12 @@ Sessions, quota used, limit and tokens today (`pool.read`).
   returns them as `usage`. A [budget](medical.md#budgets) that is reached stops the Session
   and leaves the Mission `blocked` with `blocked_reason: "budget"`; raise the limit and resume.
 - **Exposure.** A Session that read a Source item, called a web tool or read a Cable from an
-  exposed Session is marked on the board (`exposure`, shown as an `EXPOSED` chip in Moneypenny)
+  exposed Session is marked on the board (`exposure`, shown as an `EXPOSED` chip in Outer Office)
   and, under the default `strict` policy, restricted. See [Exposure](medical.md#exposure).
 - **Quarantine.** A Mission whose Agent is [quarantined](medical.md#quarantine) is
   `quarantined`: its safe house is kept, it is not resumed, and releasing the Agent returns it
   to the queue with the next qualified Agent. `quarantined` is a Session state in the board,
-  `ai6ctl` and Moneypenny.
+  `ai6ctl` and Outer Office.
 
 ## Vetting and held briefs
 
@@ -491,7 +491,7 @@ hold. The Operation's timeline records each decision as an `intake` event (`pass
 `reviewing`, `cleared`, `held`, `refused`, `released`) with the finding kinds, never the
 brief's text.
 
-An operator with `mission.create` on the Operation reviews held briefs in Moneypenny
+An operator with `mission.create` on the Operation reviews held briefs in Outer Office
 (Administration → Held briefs), with `ai6ctl held-briefs`, or through the API:
 
 ```bash

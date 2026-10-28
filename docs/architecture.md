@@ -34,7 +34,7 @@ AI6 names.
 ## Runtime
 
 ```text
- operators ── Moneypenny app / ai6ctl ── HTTPS/WSS ──► Universal Exports (public API)
+ operators ── Outer Office / ai6ctl ──── HTTPS/WSS ──► Universal Exports (public API)
                                                          │ Station bearer, DipTel frames
  people, trackers ── briefs ──► Registry                ▼
                                    ▲         ┌──────────────────────────────┐
@@ -59,10 +59,11 @@ write leases, fans out DipTels with bounded replay, and records metadata-only au
 Browsers and `ai6ctl` never connect to a Station or a provider.
 
 **DipTels** (`ai6-diptel` crate) are the wire contract between a Station, Universal
-Exports and the Moneypenny app: Guatiao values for Session lifecycle, terminal bytes and
+Exports and Outer Office: Guatiao values for Session lifecycle, terminal bytes and
 geometry, used natively and from WebAssembly.
 
-**Moneypenny** (`clients/moneypenny`) is the Flutter desktop and web operator app.
+**Outer Office** (`clients/outer-office`, short name OO) is the Flutter desktop and web
+operator app. [Moneypenny](assistant.md), the operator's AI assistant, works inside it.
 
 ## How the directorates decouple
 
@@ -204,5 +205,5 @@ it from the stream so an attached viewer's emulator does not answer a second tim
 | `crates/providers/safehouses/` | Rust | The `git` (worktree) and `copy` (plain directory) safe-house providers |
 | `coqui-access` (shared, git dependency) | Rust | Access kinds, the role authorizer and the key, LDAP, local, peer-certificate and reverse-proxy access providers, loaded as plugin libraries |
 | `coqui-peer-tls`, `coqui-peer` (shared, crates.io) | Rust | Station identity, fingerprints, trust store and mutual TLS |
-| `clients/moneypenny/` | Dart/Flutter | The Moneypenny operator app for desktop and web |
+| `clients/outer-office/` | Dart/Flutter | Outer Office, the operator app for desktop and web |
 | `examples/config/` | TOML | A runnable Operation and Agent roster |

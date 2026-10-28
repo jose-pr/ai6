@@ -1,6 +1,6 @@
 # Moneypenny, the assistant
 
-Moneypenny is an assistant that knows AI6. A person signed in to the operator app can chat
+Moneypenny is an assistant that knows AI6. A person signed in to Outer Office, the operator app, can chat
 with her: ask which Stations are busy, why a Mission stalled, what a held brief says, or how
 a setting works. She answers from AI6's live records, through tools that run as that person,
 and from this guide.

@@ -83,7 +83,7 @@ Theater through its transport (see [Theaters](theaters.md#two-ways-to-work-on-a-
 
 Ask before launching: `GET /v1/user/operations/{id}/placement-preview` on Universal
 Exports (needs `mission.read` on the Operation) returns the eligible choices, best first,
-each with its `score`, and a reason for every rejection. Moneypenny's Stations view has a
+each with its `score`, and a reason for every rejection. Outer Office's Stations view has a
 **Placement preview** panel for it, and each Station card shows the host's CPUs, CPU busy,
 load, free memory and when they were sampled (`unknown` for a figure not reported); a
 Theater's tooltip shows its own and how many Sessions run there. `ai6ctl stations` prints
@@ -150,7 +150,7 @@ embedding the Station can pass another store with `ServeConfig::with_registry`.
 ## Capacity and visibility
 
 Operators granted `station.configure` can change a Station's maximum concurrent Missions
-(1–1,024) in Moneypenny's Administration view; the change applies to new Missions and is
+(1–1,024) in Outer Office's Administration view; the change applies to new Missions and is
 audited. The same settings hold the Station's resource limits, `min_free_memory_mb` (default
 512; 0 never rules it out) and `max_cpu_percent` (default 95; 100 never does), set in the
 same view or through `PUT /v1/user/stations/{id}/settings`; the Station publishes them at check-in and placement
@@ -221,7 +221,7 @@ A round's Cable endpoint also lists two tools that no other Session has:
   `provider`, `other`) with a severity (`info`, `warning`, `critical`). The report goes into
   the logbook, is published with the Station's next check-in (`head_of_station` in
   `GET /v1/stations` for people with `station.read` on `station:ID`, since it covers every
-  Operation there, and on the Station's card in Moneypenny), and is sent as a Cable to the
+  Operation there, and on the Station's card in Outer Office), and is sent as a Cable to the
   `heads-of-station` channel when `cables.toml` defines it and lets the Agent send there:
 
 ```toml

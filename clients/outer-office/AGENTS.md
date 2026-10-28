@@ -1,7 +1,9 @@
-# Moneypenny — contributor notes
+# Outer Office — contributor notes
 
-Moneypenny is the AI6 operator app (Flutter desktop and web). It talks only to Universal
-Exports, AI6's authenticated public API.
+Outer Office (short name OO) is the AI6 operator app (Flutter desktop and web); Moneypenny
+is the AI assistant inside it. It talks only to Universal Exports, AI6's authenticated
+public API. Build defines and stored preference keys use the short name (`OO_API`,
+`OO_DEMO`, `oo.lightTheme`); the directory and Dart package keep the long one.
 
 ## Boundaries
 

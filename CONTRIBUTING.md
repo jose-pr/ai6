@@ -29,7 +29,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 
-cd clients/moneypenny
+cd clients/outer-office
 flutter analyze --fatal-infos
 flutter test
 ```

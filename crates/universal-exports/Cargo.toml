@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "Authenticated Moneypenny gateway for AI6 agent sessions"
+description = "Authenticated public API gateway for AI6 agent sessions"
 readme = "README.md"
 exclude = [".*", "*.local.*"]
 

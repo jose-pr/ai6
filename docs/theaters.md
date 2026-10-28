@@ -89,7 +89,7 @@ The probe also reports **ambient credentials**: credentials already on the Theat
 did not lease (a `~/.git-credentials` store, a git credential helper, an SSH agent or
 private key, a GitHub CLI, Claude Code or Codex login, a provider key in the login
 environment). It names where they are, never their values, and each is a weakening the
-Station publishes and Moneypenny shows: a Session there can use them whatever its own leases
+Station publishes and Outer Office shows: a Session there can use them whatever its own leases
 allow. Removing them is the operator's choice; AI6 does not refuse the Theater.
 
 **Provisioning.** `ai6 theater provision THEATER` fits a Theater out over its own transport,
@@ -150,7 +150,7 @@ published in the Theater's capability notes so you can pin it afterwards.
 ## What a transport can do
 
 Each transport declares its capabilities, and a Station publishes them at check-in with the
-Theater's declared facts (`GET /v1/stations`, and the Theater's tooltip in Moneypenny):
+Theater's declared facts (`GET /v1/stations`, and the Theater's tooltip in Outer Office):
 
 | Capability | Meaning |
 | --- | --- |
@@ -350,13 +350,13 @@ A Station publishes the Theaters it reaches at each check-in: ID, access (`local
 `transport`), the SSH host or transport provider, labels, capabilities, `agents`, the kind of
 `egress` (never a proxy URL), `harnesses`, `requires` with the last probe's report, and why a
 Theater is unreachable. The SSH user, port, key path and `provision` settings stay on the
-Station. `GET /v1/stations` and Moneypenny's Stations view list them with their last
+Station. `GET /v1/stations` and Outer Office's Stations view list them with their last
 resources sample (`resources`, with `sampled_at`) and the Sessions running there
 (`sessions`); a Theater whose requirements are unmet or unchecked shows a tool icon, and its
 tooltip says what is missing.
 
 A Session records the Station that supervises it, the Theater it works on and the mode
-(`station_id`, `theater_id`, `mode`); Moneypenny shows them on the Mission detail.
+(`station_id`, `theater_id`, `mode`); Outer Office shows them on the Mission detail.
 
 An Operation's `theater` binds it to one Theater by ID. See
 [Placement](stations.md#placement) for how the Station, Theater and Agent are chosen and how

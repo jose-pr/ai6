@@ -1,13 +1,14 @@
 ![Outer Office](../../docs/assets/outer-office-header.png)
 
-# Moneypenny
+# Outer Office
 
 [![Version](https://img.shields.io/badge/version-0.1.0--dev-blue.svg)](https://github.com/jose-pr/ai6/blob/main/CHANGELOG.md#unreleased)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/jose-pr/ai6/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://jose-pr.github.io/ai6/)
 [![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/ai6/test.yml)](https://github.com/jose-pr/ai6/actions/workflows/test.yml)
 
-The AI6 operator app for desktop and web. **Moneypenny talks only to Universal Exports,
+The AI6 operator app for desktop and web (short name OO), where operators deal with
+Moneypenny, the AI assistant. **Outer Office talks only to Universal Exports,
 AI6's authenticated public API; it never reaches a Station, a provider or M's
 credentials.** It shows Station health and the Headquarters Station, the Operation →
 Mission → Session board, Mission briefs, live Session terminals, administration and audit.
@@ -85,8 +86,8 @@ across Windows GPUs.
 A demo board with sample data and no network connection:
 
 ```powershell
-& $flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release --dart-define=MONEYPENNY_DEMO=true
-& $flutter run -d windows --dart-define=MONEYPENNY_DEMO=true
+& $flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release --dart-define=OO_DEMO=true
+& $flutter run -d windows --dart-define=OO_DEMO=true
 ```
 
 Open `http://127.0.0.1:7357` for the web build.
@@ -95,8 +96,8 @@ Open `http://127.0.0.1:7357` for the web build.
 
 | Build define | Effect | Default |
 | --- | --- | --- |
-| `MONEYPENNY_API` | Universal Exports origin for desktop builds | `http://127.0.0.1:7082` |
-| `MONEYPENNY_DEMO` | `true` shows sample data and makes no connection | `false` |
+| `OO_API` | Universal Exports origin for desktop builds | `http://127.0.0.1:7082` |
+| `OO_DEMO` | `true` shows sample data and makes no connection | `false` |
 
 Web uses its own origin: serve it from the same HTTPS origin as Universal Exports, behind
 the organization's authenticated reverse proxy. The proxy supplies the signed-in identity

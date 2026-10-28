@@ -16,12 +16,15 @@ rules turn out to be good rules for running coding agents.
 | **Medical** | `ai6::directorates::medical` | Agent health: the watchdog for stalls, loops and blocked prompts; token and cost [usage and budgets](medical.md#budgets); [exposure](medical.md#exposure) to untrusted input; [quarantine](medical.md#quarantine) |
 | **Station** | `ai6::station`, `ai6 serve` | A node running the daemon: its server, provider host, safe houses, publisher and identity |
 | **Universal Exports** | `crates/universal-exports` | The public front: the only address operators and clients reach |
-| **Moneypenny** | `clients/moneypenny` | The operator app: board, briefs, terminals, administration, audit |
+| **Outer Office** | `clients/outer-office` | The operator app (short name OO): board, briefs, terminals, administration, audit |
+| **Moneypenny** | `crates/universal-exports` (`moneypenny`) | The operator's AI assistant, at her desk in Outer Office |
 | **DipTel** | `crates/ai6-diptel` | The wire contract for Session lifecycle and terminal frames |
 
 Directorates decide; the Station is where their decisions run. In the novels Universal
 Export is the plate on the door of the London headquarters, the one address outsiders
-use, which is the gateway's job; Moneypenny is who operators actually deal with.
+use, which is the gateway's job. Outer Office is the room outside M's office where
+Moneypenny keeps her desk (*Thunderball*, the films, *Skyfall*; plain English for the
+setting, not a verified Fleming phrase): operators work in the app and deal with her there.
 
 ## Work and infrastructure
 
@@ -68,7 +71,7 @@ unavailable, `008` takes the Mission. Role names follow real intelligence job ti
 
 **The 00 coordinator.** An Operation may give an Agent with `00` clearance the job of
 coordinating its Missions. Such a Session can propose child Missions; proposals wait in a
-separate inbox until an operator with `mission.create` approves them in Moneypenny.
+separate inbox until an operator with `mission.create` approves them in Outer Office.
 Clearance never grants policy authority or bypasses cover, Q leases or Station policy.
 
 ## Conventions

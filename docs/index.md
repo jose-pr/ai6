@@ -5,7 +5,7 @@ AI6 is a self-hosted control plane for coding agents. You register **Operations*
 running the `ai6` daemon) post an Agent to each Mission and run it as a provider
 **Session** of Claude Code or Codex, in an isolated Git worktree, under a watchdog.
 Operators follow and steer the work through **Universal Exports**, the authenticated
-public API, from the **Moneypenny** desktop and web app or the `ai6ctl` command.
+public API, from the **Outer Office** desktop and web app or the `ai6ctl` command.
 
 ## Build and run
 
@@ -18,8 +18,8 @@ cargo run -p universal-exports --features cli -- --help
 cargo run -p ai6ctl -- --help
 ```
 
-The Moneypenny app needs the Flutter `main` SDK; see
-[its README](https://github.com/jose-pr/ai6/blob/main/clients/moneypenny/README.md).
+Outer Office, the operator app, needs the Flutter `main` SDK; see
+[its README](https://github.com/jose-pr/ai6/blob/main/clients/outer-office/README.md).
 
 ## Learn more
 

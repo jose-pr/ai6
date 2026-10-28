@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office (short name OO) is the Flutter desktop and web operator app, in
+  `clients/outer-office` (Dart package `outer_office`); Moneypenny is the AI assistant
+  inside it. Its build defines are `OO_API` and `OO_DEMO`, and it keeps the theme choice
+  as the `oo.lightTheme` preference.
 - Moneypenny runs on Codex with scripts and her workspace. With interpreters, the Codex
   handler admits Codex's code-mode tools (`functions.exec`, `functions.wait`) inside Codex's
   own sandbox, a permission profile (`ai6_assistant`) that denies the filesystem but the
@@ -130,7 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `assistant.memory.forget`. The app's **Ask Moneypenny** menu opens **Her memory of you**:
   list, open, edit and save, add, and forget after a confirmation, with Universal Exports'
   own words when it refuses.
-- The Moneypenny app's Roster page lists Moneypenny's settings (the `assistant` record),
+- Outer Office's Roster page lists Moneypenny's settings (the `assistant` record),
   edited under its fixed key `assistant` and added only while there is none, and after an
   accepted edit shows each setting the stored record leaves looser than its default.
 - One record of a Moneypenny conversation's exposure, `Conversation.exposed` in Universal
@@ -310,7 +314,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `StationReport` with typed findings in the logbook, records a timeline event and sends it to
   the `heads-of-station` Cable channel when configured. Each check-in carries the latest
   report (`head_of_station`); Universal Exports adds it to `BoardStation` for people with
-  `station.read` on the Station, and Moneypenny shows it on the Station card. `StationConfig::with_safe_house_hygiene(SafeHouseHygiene)` names the
+  `station.read` on the Station, and Outer Office shows it on the Station card. `StationConfig::with_safe_house_hygiene(SafeHouseHygiene)` names the
   cache directories (default `target`, `node_modules`, `.dart_tool`) and their age (7 days).
 - Safe-house providers may say what of a safe house's work exists only there and remove one
   whatever it holds: two optional `SafeHouseSession` slots, `exports` (`SafeHouseExports`:
@@ -351,8 +355,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   proposed in is audited (`moneypenny.confirmed`) and then sent through the usual route.
   Her `show` tool displays views in a strict version 1 schema (text with in-app links only,
   tables, key-value lists, bar and line charts, Mission, Station and Theater cards, timelines,
-  diffs, and forms that draft a proposal); an invalid view is refused with the reason. The
-  Moneypenny app has an **Ask Moneypenny** chat panel on every page that renders them
+  diffs, and forms that draft a proposal); an invalid view is refused with the reason.
+  Outer Office has an **Ask Moneypenny** chat panel on every page that renders them
   natively.
 - Vetting: before M places a brief, the Headquarters holder runs deterministic checks under
   the Operation's `[operation.ID.vetting]` settings (`vetting = "off"` turns them off, a
@@ -392,7 +396,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   rate, then the Chief of Staff's review, at most `max_proposal_reviews_per_hour` (20) per
   Operation and `max_proposal_reviews_per_session_per_hour` (5) per proposing Session) and
   stores the result on it (`MissionProposal::vetting`, `BriefStore::set_proposal_vetting`);
-  the inbox, the API and Moneypenny show it. A clean proposal from an unexposed Session that
+  the inbox, the API and Outer Office show it. A clean proposal from an unexposed Session that
   a live class authorisation of kind `proposal` covers (proposer Agent, or the parent
   Mission's recorded role, `MissionProposal::parent_role`; a requested role must be that
   role or one in `ClassAuthorization::proposed_roles`; title pattern; `max_uses`) is
@@ -403,7 +407,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Held briefs for operators: Universal Exports lists, releases and refuses them
   (`/v1/user/operations/{id}/held-briefs`, `mission.create`; audited as
   `mission.brief.released` and `mission.brief.refused`), `ai6ctl held-briefs
-  list|release|refuse`, and Moneypenny's Administration has a Held briefs tab that shows the
+  list|release|refuse`, and Outer Office's Administration has a Held briefs tab that shows the
   findings and the brief's text only on request; both show invisible characters by code
   (`<U+200B>`, `<tags: ...>`). Administration appears for an account whose only
   administrative permission is `mission.create`.
@@ -421,8 +425,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (`Roster::check_agents`). Universal Exports serves roster administration from
   `--roster` / `AI6_EXPORTS_ROSTER` (`/v1/user/roster/...`, `roster.read` and
   `roster.manage` on the new scope `config:roster`; edits audited as `roster.update`,
-  `roster.remove` or `roster.refused`), and Moneypenny's Administration has a Roster tab.
-- Moneypenny's Station settings set the minimum free memory and maximum CPU percent past
+  `roster.remove` or `roster.refused`), and Outer Office's Administration has a Roster tab.
+- Outer Office's Station settings set the minimum free memory and maximum CPU percent past
   which a Station takes no new Missions.
 - Brief provenance (bona fides): every brief carries where it came from (`Provenance`:
   `origin` `operator`, `source`, `sleeper`, `proposal` or `registry_drop`, the
@@ -433,7 +437,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   queued again has none. A brief found in the queue with none is a `registry_drop`:
   accepted, its Sessions exposed (`brief:registry_drop`), and never reported to a Source; a
   Source is reported to only for its own item in its own Operation. The Mission record, the
-  gateway's Mission detail and Moneypenny show the origin. `submit_brief` stores it,
+  gateway's Mission detail and Outer Office show the origin. `submit_brief` stores it,
   `ingest_source_item`, `fire_sleeper` and `promote_mission_proposal` take the receiving
   Station or gateway.
 - Provider library pins and publishers (bona fides): a `plugins.toml` pin set
@@ -477,7 +481,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a hand-off). Intake keeps a brief queued while no account of its pools has headroom.
   Universal Exports serves the pool board (`GET /v1/user/operations/{id}/pools`,
   `pool.read`; other Operations' Sessions only as a count), shown by `ai6ctl pools` and
-  Moneypenny's Account pools view; `pool.manage` lifts a limit (`ai6ctl pools clear-limit`,
+  Outer Office's Account pools view; `pool.manage` lifts a limit (`ai6ctl pools clear-limit`,
   audited). Limits last at most eight days (`StationConfig::with_account_limit_horizon`). A
   green ink secret cannot back a pool account, and a pooled Agent's loadout cannot set a
   provider credential variable.
@@ -514,7 +518,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (default 95), both Station settings in the Registry
   (`PUT /v1/user/stations/{id}/settings`), and scores the rest on Missions held against
   capacity, CPU, memory and Sessions on the Theater; an Operation's `placement = "spread"`
-  (default) or `"pack"` orders them. The board, placement previews, Moneypenny and
+  (default) or `"pack"` orders them. The board, placement previews, Outer Office and
   `ai6ctl stations` show the figures, their sample time and each choice's score
   (`ai6::Resources`, `ResourceLimits`, `PlacementStrategy`, `probe_resources`).
 - Recovery when a runner dies while its Station lives. A Station that cannot reach a
@@ -549,7 +553,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (`CheckpointSpec`, `SafeHouseCheckpoint`), which the `git` provider implements.
 - Attempt history: `GET /v1/missions` and the Mission detail list each attempt
   (`universal_exports::MissionAttempt`: Station, Theater, status, why it was lost and its
-  checkpoint branch), and Moneypenny shows them on the Mission card.
+  checkpoint branch), and Outer Office shows them on the Mission card.
 
 - Theater provisioning. A Theater declares what Sessions need there
   (`[theater.ID.requires]`: `os`, `harnesses` such as `"claude>=2.1"`, `tools`, `disk_mb`)
@@ -558,7 +562,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   POSIX Theater over its transport every five minutes and publishes the report at check-in
   (`TheaterSummary::requires`, `report`; `BoardTheater` likewise): placement rules out a
   Theater whose requirements are unchecked or unmet, and in field mode an Agent whose
-  harness is missing there, each with the reason; Moneypenny marks such a Theater and says
+  harness is missing there, each with the reason; Outer Office marks such a Theater and says
   what is missing. Credentials already on a Theater outside AI6's leases (a git credential
   store or helper, an SSH agent or key, a CLI login, a provider key in the login
   environment) are reported as weakenings, by location only. `ai6 theater provision
@@ -599,7 +603,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `/v1/user/operations/{id}/class-authorizations`) approve a kind of step on a target glob
   for named Agents or roles, up to a use limit, and are revoked there. Records live in the
   Registry (`ai6::ApprovalRequest`, `Approval`, `ClassAuthorization`); decisions are audited
-  and requests appear on the timeline. Moneypenny has Green ink and Class authorisations
+  and requests appear on the timeline. Outer Office has Green ink and Class authorisations
   tabs under Administration.
 - The green ink harness gate. The Claude handler passes Claude Code a `PreToolUse` hook on
   `Bash|PowerShell` through `--settings` (`onFailure = "block"`, Claude Code 2.1.295 or
@@ -655,7 +659,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   lease, applies it and reports the outcome, read back from the control's status route.
   A retry queues the Mission as a new attempt, optionally for another qualified Agent
   (`MissionStore::retry`). `ai6ctl mission cancel|retry|resume` and `ai6ctl session
-  interrupt` wait for the outcome; Moneypenny offers the controls in each Mission card's
+  interrupt` wait for the outcome; Outer Office offers the controls in each Mission card's
   menu with the reason any is unavailable. DipTel has the `queued` and `abandoned`
   states, and board Sessions carry `updated_at`, so a client finds a Mission's current
   Session.
@@ -664,7 +668,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Cables sent and Sleeper authorizations from a new Registry activity log
   (`ai6::TimelineEvent`, the newest 10,000 kept) merged with the Operation's audit records,
   correlated by Station, Mission and Session, filterable by Mission and continued by an
-  opaque cursor. Items are metadata only. Moneypenny shows it in a Timeline view.
+  opaque cursor. Items are metadata only. Outer Office shows it in a Timeline view.
 
 - A Station's identity defaults to `<host>-<random>`, created on first start and kept in
   `station-id` in the AI6 state directory, so a restarted daemon stays the same Station;
@@ -673,7 +677,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `ssh` host, plus labels), always reaches its own host as the implicit `local` Theater and
   publishes its Theaters at check-in. A Session's launch record carries `station_id` and
   `theater_id` separately. `GET /v1/stations` lists each
-  Station's Theaters, and Moneypenny shows them and the Station and Theater of each Session.
+  Station's Theaters, and Outer Office shows them and the Station and Theater of each Session.
 - Transports. A Station reaches a Theater through a transport, a new provider kind
   (`ai6_transport`, `ai6::directorates::q::transport`) with optional, capability-gated
   operations: open a terminal, run a command, read, write and list files, and forward a port
@@ -683,7 +687,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `remote-hands`), `egress` (`direct`, a proxy, `station` or `none`), `harnesses`, `workdir`
   and `access = { transport = { provider, config } }` for any other transport provider.
   Stations publish each Theater's capabilities and declared facts, and `GET /v1/stations`
-  and Moneypenny's Theater tooltips show them; a Theater that cannot be reached is shown
+  and Outer Office's Theater tooltips show them; a Theater that cannot be reached is shown
   with the reason and ruled out of placement.
 - Five transport providers. `ai6-transport-local` runs commands and reads and writes
   files on the Station's own host. `ai6-transport-adb` reaches an Android device through
@@ -705,7 +709,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   sandbox that asks nothing) and four Theater tools (`theater_run`, `theater_read`,
   `theater_write`, `theater_list`) on a per-Session authenticated MCP endpoint act on the
   Theater instead. Placement choices, launch records, the published Mission brief and
-  Moneypenny carry the mode.
+  Outer Office carry the mode.
 - The field runner, `ai6 runner serve`: the AI6 binary's Theater mode, which supervises
   harnesses on the Theater so a Session outlives its Station. A Theater declares it with
   `runner = {}` (or `command`, `state_dir`, `plugin_paths`, `terminal`), and the Station
@@ -729,7 +733,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   handlers, Theaters and each Operation's placement policy at check-in.
 - Universal Exports `GET /v1/user/operations/{id}/placement-preview` (needs `mission.read`)
   returns the eligible Station, Theater and Agent choices and the reason for each rejection,
-  and Moneypenny's Stations view has a placement preview panel.
+  and Outer Office's Stations view has a placement preview panel.
 - Recovery. Every Session has a record in the shared Registry (`sessions/`): AI6 Session
   ID, provider Session ID, Station, Theater, attempt and predecessor, status. A Station acts
   on a Session only while it holds the record's lease and presents its fencing token, which
@@ -743,7 +747,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Operation sets `on_limit = "rotate"` (default), `"wait"` or `"backup"` (post the next qualified Agent
   on another handler as a new attempt in the same safe house) and `limit_fallback_secs`
   (default 1800, used when no reset time is reported). `parked` is a Session state in
-  `ai6-diptel`, the gateway and Moneypenny.
+  `ai6-diptel`, the gateway and Outer Office.
 
 - Medical: usage and budgets. The Claude and Codex handlers report tokens and cost from the
   provider's own events (`AgentEvent::usage`, `TokenUsage`); the Station keeps a per-Mission
@@ -757,7 +761,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Medical: exposure. A Session is marked when its Mission came from a Source item, it calls a
   tool the Operation lists (`WebFetch` and `WebSearch` by default), or it reads a Cable from
   another Operation or an exposed Session. The mark is kept in the Session record, inherited
-  by later attempts, shown on the board (`exposure`) and as an `EXPOSED` chip in Moneypenny.
+  by later attempts, shown on the board (`exposure`) and as an `EXPOSED` chip in Outer Office.
   `[operation.ID.exposure]` picks `strict` (default: an exposed Session sends Cables only as
   replies, and its Mission proposals carry its exposure) or `observe`, and can choose
   restrictions and tools individually.
@@ -768,7 +772,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   quarantines or releases with `ai6 quarantine list|add|release` or the Universal Exports
   `quarantine` routes (`agent.configure`); a released Mission returns to the queue with the
   next qualified Agent. `quarantined` is a Session state in `ai6-diptel`, the gateway,
-  `ai6ctl` and Moneypenny, and `ai6ctl` lists a Session's exposure.
+  `ai6ctl` and Outer Office, and `ai6ctl` lists a Session's exposure.
 
 - `ai6`: the Station daemon and AI6's public contracts in one Rust crate. Directorates
   under `ai6::directorates` (M, the Registry, Q Branch, 00 Section, Medical) and the Station
@@ -847,7 +851,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   bytes and resize frames, with test vectors.
 - `ai6ctl`: a read-only operator command for health, Stations, Agent roles, Missions and
   Sessions.
-- Moneypenny: the Flutter desktop and web operator app, with Stations and the
+- Outer Office: the Flutter desktop and web operator app, with Stations and the
   Headquarters Station, the Operation → Mission → Session board, Mission briefs, live
   terminals, administration, audit and an operator menu.
 - `examples/config`, the documentation site with the Rust API reference, public API

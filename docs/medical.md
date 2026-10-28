@@ -77,7 +77,7 @@ A Session is **exposed** once it has read input someone else could have written:
 | `review` | It read review text written by someone else |
 
 Exposure is recorded in the Session's Registry record, never goes away, and is inherited by
-a later attempt at the same Mission. Moneypenny shows an `EXPOSED` chip on the Session and
+a later attempt at the same Mission. Outer Office shows an `EXPOSED` chip on the Session and
 `ai6ctl` lists the sources. Marking is always on; what an exposed Session may then do is the
 Operation's policy:
 
