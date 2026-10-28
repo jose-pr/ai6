@@ -1078,8 +1078,10 @@ mod tests {
         }
         let link = RunnerLink::local(runner_dir.clone(), PathBuf::from("unused"));
         let at_dark = link.status(&key).unwrap().unwrap().last;
-        tokio::time::sleep(DRIP_INTERVAL * 10).await;
-        assert!(link.status(&key).unwrap().unwrap().last >= at_dark + 5);
+        until("the runner to keep ticking while station-a is dark", || {
+            link.status(&key).unwrap().unwrap().last >= at_dark + 5
+        })
+        .await;
 
         // Station B becomes Headquarters, is handed the brief and adopts the Session.
         publish_station_check_in(&b);
