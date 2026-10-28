@@ -326,8 +326,10 @@ const ASSISTANT_FILE_TOOLS: &str = "Read,Write,Edit,Glob,Grep";
 const DOT_PATHS_DENIED: [&str; 2] = ["Edit(**/.*)", "Edit(**/.*/**)"];
 
 /// Environment variables a script may keep: none of them holds a credential. Every other
-/// variable of the harness's environment is removed from its scripts' environment.
-const SCRIPT_ENVIRONMENT: [&str; 17] = [
+/// variable of the harness's environment is removed from its scripts' environment, the proxy
+/// variables among them, since a corporate proxy URL may carry basic-auth credentials and the
+/// sandbox routes scripts through its own proxy regardless.
+const SCRIPT_ENVIRONMENT: [&str; 14] = [
     "PATH",
     "HOME",
     "USERPROFILE",
@@ -342,9 +344,6 @@ const SCRIPT_ENVIRONMENT: [&str; 17] = [
     "LC_CTYPE",
     "TERM",
     "TZ",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
 ];
 
 /// Model credentials Claude Code reads (code.claude.com/docs/en/env-vars), removed from every
@@ -428,10 +427,19 @@ fn add_assistant(
         allowed.push(format!("mcp__{}", server.name));
     }
     let offered = offered_tools(mode);
+    if let Some(found) = managed_settings_at(std::env::consts::OS, std::path::Path::exists) {
+        eprintln!(
+            "ai6: Claude Code managed settings at {} apply to Moneypenny's harness too: they \
+             merge with AI6's sandbox and permissions, and `allowManagedHooksOnly` there would \
+             drop the WebFetch gate",
+            found.display()
+        );
+    }
     // Under `dontAsk` Claude Code 2.1.310 still fetches its own documentation domains
-    // (docs.python.org, developer.mozilla.org) when no rule names them, so a hook refuses every
-    // host a `limited` mode does not list.
-    let web_gate = if offered.contains(&"WebFetch") && !mode.network.open() {
+    // (docs.python.org, developer.mozilla.org) when no rule names them, and an open network
+    // could reach the deployment's own hosts or the metadata address, so a hook gates every
+    // WebFetch: a `limited` mode to its listed hosts, an `open` one off the denied ones.
+    let web_gate = if offered.contains(&"WebFetch") {
         Some(hook_program(environment).ok_or_else(|| {
             refuse(
                 Status::GUATIAO_ERR_UNSUPPORTED,
@@ -493,7 +501,17 @@ fn add_assistant(
         settings.extend(script_settings(mode, working_directory, environment));
     }
     if let Some(program) = web_gate {
-        settings.extend(web_gate_settings(&program, &mode.network.allowed_hosts));
+        // A limited network allows exactly its hosts; an open one allows any but the denied.
+        let allow = if mode.network.open() {
+            Vec::new()
+        } else {
+            mode.network.allowed_hosts.clone()
+        };
+        settings.extend(web_gate_settings(
+            &program,
+            &allow,
+            &denied_domains(environment),
+        ));
     }
     if !settings.is_empty() {
         argv.extend(["--settings".to_owned(), Value::Object(settings).to_string()]);
@@ -504,17 +522,73 @@ fn add_assistant(
     Ok(())
 }
 
+/// Environment variables that name a directory holding a login or credentials: a script may
+/// not read any of them, so their values go in `credentials.files`. `CLAUDE_CONFIG_DIR` is the
+/// assistant's own, holding its transcripts and any stored login; `CODEX_HOME` and any
+/// `*_HOME` a pool account set point at other logins.
+fn credential_dir_var(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper == "CLAUDE_CONFIG_DIR" || upper == "CODEX_HOME" || upper.ends_with("_HOME")
+}
+
+/// The directories a sandboxed script may read, besides the working directory: the system
+/// locations an interpreter and its shared libraries live in. The home directory is left out
+/// (a login or credentials live there), so an interpreter installed under it is unreachable;
+/// `denyRead: ["/"]` denies everything else, `/proc` among it (so a script cannot read
+/// another process's environment). Inferred from the platform, not resolved from the
+/// interpreter; measured for `python3` on Linux.
+fn script_read_roots(os: &str) -> &'static [&'static str] {
+    match os {
+        "macos" => &[
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/System",
+            "/Library",
+            "/opt",
+            "/etc",
+            "/var",
+            "/dev",
+            "/private/etc",
+            "/private/var/db",
+        ],
+        // Linux and WSL2; another platform has no sandbox and never reaches here. The two
+        // `/tmp` entries are the sandbox's own network relay sockets (a script reaches its
+        // proxy only through them; measured with Claude Code 2.1.310), where they are when the
+        // Session has no `CLAUDE_CODE_TMPDIR` of its own: re-opened by name, so the rest of
+        // `/tmp`, AI6's own IPC sockets among it, stays unreadable.
+        _ => &[
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/lib",
+            "/lib64",
+            "/etc",
+            "/opt",
+            "/dev",
+            "/tmp/claude-http-*.sock",
+            "/tmp/srt-mux-*.sock",
+        ],
+    }
+}
+
 /// The Claude Code settings that confine an assistant's scripts (code.claude.com/docs/en/
 /// sandboxing and /settings-reference): the sandbox on, Claude Code exiting at start when it
 /// cannot run it (`failIfUnavailable`), every command still checked against the allow rules
 /// (`autoAllowBashIfSandboxed: false`) and none retried outside it
-/// (`allowUnsandboxedCommands: false`). Scripts write only in the working directory (where
-/// `read_only` paths and `.claude` stay unwritable) and the mode's directories, read nothing
-/// under `deny_read` but the working directory, reach only the mode's hosts (refused rather
-/// than asked about, `strictAllowlist`), and see none of the harness's environment variables
-/// that could hold a credential (`credentials.envVars`). The file tools are kept to the
-/// working directory too (`blockReadsOutsideWorkingDirectories`). With `unsandboxed` the
-/// sandbox is off and none of the file, network or environment limits applies to scripts.
+/// (`allowUnsandboxedCommands: false`). Reads are denied everywhere (`denyRead: ["/"]`) but the
+/// working directory and the system directories an interpreter needs
+/// ([`script_read_roots`]): the Station user's home, AI6's own files, other conversations'
+/// directories, `/proc` and anything else outside stay unreadable, since the sandbox is the
+/// boundary (a script may call anything the interpreter can, so a listed host or a readable
+/// path is reached, not merely a named tool). Scripts write only the mode's directories, never
+/// `read_only`, `.claude` or a `.git` under the working directory (which an unsandboxed git
+/// could act on); reach only the mode's hosts, with loopback, the metadata address and the
+/// deployment's own hosts refused even under `open` (`deniedDomains`); see no environment
+/// variable that could hold a credential (`credentials.envVars`); and read no directory a
+/// credential variable names (`credentials.files`). The file tools are kept to the working
+/// directory too (`blockReadsOutsideWorkingDirectories`). With `unsandboxed` the sandbox is
+/// off and none of these applies to scripts.
 fn script_settings(
     mode: &AssistantMode,
     working_directory: &str,
@@ -526,8 +600,32 @@ fn script_settings(
     }
     let root = std::path::Path::new(working_directory);
     let under = |path: &str| root.join(path).to_string_lossy().into_owned();
-    let mut read_only: Vec<String> = mode.read_only.iter().map(|path| under(path)).collect();
-    read_only.push(under(".claude"));
+    let mut deny_write: Vec<String> = mode.read_only.iter().map(|path| under(path)).collect();
+    deny_write.push(under(".claude"));
+    // A script could plant a `.git/config` with `core.fsmonitor` or a hook that the Station's
+    // own unsandboxed git would run; her repositories' git directories live outside the
+    // working directory, so nothing here needs a writable `.git`.
+    deny_write.push(under(".git"));
+    deny_write.extend(mode.files.iter().map(|dir| under(&format!("{dir}/.git"))));
+    let mut allow_read: Vec<String> = vec![working_directory.to_owned()];
+    allow_read.extend(
+        script_read_roots(std::env::consts::OS)
+            .iter()
+            .map(|dir| (*dir).to_owned()),
+    );
+    // With a temporary directory of the Session's own, Claude Code 2.1.310 puts the sandbox's
+    // network relay sockets there instead of `/tmp`: they are re-opened by name, since
+    // re-opening the whole directory read-only covers the writable `$TMPDIR` under it and
+    // `bwrap` then fails to start.
+    if let Some(temp) = environment
+        .get("CLAUDE_CODE_TMPDIR")
+        .filter(|temp| std::path::Path::new(temp.as_str()).is_absolute())
+    {
+        let temp = std::path::Path::new(temp.as_str());
+        for socket in ["claude-http-*.sock", "srt-mux-*.sock"] {
+            allow_read.push(temp.join(socket).to_string_lossy().into_owned());
+        }
+    }
     // Claude Code 2.1.310 does not open the sandbox to `WebFetch(domain:*)` given in
     // `--allowedTools`, so an open network names every host here itself.
     let hosts: Vec<&str> = match mode.network.policy.as_str() {
@@ -552,6 +650,11 @@ fn script_settings(
             })
             .filter(|name| variable_name(name)),
     );
+    let files: Vec<Value> = environment
+        .iter()
+        .filter(|(name, _)| credential_dir_var(name))
+        .map(|(_, path)| json!({ "path": path, "mode": "deny" }))
+        .collect();
     object(json!({
         "sandbox": {
             "enabled": true,
@@ -560,12 +663,13 @@ fn script_settings(
             "allowUnsandboxedCommands": false,
             "filesystem": {
                 "allowWrite": mode.files.iter().map(|path| under(path)).collect::<Vec<_>>(),
-                "denyWrite": read_only,
-                "denyRead": mode.deny_read,
-                "allowRead": [working_directory],
+                "denyWrite": deny_write,
+                "denyRead": ["/"],
+                "allowRead": allow_read,
             },
             "network": {
                 "allowedDomains": hosts,
+                "deniedDomains": denied_domains(environment),
                 "strictAllowlist": true,
             },
             "credentials": {
@@ -573,10 +677,65 @@ fn script_settings(
                     .into_iter()
                     .map(|name| json!({ "name": name, "mode": "deny" }))
                     .collect::<Vec<_>>(),
+                "files": files,
             },
         },
         "permissions": permissions,
     }))
+}
+
+/// Hosts no script may reach, whatever the policy: loopback and the cloud metadata address
+/// (an `open` network would otherwise let a script reach a service listening on the Station or
+/// read its instance credentials), and the deployment's own MCP endpoints
+/// ([`deployment_hosts`]), so a script cannot turn the gateway's or Station's tokenless
+/// loopback trust against it.
+fn denied_domains(environment: &BTreeMap<String, String>) -> Vec<String> {
+    let mut denied = vec![
+        "localhost".to_owned(),
+        "*.localhost".to_owned(),
+        "127.0.0.1".to_owned(),
+        "[::1]".to_owned(),
+        "169.254.169.254".to_owned(),
+    ];
+    denied.extend(deployment_hosts(environment));
+    denied.sort();
+    denied.dedup();
+    denied
+}
+
+/// The host of each AI6 MCP endpoint the environment carries (`*_MCP_URL`): the gateway's
+/// Moneypenny endpoint, a Station Cable endpoint.
+fn deployment_hosts(environment: &BTreeMap<String, String>) -> Vec<String> {
+    environment
+        .iter()
+        .filter(|(name, _)| name.ends_with("_MCP_URL"))
+        .filter_map(|(_, url)| url_host(url))
+        // The sandbox's domain lists take an IPv6 address only in brackets; unbracketed it is
+        // ambiguous with an address and port (code.claude.com/docs/en/sandboxing).
+        .map(|host| {
+            if host.contains(':') {
+                format!("[{host}]")
+            } else {
+                host
+            }
+        })
+        .collect()
+}
+
+/// The host of `url` (`scheme://[user@]host[:port]/…`), lowercased, without a trailing dot or
+/// bracketed-IPv6 brackets; `None` when it has no host.
+fn url_host(url: &str) -> Option<String> {
+    let after = url.split_once("://")?.1;
+    let authority = after.split(['/', '?', '#']).next().unwrap_or(after);
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, rest)| rest);
+    let host = match host_port.strip_prefix('[') {
+        Some(rest) => rest.split_once(']').map(|(inner, _)| inner)?,
+        None => host_port.split(':').next().unwrap_or(host_port),
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    (!host.is_empty()).then_some(host)
 }
 
 /// The members of a JSON object built with `json!`.
@@ -587,14 +746,25 @@ fn object(value: Value) -> serde_json::Map<String, Value> {
     }
 }
 
-/// The Claude Code settings that keep an assistant's WebFetch to `hosts`: a `PreToolUse` hook
-/// on `WebFetch` running `PROGRAM assistant web-gate --hosts HOST,...`, which denies a fetch of
-/// any other host (`ai6::directorates::section_00::gate::web_fetch_gate`), with hooks on
-/// whatever the user's settings say and a hook that fails to run blocking the fetch
-/// (`onFailure`, Claude Code 2.1.295 or later), as the green ink gate's.
-fn web_gate_settings(program: &str, hosts: &[String]) -> serde_json::Map<String, Value> {
+/// The Claude Code settings that keep an assistant's WebFetch to `allow` and off `deny`: a
+/// `PreToolUse` hook on `WebFetch` running `PROGRAM assistant web-gate [--hosts …] [--deny …]`,
+/// which denies a fetch the deployment does not allow
+/// (`ai6::directorates::section_00::gate::web_fetch_gate`), with hooks on whatever the user's
+/// settings say and a hook that fails to run blocking the fetch (`onFailure`, Claude Code
+/// 2.1.295 or later), as the green ink gate's. An empty `allow` (an open network) allows every
+/// host but the denied ones.
+fn web_gate_settings(
+    program: &str,
+    allow: &[String],
+    deny: &[String],
+) -> serde_json::Map<String, Value> {
     let mut args: Vec<String> = WEB_GATE_ARGS.map(str::to_owned).to_vec();
-    args.extend(["--hosts".to_owned(), hosts.join(",")]);
+    if !allow.is_empty() {
+        args.extend(["--hosts".to_owned(), allow.join(",")]);
+    }
+    if !deny.is_empty() {
+        args.extend(["--deny".to_owned(), deny.join(",")]);
+    }
     object(json!({
         "disableAllHooks": false,
         "hooks": {
@@ -625,6 +795,26 @@ fn hook_program(environment: &BTreeMap<String, String>) -> Option<String> {
                 .ok()
                 .map(|path| path.to_string_lossy().into_owned())
         })
+}
+
+/// The file-based Claude Code managed settings on `os` that `exists` finds, the first of
+/// `managed-settings.json` and `managed-settings.d` in its system directory
+/// (code.claude.com/docs/en/managed-settings). Settings delivered by MDM or the claude.ai
+/// console are not files here and are not found.
+fn managed_settings_at(
+    os: &str,
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    let dir = match os {
+        "macos" => "/Library/Application Support/ClaudeCode",
+        "linux" => "/etc/claude-code",
+        "windows" => r"C:\Program Files\ClaudeCode",
+        _ => return None,
+    };
+    ["managed-settings.json", "managed-settings.d"]
+        .into_iter()
+        .map(|name| std::path::Path::new(dir).join(name))
+        .find(|path| exists(path))
 }
 
 /// Why Claude Code's sandbox cannot run on `os` with programs found on `path`, or `None` when
@@ -3097,6 +3287,7 @@ mod tests {
 
     /// The working directory, an unreadable directory and the mode of a fixture: `policy` with
     /// `hosts`, `python3` when `scripts`, and her workspace's directories.
+    #[allow(clippy::type_complexity)]
     fn script_mode(policy: &str, hosts: &[&str], scripts: bool) -> (String, String, AssistantMode) {
         let root = std::env::temp_dir().join("ai6-claude-fixture");
         let working_directory = root.join("conversation").to_string_lossy().into_owned();
@@ -3107,7 +3298,6 @@ mod tests {
             } else {
                 Vec::new()
             },
-            deny_read: vec![home.clone()],
             network: ai6::AssistantNetwork {
                 policy: policy.to_owned(),
                 allowed_hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
@@ -3131,6 +3321,12 @@ mod tests {
         let mut environment = assistant_environment();
         environment.insert("ANTHROPIC_API_KEY".to_owned(), "model-key".to_owned());
         environment.insert("LANG".to_owned(), "C".to_owned());
+        // The desk gives each conversation its own configuration directory; the handler denies
+        // reading it and hides the variable from scripts.
+        environment.insert(
+            "CLAUDE_CONFIG_DIR".to_owned(),
+            format!("{working_directory}.config"),
+        );
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-assistant-fixture".to_owned(),
@@ -3169,67 +3365,26 @@ mod tests {
             .map(|position| argv[position + 1].clone())
     }
 
-    /// The sandbox a fixture's scripts run in, for `hosts`.
-    fn sandbox(working_directory: &str, home: &str, hosts: &[&str]) -> Value {
-        let under = |path: &str| {
-            std::path::Path::new(working_directory)
-                .join(path)
-                .to_string_lossy()
-                .into_owned()
-        };
-        json!({
-            "sandbox": {
-                "enabled": true,
-                "failIfUnavailable": true,
-                "autoAllowBashIfSandboxed": false,
-                "allowUnsandboxedCommands": false,
-                "filesystem": {
-                    "allowWrite": [under("personal"), under("scratch")],
-                    "denyWrite": [
-                        under("shared"),
-                        under("CLAUDE.md"),
-                        under("AGENTS.md"),
-                        under(".claude")
-                    ],
-                    "denyRead": [home],
-                    "allowRead": [working_directory],
-                },
-                "network": { "allowedDomains": hosts, "strictAllowlist": true },
-                "credentials": { "envVars": [
-                    { "name": "AI6_CABLE_MCP_TOKEN", "mode": "deny" },
-                    { "name": "AI6_CABLE_MCP_URL", "mode": "deny" },
-                    { "name": "AI6_MONEYPENNY_MCP_TOKEN", "mode": "deny" },
-                    { "name": "AI6_MONEYPENNY_MCP_URL", "mode": "deny" },
-                    { "name": "ANTHROPIC_API_KEY", "mode": "deny" },
-                    { "name": "ANTHROPIC_AUTH_TOKEN", "mode": "deny" },
-                    { "name": "CLAUDE_CODE_OAUTH_TOKEN", "mode": "deny" },
-                    { "name": "CLAUDE_FIXTURE_SESSION_ID", "mode": "deny" }
-                ]}
-            },
-            "permissions": { "blockReadsOutsideWorkingDirectories": true }
-        })
+    /// The `--settings` Claude Code is started with, parsed; `None` when none is passed.
+    fn settings_of(argv: &[String]) -> Option<Value> {
+        flag(argv, "--settings").map(|settings| serde_json::from_str(&settings).unwrap())
     }
 
-    /// The WebFetch gate of a fixture's `limited` network: the hook runs the program hosting
-    /// the handler, here the test binary.
-    fn web_gate(hosts: &[&str]) -> Value {
-        json!({
-            "disableAllHooks": false,
-            "hooks": { "PreToolUse": [{
-                "matcher": "WebFetch",
-                "hooks": [{
-                    "type": "command",
-                    "command": std::env::current_exe().unwrap().to_string_lossy(),
-                    "args": ["assistant", "web-gate", "--hosts", hosts.join(",")],
-                    "timeout": 60,
-                    "onFailure": "block"
-                }]
-            }]}
-        })
+    /// The string members of a JSON array.
+    fn strings(value: &Value) -> Vec<String> {
+        value
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|item| item.as_str().unwrap_or_default().to_owned())
+            .collect()
     }
 
     /// Each network policy with and without scripts, as code.claude.com/docs/en/sandboxing,
-    /// /permissions and /settings-reference describe the flags and keys.
+    /// /permissions and /settings-reference describe the flags and keys. Reads are denied
+    /// everywhere but the working directory and the system directories an interpreter needs,
+    /// and the deployment's own hosts, loopback and the metadata address are refused even under
+    /// `open`.
     #[test]
     fn scripts_and_the_network_policy_give_exactly_their_tools_rules_and_sandbox() {
         let files = "mcp__moneypenny,Read,Glob,Grep,Edit(/personal/**),Edit(/scratch/**)";
@@ -3301,7 +3456,7 @@ mod tests {
         ];
         for (policy, hosts, scripts, tools, denied, allowed, fetch_off) in cases {
             let case = format!("{policy} {hosts:?} scripts={scripts}");
-            let (working_directory, home, mode) = script_mode(policy, hosts, scripts);
+            let (working_directory, _home, mode) = script_mode(policy, hosts, scripts);
             let (argv, environment) = started_with(&working_directory, mode);
             assert_eq!(flag(&argv, "--tools").as_deref(), Some(tools), "{case}");
             assert_eq!(flag(&argv, "--permission-mode").as_deref(), Some("dontAsk"));
@@ -3312,25 +3467,134 @@ mod tests {
                 fetch_off.then_some("1"),
                 "{case}"
             );
-            let settings = flag(&argv, "--settings")
-                .map(|settings| serde_json::from_str::<Value>(&settings).unwrap());
-            let mut expected = serde_json::Map::new();
+            // `--settings` is present when there is a sandbox (scripts) or a WebFetch gate
+            // (any policy but `denied`); `denied` with no scripts has neither.
+            let has_settings = scripts || policy != "denied";
+            let settings = settings_of(&argv);
+            assert_eq!(settings.is_some(), has_settings, "{case}");
+            let Some(settings) = settings else {
+                continue;
+            };
+            let under = |path: &str| {
+                std::path::Path::new(&working_directory)
+                    .join(path)
+                    .to_string_lossy()
+                    .into_owned()
+            };
             if scripts {
+                let fs = &settings["sandbox"]["filesystem"];
+                assert_eq!(settings["sandbox"]["enabled"], json!(true), "{case}");
+                assert_eq!(
+                    settings["sandbox"]["failIfUnavailable"],
+                    json!(true),
+                    "{case}"
+                );
+                assert_eq!(
+                    fs["denyRead"],
+                    json!(["/"]),
+                    "reads denied everywhere: {case}"
+                );
+                let allow_read = strings(&fs["allowRead"]);
+                assert!(
+                    allow_read.contains(&working_directory),
+                    "{case}: {allow_read:?}"
+                );
+                for dir in ["/usr", "/bin", "/lib", "/etc"] {
+                    assert!(allow_read.contains(&dir.to_owned()), "{case}: {dir}");
+                }
+                assert!(
+                    !allow_read.iter().any(|dir| dir == "/proc"),
+                    "{case}: /proc denied"
+                );
+                assert_eq!(
+                    strings(&fs["allowWrite"]),
+                    [under("personal"), under("scratch")],
+                    "{case}"
+                );
+                let deny_write = strings(&fs["denyWrite"]);
+                for path in [
+                    under("shared"),
+                    under("CLAUDE.md"),
+                    under("AGENTS.md"),
+                    under(".claude"),
+                    under(".git"),
+                    under("personal/.git"),
+                    under("scratch/.git"),
+                ] {
+                    assert!(deny_write.contains(&path), "{case}: {path}");
+                }
                 let listed: &[&str] = match policy {
                     "limited" => hosts,
                     "open" => &["*"],
                     _ => &[],
                 };
-                expected.extend(object(sandbox(&working_directory, &home, listed)));
+                assert_eq!(
+                    strings(&settings["sandbox"]["network"]["allowedDomains"]),
+                    listed,
+                    "{case}"
+                );
+                let refused = strings(&settings["sandbox"]["network"]["deniedDomains"]);
+                for host in [
+                    "localhost",
+                    "127.0.0.1",
+                    "169.254.169.254",
+                    "exports.example",
+                ] {
+                    assert!(refused.contains(&host.to_owned()), "{case}: {host} refused");
+                }
+                assert_eq!(
+                    settings["sandbox"]["network"]["strictAllowlist"],
+                    json!(true),
+                    "{case}"
+                );
+                let hidden: Vec<String> = settings["sandbox"]["credentials"]["envVars"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|entry| entry["name"].as_str().unwrap().to_owned())
+                    .collect();
+                for name in [
+                    "ANTHROPIC_API_KEY",
+                    "AI6_MONEYPENNY_MCP_TOKEN",
+                    "CLAUDE_CONFIG_DIR",
+                ] {
+                    assert!(hidden.contains(&name.to_owned()), "{case}: {name} hidden");
+                }
+                let files: Vec<String> = settings["sandbox"]["credentials"]["files"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|entry| entry["path"].as_str().unwrap().to_owned())
+                    .collect();
+                assert!(
+                    files.iter().any(|path| path.ends_with(".config")),
+                    "{case}: the config dir is a denied file: {files:?}"
+                );
+                assert_eq!(
+                    settings["permissions"]["blockReadsOutsideWorkingDirectories"],
+                    json!(true),
+                    "{case}"
+                );
+            } else {
+                assert!(
+                    settings.get("sandbox").is_none(),
+                    "no sandbox without scripts: {case}"
+                );
             }
-            if policy == "limited" {
-                expected.extend(object(web_gate(hosts)));
+            // Every policy but `denied` gates WebFetch with the deployment's deny hosts.
+            let hooks = settings.pointer("/hooks/PreToolUse");
+            if policy == "denied" {
+                assert!(hooks.is_none(), "no WebFetch under denied: {case}");
+            } else {
+                let args = strings(&hooks.unwrap()[0]["hooks"][0]["args"]);
+                assert_eq!(&args[..2], ["assistant", "web-gate"], "{case}");
+                assert!(args.iter().any(|arg| arg == "--deny"), "{case}: deny list");
+                assert_eq!(
+                    args.iter().any(|arg| arg == "--hosts"),
+                    policy == "limited",
+                    "{case}: an allow list only under limited"
+                );
             }
-            assert_eq!(
-                settings,
-                (!expected.is_empty()).then_some(Value::Object(expected)),
-                "{case}"
-            );
             assert!(
                 !argv
                     .iter()
@@ -3364,8 +3628,17 @@ mod tests {
                 .contains("Edit(**/.*)")
         );
         let settings: Value = serde_json::from_str(&flag(&argv, "--settings").unwrap()).unwrap();
+        // No workspace: nothing writable, but reads are still denied everywhere but the system
+        // directories, and the WebFetch gate still applies.
         assert_eq!(settings["sandbox"]["filesystem"]["allowWrite"], json!([]));
-        assert_eq!(settings["sandbox"]["filesystem"]["denyRead"], json!([]));
+        assert_eq!(settings["sandbox"]["filesystem"]["denyRead"], json!(["/"]));
+        assert!(
+            strings(&settings["sandbox"]["filesystem"]["allowRead"]).contains(&"/usr".to_owned())
+        );
+        assert!(
+            settings.pointer("/hooks/PreToolUse").is_some(),
+            "the web gate"
+        );
         assert_eq!(environment.get(DISABLE_WEB_FETCH_ENV), None);
 
         let (argv, environment) = started_with("/conversation", AssistantMode::moneypenny());
@@ -3376,6 +3649,169 @@ mod tests {
             environment.get(DISABLE_WEB_FETCH_ENV).map(String::as_str),
             Some("1"),
             "limited with no host reaches nothing"
+        );
+    }
+
+    #[test]
+    fn managed_settings_are_found_in_each_platforms_system_directory() {
+        let only = |wanted: &'static str| move |path: &std::path::Path| path.ends_with(wanted);
+        assert_eq!(
+            managed_settings_at("linux", only("managed-settings.json")),
+            Some(std::path::PathBuf::from(
+                "/etc/claude-code/managed-settings.json"
+            ))
+        );
+        assert_eq!(
+            managed_settings_at("macos", only("managed-settings.d")),
+            Some(
+                std::path::Path::new("/Library/Application Support/ClaudeCode")
+                    .join("managed-settings.d")
+            )
+        );
+        assert!(managed_settings_at("windows", only("managed-settings.json")).is_some());
+        assert_eq!(
+            managed_settings_at("linux", |_: &std::path::Path| false),
+            None
+        );
+        assert_eq!(
+            managed_settings_at("freebsd", |_: &std::path::Path| true),
+            None
+        );
+    }
+
+    /// Reads are denied everywhere but the sandbox's own relay sockets in `/tmp`, and, with a
+    /// temporary directory of the Session's own, the relay sockets there, by name: the whole
+    /// directory is not re-opened (that covers the writable `$TMPDIR` read-only and `bwrap`
+    /// fails to start).
+    #[test]
+    fn the_network_relay_sockets_are_the_only_temp_paths_reopened() {
+        let (working_directory, _, mode) = script_mode("limited", &["docs.python.org"], true);
+        let mut environment = assistant_environment();
+        let base = std::env::temp_dir()
+            .join("conv.t")
+            .to_string_lossy()
+            .into_owned();
+        environment.insert("CLAUDE_CODE_TMPDIR".to_owned(), base.clone());
+        let settings = script_settings(&mode, &working_directory, &environment);
+        let allow_read = strings(&settings["sandbox"]["filesystem"]["allowRead"]);
+        let under = |name: &str| {
+            std::path::Path::new(&base)
+                .join(name)
+                .to_string_lossy()
+                .into_owned()
+        };
+        assert!(
+            allow_read.contains(&under("claude-http-*.sock")),
+            "{allow_read:?}"
+        );
+        assert!(
+            allow_read.contains(&under("srt-mux-*.sock")),
+            "{allow_read:?}"
+        );
+        assert!(
+            !allow_read.contains(&base),
+            "not the whole directory: {allow_read:?}"
+        );
+        if !cfg!(target_os = "macos") {
+            assert!(allow_read.contains(&"/tmp/claude-http-*.sock".to_owned()));
+            assert!(!allow_read.contains(&"/tmp".to_owned()), "not all of /tmp");
+        }
+    }
+
+    #[test]
+    fn url_host_takes_the_host_from_a_url() {
+        assert_eq!(
+            url_host("https://exports.example/v1/x").as_deref(),
+            Some("exports.example")
+        );
+        assert_eq!(
+            url_host("http://127.0.0.1:43210/mcp").as_deref(),
+            Some("127.0.0.1")
+        );
+        assert_eq!(
+            url_host("https://user:pw@Host.Example:8443/x").as_deref(),
+            Some("host.example")
+        );
+        assert_eq!(url_host("https://[::1]:7/x").as_deref(), Some("::1"));
+        assert_eq!(
+            url_host("https://host.example./x").as_deref(),
+            Some("host.example")
+        );
+        assert_eq!(url_host("not a url"), None);
+    }
+
+    /// The deny-only WebFetch hook of an `open` network: no allow list, but the deployment's
+    /// own hosts, loopback and the metadata address are refused, and the same hosts are in the
+    /// sandbox's `deniedDomains`.
+    #[test]
+    fn an_open_network_still_refuses_the_deployment_and_loopback() {
+        let (working_directory, _, mut mode) = script_mode("open", &[], true);
+        mode.interpreters = vec!["python3".to_owned()];
+        let (argv, _) = started_with(&working_directory, mode);
+        let settings: Value = serde_json::from_str(&flag(&argv, "--settings").unwrap()).unwrap();
+        let denied = strings(&settings["sandbox"]["network"]["deniedDomains"]);
+        for host in [
+            "localhost",
+            "127.0.0.1",
+            "[::1]",
+            "169.254.169.254",
+            "exports.example",
+        ] {
+            assert!(
+                denied.contains(&host.to_owned()),
+                "{host} refused: {denied:?}"
+            );
+        }
+        let args = strings(&settings.pointer("/hooks/PreToolUse").unwrap()[0]["hooks"][0]["args"]);
+        assert!(
+            args.iter().any(|arg| arg == "--deny"),
+            "a deny list: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "--hosts"),
+            "no allow list under open: {args:?}"
+        );
+        // The gate run with these arguments refuses the deployment host and loopback, allows
+        // an ordinary one.
+        let deny: Vec<String> = args
+            .iter()
+            .skip_while(|arg| *arg != "--deny")
+            .nth(1)
+            .map(|list| list.split(',').map(str::to_owned).collect())
+            .unwrap_or_default();
+        let fetch = |url: &str| serde_json::json!({ "tool_input": { "url": url } }).to_string();
+        use ai6::directorates::section_00::gate::web_fetch_gate;
+        assert!(web_fetch_gate(&fetch("https://exports.example/"), &[], &deny).is_some());
+        assert!(web_fetch_gate(&fetch("http://127.0.0.1/"), &[], &deny).is_some());
+        assert_eq!(
+            web_fetch_gate(&fetch("https://example.org/"), &[], &deny),
+            None
+        );
+    }
+
+    /// The configuration directory the desk sets is denied to scripts twice over: it is not in
+    /// `allowRead` (reads are denied everywhere else), and it is a `credentials.files` deny
+    /// entry, so a stored login and other conversations' transcripts stay unreadable.
+    #[test]
+    fn the_config_directory_is_denied_to_scripts() {
+        let (working_directory, _, mode) = script_mode("denied", &[], true);
+        let (argv, _) = started_with(&working_directory, mode);
+        let settings: Value = serde_json::from_str(&flag(&argv, "--settings").unwrap()).unwrap();
+        let allow_read = strings(&settings["sandbox"]["filesystem"]["allowRead"]);
+        let config = format!("{working_directory}.config");
+        assert!(
+            !allow_read.contains(&config),
+            "the config dir is not readable: {allow_read:?}"
+        );
+        let files: Vec<String> = settings["sandbox"]["credentials"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap().to_owned())
+            .collect();
+        assert!(
+            files.contains(&config),
+            "the config dir is a denied file: {files:?}"
         );
     }
 

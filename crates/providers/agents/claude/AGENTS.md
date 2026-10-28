@@ -170,38 +170,75 @@ dontAsk`; `--disallowedTools` names every other one of its list, and `--allowedT
 network, or `WebFetch(domain:*),WebSearch` for `open`. With interpreters, `--settings` holds
 the sandbox: `enabled`, `failIfUnavailable: true`, `autoAllowBashIfSandboxed: false`,
 `allowUnsandboxedCommands: false`, `filesystem` (`allowWrite` the mode's `files` under the
-working directory, `denyWrite` its `read_only` paths and `.claude`, `denyRead` its
-`deny_read`, `allowRead` the working directory), `network` (`allowedDomains` the hosts, `["*"]`
-for `open`, none for `denied`; `strictAllowlist: true`), `credentials.envVars` denying (`mode:
-"deny"`) every variable of the Session's environment but `PATH`, `HOME`, `USERPROFILE`,
-`APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`, `LC_CTYPE`,
-`TERM`, `TZ` and the proxy variables, and always `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`
-and `CLAUDE_CODE_OAUTH_TOKEN`; and `permissions.blockReadsOutsideWorkingDirectories: true`.
-A mode with `unsandboxed` gets `{"sandbox":{"enabled":false},"permissions":{…}}` instead. A
-`limited` network with hosts adds, in the same `--settings`, a `PreToolUse` hook on `WebFetch`
-running `PROGRAM assistant web-gate --hosts H1,H2` (`PROGRAM` as for the green ink gate,
-`timeout` 60, `onFailure: "block"`, `disableAllHooks: false`). A network that reaches nothing
-adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1` to the environment. Skills are still refused.
+working directory; `denyWrite` its `read_only` paths, `.claude`, the working directory's
+`.git` and each writable directory's `.git`, so a planted `.git/config` an unsandboxed git
+could act on is refused; `denyRead` `["/"]` and `allowRead` the working directory with the
+system directories an interpreter needs (`/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc`,
+`/opt`, `/dev`; macOS `/usr`, `/bin`, `/sbin`, `/System`, `/Library`, `/opt`, `/etc`, `/var`,
+`/dev`, `/private/etc`, `/private/var/db`) and, on Linux, the sandbox's own network relay
+sockets by name (`/tmp/claude-http-*.sock`, `/tmp/srt-mux-*.sock`, or the same two under the
+Session's `CLAUDE_CODE_TMPDIR` when it has one), so the home directory, AI6's files and IPC
+sockets, `/proc` and other conversations stay unreadable), `network` (`allowedDomains` the
+hosts, `["*"]` for `open`, none for `denied`; `deniedDomains` `localhost`, `*.localhost`,
+`127.0.0.1`, `[::1]`, `169.254.169.254` and the host of each `*_MCP_URL`, an IPv6 one in
+brackets; `strictAllowlist: true`), `credentials.envVars` denying (`mode: "deny"`) every
+variable of the Session's environment but `PATH`, `HOME`, `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TERM` and
+`TZ` (the proxy variables among the denied, since a proxy URL may carry basic-auth), and always
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`;
+`credentials.files` denying each directory a credential variable names (`CLAUDE_CONFIG_DIR`,
+`CODEX_HOME`, any `*_HOME`); and `permissions.blockReadsOutsideWorkingDirectories: true`. A
+mode with `unsandboxed` gets `{"sandbox":{"enabled":false},"permissions":{…}}` instead. Any
+network but `denied` adds, in the same `--settings`, a `PreToolUse` hook on `WebFetch` running
+`PROGRAM assistant web-gate [--hosts …] [--deny …]` (`PROGRAM` as for the green ink gate,
+`timeout` 60, `onFailure: "block"`, `disableAllHooks: false`): `--hosts` is the `limited`
+allow-list, `--deny` the `deniedDomains`, so `open` allows any host but the denied. A network
+that reaches nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1` to the environment. Skills are
+still refused. The desk gives each conversation its own `CLAUDE_CONFIG_DIR`, so the Agent's
+configuration directory (a shared login, every person's transcripts) stays out, and its own
+`TMPDIR` and `CLAUDE_CODE_TMPDIR`, since Claude Code derives the sandbox's `$TMPDIR` from the
+harness's `TMPDIR` and otherwise every conversation of the Station's user shares
+`/tmp/claude-<uid>`. When Claude Code managed settings exist as files on the Station
+(`/etc/claude-code`, `/Library/Application Support/ClaudeCode`, `C:\Program
+Files\ClaudeCode`), each start logs `ai6: Claude Code managed settings at … apply to
+Moneypenny's harness too: …`: they merge with AI6's sandbox and permissions, and
+`allowManagedHooksOnly` would drop the WebFetch gate. Settings delivered by MDM or the claude.ai
+console are not seen.
 
 Measured with 2.1.310 against a loopback stand-in for the API (no model reached), on Linux
-(WSL2 with `bwrap` and `socat`): `python3 -c …` and `python3 personal/calc.py` ran, `sh -c` was
-denied, writes to `shared/` and `CLAUDE.md` failed (read-only file system), reads of the home
-directory, another conversation's directory and the context file failed, no credential
-variable reached the script, a script reached a listed host and was refused (`403`) any other;
-WebFetch fetched a listed host and refused an unlisted one, but also fetched
-`docs.python.org` and `developer.mozilla.org`, documentation domains Claude Code fetches
-without a rule, until the hook refused them (on Windows too). `WebFetch(domain:*)` given in
-`--allowedTools` does not open the sandbox to scripts, so `open` names `*` in
-`allowedDomains` itself. On native Windows `sandbox.enabled` with `failIfUnavailable` makes
-Claude Code exit at start ("sandbox required but unavailable"); with the sandbox off a script
-reached any host, and a command Claude Code cannot trace (`python3 -c "…"`) was refused by
-`dontAsk`. `assistant_scripts` answers why the sandbox cannot run: native Windows, another
-platform than macOS or Linux, or `bwrap` or `socat` missing from the environment's `PATH`
-(else the Station's). WSL1 passes that check and is stopped by `failIfUnavailable`. Inferred,
-not measured: that a Linux host without `bwrap` makes Claude Code exit at start, as the
-settings reference says; that the user's own settings (`--setting-sources user`) can still
-add `sandbox.excludedCommands`, allowed domains or hooks, which are merged rather than
-replaced, so the Agent's Claude Code configuration directory is trusted.
+(WSL2 with `bwrap` and `socat`), with the settings above: `python3 -c …` and `python3
+personal/calc.py` ran and `/etc` was readable, `sh -c` was denied; a script reading the home
+directory, another conversation's directory, the context file or the configuration directory
+got `No such file`; writes to `shared/`, `CLAUDE.md`, `<wd>/.git` and `personal/.git` failed
+and left nothing on the host; no credential variable reached it; it saw only PIDs 1 to 3 (its
+own PID namespace) and `/proc/1/environ` was refused; its own `getaddrinfo` failed (no
+network or resolver in its namespace); with the per-conversation `TMPDIR` it could not read a
+file another conversation left in `/tmp/claude-<uid>`, which it could without; a script
+reached a listed host through the proxy (`502` on a name that does not resolve) and got `403`
+for any other; under `open` it reached `example.com` (`200`) and got `403` "on the deny list"
+for `169.254.169.254`, and loopback was unreachable. `denyRead: ["/"]` without the relay
+sockets re-opened cuts every script off from the proxy (`RemoteDisconnected`, even for a
+listed host), and re-opening the whole temporary directory makes `bwrap` fail to start, hence
+the two sockets by name. Without deny-all reads a script sees AI6's own IPC sockets in `/tmp`
+(`guatiao-remote-shm-*.sock`); with it, only the two relay sockets. WebFetch fetched a listed
+host and refused an unlisted one, and the hook refused `docs.python.org` and
+`developer.mozilla.org` (documentation domains Claude Code fetches without a rule) and, under
+`open`, `localhost` and `169.254.169.254`. `WebFetch(domain:*)` in `--allowedTools` does not
+open the sandbox to scripts, so `open` names `*` in `allowedDomains` itself. On native Windows
+`sandbox.enabled` with `failIfUnavailable` makes Claude Code exit at start ("sandbox required
+but unavailable"); with the sandbox off a script reached any host, and a command Claude Code
+cannot trace (`python3 -c "…"`) was refused by `dontAsk`. Planted into the configuration
+directory, a `settings.json` with `permissions.allow` `Bash(*)`, `defaultMode`
+`bypassPermissions`, `sandbox.excludedCommands` `["*"]` and a `PreToolUse` hook did not take
+effect under `--restricted` (the denied command stayed denied and the hook did not run), and
+the desk's own per-conversation configuration directory holds no such file anyway.
+`assistant_scripts` answers why the sandbox cannot run: native Windows, another platform than
+macOS or Linux, or `bwrap` or `socat` missing from the environment's `PATH` (else the
+Station's). WSL1 passes that check and is stopped by `failIfUnavailable`. Inferred, not
+measured: that a Linux host without `bwrap` makes Claude Code exit at start, as the settings
+reference says; the macOS read roots and relay (macOS uses Seatbelt and was not available to
+measure).
+
 `MultiEdit` and `LS`
 are not denied: Claude Code 2.1.310 warns that such a rule matches no known tool. `Task` is
 the former name of `Agent`, which Claude Code still accepts. Taken
