@@ -553,12 +553,12 @@ mod client {
     }
 }
 
-/// The `ai6` subcommand an assistant's `PreToolUse` hook runs to keep WebFetch to her hosts:
-/// `PROGRAM assistant web-gate --hosts HOST,...`.
+/// The `ai6` subcommand an assistant's `PreToolUse` hook runs to keep WebFetch to the hosts
+/// the deployment allows: `PROGRAM assistant web-gate [--hosts H,…] [--deny H,…]`.
 pub const WEB_GATE_ARGS: [&str; 2] = ["assistant", "web-gate"];
 
 #[cfg(feature = "gate")]
-pub use web::web_fetch_gate;
+pub use web::{host_in, web_fetch_gate};
 
 #[cfg(feature = "gate")]
 mod web {
@@ -566,29 +566,40 @@ mod web {
 
     use super::deny;
 
+    /// Whether `host` matches one of `patterns`: an exact lowercased name, or a `*.example.com`
+    /// entry covering every name under `example.com` but not `example.com` itself, as Claude
+    /// Code's own `WebFetch(domain:…)` rules do.
+    pub fn host_in(host: &str, patterns: &[String]) -> bool {
+        patterns
+            .iter()
+            .any(|pattern| match pattern.strip_prefix("*.") {
+                Some(parent) => host
+                    .strip_suffix(parent)
+                    .is_some_and(|sub| sub.ends_with('.') && sub.len() > 1),
+                None => host == pattern,
+            })
+    }
+
     /// Answers Claude Code's `PreToolUse` hook for WebFetch, `input` being the JSON the hook
-    /// reads: `None` (print nothing, let the fetch go on) when the URL's host is one of
-    /// `hosts`, a `*.example.com` entry covering every name under `example.com` but not
-    /// `example.com` itself, as Claude Code's own `WebFetch(domain:…)` rules do; otherwise the
-    /// decision that denies the fetch, so a host Claude Code fetches without asking (its
-    /// documentation domains) is refused too. Input it cannot read, or a URL with no host
-    /// name, is denied.
-    pub fn web_fetch_gate(input: &str, hosts: &[String]) -> Option<String> {
-        let refused = |why: &str| {
+    /// reads: the decision that denies the fetch when its URL's host is one of `deny`, or, when
+    /// `allow` is not empty, is not one of `allow` (so a host Claude Code would fetch without a
+    /// rule, such as its documentation domains, is refused too); `None` (let the fetch go on)
+    /// otherwise. An empty `allow` allows every host `deny` does not name, for an `open`
+    /// network kept off loopback, the metadata address and the deployment's own hosts. Input it
+    /// cannot read, or a URL with no host name, is denied.
+    pub fn web_fetch_gate(input: &str, allow: &[String], deny_hosts: &[String]) -> Option<String> {
+        let refused = |why: String| {
             Some(deny(&format!(
-                "WebFetch reaches only the hosts this deployment allows ({}); {why}",
-                if hosts.is_empty() {
-                    "none".to_owned()
-                } else {
-                    hosts.join(", ")
-                }
+                "WebFetch is limited by this deployment; {why}"
             )))
         };
         let Ok(input) = serde_json::from_str::<Value>(input) else {
-            return refused("the hook input could not be read, so the fetch is refused.");
+            return refused(
+                "the hook input could not be read, so the fetch is refused.".to_owned(),
+            );
         };
         let Some(url) = input.pointer("/tool_input/url").and_then(Value::as_str) else {
-            return refused("the hook input names no URL, so the fetch is refused.");
+            return refused("the hook input names no URL, so the fetch is refused.".to_owned());
         };
         let host = url::Url::parse(url).ok().and_then(|url| match url.host() {
             Some(url::Host::Domain(domain)) => {
@@ -597,21 +608,18 @@ mod web {
             _ => None,
         });
         let Some(host) = host else {
-            return refused("the URL names no host name, so the fetch is refused.");
+            return refused("the URL names no host name, so the fetch is refused.".to_owned());
         };
-        let listed = hosts
-            .iter()
-            .any(|allowed| match allowed.strip_prefix("*.") {
-                Some(parent) => host
-                    .strip_suffix(parent)
-                    .is_some_and(|sub| sub.ends_with('.') && sub.len() > 1),
-                None => host == *allowed,
-            });
-        if listed {
-            None
-        } else {
-            refused(&format!("{host} is not one of them."))
+        if host_in(&host, deny_hosts) {
+            return refused(format!("{host} is not one it may reach."));
         }
+        if !allow.is_empty() && !host_in(&host, allow) {
+            return refused(format!(
+                "{host} is not among the hosts it may reach ({}).",
+                allow.join(", ")
+            ));
+        }
+        None
     }
 
     #[cfg(test)]
@@ -623,8 +631,8 @@ mod web {
         }
 
         #[test]
-        fn only_listed_hosts_are_fetched_and_everything_else_is_denied() {
-            let hosts = vec!["docs.python.org".to_owned(), "*.pypi.org".to_owned()];
+        fn an_allow_list_keeps_fetches_to_its_hosts() {
+            let allow = vec!["docs.python.org".to_owned(), "*.pypi.org".to_owned()];
             for allowed in [
                 "https://docs.python.org/3/",
                 "http://DOCS.python.org./x",
@@ -632,7 +640,11 @@ mod web {
                 "https://a.b.pypi.org/",
                 "https://user@docs.python.org:8443/x",
             ] {
-                assert_eq!(web_fetch_gate(&fetch(allowed), &hosts), None, "{allowed}");
+                assert_eq!(
+                    web_fetch_gate(&fetch(allowed), &allow, &[]),
+                    None,
+                    "{allowed}"
+                );
             }
             for refused in [
                 "https://developer.mozilla.org/en-US/",
@@ -644,12 +656,45 @@ mod web {
                 "file:///etc/passwd",
                 "not a url",
             ] {
-                let decision = web_fetch_gate(&fetch(refused), &hosts).expect(refused);
+                let decision = web_fetch_gate(&fetch(refused), &allow, &[]).expect(refused);
                 assert!(decision.contains("\"deny\""), "{refused}: {decision}");
             }
-            assert!(web_fetch_gate("{", &hosts).is_some());
-            assert!(web_fetch_gate("{\"tool_input\":{}}", &hosts).is_some());
-            assert!(web_fetch_gate(&fetch("https://docs.python.org/"), &[]).is_some());
+            assert!(web_fetch_gate("{", &allow, &[]).is_some());
+            assert!(web_fetch_gate("{\"tool_input\":{}}", &allow, &[]).is_some());
+            // No allow list: every host but a denied one goes on, for an open network.
+            assert_eq!(
+                web_fetch_gate(&fetch("https://any.example/"), &[], &[]),
+                None
+            );
+        }
+
+        #[test]
+        fn a_deny_list_refuses_its_hosts_even_with_no_allow_list() {
+            let deny_hosts = vec![
+                "localhost".to_owned(),
+                "127.0.0.1".to_owned(),
+                "169.254.169.254".to_owned(),
+                "gateway.ai6.internal".to_owned(),
+            ];
+            for refused in [
+                "https://localhost/",
+                "http://127.0.0.1:8080/",
+                "https://169.254.169.254/latest/meta-data/",
+                "https://gateway.ai6.internal/v1/moneypenny/mcp",
+            ] {
+                let decision = web_fetch_gate(&fetch(refused), &[], &deny_hosts).expect(refused);
+                assert!(decision.contains("\"deny\""), "{refused}: {decision}");
+            }
+            assert_eq!(
+                web_fetch_gate(&fetch("https://docs.python.org/"), &[], &deny_hosts),
+                None
+            );
+            // A denied host is refused even when an allow list would admit it.
+            let allow = vec!["gateway.ai6.internal".to_owned()];
+            assert!(
+                web_fetch_gate(&fetch("https://gateway.ai6.internal/"), &allow, &deny_hosts)
+                    .is_some()
+            );
         }
     }
 }

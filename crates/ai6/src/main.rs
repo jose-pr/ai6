@@ -112,13 +112,17 @@ enum GreenInkCommand {
 #[derive(Debug, Subcommand)]
 enum AssistantCommand {
     /// Claude Code's PreToolUse hook for Moneypenny's WebFetch. Reads the hook's JSON on
-    /// standard input; for a URL whose host is not one of --hosts (`*.example.com` covering
-    /// the names under it), and for input it cannot read, prints a decision that denies the
-    /// fetch. Prints nothing otherwise; always exits 0.
+    /// standard input; denies a fetch whose host is one of --deny, or, when --hosts is given,
+    /// is not one of them (`*.example.com` covers the names under it), and denies input it
+    /// cannot read. Prints nothing otherwise; always exits 0.
     WebGate {
-        /// The hosts she may fetch from, separated by commas.
+        /// The hosts she may fetch from, separated by commas; none allows any host --deny does
+        /// not name.
         #[arg(long, value_delimiter = ',')]
         hosts: Vec<String>,
+        /// Hosts she may never fetch, separated by commas, whatever --hosts says.
+        #[arg(long, value_delimiter = ',')]
+        deny: Vec<String>,
     },
 }
 
@@ -394,8 +398,8 @@ async fn main() -> ExitCode {
             command: GreenInkCommand::Gate { cable_url },
         } => green_ink_gate(cable_url).await,
         Command::Assistant {
-            command: AssistantCommand::WebGate { hosts },
-        } => assistant_web_gate(&hosts),
+            command: AssistantCommand::WebGate { hosts, deny },
+        } => assistant_web_gate(&hosts, &deny),
         Command::Plugins {
             command: PluginsCommand::Pin { paths },
         } => {
@@ -646,9 +650,9 @@ async fn green_ink_gate(cable_url: Option<String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Reads the hook input and prints a denial when the fetch's host is not one of `hosts`; a
-/// failure to read the input denies too.
-fn assistant_web_gate(hosts: &[String]) -> ExitCode {
+/// Reads the hook input and prints a denial when the fetch's host is one of `deny`, or not one
+/// of `hosts` when it is given; a failure to read the input denies too.
+fn assistant_web_gate(hosts: &[String], deny: &[String]) -> ExitCode {
     use ai6::directorates::section_00::gate::web_fetch_gate;
     use std::io::Read;
     let mut input = String::new();
@@ -656,7 +660,7 @@ fn assistant_web_gate(hosts: &[String]) -> ExitCode {
     if std::io::stdin().read_to_string(&mut input).is_err() {
         input.clear();
     }
-    if let Some(decision) = web_fetch_gate(&input, hosts) {
+    if let Some(decision) = web_fetch_gate(&input, hosts, deny) {
         println!("{decision}");
     }
     ExitCode::SUCCESS
