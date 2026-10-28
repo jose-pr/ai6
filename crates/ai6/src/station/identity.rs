@@ -27,7 +27,8 @@ pub const IDENTITY_FILE: &str = "identity.pem";
 
 /// Why a Station identity, trust store or TLS configuration could not be made.
 ///
-/// The messages never hold key material or paths.
+/// The messages never hold key material. A CA file that cannot be used
+/// ([`PeerError::CaFile`]) is named by its path.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum StationIdentityError {
