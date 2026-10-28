@@ -53,8 +53,11 @@ discovers Guatiao providers and reports unavailable ones in its diagnostics.
 so it sees no terminal: a harness that checks (`claude -p` refuses to read its input from a
 terminal) reads what is written to it, nothing is echoed, an input line of any length arrives
 whole, and the output is the program's bytes exactly, with no CR inserted and no control
-sequence. Standard error goes into the same pipe as standard output, keeping the order the
-program wrote them in; the provider setting `stderr = "drop"` discards it instead. The output
+sequence. Standard error goes through a pipe of its own, and only its last 8 KiB, from the first
+whole line in them, follow the output once it has ended, so a JSON stream is never broken up by
+it and the handler still reads why a harness failed. The provider setting `stderr = "merge"`
+puts it into the same pipe as standard output instead, keeping the order the program wrote
+them in, and `stderr = "drop"` discards it. The output
 ends once the program has exited and its pipe has closed, or, when a process it left running
 holds the pipe, once it has exited and nothing has arrived for 200 ms. `resize` does nothing.
 With no terminal, a written `^C` is one more byte of input, not a signal, so a JSON harness is

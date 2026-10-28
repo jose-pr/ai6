@@ -241,8 +241,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   fails the check. `tools.view_image`, which Codex reports as unrecognized, is not passed.
 - The `pipe` terminal provider (`ai6-terminal-pipe`): the program gets plain pipes for its
   standard input and output and no terminal, so its output arrives byte for byte and a
-  harness that checks for a terminal reads its input. Standard error is merged into the
-  output (`stderr = "merge"`, the default) or dropped (`"drop"`). Kill takes the whole tree:
+  harness that checks for a terminal reads its input. Standard error goes through a pipe of
+  its own and only its last 8 KiB of whole lines follow the output once it has ended
+  (`stderr = "tail"`, the default, `ai6_terminal_pipe::STDERR_TAIL_BYTES`), so a JSON stream
+  is never broken up by it; it can be merged into the output (`"merge"`) or dropped
+  (`"drop"`). Kill takes the whole tree:
   a process group on Unix, a Job Object on Windows.
 - A handler declares how its harness talks (`AgentHandler::stdio`: `terminal` by default,
   `json` for the Claude Code and Codex handlers) and a terminal provider whether it gives a

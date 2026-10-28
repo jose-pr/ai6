@@ -7,8 +7,9 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/ai6/test.yml)](https://github.com/jose-pr/ai6/actions/workflows/test.yml)
 
 The `pipe` terminal provider for [AI6](https://github.com/jose-pr/ai6): **a program on plain
-pipes, with no terminal**. Its standard input is a pipe, and its standard output, with standard
-error merged in, is the output stream, byte for byte. A Station gives it to harnesses whose
+pipes, with no terminal**. Its standard input is a pipe, and its standard output is the output
+stream, byte for byte, followed by the last lines of its standard error. A Station gives it to
+harnesses whose
 handler speaks JSON over standard input and output (Claude Code, Codex), which a terminal would
 render or refuse. See the
 [API header](https://github.com/jose-pr/ai6/blob/main/crates/providers/terminals/pipe/AGENTS.md).
@@ -17,7 +18,9 @@ render or refuse. See the
 
 - Output exactly as the program wrote it: no line-break translation, no control sequences.
 - Input of any length reaches the program whole; nothing is echoed.
-- Standard error merged into the output (the default) or dropped.
+- Standard error on a pipe of its own, its last 8 KiB following the output once it has ended
+  (the default), merged into the output, or dropped.
+- The program inherits only its standard streams.
 - Kills the whole process tree: a process group and the processes found by parent from it on
   Unix, a Job Object on Windows.
 - Builds as both a Rust library and the Guatiao provider library a Station loads.

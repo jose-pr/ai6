@@ -60,6 +60,7 @@ pub(crate) fn spawn(launch: Launch<'_>) -> io::Result<(Process, ProcessTree)> {
     let stderr = match launch.stderr {
         ErrorOutput::Stdout => Stdio::from(launch.stdout.try_clone()?),
         ErrorOutput::Null => Stdio::null(),
+        ErrorOutput::Pipe(writer) => Stdio::from(writer),
     };
     cmd.stdin(launch.stdin).stdout(launch.stdout).stderr(stderr);
     // SAFETY: the hook runs in the child between fork and exec, and calls only setsid, fcntl,

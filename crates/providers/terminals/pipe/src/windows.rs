@@ -135,6 +135,7 @@ pub(crate) fn spawn(launch: Launch<'_>) -> io::Result<(Process, ProcessTree)> {
             let null = std::fs::OpenOptions::new().write(true).open("NUL")?;
             Some(inheritable(null.as_raw_handle())?)
         }
+        ErrorOutput::Pipe(writer) => Some(inheritable(writer.as_raw_handle())?),
     };
     let error_handle = stderr.as_ref().unwrap_or(&stdout).as_raw_handle();
     let mut inherited = vec![stdin.as_raw_handle(), stdout.as_raw_handle()];

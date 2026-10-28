@@ -15,15 +15,19 @@ comment; the rest of the crate denies it.
 
 - `Pipe` — implements `ai6::directorates::q::terminal::Terminal`; `tty()` answers `false`,
   so a Station gives it to a harness whose handler declares `HarnessStdio::Json`, preferring
-  it to other providers without a terminal. `Pipe::default()` merges
-  standard error; `Pipe::new(PipeConfig)` takes a configuration. As a Guatiao provider it is
-  built from a `PipeConfig` value, and from an empty map (every field defaulted) when the host
-  passes none.
+  it to other providers without a terminal. `Pipe::default()` keeps only standard error's
+  tail; `Pipe::new(PipeConfig)` takes a configuration. As a Guatiao provider it is built from a
+  `PipeConfig` value, and from an empty map (every field defaulted) when the host passes none.
 - `PipeConfig { stderr: StderrMode }` — `ToValue`, `FromValue`, `Schema`, `Default`.
-  `stderr` defaults to `merge`.
-- `StderrMode` — `Merge` (`"merge"`, the default): standard error goes into the output
-  stream, through the same pipe as standard output, so the order the program wrote them in is
-  kept. `Drop` (`"drop"`): discarded.
+  `stderr` defaults to `tail`.
+- `StderrMode` — `Tail` (`"tail"`, the default): standard error goes through a pipe of its
+  own, and only its last `STDERR_TAIL_BYTES` (8192), from the first whole line in them, are
+  added to the output once the program's own output has ended, as lines of their own (preceded
+  by a line feed when the output ended inside a line). A JSON stream on standard output is
+  never broken up by it, and the last thing the program said there (why it failed) is still
+  read. `Merge` (`"merge"`): into the output stream, through the same pipe as standard output,
+  in the order the program wrote them. `Drop` (`"drop"`): discarded.
+- `STDERR_TAIL_BYTES: usize = 8192` — how much of the end of standard error `Tail` keeps.
 
 ## Session behaviour
 
@@ -51,7 +55,7 @@ comment; the rest of the crate denies it.
 - **Output** is read on a thread into a channel, so `read` honours its timeout; a chunk
   larger than the caller's buffer is kept for the next `read`.
 - **End of output**: `read` returns `0` once the program has exited and its output pipe has
-  closed. A process the program left running that holds the pipe keeps it open; then the
+  closed, after standard error's tail under `Tail` (whose pipe is waited for up to 200 ms). A process the program left running that holds the pipe keeps it open; then the
   end is reported once the program has exited and nothing has arrived for 200 ms. A pipe that
   closes while the program still runs ends nothing until it exits. After the first `0`, every
   `read` returns `0`.

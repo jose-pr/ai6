@@ -2,6 +2,7 @@ pub mod ai6_terminal_pipe
 pub enum ai6_terminal_pipe::StderrMode
 pub ai6_terminal_pipe::StderrMode::Drop
 pub ai6_terminal_pipe::StderrMode::Merge
+pub ai6_terminal_pipe::StderrMode::Tail
 pub struct ai6_terminal_pipe::Pipe
 impl ai6_terminal_pipe::Pipe
 pub fn ai6_terminal_pipe::Pipe::new(ai6_terminal_pipe::PipeConfig) -> Self
@@ -19,5 +20,6 @@ pub ai6_terminal_pipe::PipeConfig::stderr: ai6_terminal_pipe::StderrMode
 impl core::convert::TryFrom<ai6_terminal_pipe::PipeConfig> for ai6_terminal_pipe::Pipe
 pub type ai6_terminal_pipe::Pipe::Error = guatiao::library::kind::ProviderError
 pub fn ai6_terminal_pipe::Pipe::try_from(ai6_terminal_pipe::PipeConfig) -> core::result::Result<Self, Self::Error>
+pub const ai6_terminal_pipe::STDERR_TAIL_BYTES: usize
 #[no_mangle] pub static ai6_terminal_pipe::guatiao_declares: [u8; 19]
 #[no_mangle] pub unsafe c fn ai6_terminal_pipe::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

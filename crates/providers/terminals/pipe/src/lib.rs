@@ -30,11 +30,11 @@ mod process_tree;
 #[path = "../../process_tree/windows.rs"]
 mod process_tree;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{PipeReader, PipeWriter, Read, Write};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
@@ -53,13 +53,20 @@ const EXIT_CHECK: Duration = Duration::from_millis(50);
 const DRAIN_QUIET: Duration = Duration::from_millis(200);
 /// The longest `kill` waits for the child and its process tree to have exited.
 const KILL_WAIT: Duration = Duration::from_secs(2);
+/// How much of the end of standard error [`StderrMode::Tail`] keeps.
+pub const STDERR_TAIL_BYTES: usize = 8192;
 
 /// What becomes of the program's standard error.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[map(crate = ::ai6::guatiao, rename_all = "lowercase")]
 pub enum StderrMode {
-    /// Written into the output stream, in the order the program wrote it.
+    /// Read through a pipe of its own, and only its last [`STDERR_TAIL_BYTES`] (from the first
+    /// whole line in them) added to the output after the program's own output has ended, as
+    /// lines of their own. A JSON stream on standard output is never broken up by it, and what
+    /// the program said last on standard error, such as why it failed, is still read.
     #[default]
+    Tail,
+    /// Written into the output stream, in the order the program wrote it.
     Merge,
     /// Discarded.
     Drop,
@@ -69,8 +76,8 @@ pub enum StderrMode {
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[map(crate = ::ai6::guatiao)]
 pub struct PipeConfig {
-    /// What becomes of standard error: `merge` (the default) or `drop`.
-    #[map(default = StderrMode::Merge)]
+    /// What becomes of standard error: `tail` (the default), `merge` or `drop`.
+    #[map(default = StderrMode::Tail)]
     pub stderr: StderrMode,
 }
 
@@ -128,6 +135,60 @@ struct PipeSession {
     child: Mutex<Process>,
     tree: ProcessTree,
     exit: Mutex<Option<ExitInfo>>,
+    /// With [`StderrMode::Tail`], the end of standard error, until the output has ended.
+    errors: Option<Arc<Mutex<ErrorTail>>>,
+    /// The last byte `read` handed out, `\n` before any.
+    last_byte: AtomicU8,
+}
+
+/// The end of a program's standard error, as its own pipe delivers it.
+#[derive(Default)]
+struct ErrorTail {
+    bytes: VecDeque<u8>,
+    /// Whether bytes were dropped from the front.
+    cut: bool,
+    /// Whether the pipe has closed.
+    closed: bool,
+    /// Whether the tail has been added to the output.
+    taken: bool,
+}
+
+impl ErrorTail {
+    fn push(&mut self, chunk: &[u8]) {
+        self.bytes.extend(chunk);
+        let over = self.bytes.len().saturating_sub(STDERR_TAIL_BYTES);
+        if over > 0 {
+            self.bytes.drain(..over);
+            self.cut = true;
+        }
+    }
+
+    /// The tail as whole lines, once: from the first line that was not cut, ending with a line
+    /// feed, and starting with one when the output it follows (whose last byte is `last`) ended
+    /// inside a line.
+    fn take(&mut self, last: u8) -> Vec<u8> {
+        if self.taken {
+            return Vec::new();
+        }
+        self.taken = true;
+        let mut bytes: Vec<u8> = std::mem::take(&mut self.bytes).into();
+        if self.cut
+            && let Some(at) = bytes.iter().position(|&byte| byte == b'\n')
+            && at + 1 < bytes.len()
+        {
+            bytes.drain(..=at);
+        }
+        if bytes.is_empty() {
+            return bytes;
+        }
+        if bytes.last() != Some(&b'\n') {
+            bytes.push(b'\n');
+        }
+        if last != b'\n' {
+            bytes.insert(0, b'\n');
+        }
+        bytes
+    }
 }
 
 /// A program to start, and the child's ends of its pipes, which `os::spawn` closes in this
@@ -149,6 +210,8 @@ pub(crate) enum ErrorOutput {
     Stdout,
     /// To the null device.
     Null,
+    /// Into a pipe of its own.
+    Pipe(PipeWriter),
 }
 
 impl PipeSession {
@@ -159,6 +222,14 @@ impl PipeSession {
             .ok_or_else(|| refuse(Status::GUATIAO_ERR_BAD_VALUE, "argv is empty"))?;
         let (stdin, input) = std::io::pipe().map_err(internal)?;
         let (mut output, writer) = std::io::pipe().map_err(internal)?;
+        let (error_output, error_reader) = match stderr {
+            StderrMode::Tail => {
+                let (reader, writer) = std::io::pipe().map_err(internal)?;
+                (ErrorOutput::Pipe(writer), Some(reader))
+            }
+            StderrMode::Merge => (ErrorOutput::Stdout, None),
+            StderrMode::Drop => (ErrorOutput::Null, None),
+        };
         let launch = Launch {
             program,
             args,
@@ -166,15 +237,38 @@ impl PipeSession {
             cwd: spec.cwd.as_deref(),
             stdin,
             stdout: writer,
-            stderr: match stderr {
-                StderrMode::Merge => ErrorOutput::Stdout,
-                StderrMode::Drop => ErrorOutput::Null,
-            },
+            stderr: error_output,
         };
         let (child, tree) = os::spawn(launch)
             .map_err(|error| internal(format!("cannot start {program:?}: {error}")))?;
         let pid = i64::from(child.id());
         let stdin = input;
+
+        let errors = match error_reader {
+            Some(mut reader) => {
+                let errors = Arc::new(Mutex::new(ErrorTail::default()));
+                let tail = errors.clone();
+                std::thread::Builder::new()
+                    .name(format!("pipe-{pid}-stderr"))
+                    .spawn(move || {
+                        let mut buf = vec![0u8; READ_CHUNK];
+                        loop {
+                            let read = reader.read(&mut buf);
+                            let Ok(mut tail) = tail.lock() else { break };
+                            match read {
+                                Ok(0) | Err(_) => {
+                                    tail.closed = true;
+                                    break;
+                                }
+                                Ok(n) => tail.push(&buf[..n]),
+                            }
+                        }
+                    })
+                    .map_err(internal)?;
+                Some(errors)
+            }
+            None => None,
+        };
 
         let (tx, rx) = channel();
         std::thread::Builder::new()
@@ -205,7 +299,31 @@ impl PipeSession {
             child: Mutex::new(child),
             tree,
             exit: Mutex::new(None),
+            errors,
+            last_byte: AtomicU8::new(b'\n'),
         })
+    }
+
+    /// The tail of standard error, once the output has ended, if it holds anything and has not
+    /// been taken: waits up to [`DRAIN_QUIET`] for its pipe to close, which a process the
+    /// program left running may hold open.
+    fn error_tail(&self) -> Result<Option<Vec<u8>>, ProviderError> {
+        let Some(errors) = &self.errors else {
+            return Ok(None);
+        };
+        let deadline = Instant::now() + DRAIN_QUIET;
+        loop {
+            let mut tail = lock(errors)?;
+            if tail.taken {
+                return Ok(None);
+            }
+            if tail.closed || Instant::now() >= deadline {
+                let bytes = tail.take(self.last_byte.load(Ordering::Acquire));
+                return Ok((!bytes.is_empty()).then_some(bytes));
+            }
+            drop(tail);
+            std::thread::sleep(EXIT_POLL);
+        }
     }
 
     fn poll_exit(&self) -> Result<Option<ExitInfo>, ProviderError> {
@@ -244,6 +362,10 @@ impl TerminalSession for PipeSession {
                 if self.closed.load(Ordering::Acquire) {
                     // The pipe has closed; the output ends with the program.
                     if exited {
+                        if let Some(tail) = self.error_tail()? {
+                            *pending = tail;
+                            break;
+                        }
                         return self.end();
                     }
                     if now >= deadline {
@@ -269,6 +391,10 @@ impl TerminalSession for PipeSession {
                     Err(RecvTimeoutError::Timeout) => {
                         let now = Instant::now();
                         if drained_at.is_some_and(|at| now >= at) {
+                            if let Some(tail) = self.error_tail()? {
+                                *pending = tail;
+                                break;
+                            }
                             return self.end();
                         }
                         if now >= deadline {
@@ -281,6 +407,9 @@ impl TerminalSession for PipeSession {
         let n = pending.len().min(dst.len());
         dst[..n].copy_from_slice(&pending[..n]);
         pending.drain(..n);
+        if let Some(&last) = dst[..n].last() {
+            self.last_byte.store(last, Ordering::Release);
+        }
         Ok(n as i64)
     }
 

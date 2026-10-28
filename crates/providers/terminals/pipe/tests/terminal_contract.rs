@@ -143,7 +143,7 @@ fn pipe_child() {
 
 /// An input line far longer than a terminal's line limit reaches the program whole, the
 /// program sees no terminal, and its output arrives as written: no CR before a line feed and
-/// no control sequence. Standard error is merged into the output.
+/// no control sequence. Standard error's last line follows the output.
 #[test]
 fn a_long_line_arrives_whole_and_the_output_is_exact() {
     let session = start_child(
@@ -164,8 +164,68 @@ fn a_long_line_arrives_whole_and_the_output_is_exact() {
     assert!(contains(&output, &payload()), "the payload arrives exact");
     assert!(!output.contains(&b'\r'), "no CR was inserted");
     assert!(!output.contains(&0x1b), "no control sequence was added");
-    assert!(contains(&output, b"AI6_PIPE_STDERR\n"), "stderr is merged");
+    assert!(
+        output.ends_with(b"AI6_PIPE_STDERR\n"),
+        "stderr's tail ends the output"
+    );
     assert_eq!(exit_now(&session).code, Some(0));
+}
+
+/// The child of [`stderr_keeps_out_of_the_stream_and_only_its_tail_follows`]: a line on
+/// standard output, many on standard error, then another on standard output.
+#[test]
+fn pipe_noisy_child() {
+    if std::env::var_os("AI6_PIPE_NOISY").is_none() {
+        return;
+    }
+    println!("AI6_OUT_FIRST");
+    std::io::stdout().flush().unwrap();
+    for n in 0..2000 {
+        eprintln!("AI6_ERR_{n:04}");
+    }
+    println!("AI6_OUT_SECOND");
+    std::io::stdout().flush().unwrap();
+}
+
+/// By default standard error never breaks into the program's output; only its last lines, up to
+/// `STDERR_TAIL_BYTES`, follow the output once it has ended. Merged, it lands in between.
+#[test]
+fn stderr_keeps_out_of_the_stream_and_only_its_tail_follows() {
+    let noisy = [("AI6_PIPE_NOISY", "1".to_owned())];
+    let output = read_to_end(&start_child(Pipe::default(), "pipe_noisy_child", &noisy));
+    let text = String::from_utf8_lossy(&output);
+    assert!(
+        text.contains("AI6_OUT_FIRST\nAI6_OUT_SECOND\n"),
+        "{}",
+        &text[..text.len().min(200)]
+    );
+    // The test harness's own report ends standard output; the tail comes after it.
+    let errors = &text[text.find("AI6_ERR_").unwrap()..];
+    assert!(text.find("test result").unwrap() < text.find("AI6_ERR_").unwrap());
+    assert!(
+        errors.len() <= ai6_terminal_pipe::STDERR_TAIL_BYTES,
+        "{}",
+        errors.len()
+    );
+    assert!(errors.ends_with("AI6_ERR_1999\n"), "the last line is kept");
+    assert!(!errors.contains("AI6_ERR_0000"), "the first is not");
+    assert!(
+        errors
+            .lines()
+            .all(|line| line.len() == "AI6_ERR_0000".len()),
+        "only whole lines"
+    );
+
+    let merged = Pipe::new(PipeConfig {
+        stderr: StderrMode::Merge,
+    });
+    let output = read_to_end(&start_child(merged, "pipe_noisy_child", &noisy));
+    let text = String::from_utf8_lossy(&output);
+    let second = text.find("AI6_OUT_SECOND").unwrap();
+    assert!(
+        text[..second].contains("AI6_ERR_0000"),
+        "merged, it is in between"
+    );
 }
 
 /// With `stderr = "drop"` the program's standard error is discarded.
@@ -181,19 +241,23 @@ fn dropped_stderr_is_not_in_the_output() {
     assert!(!contains(&output, b"AI6_PIPE_STDERR"));
 }
 
-/// A configuration with no settings is the default: standard error merged.
+/// A configuration with no settings is the default: only standard error's tail kept.
 #[test]
-fn an_empty_configuration_merges_stderr() {
+fn an_empty_configuration_keeps_only_the_stderr_tail() {
     let empty = BTreeMap::<String, String>::new().to_value().unwrap();
     let config = PipeConfig::from_value(&empty).unwrap();
-    assert_eq!(config.stderr, StderrMode::Merge);
-    let drop = BTreeMap::from([("stderr".to_owned(), "drop".to_owned())])
-        .to_value()
-        .unwrap();
-    assert_eq!(
-        PipeConfig::from_value(&drop).unwrap().stderr,
-        StderrMode::Drop
-    );
+    assert_eq!(config.stderr, StderrMode::Tail);
+    assert_eq!(PipeConfig::default().stderr, StderrMode::Tail);
+    for (name, mode) in [
+        ("tail", StderrMode::Tail),
+        ("merge", StderrMode::Merge),
+        ("drop", StderrMode::Drop),
+    ] {
+        let value = BTreeMap::from([("stderr".to_owned(), name.to_owned())])
+            .to_value()
+            .unwrap();
+        assert_eq!(PipeConfig::from_value(&value).unwrap().stderr, mode);
+    }
 }
 
 /// The child of [`a_child_that_exits_early_ends_its_output`]: writes a line and exits with
