@@ -2324,7 +2324,29 @@ impl HarnessTerminal {
 /// `ai6: WHO: HOW the HANDLER harness in the TERMINAL terminal`. A Mission's Session record
 /// also keeps them (`SessionLaunch`); an assistant Session has no record.
 pub(super) fn log_harness_start(who: &str, how: &str, handler: &str, terminal: &str) {
-    eprintln!("ai6: {who}: {how} the {handler} harness in the {terminal} terminal");
+    eprintln!("{}", harness_start_line(who, how, handler, terminal));
+}
+
+/// The line [`log_harness_start`] writes. A runner reports the handler and terminal, so a value
+/// outside the provider-ID characters (letters, digits, `-`, `_`, `.`) is quoted and escaped,
+/// and cannot start a line of its own in the Station's log.
+fn harness_start_line(who: &str, how: &str, handler: &str, terminal: &str) -> String {
+    let shown = |value: &str| {
+        let plain = !value.is_empty()
+            && value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if plain {
+            value.to_owned()
+        } else {
+            format!("{value:?}")
+        }
+    };
+    format!(
+        "ai6: {who}: {how} the {} harness in the {} terminal",
+        shown(handler),
+        shown(terminal)
+    )
 }
 
 /// Records which runner Session a Mission's harness is, and the terminal the runner chose.
@@ -5988,6 +6010,25 @@ mod tests {
 
     use super::*;
     use crate::directorates::registry::store::FileRegistry;
+
+    #[test]
+    fn a_runner_reported_provider_cannot_forge_a_log_line() {
+        assert_eq!(
+            harness_start_line("Mission \"m\"", "started", "claude", "pipe"),
+            "ai6: Mission \"m\": started the claude harness in the pipe terminal"
+        );
+        let forged = harness_start_line(
+            "Mission \"m\"",
+            "runner Session \"k\" runs",
+            "claude\nai6: weakening: none",
+            "pty\r",
+        );
+        assert!(!forged.contains(['\n', '\r']), "{forged}");
+        assert!(
+            forged.contains(r#"the "claude\nai6: weakening: none" harness in the "pty\r""#),
+            "{forged}"
+        );
+    }
 
     #[test]
     fn a_failed_cover_policy_marks_the_mission_blown() {
