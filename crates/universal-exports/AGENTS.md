@@ -472,7 +472,8 @@ Directory groups), so the Station re-caps both by its own roster's tables rather
 gateway's narrowing. Every job carries
 `exposed`, the conversation's one record of exposure (`Conversation.exposed`, never cleared):
 set once a read tool other than `field_guide`, `profile` and `station_settings` answers
-without error (before she gets the answer), when a Station reports a `tool` event naming
+with text a route gave (a result, or a refusal quoting the route's answer: any status but
+401, 403, 404 and 503), before she gets the answer, when a Station reports a `tool` event naming
 `WebFetch` or `WebSearch`, or `Bash` while the last job's reach lets scripts reach a host
 (`ai6::outside_tool`; the conversation shows a `notice` naming the tool), and by the Station
 running the conversation through `POST

@@ -249,7 +249,8 @@ again from what the file holds now.
 A conversation is exposed, for good, when:
 
 - any of her read tools answers other than `field_guide`, `profile` and `station_settings`
-  (every other one can quote an Agent, a brief or another person);
+  (every other one can quote an Agent, a brief or another person), with a result or with a
+  refusal that quotes what AI6 answered;
 - she reads a [Cable](#cables) body;
 - she reads one of the files she wrote in an exposed conversation. The Station keeps their
   paths in `.moneypenny/outside-text/` in the personal repository, a hidden directory she

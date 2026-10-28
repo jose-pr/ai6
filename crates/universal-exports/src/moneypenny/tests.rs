@@ -2311,6 +2311,41 @@ async fn a_read_tool_exposes_unless_it_quotes_no_one() {
     assert_eq!(now.json::<Value>().await.unwrap(), json!({"exposed": true}));
 }
 
+#[tokio::test]
+async fn a_failed_read_tool_that_quotes_its_answer_exposes_too() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "What happened?").await;
+    // A refusal that says only what the status means quotes no one.
+    let refused = call_tool(
+        &served,
+        &job.mcp_token,
+        "timeline",
+        json!({"operation_id": "nowhere"}),
+    )
+    .await;
+    assert_eq!(refused["isError"], true);
+    let still = exposure_of(&served, "hq", &job.conversation_id).await;
+    assert_eq!(
+        still.json::<Value>().await.unwrap(),
+        json!({"exposed": false})
+    );
+    // One that quotes the route's answer is read as any result is.
+    let quoted = call_tool(
+        &served,
+        &job.mcp_token,
+        "timeline",
+        json!({"operation_id": "G", "cursor": "nonsense"}),
+    )
+    .await;
+    assert_eq!(quoted["isError"], true, "{quoted}");
+    assert!(
+        quoted.to_string().contains("ai6-data"),
+        "the refusal quotes the answer: {quoted}"
+    );
+    let now = exposure_of(&served, "hq", &job.conversation_id).await;
+    assert_eq!(now.json::<Value>().await.unwrap(), json!({"exposed": true}));
+}
+
 /// What `GET /v1/station/assistant/exposure` answers `station`, with its status.
 async fn exposure(served: &Served, station: &str, conversation: &str) -> (StatusCode, Value) {
     let response = exposure_of(served, station, conversation).await;

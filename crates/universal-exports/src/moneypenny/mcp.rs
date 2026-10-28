@@ -142,9 +142,10 @@ pub(crate) async fn endpoint(
             } else if let Some(tool) = write {
                 assistant.propose(&gateway, &granted, tool, &input).await
             } else {
-                let outcome = tools::run(&gateway, &granted.bearer, name, &input).await;
-                // Marked before she reads the text, so whatever waits on exposure waits.
-                if !outcome.is_error && tools::exposes(name) {
+                let (outcome, quoted) = tools::run(&gateway, &granted.bearer, name, &input).await;
+                // Marked before she reads the text, so whatever waits on exposure waits; a
+                // refusal quoting the route's answer can carry others' text as well as a result.
+                if quoted && tools::exposes(name) {
                     assistant.mark_exposed(&granted.conversation_id);
                 }
                 outcome

@@ -20,7 +20,8 @@ use crate::Gateway;
 /// numeric limits. Every other read tool exposes the conversation, including any added later.
 pub(crate) const QUIET_TOOLS: [&str; 3] = ["field_guide", "profile", "station_settings"];
 
-/// Whether a successful call of read tool `name` exposes the conversation.
+/// Whether a call of read tool `name` whose text quotes a route's answer exposes the
+/// conversation.
 pub(crate) fn exposes(name: &str) -> bool {
     !QUIET_TOOLS.contains(&name)
 }
@@ -630,26 +631,45 @@ pub(crate) fn refusal(status: StatusCode, value: &Value) -> String {
     }
 }
 
-/// Runs the read tool `name` with `input` as the holder of `bearer`.
-pub(crate) async fn run(gateway: &Gateway, bearer: &str, name: &str, input: &Value) -> Outcome {
+/// Whether [`refusal`] of `status` quotes the route's answer, which may hold text others wrote.
+fn refusal_quotes(status: StatusCode) -> bool {
+    !matches!(
+        status,
+        StatusCode::UNAUTHORIZED
+            | StatusCode::FORBIDDEN
+            | StatusCode::NOT_FOUND
+            | StatusCode::SERVICE_UNAVAILABLE
+    )
+}
+
+/// Runs the read tool `name` with `input` as the holder of `bearer`; also answers whether its
+/// text quotes what a route answered, as a result or in a refusal, which [`exposes`] then
+/// judges whatever the outcome.
+pub(crate) async fn run(
+    gateway: &Gateway,
+    bearer: &str,
+    name: &str,
+    input: &Value,
+) -> (Outcome, bool) {
     let Some(tool) = read_tools().iter().find(|tool| tool.name == name) else {
-        return Outcome::error(format!("There is no tool {name:?}."));
+        return (Outcome::error(format!("There is no tool {name:?}.")), false);
     };
     if let Err(problem) = check(&tool.schema(), input, "input") {
-        return Outcome::error(format!("INVALID_INPUT: {problem}"));
+        return (Outcome::error(format!("INVALID_INPUT: {problem}")), false);
     }
     let empty = Map::new();
     let input = input.as_object().unwrap_or(&empty);
     let plan = match (tool.plan)(input) {
         Ok(plan) => plan,
-        Err(problem) => return Outcome::error(format!("INVALID_INPUT: {problem}")),
+        Err(problem) => return (Outcome::error(format!("INVALID_INPUT: {problem}")), false),
     };
     let calls = match plan {
         Plan::Guide(text) => {
-            return Outcome {
+            let guide = Outcome {
                 text: text.to_owned(),
                 is_error: false,
             };
+            return (guide, false);
         }
         Plan::Read(calls) => calls,
     };
@@ -663,8 +683,18 @@ pub(crate) async fn run(gateway: &Gateway, bearer: &str, name: &str, input: &Val
                 };
                 results.insert((*key).to_owned(), value);
             }
-            Ok((status, value)) => return Outcome::error(refusal(status, &value)),
-            Err(error) => return Outcome::error(format!("The request failed: {error}")),
+            Ok((status, value)) => {
+                return (
+                    Outcome::error(refusal(status, &value)),
+                    refusal_quotes(status),
+                );
+            }
+            Err(error) => {
+                return (
+                    Outcome::error(format!("The request failed: {error}")),
+                    false,
+                );
+            }
         }
     }
     let value = if calls.len() == 1 {
@@ -672,10 +702,11 @@ pub(crate) async fn run(gateway: &Gateway, bearer: &str, name: &str, input: &Val
     } else {
         Value::Object(results)
     };
-    Outcome {
+    let read = Outcome {
         text: wrap(name, &value),
         is_error: false,
-    }
+    };
+    (read, true)
 }
 
 #[cfg(test)]
