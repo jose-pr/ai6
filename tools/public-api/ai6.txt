@@ -3875,16 +3875,19 @@ pub ai6::directorates::section_00::agent::UsageLimit::window: core::option::Opti
 pub const ai6::directorates::section_00::agent::LIMIT_EVENT: &str
 pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -4073,6 +4076,8 @@ pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_SHARED_BASES: 
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_SKILLS: usize
 pub const ai6::directorates::section_00::assistant::MAX_MEMORY_FILES: usize
 pub const ai6::directorates::section_00::assistant::MAX_MEMORY_LIST_BYTES: usize
+pub const ai6::directorates::section_00::assistant::SCRIPT_ENVIRONMENT: [&str; 14]
+pub fn ai6::directorates::section_00::assistant::credential_dir_var(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::host_pattern(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::interpreter_name(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::memory_path(&str) -> bool
@@ -7140,6 +7145,7 @@ pub const ai6::REVIEW_DATA_KEY: &str
 pub const ai6::REVIEW_SOURCE: &str
 pub const ai6::SAFE_HOUSE_DELETE: &str
 pub const ai6::SCOPE_KINDS: [&str; 4]
+pub const ai6::SCRIPT_ENVIRONMENT: [&str; 14]
 pub const ai6::SLEEPER_BRIEF_SOURCE: &str
 pub const ai6::SOURCE_BRIEF_PREFIX: &str
 pub const ai6::UNKNOWN_USE_PERMILLE: u16
@@ -7194,16 +7200,19 @@ pub fn ai6::directorates::registry::store::FileRegistry::report_quota(&self, &ai
 pub fn ai6::directorates::registry::store::FileRegistry::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
 pub trait ai6::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -7757,6 +7766,7 @@ pub fn ai6::classify(&str, &dyn ai6::directorates::m::approvals::Repository) -> 
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub fn ai6::clearance_at_least(&str, &str) -> bool
 pub fn ai6::content_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
+pub fn ai6::credential_dir_var(&str) -> bool
 pub fn ai6::describe(&guatiao::library::kind::ProviderError) -> alloc::string::String
 pub fn ai6::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
 pub fn ai6::fitness(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<(), alloc::string::String>

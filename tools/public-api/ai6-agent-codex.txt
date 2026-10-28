@@ -6,6 +6,8 @@ pub type ai6_agent_codex::CodexHandler::Error = guatiao::library::kind::Provider
 pub fn ai6_agent_codex::CodexHandler::try_from(ai6_agent_codex::CodexConfig) -> core::result::Result<Self, Self::Error>
 pub struct ai6_agent_codex::CodexHandler
 impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_codex::CodexHandler
+pub fn ai6_agent_codex::CodexHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_codex::CodexHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_codex::CodexHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_codex::CodexHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_codex::CodexHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
