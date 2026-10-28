@@ -1644,6 +1644,9 @@ fn acquire_session_hold(
             )
             .with_provider_session(provider_session.as_str())
             .with_attempt(existing.as_ref().map_or(1, |hold| hold.attempt), None);
+            if let Some(operation) = &mission.operation_id {
+                new_session = new_session.with_operation(operation.as_str());
+            }
             if let Ok(theater) = session_theater(state, mission.operation_id.as_deref()) {
                 new_session = new_session.with_theater(theater);
             }
@@ -4095,6 +4098,9 @@ async fn start_mission(
     .with_exposure(exposure.exposures());
     if let Some(account) = accounts::held(&state, &mission_id) {
         new_session = new_session.with_account(account);
+    }
+    if let Some(operation) = &mission.operation_id {
+        new_session = new_session.with_operation(operation.as_str());
     }
     if let Some(provider) = &session_id {
         new_session = new_session.with_provider_session(provider.as_str());

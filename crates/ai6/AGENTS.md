@@ -1547,6 +1547,7 @@ pub const MAX_RECENT_EVENT_CHARS: usize = 300;
 #[non_exhaustive] pub struct SessionRecord {
     pub session_id: String,                  // AI6's ID (not the provider's)
     pub mission_id: String,
+    pub operation: Option<String>,           // the Mission's Operation, as the opening Station knew it
     pub provider_session_id: Option<String>,
     pub station: String,                     // the lease holder
     pub theater: Option<String>,
@@ -1566,6 +1567,7 @@ pub const MAX_RECENT_EVENT_CHARS: usize = 300;
 impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }   // false once closed
 pub struct NewSession   // NewSession::new(session_id, mission_id, station)
                         //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
+                        //   .with_operation(id)
                         //   .with_exposure(Vec<Exposure>) .with_launch(SessionLaunch) .with_account(AccountRef)
 pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStatus) .parked_until(f64)
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)

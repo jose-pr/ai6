@@ -297,9 +297,10 @@ the Station holding a brief lease whose `mission_id` matches, else the Headquart
 Stations whose check-in is older than 45 seconds are passed over, and with none the request
 is refused `503` with `Retry-After: 15`. When the request names `session_id` and the
 Registry knows another provider Session as current, it is refused `409`; otherwise the
-current one is attached. A Mission the board knows only under another Operation is `404`, and
-so is one nothing knows (no Session record, brief lease, queued brief of the Operation or
-board entry): both are refused before anything is audited or queued.
+current one is attached. The Mission must be known under the Operation of the route: a
+Session record's `operation`, its brief lease's `operation` metadata, its queued brief's
+`operation` or a board entry names it, and none of them names another. Otherwise it is `404`,
+refused before anything is routed, audited or queued, with no Station or Session in the body.
 
 Bounds (in memory, per gateway): 1,024 controls kept, oldest finished dropped first, `409`
 when all are open; 64 queued per Station, `409` beyond; a control queued or delivered for

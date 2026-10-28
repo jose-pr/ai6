@@ -128,6 +128,9 @@ pub struct SessionRecord {
     pub session_id: String,
     /// The Mission the Session works for.
     pub mission_id: String,
+    /// The Operation the Mission belongs to, when the Station that opened the Session knew it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
     /// The provider-issued Session ID, once the provider has created it.
     pub provider_session_id: Option<String>,
     /// The Station that holds the lease and supervises the Session.
@@ -183,6 +186,7 @@ impl SessionRecord {
 pub struct NewSession {
     pub(super) session_id: String,
     mission_id: String,
+    operation: Option<String>,
     station: String,
     provider_session_id: Option<String>,
     theater: Option<String>,
@@ -203,6 +207,7 @@ impl NewSession {
         Self {
             session_id: session_id.into(),
             mission_id: mission_id.into(),
+            operation: None,
             station: station.into(),
             provider_session_id: None,
             theater: None,
@@ -212,6 +217,12 @@ impl NewSession {
             launch: None,
             account: None,
         }
+    }
+
+    /// Records the Operation the Mission belongs to.
+    pub fn with_operation(mut self, operation: impl Into<String>) -> Self {
+        self.operation = Some(operation.into());
+        self
     }
 
     /// Records the pool account the Session runs on.
@@ -474,6 +485,7 @@ pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> Ses
     SessionRecord {
         session_id: new.session_id,
         mission_id: new.mission_id,
+        operation: new.operation,
         provider_session_id: new.provider_session_id,
         station: new.station,
         theater: new.theater,

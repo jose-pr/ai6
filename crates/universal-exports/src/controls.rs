@@ -278,8 +278,10 @@ enum Routing {
 
 /// The Station that should act on a Mission: the one holding its latest Session record, else
 /// the one holding its brief's lease, else the Headquarters Station. A Station that has gone
-/// dark is passed over. A Mission with no Session record, no lease, no queued brief of
-/// `operation` and nothing on the board (`on_board`) is unknown.
+/// dark is passed over. The Mission is known only when something names `operation` as its
+/// Operation (a Session record, its lease, its queued brief, or the board: `on_board`) and
+/// nothing names another; otherwise it is unknown, so nothing about a Mission of another
+/// Operation is routed to, counted or told.
 fn control_target(
     registry: &dyn RegistryBackend,
     operation: &str,
@@ -291,15 +293,46 @@ fn control_target(
         .into_iter()
         .map(|record| record.station().to_owned())
         .collect::<Vec<_>>();
-    let latest = registry
+    let records: Vec<_> = registry
         .sessions()?
         .into_iter()
         .filter(|record| record.mission_id == mission_id)
-        .max_by(|left, right| {
-            left.attempt
-                .cmp(&right.attempt)
-                .then(left.lease_expires.total_cmp(&right.lease_expires))
-        });
+        .collect();
+    let leased = registry.leases()?.into_iter().find(|lease| {
+        lease
+            .meta()
+            .get("mission_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(mission_id)
+    });
+    let leased_for = leased.as_ref().and_then(|lease| {
+        lease
+            .meta()
+            .get("operation")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    });
+    // A queued brief's Mission ID is its key until a Station places it.
+    let briefed_for: Vec<Option<String>> = registry
+        .list_new()?
+        .into_iter()
+        .filter(|brief| brief.key() == mission_id)
+        .map(|brief| brief.operation)
+        .collect();
+    let named: Vec<&str> = records
+        .iter()
+        .filter_map(|record| record.operation.as_deref())
+        .chain(leased_for.as_deref())
+        .chain(briefed_for.iter().flatten().map(String::as_str))
+        .collect();
+    if !(on_board || named.contains(&operation)) || named.iter().any(|named| *named != operation) {
+        return Ok(Routing::Unknown);
+    }
+    let latest = records.into_iter().max_by(|left, right| {
+        left.attempt
+            .cmp(&right.attempt)
+            .then(left.lease_expires.total_cmp(&right.lease_expires))
+    });
     let session = latest
         .as_ref()
         .and_then(|record| record.provider_session_id.clone());
@@ -311,13 +344,6 @@ fn control_target(
             session,
         }));
     }
-    let leased = registry.leases()?.into_iter().find(|lease| {
-        lease
-            .meta()
-            .get("mission_id")
-            .and_then(serde_json::Value::as_str)
-            == Some(mission_id)
-    });
     if let Some(lease) = &leased
         && live.iter().any(|station| station == lease.station())
     {
@@ -325,16 +351,6 @@ fn control_target(
             station: lease.station().to_owned(),
             session,
         }));
-    }
-    let known = on_board
-        || latest.is_some()
-        || leased.is_some()
-        // A queued brief's Mission ID is its key until a Station places it.
-        || registry.list_new()?.iter().any(|brief| {
-            brief.key() == mission_id && brief.operation.as_deref().is_none_or(|op| op == operation)
-        });
-    if !known {
-        return Ok(Routing::Unknown);
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -732,6 +748,7 @@ pub(crate) mod tests {
         registry
             .open_session(
                 NewSession::new("record-g", "mission-g", "worker")
+                    .with_operation("G")
                     .with_provider_session("session-g"),
                 Duration::from_secs(60),
             )
@@ -1097,6 +1114,64 @@ pub(crate) mod tests {
         assert!(served.registry.list_audit(10).unwrap().is_empty());
         assert!(take(&served, "hq").await.is_none());
         assert!(take(&served, "worker").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_mission_the_registry_holds_for_another_operation_is_not_found() {
+        let served = served().await;
+        // Off the board, so only the Registry knows them: one of Operation L, one whose
+        // Operation nothing names, and one claimed by G and by L.
+        for (record, mission, operation) in [
+            ("record-x", "mission-x", Some("L")),
+            ("record-y", "mission-y", None),
+            ("record-z1", "mission-z", Some("G")),
+            ("record-z2", "mission-z", Some("L")),
+        ] {
+            let mut new = NewSession::new(record, mission, "worker").with_provider_session("p-1");
+            if let Some(operation) = operation {
+                new = new.with_operation(operation);
+            }
+            served
+                .registry
+                .open_session(new, Duration::from_secs(60))
+                .unwrap();
+        }
+        for mission in ["mission-x", "mission-y", "mission-z"] {
+            let asked = ask(
+                &served,
+                &served.operator,
+                "G",
+                mission,
+                serde_json::json!({"action": "cancel", "idempotency_key": "c"}),
+            )
+            .await;
+            assert_eq!(asked.status(), StatusCode::NOT_FOUND, "{mission}");
+            let body = asked.text().await.unwrap();
+            assert!(
+                !body.contains("worker") && !body.contains("p-1"),
+                "{mission}: {body}"
+            );
+        }
+        assert!(served.registry.list_audit(10).unwrap().is_empty());
+        assert!(take(&served, "worker").await.is_none());
+
+        // The Registry naming the Operation asked about is enough.
+        served
+            .registry
+            .open_session(
+                NewSession::new("record-w", "mission-w", "worker").with_operation("G"),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        let asked = ask(
+            &served,
+            &served.operator,
+            "G",
+            "mission-w",
+            serde_json::json!({"action": "cancel", "idempotency_key": "c"}),
+        )
+        .await;
+        assert_eq!(asked.status(), StatusCode::ACCEPTED);
     }
 
     #[test]
