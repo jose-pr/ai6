@@ -3957,6 +3957,7 @@ pub ai6::directorates::section_00::assistant::AssistantEvent::cable: core::optio
 pub ai6::directorates::section_00::assistant::AssistantEvent::change: core::option::Option<ai6::directorates::section_00::assistant::AssistantChange>
 pub ai6::directorates::section_00::assistant::AssistantEvent::kind: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantEvent::memory: core::option::Option<ai6::directorates::section_00::assistant::MemoryAnswer>
+pub ai6::directorates::section_00::assistant::AssistantEvent::shared: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantSharedBase>
 pub ai6::directorates::section_00::assistant::AssistantEvent::text: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantEvent::tools: alloc::vec::Vec<alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantEvent
@@ -4002,6 +4003,13 @@ pub ai6::directorates::section_00::assistant::AssistantReport::events: alloc::ve
 pub ai6::directorates::section_00::assistant::AssistantReport::job_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantReport::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantReport::station_id: alloc::string::String
+pub struct ai6::directorates::section_00::assistant::AssistantSharedBase
+pub ai6::directorates::section_00::assistant::AssistantSharedBase::base: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantSharedBase::content: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantSharedBase::group: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantSharedBase::path: alloc::string::String
+impl ai6::directorates::section_00::assistant::AssistantSharedBase
+pub fn ai6::directorates::section_00::assistant::AssistantSharedBase::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::directorates::section_00::assistant::AssistantWorkspace
 pub ai6::directorates::section_00::assistant::AssistantWorkspace::author_email: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantWorkspace::author_name: alloc::string::String
@@ -4038,6 +4046,7 @@ pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_PATH: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_SERVER: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_TOKEN_ENV: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_URL_ENV: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_SHARED_CHANGE_TOOL: &str
 pub const ai6::directorates::section_00::assistant::COMMIT_MEMORY: &str
 pub const ai6::directorates::section_00::assistant::COMMIT_SHARED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_ACCEPTED: &str
@@ -4060,6 +4069,7 @@ pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_CONTEXT_BYTES:
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENTS: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENT_BYTES: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_MESSAGE_BYTES: usize
+pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_SHARED_BASES: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_SKILLS: usize
 pub const ai6::directorates::section_00::assistant::MAX_MEMORY_FILES: usize
 pub const ai6::directorates::section_00::assistant::MAX_MEMORY_LIST_BYTES: usize
@@ -5026,6 +5036,7 @@ pub ai6::AssistantEvent::cable: core::option::Option<ai6::directorates::section_
 pub ai6::AssistantEvent::change: core::option::Option<ai6::directorates::section_00::assistant::AssistantChange>
 pub ai6::AssistantEvent::kind: alloc::string::String
 pub ai6::AssistantEvent::memory: core::option::Option<ai6::directorates::section_00::assistant::MemoryAnswer>
+pub ai6::AssistantEvent::shared: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantSharedBase>
 pub ai6::AssistantEvent::text: core::option::Option<alloc::string::String>
 pub ai6::AssistantEvent::tools: alloc::vec::Vec<alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantEvent
@@ -5140,6 +5151,13 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_unpinned(
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_unsandboxed_scripts(self, bool) -> Self
 impl core::default::Default for ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::default() -> Self
+pub struct ai6::AssistantSharedBase
+pub ai6::AssistantSharedBase::base: core::option::Option<alloc::string::String>
+pub ai6::AssistantSharedBase::content: alloc::string::String
+pub ai6::AssistantSharedBase::group: alloc::string::String
+pub ai6::AssistantSharedBase::path: alloc::string::String
+impl ai6::directorates::section_00::assistant::AssistantSharedBase
+pub fn ai6::directorates::section_00::assistant::AssistantSharedBase::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::AssistantWorkspace
 pub ai6::AssistantWorkspace::author_email: alloc::string::String
 pub ai6::AssistantWorkspace::author_name: alloc::string::String
@@ -7019,6 +7037,7 @@ pub const ai6::ASSISTANT_MCP_PATH: &str
 pub const ai6::ASSISTANT_MCP_SERVER: &str
 pub const ai6::ASSISTANT_MCP_TOKEN_ENV: &str
 pub const ai6::ASSISTANT_MCP_URL_ENV: &str
+pub const ai6::ASSISTANT_SHARED_CHANGE_TOOL: &str
 pub const ai6::BRIEF_EXPOSURE_KEY: &str
 pub const ai6::BRIEF_REGISTRY_DROP: &str
 pub const ai6::BRIEF_SOURCE: &str
@@ -7093,6 +7112,7 @@ pub const ai6::MAX_ASSISTANT_CONTEXT_BYTES: usize
 pub const ai6::MAX_ASSISTANT_EVENTS: usize
 pub const ai6::MAX_ASSISTANT_EVENT_BYTES: usize
 pub const ai6::MAX_ASSISTANT_MESSAGE_BYTES: usize
+pub const ai6::MAX_ASSISTANT_SHARED_BASES: usize
 pub const ai6::MAX_CABLE_BODY_BYTES: usize
 pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::MAX_CABLE_TTL: f64
