@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A change to a shared repository records what the file held when Moneypenny made it. As a
+  Station sees her `propose_shared_change` call, it reports the file's SHA-256 in her
+  `shared/<group>/` checkout, or that there was none (`AssistantEvent::shared`,
+  `AssistantSharedBase`); Universal Exports attaches it to the change as
+  `AssistantChange::base`, waiting up to five seconds for the report and refusing the call
+  without one. The commit is refused, nothing written, when the repository's `main` has
+  changed that file since.
 - Moneypenny runs scripts and reaches the web on Claude Code, inside its sandbox and within
   the roster's `[assistant]` keys `interpreters` (`["python3"]`), `network` (`limited`,
   `denied` or `open`), `allowed_hosts` (none) and `unsandboxed_scripts` (false), which

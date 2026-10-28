@@ -264,6 +264,14 @@ same trailer. With `write = true` for that group (or for `org`) it is committed 
 audited `moneypenny.shared.write`; that setting is a weakening, as are `allow_elevated` and
 any `write = true`, and each is logged when a Station starts or its roster changes.
 
+The change is made from what she read: as the Station sees her call, it reports what the file
+held in her `shared/<group>/` checkout (its SHA-256, or that there was no such file), and
+Universal Exports attaches that to the change. When the repository's `main` has changed the
+file since, the commit is refused and nothing is written, so a group member's edit made
+meanwhile is never replaced; she is told to make the change again from what the file holds
+now. A call the Station reports nothing for within five seconds (her checkout of that
+repository could not be opened, or the harness is not Claude Code) is refused.
+
 ## Your memory in the app
 
 What she remembers about you is yours to read and correct. In the app, **Ask Moneypenny**'s
