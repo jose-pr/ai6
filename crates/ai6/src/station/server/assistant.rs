@@ -265,14 +265,13 @@ impl CableGate for ExportsGate {
     }
 }
 
-/// A running harness: its Session, flags, token expiry, the reach and skills it started
-/// with, and its workspace.
+/// A running harness: its Session, flags, token expiry, what it started under
+/// ([`Desk::started_under`]), and its workspace.
 type Running = (
     SharedSession,
     Arc<Flags>,
     f64,
-    AssistantReach,
-    Vec<String>,
+    String,
     Option<SharedWorkspace>,
 );
 
@@ -416,12 +415,9 @@ struct Live {
     session: SharedSession,
     token_expires_at: f64,
     flags: Arc<Flags>,
-    /// What this conversation's reach lets scripts and web tools do, as its running harness was
-    /// started: kept so a later job whose cap changed restarts the harness instead of reaching
-    /// it warm.
-    reach: AssistantReach,
-    /// The skills the job gave it at start, kept for the same reason.
-    skills: Vec<String>,
+    /// What the running harness started under ([`Desk::started_under`]): a later job under
+    /// anything else restarts the harness rather than reach it warm with what it began with.
+    started: String,
     /// Raised for good once the conversation reads outside text (a web tool, a reaching
     /// script), shared with the pump and the Cable endpoint; sticky for the harness's life.
     exposed: Arc<AtomicBool>,
@@ -715,9 +711,10 @@ impl Desk {
             return self.decide_cable(job).await.map(|()| None);
         }
         // What this job may run and reach, capped by the Station's roster; a job the roster
-        // narrows (a group or person table, or a changed deployment), or whose skills changed,
-        // restarts the harness rather than reach it warm with what it started under.
+        // narrows (a group or person table, or a changed deployment), or under which anything
+        // else the harness started with changed, restarts it rather than reach it warm.
         let reach = self.capped_reach(job)?;
+        let started = self.started_under(job, &reach);
         // Universal Exports' record of exposure only ever rises; a running harness's flag (read
         // by its Cable endpoint) follows it at once.
         if job.exposed
@@ -727,11 +724,8 @@ impl Desk {
             entry.exposed.store(true, Ordering::Release);
         }
         let running = self.running(&job.conversation_id);
-        if let Some((session, flags, expires, started_reach, started_skills, workspace)) = running {
-            if expires > unix_now() + TOKEN_MARGIN_SECS
-                && started_reach == reach
-                && started_skills == job.skills
-            {
+        if let Some((session, flags, expires, started_under, workspace)) = running {
+            if expires > unix_now() + TOKEN_MARGIN_SECS && started_under == started {
                 #[cfg(feature = "cables-mcp")]
                 if let Some(cables) = self.cables_of(&job.conversation_id) {
                     cables.update(&job.cables, job.exposed);
@@ -770,8 +764,8 @@ impl Desk {
                 .map_err(|error| error.to_string())?
                 .map(|()| None);
             }
-            // Its token is about to expire, or its reach or skills changed: the harness starts
-            // again.
+            // Its token is about to expire, or what it started under changed: the harness
+            // starts again.
             self.close(&job.conversation_id);
         }
         // A harness that has stopped may still be removing the directory the next one uses.
@@ -1051,8 +1045,7 @@ impl Desk {
                     session: session.clone(),
                     token_expires_at: job.token_expires_at,
                     flags: flags.clone(),
-                    reach: reach.clone(),
-                    skills: job.skills.clone(),
+                    started: self.started_under(job, &reach),
                     exposed: exposed.clone(),
                     workspace: workspace.clone(),
                     #[cfg(feature = "cables-mcp")]
@@ -1100,6 +1093,39 @@ impl Desk {
             return Ok(job_reach.capped_by(&AssistantReach::default()));
         };
         Ok(job_reach.capped_by(&settings.reach_for(person, job_groups(job, &settings)?)))
+    }
+
+    /// A digest of what a harness for `job` starts under, past its token's expiry: the tool
+    /// token it is handed, `reach`, the repositories of its workspace, its skills with the path
+    /// and pin this Station's catalog gives each, and the catalog settings that decide how they
+    /// load (`skills_allow_tools`, `skills_unpinned`). A running harness started under another
+    /// is restarted, so a narrowed or withdrawn permission never outlives its message.
+    fn started_under(&self, job: &AssistantJob, reach: &AssistantReach) -> String {
+        let state = self.state.current();
+        let settings = state.roster.assistant();
+        let skills: Vec<_> = job
+            .skills
+            .iter()
+            .map(|name| {
+                let entry = settings.skills().get(name);
+                (
+                    name,
+                    entry.map(|skill| skill.path().to_owned()),
+                    entry
+                        .and_then(|skill| skill.pin())
+                        .map(|pin| pin.to_string()),
+                )
+            })
+            .collect();
+        let under = serde_json::json!({
+            "token": workspace::sha256_hex(job.mcp_token.as_bytes()),
+            "reach": reach,
+            "workspace": job.workspace.as_ref().map(|workspace| (&workspace.personal, &workspace.shared)),
+            "skills": skills,
+            "skills_allow_tools": settings.skills_allow_tools(),
+            "skills_unpinned": settings.skills_unpinned(),
+        });
+        workspace::sha256_hex(under.to_string().as_bytes())
     }
 
     /// Gives `mode` what `reach` lets her run and reach: the network policy, and the
@@ -1278,8 +1304,7 @@ impl Desk {
                 entry.session.clone(),
                 entry.flags.clone(),
                 entry.token_expires_at,
-                entry.reach.clone(),
-                entry.skills.clone(),
+                entry.started.clone(),
                 entry.workspace.clone(),
             )
         })
@@ -1377,7 +1402,7 @@ impl Desk {
     /// interrupt; its pump reports `interrupted` when the turn ends. A harness that is not
     /// answering, or not running here, is left as it is.
     async fn interrupt(&self, conversation: &str) -> Result<(), String> {
-        let Some((session, flags, _, _, _, _)) = self.running(conversation) else {
+        let Some((session, flags, _, _, _)) = self.running(conversation) else {
             return Ok(());
         };
         if !flags.busy.load(Ordering::Acquire) {
@@ -5415,6 +5440,58 @@ mod tests {
         );
         assert_eq!(mode.network.policy, "denied");
         drop(asked);
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_narrowed_shared_set_or_a_new_token_restarts_the_running_harness() {
+        let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Answers);
+        let mine = people.path().join("eve.git");
+        let launched = || {
+            let asked = fixture.asked.lock().unwrap();
+            asked.starts.len() + asked.resumes.len()
+        };
+        let answered = |count: usize| {
+            kinds(&fixture, "c-n")
+                .iter()
+                .filter(|kind| *kind == EVENT_COMPLETED)
+                .count()
+                >= count
+        };
+        let with_ops = || {
+            let mut wanted = workspace(&mine);
+            wanted.shared.insert(
+                "ops".to_owned(),
+                people.path().join("ops").to_string_lossy().into_owned(),
+            );
+            wanted
+        };
+        fixture
+            .desk
+            .handle(working("c-n", "first", with_ops()))
+            .await;
+        until(|| answered(1)).await;
+        assert_eq!(launched(), 1);
+        // The same again reaches it warm.
+        fixture
+            .desk
+            .handle(working("c-n", "second", with_ops()))
+            .await;
+        until(|| answered(2)).await;
+        assert_eq!(launched(), 1, "reached warm");
+        // The person left `ops`: the harness that has `shared/ops/` starts again without it.
+        let mut left = working("c-n", "third", workspace(&mine));
+        left.groups = Some(vec!["gone".to_owned()]);
+        fixture.desk.handle(left).await;
+        until(|| launched() == 2).await;
+        until(|| answered(3)).await;
+        // A message with another token (the old one withdrawn) never reaches the old harness.
+        let mut renewed = working("c-n", "fourth", workspace(&mine));
+        renewed.groups = Some(vec!["gone".to_owned()]);
+        renewed.mcp_token = "renewed-token-".repeat(4);
+        fixture.desk.handle(renewed).await;
+        until(|| launched() == 3).await;
         fixture.desk.close_all();
     }
 

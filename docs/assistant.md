@@ -492,7 +492,9 @@ paths.
 With each message Universal Exports sends the skills the person is given, with the person's
 directory groups. The Station takes only names its own roster gives that person (its catalog,
 less what its own group and person tables leave out), as it caps her scripts and network, and
-restarts her harness when the skills change. Before her harness starts it copies each skill into
+restarts her harness when anything it started under changes: her skills, a skill's path or
+pin in its catalog, `skills_allow_tools` or `skills_unpinned`, her scripts and network, her
+repositories (a group she left takes its `shared/` checkout with it) or her tool token. Before her harness starts it copies each skill into
 her working directory's `.claude/skills/<name>/`, never through a link, then checks the copy
 against its pin and its `SKILL.md` again. A skill that does not match is left out: the
 Station logs `ai6: assistant skill <name> does not match its pin` (or why else it was not
