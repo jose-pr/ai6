@@ -414,7 +414,10 @@ only ever holds a conversation of its signed-in person). With nothing being answ
 answered `{"type":"interrupt","stopping":false}` and changes nothing. Otherwise it is answered
 `stopping: true`, Moneypenny is told `[App: the person stopped your last answer.]` with the
 next message, and either a message no Station has accepted is withdrawn at once (a late
-`accepted` for it is refused `409`, so its Station closes what it started), or one
+`accepted` for it is refused `409`, so its Station closes what it started; when a Station had
+taken it, the conversation's tool tokens are withdrawn and that Station is cut off
+(`Conversation.cut_off`) until it accepts a later message: its Cable standing answers `send`
+and `read` false, and of its reports only `cable_sent` events are taken, for the audit log), or one
 `interrupt` job is queued for the Station running the harness. The answer ends, as a `notice`
 entry `You stopped Moneypenny's answer.` and `busy` false, when the message is withdrawn or
 that Station reports `interrupted`.

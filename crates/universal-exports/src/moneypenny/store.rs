@@ -102,6 +102,10 @@ pub(crate) struct Conversation {
     /// What the Station running the harness reported each shared change call was made from,
     /// oldest first, until the call takes it; at most [`ai6::MAX_ASSISTANT_SHARED_BASES`].
     pub(crate) shared_bases: VecDeque<AssistantSharedBase>,
+    /// The Station that took a message the person then stopped, until it takes another: its
+    /// harness is cut off from her Cables, and the only reports taken from it are the Cables
+    /// it sent meanwhile, for the audit log.
+    pub(crate) cut_off: Option<String>,
 }
 
 /// How much one conversation keeps.
@@ -156,6 +160,7 @@ impl Conversation {
             workspace: None,
             scripts_reach_hosts: false,
             shared_bases: VecDeque::new(),
+            cut_off: None,
         }
     }
 

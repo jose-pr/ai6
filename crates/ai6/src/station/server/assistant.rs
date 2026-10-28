@@ -62,9 +62,9 @@ use crate::directorates::section_00::agent::{
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
     AssistantJob, AssistantReach, AssistantReport, AssistantSharedBase, COMMIT_MEMORY,
-    EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
-    EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer,
-    outside_tool,
+    EVENT_ACCEPTED, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED,
+    EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT,
+    EVENT_TOOL, MemoryAnswer, outside_tool,
 };
 use crate::guatiao::library::Object;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
@@ -108,7 +108,8 @@ type Queued = (AssistantReport, Option<Answered>);
 
 /// The desk's reports in the order Universal Exports relies on: from before a harness gets a
 /// message until Universal Exports has its `accepted`, the conversation's reports wait, and
-/// once that `accepted` is refused none is sent.
+/// once that `accepted` is refused none is sent but the Cables the harness sent, which
+/// Universal Exports audits.
 #[derive(Clone)]
 struct Outbox {
     report: Reporter,
@@ -119,8 +120,24 @@ struct Outbox {
 enum Held {
     Waiting(Vec<AssistantReport>),
     /// Universal Exports refused the message's `accepted`: the harness is closing, and nothing
-    /// it says is sent.
+    /// it says is sent but its `cable_sent` events ([`cables_sent`]).
     Refused,
+}
+
+/// `report` with only its `cable_sent` events, when it has any: a Cable that was sent is
+/// reported for the audit log even from a harness whose message was given up.
+fn cables_sent(report: &AssistantReport) -> Option<AssistantReport> {
+    let events: Vec<AssistantEvent> = report
+        .events
+        .iter()
+        .filter(|event| event.kind == EVENT_CABLE_SENT)
+        .cloned()
+        .collect();
+    (!events.is_empty()).then(|| AssistantReport {
+        events,
+        session_id: None,
+        ..report.clone()
+    })
 }
 
 impl Outbox {
@@ -138,7 +155,11 @@ impl Outbox {
         };
         match held.get_mut(&report.conversation_id) {
             None => (self.report)(report, None),
-            Some(Held::Refused) => {}
+            Some(Held::Refused) => {
+                if let Some(sent) = cables_sent(&report) {
+                    (self.report)(sent, None);
+                }
+            }
             Some(Held::Waiting(waiting)) if waiting.len() < REPORT_QUEUE => waiting.push(report),
             Some(Held::Waiting(_)) => eprintln!(
                 "ai6: an assistant report was dropped: too many wait for their message's answer"
@@ -156,7 +177,8 @@ impl Outbox {
     /// Sends a job's answer behind every report queued before it and waits until it was sent;
     /// answers whether Universal Exports refused it. For a `message` job the reports held
     /// meanwhile follow it, or, when it was a refused `accepted`, are dropped with all later
-    /// ones until the harness has closed ([`Outbox::closed`]).
+    /// ones until the harness has closed ([`Outbox::closed`]), their `cable_sent` events
+    /// excepted.
     async fn answer(&self, report: AssistantReport, message: bool) -> bool {
         let conversation = report.conversation_id.clone();
         let accepted = report
@@ -169,7 +191,11 @@ impl Outbox {
         let refused = refusal.await.unwrap_or(false);
         if message && let Ok(mut held) = self.held.lock() {
             if accepted && refused {
-                held.insert(conversation, Held::Refused);
+                if let Some(Held::Waiting(waiting)) = held.insert(conversation, Held::Refused) {
+                    for sent in waiting.iter().filter_map(cables_sent) {
+                        (self.report)(sent, None);
+                    }
+                }
             } else if let Some(Held::Waiting(waiting)) = held.remove(&conversation) {
                 // Still under the lock, so a report sent meanwhile goes after these.
                 for report in waiting {
@@ -3315,6 +3341,65 @@ mod tests {
         assert_eq!(fixture.asked.lock().unwrap().starts.len(), 1);
     }
 
+    /// An outbox whose link answers every job answer `refused`, and the reports it sent.
+    fn refusing_outbox() -> (Outbox, Arc<Mutex<Vec<AssistantReport>>>) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let seen = sent.clone();
+        let outbox = Outbox::new(Arc::new(
+            move |report: AssistantReport, answered: Option<Answered>| match answered {
+                Some(answered) => {
+                    let _ = answered.send(true);
+                }
+                None => seen.lock().unwrap().push(report),
+            },
+        ));
+        (outbox, sent)
+    }
+
+    fn reported(conversation: &str, kinds: &[&str]) -> AssistantReport {
+        AssistantReport {
+            station_id: "test".to_owned(),
+            conversation_id: conversation.to_owned(),
+            job_id: None,
+            session_id: None,
+            events: kinds
+                .iter()
+                .map(|kind| AssistantEvent::new(kind, None))
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_accept_still_reports_the_cables_its_harness_sent() {
+        let (outbox, sent) = refusing_outbox();
+        outbox.hold("c-late");
+        outbox.send(reported("c-late", &[EVENT_TEXT, EVENT_CABLE_SENT]));
+        outbox.send(reported("c-late", &[EVENT_TEXT]));
+        let accepted = AssistantReport {
+            job_id: Some("job-late".to_owned()),
+            ..reported("c-late", &[EVENT_ACCEPTED])
+        };
+        assert!(outbox.answer(accepted, true).await, "refused");
+        outbox.send(reported("c-late", &[EVENT_CABLE_SENT, EVENT_CLOSED]));
+        outbox.send(reported("c-late", &[EVENT_COMPLETED]));
+        let kinds: Vec<Vec<String>> = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|report| {
+                report
+                    .events
+                    .iter()
+                    .map(|event| event.kind.clone())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [[EVENT_CABLE_SENT.to_owned()], [EVENT_CABLE_SENT.to_owned()]]
+        );
+    }
+
     #[tokio::test]
     async fn a_token_about_to_expire_restarts_the_harness_with_the_new_one() {
         let fixture = fixture(true, IDLE);
@@ -3469,7 +3554,7 @@ mod tests {
         };
         use crate::directorates::section_00::assistant::{
             ASSISTANT_CABLE_MCP_TOKEN_ENV, ASSISTANT_CABLE_MCP_URL_ENV, AssistantCableDecision,
-            AssistantCableGrant, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT,
+            AssistantCableGrant, EVENT_CABLE_PROPOSAL,
         };
 
         let mut fixture = fixture(true, IDLE);

@@ -958,6 +958,26 @@ impl Assistant {
                 .conversations
                 .get_mut(&report.conversation_id)
                 .ok_or(StatusCode::NOT_FOUND)?;
+            // A harness cut off by a Stop is heard only for the Cables it sent, so each is
+            // audited; nothing else it says reaches the conversation.
+            if report.job_id.is_none()
+                && conversation.cut_off.as_deref() == Some(report.station_id.as_str())
+            {
+                for event in report
+                    .events
+                    .iter()
+                    .filter(|event| event.kind == EVENT_CABLE_SENT)
+                {
+                    cables::apply(
+                        conversation,
+                        event,
+                        &report.station_id,
+                        max_entries,
+                        &mut after,
+                    );
+                }
+                break 'locked;
+            }
             conversation.heard_at = now();
             if let Some(job_id) = &report.job_id {
                 let pending = conversation
@@ -973,6 +993,9 @@ impl Assistant {
                     EVENT_ACCEPTED => {
                         conversation.pending = None;
                         conversation.live = true;
+                        if conversation.cut_off.as_deref() == Some(report.station_id.as_str()) {
+                            conversation.cut_off = None;
+                        }
                         if conversation.station.as_deref() != Some(report.station_id.as_str()) {
                             conversation.station = Some(report.station_id.clone());
                         }
@@ -1752,9 +1775,26 @@ impl Assistant {
             .notes
             .push("[App: the person stopped your last answer.]".to_owned());
         let station = conversation.station.clone();
-        // A Station that already took a withdrawn message has its late `accepted` refused,
-        // which makes it close the harness it started.
-        if conversation.pending.take().is_some() || station.is_none() {
+        if let Some(pending) = conversation.pending.take() {
+            // A Station that already took the withdrawn message has its late `accepted`
+            // refused, which makes it close the harness it started. Meanwhile that harness is
+            // cut off: its tool token is withdrawn and its Cable calls are refused.
+            let taken = pending.taken_at.and(pending.station);
+            if let Some(taken_by) = &taken {
+                if station.as_ref() == Some(taken_by) {
+                    conversation.live = false;
+                }
+                conversation.token = None;
+                conversation.cut_off = Some(taken_by.clone());
+            }
+            stopped(conversation, bounds);
+            if taken.is_some() {
+                desk.tokens
+                    .retain(|_, grant| grant.conversation_id != conversation_id);
+            }
+            return Ok(true);
+        }
+        if station.is_none() {
             stopped(conversation, bounds);
             return Ok(true);
         }
@@ -2428,9 +2468,22 @@ pub(crate) async fn exposure(
     let Some(operation) = query.operation else {
         return Ok(Json(json!({"exposed": exposed})));
     };
-    let (send, read) = assistant
-        .cable_permissions(&gateway, &query.conversation, &operation)
-        .await;
+    // A harness cut off by a Stop sends and reads no Cable.
+    let cut_off = assistant
+        .desk()
+        .store
+        .conversations
+        .get(&query.conversation)
+        .is_some_and(|conversation| {
+            conversation.cut_off.as_deref() == Some(query.station.as_str())
+        });
+    let (send, read) = if cut_off {
+        (false, false)
+    } else {
+        assistant
+            .cable_permissions(&gateway, &query.conversation, &operation)
+            .await
+    };
     Ok(Json(
         json!({"exposed": exposed, "send": send, "read": read}),
     ))

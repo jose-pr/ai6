@@ -1515,6 +1515,97 @@ async fn an_interrupt_withdraws_a_message_no_harness_has_and_shows_a_refusal() {
 }
 
 #[tokio::test]
+async fn a_stopped_message_a_station_took_cuts_its_harness_off() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "first").await;
+    finish(&served, &mut app, &job).await;
+    let conversation = job.conversation_id.clone();
+    assert_eq!(
+        standing(&served, "hq", &conversation, "G").await["send"],
+        true
+    );
+
+    // The Station running her takes the next message, and the person stops it.
+    say(&mut app, "second", None).await;
+    let taken = take(&served, "hq").await;
+    assert_eq!(interrupt(&mut app).await["stopping"], true);
+    assert_eq!(
+        mcp(&served, &taken.mcp_token, "tools/list", json!({}))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "the harness that took it has no tools left"
+    );
+    assert_eq!(
+        standing(&served, "hq", &conversation, "G").await,
+        json!({"exposed": false, "send": false, "read": false}),
+        "and no Cables"
+    );
+    // A Cable it sent meanwhile is still audited; nothing else it says is taken.
+    let sent = AssistantEvent {
+        cable: Some(ai6::AssistantCable {
+            cable_id: Some("cable-1".to_owned()),
+            ..held_cable("held-1", "Deploy now.")
+        }),
+        ..AssistantEvent::new(ai6::EVENT_CABLE_SENT, None)
+    };
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &taken,
+            None,
+            vec![
+                AssistantEvent::new(EVENT_TEXT, Some("Too late.".to_owned())),
+                sent
+            ],
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(audits(&served, "moneypenny.cable.sent").len(), 1);
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &taken,
+            Some(&taken.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::CONFLICT,
+        "its late accept is refused"
+    );
+
+    // The next message the Station accepts runs with a new token and its Cables again.
+    say(&mut app, "third", None).await;
+    let next = take(&served, "hq").await;
+    assert_ne!(next.mcp_token, taken.mcp_token);
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &next,
+            Some(&next.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        standing(&served, "hq", &conversation, "G").await["send"],
+        true
+    );
+    let shown = finish(&served, &mut app, &next).await;
+    assert!(
+        !shown
+            .iter()
+            .any(|frame| frame.to_string().contains("Too late.")),
+        "{shown:?}"
+    );
+}
+
+#[tokio::test]
 async fn an_accepted_answer_that_never_comes_is_given_up() {
     let served =
         served(AssistantConfig::default().with_answer_deadline(Duration::from_secs(1))).await;

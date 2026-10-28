@@ -612,7 +612,8 @@ reopening one shows what was said. One message is answered at a time.
 While she answers, **Stop** takes the place of Send. It sends `{"type":"interrupt"}` on the
 socket, which only ever reaches the person's own conversation. A message no Station has
 taken up yet is simply withdrawn (a Station that was just starting on it shows nothing of
-that answer and closes her harness); otherwise Universal Exports asks the Station running her
+that answer and closes her harness, which from the Stop on has no tools and no Cables; a
+Cable it sent before is still recorded in the audit log); otherwise Universal Exports asks the Station running her
 harness to interrupt it, and that Station's handler stops the turn the way the harness
 expects (a stream-json interrupt request for Claude Code, `turn/interrupt` for Codex). The
 conversation then shows "You stopped Moneypenny's answer.", her harness stays up for the next
