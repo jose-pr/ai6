@@ -188,7 +188,8 @@ pub use directorates::section_00::assistant::{
     MAX_ASSISTANT_CHANGE_FILES, MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENT_BYTES,
     MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES, MAX_ASSISTANT_SHARED_BASES,
     MAX_MEMORY_FILES, MAX_MEMORY_LIST_BYTES, MemoryAction, MemoryAnswer, MemoryCommit, MemoryFile,
-    MemoryOp, host_pattern, interpreter_name, memory_path, outside_tool,
+    MemoryOp, SCRIPT_ENVIRONMENT, credential_dir_var, host_pattern, interpreter_name, memory_path,
+    outside_tool,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

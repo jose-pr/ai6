@@ -233,7 +233,8 @@ effect under `--restricted` (the denied command stayed denied and the hook did n
 the desk's own per-conversation configuration directory holds no such file anyway.
 `assistant_scripts` answers why the sandbox cannot run: native Windows, another platform than
 macOS or Linux, or `bwrap` or `socat` missing from the environment's `PATH` (else the
-Station's). WSL1 passes that check and is stopped by `failIfUnavailable`. Inferred, not
+Station's). WSL1 passes that check and is stopped by `failIfUnavailable`. `assistant_skills`
+answers `None`: only the `--plugin-dir` plugin's skills load. Inferred, not
 measured: that a Linux host without `bwrap` makes Claude Code exit at start, as the settings
 reference says; the macOS read roots and relay (macOS uses Seatbelt and was not available to
 measure).

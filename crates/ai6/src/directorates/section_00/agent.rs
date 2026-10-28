@@ -326,6 +326,15 @@ pub trait AgentHandler: Send + Sync {
             "this handler runs no interpreter for an assistant".to_owned(),
         ))
     }
+
+    /// Whether the harness can load exactly an assistant's [`AssistantMode::skills`] and no
+    /// other skill: `None` when it can, else why not, in a sentence; a Station installs no
+    /// skill for a handler that cannot. The default: it cannot.
+    fn assistant_skills(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "this handler loads no skill for an assistant".to_owned(),
+        ))
+    }
 }
 
 /// One provider-owned, resumable agent operation.

@@ -19,6 +19,7 @@ use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
     LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
 };
+use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
 use ai6::directorates::section_00::gate::{GATE_PROGRAM_ENV, WEB_GATE_ARGS};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
@@ -85,6 +86,12 @@ impl AgentHandler for ClaudeHandler {
                 .map(|(_, path)| std::ffi::OsString::from(path))
                 .or_else(|| std::env::var_os("PATH")),
         ))
+    }
+
+    /// Under `--restricted`, Claude Code 2.1.311 loads skills only from a `--plugin-dir`
+    /// plugin, which holds exactly the assistant's.
+    fn assistant_skills(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
     }
 
     fn start(
@@ -332,27 +339,6 @@ const ASSISTANT_FILE_TOOLS: &str = "Read,Write,Edit,Glob,Grep";
 /// `GITATT~1`), even after a read.
 const DOT_PATHS_DENIED: [&str; 2] = ["Edit(**/.*)", "Edit(**/.*/**)"];
 
-/// Environment variables a script may keep: none of them holds a credential. Every other
-/// variable of the harness's environment is removed from its scripts' environment, the proxy
-/// variables among them, since a corporate proxy URL may carry basic-auth credentials and the
-/// sandbox routes scripts through its own proxy regardless.
-const SCRIPT_ENVIRONMENT: [&str; 14] = [
-    "PATH",
-    "HOME",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "SYSTEMROOT",
-    "TEMP",
-    "TMP",
-    "TMPDIR",
-    "LANG",
-    "LC_ALL",
-    "LC_CTYPE",
-    "TERM",
-    "TZ",
-];
-
 /// Model credentials Claude Code reads (code.claude.com/docs/en/env-vars), removed from every
 /// script's environment even when the harness's own environment does not name them.
 const MODEL_CREDENTIALS: [&str; 3] = [
@@ -538,15 +524,6 @@ fn add_assistant(
         argv.extend(["--append-system-prompt-file".to_owned(), file.clone()]);
     }
     Ok(())
-}
-
-/// Environment variables that name a directory holding a login or credentials: a script may
-/// not read any of them, so their values go in `credentials.files`. `CLAUDE_CONFIG_DIR` is the
-/// assistant's own, holding its transcripts and any stored login; `CODEX_HOME` and any
-/// `*_HOME` a pool account set point at other logins.
-fn credential_dir_var(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    upper == "CLAUDE_CONFIG_DIR" || upper == "CODEX_HOME" || upper.ends_with("_HOME")
 }
 
 /// The directories a sandboxed script may read, besides the working directory: the system

@@ -2770,7 +2770,11 @@ handlers do), and the Station gives it a provider without a terminal.
 Result<Option<String>, ProviderError>` is another appended slot: `None` when the harness,
 started with `environment`, can run an assistant's interpreters inside its own sandbox on this
 Station, else why not; the default answers that it cannot. Claude's answers `None` on macOS,
-and on Linux when `bwrap` and `socat` are on the environment's `PATH` (else the Station's).
+and on Linux when `bwrap` and `socat` are on the environment's `PATH` (else the Station's);
+Codex's runs `codex sandbox -P` once in 15 minutes. `AgentHandler::assistant_skills(&self) ->
+Result<Option<String>, ProviderError>`, a further appended slot: `None` when the harness loads
+exactly `AssistantMode::skills` and no other skill, else why not (default: it cannot; Claude
+answers `None`, Codex why not); a Station installs no skill for a handler that cannot.
 `AgentStart`, `AgentResume`, `AgentMessage`,
 `AgentEvent`, `UsageLimit` and `TokenUsage` are also serde `Serialize` and `Deserialize`
 (field names as declared): a runner's API carries them as JSON.
@@ -2959,7 +2963,9 @@ impl AssistantReach {
 }
 pub fn host_pattern(host: &str) -> bool;       // lowercase DNS name with a dot, optional leading "*."
 pub fn interpreter_name(name: &str) -> bool;   // 1-64 letters, digits, . - _, not a path or flag
-pub fn outside_tool(tool: &str, scripts_reach_hosts: bool) -> bool; // WebFetch, WebSearch, or Bash when reaching
+pub fn outside_tool(tool: &str, scripts_reach_hosts: bool) -> bool; // WebFetch, WebSearch, or Bash / exec_command when reaching
+pub fn credential_dir_var(name: &str) -> bool; // CLAUDE_CONFIG_DIR, CODEX_HOME or any *_HOME, case ignored
+pub const SCRIPT_ENVIRONMENT: [&str; 14]; // the variables an assistant's sandboxed scripts keep (PATH, HOME, TEMP, LANG, …)
 pub struct AssistantWorkspace { pub personal: String /* the person's repository, expanded */,
     pub shared: BTreeMap<String, String> /* default; checkout name (group or "org") -> repository */,
     pub author_name: String, pub author_email: String /* the person's */ }
@@ -3598,7 +3604,7 @@ installed: <reason>`), filed as a `StationReport` with one `provider` warning fi
 same text, and reported to the conversation as a `notice` with its first event. With one skill
 or more it writes `.claude/.claude-plugin/plugin.json` (`{"name":"ai6",…}`) and starts the
 harness with `skills` (those installed), `skills_dir` (`.claude`) and `skill_commands =
-skills_allow_tools`; the workspace's standing text lists them.
+skills_allow_tools`; the workspace's standing text lists them. When `Harness::skills` (the handler's `assistant_skills`) says the harness cannot keep to them, the desk installs none, logs `assistant conversation <digest>: skills are unavailable with handler <id>: <reason>` and gives the start context the line `Skills are unavailable in this conversation (<reason>), …`.
 
 A job with a `workspace` gets, through the `git` safe-house provider (`SafeHouseSpec::clone`,
 `CheckpointSpec::branch`): `personal/`, a clone of `workspace.personal` on `main` (a missing
@@ -3625,7 +3631,7 @@ in progress wrote goes with it); otherwise, and for `COMMIT_SHARED`,
 the desk clones the commit's repository into a temporary directory, commits the files'
 text there exactly without writing them, pushes, and removes it; a file whose
 `AssistantChange::base` differs from what `main` holds refuses the commit. A `tool` event whose raw
-line is Claude Code's call of `mcp__moneypenny__propose_shared_change` carries, in `shared`,
+line is Claude Code's call of `mcp__moneypenny__propose_shared_change` (a `tool_use` block), or Codex's `item/started` of an `mcpToolCall` item with `server` `moneypenny`, `tool` `propose_shared_change` and its `arguments`, carries, in `shared`,
 the SHA-256 of the file it names in that `shared/<group>/` checkout (`None` when there is no
 such file); a call naming a checkout that is not there, or a path that is not a plain file,
 gets none. The desk never reads, writes
@@ -3677,7 +3683,7 @@ raises it with `POST` (`{"station","conversation","source"}`) for what only it s
 with a file `.moneypenny/outside-text/` in the personal repository names exposes the turn at
 that call (source `personal:<path> (read by <tool>)`): a `Read` or `Edit` of it, a `Grep` or
 `Glob` whose search covers it (paths compared after `.`/`..`, the filesystem's own spelling
-and case), a `Bash` call (a script may read any file of her directory), or a call whose input
+and case), a `Bash` or Codex `exec_command` call (a script may read any file of her directory), or a call whose input
 (`AgentEvent::data`) the desk cannot read. A
 `memory/MEMORY.md` importing one (`@path`, followed five deep) exposes the conversation as
 its harness starts. Other reads do not. The record is a directory: one entry per file, holding

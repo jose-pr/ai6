@@ -70,9 +70,9 @@ const MAX_WALK: usize = 10_000;
 /// it, so conversations adding to it at once never touch the same file.
 pub(super) const OUTSIDE_TEXT: &str = ".moneypenny/outside-text";
 /// The built-in tools that answer with text of a file or its name: `Read`, `Grep` and `Glob`,
-/// `Edit`, whose answer quotes the lines around its change, and `Bash`, whose script may read
-/// any file of her working directory.
-const READING_TOOLS: [&str; 5] = ["Read", "Grep", "Glob", "Edit", "Bash"];
+/// `Edit`, whose answer quotes the lines around its change, and a script, Claude Code's `Bash`
+/// or Codex's `exec_command`, which may read any file of her working directory.
+const READING_TOOLS: [&str; 6] = ["Read", "Grep", "Glob", "Edit", "Bash", "exec_command"];
 /// How deep Claude Code follows `@path` imports from a memory file.
 const MAX_IMPORT_DEPTH: usize = 5;
 
@@ -1085,6 +1085,18 @@ impl Covered {
 /// answer with; `None` when the line is not one this desk can read.
 fn reading_calls(data: Option<&[u8]>) -> Option<Vec<(String, Scope)>> {
     let value: serde_json::Value = serde_json::from_slice(data?).ok()?;
+    // A command Codex's app server starts (`item/started`, a `commandExecution` item).
+    if value.get("method").and_then(serde_json::Value::as_str) == Some("item/started")
+        && value
+            .pointer("/params/item/type")
+            .and_then(serde_json::Value::as_str)
+            == Some("commandExecution")
+    {
+        return Some(vec![(
+            "exec_command".to_owned(),
+            Scope::Under(".".to_owned()),
+        )]);
+    }
     let mut calls = Vec::new();
     for block in value.pointer("/message/content")?.as_array()? {
         if block.get("type").and_then(serde_json::Value::as_str) != Some("tool_use") {
@@ -1126,13 +1138,36 @@ fn reading_calls(data: Option<&[u8]>) -> Option<Vec<(String, Scope)>> {
 }
 
 /// The `group`, `path` and `content` of each [`ASSISTANT_SHARED_CHANGE_TOOL`] call in a
-/// harness event's raw line, as Claude Code's `stream-json` writes it.
+/// harness event's raw line, as Claude Code's `stream-json` writes it (`tool_use` blocks of
+/// an assistant message) or as Codex's app server announces it (an `item/started`
+/// notification of an `mcpToolCall` item with `server`, `tool` and `arguments`, Codex
+/// 0.164.0).
 fn shared_change_calls(data: Option<&[u8]>) -> Vec<(String, String, String)> {
     let tool = format!("mcp__{ASSISTANT_MCP_SERVER}__{ASSISTANT_SHARED_CHANGE_TOOL}");
     let Some(value) = data.and_then(|data| serde_json::from_slice::<serde_json::Value>(data).ok())
     else {
         return Vec::new();
     };
+    if value.get("method").and_then(serde_json::Value::as_str) == Some("item/started") {
+        let item = value.pointer("/params/item");
+        let text = |pointer: &str| item?.pointer(pointer)?.as_str();
+        if text("/type") != Some("mcpToolCall")
+            || text("/server") != Some(ASSISTANT_MCP_SERVER)
+            || text("/tool") != Some(ASSISTANT_SHARED_CHANGE_TOOL)
+        {
+            return Vec::new();
+        }
+        return match (
+            text("/arguments/group"),
+            text("/arguments/path"),
+            text("/arguments/content"),
+        ) {
+            (Some(group), Some(path), Some(content)) => {
+                vec![(group.to_owned(), path.to_owned(), content.to_owned())]
+            }
+            _ => Vec::new(),
+        };
+    }
     let blocks = value
         .pointer("/message/content")
         .and_then(serde_json::Value::as_array);
@@ -1440,6 +1475,46 @@ mod tests {
         assert_eq!(scopes(b"not json".to_vec()), None);
         assert_eq!(reading_calls(None).map(|calls| calls.len()), None);
         assert_eq!(scopes(line("Write", serde_json::json!({}))), None);
+        // A command Codex starts may read anything there.
+        let command = serde_json::json!({ "method": "item/started", "params": { "item": {
+            "type": "commandExecution", "command": "python3 personal/calc.py"
+        } } });
+        assert_eq!(
+            scopes(command.to_string().into_bytes()),
+            Some(vec!["under .".to_owned()])
+        );
+    }
+
+    /// `item/started` of a `propose_shared_change` call as Codex 0.164.0's app server sends it
+    /// (recorded against a stand-in for the model; ids shortened).
+    const CODEX_SHARED_CALL: &str = r#"{"method":"item/started","params":{"item":{
+        "type":"mcpToolCall","id":"exec-1","server":"moneypenny","tool":"propose_shared_change",
+        "status":"inProgress","arguments":{"group":"ops","path":"notes/plan.md",
+        "content":"SHARED-CONTENT\n","message":"plan"},"appContext":null,"result":null,
+        "error":null,"durationMs":null},"threadId":"t","turnId":"u","startedAtMs":1}}"#;
+
+    #[test]
+    fn a_shared_change_is_read_from_codex_as_from_claude_code() {
+        assert_eq!(
+            shared_change_calls(Some(CODEX_SHARED_CALL.as_bytes())),
+            [(
+                "ops".to_owned(),
+                "notes/plan.md".to_owned(),
+                "SHARED-CONTENT\n".to_owned()
+            )]
+        );
+        for (from, to) in [
+            ("\"server\":\"moneypenny\"", "\"server\":\"other\""),
+            ("\"tool\":\"propose_shared_change\"", "\"tool\":\"board\""),
+            ("item/started", "item/completed"),
+            ("\"path\":\"notes/plan.md\",", ""),
+        ] {
+            let changed = CODEX_SHARED_CALL.replace(from, to);
+            assert!(
+                shared_change_calls(Some(changed.as_bytes())).is_empty(),
+                "{from} -> {to}"
+            );
+        }
     }
 
     #[test]

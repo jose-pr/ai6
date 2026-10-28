@@ -198,11 +198,43 @@ fn check_network(network: &AssistantNetwork) -> Result<(), String> {
 }
 
 /// Whether a [`EVENT_TOOL`] event's `tool` brings text from outside AI6 into the conversation:
-/// Claude Code's web tools always, and a script (`Bash`) when `scripts_reach_hosts`
-/// ([`AssistantReach::scripts_reach_hosts`]). Text it brings in exposes the conversation.
+/// the web tools always, and a script (Claude Code's `Bash`, Codex's `exec_command`) when
+/// `scripts_reach_hosts` ([`AssistantReach::scripts_reach_hosts`]). Text it brings in exposes
+/// the conversation.
 pub fn outside_tool(tool: &str, scripts_reach_hosts: bool) -> bool {
-    matches!(tool, "WebFetch" | "WebSearch") || (tool == "Bash" && scripts_reach_hosts)
+    matches!(tool, "WebFetch" | "WebSearch")
+        || (matches!(tool, "Bash" | "exec_command") && scripts_reach_hosts)
 }
+
+/// Whether the environment variable `name` names a directory holding a login or credentials,
+/// which an assistant's scripts may not read: `CLAUDE_CONFIG_DIR` (the assistant's own Claude
+/// Code configuration, its transcripts and any stored login), `CODEX_HOME` and any `*_HOME`
+/// (a pool account's login among them). Case is ignored.
+pub fn credential_dir_var(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper == "CLAUDE_CONFIG_DIR" || upper == "CODEX_HOME" || upper.ends_with("_HOME")
+}
+
+/// The environment variables an assistant's sandboxed scripts keep: none of them holds a
+/// credential. A handler removes every other variable of the harness's environment from its
+/// scripts' environment, the proxy variables among them, since a proxy URL may carry
+/// credentials.
+pub const SCRIPT_ENVIRONMENT: [&str; 14] = [
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TZ",
+];
 
 /// How strict a network policy is: `denied` before `limited` before `open`; an unknown one
 /// counts as `denied`.

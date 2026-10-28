@@ -295,6 +295,11 @@ pub(super) trait Harness: Send + Sync {
         let _ = (handler, environment);
         Some("this Station's harness runs no scripts".to_owned())
     }
+    /// Why `handler`'s harness cannot load exactly an assistant's skills; `None` when it can.
+    fn skills(&self, handler: &str) -> Option<String> {
+        let _ = handler;
+        None
+    }
 }
 
 /// The Station's handlers, each on the terminal provider the Station chooses for it.
@@ -381,6 +386,15 @@ impl Harness for StationHarness {
         handler
             .assistant_scripts(environment.clone())
             .unwrap_or_else(|error| Some(error.to_string()))
+    }
+
+    fn skills(&self, handler: &str) -> Option<String> {
+        match self.0.plugins.handler(handler, None) {
+            Ok(handler) => handler
+                .assistant_skills()
+                .unwrap_or_else(|error| Some(error.to_string())),
+            Err(error) => Some(error.to_string()),
+        }
     }
 }
 
@@ -834,7 +848,25 @@ impl Desk {
                  this elevated Station",
             );
         }
-        let installed = match self.install_skills(job, &area).await {
+        // A harness that cannot keep to the catalog gets none of it, rather than every skill
+        // its own configuration finds.
+        let no_skills = if job.skills.is_empty() {
+            None
+        } else {
+            self.harness.skills(&handler)
+        };
+        let installed = match &no_skills {
+            Some(reason) => {
+                (self.log)(&format!(
+                    "assistant conversation {}: skills are unavailable with handler \
+                     {handler:?}: {reason}",
+                    conversation_digest(&job.conversation_id)
+                ));
+                Ok(skills::Installed::default())
+            }
+            None => self.install_skills(job, &area).await,
+        };
+        let installed = match installed {
             Ok(installed) => installed,
             Err(reason) => {
                 remove_area(&area);
@@ -922,6 +954,12 @@ impl Desk {
             .collect();
         initial_context.extend(job.context.iter().cloned());
         initial_context.extend(unavailable);
+        initial_context.extend(no_skills.map(|reason| {
+            format!(
+                "Skills are unavailable in this conversation ({reason}), so you load none: say \
+                 so when the person asks for one."
+            )
+        }));
         let reaching = !mode.network.reaches_nothing() || mode.unsandboxed;
         // A resumed harness has the conversation; only one started afresh is given its recap.
         let mut fresh_context = initial_context.clone();
@@ -2377,13 +2415,15 @@ mod tests {
 
     /// A harness that does what `script` says with every message; a resumed one does what
     /// `resumed` says, and one that dies when resumed never confirms its Session. Its scripts
-    /// run in a sandbox unless `no_sandbox` says why not.
+    /// run in a sandbox unless `no_sandbox` says why not, and it loads skills unless
+    /// `no_skills` says why not.
     struct Scripted {
         asked: Arc<Mutex<Asked>>,
         resumable: bool,
         script: Script,
         resumed: Script,
         no_sandbox: Arc<Mutex<Option<String>>>,
+        no_skills: Arc<Mutex<Option<String>>>,
     }
 
     struct ScriptedSession {
@@ -2454,18 +2494,26 @@ mod tests {
                         let area = self.dir.to_string_lossy().replace('\\', "/");
                         let input: serde_json::Value =
                             serde_json::from_str(&input.replace("{area}", &area)).unwrap();
-                        read.tools = vec![tool.to_owned()];
-                        read.data = Some(
-                            serde_json::json!({
+                        // `codex:<tool>` calls a tool of her server as Codex announces it.
+                        let line = match tool.strip_prefix("codex:") {
+                            Some(tool) => serde_json::json!({
+                                "method": "item/started",
+                                "params": { "item": {
+                                    "type": "mcpToolCall", "id": "exec-1",
+                                    "server": "moneypenny", "tool": tool,
+                                    "status": "inProgress", "arguments": input
+                                } }
+                            }),
+                            None => serde_json::json!({
                                 "type": "assistant",
                                 "message": { "content": [
                                     { "type": "tool_use", "id": "toolu_1", "name": tool,
                                       "input": input }
                                 ] }
-                            })
-                            .to_string()
-                            .into_bytes(),
-                        );
+                            }),
+                        };
+                        read.tools = vec![tool.trim_start_matches("codex:").to_owned()];
+                        read.data = Some(line.to_string().into_bytes());
                     }
                     events.push_back(read);
                     let memory = self.dir.join(PERSONAL).join("memory");
@@ -2590,6 +2638,10 @@ mod tests {
         ) -> Option<String> {
             self.no_sandbox.lock().unwrap().clone()
         }
+
+        fn skills(&self, _handler: &str) -> Option<String> {
+            self.no_skills.lock().unwrap().clone()
+        }
     }
 
     const AGENTS: &str = "[agent.moneypenny]\nhandler = \"mock-assistant\"\nmodel = \"sonnet\"\n\
@@ -2607,6 +2659,8 @@ mod tests {
         exposure: Arc<Recorded>,
         /// Why the harness's scripts cannot be sandboxed here; `None`, they can.
         no_sandbox: Arc<Mutex<Option<String>>>,
+        /// Why the harness cannot keep to her skills; `None`, it can.
+        no_skills: Arc<Mutex<Option<String>>>,
         _root: tempfile::TempDir,
     }
 
@@ -2682,6 +2736,7 @@ mod tests {
         let elevated = Arc::new(Mutex::new(Some(elevated)));
         let exposure = Arc::new(Recorded::default());
         let no_sandbox = Arc::new(Mutex::new(None));
+        let no_skills = Arc::new(Mutex::new(None));
         let desk = Desk::new(
             state,
             Arc::new(Scripted {
@@ -2690,6 +2745,7 @@ mod tests {
                 script,
                 resumed,
                 no_sandbox: no_sandbox.clone(),
+                no_skills: no_skills.clone(),
             }),
             Arc::new(move |report, answered: Option<Answered>| {
                 sink.lock().unwrap().push(report);
@@ -2712,6 +2768,7 @@ mod tests {
             logged,
             exposure,
             no_sandbox,
+            no_skills,
             _root: root,
         }
     }
@@ -4798,24 +4855,28 @@ mod tests {
         wanted
             .shared
             .insert("ops".to_owned(), ops.to_string_lossy().into_owned());
-        let call = |group: &str, path: &str| {
+        let call = |tool: &str, group: &str, path: &str| {
             format!(
-                "mcp__moneypenny__propose_shared_change {{\"group\": \"{group}\", \"path\": \
+                "{tool} {{\"group\": \"{group}\", \"path\": \
                  \"{path}\", \"content\": \"On call: Q.\\n\", \"message\": \"Name who is on \
                  call\"}}"
             )
         };
-        for (n, (group, path)) in [
-            ("ops", "handbook.md"),
-            ("ops", "rota.md"),
-            ("gone", "handbook.md"),
+        let claude = "mcp__moneypenny__propose_shared_change";
+        // Codex announces the same call as an MCP tool call item of her server.
+        let codex = "codex:propose_shared_change";
+        for (n, (tool, group, path)) in [
+            (claude, "ops", "handbook.md"),
+            (claude, "ops", "rota.md"),
+            (claude, "gone", "handbook.md"),
+            (codex, "ops", "handbook.md"),
         ]
         .into_iter()
         .enumerate()
         {
             fixture
                 .desk
-                .handle(working("c-s", &call(group, path), wanted.clone()))
+                .handle(working("c-s", &call(tool, group, path), wanted.clone()))
                 .await;
             until(|| {
                 kinds(&fixture, "c-s")
@@ -4844,11 +4905,17 @@ mod tests {
                 AssistantSharedBase {
                     group: "ops".to_owned(),
                     path: "rota.md".to_owned(),
-                    content,
+                    content: content.clone(),
                     base: None,
                 },
+                AssistantSharedBase {
+                    group: "ops".to_owned(),
+                    path: "handbook.md".to_owned(),
+                    content,
+                    base: Some(workspace::sha256_hex(b"# Handbook\n")),
+                },
             ],
-            "a repository not checked out gives no base"
+            "a repository not checked out gives no base; Codex's call gives one as Claude's"
         );
         // The change as Universal Exports makes it from her call and its base.
         let change = |base: &AssistantSharedBase| {
@@ -5476,6 +5543,51 @@ mod tests {
         let mode = start.assistant.unwrap();
         assert!(mode.skills.is_empty() && mode.skills_dir.is_none());
         assert!(!Path::new(&start.working_directory).join(".claude").exists());
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_harness_that_cannot_keep_to_her_skills_gets_none_and_she_is_told() {
+        let catalog = tempfile::tempdir().unwrap();
+        let fixture = on_station(
+            &skills_catalog(catalog.path()),
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        *fixture.no_skills.lock().unwrap() = Some("it keeps no list of skills".to_owned());
+        let given = AssistantJob {
+            skills: vec!["charts".to_owned()],
+            person_id: Some("eve".to_owned()),
+            ..job("c-ns", "Chart the week.")
+        };
+        fixture.desk.handle(given).await;
+        until(|| kinds(&fixture, "c-ns").contains(&EVENT_COMPLETED.to_owned())).await;
+        let start = fixture.asked.lock().unwrap().starts[0].clone();
+        let mode = start.assistant.clone().unwrap();
+        assert!(
+            mode.skills.is_empty() && mode.skills_dir.is_none(),
+            "{mode:?}"
+        );
+        assert!(!Path::new(&start.working_directory).join(".claude").exists());
+        assert!(
+            start.initial_context.iter().any(|line| line.starts_with(
+                "Skills are unavailable in this conversation (it \
+                                               keeps no list of skills)"
+            )),
+            "{:?}",
+            start.initial_context
+        );
+        let logged = fixture.logged.lock().unwrap().clone();
+        assert!(
+            logged.iter().any(|line| line.ends_with(
+                "skills are unavailable with handler \"mock-assistant\": it keeps no list of \
+                 skills"
+            )),
+            "{logged:?}"
+        );
         fixture.desk.close_all();
     }
 
