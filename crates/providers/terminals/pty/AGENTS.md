@@ -59,7 +59,10 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   nothing new), is stopped with `SIGSTOP`, then all are killed with `SIGKILL`, so a process
   that left the group (`setsid`, `setpgid`) is killed too. A process reparented away from the
   tree (its parent exited first) and outside the group and session is not found. On Windows
-  the child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`. `kill` returns once the child has exited and, on Windows,
+  the child is assigned to a Job Object with `KILL_ON_JOB_CLOSE` just after it starts
+  (`portable-pty` starts it and takes no Job Object), and every process it started before then,
+  found by parent and created after it, is assigned too; one whose parent already exited in
+  that instant is not found. `kill` returns once the child has exited and, on Windows,
   the Job Object has no process left, or after 2 s. Windows may still refuse to remove the
   child's working directory for a few tens of milliseconds after that (os error 32): retry.
 - **Input** is passed through on Unix. On Windows, ConPTY reads Enter as CR, so a bare LF
