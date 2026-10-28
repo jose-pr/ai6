@@ -2678,7 +2678,7 @@ mod tests {
              repo = '{}'\n[assistant.shared.gone]\nrepo = '{}'\n",
             people.join("{person}.git").display(),
             people.join("ops").display(),
-            people.join("missing.git").display()
+            people.join("gone").join("missing.git").display()
         )
     }
 
@@ -4341,6 +4341,7 @@ mod tests {
             "gone".to_owned(),
             people
                 .path()
+                .join("gone")
                 .join("missing.git")
                 .to_string_lossy()
                 .into_owned(),
@@ -4800,6 +4801,7 @@ mod tests {
             "gone".to_owned(),
             repos
                 .path()
+                .join("gone")
                 .join("missing.git")
                 .to_string_lossy()
                 .into_owned(),
@@ -4820,7 +4822,7 @@ mod tests {
             "{notices:?}"
         );
         assert!(
-            !repos.path().join("missing.git").exists(),
+            !repos.path().join("gone").join("missing.git").exists(),
             "a shared one is never made"
         );
 

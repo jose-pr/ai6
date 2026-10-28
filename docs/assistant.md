@@ -184,7 +184,9 @@ repo = "https://git.example/org/handbook.git"
 identifier and is the one to use. `{person}` is the identifier itself, and only when it is 1
 to 64 lowercase letters, digits, `.`, `_`, `@` and `-` not starting with `.`: any other
 identifier is refused, so two people whose identifiers differ only in case never share a
-repository on a case-insensitive filesystem. A local path or `file://` repository is
+repository on a case-insensitive filesystem. The template holds exactly one of the two,
+inside the repository's path (not its host or user), and is refused when some identifier
+would fill it in as a shared or the organisation's repository. A local path or `file://` repository is
 created, empty and bare, the first time it is used, readable by the Station's user only on
 Unix (`0700` directories, `0600` files; on Windows it takes its parent directory's access);
 `ssh://`, `https://` and `user@host:` repositories are reached with the Station user's Git

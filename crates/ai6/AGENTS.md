@@ -453,8 +453,11 @@ path or `file://` is `Local` (made bare on first use), the rest and `user@host:p
 `Remote` (must exist). `personal_repo_for` fills `{person_digest}` always and `{person}` only
 for an identifier of 1-64 lowercase letters, digits, `.`, `_`, `@`, `-` not starting with `.`
 (so identifiers differing only in case never share a repository); others are
-refused, naming `{person_digest}`. `validate` refuses other placeholders, group names that are
-not `file_safe` or are `org`, and repositories `RepoKind::of` refuses. `shared_for` yields the
+refused, naming `{person_digest}`. `validate` refuses other placeholders, a template that does
+not hold exactly one `{person}` or `{person_digest}` inside its path (after `scheme://host` or
+`user@host:`), a template some person's identifier would fill in as a shared or the `org`
+repository (compared without case), group names that are not `file_safe` or are `org`, and
+repositories `RepoKind::of` refuses. `shared_for` yields the
 groups' repositories the person is a member of, then `org`.
 
 The skills catalog: `validate` refuses a name `skill_name` refuses, a `path` that is not

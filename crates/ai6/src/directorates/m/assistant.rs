@@ -553,6 +553,21 @@ fn is_scp_like(repo: &str) -> bool {
     colon > 1 && !before.contains('/') && !before.contains('\\')
 }
 
+/// Where the path of `repo` starts: after `scheme://user@host` up to its first `/`, after the
+/// `:` of `user@host:`, and at once for a local path. A URL with no path has none, at its end.
+fn path_start(repo: &str) -> usize {
+    if let Some(scheme) = repo.find("://") {
+        let authority = scheme + 3;
+        return repo[authority..]
+            .find('/')
+            .map_or(repo.len(), |slash| authority + slash);
+    }
+    if is_scp_like(repo) {
+        return repo.find(':').map_or(0, |colon| colon + 1);
+    }
+    0
+}
+
 impl AssistantSettings {
     /// Settings that keep nothing, share nothing, run `python3` scripts in the harness's
     /// sandbox with no host to reach, and refuse elevated Stations.
@@ -764,6 +779,63 @@ impl AssistantSettings {
         self.allow_elevated
     }
 
+    /// Refuses a personal repository template that does not name the person exactly once,
+    /// inside the repository's path (not its scheme, user or host), or that some person's
+    /// identifier would fill in as a shared or the organisation's repository.
+    fn check_template(&self, template: &str) -> Result<(), String> {
+        let named = template.matches(PERSON_PLACEHOLDER).count()
+            + template.matches(PERSON_DIGEST_PLACEHOLDER).count();
+        if named != 1 {
+            return Err(format!(
+                "names the person {named} times; it takes exactly one {PERSON_PLACEHOLDER} or \
+                 {PERSON_DIGEST_PLACEHOLDER}, so each person has a repository of their own"
+            ));
+        }
+        let (at, placeholder) = [PERSON_PLACEHOLDER, PERSON_DIGEST_PLACEHOLDER]
+            .into_iter()
+            .find_map(|placeholder| template.find(placeholder).map(|at| (at, placeholder)))
+            .unwrap_or_default();
+        if at < path_start(template) {
+            return Err(format!(
+                "puts {placeholder} before the repository's path; it goes inside a path segment"
+            ));
+        }
+        let (prefix, suffix) = (&template[..at], &template[at + placeholder.len()..]);
+        let shared = self
+            .shared
+            .iter()
+            .map(|(group, repo)| (format!("assistant.shared.{group}"), repo))
+            .chain(
+                self.org
+                    .iter()
+                    .map(|repo| ("assistant.org".to_owned(), repo)),
+            );
+        for (key, repo) in shared {
+            // Compared without case: two spellings name one repository on a case-insensitive
+            // filesystem.
+            let repo = repo.repo.to_lowercase();
+            let (prefix, suffix) = (prefix.to_lowercase(), suffix.to_lowercase());
+            let filled = repo.len() > prefix.len() + suffix.len()
+                && repo.starts_with(&prefix)
+                && repo.ends_with(&suffix)
+                && repo
+                    .get(prefix.len()..repo.len() - suffix.len())
+                    .is_some_and(|person| {
+                        if placeholder == PERSON_DIGEST_PLACEHOLDER {
+                            person.len() == 16 && person.bytes().all(|b| b.is_ascii_hexdigit())
+                        } else {
+                            person_safe(person)
+                        }
+                    });
+            if filled {
+                return Err(format!(
+                    "is {key}'s repository for some person, whose memory would go there"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Checks every repository and group name: repositories of a known [`RepoKind`], a
     /// template whose only placeholders are the two person ones, and group names of 1 to 64
     /// letters, digits, `.`, `-` and `_`, not starting with `.` and not [`ORG_SHARED`]. Checks
@@ -789,6 +861,8 @@ impl AssistantSettings {
                      {PERSON_PLACEHOLDER} and {PERSON_DIGEST_PLACEHOLDER}"
                 ));
             }
+            self.check_template(template)
+                .map_err(|reason| format!("assistant.personal_repo: {template:?} {reason}"))?;
         }
         for (group, shared) in &self.shared {
             if !file_safe(group) || group == ORG_SHARED {
@@ -1209,7 +1283,26 @@ mod tests {
                 .is_none()
         );
 
+        for good in [
+            "personal_repo = \"/srv/{person}.git\"\n[shared.ops]\nrepo = \"/srv/ops/h.git\"",
+            "personal_repo = \"ssh://git@host/people/{person_digest}.git\"",
+            "personal_repo = \"git@host:people/{person}.git\"",
+            "personal_repo = \"file:///srv/{person}.git\"",
+        ] {
+            let settings: AssistantSettings = toml::from_str(good).unwrap();
+            assert_eq!(settings.validate(), Ok(()), "{good}");
+        }
         for bad in [
+            // The person exactly once, inside the path.
+            "personal_repo = \"/srv/shared.git\"",
+            "personal_repo = \"/srv/{person}/{person_digest}.git\"",
+            "personal_repo = \"/srv/{person}-{person}.git\"",
+            "personal_repo = \"https://{person}.example/x.git\"",
+            "personal_repo = \"ssh://{person}@host/x.git\"",
+            "personal_repo = \"{person}@host:x.git\"",
+            // Never a shared repository, for any person.
+            "personal_repo = \"/srv/{person}.git\"\n[shared.ops]\nrepo = \"/srv/ops.git\"",
+            "personal_repo = \"/srv/{person_digest}.git\"\n[org]\nrepo = \"/SRV/0123456789abcdef.git\"",
             "personal_repo = \"/srv/{user}.git\"",
             "personal_repo = \"ext::sh\"",
             "[shared.org]\nrepo = \"/srv/x.git\"",
