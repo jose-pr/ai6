@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use ai6::directorates::m::assistant::SKILLS_PLUGIN;
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{
     AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine,
@@ -281,8 +282,8 @@ fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<A
 }
 
 /// The built-in tools an assistant's mode offers: the file tools with directories to write,
-/// `Bash` with interpreters, `WebFetch` when the network reaches a host, and `WebSearch` only
-/// when it is open (a search takes no host list).
+/// `Bash` with interpreters, `WebFetch` when the network reaches a host, `WebSearch` only
+/// when it is open (a search takes no host list), and `Skill` with skills.
 fn offered_tools(mode: &AssistantMode) -> Vec<&'static str> {
     let mut tools = Vec::new();
     if !mode.files.is_empty() {
@@ -297,8 +298,14 @@ fn offered_tools(mode: &AssistantMode) -> Vec<&'static str> {
     if mode.network.open() {
         tools.push("WebSearch");
     }
+    if !mode.skills.is_empty() {
+        tools.push(SKILL_TOOL);
+    }
     tools
 }
+
+/// The built-in tool that loads a skill, offered to an assistant with skills.
+const SKILL_TOOL: &str = "Skill";
 
 /// What AI6 decided about the Session's settings.
 #[derive(Clone, Copy)]
@@ -379,9 +386,7 @@ fn add_settings(
 /// (`--restricted`, only the user's settings) with exactly the mode's MCP servers connected
 /// (`--strict-mcp-config`) and their tools allowed without a prompt (`--allowedTools
 /// mcp__<name>`), and only the built-in tools [`offered_tools`] names (`--tools`; none is
-/// `--tools=`), each other one denied by name. Skills are refused until this handler can
-/// confine them: refusing fails closed, where ignoring would start a Session the Station did
-/// not ask for.
+/// `--tools=`), each other one denied by name.
 ///
 /// With any built-in tool the Session runs under `--permission-mode dontAsk`, which denies
 /// every call no rule allows (code.claude.com/docs/en/permissions):
@@ -395,8 +400,15 @@ fn add_settings(
 /// - network `limited` with hosts: `WebFetch`, allowed as `WebFetch(domain:<host>)` for each
 ///   host (which also lets the sandbox's scripts reach it); `open`: `WebFetch(domain:*)` and
 ///   `WebSearch`. WebFetch runs outside the sandbox, so its rules are its only limit.
+/// - `skills`: `Skill`, each skill allowed as `Skill(ai6:<name>)`, and the mode's `skills_dir`
+///   as `--plugin-dir`: under `--restricted`, Claude Code 2.1.311 loads no skill from the
+///   working directory, the user's directory or an installed plugin, and does load a
+///   `--plugin-dir` plugin's. Only the skills installed there can load, since an allow rule
+///   does not keep another skill out. Without `skill_commands`, `disableSkillShellExecution`
+///   keeps a skill's injected commands from running.
 ///
-/// A `context_file` is passed with `--append-system-prompt-file`.
+/// Every setting the parts call for goes in one `--settings` value. A `context_file` is passed
+/// with `--append-system-prompt-file`.
 fn add_assistant(
     argv: &mut Vec<String>,
     environment: &BTreeMap<String, String>,
@@ -405,12 +417,6 @@ fn add_assistant(
 ) -> Result<(), ProviderError> {
     mode.validate()
         .map_err(|reason| refuse(Status::GUATIAO_ERR_BAD_VALUE, reason))?;
-    if !mode.skills.is_empty() {
-        return Err(refuse(
-            Status::GUATIAO_ERR_UNSUPPORTED,
-            "this Claude Code handler runs no skill for an assistant",
-        ));
-    }
     let mut servers = serde_json::Map::new();
     let mut allowed = Vec::new();
     for server in &mode.mcp_servers {
@@ -485,6 +491,11 @@ fn add_assistant(
                 .map(|host| format!("WebFetch(domain:{host})")),
         );
     }
+    allowed.extend(
+        mode.skills
+            .iter()
+            .map(|name| format!("{SKILL_TOOL}({SKILLS_PLUGIN}:{name})")),
+    );
     argv.extend([
         "--disallowedTools".to_owned(),
         denied.join(","),
@@ -496,9 +507,16 @@ fn add_assistant(
         "--mcp-config".to_owned(),
         json!({ "mcpServers": servers }).to_string(),
     ]);
+    let skills_dir = mode.skills_dir.as_ref().filter(|_| !mode.skills.is_empty());
+    if let Some(dir) = skills_dir {
+        argv.extend(["--plugin-dir".to_owned(), dir.clone()]);
+    }
     let mut settings = serde_json::Map::new();
     if !mode.interpreters.is_empty() {
         settings.extend(script_settings(mode, working_directory, environment));
+    }
+    if skills_dir.is_some() && !mode.skill_commands {
+        settings.insert("disableSkillShellExecution".to_owned(), Value::Bool(true));
     }
     if let Some(program) = web_gate {
         // A limited network allows exactly its hosts; an open one allows any but the denied.
@@ -3256,6 +3274,138 @@ mod tests {
             "a Mission's Cable server of the environment stays out"
         );
         assert!(!argv.iter().any(|a| a.contains("cable-token")));
+    }
+
+    /// Measured with Claude Code 2.1.311 against a loopback stand-in for the API: under
+    /// `--restricted` only a `--plugin-dir` plugin's skills loaded, and with
+    /// `disableSkillShellExecution` a skill's injected command was replaced, not run.
+    #[test]
+    fn an_assistant_with_skills_loads_only_its_plugin_directory_and_runs_no_command() {
+        let environment = assistant_environment();
+        let dir = std::env::temp_dir()
+            .join("conversation")
+            .join(".claude")
+            .to_string_lossy()
+            .into_owned();
+        let skills = AssistantMode {
+            skills: vec!["report-writer".to_owned(), "charts".to_owned()],
+            skills_dir: Some(dir.clone()),
+            ..AssistantMode::moneypenny()
+        };
+        let with_files = AssistantMode {
+            files: vec!["personal".to_owned()],
+            ..skills.clone()
+        };
+        let commands = AssistantMode {
+            skill_commands: true,
+            ..skills.clone()
+        };
+        for (mode, tools, allowed) in [
+            (
+                &skills,
+                "Skill",
+                "mcp__moneypenny,Skill(ai6:report-writer),Skill(ai6:charts)",
+            ),
+            (
+                &with_files,
+                "Read,Write,Edit,Glob,Grep,Skill",
+                "mcp__moneypenny,Read,Glob,Grep,Edit(/personal/**),Skill(ai6:report-writer),\
+                 Skill(ai6:charts)",
+            ),
+            (
+                &commands,
+                "Skill",
+                "mcp__moneypenny,Skill(ai6:report-writer),Skill(ai6:charts)",
+            ),
+        ] {
+            let mut argv = Vec::new();
+            add_assistant(&mut argv, &environment, "/wd", mode).unwrap();
+            let after = |flag: &str| {
+                let position = argv.iter().position(|a| a == flag);
+                position.map(|position| argv[position + 1].clone())
+            };
+            assert!(argv.iter().any(|a| a == "--restricted"), "{argv:?}");
+            assert_eq!(after("--tools").as_deref(), Some(tools));
+            assert_eq!(after("--permission-mode").as_deref(), Some("dontAsk"));
+            let denied = after("--disallowedTools").unwrap();
+            assert!(!denied.split(',').any(|tool| tool == "Skill"), "{denied}");
+            for tool in ["Bash", "WebFetch", "Task", "Agent"] {
+                assert!(denied.split(',').any(|name| name == tool), "{denied}");
+            }
+            assert_eq!(after("--allowedTools").as_deref(), Some(allowed));
+            assert_eq!(after("--setting-sources").as_deref(), Some("user"));
+            assert_eq!(after("--plugin-dir").as_deref(), Some(dir.as_str()));
+            let settings = after("--settings");
+            if mode.skill_commands {
+                assert_eq!(settings, None, "{argv:?}");
+            } else {
+                assert_eq!(
+                    serde_json::from_str::<Value>(&settings.unwrap()).unwrap(),
+                    json!({"disableSkillShellExecution": true})
+                );
+            }
+        }
+        let mut nowhere = skills.clone();
+        nowhere.skills_dir = None;
+        let mut argv = Vec::new();
+        assert!(add_assistant(&mut argv, &environment, "/wd", &nowhere).is_err());
+        assert!(argv.is_empty());
+
+        // The tripwire lets `Skill` through only for a mode with skills.
+        for (mode, ends) in [(&skills, false), (&AssistantMode::moneypenny(), true)] {
+            let mut input =
+                b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-1\"}\n".to_vec();
+            input.extend_from_slice(
+                b"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\
+                  \"id\":\"t\",\"name\":\"Skill\",\"input\":{\"skill\":\"ai6:charts\"}}]}}\n",
+            );
+            input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
+            let session = ClaudeSession::new(
+                ResumeTerminalSession {
+                    input: Mutex::new(input),
+                    writes: Arc::new(Mutex::new(Vec::new())),
+                }
+                .into_object(),
+                None,
+            )
+            .restricted_to(restriction(false, Some(mode)));
+            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+                .map(|event| event.kind)
+                .collect::<Vec<_>>();
+            assert_eq!(kinds.contains(&"failed".to_owned()), ends, "{kinds:?}");
+        }
+    }
+
+    #[test]
+    fn skills_beside_scripts_share_one_settings_value() {
+        let environment = assistant_environment();
+        let mode = AssistantMode {
+            interpreters: vec!["python3".to_owned()],
+            files: vec!["personal".to_owned()],
+            skills: vec!["charts".to_owned()],
+            skills_dir: Some(
+                std::env::temp_dir()
+                    .join("conversation")
+                    .join(".claude")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            ..AssistantMode::moneypenny()
+        };
+        let mut argv = Vec::new();
+        add_assistant(&mut argv, &environment, "/wd", &mode).unwrap();
+        let flags: Vec<usize> = argv
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "--settings")
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(flags.len(), 1, "one --settings: {argv:?}");
+        let settings: Value = serde_json::from_str(&argv[flags[0] + 1]).unwrap();
+        assert_eq!(settings["sandbox"]["enabled"], true);
+        assert_eq!(settings["disableSkillShellExecution"], true);
+        let tools = &argv[argv.iter().position(|a| a == "--tools").unwrap() + 1];
+        assert_eq!(tools, "Read,Write,Edit,Glob,Grep,Bash,Skill");
     }
 
     #[test]

@@ -193,8 +193,7 @@ network but `denied` adds, in the same `--settings`, a `PreToolUse` hook on `Web
 `PROGRAM assistant web-gate [--hosts …] [--deny …]` (`PROGRAM` as for the green ink gate,
 `timeout` 60, `onFailure: "block"`, `disableAllHooks: false`): `--hosts` is the `limited`
 allow-list, `--deny` the `deniedDomains`, so `open` allows any host but the denied. A network
-that reaches nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1` to the environment. Skills are
-still refused. The desk gives each conversation its own `CLAUDE_CONFIG_DIR`, so the Agent's
+that reaches nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1` to the environment. The desk gives each conversation its own `CLAUDE_CONFIG_DIR`, so the Agent's
 configuration directory (a shared login, every person's transcripts) stays out, and its own
 `TMPDIR` and `CLAUDE_CODE_TMPDIR`, since Claude Code derives the sandbox's `$TMPDIR` from the
 harness's `TMPDIR` and otherwise every conversation of the Station's user shares
@@ -238,6 +237,27 @@ Station's). WSL1 passes that check and is stopped by `failIfUnavailable`. Inferr
 measured: that a Linux host without `bwrap` makes Claude Code exit at start, as the settings
 reference says; the macOS read roots and relay (macOS uses Seatbelt and was not available to
 measure).
+
+An assistant whose mode names `skills` (with `skills_dir`, refused with `BAD_VALUE` without
+one) also gets `Skill` in `--tools`, last (`--tools Skill` alone without other parts), under
+`dontAsk`, `Skill` left out of the deny list, `Skill(ai6:<name>)` per skill in
+`--allowedTools`, `--plugin-dir <skills_dir>`, and, unless `skill_commands`,
+`"disableSkillShellExecution": true` in the one `--settings` value beside the sandbox and the
+WebFetch gate; its tripwire lets `Skill` through. The desk installs the plugin in the working
+directory's `.claude`, which the sandbox's `denyWrite` keeps her scripts from changing. Measured with
+2.1.311 on Windows against a loopback stand-in for the API, with this argv: under
+`--restricted` no skill loaded from the working directory's `.claude/skills` (with
+`--setting-sources user` or `user,project`), from an `--add-dir` directory, from
+`$CLAUDE_CONFIG_DIR/skills` or `~/.claude/skills`, from a nested `.claude/skills`, or from a
+plugin installed from a marketplace and enabled in user settings (each answered `Unknown
+skill`; without `--restricted` the personal and installed ones loaded); the `--plugin-dir`
+plugin's skills were listed and launched as `ai6:<name>` and as the bare name. A plugin skill
+not named in `--allowedTools` still launched under `dontAsk`, so the allow rules do not keep
+a skill out: only what is in the plugin directory loads. A skill's injected command failed
+the whole skill on the Bash permission check; with `disableSkillShellExecution` it was
+replaced by a notice and the skill loaded. A skill's other files were readable with `Read`
+(the plugin is inside the working directory) and Write to them was denied by the dot-path
+rule.
 
 `MultiEdit` and `LS`
 are not denied: Claude Code 2.1.310 warns that such a rule matches no known tool. `Task` is

@@ -2839,10 +2839,10 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // "headers":{"Authorization":"Bearer ${P_TOKEN}"}}}}`, no gate. Codex: `-c mcp_servers=
 // {<name>={url="…",bearer_token_env_var="P_TOKEN"}}` (replacing the user's servers), the same
 // `-c` settings that switch its built-in tools off as answer-only, the project untrusted, and
-// the answer-only thread policy. Both refuse to start (UNSUPPORTED) with skills when they
-// cannot install them (Codex always; Claude Code without an absolute `skills_dir`), Codex also
-// with interpreters or a network reaching more than the servers, and (BAD_VALUE) when the
-// environment lacks a server's URL or token; tokens never reach a command line.
+// the answer-only thread policy. Codex refuses to start (UNSUPPORTED) with skills,
+// interpreters or a network reaching more than the servers; both refuse (BAD_VALUE) a mode
+// `validate` refuses, or when the environment lacks a server's URL or token; tokens never
+// reach a command line.
 // `validate` also checks `files` and `read_only` (1 to 8 `/`-separated names of letters,
 // digits, `.`, `-`, `_`, none starting with `.`), interpreters (`interpreter_name`), hosts
 // (`host_pattern`), that `context_file` is absolute, and that `skills` come with an absolute
