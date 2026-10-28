@@ -3847,6 +3847,18 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
 pub mod ai6::directorates::section_00::assistant
+pub enum ai6::directorates::section_00::assistant::MemoryAction
+pub ai6::directorates::section_00::assistant::MemoryAction::Forget
+pub ai6::directorates::section_00::assistant::MemoryAction::Forget::commit: ai6::directorates::section_00::assistant::MemoryCommit
+pub ai6::directorates::section_00::assistant::MemoryAction::Forget::path: alloc::string::String
+pub ai6::directorates::section_00::assistant::MemoryAction::List
+pub ai6::directorates::section_00::assistant::MemoryAction::Read
+pub ai6::directorates::section_00::assistant::MemoryAction::Read::path: alloc::string::String
+pub ai6::directorates::section_00::assistant::MemoryAction::Write
+pub ai6::directorates::section_00::assistant::MemoryAction::Write::base: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::MemoryAction::Write::commit: ai6::directorates::section_00::assistant::MemoryCommit
+pub ai6::directorates::section_00::assistant::MemoryAction::Write::path: alloc::string::String
+pub ai6::directorates::section_00::assistant::MemoryAction::Write::text: alloc::string::String
 pub struct ai6::directorates::section_00::assistant::AssistantCable
 pub ai6::directorates::section_00::assistant::AssistantCable::body: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantCable::cable_id: core::option::Option<alloc::string::String>
@@ -3888,6 +3900,7 @@ pub struct ai6::directorates::section_00::assistant::AssistantEvent
 pub ai6::directorates::section_00::assistant::AssistantEvent::cable: core::option::Option<ai6::directorates::section_00::assistant::AssistantCable>
 pub ai6::directorates::section_00::assistant::AssistantEvent::change: core::option::Option<ai6::directorates::section_00::assistant::AssistantChange>
 pub ai6::directorates::section_00::assistant::AssistantEvent::kind: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantEvent::memory: core::option::Option<ai6::directorates::section_00::assistant::MemoryAnswer>
 pub ai6::directorates::section_00::assistant::AssistantEvent::text: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantEvent::tools: alloc::vec::Vec<alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantEvent
@@ -3905,6 +3918,7 @@ pub ai6::directorates::section_00::assistant::AssistantJob::exposed: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::interrupt: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::job_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::mcp_token: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantJob::memory: core::option::Option<ai6::directorates::section_00::assistant::MemoryOp>
 pub ai6::directorates::section_00::assistant::AssistantJob::message: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::person_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::recap: core::option::Option<alloc::string::String>
@@ -3928,6 +3942,26 @@ pub ai6::directorates::section_00::assistant::AssistantWorkspace::personal: allo
 pub ai6::directorates::section_00::assistant::AssistantWorkspace::shared: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantWorkspace
 pub fn ai6::directorates::section_00::assistant::AssistantWorkspace::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub struct ai6::directorates::section_00::assistant::MemoryAnswer
+pub ai6::directorates::section_00::assistant::MemoryAnswer::changed: bool
+pub ai6::directorates::section_00::assistant::MemoryAnswer::commit: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::MemoryAnswer::digest: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::MemoryAnswer::files: alloc::vec::Vec<ai6::directorates::section_00::assistant::MemoryFile>
+pub ai6::directorates::section_00::assistant::MemoryAnswer::missing: bool
+pub ai6::directorates::section_00::assistant::MemoryAnswer::more: bool
+pub ai6::directorates::section_00::assistant::MemoryAnswer::text: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::section_00::assistant::MemoryCommit
+pub ai6::directorates::section_00::assistant::MemoryCommit::author_email: alloc::string::String
+pub ai6::directorates::section_00::assistant::MemoryCommit::author_name: alloc::string::String
+pub ai6::directorates::section_00::assistant::MemoryCommit::message: alloc::string::String
+pub struct ai6::directorates::section_00::assistant::MemoryFile
+pub ai6::directorates::section_00::assistant::MemoryFile::bytes: u64
+pub ai6::directorates::section_00::assistant::MemoryFile::path: alloc::string::String
+pub struct ai6::directorates::section_00::assistant::MemoryOp
+pub ai6::directorates::section_00::assistant::MemoryOp::action: ai6::directorates::section_00::assistant::MemoryAction
+pub ai6::directorates::section_00::assistant::MemoryOp::repo: alloc::string::String
+impl ai6::directorates::section_00::assistant::MemoryOp
+pub fn ai6::directorates::section_00::assistant::MemoryOp::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub const ai6::directorates::section_00::assistant::ASSISTANT_CABLE_MCP_ENV_PREFIX: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_CABLE_MCP_SERVER: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_CABLE_MCP_TOKEN_ENV: &str
@@ -3959,6 +3993,9 @@ pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_CONTEXT_BYTES:
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENTS: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_EVENT_BYTES: usize
 pub const ai6::directorates::section_00::assistant::MAX_ASSISTANT_MESSAGE_BYTES: usize
+pub const ai6::directorates::section_00::assistant::MAX_MEMORY_FILES: usize
+pub const ai6::directorates::section_00::assistant::MAX_MEMORY_LIST_BYTES: usize
+pub fn ai6::directorates::section_00::assistant::memory_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::repository_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::valid_identity(&str) -> bool
 pub mod ai6::directorates::section_00::gate
@@ -4370,6 +4407,18 @@ pub ai6::Ingest::Updated
 #[non_exhaustive] pub enum ai6::LeaseRecovery
 pub ai6::LeaseRecovery::Failed
 pub ai6::LeaseRecovery::Requeued
+pub enum ai6::MemoryAction
+pub ai6::MemoryAction::Forget
+pub ai6::MemoryAction::Forget::commit: ai6::directorates::section_00::assistant::MemoryCommit
+pub ai6::MemoryAction::Forget::path: alloc::string::String
+pub ai6::MemoryAction::List
+pub ai6::MemoryAction::Read
+pub ai6::MemoryAction::Read::path: alloc::string::String
+pub ai6::MemoryAction::Write
+pub ai6::MemoryAction::Write::base: core::option::Option<alloc::string::String>
+pub ai6::MemoryAction::Write::commit: ai6::directorates::section_00::assistant::MemoryCommit
+pub ai6::MemoryAction::Write::path: alloc::string::String
+pub ai6::MemoryAction::Write::text: alloc::string::String
 #[non_exhaustive] pub enum ai6::OnLost
 pub ai6::OnLost::Fail
 pub ai6::OnLost::Retry
@@ -4896,6 +4945,7 @@ pub struct ai6::AssistantEvent
 pub ai6::AssistantEvent::cable: core::option::Option<ai6::directorates::section_00::assistant::AssistantCable>
 pub ai6::AssistantEvent::change: core::option::Option<ai6::directorates::section_00::assistant::AssistantChange>
 pub ai6::AssistantEvent::kind: alloc::string::String
+pub ai6::AssistantEvent::memory: core::option::Option<ai6::directorates::section_00::assistant::MemoryAnswer>
 pub ai6::AssistantEvent::text: core::option::Option<alloc::string::String>
 pub ai6::AssistantEvent::tools: alloc::vec::Vec<alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantEvent
@@ -4913,6 +4963,7 @@ pub ai6::AssistantJob::exposed: bool
 pub ai6::AssistantJob::interrupt: bool
 pub ai6::AssistantJob::job_id: alloc::string::String
 pub ai6::AssistantJob::mcp_token: alloc::string::String
+pub ai6::AssistantJob::memory: core::option::Option<ai6::directorates::section_00::assistant::MemoryOp>
 pub ai6::AssistantJob::message: alloc::string::String
 pub ai6::AssistantJob::person_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::recap: core::option::Option<alloc::string::String>
@@ -5659,6 +5710,18 @@ pub fn ai6::directorates::q::McpServer::name(&self) -> &str
 pub struct ai6::McpServerRef
 pub ai6::McpServerRef::env_prefix: alloc::string::String
 pub ai6::McpServerRef::name: alloc::string::String
+pub struct ai6::MemoryAnswer
+pub ai6::MemoryAnswer::changed: bool
+pub ai6::MemoryAnswer::commit: core::option::Option<alloc::string::String>
+pub ai6::MemoryAnswer::digest: core::option::Option<alloc::string::String>
+pub ai6::MemoryAnswer::files: alloc::vec::Vec<ai6::directorates::section_00::assistant::MemoryFile>
+pub ai6::MemoryAnswer::missing: bool
+pub ai6::MemoryAnswer::more: bool
+pub ai6::MemoryAnswer::text: core::option::Option<alloc::string::String>
+pub struct ai6::MemoryCommit
+pub ai6::MemoryCommit::author_email: alloc::string::String
+pub ai6::MemoryCommit::author_name: alloc::string::String
+pub ai6::MemoryCommit::message: alloc::string::String
 pub struct ai6::MemoryConfigSource
 impl ai6::directorates::m::config::MemoryConfigSource
 pub fn ai6::directorates::m::config::MemoryConfigSource::new(ai6::directorates::m::roster::Roster) -> Self
@@ -5672,6 +5735,14 @@ pub fn ai6::directorates::m::config::MemoryConfigSource::remove(&self, ai6::dire
 pub fn ai6::directorates::m::config::MemoryConfigSource::revision(&self) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::directorates::m::config::MemoryConfigSource
 pub fn ai6::directorates::m::config::MemoryConfigSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::MemoryFile
+pub ai6::MemoryFile::bytes: u64
+pub ai6::MemoryFile::path: alloc::string::String
+pub struct ai6::MemoryOp
+pub ai6::MemoryOp::action: ai6::directorates::section_00::assistant::MemoryAction
+pub ai6::MemoryOp::repo: alloc::string::String
+impl ai6::directorates::section_00::assistant::MemoryOp
+pub fn ai6::directorates::section_00::assistant::MemoryOp::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::MissionId(_)
 impl ai6::directorates::m::identity::MissionId
 pub fn ai6::directorates::m::identity::MissionId::as_str(&self) -> &str
@@ -6899,6 +6970,8 @@ pub const ai6::MAX_LOADOUT_BYTES: usize
 pub const ai6::MAX_MANIFEST_BYTES: u64
 pub const ai6::MAX_MANIFEST_FILES: usize
 pub const ai6::MAX_MANIFEST_FILE_BYTES: u64
+pub const ai6::MAX_MEMORY_FILES: usize
+pub const ai6::MAX_MEMORY_LIST_BYTES: usize
 pub const ai6::MAX_RECENT_EVENTS: usize
 pub const ai6::MAX_RECENT_EVENT_CHARS: usize
 pub const ai6::MAX_SECRET_LEASE_TTL: core::time::Duration
@@ -7539,6 +7612,7 @@ pub fn ai6::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
 pub fn ai6::is_untrusted(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::library_pin(&[u8]) -> coqui_peer::id::PeerId
 pub fn ai6::load_role_authorizer(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::memory_path(&str) -> bool
 pub fn ai6::micro_usd(f64) -> u64
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
