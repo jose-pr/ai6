@@ -258,6 +258,40 @@ same trailer. With `write = true` for that group (or for `org`) it is committed 
 audited `moneypenny.shared.write`; that setting is a weakening, as are `allow_elevated` and
 any `write = true`, and each is logged when a Station starts or its roster changes.
 
+## Your memory in the app
+
+What she remembers about you is yours to read and correct. In the app, **Ask Moneypenny**'s
+menu opens **Her memory of you**: the files of `memory/` in your personal repository, each to
+open, edit and save, and to forget (after you confirm). A new file is made there too. The page
+talks to Universal Exports, which has no checkout of any repository: it asks the Headquarters
+Station (else the first healthy one) to do it in a clone of your repository of its own, and
+answers within 30 seconds or says that the Station did not.
+
+| Route | Does |
+| --- | --- |
+| `GET /v1/user/assistant/memory` | Lists the files, their sizes and the commit `main` is at |
+| `GET /v1/user/assistant/memory/{path}` | Reads one file, with a digest of its text |
+| `PUT /v1/user/assistant/memory/{path}` | Writes one file: `{"content", "message"?, "base"?}` |
+| `DELETE /v1/user/assistant/memory/{path}` | Forgets one file |
+
+`{path}` is relative to `memory/`: up to seven names of letters, digits, `.`, `-` and `_`,
+none starting with `.`; a file holds at most 64 KiB of text. Each save and each "forget" is
+a commit to `main` authored by you, its message yours or `Edit memory/<path>` /
+`Forget memory/<path>`, followed by `Via: Universal Exports`; history keeps what was there
+before. The app saves with the digest of the text it opened as `base`, so a file she changed
+meanwhile is refused (`409`) rather than overwritten: open it again and make the change from
+what it holds now. Likewise her own next change to a file you edited is refused, and she makes
+it again from your text. A conversation already running keeps the memory it read until her
+harness starts again.
+
+Your memory is yours alone. The deployment's administrators can read it, never change it: a
+person holding `assistant.memory.admin` on `config:assistant` ([access
+policy](access.md#the-access-policy)) adds `?person=<id>` to the two `GET` routes, and each
+such read is audited `assistant.memory.read` before it is made. Nobody, administrator or not,
+writes or forgets another person's memory. Your own changes are audited too
+(`assistant.memory.write`, `assistant.memory.forget`), and one that cannot be audited is not
+made.
+
 ## Cables
 
 She can talk to Agents for you over [Cables](agents.md#cables), in the Operations where you

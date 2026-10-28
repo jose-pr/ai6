@@ -31,9 +31,11 @@ With no `source` they live in memory and are gone at exit.
 ## The access policy
 
 `access.toml` binds people to roles at a scope. A scope is `*` or `station:<id>`,
-`operation:<id>`, `theater:<id>` or `config:roster` (the roster every Station reads); the
+`operation:<id>`, `theater:<id>`, `config:roster` (the roster every Station reads) or
+`config:assistant` (Moneypenny's repositories); the
 first rule that matches decides, and no match denies. The actions Universal Exports checks
-are `agent.configure`, `agent.read`, `approval.class`, `approval.decide`, `audit.read`,
+are `agent.configure`, `agent.read`, `approval.class`, `approval.decide`,
+`assistant.memory.admin`, `audit.read`,
 `cable.read`, `cable.send`, `mission.control`, `mission.create`, `mission.read`,
 `pool.manage`, `pool.read`,
 `roster.manage`, `roster.read`, `session.input`, `session.read`, `station.configure` and
@@ -48,16 +50,27 @@ for [green ink](missions.md#green-ink) and `approval.class` manages class author
 neither comes with `mission.create` or `mission.control`. `cable.send` and `cable.read` on
 `operation:<id>` are what [Moneypenny](assistant.md#cables) may do with Cables there for
 the person: send and reply, and read what is sent to her. The Station's `cables.toml` still
-has to let her Agent do it.
+has to let her Agent do it. A person reads and changes [Moneypenny's memory of
+them](assistant.md#your-memory-in-the-app) with no action at all, and nobody else's;
+`assistant.memory.admin` on `config:assistant` lets an administrator read anyone's, each read
+audited `assistant.memory.read`, and change none.
 
 ```toml
 [role.viewer]
 actions = ["mission.read", "session.read"]
 
+[role.memory-admin]
+actions = ["assistant.memory.admin"]
+
 [[rule]]
 subject = "group:field"
 scope = "operation:G"
 role = "viewer"
+
+[[rule]]
+subject = "group:security"
+scope = "config:assistant"
+role = "memory-admin"
 ```
 
 ## Login limits

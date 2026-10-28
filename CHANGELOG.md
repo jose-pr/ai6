@@ -43,6 +43,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `roster.read` and `roster.manage`) and an accepted edit answers with the settings it loosens
   (`RosterChange::weakened`); Moneypenny's `roster` and `propose_roster_edit` tools take it
   too, a proposal naming each weakening in its summary.
+- The person reads and changes Moneypenny's memory of them from the app: Universal Exports
+  serves `GET /v1/user/assistant/memory` (the files of `memory/`, their sizes and the commit
+  `main` is at) and `GET`, `PUT` (`{"content", "message"?, "base"?}`) and `DELETE`
+  `/v1/user/assistant/memory/{path}`, each a memory job (`AssistantJob::memory`,
+  `ai6::MemoryOp` with `MemoryAction::{List, Read, Write, Forget}`, answered with
+  `AssistantEvent::memory`, `ai6::MemoryAnswer`) for the Headquarters Station, else the first
+  healthy one, within 30 seconds (`504` otherwise). The Station works in a clone of the
+  person's repository of its own and commits a write or a "forget" to `main` exactly, authored
+  by the person with `Via: Universal Exports` in the message, never to a fallback branch; a
+  write whose `base` the file no longer holds is refused (`409`). A person's memory is theirs
+  alone: the new action `assistant.memory.admin` on `config:assistant` reads another
+  person's (`?person=<id>`), audited `assistant.memory.read`, and nobody changes another's;
+  the person's own changes are audited `assistant.memory.write` and
+  `assistant.memory.forget`. The app's **Ask Moneypenny** menu opens **Her memory of you**:
+  list, open, edit and save, add, and forget after a confirmation, with Universal Exports'
+  own words when it refuses.
 - The Moneypenny app's Roster page lists Moneypenny's settings (the `assistant` record),
   edited under its fixed key `assistant` and added only while there is none, and after an
   accepted edit shows each setting the stored record leaves looser than its default.

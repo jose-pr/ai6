@@ -53,7 +53,9 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   answers from AI6's records, through tools that run with the signed-in operator's own
   permissions, shows tables, charts, cards, timelines and diffs rendered by the app, and
   proposes changes the operator confirms or cancels (the exact request is shown); **Stop**
-  ends an answer she is still giving. See the
+  ends an answer she is still giving. Her menu opens **Her memory of you**, the files of
+  `memory/` in the operator's personal repository: open, edit and save, add, or forget one
+  (after a confirmation), each a commit by the operator. See the
   [assistant guide](https://jose-pr.github.io/ai6/assistant/).
 - Audit log for operators with `audit.read`; operator menu with identity, effective
   permissions per Operation, theme and sign-out.
