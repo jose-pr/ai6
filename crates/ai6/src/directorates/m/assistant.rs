@@ -401,11 +401,11 @@ pub fn check_skill(dir: &Path, name: &str, allow_tools: bool) -> Result<(), Stri
     if keys.get("name").and_then(serde_json::Value::as_str) != Some(name) {
         return Err(format!("SKILL.md front matter does not have name: {name}"));
     }
-    if !keys
+    let description = keys
         .get("description")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|description| !description.trim().is_empty())
-    {
+        .unwrap_or_default();
+    if description.trim().is_empty() {
         return Err("SKILL.md front matter has no description".to_owned());
     }
     if allow_tools {
