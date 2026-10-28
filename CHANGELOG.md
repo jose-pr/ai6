@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Moneypenny runs on Codex with scripts and her workspace. With interpreters, the Codex
+  handler admits Codex's code-mode tools (`functions.exec`, `functions.wait`) inside Codex's
+  own sandbox, a permission profile (`ai6_assistant`) that denies the filesystem but the
+  platform's paths, her working directory (read) and `personal/` and `scratch/` (write), with
+  only the script environment kept (`ai6::SCRIPT_ENVIRONMENT`, shared with Claude Code) and,
+  on Windows, `windows.sandbox = "mxc"`; each such start is reported as a weakening, since any
+  command runs inside the sandbox. Scripts on Codex get no network under any policy. Her
+  context file reaches Codex as developer instructions; her server's tools are approved
+  without asking (`default_tools_approval_mode = "approve"`); commands are reported as the
+  tool `exec_command`, which counts as `Bash` does for exposure; a `propose_shared_change`
+  call is read from Codex's `mcpToolCall` item for its shared-change base.
+  `AgentHandler::assistant_scripts` for Codex asks `codex sandbox -P` whether the sandbox
+  runs. New `AgentHandler::assistant_skills`: a Station installs no skill for a handler that
+  cannot keep to the catalog (Codex) and tells her so.
 - A change to a shared repository records what the file held when Moneypenny made it. As a
   Station sees her `propose_shared_change` call, it reports the file's SHA-256 in her
   `shared/<group>/` checkout, or that there was none (`AssistantEvent::shared`,

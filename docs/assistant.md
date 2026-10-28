@@ -52,23 +52,25 @@ whose tools it may call without asking, and runs with `CLAUDE_CODE_DISABLE_ADVIS
 Claude Code otherwise attaches its server-side advisor tool, which none of those flags
 removes. Codex gets its command execution switched off
 (`features.shell_tool = false`), web search, sub-agents, app connectors and questions to the
-user off, an empty skills catalog, every other feature it enables switched off but those
-that only store its login and reach its service and the one its tool check reads through,
-that one server added and each of the user's own MCP servers switched off by name, and, as a
-further line, the read-only sandbox (no writes, no network) with approvals off. Then the
-[tool check](agents.md#codex-tool-check) renders what Codex would offer the model and starts
-her only if that is exactly her server's tools. Codex 0.164 gives every model its code-mode
-JavaScript tools (`functions.exec`, `functions.wait`) and offers MCP tools only through
-them, which this check refuses, so with that release she does not start on Codex: the safe
-outcome, since `exec` reaches nested tools such as `apply_patch`. Run her on Claude Code.
-Either harness that calls a tool outside her server anyway is ended at once ([restricted
-Sessions](agents.md#chief-of-staff)).
+user off, an empty skills catalog, no project instructions file (`project_doc_max_bytes =
+0`), every other feature it enables switched off but those that only store its login and
+reach its service and the one its tool check reads through, that one server added with its
+tools approved without asking (`default_tools_approval_mode = "approve"`: Codex otherwise
+fails every MCP call it would ask about) and each of the user's own MCP servers switched off
+by name, and, as a further line, the read-only sandbox (no writes, no network) with approvals
+off. Then the [tool check](agents.md#codex-tool-check) renders what Codex would offer the
+model and starts her only if that is exactly her server's tools. Codex 0.164 gives every
+model its code-mode JavaScript tools (`functions.exec`, `functions.wait`) and offers MCP
+tools only through them, which this check refuses, so with that release she starts on Codex
+only [with scripts](#her-scripts-on-codex), where those two tools are admitted inside Codex's
+sandbox as a reported weakening. Either harness that calls a tool outside what her mode
+allows is ended at once ([restricted Sessions](agents.md#chief-of-staff)).
 
 The mode is built from parts (MCP servers, interpreters, skills, network policy, the
 directories she may write, a context file), and Claude Code gets exactly the built-in tools
 those parts call for: [scripts and the web](#her-scripts-and-the-web) as the roster allows,
-and [skills](#her-skills) from the roster's catalog. Codex refuses to start an assistant that
-asks for a skill, an interpreter or a network beyond its MCP server. With a
+and [skills](#her-skills) from the roster's catalog. Codex gets the tools of
+[its sandbox](#her-scripts-on-codex) with interpreters and none without, and refuses skills. With a
 [workspace](#her-workspace-and-memory), Claude Code also gets its file
 tools (`Read`, `Write`, `Edit`, `Glob`, `Grep`) under `--permission-mode dontAsk`: she may
 read anything in her workspace (`--restricted` keeps the file tools inside it) and write
@@ -84,7 +86,9 @@ its target, and the Station never reads, writes or removes anything in her works
 a symbolic link, a junction or another reparse point. Her
 standing context goes in with `--append-system-prompt-file`, from a file beside, not inside,
 her workspace. Every assistant Session runs with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so Claude
-Code keeps no memory of its own beside hers. Codex refuses a workspace for now.
+Code keeps no memory of its own beside hers. Codex gets the same standing context as
+developer instructions, read from that file; it writes in her workspace only through her
+[scripts](#her-scripts-on-codex), so without them she is told she has no file tools.
 
 A Station running elevated (as root, or on Windows with an administrator's elevated token)
 refuses every assistant message unless the roster's `[assistant]` sets `allow_elevated =
@@ -269,8 +273,10 @@ held in her `shared/<group>/` checkout (its SHA-256, or that there was no such f
 Universal Exports attaches that to the change. When the repository's `main` has changed the
 file since, the commit is refused and nothing is written, so a group member's edit made
 meanwhile is never replaced; she is told to make the change again from what the file holds
-now. A call the Station reports nothing for within five seconds (her checkout of that
-repository could not be opened, or the harness is not Claude Code) is refused.
+now. The Station sees the call in Claude Code's stream (the `tool_use` block) and in Codex's
+(the `mcpToolCall` item it announces before calling her server). A call the Station reports
+nothing for within five seconds (her checkout of that repository could not be opened) is
+refused.
 
 ## Your memory in the app
 
@@ -391,7 +397,45 @@ ends her answer with the reason, or refuses each script.
 
 `network = "open"` and `unsandboxed_scripts = true` are weakenings: a Station logs them when it
 starts and reports them at check-in, and `open` is logged again with each harness it starts.
-Codex runs her without scripts and refuses a network beyond her MCP servers.
+
+## Her scripts on Codex
+
+On Codex her scripts run in Codex's own sandbox, under a permission profile
+([Codex permissions](https://learn.chatgpt.com/docs/permissions)) the handler passes as
+`ai6_assistant`: the whole filesystem denied, the platform's own paths (`:minimal`) and her
+working directory readable, and only `personal/` and `scratch/` writable (a `.git` under them
+stays read-only). The directory the `codex` executable is in, and the one each interpreter is
+in as found on the harness's `PATH`, are readable too, unless that directory is or holds the
+home directory, her working directory or a credential directory (`CODEX_HOME`, any
+`*_HOME`), or lies inside a credential directory: an interpreter there is unreachable. Her
+scripts keep only the environment variables Claude Code's keep
+(`shell_environment_policy.include_only`). On Windows the handler sets `windows.sandbox =
+"mxc"`, the one Windows implementation that denies reads; `unelevated` refuses such a
+profile and `elevated` needs the whole filesystem readable (Codex 0.164).
+
+What differs from Claude Code:
+
+- **Any command, not only the interpreters.** Codex 0.164 offers the model only its code-mode
+  tools, `functions.exec` (JavaScript that calls her server's tools and the command tools) and
+  `functions.wait`, and keeps no list of allowed programs: inside the sandbox she may run any
+  command. Each harness started with scripts reports that as a weakening (`ai6: weakening:
+  Codex gives Moneypenny's thread functions.exec and functions.wait …`, and a `weakened`
+  event first).
+- **No network for scripts.** Codex's app server enforced no host list for a profile's
+  network in Codex 0.164 (with network on, a script reached unlisted hosts and the Station's
+  own loopback services), so her scripts get none under every policy; she is told so when the
+  policy names hosts, and the Station logs it. She has no web search on Codex.
+- **Files only through scripts.** Codex has no file tool outside `exec`: without interpreters
+  she writes nothing, and is told so.
+- **Every command counts as reading her files.** The Station sees each command Codex starts
+  (`exec_command`) and treats it as Claude Code's `Bash`: it reads the outside-text record's
+  files, and reaches the network while the policy names hosts.
+
+Whether Codex's sandbox runs is asked once in 15 minutes per executable and configuration:
+the handler runs `codex sandbox -P` with the same kind of profile, no model involved. Where it
+fails (Windows without MXC, a Linux host that refuses bubblewrap), she starts without scripts,
+as on a Station where Claude Code has no sandbox, unless `unsandboxed_scripts = true`: then
+Codex runs her commands with no sandbox (`danger-full-access`), the weakening above.
 
 ## Her skills
 
@@ -455,8 +499,11 @@ it as a plugin named `ai6` (`--plugin-dir`): she calls a skill as `ai6:<name>`, 
 replaced with a notice (`disableSkillShellExecution`) unless `skills_allow_tools` is set; with
 it, they still go through her permission rules. A skill's other files she reads with her
 file tools, which she has with a [workspace](#her-workspace-and-memory). Skill text is the
-deployment's own, like a shared repository: reading it exposes nothing. The Codex handler
-refuses skills, so a person given any runs on Claude Code.
+deployment's own, like a shared repository: reading it exposes nothing. Codex keeps no list
+of allowed skills (it loads those of the project, the user's home directory and the system,
+and its own bundled ones: [Codex skills](https://learn.chatgpt.com/docs/build-skills)), so on
+Codex the Station installs none, tells
+her skills are unavailable and logs why; a person who needs skills runs on Claude Code.
 
 ## Cables
 
