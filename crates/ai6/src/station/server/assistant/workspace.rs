@@ -43,9 +43,9 @@ pub(super) const SHARED: &str = "shared";
 /// Her scratch directory, gone with the conversation's directory.
 pub(super) const SCRATCH: &str = "scratch";
 /// Her memory, inside the personal repository.
-const MEMORY: &str = "memory";
+pub(super) const MEMORY: &str = "memory";
 /// The branch every repository is read from and saved to.
-const MAIN: &str = "main";
+pub(super) const MAIN: &str = "main";
 /// The safe-house provider the workspace's repositories are opened with.
 pub(super) const PROVIDER: &str = "git";
 /// The most of `MEMORY.md` inlined into `AGENTS.md` and the context file.
@@ -615,7 +615,7 @@ fn exactly(change: &AssistantChange) -> Vec<CheckpointFile> {
 }
 
 /// The hex SHA-256 of `bytes`: a file's [`AssistantChange::base`].
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(super) fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(bytes)
         .iter()
@@ -652,7 +652,7 @@ fn landed(saved: &SafeHouseCheckpoint, repo: &str) -> String {
 }
 
 /// Clones `repo` into `path` on `main`, its git directory in `git_dir` when given.
-fn open_clone(
+pub(super) fn open_clone(
     provider: &dyn SafeHouseProvider,
     repo: &str,
     path: &Path,
@@ -749,7 +749,9 @@ fn stat_tree(root: &Path) -> BTreeMap<String, (u64, Option<SystemTime>)> {
     found
 }
 
-fn walk(path: &Path, name: &str, visit: &mut dyn FnMut(String, &Path)) {
+/// Visits each plain file under `path` by `name/<path>`, never through a link and never into
+/// a hidden name.
+pub(super) fn walk(path: &Path, name: &str, visit: &mut dyn FnMut(String, &Path)) {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return;
     };
@@ -871,7 +873,7 @@ fn read_text(root: &Path, path: &Path) -> Option<String> {
 /// Refuses `path` when `root`, or anything from `root` down to it, is a link: a symbolic link,
 /// a junction or any other reparse point, which would take a read or write of the Station's
 /// somewhere else. What does not exist yet is fine.
-fn no_links(root: &Path, path: &Path) -> std::io::Result<()> {
+pub(super) fn no_links(root: &Path, path: &Path) -> std::io::Result<()> {
     let refused = |at: &Path| {
         std::io::Error::other(format!(
             "{} is a link, which is never followed",
@@ -1052,7 +1054,7 @@ fn expand(base: &Path, raw: &str) -> Option<PathBuf> {
 }
 
 /// The path of `file`, a `/`-separated path relative to `root`.
-fn in_tree(root: &Path, file: &str) -> PathBuf {
+pub(super) fn in_tree(root: &Path, file: &str) -> PathBuf {
     file.split('/')
         .fold(root.to_path_buf(), |at, name| at.join(name))
 }

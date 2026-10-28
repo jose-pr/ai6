@@ -20,17 +20,20 @@ pub use coqui_roles::{
 use serde::Deserialize;
 
 /// The resource kinds a role rule may be scoped to in AI6: `station:<id>`, `operation:<id>`,
-/// `theater:<id>` and `config:roster` (the roster every Station reads). A rule may also name
-/// `*`.
+/// `theater:<id>`, `config:roster` (the roster every Station reads) and `config:assistant`
+/// (Moneypenny's repositories). A rule may also name `*`.
 pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
 
 /// The actions the gateway checks, for writing roles. `cable.send` and `cable.read` on
 /// `operation:<id>` bound what Moneypenny may do with Cables on the person's behalf.
+/// `assistant.memory.admin` on `config:assistant` reads another person's memory, audited; a
+/// person's own memory needs no action, and nobody changes another's.
 pub const ACTIONS: &[&str] = &[
     "agent.configure",
     "agent.read",
     "approval.class",
     "approval.decide",
+    "assistant.memory.admin",
     "audit.read",
     "cable.read",
     "cable.send",

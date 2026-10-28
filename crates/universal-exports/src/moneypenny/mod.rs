@@ -21,6 +21,7 @@
 //!
 //! Routes: `GET /v1/user/moneypenny` (the app's WebSocket), `POST /v1/moneypenny/mcp` (the
 //! harness's tools, with a token bound to the person and the conversation),
+//! `/v1/user/assistant/memory` (the person's memory, [`memory`]),
 //! `GET /v1/station/assistant/next`, `POST /v1/station/assistant/reports` and
 //! `GET`/`POST /v1/station/assistant/exposure` (the Stations).
 
@@ -28,6 +29,7 @@ pub(crate) mod actions;
 pub(crate) mod cables;
 mod guide;
 pub(crate) mod mcp;
+pub(crate) mod memory;
 mod store;
 pub(crate) mod tools;
 pub(crate) mod views;
@@ -218,6 +220,9 @@ struct Desk {
     /// Confirmed Cables waiting for their Station, by control job ID: the conversation, the
     /// proposal and when they are given up, Unix seconds.
     cable_deadlines: HashMap<String, (String, String, f64)>,
+    /// Memory requests waiting for their Station's answer, by job ID: the Station given the
+    /// job, and where its answer goes.
+    memory: HashMap<String, (String, tokio::sync::oneshot::Sender<AssistantReport>)>,
 }
 
 /// What a control job asks of a Station.
@@ -265,6 +270,7 @@ fn control_job(
         cables: Vec::new(),
         cable_confirm: None,
         cable_discard: None,
+        memory: None,
     }
 }
 
@@ -652,6 +658,7 @@ impl Assistant {
                 cables,
                 cable_confirm: None,
                 cable_discard: None,
+                memory: None,
             };
             conversation.workspace = job.workspace.clone();
             if let Some(text) = shown {
@@ -2383,6 +2390,11 @@ pub(crate) async fn reports(
     let Some(assistant) = gateway.assistant.clone() else {
         return Err(ApiError::not_found());
     };
+    match assistant.answer_memory(&report) {
+        Some(Ok(())) => return Ok(StatusCode::NO_CONTENT),
+        Some(Err(_)) => return Err(ApiError::forbidden()),
+        None => {}
+    }
     match assistant.report(&gateway, report).await {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(StatusCode::NOT_FOUND) => Err(ApiError::not_found()),

@@ -27,7 +27,13 @@
 //! A Station running elevated (root, or an administrator's elevated token) refuses every job
 //! unless the roster's `assistant.allow_elevated` is set, which is logged as a weakening each
 //! time a harness starts.
+//!
+//! A job carrying a [`MemoryOp`] is the person reading or changing her memory of them from the
+//! app: no harness is involved, and [`memory`] makes it in a clone of the person's repository.
+//!
+//! [`MemoryOp`]: crate::directorates::section_00::assistant::MemoryOp
 
+mod memory;
 mod workspace;
 
 use std::collections::BTreeMap;
@@ -54,7 +60,7 @@ use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
     AssistantJob, AssistantReport, COMMIT_MEMORY, EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED,
     EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
-    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL,
+    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer,
 };
 use crate::guatiao::library::Object;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
@@ -79,6 +85,8 @@ const STOP_CHECK: Duration = Duration::from_millis(250);
 const MAX_KNOWN: usize = 1_024;
 /// How long removing a closed harness's working directory is tried again.
 const REMOVE_RETRY: Duration = Duration::from_secs(2);
+/// Memory jobs a Station makes at once, each in a clone of its own; more wait their turn.
+const MAX_MEMORY_JOBS: usize = 4;
 
 /// A harness, shared by the desk (to send it messages) and its pump (to read it).
 type SharedSession = Arc<Mutex<Object<dyn AgentSession>>>;
@@ -384,6 +392,8 @@ pub(super) struct Desk {
     log: Logger,
     /// Universal Exports' record of exposure.
     exposure: Arc<dyn Exposure>,
+    /// Turns for memory jobs ([`MAX_MEMORY_JOBS`]).
+    memory_jobs: Arc<tokio::sync::Semaphore>,
 }
 
 impl Desk {
@@ -413,6 +423,7 @@ impl Desk {
             elevation: OnceLock::new(),
             log: Arc::new(|line| eprintln!("ai6: {line}")),
             exposure: Arc::new(Unreachable),
+            memory_jobs: Arc::new(tokio::sync::Semaphore::new(MAX_MEMORY_JOBS)),
         }
     }
 
@@ -489,6 +500,11 @@ impl Desk {
                 }
             }
         }
+        if let Some(memory) = &job.memory
+            && personal()?.as_deref() != Some(memory.repo.as_str())
+        {
+            return refused("the person's repository");
+        }
         if let Some(commit) = &job.commit {
             let given = if commit.kind == COMMIT_MEMORY {
                 personal()?.as_deref() == Some(commit.repo.as_str())
@@ -512,6 +528,9 @@ impl Desk {
     /// no longer waits for the job here (it moved to another Station or was given up), so the
     /// harness closes.
     pub(super) async fn handle(&self, job: AssistantJob) {
+        if job.memory.is_some() {
+            return self.handle_memory(job);
+        }
         let message = carries_message(&job);
         if message {
             self.outbox.hold(&job.conversation_id);
@@ -539,6 +558,61 @@ impl Desk {
         if accepted && refused {
             self.close(&job.conversation_id);
         }
+    }
+
+    /// Takes a memory job on a task of its own, so a slow clone holds up no conversation, and
+    /// at most [`MAX_MEMORY_JOBS`] at once: answers `accepted` with what it did and found, or
+    /// `rejected` with why nothing was done, each with its [`MemoryAnswer`].
+    fn handle_memory(&self, job: AssistantJob) {
+        let checked = job
+            .validate()
+            .and_then(|()| self.check_elevation())
+            .and_then(|()| self.check_repositories(&job))
+            .and_then(|()| job.memory.clone().ok_or_else(|| "no memory job".to_owned()));
+        let houses = self.houses.clone();
+        let outbox = self.outbox.clone();
+        let station_id = self.state.station_id.clone();
+        let permits = self.memory_jobs.clone();
+        tokio::spawn(async move {
+            let outcome = match checked {
+                Err(reason) => Err(memory::Refusal::of(reason)),
+                Ok(op) => {
+                    let _turn = permits.acquire_owned().await;
+                    let digest = conversation_digest(&job.conversation_id);
+                    tokio::task::spawn_blocking(move || memory::run(&houses, &op, &digest))
+                        .await
+                        .unwrap_or_else(|error| Err(memory::Refusal::of(error.to_string())))
+                }
+            };
+            let (kind, (text, answer)) = match outcome {
+                Ok(done) => (EVENT_ACCEPTED, done),
+                Err(refusal) => (
+                    EVENT_REJECTED,
+                    (
+                        refusal.reason,
+                        MemoryAnswer {
+                            missing: refusal.missing,
+                            changed: refusal.changed,
+                            ..MemoryAnswer::default()
+                        },
+                    ),
+                ),
+            };
+            let mut event = AssistantEvent::new(kind, Some(text));
+            event.memory = Some(answer);
+            outbox
+                .answer(
+                    AssistantReport {
+                        station_id,
+                        conversation_id: job.conversation_id,
+                        job_id: Some(job.job_id),
+                        session_id: None,
+                        events: vec![event],
+                    },
+                    false,
+                )
+                .await;
+        });
     }
 
     async fn take(&self, job: &AssistantJob) -> Result<Option<String>, String> {
@@ -1866,7 +1940,8 @@ mod tests {
     use super::super::tests::test_state;
     use super::*;
     use crate::directorates::section_00::assistant::{
-        AssistantChange, AssistantCommit, AssistantWorkspace, COMMIT_SHARED,
+        AssistantChange, AssistantCommit, AssistantWorkspace, COMMIT_SHARED, MemoryAction,
+        MemoryCommit, MemoryFile, MemoryOp,
     };
     use crate::guatiao::library::ProviderError;
 
@@ -2377,6 +2452,7 @@ mod tests {
             cables: Vec::new(),
             cable_confirm: None,
             cable_discard: None,
+            memory: None,
         }
     }
 
@@ -3565,6 +3641,208 @@ mod tests {
             .await;
         until(|| kinds(&fixture, "c-6").contains(&EVENT_COMPLETED.to_owned())).await;
         fixture.desk.close_all();
+    }
+
+    /// A job that does `action` with `repo` for the person, from the app.
+    fn remembering(id: &str, repo: &Path, action: MemoryAction) -> AssistantJob {
+        let conversation = format!("memory-{id}");
+        AssistantJob {
+            job_id: conversation.clone(),
+            message: String::new(),
+            context: Vec::new(),
+            recap: None,
+            person_id: Some("eve".to_owned()),
+            memory: Some(MemoryOp {
+                repo: repo.to_string_lossy().into_owned(),
+                action,
+            }),
+            ..job(&conversation, "unused")
+        }
+    }
+
+    /// How the desk answered memory job `id`: its event's kind and text, and its answer.
+    async fn memory_answer(fixture: &Fixture, id: &str) -> (String, String, MemoryAnswer) {
+        let conversation = format!("memory-{id}");
+        until(|| !events(fixture, &conversation).is_empty()).await;
+        let event = events(fixture, &conversation)
+            .into_iter()
+            .next()
+            .expect("the job was answered");
+        (
+            event.kind,
+            event.text.unwrap_or_default(),
+            event.memory.expect("with a memory answer"),
+        )
+    }
+
+    fn by_the_person(subject: &str) -> MemoryCommit {
+        MemoryCommit {
+            message: format!("{subject}\n\nVia: Universal Exports"),
+            author_name: "Eve Moneypenny".to_owned(),
+            author_email: "eve@example.invalid".to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_person_reads_writes_and_forgets_memory_in_commits_of_their_own() {
+        let people = tempfile::tempdir().unwrap();
+        let fixture = git_fixture(people.path(), Script::Answers);
+        let bare = people.path().join("eve.git");
+        let write = |text: &str, base: Option<String>| MemoryAction::Write {
+            path: "memory/prefs.md".to_owned(),
+            text: text.to_owned(),
+            base,
+            commit: by_the_person("Edit memory/prefs.md"),
+        };
+
+        // Her first use creates the repository, empty.
+        fixture
+            .desk
+            .handle(remembering("1", &bare, MemoryAction::List {}))
+            .await;
+        let (kind, _, listed) = memory_answer(&fixture, "1").await;
+        assert_eq!(kind, EVENT_ACCEPTED);
+        assert_eq!(listed, MemoryAnswer::default(), "nothing yet, no commit");
+        assert!(bare.join("HEAD").exists(), "created bare");
+
+        fixture
+            .desk
+            .handle(remembering("2", &bare, write("Tables, please.\n", None)))
+            .await;
+        let (kind, text, written) = memory_answer(&fixture, "2").await;
+        assert_eq!(kind, EVENT_ACCEPTED, "{text}");
+        let head = git(&bare, &["rev-parse", "main"]).trim().to_owned();
+        assert_eq!(written.commit.as_deref(), Some(head.as_str()));
+        assert_eq!(
+            git(
+                &bare,
+                &["log", "-1", "--format=%an <%ae>|%cn <%ce>|%B", "main"]
+            )
+            .trim(),
+            "Eve Moneypenny <eve@example.invalid>|Eve Moneypenny <eve@example.invalid>|Edit \
+             memory/prefs.md\n\nVia: Universal Exports"
+        );
+        assert_eq!(
+            git(&bare, &["show", "main:memory/prefs.md"]),
+            "Tables, please.\n"
+        );
+
+        fixture
+            .desk
+            .handle(remembering("3", &bare, MemoryAction::List {}))
+            .await;
+        let (_, _, listed) = memory_answer(&fixture, "3").await;
+        assert_eq!(listed.commit.as_deref(), Some(head.as_str()));
+        assert_eq!(
+            listed.files,
+            [MemoryFile {
+                path: "memory/prefs.md".to_owned(),
+                bytes: 16,
+            }]
+        );
+        fixture
+            .desk
+            .handle(remembering(
+                "4",
+                &bare,
+                MemoryAction::Read {
+                    path: "memory/prefs.md".to_owned(),
+                },
+            ))
+            .await;
+        let (_, _, read) = memory_answer(&fixture, "4").await;
+        assert_eq!(read.text.as_deref(), Some("Tables, please.\n"));
+        let digest = read.digest.clone().unwrap();
+        assert_eq!(Some(digest.clone()), written.digest);
+
+        // A write from what the file no longer holds changes nothing.
+        fixture
+            .desk
+            .handle(remembering(
+                "5",
+                &bare,
+                write("Charts.\n", Some("0".repeat(64))),
+            ))
+            .await;
+        let (kind, text, stale) = memory_answer(&fixture, "5").await;
+        assert_eq!(kind, EVENT_REJECTED);
+        assert!(stale.changed, "{text}");
+        assert_eq!(git(&bare, &["rev-parse", "main"]).trim(), head);
+        fixture
+            .desk
+            .handle(remembering("6", &bare, write("Charts.\n", Some(digest))))
+            .await;
+        assert_eq!(memory_answer(&fixture, "6").await.0, EVENT_ACCEPTED);
+        assert_eq!(git(&bare, &["show", "main:memory/prefs.md"]), "Charts.\n");
+
+        // "Forget" is a commit by the person that removes the file.
+        fixture
+            .desk
+            .handle(remembering(
+                "7",
+                &bare,
+                MemoryAction::Forget {
+                    path: "memory/prefs.md".to_owned(),
+                    commit: by_the_person("Forget memory/prefs.md"),
+                },
+            ))
+            .await;
+        let (kind, text, forgot) = memory_answer(&fixture, "7").await;
+        assert_eq!(kind, EVENT_ACCEPTED, "{text}");
+        assert_eq!(
+            forgot.commit.as_deref(),
+            Some(git(&bare, &["rev-parse", "main"]).trim())
+        );
+        assert_eq!(
+            git(
+                &bare,
+                &[
+                    "log",
+                    "-1",
+                    "--format=%an <%ae>|%s",
+                    "--name-status",
+                    "main"
+                ]
+            )
+            .trim(),
+            "Eve Moneypenny <eve@example.invalid>|Forget memory/prefs.md\n\nD\tmemory/prefs.md"
+        );
+        assert!(!git(&bare, &["ls-tree", "-r", "--name-only", "main"]).contains("prefs.md"));
+        for (id, action) in [
+            (
+                "8",
+                MemoryAction::Forget {
+                    path: "memory/prefs.md".to_owned(),
+                    commit: by_the_person("Forget memory/prefs.md"),
+                },
+            ),
+            (
+                "9",
+                MemoryAction::Read {
+                    path: "memory/prefs.md".to_owned(),
+                },
+            ),
+        ] {
+            fixture.desk.handle(remembering(id, &bare, action)).await;
+            let (kind, _, gone) = memory_answer(&fixture, id).await;
+            assert_eq!(kind, EVENT_REJECTED);
+            assert!(gone.missing);
+        }
+
+        // Another person's repository is not this person's, whatever the job says.
+        let theirs = people.path().join("mallory.git");
+        fixture
+            .desk
+            .handle(remembering("10", &theirs, MemoryAction::List {}))
+            .await;
+        let (kind, text, _) = memory_answer(&fixture, "10").await;
+        assert_eq!(kind, EVENT_REJECTED);
+        assert!(text.contains("roster"), "{text}");
+        assert!(!theirs.exists());
+        assert!(
+            fixture.asked.lock().unwrap().starts.is_empty(),
+            "no harness for any of it"
+        );
     }
 
     /// The marks of exposure the desk raised for `conversation`, by source.

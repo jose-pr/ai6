@@ -1203,6 +1203,13 @@ impl Gateway {
             .route("/v1/user/attach-grants", post(issue_user_attach_token))
             .route("/v1/user/moneypenny", get(moneypenny::socket))
             .route("/v1/moneypenny/mcp", post(moneypenny::mcp::endpoint))
+            .route("/v1/user/assistant/memory", get(moneypenny::memory::list))
+            .route(
+                "/v1/user/assistant/memory/{*path}",
+                get(moneypenny::memory::read)
+                    .put(moneypenny::memory::write)
+                    .delete(moneypenny::memory::forget),
+            )
             .route("/v1/station/assistant/next", get(moneypenny::next))
             .route("/v1/station/assistant/reports", post(moneypenny::reports))
             .route(

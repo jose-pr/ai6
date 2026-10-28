@@ -59,13 +59,17 @@ What AI6 adds:
 
 ```rust
 pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
-                              // "config:roster" is the roster every Station reads
+                              // "config:roster" is the roster every Station reads,
+                              // "config:assistant" Moneypenny's repositories
 pub const ACTIONS: &[&str];   // agent.configure, agent.read, approval.class,
-                              // approval.decide, audit.read, cable.read, cable.send,
+                              // approval.decide, assistant.memory.admin, audit.read,
+                              // cable.read, cable.send,
                               // mission.control, mission.create, mission.read,
                               // pool.manage, pool.read, roster.manage, roster.read,
                               // session.input, session.read, station.configure,
                               // station.read; cable.* on operation:<id> bound
+                              // assistant.memory.admin on config:assistant reads
+                              // another person's memory
                               // Moneypenny's Cables for the person
 pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
 pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError>;
@@ -2782,6 +2786,8 @@ pub const EVENT_CABLE_SENT: &str = "cable_sent";      // `cable`: sent, `cable_i
 pub const COMMIT_MEMORY: &str = "memory"; pub const COMMIT_SHARED: &str = "shared";
 pub const MAX_ASSISTANT_CHANGE_BYTES: usize = 64 * 1024;  // text of one change or commit
 pub const MAX_ASSISTANT_CHANGE_FILES: usize = 32;
+pub const MAX_MEMORY_FILES: usize = 1_000;          // files one memory listing names
+pub const MAX_MEMORY_LIST_BYTES: usize = 128 * 1024; // bytes of paths one listing names
 pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
     pub message: String, pub context: Vec<String> /* default: standing context */,
     pub recap: Option<String> /* default, omitted when None: for a harness started afresh only */,
@@ -2790,14 +2796,32 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub close: bool /* default */,
     pub interrupt: bool /* default */,
     pub exposed: bool /* default: Conversation.exposed at queue time, the one record of it */,
-    pub person_id: Option<String> /* default, omitted when None; required with workspace, commit or cables */,
+    pub person_id: Option<String> /* default, omitted when None; required with workspace, commit, memory or cables */,
     pub workspace: Option<AssistantWorkspace> /* default, omitted when None */,
     pub commit: Option<AssistantCommit> /* default, omitted when None */,
     pub cables: Vec<AssistantCableGrant> /* default, omitted when empty */,
     pub cable_confirm: Option<AssistantCableDecision> /* default, omitted when None */,
-    pub cable_discard: Option<AssistantCableDecision> /* default, omitted when None */ }
+    pub cable_discard: Option<AssistantCableDecision> /* default, omitted when None */,
+    pub memory: Option<MemoryOp> /* default, omitted when None: the person's memory from the app */ }
                                                      // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
+pub struct MemoryOp { pub repo: String /* the person's personal repository */,
+    pub action: MemoryAction }
+pub enum MemoryAction {                              // serde: {"kind": "list"|"read"|"write"|"forget", …}
+    List {}, Read { path: String },
+    Write { path: String, text: String, base: Option<String> /* hex SHA-256 the file must hold */,
+        commit: MemoryCommit },
+    Forget { path: String, commit: MemoryCommit } }
+pub struct MemoryCommit { pub message: String /* trailer included */,
+    pub author_name: String, pub author_email: String /* the person's, as committer too */ }
+impl MemoryOp { pub fn validate(&self) -> Result<(), String>; }
+pub struct MemoryAnswer { pub commit: Option<String> /* main read at, or the commit made */,
+    pub files: Vec<MemoryFile> /* list, path order */, pub more: bool,
+    pub text: Option<String> /* read */, pub digest: Option<String> /* hex SHA-256 of text read or written */,
+    pub missing: bool /* refused: no such file */, pub changed: bool /* refused: base no longer held */ }
+                                                     // every field default, omitted when empty
+pub struct MemoryFile { pub path: String /* relative to the repository */, pub bytes: u64 }
+pub fn memory_path(path: &str) -> bool;              // a repository_path under memory/
 pub struct AssistantWorkspace { pub personal: String /* the person's repository, expanded */,
     pub shared: BTreeMap<String, String> /* default; checkout name (group or "org") -> repository */,
     pub author_name: String, pub author_email: String /* the person's */ }
@@ -2828,22 +2852,26 @@ pub struct AssistantReport { pub station_id: String, pub conversation_id: String
     pub job_id: Option<String>, pub session_id: Option<String>, pub events: Vec<AssistantEvent> }
 pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,
     pub change: Option<AssistantChange> /* default, omitted when None */,
-    pub cable: Option<AssistantCable> /* default, omitted when None */ }
+    pub cable: Option<AssistantCable> /* default, omitted when None */,
+    pub memory: Option<MemoryAnswer> /* default, omitted when None: a memory job's answer */ }
 impl AssistantEvent { pub fn new(kind: &str, text: Option<String>) -> Self; } // cuts text
 pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control characters
 ```
 
 All are serde types with unknown fields refused. `validate` checks identities, a message
 of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`, `interrupt`, `commit`,
-`cable_confirm` or `cable_discard`, of which a job sets one), the context bound (context and
+`cable_confirm`, `cable_discard` or `memory`, of which a job sets one), the context bound (context and
 recap together), a token of 32-512 bytes without whitespace, a workspace (repositories of a
 known `RepoKind`, checkout names as `file_safe` names, an author without control characters,
 `<` or `>`), a commit (a known kind; the change's 1-32 files within
 `MAX_ASSISTANT_CHANGE_BYTES`, each `repository_path`, under `memory/` for `COMMIT_MEMORY`, its
 digest matching; a message of 1-4096 bytes), and at most `MAX_ASSISTANT_CABLE_GRANTS` Cable
-grants for distinct valid Operations, which need `person_id`. A job's answer is one report
-with its `job_id` and one `accepted` (for a commit, text saying where it landed) or `rejected`
-event (text: the reason); the harness's own events follow in reports without a `job_id`.
+grants for distinct valid Operations, which need `person_id`, and a memory operation (a
+repository of a known kind; a `memory_path`; text within `MAX_ASSISTANT_CHANGE_BYTES`; a base
+of 64 hex digits; a commit message of 1-4096 bytes and an author as for a commit), which needs
+`person_id` too. A job's answer is one report with its `job_id` and one `accepted` (for a
+commit, text saying where it landed) or `rejected` event (text: the reason), a memory job's
+with its `memory` answer; the harness's own events follow in reports without a `job_id`.
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
 `limit` set, in place of the `completed` or `failed` event the same output would
@@ -3436,6 +3464,18 @@ or removes a file in the conversation's directory through a symbolic link, junct
 reparse point (refused, or skipped when it walks a tree), and the provider checks links out as
 plain files.
 
+A `memory` job starts no harness and runs on a task of its own (at most four at once, the rest
+waiting their turn), so no conversation waits for it: the desk clones the person's repository
+into a temporary directory (a local one is created bare first, as for a conversation), does the
+action, and removes the clone. `List {}` answers every plain file under `memory/` (hidden names and links
+skipped, at most `MAX_MEMORY_FILES` and `MAX_MEMORY_LIST_BYTES`, `more` beyond) and the commit
+`main` is at; `Read` the text (a file over 64 KiB or not UTF-8 is refused) and its digest;
+`Write` and `Forget` commit exactly that file to `main` as the person (author and committer),
+with no fallback branch: a `main` that refuses it twice refuses the job. A `Write` whose
+`base` the file no longer holds is refused with `changed` (checked in the clone, then again
+against `main` as it commits); a `Read` or `Forget` of a missing file with `missing`. A
+conversation running anywhere keeps the memory it read until its harness starts again.
+
 Exposure is Universal Exports' record (`Conversation.exposed`); the desk reads it with `GET
 /v1/station/assistant/exposure?station&conversation` (`{"exposed"}`) when a turn ends and
 raises it with `POST` (`{"station","conversation","source"}`) for what only it sees
@@ -3454,11 +3494,11 @@ replace each other's entries, and a file is never on `main` without its entry; t
 the record again at each turn's start and after each save. A failed `GET` counts as exposed; a memory change of a turn the desk found exposed
 is dropped with a `notice` when the `POST` fails.
 
-A job with a `workspace` or a `commit` must name `person_id`, and the Station refuses one whose
-repositories its own roster does not give: the personal repository must be
-`personal_repo_for(person_id)` of its `[assistant]`, each shared one the repository its roster
-gives that name (`org` or a group), and a commit's repository the person's (memory) or one
-of the shared ones.
+A job with a `workspace`, a `commit` or `memory` must name `person_id`, and the Station refuses
+one whose repositories its own roster does not give: the personal repository (of a workspace or
+a memory job) must be `personal_repo_for(person_id)` of its `[assistant]`, each shared one the
+repository its roster gives that name (`org` or a group), and a commit's repository the
+person's (memory) or one of the shared ones.
 
 On a Station running elevated (`ai6::station::elevation::is_elevated() -> io::Result<bool>`,
 feature `daemon`: root on Unix, a High or

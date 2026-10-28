@@ -48,7 +48,8 @@ impl Directory for People {
     }
 }
 
-/// Operator 007 reads and audits Operation G and manages the roster; viewer 007 only reads G.
+/// Operator 007 reads and audits Operation G, manages the roster and may read anyone's memory
+/// (`assistant.memory.admin`); viewer 007 only reads G.
 const ROLES: &str = r#"
     [role.viewer]
     actions = ["mission.read"]
@@ -58,6 +59,9 @@ const ROLES: &str = r#"
 
     [role.roster-reader]
     actions = ["roster.read", "roster.manage"]
+
+    [role.memory-admin]
+    actions = ["assistant.memory.admin"]
 
     [[rule]]
     subject = "person:viewer-007"
@@ -73,6 +77,11 @@ const ROLES: &str = r#"
     subject = "person:operator-007"
     scope = "config:roster"
     role = "roster-reader"
+
+    [[rule]]
+    subject = "person:operator-007"
+    scope = "config:assistant"
+    role = "memory-admin"
 "#;
 
 struct Served {
@@ -2442,5 +2451,343 @@ async fn a_held_cable_is_not_sent_for_a_person_without_cable_send() {
     assert!(
         told.cable_confirm.is_none(),
         "no Station is asked to send it"
+    );
+}
+
+/// Sends `method` to `/v1/user/assistant/memory{path}` with `token`, in the background: the
+/// gateway answers once a Station has.
+fn memory_request(
+    served: &Served,
+    method: reqwest::Method,
+    path: &str,
+    token: &str,
+    body: Option<Value>,
+) -> tokio::task::JoinHandle<(StatusCode, Value)> {
+    let request = reqwest::Client::new()
+        .request(
+            method,
+            format!("{}/v1/user/assistant/memory{path}", served.base),
+        )
+        .bearer_auth(token);
+    let request = match body {
+        Some(body) => request.json(&body),
+        None => request,
+    };
+    tokio::spawn(async move {
+        let response = request.send().await.unwrap();
+        let status = response.status();
+        (status, response.json().await.unwrap_or(Value::Null))
+    })
+}
+
+/// The Station `station`'s answer to memory job `job`: `kind` with `text` and `answer`.
+async fn answer_memory(
+    served: &Served,
+    station: &str,
+    job: &AssistantJob,
+    kind: &str,
+    text: &str,
+    answer: ai6::MemoryAnswer,
+) -> StatusCode {
+    let mut event = AssistantEvent::new(kind, Some(text.to_owned()));
+    event.memory = Some(answer);
+    report(served, station, job, Some(&job.job_id), vec![event]).await
+}
+
+#[tokio::test]
+async fn a_persons_memory_is_read_by_them_and_by_an_audited_admin_only() {
+    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
+
+    // The operator lists their own memory: a job for the Headquarters Station, on their
+    // repository, answered with what the Station found.
+    let asked = memory_request(&served, reqwest::Method::GET, "", &served.operator, None);
+    let job = take(&served, "hq").await;
+    assert_eq!(job.person_id.as_deref(), Some("operator-007"));
+    assert!(job.message.is_empty() && job.workspace.is_none());
+    assert_eq!(
+        job.memory,
+        Some(ai6::MemoryOp {
+            repo: "/srv/mp/operator-007.git".to_owned(),
+            action: ai6::MemoryAction::List {},
+        })
+    );
+    let found = ai6::MemoryAnswer {
+        commit: Some("c0ffee".to_owned()),
+        files: vec![
+            ai6::MemoryFile {
+                path: "memory/MEMORY.md".to_owned(),
+                bytes: 42,
+            },
+            ai6::MemoryFile {
+                path: "memory/people/ana.md".to_owned(),
+                bytes: 7,
+            },
+        ],
+        ..ai6::MemoryAnswer::default()
+    };
+    // Only the Station given the job answers it.
+    assert_eq!(
+        answer_memory(&served, "worker", &job, EVENT_ACCEPTED, "", found.clone()).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        answer_memory(&served, "hq", &job, EVENT_ACCEPTED, "", found).await,
+        StatusCode::NO_CONTENT
+    );
+    let (status, listed) = asked.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(
+        listed,
+        json!({
+            "person": "operator-007",
+            "commit": "c0ffee",
+            "files": [
+                {"path": "MEMORY.md", "bytes": 42},
+                {"path": "people/ana.md", "bytes": 7},
+            ],
+            "more": false,
+        })
+    );
+    assert!(
+        audits(&served, "assistant.memory.read").is_empty(),
+        "reading one's own memory is not an audited act"
+    );
+
+    // The viewer reads only their own: the operator's is refused before any Station hears.
+    for path in ["?person=operator-007", "/MEMORY.md?person=operator-007"] {
+        let (status, refused) =
+            memory_request(&served, reqwest::Method::GET, path, &served.viewer, None)
+                .await
+                .unwrap();
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {refused}");
+        assert!(
+            refused["error"]
+                .as_str()
+                .unwrap()
+                .contains("assistant.memory.admin"),
+            "{refused}"
+        );
+    }
+    assert!(nothing_for(&served, "hq").await);
+    assert!(audits(&served, "assistant.memory.read").is_empty());
+
+    // The operator holds assistant.memory.admin: reading the viewer's is allowed, and audited
+    // before the Station is asked.
+    let asked = memory_request(
+        &served,
+        reqwest::Method::GET,
+        "/MEMORY.md?person=viewer-007",
+        &served.operator,
+        None,
+    );
+    let job = take(&served, "hq").await;
+    assert_eq!(job.person_id.as_deref(), Some("viewer-007"));
+    let memory = job.memory.clone().unwrap();
+    assert_eq!(memory.repo, "/srv/mp/viewer-007.git");
+    assert_eq!(
+        memory.action,
+        ai6::MemoryAction::Read {
+            path: "memory/MEMORY.md".to_owned()
+        }
+    );
+    let read = audits(&served, "assistant.memory.read");
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].actor, "operator-007");
+    assert_eq!(read[0].resource.as_deref(), Some("config:assistant"));
+    assert_eq!(read[0].target, "viewer-007 memory/MEMORY.md");
+    let text = ai6::MemoryAnswer {
+        text: Some("# Memory\n".to_owned()),
+        digest: Some("d".repeat(64)),
+        commit: Some("c0ffee".to_owned()),
+        ..ai6::MemoryAnswer::default()
+    };
+    answer_memory(&served, "hq", &job, EVENT_ACCEPTED, "read", text).await;
+    let (status, opened) = asked.await.unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        opened,
+        json!({
+            "path": "MEMORY.md",
+            "text": "# Memory\n",
+            "digest": "d".repeat(64),
+            "commit": "c0ffee",
+        })
+    );
+
+    // Even so, nobody changes another person's memory.
+    for (method, body) in [
+        (reqwest::Method::PUT, Some(json!({"content": "x"}))),
+        (reqwest::Method::DELETE, None),
+    ] {
+        let (status, refused) = memory_request(
+            &served,
+            method,
+            "/MEMORY.md?person=viewer-007",
+            &served.operator,
+            body,
+        )
+        .await
+        .unwrap();
+        assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    }
+    assert!(nothing_for(&served, "hq").await);
+    assert_eq!(audits(&served, "assistant.memory.read").len(), 1);
+
+    // A deployment without personal repositories keeps no memory.
+    let plain = served_with(AssistantConfig::default(), None).await;
+    let (status, refused) = memory_request(&plain, reqwest::Method::GET, "", &plain.operator, None)
+        .await
+        .unwrap();
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("personal repository")
+    );
+}
+
+#[tokio::test]
+async fn the_persons_changes_are_audited_commits_by_them_and_refusals_keep_their_words() {
+    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
+
+    let asked = memory_request(
+        &served,
+        reqwest::Method::PUT,
+        "/prefs.md",
+        &served.viewer,
+        Some(json!({"content": "Tables.\n", "base": "a".repeat(64)})),
+    );
+    let job = take(&served, "hq").await;
+    let Some(ai6::MemoryOp {
+        repo,
+        action:
+            ai6::MemoryAction::Write {
+                path,
+                text,
+                base,
+                commit,
+            },
+    }) = job.memory.clone()
+    else {
+        panic!("a write: {:?}", job.memory);
+    };
+    assert_eq!(repo, "/srv/mp/viewer-007.git");
+    assert_eq!(
+        (path.as_str(), text.as_str()),
+        ("memory/prefs.md", "Tables.\n")
+    );
+    assert_eq!(base, Some("a".repeat(64)));
+    assert_eq!(
+        commit.message,
+        "Edit memory/prefs.md\n\nVia: Universal Exports"
+    );
+    assert_eq!(commit.author_name, "viewer-007");
+    assert!(commit.author_email.ends_with("@people.ai6.invalid"));
+    let written = audits(&served, "assistant.memory.write");
+    assert_eq!(written.len(), 1, "audited before the Station is asked");
+    assert_eq!(written[0].target, "viewer-007 memory/prefs.md");
+    let saved = ai6::MemoryAnswer {
+        commit: Some("beef".to_owned()),
+        digest: Some("b".repeat(64)),
+        ..ai6::MemoryAnswer::default()
+    };
+    answer_memory(&served, "hq", &job, EVENT_ACCEPTED, "saved", saved).await;
+    assert_eq!(
+        asked.await.unwrap(),
+        (
+            StatusCode::OK,
+            json!({"path": "prefs.md", "digest": "b".repeat(64), "commit": "beef"})
+        )
+    );
+
+    // Forget, with the person's own message; the Station's refusals come back as it words them.
+    let refusals = [
+        (
+            reqwest::Method::DELETE,
+            None,
+            ai6::MemoryAnswer {
+                missing: true,
+                ..ai6::MemoryAnswer::default()
+            },
+            "memory/prefs.md is not in the person's memory",
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            reqwest::Method::PUT,
+            Some(json!({"content": "Charts.\n", "message": "Charts now"})),
+            ai6::MemoryAnswer {
+                changed: true,
+                ..ai6::MemoryAnswer::default()
+            },
+            "memory/prefs.md changed since it was opened, so nothing was saved",
+            StatusCode::CONFLICT,
+        ),
+        (
+            reqwest::Method::PUT,
+            Some(json!({"content": "Charts.\n"})),
+            ai6::MemoryAnswer::default(),
+            "this Station runs elevated",
+            StatusCode::BAD_GATEWAY,
+        ),
+    ];
+    for (method, body, answer, said, status) in refusals {
+        let asked = memory_request(&served, method, "/prefs.md", &served.viewer, body);
+        let job = take(&served, "hq").await;
+        if let Some(ai6::MemoryAction::Write { commit, .. }) =
+            job.memory.as_ref().map(|op| &op.action)
+            && commit.message.starts_with("Charts now")
+        {
+            assert_eq!(commit.message, "Charts now\n\nVia: Universal Exports");
+        }
+        answer_memory(&served, "hq", &job, EVENT_REJECTED, said, answer).await;
+        let (got, refused) = asked.await.unwrap();
+        assert_eq!(got, status, "{refused}");
+        let error = refused["error"].as_str().unwrap();
+        assert!(error.starts_with(&said[..1].to_uppercase()), "{error}");
+        assert!(error.contains(&said[1..]), "{error}");
+    }
+    let forgot = audits(&served, "assistant.memory.forget");
+    assert_eq!(forgot.len(), 1);
+    assert_eq!(forgot[0].actor, "viewer-007");
+
+    // Paths outside memory/, and bodies out of bounds, are refused before any Station hears.
+    for (path, body) in [
+        ("/..%2Fnotes.md", Some(json!({"content": "x"}))),
+        ("/.hidden.md", Some(json!({"content": "x"}))),
+        ("/notes/a%20b.md", Some(json!({"content": "x"}))),
+        (
+            "/big.md",
+            Some(json!({"content": "x".repeat(ai6::MAX_ASSISTANT_CHANGE_BYTES + 1)})),
+        ),
+        (
+            "/a.md",
+            Some(json!({"content": "x", "message": "a\u{1b}b"})),
+        ),
+        ("/a.md", Some(json!({"content": "x", "base": "short"}))),
+    ] {
+        let (status, refused) =
+            memory_request(&served, reqwest::Method::PUT, path, &served.viewer, body)
+                .await
+                .unwrap();
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {refused}");
+    }
+    assert!(nothing_for(&served, "hq").await);
+
+    // A Station that never takes the request: nothing is done, and the app is told.
+    let (status, refused) = memory_request(&served, reqwest::Method::GET, "", &served.viewer, None)
+        .await
+        .unwrap();
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("nothing was done"),
+        "{refused}"
+    );
+    assert!(
+        nothing_for(&served, "hq").await,
+        "the request was withdrawn"
     );
 }
