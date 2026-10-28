@@ -14,7 +14,9 @@ jobs:
 
   docs-gate:
     uses: ./.github/workflows/docs.yml
-    # A caller must grant up front every permission a called workflow's jobs ask for.
+    # A caller must grant up front every permission a called workflow's jobs ask for, a
+    # job it skips included: the build job asks only `contents: read`, and the deploy job,
+    # skipped with `deploy: false`, asks `pages: write` and `id-token: write`.
     permissions:
       contents: read
       pages: write
@@ -30,7 +32,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.ref_name }}
       - name: Extract release notes from CHANGELOG.md
