@@ -66,9 +66,9 @@ Sessions](agents.md#chief-of-staff)).
 
 The mode is built from parts (MCP servers, interpreters, skills, network policy, the
 directories she may write, a context file), and Claude Code gets exactly the built-in tools
-those parts call for: [scripts and the web](#her-scripts-and-the-web) as the roster allows.
-A handler refuses to start an assistant that asks for a skill, and Codex also one that asks
-for an interpreter or a network beyond its MCP server. With a
+those parts call for: [scripts and the web](#her-scripts-and-the-web) as the roster allows,
+and [skills](#her-skills) from the roster's catalog. Codex refuses to start an assistant that
+asks for a skill, an interpreter or a network beyond its MCP server. With a
 [workspace](#her-workspace-and-memory), Claude Code also gets its file
 tools (`Read`, `Write`, `Edit`, `Glob`, `Grep`) under `--permission-mode dontAsk`: she may
 read anything in her workspace (`--restricted` keeps the file tools inside it) and write
@@ -385,6 +385,71 @@ ends her answer with the reason, or refuses each script.
 starts and reports them at check-in, and `open` is logged again with each harness it starts.
 Codex runs her without scripts and refuses a network beyond her MCP servers.
 
+## Her skills
+
+Moneypenny can use [Claude Code skills](https://code.claude.com/docs/en/skills), but only
+those of a catalog in the global `agents.toml`, each pinned to the exact files it was
+reviewed with:
+
+```toml
+[assistant.skills.report-writer]
+path = "skills/report-writer"     # absolute, or relative to this configuration directory
+pin = "sha256:..."                # ai6 assistant pin-skill skills/report-writer
+
+[assistant.group.contractors]     # a directory group
+skills = []
+
+[assistant.person."eve@sis"]      # one person
+skills = ["report-writer"]
+```
+
+`ai6 assistant pin-skill DIR` prints every file of the skill directory with its SHA-256 and
+the `pin`: the digest of one line per file, path and digest. Change any byte, add or remove a
+file, and the pin does not match. Everyone is given every catalog skill; a group's table,
+and a person's, may leave some out, never add one, and a person in several groups keeps only
+what all of their tables keep. These are the same tables that narrow [her scripts and the
+web](#her-scripts-and-the-web): one table may set `skills` beside `interpreters` or `network`.
+
+When the roster loads, each skill's `SKILL.md` is read and the load fails, naming the skill,
+when:
+
+- it has no `pin` (unless `skills_unpinned = true`);
+- its front matter is not YAML between two `---` lines, or does not have `name` equal to the
+  catalog's name and a `description`;
+- its front matter has any key but `name`, `description`, `when_to_use`, `argument-hint`,
+  `arguments`, `disable-model-invocation`, `user-invocable`, `disallowed-tools`, `paths`,
+  `metadata`, `license` and `compatibility`, or it injects a command (`` !`command` ``, or a
+  block opened with `` ```! ``), unless `skills_allow_tools = true`. `allowed-tools` grants
+  tools without asking for the turn that loads the skill, `hooks` registers commands for the
+  rest of the Session, an injected command runs before she reads the skill, and `model`,
+  `effort` or `context` change her Session, so none of these loads by default.
+
+`skills_unpinned` and `skills_allow_tools` are weakenings, logged and reported at check-in as
+`allow_elevated` is, and so is a SHA-1 pin. The skill directories must be readable wherever
+the roster is loaded: by every Station and by Universal Exports. A SQL roster gives absolute
+paths.
+
+With each message Universal Exports sends the skills the person is given, with the person's
+directory groups. The Station takes only names its own roster gives that person (its catalog,
+less what its own group and person tables leave out), as it caps her scripts and network, and
+restarts her harness when the skills change. Before her harness starts it copies each skill into
+her working directory's `.claude/skills/<name>/`, never through a link, then checks the copy
+against its pin and its `SKILL.md` again. A skill that does not match is left out: the
+Station logs `ai6: assistant skill <name> does not match its pin` (or why else it was not
+installed), files a `provider` finding in its logbook, and the conversation is told. Her
+standing text lists the skills she has. She cannot write there: no path with a name
+starting with `.` is hers to write, and her scripts' sandbox denies writes to `.claude`.
+
+Claude Code started with `--restricted` loads no skill from the working directory, the
+user's own `~/.claude/skills` or an installed plugin, so the Station hands the directory to
+it as a plugin named `ai6` (`--plugin-dir`): she calls a skill as `ai6:<name>`, gets the
+`Skill` tool only when she has skills, and has no other skill to call. Injected commands are
+replaced with a notice (`disableSkillShellExecution`) unless `skills_allow_tools` is set; with
+it, they still go through her permission rules. A skill's other files she reads with her
+file tools, which she has with a [workspace](#her-workspace-and-memory). Skill text is the
+deployment's own, like a shared repository: reading it exposes nothing. The Codex handler
+refuses skills, so a person given any runs on Claude Code.
+
 ## Cables
 
 She can talk to Agents for you over [Cables](agents.md#cables), in the Operations where you
@@ -508,4 +573,7 @@ answered does nothing.
 | Interpreters her scripts may run | `python3`, in the harness's sandbox | `[assistant] interpreters` |
 | Hosts her web tools and scripts reach | none (`limited` with no host) | `[assistant] network`, `allowed_hosts` |
 | Scripts where the harness has no sandbox | none | `[assistant] unsandboxed_scripts` |
-| Narrower scripts and network for a group or a person | none | `[assistant.group.<group>]`, `[assistant.person.<id>]` |
+| Skills | none | `[assistant.skills.<name>]` (`path`, `pin`) |
+| Narrower scripts, network and skills for a group or a person | none | `[assistant.group.<group>]`, `[assistant.person.<id>]` |
+| Load a skill without a pin | no | `[assistant] skills_unpinned` |
+| Load a skill that grants tools, registers hooks or runs commands | no | `[assistant] skills_allow_tools` |

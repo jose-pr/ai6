@@ -35,6 +35,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   interpreter are weakenings too. A `WebFetch` or `WebSearch` call, or a script that can reach
   a host, exposes the conversation at once, with or without a workspace, and the hold on her
   Cables sees it the same turn.
+- Moneypenny's skills come from an allow-listed catalog in the global `agents.toml`:
+  `[assistant.skills.<name>]` with `path` (absolute, or relative to the configuration
+  directory) and `pin`, the digest `ai6 assistant pin-skill DIR` prints
+  (`ProjectManifest::read_tree`, `SkillEntry`). The roster load reads each skill's `SKILL.md`
+  and refuses a skill without a pin, one whose front matter does not name it or has no
+  description, and one whose front matter has any key beyond the inert ones
+  (`SKILL_INERT_KEYS`; `allowed-tools`, `hooks`, `shell`, `model` among those refused) or that
+  injects a command (`` !`…` ``, `` ```! ``), naming it; `skills_unpinned` and
+  `skills_allow_tools` let them load and are reported as weakenings. Every catalog skill is
+  given to everyone unless an `[assistant.group.<group>]` or `[assistant.person.<id>]` table
+  narrows `skills` (`AssistantNarrowing`, `AssistantSettings::skills_for`); Universal Exports
+  sends the person's in `AssistantJob::skills`, and a Station refuses a name its own roster
+  does not give the person (its catalog less its own tables for the job's directory groups)
+  and restarts the harness when the skills changed. These are the tables that narrow her
+  scripts and network. At each harness start the Station copies each into the working directory's
+  `.claude/skills/<name>/`, never through a link, and checks the copy against its pin and its
+  `SKILL.md` again; a skill that fails is left out with `ai6: assistant skill <name> does not
+  match its pin` (or why it was not installed), a `provider` finding in the Station's logbook
+  and a notice in the conversation. `.claude/` is a plugin named `ai6`
+  (`AssistantMode::skills_dir`), and her standing text lists the skills. The Claude handler
+  offers `Skill` with `Skill(ai6:<name>)` allowed, passes the directory with `--plugin-dir`
+  (under `--restricted`, Claude Code 2.1.311 loads no other skill: not the working
+  directory's, the user's or an installed plugin's), and sets `disableSkillShellExecution`
+  unless `AssistantMode::skill_commands`. The Codex handler still refuses skills.
 - Moneypenny keeps each person's work and memory in their own repository. The global
   `agents.toml` takes an `[assistant]` table (`ai6::AssistantSettings`, also
   `RosterBuilder::assistant`): `personal_repo` (`{person}` or `{person_digest}`; a local or
