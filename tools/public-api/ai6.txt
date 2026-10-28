@@ -133,6 +133,7 @@ impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::deployment_reach(&self) -> ai6::directorates::section_00::assistant::AssistantReach
+pub fn ai6::directorates::m::assistant::AssistantSettings::has_group_narrowing(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::interpreters(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::network(&self) -> ai6::directorates::m::assistant::NetworkPolicy
 pub fn ai6::directorates::m::assistant::AssistantSettings::new() -> Self
@@ -3812,7 +3813,6 @@ pub ai6::directorates::section_00::agent::AgentStart::prompt: alloc::string::Str
 pub ai6::directorates::section_00::agent::AgentStart::working_directory: alloc::string::String
 pub struct ai6::directorates::section_00::agent::AssistantMode
 pub ai6::directorates::section_00::agent::AssistantMode::context_file: core::option::Option<alloc::string::String>
-pub ai6::directorates::section_00::agent::AssistantMode::deny_read: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::files: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::interpreters: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::mcp_servers: alloc::vec::Vec<ai6::directorates::section_00::agent::McpServerRef>
@@ -3949,6 +3949,7 @@ pub ai6::directorates::section_00::assistant::AssistantJob::commit: core::option
 pub ai6::directorates::section_00::assistant::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::conversation_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::exposed: bool
+pub ai6::directorates::section_00::assistant::AssistantJob::groups: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::section_00::assistant::AssistantJob::interrupt: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::job_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::mcp_token: alloc::string::String
@@ -4068,9 +4069,10 @@ pub const ai6::directorates::section_00::gate::WEB_GATE_ARGS: [&str; 2]
 pub fn ai6::directorates::section_00::gate::decide(core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>, impl core::ops::function::FnOnce(&[ai6::directorates::m::approvals::ActionScope]) -> core::result::Result<ai6::directorates::section_00::gate::Answers, alloc::string::String>) -> ai6::directorates::section_00::gate::GateVerdict
 pub fn ai6::directorates::section_00::gate::deny(&str) -> alloc::string::String
 pub fn ai6::directorates::section_00::gate::gate(&str, core::option::Option<&std::path::Path>, core::option::Option<&ai6::directorates::section_00::gate::GateClient>) -> ai6::directorates::section_00::gate::GateVerdict
+pub fn ai6::directorates::section_00::gate::host_in(&str, &[alloc::string::String]) -> bool
 pub fn ai6::directorates::section_00::gate::local_git(&[alloc::string::String]) -> core::result::Result<ai6::directorates::section_00::gate::GitOutput, alloc::string::String>
 pub fn ai6::directorates::section_00::gate::pre_tool_use(&str, core::option::Option<&ai6::directorates::section_00::gate::GateClient>) -> core::option::Option<alloc::string::String>
-pub fn ai6::directorates::section_00::gate::web_fetch_gate(&str, &[alloc::string::String]) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::section_00::gate::web_fetch_gate(&str, &[alloc::string::String], &[alloc::string::String]) -> core::option::Option<alloc::string::String>
 pub type ai6::directorates::section_00::gate::Answers = alloc::vec::Vec<(alloc::string::String, core::option::Option<alloc::string::String>)>
 pub type ai6::directorates::section_00::gate::GitOutput = (bool, alloc::string::String)
 pub mod ai6::station
@@ -5014,6 +5016,7 @@ pub ai6::AssistantJob::commit: core::option::Option<ai6::directorates::section_0
 pub ai6::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantJob::conversation_id: alloc::string::String
 pub ai6::AssistantJob::exposed: bool
+pub ai6::AssistantJob::groups: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::AssistantJob::interrupt: bool
 pub ai6::AssistantJob::job_id: alloc::string::String
 pub ai6::AssistantJob::mcp_token: alloc::string::String
@@ -5031,7 +5034,6 @@ impl core::fmt::Debug for ai6::directorates::section_00::assistant::AssistantJob
 pub fn ai6::directorates::section_00::assistant::AssistantJob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::AssistantMode
 pub ai6::AssistantMode::context_file: core::option::Option<alloc::string::String>
-pub ai6::AssistantMode::deny_read: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::files: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::interpreters: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::mcp_servers: alloc::vec::Vec<ai6::directorates::section_00::agent::McpServerRef>
@@ -5077,6 +5079,7 @@ impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::deployment_reach(&self) -> ai6::directorates::section_00::assistant::AssistantReach
+pub fn ai6::directorates::m::assistant::AssistantSettings::has_group_narrowing(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::interpreters(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::network(&self) -> ai6::directorates::m::assistant::NetworkPolicy
 pub fn ai6::directorates::m::assistant::AssistantSettings::new() -> Self
