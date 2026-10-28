@@ -50,6 +50,13 @@ pub(super) const MAIN: &str = "main";
 pub(super) const PROVIDER: &str = "git";
 /// The most of `MEMORY.md` inlined into `AGENTS.md` and the context file.
 const MAX_INLINED_MEMORY: usize = 32 * 1024;
+/// The most of one memory file the desk reads, so a script that grows a file (`truncate` to a
+/// huge length) cannot make the desk read it all and abort the Station; a longer file is read
+/// to this length, which still shows it changed.
+const MAX_MEMORY_FILE: usize = 256 * 1024;
+/// The most memory files the desk reads at a turn's edge, and the most bytes over all of them.
+const MAX_MEMORY_FILES: usize = 1_024;
+const MAX_MEMORY_BYTES: usize = 8 * 1024 * 1024;
 /// The most files of `personal/` looked at to name what a turn changed in its commit message.
 const MAX_WALK: usize = 10_000;
 /// The record, in the personal repository, of the files she wrote while exposed: a directory
@@ -717,15 +724,56 @@ fn instructions(exposed: bool, shared: &[String]) -> String {
     )
 }
 
-/// Every file under `root`, by `prefix/<path>`, with its bytes; links are not followed.
+/// Every file under `root`, by `prefix/<path>`, with its bytes; links are not followed. Each
+/// file is read to at most [`MAX_MEMORY_FILE`], and the walk stops at [`MAX_MEMORY_FILES`]
+/// files or [`MAX_MEMORY_BYTES`] in all, so a script that enlarges a memory file cannot make
+/// the desk read it unbounded and abort the Station.
 fn read_tree(root: &Path, prefix: &str) -> BTreeMap<String, Vec<u8>> {
     let mut found = BTreeMap::new();
+    let mut total = 0usize;
     walk(root, prefix, &mut |path, file| {
-        if let Ok(bytes) = fs::read(file) {
+        if found.len() >= MAX_MEMORY_FILES || total >= MAX_MEMORY_BYTES {
+            return;
+        }
+        if let Some(bytes) = read_capped(file, MAX_MEMORY_FILE) {
+            total += bytes.len();
             found.insert(path, bytes);
         }
     });
     found
+}
+
+/// The first `limit` bytes of the plain file `path`: its own length when shorter, so a file
+/// `truncate`d to a huge length is read only to `limit`. The final component is opened without
+/// following a link (`O_NOFOLLOW`; `FILE_FLAG_OPEN_REPARSE_POINT` on Windows) and the open
+/// handle is checked, so a symbolic link or reparse point swapped in after [`no_links`] looked
+/// is not read through. `None` when it cannot be opened, is not a plain file, or is a link.
+fn read_capped(path: &Path, limit: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NOFOLLOW: a symlink at the final component makes the open fail (ELOOP).
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_OPEN_REPARSE_POINT opens the reparse point itself; its metadata is then a
+        // link and is refused below, rather than the target being read.
+        options.custom_flags(0x0020_0000);
+    }
+    let file = options.open(path).ok()?;
+    // The handle, not the path, decides: a swap between the open and here cannot change it.
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || is_link(&metadata) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(limit as u64).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// The files of `personal/` outside `.git` and `memory/`, with size and modification time.
@@ -862,13 +910,14 @@ fn remove(root: &Path, path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// The text of the plain file `path`, under `root`, reached through no link.
+/// The text of the plain file `path`, under `root`, reached through no link, read to at most
+/// [`MAX_MEMORY_FILE`] bytes; `None` when it is not a plain file or is not valid UTF-8.
 fn read_text(root: &Path, path: &Path) -> Option<String> {
     no_links(root, path).ok()?;
-    fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.is_file())
-        .then(|| fs::read_to_string(path).ok())
-        .flatten()
+    if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return None;
+    }
+    String::from_utf8(read_capped(path, MAX_MEMORY_FILE)?).ok()
 }
 
 /// Refuses `path` when `root`, or anything from `root` down to it, is a link: a symbolic link,
@@ -1181,6 +1230,55 @@ mod tests {
         assert_eq!(read_text(&area, &index), None);
         assert!(write_file(&area, &index, "x").is_err());
         assert_eq!(fs::read_to_string(&secret).unwrap(), "secret");
+    }
+
+    #[test]
+    fn a_huge_memory_file_is_read_only_to_its_cap() {
+        let root = tempfile::tempdir().unwrap();
+        let memory = root.path().join("memory");
+        fs::create_dir_all(&memory).unwrap();
+        let big = memory.join("big.md");
+        // A script makes a file this long without writing it; the desk reads only its cap.
+        fs::File::create(&big)
+            .unwrap()
+            .set_len(64 * 1024 * 1024)
+            .unwrap();
+        assert_eq!(
+            read_capped(&big, MAX_MEMORY_FILE).unwrap().len(),
+            MAX_MEMORY_FILE
+        );
+        let tree = read_tree(&memory, MEMORY);
+        assert_eq!(tree["memory/big.md"].len(), MAX_MEMORY_FILE);
+        assert_eq!(
+            read_text(root.path(), &big).map(|text| text.len()),
+            Some(MAX_MEMORY_FILE)
+        );
+    }
+
+    #[test]
+    fn a_tree_of_many_memory_files_is_read_only_to_its_count() {
+        let root = tempfile::tempdir().unwrap();
+        let memory = root.path().join("memory");
+        fs::create_dir_all(&memory).unwrap();
+        for index in 0..MAX_MEMORY_FILES + 5 {
+            fs::write(memory.join(format!("{index:05}.md")), "x").unwrap();
+        }
+        assert_eq!(read_tree(&memory, MEMORY).len(), MAX_MEMORY_FILES);
+    }
+
+    /// The read itself refuses a link at the final component, so one swapped in after
+    /// `no_links` looked is not followed.
+    #[cfg(unix)]
+    #[test]
+    fn the_read_refuses_a_link_swapped_in_after_the_check() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.md");
+        fs::write(&secret, "secret").unwrap();
+        let link = root.path().join("MEMORY.md");
+        std::os::unix::fs::symlink(&secret, &link).unwrap();
+        assert_eq!(fs::read_to_string(&link).unwrap(), "secret");
+        assert_eq!(read_capped(&link, MAX_MEMORY_FILE), None);
     }
 
     #[test]
