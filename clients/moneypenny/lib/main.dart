@@ -16,6 +16,7 @@ import 'package:guatiao/guatiao.dart' as guatiao;
 import 'agents/agents_page.dart';
 import 'assistant/assistant_controller.dart';
 import 'assistant/assistant_panel.dart';
+import 'assistant/memory_page.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
@@ -760,6 +761,68 @@ class MissionBoard extends ChangeNotifier {
       default:
         throw StateError('The gateway refused the roster change.');
     }
+  }
+
+  /// The files of Moneypenny's memory of the signed-in person. Throws [MemoryRefused] with
+  /// Universal Exports' words when it cannot be read.
+  Future<MemoryListing> loadMemory() async {
+    if (demo) return MemoryListing.demo();
+    final response = await _userRequest('GET', '/v1/user/assistant/memory');
+    if (response.statusCode != 200) throw _memoryRefused(response);
+    return MemoryListing.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// One file of that memory, by its path under `memory/`.
+  Future<MemoryText> readMemory(String path) async {
+    if (demo) {
+      return MemoryText(
+        path: path,
+        text: '# Memory\n\n- preferences.md: how the operator likes answers\n',
+      );
+    }
+    final response = await _userRequest('GET', _memoryUrl(path));
+    if (response.statusCode != 200) throw _memoryRefused(response);
+    return MemoryText.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Writes one file of that memory as a commit by the person. With [base], the digest of
+  /// the text it was made from, a file changed since is refused rather than replaced.
+  Future<void> saveMemory(String path, String text, {String? base}) async {
+    if (demo) throw StateError('Memory changes are unavailable in preview.');
+    final response = await _userRequest(
+      'PUT',
+      _memoryUrl(path),
+      body: {'content': text, 'base': ?base},
+    );
+    if (response.statusCode != 200) throw _memoryRefused(response);
+  }
+
+  /// Forgets one file of that memory: a commit by the person that removes it.
+  Future<void> forgetMemory(String path) async {
+    if (demo) throw StateError('Memory changes are unavailable in preview.');
+    final response = await _userRequest('DELETE', _memoryUrl(path));
+    if (response.statusCode != 200) throw _memoryRefused(response);
+  }
+
+  String _memoryUrl(String path) =>
+      '/v1/user/assistant/memory/${path.split('/').map(Uri.encodeComponent).join('/')}';
+
+  /// Universal Exports' own words for a refused memory request, when it gave any.
+  MemoryRefused _memoryRefused(http.Response response) {
+    try {
+      final error =
+          (jsonDecode(response.body) as Map<String, dynamic>)['error'];
+      if (error is String && error.isNotEmpty) return MemoryRefused(error);
+    } on Object {
+      // Not Universal Exports' JSON: fall back to the status.
+    }
+    return MemoryRefused(
+      'Universal Exports refused it (HTTP ${response.statusCode}).',
+    );
   }
 
   /// The pool accounts an Operation may draw from.
@@ -2906,6 +2969,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                       },
                     },
                     onOpen: (link) => _openLink(context, link),
+                    onMemory: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => MemoryPage(board: widget.board),
+                      ),
+                    ),
                   ),
                 ),
               ),

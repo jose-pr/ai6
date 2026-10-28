@@ -8,12 +8,14 @@ import 'assistant_view.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
 /// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries [page],
-/// the app page the person is on, so "this Mission" means something to her.
+/// the app page the person is on, so "this Mission" means something to her. Its menu opens
+/// her memory of the person ([onMemory]).
 class AssistantPanel extends StatefulWidget {
   const AssistantPanel({
     required this.controller,
     this.page = const {},
     this.onOpen,
+    this.onMemory,
     super.key,
   });
 
@@ -22,6 +24,9 @@ class AssistantPanel extends StatefulWidget {
 
   /// Opens an app page a view links to (`app:/missions/G/m-1`).
   final void Function(String link)? onOpen;
+
+  /// Opens the Memory page; without it the menu does not offer it.
+  final VoidCallback? onMemory;
 
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
@@ -70,10 +75,28 @@ class _AssistantPanelState extends State<AssistantPanel> {
                   ? 'Answering…'
                   : 'Ask about AI6, or ask her to propose a change.',
             ),
-            trailing: IconButton(
-              tooltip: 'New conversation',
-              onPressed: controller.connected ? controller.startOver : null,
-              icon: const Icon(Icons.add_comment_outlined),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'New conversation',
+                  onPressed: controller.connected ? controller.startOver : null,
+                  icon: const Icon(Icons.add_comment_outlined),
+                ),
+                if (widget.onMemory case final onMemory?)
+                  PopupMenuButton<void>(
+                    tooltip: 'Moneypenny menu',
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        onTap: onMemory,
+                        child: const ListTile(
+                          leading: Icon(Icons.psychology_outlined),
+                          title: Text('Her memory of you'),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
             ),
           ),
           const Divider(height: 1),

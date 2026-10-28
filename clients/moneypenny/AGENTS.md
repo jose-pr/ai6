@@ -16,6 +16,9 @@ Exports, AI6's authenticated public API.
   link; a view the parser refuses is shown as refused with its reason. Proposals run only on
   the operator's Confirm. `test/fixtures/assistant_views.json` is shared with the gateway's
   tests: change both sides together.
+- The Memory page (`lib/assistant/memory_page.dart`) reads and changes only the signed-in
+  person's own memory, through `/v1/user/assistant/memory`; it saves with the digest of the
+  text it opened as `base`, and shows a refusal in Universal Exports' own words.
 
 ## Flutter windowing
 
