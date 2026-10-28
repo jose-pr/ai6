@@ -437,6 +437,12 @@ impl AssistantSettings {
         self.unsandboxed_scripts
     }
 
+    /// Whether any directory group has a narrowing table, so a job's reach cannot be capped
+    /// without knowing the person's groups.
+    pub fn has_group_narrowing(&self) -> bool {
+        !self.group.is_empty()
+    }
+
     /// The deployment's own reach, before any table narrows it.
     pub fn deployment_reach(&self) -> AssistantReach {
         AssistantReach {

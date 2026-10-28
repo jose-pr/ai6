@@ -53,7 +53,6 @@ impl AssistantMode {
                 env_prefix: ASSISTANT_MCP_ENV_PREFIX.to_owned(),
             }],
             interpreters: Vec::new(),
-            deny_read: Vec::new(),
             unsandboxed: false,
             skills: Vec::new(),
             network: AssistantNetwork::default(),
@@ -124,11 +123,6 @@ impl AssistantMode {
             }
         }
         check_network(&self.network)?;
-        for path in &self.deny_read {
-            if path.chars().any(char::is_control) || !std::path::Path::new(path).is_absolute() {
-                return Err(format!("{path:?} is not an absolute path"));
-            }
-        }
         for path in self.files.iter().chain(&self.read_only) {
             let names: Vec<&str> = path.split('/').collect();
             if names.len() > 8 || !names.iter().all(|name| file_safe(name)) {
@@ -799,6 +793,12 @@ pub struct AssistantJob {
     /// roster's `[assistant]` and never widens it. The default runs and reaches nothing.
     #[serde(default)]
     pub reach: AssistantReach,
+    /// The person's directory groups, so the Station can apply its roster's per-group script
+    /// and network narrowing; `None` when Universal Exports did not resolve them, which makes
+    /// a Station whose roster narrows by group refuse rather than skip a narrowing. Requires
+    /// `person_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<String>>,
 }
 
 /// What a person may do with Cables in one Operation, through the assistant.
@@ -907,13 +907,19 @@ impl AssistantJob {
         if (self.workspace.is_some()
             || self.commit.is_some()
             || self.memory.is_some()
-            || !self.cables.is_empty())
+            || !self.cables.is_empty()
+            || self.groups.is_some())
             && self.person_id.is_none()
         {
             return Err(
-                "a workspace, a commit, a memory operation or Cable grants need person_id"
+                "a workspace, a commit, a memory operation, Cable grants or groups need person_id"
                     .to_owned(),
             );
+        }
+        for group in self.groups.iter().flatten() {
+            if !valid_identity(group) {
+                return Err("a group is empty, too long or has control characters".to_owned());
+            }
         }
         for decision in self.cable_confirm.iter().chain(&self.cable_discard) {
             if !valid_identity(&decision.id) || !valid_identity(&decision.digest) {
@@ -1002,6 +1008,7 @@ impl fmt::Debug for AssistantJob {
                 }),
             )
             .field("reach", &self.reach)
+            .field("groups", &self.groups)
             .finish()
     }
 }
@@ -1136,6 +1143,7 @@ mod tests {
             cable_discard: None,
             memory: None,
             reach: AssistantReach::default(),
+            groups: None,
         }
     }
 
@@ -1332,9 +1340,6 @@ mod tests {
         let mut mode = AssistantMode::moneypenny();
         mode.network.allowed_hosts.push("*".to_owned());
         assert!(mode.validate().is_err(), "a bare wildcard is not a host");
-        let mut mode = AssistantMode::moneypenny();
-        mode.deny_read.push("relative/home".to_owned());
-        assert!(mode.validate().is_err());
     }
 
     #[test]

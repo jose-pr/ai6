@@ -58,9 +58,9 @@ use crate::directorates::section_00::agent::{
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
-    AssistantJob, AssistantReport, COMMIT_MEMORY, EVENT_ACCEPTED, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
-    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
+    AssistantJob, AssistantReach, AssistantReport, COMMIT_MEMORY, EVENT_ACCEPTED, EVENT_CLOSED,
+    EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES,
+    EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
 };
 use crate::guatiao::library::Object;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
@@ -238,23 +238,37 @@ impl Exposure for Unreachable {
 }
 
 /// A conversation's Cable endpoint's view of [`Exposure`]: no answer refuses the call, and an
-/// exposure counts once Universal Exports has recorded it.
+/// exposure counts once Universal Exports has recorded it, or at once once the desk's own
+/// `exposed` flag is raised (a web tool or a reaching script this turn, which Universal
+/// Exports may not have heard yet).
 #[cfg(feature = "cables-mcp")]
-struct ExportsGate(Arc<dyn Exposure>);
+struct ExportsGate {
+    exposure: Arc<dyn Exposure>,
+    exposed: Arc<AtomicBool>,
+}
 
 #[cfg(feature = "cables-mcp")]
 impl CableGate for ExportsGate {
     fn standing(&self, conversation: &str, operation: &str) -> Option<Standing> {
-        self.0.standing(conversation, operation).ok()
+        let mut standing = self.exposure.standing(conversation, operation).ok()?;
+        standing.exposed |= self.exposed.load(Ordering::Acquire);
+        Some(standing)
     }
 
     fn expose(&self, conversation: &str, source: &str) -> bool {
-        self.0.mark(conversation, source).is_ok()
+        self.exposed.store(true, Ordering::Release);
+        self.exposure.mark(conversation, source).is_ok()
     }
 }
 
 /// A running harness: its Session, flags, token expiry and workspace.
-type Running = (SharedSession, Arc<Flags>, f64, Option<SharedWorkspace>);
+type Running = (
+    SharedSession,
+    Arc<Flags>,
+    f64,
+    AssistantReach,
+    Option<SharedWorkspace>,
+);
 
 /// Starts and resumes harnesses: the Station's own handlers and terminal, or a test's.
 pub(super) trait Harness: Send + Sync {
@@ -382,6 +396,13 @@ struct Live {
     session: SharedSession,
     token_expires_at: f64,
     flags: Arc<Flags>,
+    /// What this conversation's reach lets scripts and web tools do, as its running harness was
+    /// started: kept so a later job whose cap changed restarts the harness instead of reaching
+    /// it warm.
+    reach: AssistantReach,
+    /// Raised for good once the conversation reads outside text (a web tool, a reaching
+    /// script), shared with the pump and the Cable endpoint; sticky for the harness's life.
+    exposed: Arc<AtomicBool>,
     workspace: Option<SharedWorkspace>,
     /// The conversation's Cable endpoint, while its harness runs.
     #[cfg(feature = "cables-mcp")]
@@ -648,9 +669,21 @@ impl Desk {
         if job.cable_confirm.is_some() || job.cable_discard.is_some() {
             return self.decide_cable(job).await.map(|()| None);
         }
+        // What this job may run and reach, capped by the Station's roster; a job the roster
+        // narrows (a group or person table, or a changed deployment) restarts the harness
+        // rather than reach it warm with the reach it started under.
+        let reach = self.capped_reach(job)?;
+        // Universal Exports' record of exposure only ever rises; a running harness's flag (read
+        // by its Cable endpoint) follows it at once.
+        if job.exposed
+            && let Ok(live) = self.live.lock()
+            && let Some(entry) = live.get(&job.conversation_id)
+        {
+            entry.exposed.store(true, Ordering::Release);
+        }
         let running = self.running(&job.conversation_id);
-        if let Some((session, flags, expires, workspace)) = running {
-            if expires > unix_now() + TOKEN_MARGIN_SECS {
+        if let Some((session, flags, expires, started_reach, workspace)) = running {
+            if expires > unix_now() + TOKEN_MARGIN_SECS && started_reach == reach {
                 #[cfg(feature = "cables-mcp")]
                 if let Some(cables) = self.cables_of(&job.conversation_id) {
                     cables.update(&job.cables, job.exposed);
@@ -689,7 +722,7 @@ impl Desk {
                 .map_err(|error| error.to_string())?
                 .map(|()| None);
             }
-            // Its token is about to expire: the harness starts again with the job's.
+            // Its token is about to expire, or its reach changed: the harness starts again.
             self.close(&job.conversation_id);
         }
         // A harness that has stopped may still be removing the directory the next one uses.
@@ -771,13 +804,49 @@ impl Desk {
                 return Err(reason);
             }
         };
+        let reach = match self.capped_reach(job) {
+            Ok(reach) => reach,
+            Err(reason) => {
+                remove_area(&area);
+                return Err(reason);
+            }
+        };
         // As a Chief of Staff review, the harness keeps only what reaches its model.
         let mut environment = vetting::review_environment(&agent.env);
         environment.insert(ASSISTANT_MCP_URL_ENV.to_owned(), self.mcp_url.clone());
         environment.insert(ASSISTANT_MCP_TOKEN_ENV.to_owned(), job.mcp_token.clone());
+        // Her own Claude Code configuration directory, beside the working directory: the
+        // Agent's (a shared login's `.credentials.json`, every person's transcripts) stays out
+        // of the harness, and each conversation keeps its own. The sandbox denies reading it.
+        if let Some(config) = config_dir(Path::new(&area)) {
+            if let Err(error) = std::fs::create_dir_all(&config) {
+                remove_area(&area);
+                return Err(format!(
+                    "assistant configuration directory not made: {error}"
+                ));
+            }
+            environment.insert(
+                "CLAUDE_CONFIG_DIR".to_owned(),
+                config.to_string_lossy().into_owned(),
+            );
+        }
+        // Her own temporary directory, so her scripts' `$TMPDIR` is not the per-user one every
+        // conversation of the Station's user shares. Claude Code 2.1.310 derives the sandbox's
+        // `$TMPDIR` from the harness's own `TMPDIR` (`os.tmpdir()`), and keeps its own temp
+        // files under `CLAUDE_CODE_TMPDIR`, so both point here.
+        if let Some(temp) = temp_dir(Path::new(&area)) {
+            if let Err(error) = std::fs::create_dir_all(&temp) {
+                remove_area(&area);
+                return Err(format!("assistant temporary directory not made: {error}"));
+            }
+            let temp = temp.to_string_lossy().into_owned();
+            environment.insert("TMPDIR".to_owned(), temp.clone());
+            environment.insert("CLAUDE_CODE_TMPDIR".to_owned(), temp);
+        }
+        let exposed = Arc::new(AtomicBool::new(job.exposed));
         #[cfg(feature = "cables-mcp")]
         let cables = match self
-            .open_cables(job, &agent.id, &mut mode, &mut environment)
+            .open_cables(job, &agent.id, &mut mode, &mut environment, &exposed)
             .await
         {
             Ok(cables) => cables,
@@ -786,7 +855,7 @@ impl Desk {
                 return Err(reason);
             }
         };
-        let unavailable = self.arm(&mut mode, job, &handler, &environment, &area);
+        let unavailable = self.arm(&mut mode, job, &reach, &handler, &environment);
         let mission_id = MissionId::try_new(format!(
             "assistant--{}",
             conversation_digest(&job.conversation_id)
@@ -896,6 +965,8 @@ impl Desk {
                     session: session.clone(),
                     token_expires_at: job.token_expires_at,
                     flags: flags.clone(),
+                    reach: reach.clone(),
+                    exposed: exposed.clone(),
                     workspace: workspace.clone(),
                     #[cfg(feature = "cables-mcp")]
                     cables,
@@ -916,6 +987,7 @@ impl Desk {
             workspace,
             notices,
             exposure: self.exposure.clone(),
+            exposed,
             reaching,
         };
         std::thread::Builder::new()
@@ -925,37 +997,71 @@ impl Desk {
         Ok(())
     }
 
-    /// Gives `mode` what the job lets her run and reach, never more than this Station's own
-    /// roster gives the person ([`AssistantSettings::reach_for`], without the groups only
-    /// Universal Exports knows): the network policy, and the interpreters when `handler`'s
-    /// harness can sandbox them here, or without a sandbox when `unsandboxed_scripts` allows
-    /// it, a weakening logged each time. Answers the line that tells her scripts are
-    /// unavailable, when they are, which the Station's log also gets with the reason.
+    /// What this Station's roster lets `job`'s person run and reach, the deployment capped by
+    /// the person's own table and every group table the job names
+    /// ([`AssistantSettings::reach_for`]); `Err` when a group table exists but the job carries
+    /// no group list to apply it against (the gateway did not resolve the person's groups), so
+    /// the Station refuses rather than skip a narrowing and widen. A job with no `person_id`
+    /// takes the strictest reach: nothing runs, nothing is reached.
     ///
     /// [`AssistantSettings::reach_for`]: crate::directorates::m::assistant::AssistantSettings::reach_for
+    fn capped_reach(&self, job: &AssistantJob) -> Result<AssistantReach, String> {
+        let settings = self.state.current().roster.assistant().clone();
+        let job_reach = job.reach.capped_by(&settings.deployment_reach());
+        let Some(person) = job.person_id.as_deref() else {
+            // No person: the strictest reach, whatever the roster allows anyone.
+            return Ok(job_reach.capped_by(&AssistantReach::default()));
+        };
+        let groups = match (&job.groups, settings.has_group_narrowing()) {
+            (Some(groups), _) => groups.as_slice(),
+            (None, false) => &[],
+            (None, true) => {
+                return Err(
+                    "this Station's roster narrows scripts and network by directory group, but \
+                     the job carries no group membership, so nothing was done"
+                        .to_owned(),
+                );
+            }
+        };
+        Ok(job_reach.capped_by(&settings.reach_for(person, groups)))
+    }
+
+    /// Gives `mode` what `reach` lets her run and reach: the network policy, and the
+    /// interpreters when `handler`'s harness can sandbox them here, or without a sandbox when
+    /// `reach.unsandboxed_scripts` allows it (a weakening logged, and loud: every page she
+    /// fetches and every person she serves effectively gets a shell as the Station user).
+    /// Answers the line that tells her scripts are unavailable, when they are, which the
+    /// Station's log also gets with the reason.
     fn arm(
         &self,
         mode: &mut AssistantMode,
         job: &AssistantJob,
+        reach: &AssistantReach,
         handler: &str,
         environment: &BTreeMap<String, String>,
-        area: &str,
     ) -> Option<String> {
-        let state = self.state.current();
-        let person = job.person_id.as_deref().unwrap_or_default();
-        let reach = job
-            .reach
-            .capped_by(&state.roster.assistant().reach_for(person, &[]));
         let digest = conversation_digest(&job.conversation_id);
         if reach.network.open() {
             (self.log)(
                 "weakening: assistant.network = \"open\": Moneypenny's web tools and scripts \
-                 reach any host",
+                 reach any host but this deployment's own and the loopback and metadata \
+                 addresses",
             );
         }
-        mode.network = reach.network;
+        mode.network = reach.network.clone();
         if reach.interpreters.is_empty() {
             return None;
+        }
+        // A shell interpreter runs anything in the sandbox; name it so the operator sees it.
+        if let Some(shell) = reach
+            .interpreters
+            .iter()
+            .find(|name| matches!(name.as_str(), "bash" | "sh" | "dash" | "zsh" | "env"))
+        {
+            (self.log)(&format!(
+                "weakening: assistant.interpreters includes {shell:?}: a shell runs any program \
+                 the sandbox allows, not only {shell:?}"
+            ));
         }
         if let Some(reason) = self.harness.scripts(handler, environment) {
             if !reach.unsandboxed_scripts {
@@ -969,13 +1075,14 @@ impl Desk {
                 ));
             }
             (self.log)(
-                "weakening: assistant scripts run unsandboxed: files and network not enforced \
-                 for them",
+                "weakening: assistant scripts run unsandboxed: no file or network limit is \
+                 enforced for them, so every page she fetches and every person she serves \
+                 effectively gets a shell as the Station's user, able to read its credentials, \
+                 other conversations and the Station",
             );
             mode.unsandboxed = true;
         }
-        mode.interpreters = reach.interpreters;
-        mode.deny_read = self.unreadable(area);
+        mode.interpreters = reach.interpreters.clone();
         if !mode.files.is_empty() {
             mode.read_only = vec![
                 workspace::SHARED.to_owned(),
@@ -984,23 +1091,6 @@ impl Desk {
             ];
         }
         None
-    }
-
-    /// What her scripts may not read: the Station user's home directory, AI6's state and
-    /// configuration, and the directory holding every conversation's working directory, her
-    /// own context and git directories included (`area` itself stays readable to her).
-    fn unreadable(&self, area: &str) -> Vec<String> {
-        let home = ["HOME", "USERPROFILE"]
-            .into_iter()
-            .find_map(std::env::var_os)
-            .map(PathBuf::from);
-        let root = Path::new(area).parent().map(Path::to_path_buf);
-        home.into_iter()
-            .chain(self.state.station.private_paths.iter().cloned())
-            .chain(root)
-            .filter(|path| path.is_absolute())
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect()
     }
 
     /// With Cable grants, serves the conversation its Cable endpoint, as a further server of
@@ -1012,6 +1102,7 @@ impl Desk {
         agent: &str,
         mode: &mut AssistantMode,
         environment: &mut BTreeMap<String, String>,
+        exposed: &Arc<AtomicBool>,
     ) -> Result<Option<Arc<AssistantEndpoint>>, String> {
         let Some(person) = job.person_id.clone().filter(|_| !job.cables.is_empty()) else {
             return Ok(None);
@@ -1043,7 +1134,10 @@ impl Desk {
             job.cables.clone(),
             job.exposed,
             reporter,
-            Arc::new(ExportsGate(self.exposure.clone())),
+            Arc::new(ExportsGate {
+                exposure: self.exposure.clone(),
+                exposed: exposed.clone(),
+            }),
             // The harness is started again before the job's token expires; so is this one.
             job.token_expires_at,
         )
@@ -1108,6 +1202,7 @@ impl Desk {
                 entry.session.clone(),
                 entry.flags.clone(),
                 entry.token_expires_at,
+                entry.reach.clone(),
                 entry.workspace.clone(),
             )
         })
@@ -1177,7 +1272,7 @@ impl Desk {
     /// interrupt; its pump reports `interrupted` when the turn ends. A harness that is not
     /// answering, or not running here, is left as it is.
     async fn interrupt(&self, conversation: &str) -> Result<(), String> {
-        let Some((session, flags, _, _)) = self.running(conversation) else {
+        let Some((session, flags, _, _, _)) = self.running(conversation) else {
             return Ok(());
         };
         if !flags.busy.load(Ordering::Acquire) {
@@ -1271,6 +1366,9 @@ struct Pump {
     /// What preparing the workspace left to tell, sent with the first event.
     notices: Vec<String>,
     exposure: Arc<dyn Exposure>,
+    /// The conversation's exposure flag, shared with the desk and the Cable endpoint; raised
+    /// for good once a web tool or a reaching script brings in outside text.
+    exposed: Arc<AtomicBool>,
     /// Her scripts can reach a host (a network policy that reaches one, or no sandbox).
     reaching: bool,
 }
@@ -1498,28 +1596,39 @@ impl Pump {
         events
     }
 
-    /// Notes the tools an event called, with its raw line: a web tool, or a script that can
-    /// reach a host, brings in outside text, so what she writes from then on is recorded as
-    /// such (Universal Exports marks the conversation from the same `tool` event); one that
-    /// answers with a file the personal repository records as written while exposed exposes
-    /// the conversation, which Universal Exports is told at once (a failure is told again when
-    /// the turn ends).
+    /// Notes the tools an event called, with its raw line. A web tool, or a script that can
+    /// reach a host, brings in outside text: it raises the conversation's exposed flag at once
+    /// (so a Cable it sends later this turn, before Universal Exports hears, is held) and tells
+    /// Universal Exports, whether or not there is a workspace. With a workspace, a call that
+    /// answers with a file the personal repository records as written while exposed exposes the
+    /// conversation too. Either way a failure to tell Universal Exports is told again when the
+    /// turn ends.
     fn note_tools(&self, tools: &[String], data: Option<&[u8]>) {
+        if tools.iter().any(|tool| outside_tool(tool, self.reaching)) {
+            self.expose("tool:outside-text");
+        }
         let Some(workspace) = &self.workspace else {
             return;
         };
-        if tools.iter().any(|tool| outside_tool(tool, self.reaching))
+        if let Some(source) = workspace
+            .lock()
+            .ok()
+            .and_then(|mut workspace| workspace.note_tools(tools, data))
+        {
+            self.expose(&source);
+        }
+    }
+
+    /// Raises the conversation's exposed flag and tells Universal Exports; logs a failure to
+    /// tell it, which the turn's end tries again.
+    fn expose(&self, source: &str) {
+        self.exposed.store(true, Ordering::Release);
+        if let Some(workspace) = &self.workspace
             && let Ok(mut workspace) = workspace.lock()
         {
             workspace.mark_exposed();
         }
-        let source = workspace
-            .lock()
-            .ok()
-            .and_then(|mut workspace| workspace.note_tools(tools, data));
-        if let Some(source) = source
-            && let Err(reason) = self.exposure.mark(&self.conversation_id, &source)
-        {
+        if let Err(reason) = self.exposure.mark(&self.conversation_id, source) {
             eprintln!(
                 "ai6: assistant conversation {}: exposure not recorded yet: {reason}",
                 conversation_digest(&self.conversation_id)
@@ -1748,6 +1857,26 @@ fn repos_dir(area: &Path) -> Option<PathBuf> {
     Some(area.parent()?.join(format!("{name}.git")))
 }
 
+/// The temporary directory beside a conversation's directory, which Claude Code's own temp
+/// files and its sandboxed scripts' `$TMPDIR` live under (`CLAUDE_CODE_TMPDIR`, to which it
+/// appends `claude-<uid>`): one per conversation, so a script never reads another
+/// conversation's temp files, as it can in the per-user default shared by every conversation
+/// of the Station's user. Kept short, since a long one makes Claude Code fall back to that
+/// shared default for sandboxed scripts.
+fn temp_dir(area: &Path) -> Option<PathBuf> {
+    let name = area.file_name()?.to_str()?;
+    Some(area.parent()?.join(format!("{}.t", name.get(..12)?)))
+}
+
+/// The Claude Code configuration directory beside a conversation's directory: outside it, so a
+/// sandboxed script never reaches its transcripts or any stored login, and its own, so the
+/// Agent's configuration directory (a shared login, every person's transcripts) stays out and
+/// each conversation keeps its own.
+fn config_dir(area: &Path) -> Option<PathBuf> {
+    let name = area.file_name()?.to_str()?;
+    Some(area.parent()?.join(format!("{name}.config")))
+}
+
 /// Removes a conversation's directory [`Desk::area`] made, its context file and its git
 /// directories, and nothing else.
 fn remove_area(path: &str) {
@@ -1770,6 +1899,12 @@ fn remove_area(path: &str) {
     }
     if let Some(repos) = repos_dir(path) {
         remove_tree(&repos);
+    }
+    if let Some(config) = config_dir(path) {
+        remove_tree(&config);
+    }
+    if let Some(temp) = temp_dir(path) {
+        remove_tree(&temp);
     }
     remove_tree(path);
 }
@@ -2082,6 +2217,9 @@ mod tests {
         /// Writes `personal/calc.py`, runs it with `Bash`, which writes `personal/out.txt`,
         /// then answers and completes.
         Computes,
+        /// Calls `WebFetch`, then answers and completes; touches no file, so it needs no
+        /// workspace.
+        Fetches,
     }
 
     /// Universal Exports' exposure record, as a test keeps it.
@@ -2241,6 +2379,13 @@ mod tests {
                     events.push_back(ran);
                     events.push_back(event(EVENT_TEXT, Some("It is 42.")));
                     events.push_back(event("completed", Some("It is 42.")));
+                }
+                Script::Fetches => {
+                    let mut fetched = event("tool", None);
+                    fetched.tools = vec!["WebFetch".to_owned()];
+                    events.push_back(fetched);
+                    events.push_back(event(EVENT_TEXT, Some("Fetched.")));
+                    events.push_back(event("completed", Some("Fetched.")));
                 }
             }
         }
@@ -2601,6 +2746,7 @@ mod tests {
             cable_discard: None,
             memory: None,
             reach: Default::default(),
+            groups: None,
         }
     }
 
@@ -4592,6 +4738,8 @@ mod tests {
                 },
                 unsandboxed_scripts: true,
             },
+            // A reach is for a named person; with none the Station takes the strictest.
+            person_id: job.person_id.or_else(|| Some("eve".to_owned())),
             ..job
         }
     }
@@ -4633,9 +4781,23 @@ mod tests {
         assert_eq!(mode.network.allowed_hosts, ["docs.python.org", "pypi.org"]);
         assert!(!mode.unsandboxed, "the harness has a sandbox here");
         assert_eq!(mode.read_only, ["shared", "CLAUDE.md", "AGENTS.md"]);
+        // Her own configuration directory, beside the working directory, keeps the Agent's out.
+        let config = start
+            .environment
+            .get("CLAUDE_CONFIG_DIR")
+            .expect("own config dir");
         let area = PathBuf::from(&start.working_directory);
-        let root = area.parent().unwrap().to_string_lossy().into_owned();
-        assert!(mode.deny_read.contains(&root), "{:?}", mode.deny_read);
+        assert_eq!(
+            PathBuf::from(config).parent(),
+            area.parent(),
+            "beside, not inside, the working directory"
+        );
+        // Her own temporary directory too, so her scripts' TMPDIR is not the shared per-user
+        // one; the sandbox derives it from the harness's TMPDIR.
+        let temp = start.environment.get("TMPDIR").expect("own TMPDIR");
+        assert_eq!(start.environment.get("CLAUDE_CODE_TMPDIR"), Some(temp));
+        assert_eq!(PathBuf::from(temp).parent(), area.parent());
+        assert!(temp.len() < area.to_string_lossy().len(), "kept short");
         assert!(
             !start
                 .initial_context
@@ -4732,9 +4894,9 @@ mod tests {
         let logged = loose.logged.lock().unwrap().clone();
         assert!(
             logged.iter().any(|line| line
-                == "weakening: assistant scripts run unsandboxed: files and network not \
-                    enforced for them"),
-            "{logged:?}"
+                .starts_with("weakening: assistant scripts run unsandboxed:")
+                && line.contains("effectively gets a shell as the Station's user")),
+            "the weakening says it loudly: {logged:?}"
         );
         assert!(
             logged
@@ -4754,5 +4916,214 @@ mod tests {
             "the check-in names both: {reported:?}"
         );
         loose.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_group_table_narrows_the_station_cap_and_a_missing_group_list_is_refused() {
+        let people = tempfile::tempdir().unwrap();
+        let agents = station_agents_with(
+            people.path(),
+            "interpreters = ['python3', 'node']\nnetwork = 'open'\n\
+             [assistant.group.contractors]\ninterpreters = ['python3']\nnetwork = 'denied'\n",
+        );
+        let fixture = on_station(
+            &agents,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+
+        // A job for a contractor: the group table narrows interpreters and the network.
+        let contractor = AssistantJob {
+            person_id: Some("eve".to_owned()),
+            groups: Some(vec!["contractors".to_owned()]),
+            reach: crate::directorates::section_00::assistant::AssistantReach {
+                interpreters: vec!["python3".to_owned(), "node".to_owned()],
+                network: crate::directorates::section_00::agent::AssistantNetwork {
+                    policy: "open".to_owned(),
+                    allowed_hosts: Vec::new(),
+                },
+                unsandboxed_scripts: false,
+            },
+            ..job("c-g", "Hello.")
+        };
+        fixture.desk.handle(contractor).await;
+        until(|| kinds(&fixture, "c-g").contains(&EVENT_COMPLETED.to_owned())).await;
+        let mode = fixture.asked.lock().unwrap().starts[0]
+            .assistant
+            .clone()
+            .unwrap();
+        assert_eq!(
+            mode.interpreters,
+            ["python3"],
+            "the group narrows interpreters"
+        );
+        assert_eq!(
+            mode.network.policy, "denied",
+            "the group denies the network"
+        );
+        fixture.desk.close_all();
+
+        // A job with no group list, while the roster narrows by group: refused, not skipped.
+        let no_groups = AssistantJob {
+            person_id: Some("eve".to_owned()),
+            groups: None,
+            ..job("c-h", "Hello.")
+        };
+        fixture.desk.handle(no_groups).await;
+        until(|| kinds(&fixture, "c-h").contains(&EVENT_REJECTED.to_owned())).await;
+        let text = text_of(&fixture, "c-h", EVENT_REJECTED).unwrap();
+        assert!(text.contains("directory group"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_job_without_a_person_takes_the_strictest_reach() {
+        let people = tempfile::tempdir().unwrap();
+        let agents = station_agents_with(
+            people.path(),
+            "interpreters = ['python3']\nnetwork = 'open'\n",
+        );
+        let fixture = on_station(
+            &agents,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        // The job asks for everything but names no person.
+        let anonymous = AssistantJob {
+            person_id: None,
+            reach: crate::directorates::section_00::assistant::AssistantReach {
+                interpreters: vec!["python3".to_owned()],
+                network: crate::directorates::section_00::agent::AssistantNetwork {
+                    policy: "open".to_owned(),
+                    allowed_hosts: Vec::new(),
+                },
+                unsandboxed_scripts: false,
+            },
+            ..job("c-a", "Hello.")
+        };
+        fixture.desk.handle(anonymous).await;
+        until(|| kinds(&fixture, "c-a").contains(&EVENT_COMPLETED.to_owned())).await;
+        let mode = fixture.asked.lock().unwrap().starts[0]
+            .assistant
+            .clone()
+            .unwrap();
+        assert!(mode.interpreters.is_empty(), "no person, no scripts");
+        assert!(mode.network.reaches_nothing(), "no person, no network");
+    }
+
+    #[tokio::test]
+    async fn a_narrower_reach_restarts_the_running_harness_rather_than_reaching_it_warm() {
+        let people = tempfile::tempdir().unwrap();
+        let agents = station_agents_with(
+            people.path(),
+            "interpreters = ['python3']\nnetwork = 'open'\n",
+        );
+        let fixture = on_station(
+            &agents,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        let open = |conversation: &str| AssistantJob {
+            person_id: Some("eve".to_owned()),
+            reach: crate::directorates::section_00::assistant::AssistantReach {
+                interpreters: vec!["python3".to_owned()],
+                network: crate::directorates::section_00::agent::AssistantNetwork {
+                    policy: "open".to_owned(),
+                    allowed_hosts: Vec::new(),
+                },
+                unsandboxed_scripts: false,
+            },
+            ..job(conversation, "first")
+        };
+        fixture.desk.handle(open("c-r")).await;
+        until(|| kinds(&fixture, "c-r").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert_eq!(fixture.asked.lock().unwrap().starts.len(), 1);
+
+        // The next message carries a narrower reach: the harness restarts (a second start, or
+        // a resume), it is not reached warm with the open reach it began under.
+        let narrowed = AssistantJob {
+            person_id: Some("eve".to_owned()),
+            reach: crate::directorates::section_00::assistant::AssistantReach {
+                interpreters: Vec::new(),
+                network: crate::directorates::section_00::agent::AssistantNetwork {
+                    policy: "denied".to_owned(),
+                    allowed_hosts: Vec::new(),
+                },
+                unsandboxed_scripts: false,
+            },
+            ..job("c-r", "second")
+        };
+        fixture.desk.handle(narrowed).await;
+        until(|| {
+            fixture
+                .asked
+                .lock()
+                .unwrap()
+                .starts
+                .iter()
+                .chain(std::iter::empty())
+                .any(|start| start.prompt == "second")
+                || !fixture.asked.lock().unwrap().resumes.is_empty()
+        })
+        .await;
+        let asked = fixture.asked.lock().unwrap();
+        let restarted = asked.starts.len() > 1 || !asked.resumes.is_empty();
+        assert!(restarted, "the harness restarted on the narrower reach");
+        let mode = asked
+            .resumes
+            .first()
+            .and_then(|resume| resume.assistant.clone())
+            .or_else(|| {
+                asked
+                    .starts
+                    .get(1)
+                    .and_then(|start| start.assistant.clone())
+            })
+            .unwrap();
+        assert!(
+            mode.interpreters.is_empty(),
+            "the restarted harness runs no script"
+        );
+        assert_eq!(mode.network.policy, "denied");
+        drop(asked);
+        fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_web_tool_exposes_the_turn_even_without_a_workspace() {
+        // The default roster gives no personal repository, so there is no workspace.
+        let fixture = scripted(true, IDLE, Script::Fetches, Script::Answers);
+        let fetching = AssistantJob {
+            reach: crate::directorates::section_00::assistant::AssistantReach {
+                interpreters: Vec::new(),
+                network: crate::directorates::section_00::agent::AssistantNetwork {
+                    policy: "open".to_owned(),
+                    allowed_hosts: Vec::new(),
+                },
+                unsandboxed_scripts: false,
+            },
+            person_id: Some("eve".to_owned()),
+            ..job("c-x", "Look it up.")
+        };
+        assert!(fetching.workspace.is_none());
+        fixture.desk.handle(fetching).await;
+        until(|| kinds(&fixture, "c-x").contains(&EVENT_COMPLETED.to_owned())).await;
+        // The desk tells Universal Exports the conversation is exposed, with no workspace.
+        let marks = fixture.exposure.marks.lock().unwrap().clone();
+        assert!(
+            marks
+                .iter()
+                .any(|(conversation, source)| conversation == "c-x"
+                    && source.contains("outside-text")),
+            "{marks:?}"
+        );
     }
 }

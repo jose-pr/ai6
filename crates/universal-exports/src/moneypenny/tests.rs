@@ -1972,6 +1972,15 @@ async fn each_job_carries_what_the_persons_groups_and_own_table_narrow_her_reach
     assert_eq!(operator.reach.network.policy, "limited");
     assert_eq!(operator.reach.network.allowed_hosts, ["pypi.org"]);
     assert!(!operator.reach.unsandboxed_scripts);
+    // The job also carries the person's groups, so the Station re-caps by the same tables.
+    assert!(
+        operator
+            .groups
+            .as_ref()
+            .is_some_and(|groups| groups.contains(&"ops".to_owned())),
+        "{:?}",
+        operator.groups
+    );
     let (_viewer_app, viewer) = accepted(&served, &served.viewer, "Hello.").await;
     assert_eq!(viewer.reach.interpreters, ["python3", "node"]);
     assert_eq!(
@@ -1991,6 +2000,47 @@ async fn each_job_carries_what_the_persons_groups_and_own_table_narrow_her_reach
         .unwrap_err()
         .to_string();
     assert!(refused.contains("assistant.group.ops.network"), "{refused}");
+}
+
+#[tokio::test]
+async fn a_script_counts_as_outside_text_after_the_roster_narrows_her_network() {
+    let reaching = ai6::AssistantSettings::new()
+        .with_personal_repo("/srv/mp/{person}.git")
+        .with_network(ai6::NetworkPolicy::Limited, vec!["pypi.org".to_owned()]);
+    let source = Arc::new(ai6::MemoryConfigSource::new(
+        ai6::Roster::builder().assistant(reaching).build().unwrap(),
+    ));
+    let served = served_with(AssistantConfig::default(), Some(source.clone())).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Fetch it.").await;
+    assert!(job.reach.scripts_reach_hosts());
+    finish(&served, &mut app, &job).await;
+
+    // The roster narrows her network to nothing; her next job's reach reaches no host.
+    let narrowed = ai6::AssistantSettings::new()
+        .with_personal_repo("/srv/mp/{person}.git")
+        .with_network(ai6::NetworkPolicy::Denied, Vec::new());
+    source.replace(ai6::Roster::builder().assistant(narrowed).build().unwrap());
+    say(&mut app, "And again?", None).await;
+    let second = take(&served, "hq").await;
+    assert!(!second.reach.scripts_reach_hosts());
+    report(
+        &served,
+        "hq",
+        &second,
+        Some(&second.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    // A script still running from the wider reach brings in outside text all the same.
+    let mut ran = AssistantEvent::new(EVENT_TOOL, None);
+    ran.tools = vec!["Bash".to_owned()];
+    assert_eq!(
+        report(&served, "hq", &second, None, vec![ran]).await,
+        StatusCode::NO_CONTENT
+    );
+    set_aside(&served, &second).await;
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
+    assert_eq!(proposal_of(&frames)["tool"], "memory_commit");
 }
 
 #[tokio::test]

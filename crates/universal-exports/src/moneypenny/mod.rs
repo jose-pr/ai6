@@ -273,6 +273,8 @@ fn control_job(
         cable_discard: None,
         memory: None,
         reach: AssistantReach::default(),
+        // A control starts no harness, so it carries no reach or groups.
+        groups: None,
     }
 }
 
@@ -667,9 +669,13 @@ impl Assistant {
                 cable_discard: None,
                 memory: None,
                 reach,
+                // The person's directory groups, so the Station applies its per-group narrowing.
+                groups: Some(person.groups.clone()),
             };
             conversation.workspace = job.workspace.clone();
-            conversation.scripts_reach_hosts = job.reach.scripts_reach_hosts();
+            // Sticky for the conversation: a harness started under a wider reach may still be running
+            // its script when a narrower message arrives, so its `Bash` still counts as outside text.
+            conversation.scripts_reach_hosts |= job.reach.scripts_reach_hosts();
             if let Some(text) = shown {
                 conversation.push(
                     Entry {

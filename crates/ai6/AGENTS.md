@@ -394,6 +394,7 @@ impl AssistantSettings {
     pub fn allowed_hosts(&self) -> &[String];
     pub fn unsandboxed_scripts(&self) -> bool;
     pub fn deployment_reach(&self) -> AssistantReach;      // before any table
+    pub fn has_group_narrowing(&self) -> bool;             // any [assistant.group.<g>] table
     /// The deployment's reach capped by every group table of `groups` and the person's own.
     pub fn reach_for(&self, person: &str, groups: &[String]) -> AssistantReach;
     pub fn validate(&self) -> Result<(), String>;          // "assistant.<key>: …"; a table that widens
@@ -2002,15 +2003,18 @@ pub fn local_git(args: &[String]) -> Result<GitOutput, String>;   // git in a pr
 pub fn pre_tool_use(input: &str, client: Option<&GateClient>) -> Option<String>;   // Claude Code hook output
 pub const WEB_GATE_ARGS: [&str; 2];   // ["assistant", "web-gate"]: Moneypenny's WebFetch hook
 // feature `gate`:
-pub fn web_fetch_gate(input: &str, hosts: &[String]) -> Option<String>;  // None: the fetch goes on
+pub fn web_fetch_gate(input: &str, allow: &[String], deny: &[String]) -> Option<String>; // None: goes on
+pub fn host_in(host: &str, patterns: &[String]) -> bool;   // exact, or a leading "*." wildcard
 ```
 
-`web_fetch_gate` takes a WebFetch `PreToolUse` hook input (`tool_input.url`) and lets it go
-on only when the URL's host name, lowercased and without a trailing dot, is one of `hosts`
-(`*.example.com` covers the names under `example.com`, not `example.com` itself, as Claude
-Code's `WebFetch(domain:…)` rules do); an address, a URL without a host name, unreadable input
-and every other host get the deny decision. `ai6 assistant web-gate --hosts H1,H2` is that
-hook: it reads standard input, prints the decision and always exits 0. It exists because
+`web_fetch_gate` takes a WebFetch `PreToolUse` hook input (`tool_input.url`) and denies the
+fetch when the URL's host (lowercased, no trailing dot) is one of `deny`, or, when `allow` is
+not empty, is not one of it (`*.example.com` covers the names under `example.com`, not
+`example.com` itself, as Claude Code's `WebFetch(domain:…)` rules do; `host_in` is the match).
+An empty `allow` lets every host through but the denied, for an `open` network kept off its
+deny list. An address, a URL without a host name and unreadable input are denied. `ai6
+assistant web-gate [--hosts H,…] [--deny H,…]` is that hook: it reads standard input, prints
+the decision and always exits 0. It exists because
 Claude Code 2.1.310 fetches its preapproved documentation domains (`docs.python.org`,
 `developer.mozilla.org`) under `dontAsk` although no rule names them (measured against a
 loopback stand-in for the API).
@@ -2777,7 +2781,6 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // instructions and ignores it.
 pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
                            pub interpreters: Vec<String> /* serde default */,
-                           pub deny_read: Vec<String> /* serde default; absolute paths scripts may not read */,
                            pub unsandboxed: bool /* serde default; scripts without the sandbox, a weakening */,
                            pub skills: Vec<String> /* serde default */,
                            pub network: AssistantNetwork /* serde default */,
@@ -2804,7 +2807,7 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // environment lacks a server's URL or token; tokens never reach a command line.
 // `validate` also checks `files` and `read_only` (1 to 8 `/`-separated names of letters,
 // digits, `.`, `-`, `_`, none starting with `.`), interpreters (`interpreter_name`), hosts
-// (`host_pattern`) and that `context_file` and `deny_read` are absolute. Claude Code offers
+// (`host_pattern`) and that `context_file` is absolute. Claude Code offers
 // exactly the built-in tools the parts call for in `--tools` (none: `--tools=`) under
 // `--permission-mode dontAsk`, denies the rest by name: with `files`, `Read,Write,Edit,Glob,
 // Grep` and `--allowedTools …,Read,Glob,Grep,Edit(/<dir>/**),…` (no path with a name starting
@@ -2813,13 +2816,18 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // `WebSearch`, `WebFetch(domain:*)` and `WebSearch`. Interpreters add `--settings` with the
 // sandbox (`enabled`, `failIfUnavailable`, `autoAllowBashIfSandboxed: false`,
 // `allowUnsandboxedCommands: false`, `filesystem` {`allowWrite`: the `files` directories,
-// `denyWrite`: `read_only` and `.claude`, `denyRead`: `deny_read`, `allowRead`: the working
-// directory}, `network` {`allowedDomains`: the hosts, `["*"]` when open, `strictAllowlist`},
-// `credentials.envVars` denying every environment variable but PATH, HOME, temp, locale and
-// proxy ones, and the model credentials) and `permissions.blockReadsOutsideWorkingDirectories`;
-// `unsandboxed` makes it `{"sandbox":{"enabled":false},…}`. A `limited` WebFetch adds a
-// `PreToolUse` hook on `WebFetch` running `<gate program> assistant web-gate --hosts …`
-// (`onFailure: block`). A network reaching nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1`;
+// `denyWrite`: `read_only`, `.claude` and the `.git` of the working directory and each writable
+// directory, `denyRead`: `["/"]`, `allowRead`: the working directory, the system directories
+// an interpreter needs and, on Linux, the sandbox's two relay sockets by name (in `/tmp`, or in
+// the Session's `CLAUDE_CODE_TMPDIR`)}, `network` {`allowedDomains`: the hosts, `["*"]` when open;
+// `deniedDomains`: loopback, the metadata address and the `*_MCP_URL` hosts; `strictAllowlist`},
+// `credentials.envVars` denying every environment variable but PATH, HOME, temp, locale ones,
+// and the model credentials, `credentials.files` denying the credential directories
+// (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `*_HOME`)) and
+// `permissions.blockReadsOutsideWorkingDirectories`;
+// `unsandboxed` makes it `{"sandbox":{"enabled":false},…}`. Any network but `denied` adds a
+// `PreToolUse` hook on `WebFetch` running `<gate program> assistant web-gate [--hosts …]
+// [--deny …]` (`onFailure: block`). A network reaching nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1`;
 // a `context_file` is `--append-system-prompt-file`; every assistant Session has
 // `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Codex refuses `files` and `context_file`
 // (UNSUPPORTED).
@@ -2869,7 +2877,10 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub cable_confirm: Option<AssistantCableDecision> /* default, omitted when None */,
     pub cable_discard: Option<AssistantCableDecision> /* default, omitted when None */,
     pub memory: Option<MemoryOp> /* default, omitted when None: the person's memory from the app */,
-    pub reach: AssistantReach /* default: runs and reaches nothing */ }
+    pub reach: AssistantReach /* default: runs and reaches nothing */,
+    pub groups: Option<Vec<String>> /* default, omitted when None; the person's directory groups,
+                                       so the Station re-caps by its per-group tables; requires
+                                       person_id; None makes a group-narrowing roster refuse */ }
                                                      // Debug redacts the token
 impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
 pub struct MemoryOp { pub repo: String /* the person's personal repository */,
@@ -3558,20 +3569,29 @@ against `main` as it commits); a `Read` or `Forget` of a missing file with `miss
 conversation running anywhere keeps the memory it read until its harness starts again.
 
 Her scripts and network: the desk caps `job.reach` by its own roster's
-`assistant().reach_for(person_id, &[])` (the groups are Universal Exports'), so a job never
-widens what this Station's roster gives, and sets the mode's `network` from it, logging
+`assistant().reach_for(person_id, job.groups)` (a job with no `person_id` takes the strictest
+reach; a roster that narrows by group refuses a job carrying no `groups`), so a job never
+widens what this Station's roster gives. It recomputes the cap on every message and, when it
+differs from the reach the running harness started under, restarts the harness rather than
+reaching it warm. It sets the mode's `network` from the reach, logging
 `weakening: assistant.network = "open": …` when it is open. With interpreters left, it asks
 `Harness::scripts` (the handler's `assistant_scripts` with the harness environment): when the
-harness can sandbox them, the mode gets them, `deny_read` (the Station user's home, AI6's
-configuration, state and Registry directories, and the directory holding every
-conversation's directory) and, with a workspace, `read_only = ["shared", "CLAUDE.md",
-"AGENTS.md"]`; when it cannot, the mode gets none, the start and resume context get the line
-`Scripts are unavailable on this Station (<reason>), …`, and the log
+harness can sandbox them, the mode gets them and, with a workspace, `read_only = ["shared",
+"CLAUDE.md", "AGENTS.md"]`; when it cannot, the mode gets none, the start and resume context
+get the line `Scripts are unavailable on this Station (<reason>), …`, and the log
 `assistant conversation <digest>: scripts are unavailable on this Station: <reason>`, unless
 the reach allows `unsandboxed_scripts`: then the mode gets them with `unsandboxed`, and the
-log `weakening: assistant scripts run unsandboxed: files and network not enforced for them`.
-A `WebFetch` or `WebSearch` call, or `Bash` while her scripts reach a host, marks the turn
-exposed, so what she writes from then on is recorded as outside text.
+log `weakening: assistant scripts run unsandboxed: …` (loud: a shell as the Station user). A
+shell interpreter (`bash`, `sh`, `env`) is logged as a weakening too. The desk gives the
+harness its own `CLAUDE_CONFIG_DIR` (`<conversation digest>.config` beside the directory),
+removed with it, so the Agent's configuration directory (a shared login, other people's
+transcripts) stays out and each conversation keeps its own, and its own temporary directory
+(`<first 12 digest digits>.t` beside it, as `TMPDIR` and `CLAUDE_CODE_TMPDIR`: Claude Code
+derives the sandbox's `$TMPDIR` from the harness's `TMPDIR`, which would otherwise be the
+`/tmp/claude-<uid>` every conversation shares). A `WebFetch` or `WebSearch` call,
+or `Bash` while her scripts reach a host (`outside_tool`), raises a per-conversation `exposed`
+flag at once (so a Cable she sends later the same turn is held, before Universal Exports
+hears) and tells Universal Exports, with or without a workspace.
 
 Exposure is Universal Exports' record (`Conversation.exposed`); the desk reads it with `GET
 /v1/station/assistant/exposure?station&conversation` (`{"exposed"}`) when a turn ends and

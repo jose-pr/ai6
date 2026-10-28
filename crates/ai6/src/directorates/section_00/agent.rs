@@ -70,11 +70,6 @@ pub struct AssistantMode {
     /// `unsandboxed` lets them run without it.
     #[serde(default)]
     pub interpreters: Vec<String>,
-    /// Absolute paths the interpreters may not read: the Station user's home directory, AI6's
-    /// state and configuration, the directory holding other conversations' working
-    /// directories. The working directory stays readable whatever this names.
-    #[serde(default)]
-    pub deny_read: Vec<String>,
     /// Run the interpreters without the harness's sandbox, where it has none: no file or
     /// network limit applies to them. A weakening the Station reports; `false` refuses
     /// interpreters a handler cannot confine.

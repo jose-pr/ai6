@@ -143,9 +143,6 @@ pub struct StationConfig {
     resources_every: Duration,
     config_poll: Duration,
     hygiene: crate::station::safehouse::SafeHouseHygiene,
-    /// AI6's state and configuration directories, which Moneypenny's scripts may not read;
-    /// filled in when the Station starts.
-    private_paths: Vec<PathBuf>,
 }
 
 impl StationConfig {
@@ -288,7 +285,6 @@ impl Default for StationConfig {
             resources_every: DEFAULT_RESOURCES_EVERY,
             config_poll: DEFAULT_CONFIG_POLL,
             hygiene: Default::default(),
-            private_paths: Vec::new(),
         }
     }
 }
@@ -601,19 +597,10 @@ where
         Err(error) if error.kind() == io::ErrorKind::NotFound => CableConfig::default(),
         Err(error) => return Err(error),
     };
-    let state_dir = crate::station::safehouse::state_dir().map_err(io::Error::other)?;
-    let mission_store = state_dir.join("missions.json");
+    let mission_store = crate::station::safehouse::state_dir()
+        .map_err(io::Error::other)?
+        .join("missions.json");
     let mut missions = MissionStore::open(mission_store)?;
-    // A Registry directory outside the state directory is AI6's too; a SQL location such as
-    // `sqlite:PATH` names no directory and is left out.
-    let registry_dir = crate::directorates::registry::store::default_registry_dir()
-        .ok()
-        .filter(|dir| !dir.to_string_lossy().contains(':') || dir.is_absolute());
-    config.station.private_paths = [Some(config_dir.clone()), Some(state_dir), registry_dir]
-        .into_iter()
-        .flatten()
-        .filter_map(|path| std::path::absolute(path).ok())
-        .collect();
     let intake: Arc<dyn RegistryBackend> = match config.registry.take() {
         Some(registry) => registry,
         None => crate::directorates::registry::backend::from_environment()?,

@@ -417,6 +417,7 @@ impl Assistant {
             memory: Some(op),
             // Runs nothing.
             reach: Default::default(),
+            groups: None,
         };
         job.validate()
             .map_err(|reason| refused(StatusCode::BAD_REQUEST, sentence(&reason)))?;

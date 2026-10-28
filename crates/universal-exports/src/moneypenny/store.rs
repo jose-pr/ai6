@@ -96,8 +96,8 @@ pub(crate) struct Conversation {
     pub(crate) exposed: bool,
     /// The workspace the last job named, for the commits its reports lead to.
     pub(crate) workspace: Option<AssistantWorkspace>,
-    /// Whether the scripts of the last job could reach a host, so a script it runs brings in
-    /// outside text.
+    /// Whether any job of the conversation let her scripts reach a host, so a script brings in
+    /// outside text; raised for good, never lowered by a narrower later job.
     pub(crate) scripts_reach_hosts: bool,
 }
 
