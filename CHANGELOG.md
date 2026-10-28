@@ -216,6 +216,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - On Unix, killing a `pipe` or `pty` Session also kills the processes that left its process
   group (`setsid`, `setpgid`): every process whose parent is in the tree is found and stopped
   before all are killed.
+- The `pipe` terminal starts its program alone. On Unix the program leads a session of its
+  own and inherits no descriptor but its standard streams; on Windows it inherits only its
+  three standard handles (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`) and is inside its Job Object
+  from its first instruction (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), and a bare program name
+  found on no `PATH` directory is refused.
 - Windows exit codes are reported as signed 32-bit values by the `pipe` and `pty` terminals
   (`0xFFFFFFFF` is `-1`), and the Claude Code and Codex handlers show a negative one with its
   NTSTATUS hex (`exited with code -1073741510 (0xC000013A)`, through

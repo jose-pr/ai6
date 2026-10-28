@@ -5,8 +5,8 @@
 //! `ai6-terminal-pipe`: the `pipe` terminal provider. The program gets plain pipes for its
 //! standard input and output, and no terminal, so a harness that checks whether its input is a
 //! terminal (Claude Code's `-p`) reads what is written to it, and its output arrives exactly as
-//! written. What differs per platform (owning the child's process tree, finding the program) is
-//! in `unix.rs` and `windows.rs` behind one `os` interface.
+//! written. What differs per platform (starting the child alone, owning its process tree,
+//! finding the program) is in `unix.rs` and `windows.rs` behind one `os` interface.
 //!
 //! Output is read on a thread into a channel, so `read` can time out. The output ends when the
 //! program has exited and its output pipe is closed, or, when a process it left behind holds the
@@ -26,9 +26,12 @@ mod os;
 #[cfg(unix)]
 #[path = "../../process_tree/unix.rs"]
 mod process_tree;
+#[cfg(windows)]
+#[path = "../../process_tree/windows.rs"]
+mod process_tree;
 
-use std::io::{Read, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::collections::BTreeMap;
+use std::io::{PipeReader, PipeWriter, Read, Write};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
@@ -38,7 +41,8 @@ use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, T
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue, Value};
 
-use os::ProcessTree;
+use os::Process;
+use process_tree::ProcessTree;
 
 const READ_CHUNK: usize = 65536;
 const EXIT_POLL: Duration = Duration::from_millis(10);
@@ -120,10 +124,31 @@ struct PipeSession {
     closed: AtomicBool,
     /// Since when the child has been seen exited with no output arriving.
     quiet_since: Mutex<Option<Instant>>,
-    stdin: Mutex<ChildStdin>,
-    child: Mutex<Child>,
+    stdin: Mutex<PipeWriter>,
+    child: Mutex<Process>,
     tree: ProcessTree,
     exit: Mutex<Option<ExitInfo>>,
+}
+
+/// A program to start, and the child's ends of its pipes, which `os::spawn` closes in this
+/// process once the child has them: until they close, the output never ends.
+pub(crate) struct Launch<'a> {
+    pub(crate) program: &'a str,
+    pub(crate) args: &'a [String],
+    /// The whole environment, or `None` for this process's.
+    pub(crate) env: Option<&'a BTreeMap<String, String>>,
+    pub(crate) cwd: Option<&'a str>,
+    pub(crate) stdin: PipeReader,
+    pub(crate) stdout: PipeWriter,
+    pub(crate) stderr: ErrorOutput,
+}
+
+/// Where the child's standard error goes.
+pub(crate) enum ErrorOutput {
+    /// Into standard output's pipe, which keeps the order the program wrote them in.
+    Stdout,
+    /// To the null device.
+    Null,
 }
 
 impl PipeSession {
@@ -132,47 +157,24 @@ impl PipeSession {
             .argv
             .split_first()
             .ok_or_else(|| refuse(Status::GUATIAO_ERR_BAD_VALUE, "argv is empty"))?;
+        let (stdin, input) = std::io::pipe().map_err(internal)?;
         let (mut output, writer) = std::io::pipe().map_err(internal)?;
-        let mut cmd = Command::new(os::resolve(program, spec.env.as_ref()));
-        cmd.args(args);
-        if let Some(env) = &spec.env {
-            cmd.env_clear();
-            cmd.envs(env);
-        }
-        if let Some(dir) = &spec.cwd {
-            cmd.current_dir(dir);
-        }
-        cmd.stdin(Stdio::piped());
-        match stderr {
-            StderrMode::Merge => {
-                // One pipe for both keeps the order in which the program wrote them.
-                cmd.stdout(writer.try_clone().map_err(internal)?);
-                cmd.stderr(writer);
-            }
-            StderrMode::Drop => {
-                cmd.stdout(writer);
-                cmd.stderr(Stdio::null());
-            }
-        }
-        os::own_process_tree(&mut cmd);
-        let mut child = cmd
-            .spawn()
-            .map_err(|error| internal(format!("cannot start {program:?}: {error}")))?;
-        // The command holds the pipe's write ends; until they close, the output never ends.
-        drop(cmd);
-        let tree = match os::adopt(&child) {
-            Ok(tree) => tree,
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(internal(error));
-            }
+        let launch = Launch {
+            program,
+            args,
+            env: spec.env.as_ref(),
+            cwd: spec.cwd.as_deref(),
+            stdin,
+            stdout: writer,
+            stderr: match stderr {
+                StderrMode::Merge => ErrorOutput::Stdout,
+                StderrMode::Drop => ErrorOutput::Null,
+            },
         };
+        let (child, tree) = os::spawn(launch)
+            .map_err(|error| internal(format!("cannot start {program:?}: {error}")))?;
         let pid = i64::from(child.id());
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| internal("the child's standard input was not piped"))?;
+        let stdin = input;
 
         let (tx, rx) = channel();
         std::thread::Builder::new()
@@ -211,7 +213,7 @@ impl PipeSession {
         if exit.is_none()
             && let Some(status) = lock(&self.child)?.try_wait().map_err(internal)?
         {
-            *exit = Some(os::exit_info(status));
+            *exit = Some(status);
         }
         Ok(*exit)
     }

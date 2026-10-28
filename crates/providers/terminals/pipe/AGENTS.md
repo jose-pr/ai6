@@ -32,7 +32,19 @@ comment; the rest of the crate denies it.
   An empty `argv` or a malformed spec is `GUATIAO_ERR_BAD_VALUE`; a program that cannot be
   started is `GUATIAO_ERR_INTERNAL` naming it. On Windows a bare name is looked up on the
   child's `PATH` with each `PATHEXT` extension (`codex` finds `codex.cmd`; a file named
-  exactly `codex` is not run), and a name with an extension is taken as given.
+  exactly `codex` is not run), a name with an extension is taken as given, and a bare name
+  found on no `PATH` directory is refused (never looked for in the current directory). A
+  `.bat` or `.cmd` file runs under the system's `cmd.exe` with its arguments quoted as the
+  standard library quotes them (`%` expands nothing, `&` ends nothing); an argument holding CR
+  or LF is refused for one.
+- **Alone**: the child inherits only its standard streams. On Unix it leads a new session (so
+  also a new process group, with no controlling terminal), and every descriptor above
+  standard error is marked close-on-exec before the program runs (`close_range` on Linux
+  5.11 or later, else each descriptor below the soft `RLIMIT_NOFILE`, at most 65536). On
+  Windows it is started with `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` naming only its three
+  standard handles, inside its Job Object from its first instruction
+  (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), and with `CREATE_NO_WINDOW`, so a Station without a
+  console opens no window.
 - **No terminal**: standard input and output are pipes, so `isatty` is false for both. Nothing
   is echoed, no line discipline applies (an input line of any length arrives whole), and the
   output is the program's bytes exactly: no CR inserted, no control sequences.
@@ -48,20 +60,20 @@ comment; the rest of the crate denies it.
 - **Exit** is asked of the child. On Unix a signal is reported by number; on Windows the exit
   code is reported as the standard library's signed 32-bit value (`0xFFFFFFFF` is `-1`,
   `0xC000013A` is `-1073741510`), and `kill` makes it `1`.
-- **Kill** takes the whole process tree. On Unix the child leads a new process group; every
-  process of the group, and every process whose parent is in the tree (found from `/proc` on
-  Linux and Android, from `ps` elsewhere, until a scan finds nothing new), is stopped with
-  `SIGSTOP`, then all are killed with `SIGKILL`, so a process that left the group (`setsid`,
-  `setpgid`) is killed too. A process reparented away from the tree (its parent exited first)
-  is not found, unless it is still in the child's group. On Windows the child is assigned to a
-  Job Object with `KILL_ON_JOB_CLOSE` right after it starts, and is started
-  with `CREATE_NO_WINDOW`, so a Station without a console opens no window. `kill` returns once
-  the child has exited and, on Windows, the Job Object has no process left, or after 2 s. It is
-  idempotent.
+- **Kill** takes the whole process tree. On Unix every process of the child's process group
+  and, on Linux and Android, its session, and every process whose parent is in the tree
+  (found from `/proc` on Linux and Android, from `ps` elsewhere, until a scan finds nothing
+  new), is stopped with `SIGSTOP`, then all are killed with `SIGKILL`, so a process that left
+  the group (`setsid`, `setpgid`) is killed too. A process reparented away from the tree (its
+  parent exited first) and outside the group and session is not found. On Windows the Job
+  Object (`KILL_ON_JOB_CLOSE`) is terminated. `kill` returns once the child has exited and, on
+  Windows, the Job Object has no process left, or after 2 s. It is idempotent.
 - **Drop** kills a running program and waits for it.
 
 ## Gotchas
 
-- A process the program starts in the instant before it joins the Job Object is not in it.
+- On Windows the child's ends of its pipes are inheritable for the instant the child is being
+  started: a process the Station starts meanwhile with every inheritable handle (as the
+  standard library's `Command` does) also gets them, and keeps the pipe open while it runs.
 - After renaming or removing a provider library, clean the plugin directory: a Station
   loads every provider library it finds.

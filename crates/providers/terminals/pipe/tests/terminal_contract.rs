@@ -381,6 +381,178 @@ fn a_child_that_exits_leaving_a_process_behind_ends_its_output() {
     assert_eq!(wait_for_exit(&session).code, Some(4));
 }
 
+/// What the file whose handle [`the_child_inherits_nothing_but_its_pipes`] leaks holds.
+const LEAK_MARKER: &str = "AI6_PIPE_LEAKED_HANDLE";
+
+/// The child of [`the_child_inherits_nothing_but_its_pipes`]: reports whether the descriptor or
+/// handle number in `AI6_PIPE_LEAK` reads the leaked file, and whether it leads a session of
+/// its own (always `true` on Windows, which has none).
+#[test]
+fn pipe_leak_child() {
+    let Ok(raw) = std::env::var("AI6_PIPE_LEAK") else {
+        return;
+    };
+    let leaked = read_inherited(raw.parse().unwrap()).is_some_and(|text| text == LEAK_MARKER);
+    println!("{{\"leaked\":{leaked},\"leader\":{}}}", session_leader());
+}
+
+#[cfg(unix)]
+fn read_inherited(fd: i32) -> Option<String> {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    // SAFETY: the file is never closed here, so a descriptor the process does not own is left
+    // alone; reading one that is not open fails.
+    let mut file = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd) });
+    let mut text = String::new();
+    file.read_to_string(&mut text).ok().map(|_| text)
+}
+
+#[cfg(windows)]
+fn read_inherited(handle: usize) -> Option<String> {
+    use std::io::Read;
+    use std::os::windows::io::FromRawHandle;
+    // SAFETY: as on Unix, the handle is never closed here.
+    let mut file =
+        std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_handle(handle as _) });
+    let mut text = String::new();
+    file.read_to_string(&mut text).ok().map(|_| text)
+}
+
+#[cfg(unix)]
+fn session_leader() -> bool {
+    // SAFETY: getsid and getpid take and return plain integers.
+    unsafe { libc::getsid(0) == libc::getpid() }
+}
+
+#[cfg(windows)]
+fn session_leader() -> bool {
+    true
+}
+
+/// Opens `path` with a descriptor or handle every child the test process starts would inherit,
+/// and returns it with its number.
+#[cfg(unix)]
+fn inheritable(path: &Path) -> (std::fs::File, String) {
+    use std::os::fd::AsRawFd;
+    let file = std::fs::File::open(path).unwrap();
+    // SAFETY: fcntl on a descriptor this function owns.
+    assert_eq!(
+        unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFD, 0) },
+        0
+    );
+    let fd = file.as_raw_fd().to_string();
+    (file, fd)
+}
+
+#[cfg(windows)]
+fn inheritable(path: &Path) -> (std::fs::File, String) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+    let file = std::fs::File::open(path).unwrap();
+    // SAFETY: SetHandleInformation on a handle this function owns.
+    let set = unsafe {
+        SetHandleInformation(
+            file.as_raw_handle(),
+            HANDLE_FLAG_INHERIT,
+            HANDLE_FLAG_INHERIT,
+        )
+    };
+    assert_ne!(set, 0);
+    let handle = (file.as_raw_handle() as usize).to_string();
+    (file, handle)
+}
+
+/// The program inherits only its standard streams, not a descriptor or handle the Station left
+/// inheritable, and on Unix leads a session of its own.
+#[test]
+fn the_child_inherits_nothing_but_its_pipes() {
+    let dir = tempfile_dir("leak");
+    let path = dir.join("marker");
+    std::fs::write(&path, LEAK_MARKER).unwrap();
+    let (file, raw) = inheritable(&path);
+    let session = start_child(
+        Pipe::default(),
+        "pipe_leak_child",
+        &[("AI6_PIPE_LEAK", raw)],
+    );
+    let output = read_to_end(&session);
+    drop(file);
+    let text = String::from_utf8_lossy(&output);
+    assert!(text.contains("\"leaked\":false"), "{text}");
+    assert!(text.contains("\"leader\":true"), "{text}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The child of [`a_batch_file_gets_its_arguments_exactly`]: prints the arguments it was given
+/// after its own, as JSON.
+#[test]
+fn pipe_args_child() {
+    if std::env::var_os("AI6_PIPE_ARGS").is_none() {
+        return;
+    }
+    let args: Vec<String> = std::env::args()
+        .skip_while(|arg| arg != "--nocapture")
+        .skip(1)
+        .collect();
+    println!("ARGS {}", serde_json_like(&args));
+}
+
+/// `args` as a JSON array of strings, escaping only what the test's arguments hold.
+fn serde_json_like(args: &[String]) -> String {
+    let quoted: Vec<String> = args
+        .iter()
+        .map(|arg| format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect();
+    format!("[{}]", quoted.join(","))
+}
+
+/// A `.cmd` file, as npm installs `codex.cmd`, gets each argument as given: `cmd.exe` neither
+/// expands a variable in one nor ends the command at a `&`.
+#[cfg(windows)]
+#[test]
+fn a_batch_file_gets_its_arguments_exactly() {
+    let dir = tempfile_dir("batch");
+    let script = dir.join("relay.cmd");
+    std::fs::write(
+        &script,
+        format!(
+            "@\"{}\" --exact pipe_args_child --nocapture %*\r\n",
+            std::env::current_exe().unwrap().display()
+        ),
+    )
+    .unwrap();
+    let args = [
+        "plain",
+        "two words",
+        r#"k="v w""#,
+        "%PATH%",
+        "a&b|c^d",
+        r"C:\dir\",
+        "",
+    ];
+    let mut env: BTreeMap<String, String> = std::env::vars().collect();
+    env.insert("AI6_PIPE_ARGS".to_owned(), "1".to_owned());
+    let mut argv = vec![script.to_string_lossy().into_owned()];
+    argv.extend(args.iter().map(|arg| (*arg).to_owned()));
+    let session = Pipe::default()
+        .spawn(
+            &Spec {
+                env: Some(env),
+                ..spec(argv)
+            }
+            .to_value()
+            .unwrap(),
+        )
+        .unwrap();
+    let output = String::from_utf8_lossy(&read_to_end(&session)).into_owned();
+    let expected: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+    assert!(
+        output.contains(&format!("ARGS {}", serde_json_like(&expected))),
+        "{output}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A Station reads this to give the provider to harnesses that speak JSON.
 #[test]
 fn the_provider_says_it_gives_no_terminal() {
