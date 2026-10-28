@@ -1,0 +1,13 @@
+name: example
+
+publish_to: none
+
+environment:
+  sdk: ^3.3.0
+
+dependencies:
+  intl:
+    path: ../
+
+dev_dependencies:
+  lints: ^6.0.0

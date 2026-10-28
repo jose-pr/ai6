@@ -1,0 +1,17 @@
+// Copyright 2013 The Flutter Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+part of '../../vector_math_64.dart';
+
+/// Defines a result of an intersection test.
+class IntersectionResult {
+  /// Creates a new mutable result instance, with no initial values.
+  IntersectionResult();
+  double? _depth;
+
+  /// The penetration depth of the intersection.
+  double? get depth => _depth;
+
+  /// The [axis] of the intersection.
+  final axis = Vector3.zero();
+}
