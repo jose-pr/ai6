@@ -52,7 +52,8 @@ class AssistantEntry {
     this.data,
   });
 
-  /// `person`, `moneypenny`, `tools`, `error`, `proposal`, `view` or `notice`.
+  /// `person`, `moneypenny`, `tools`, `error`, `proposal`, `view`, `navigation` or
+  /// `notice`.
   final String role;
   final String text;
   final double at;
@@ -68,7 +69,7 @@ class AssistantEntry {
   AssistantEntry withData(Map<String, Object?> data) =>
       AssistantEntry(role: role, text: text, at: at, data: data);
 
-  /// The proposal or view ID this entry carries.
+  /// The proposal, view or navigation ID this entry carries.
   String? get id => data?['id'] as String?;
 }
 
@@ -100,6 +101,12 @@ class AssistantController extends ChangeNotifier {
   bool stopping = false;
   bool connected = false;
   String? problem;
+
+  final _arrivals = StreamController<AssistantEntry>.broadcast(sync: true);
+
+  /// Each entry as it arrives while the conversation is open; not those a reconnect sends
+  /// again.
+  Stream<AssistantEntry> get arrivals => _arrivals.stream;
 
   /// A message asked before the conversation was ready, sent when it is.
   ({String text, OoRoute? route})? _pending;
@@ -165,12 +172,13 @@ class AssistantController extends ChangeNotifier {
           );
         }
       case 'entry':
-        entries = [
-          ...entries,
-          AssistantEntry.fromJson(
-            (message['entry'] as Map).cast<String, Object?>(),
-          ),
-        ];
+        final entry = AssistantEntry.fromJson(
+          (message['entry'] as Map).cast<String, Object?>(),
+        );
+        entries = [...entries, entry];
+        notifyListeners();
+        _arrivals.add(entry);
+        return;
       case 'proposal':
         final proposal = (message['proposal'] as Map).cast<String, Object?>();
         entries = [
@@ -249,6 +257,7 @@ class AssistantController extends ChangeNotifier {
   @override
   void dispose() {
     _subscription?.cancel();
+    unawaited(_arrivals.close());
     unawaited(_channel?.close());
     super.dispose();
   }

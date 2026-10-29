@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -6,8 +8,10 @@ import '../routes/oo_route.dart';
 import '../shell/oo_shell.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
+import 'assistant_controller.dart';
 import 'assistant_panel.dart';
 import 'chat_layout.dart';
+import 'navigation_card.dart';
 
 /// How long [chat] takes to move, unless the platform asks for no animations.
 Duration chatTransition(BuildContext context, MoneypennyChat chat) =>
@@ -37,7 +41,7 @@ class ChatShell extends StatefulWidget {
   /// The route of the app page the person is on, sent with each message to her.
   final OoRoute? route;
 
-  /// Opens an app page one of her views links to.
+  /// Opens an app page one of her views, links or navigation cards points to.
   final void Function(String link)? onLink;
 
   /// Opens her memory of the person above the given context.
@@ -49,6 +53,7 @@ class ChatShell extends StatefulWidget {
 
 class _ChatShellState extends State<ChatShell> {
   ModalRoute<Object?>? _route;
+  StreamSubscription<AssistantEntry>? _arrivals;
 
   @override
   void initState() {
@@ -56,6 +61,34 @@ class _ChatShellState extends State<ChatShell> {
     widget.chat?.addListener(_changed);
     HardwareKeyboard.instance.addHandler(_key);
     _hand(widget.chat);
+    _listen(widget.chat);
+  }
+
+  void _listen(MoneypennyChat? chat) {
+    unawaited(_arrivals?.cancel());
+    _arrivals = chat?.controller.arrivals.listen(_arrived);
+  }
+
+  /// Opens a page she offers at once when the person chose that, the entry is not one she
+  /// offered after reading outside text, and nothing (a dialog, a sheet) covers the page.
+  /// Otherwise the card waits for Open.
+  void _arrived(AssistantEntry entry) {
+    final chat = widget.chat;
+    if (entry.role != 'navigation' ||
+        chat == null ||
+        !mounted ||
+        !chat.followAtOnce ||
+        entry.data?['exposed'] == true ||
+        !(_route?.isCurrent ?? true)) {
+      return;
+    }
+    final OoRoute route;
+    try {
+      route = navigationRoute(entry.data);
+    } on FormatException {
+      return;
+    }
+    widget.onLink?.call(route.toUri());
   }
 
   @override
@@ -70,12 +103,14 @@ class _ChatShellState extends State<ChatShell> {
     if (old.chat != widget.chat) {
       old.chat?.removeListener(_changed);
       widget.chat?.addListener(_changed);
+      _listen(widget.chat);
     }
     _hand(widget.chat);
   }
 
   @override
   void dispose() {
+    unawaited(_arrivals?.cancel());
     HardwareKeyboard.instance.removeHandler(_key);
     widget.chat?.removeListener(_changed);
     super.dispose();
@@ -327,6 +362,8 @@ class ChatPanel extends StatelessWidget {
             onMemory: chat.onMemory == null
                 ? null
                 : () => chat.onMemory?.call(context),
+            followAtOnce: chat.followAtOnce,
+            onFollowAtOnce: chat.setFollowAtOnce,
             onClose: placement == ChatPlacement.fullScreen
                 ? chat.collapse
                 : null,

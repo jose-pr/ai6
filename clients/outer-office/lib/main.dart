@@ -20,6 +20,7 @@ import 'assistant/chat_region.dart';
 import 'assistant/chat_window.dart';
 import 'assistant/demo_conversation.dart';
 import 'assistant/memory_page.dart';
+import 'assistant/navigation_card.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
@@ -2825,6 +2826,8 @@ class _AccessGateState extends State<_AccessGate> {
         chat: chat,
         route: widget.router.page,
         onRoute: (route) => widget.router.go(context, route),
+        onFollow: (route) => widget.router.follow(context, route),
+        openedByMoneypenny: widget.router.openedByMoneypenny,
         notice: widget.router.notice,
         onDismissNotice: widget.router.dismissNotice,
       );
@@ -2971,6 +2974,8 @@ class MissionBoardPage extends StatefulWidget {
     this.chat,
     required this.route,
     required this.onRoute,
+    this.onFollow,
+    this.openedByMoneypenny = false,
     this.notice,
     this.onDismissNotice,
     super.key,
@@ -2989,6 +2994,13 @@ class MissionBoardPage extends StatefulWidget {
   /// filter of this page.
   final ValueChanged<OoRoute> onRoute;
 
+  /// Opens a route from one of Moneypenny's links or cards: always a new history entry, and
+  /// marked as hers; [onRoute] where unset.
+  final ValueChanged<OoRoute>? onFollow;
+
+  /// Whether one of her links or cards opened [route]; the page then says so.
+  final bool openedByMoneypenny;
+
   /// Why a link opened Overview instead of its page, until dismissed.
   final String? notice;
   final VoidCallback? onDismissNotice;
@@ -3000,8 +3012,9 @@ class MissionBoardPage extends StatefulWidget {
 class _MissionBoardPageState extends State<MissionBoardPage> {
   SessionSummary? _selectedWebSession;
 
-  /// Opens the app page a view links to (`app:/missions?operation_id=G`); a link that is not
-  /// a route is ignored. A chat covering the page makes way for it.
+  /// Opens the app page one of her views, links or navigation cards points to
+  /// (`app:/missions?operation_id=G`); a link that is not a route is ignored. An expanded chat
+  /// docks and one over the page closes, so the page is in view. Opening only reads.
   void _openLink(String link) {
     final OoRoute route;
     try {
@@ -3019,7 +3032,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         case _:
       }
     }
-    widget.onRoute(route);
+    (widget.onFollow ?? widget.onRoute)(route);
   }
 
   bool get _canReadRoles =>
@@ -3461,6 +3474,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                     ),
                   ],
                 ),
+              if (widget.openedByMoneypenny) const OpenedByMoneypenny(),
               Expanded(child: _pageBody(context, route, pages)),
             ],
           ),

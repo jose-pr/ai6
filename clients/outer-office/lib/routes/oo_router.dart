@@ -81,6 +81,10 @@ class OoRouterDelegate extends RouterDelegate<OoRoute>
     notifyListeners();
   }
 
+  /// Whether Moneypenny's link or card opened the current route; any other change clears it.
+  bool get openedByMoneypenny => _openedByMoneypenny;
+  bool _openedByMoneypenny = false;
+
   /// Opens [route], from a [context] under the app's [Router].
   void go(BuildContext context, OoRoute route) {
     if (route == _route) return;
@@ -91,10 +95,26 @@ class OoRouterDelegate extends RouterDelegate<OoRoute>
     });
   }
 
-  void _set(OoRoute route) {
+  /// Opens [route] from one of Moneypenny's links or cards: always a new history entry, so
+  /// Back returns to the page before, and marked [openedByMoneypenny].
+  void follow(BuildContext context, OoRoute route) {
+    if (route == _route) {
+      if (_openedByMoneypenny) return;
+      _openedByMoneypenny = true;
+      notifyListeners();
+      return;
+    }
+    Router.navigate(context, () {
+      _notice = null;
+      _set(route, byMoneypenny: true);
+    });
+  }
+
+  void _set(OoRoute route, {bool byMoneypenny = false}) {
     if (route.page != OoPage.memory) _behind = route;
-    if (route == _route) return;
+    if (route == _route && byMoneypenny == _openedByMoneypenny) return;
     _route = route;
+    _openedByMoneypenny = byMoneypenny;
     notifyListeners();
   }
 

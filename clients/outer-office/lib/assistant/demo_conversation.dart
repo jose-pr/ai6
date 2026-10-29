@@ -9,7 +9,8 @@ const demoConversationLabel = 'Sample conversation — demo';
 
 /// Moneypenny in the preview (`OO_DEMO=true`): a scripted conversation that answers the
 /// quick questions from canned replies, everything else with one fallback, and reaches no
-/// network. Confirm, Cancel and form submissions change nothing.
+/// network. Confirm, Cancel and form submissions change nothing; her page cards open their
+/// pages, which only read.
 ///
 /// Only the preview builds it; a signed-in app always talks to Universal Exports.
 class DemoAssistantChannel implements AssistantChannel {
@@ -91,6 +92,15 @@ class DemoAssistantChannel implements AssistantChannel {
               '**station-remote-02** is dark. Its Missions wait for placement; I can '
               'raise station-control-01\'s capacity so they run there.',
         ),
+        _entry('navigation', 'The blocked Sessions of Operation G', {
+          'id': 'demo-nav-blocked',
+          'route': {
+            'page': 'sessions',
+            'operation_id': 'G',
+            'state': 'blocked',
+          },
+          'label': 'The blocked Sessions of Operation G',
+        }),
         _entry('proposal', '', {
           'id': 'demo-proposal',
           'status': 'pending',
@@ -153,6 +163,13 @@ class DemoAssistantChannel implements AssistantChannel {
           'exposed': true,
           'view': _operationG,
         }),
+        // The records she summarised; stamped like her views, so it waits for Open.
+        _entry('navigation', 'The Missions of Operation G I summarised', {
+          'id': 'demo-nav-g',
+          'exposed': true,
+          'route': {'page': 'missions', 'operation_id': 'G'},
+          'label': 'The Missions of Operation G I summarised',
+        }),
       ];
     }
     if (text == dark) {
@@ -161,8 +178,13 @@ class DemoAssistantChannel implements AssistantChannel {
         _entry(
           'moneypenny',
           'One: **station-remote-02** stopped checking in. It serves Operation L; '
-              'see [the Stations](app:/stations/station-remote-02).',
+              'see [its card](app:/stations?station_id=station-remote-02).',
         ),
+        _entry('navigation', 'station-remote-02 on the Stations page', {
+          'id': 'demo-nav-dark',
+          'route': {'page': 'stations', 'station_id': 'station-remote-02'},
+          'label': 'station-remote-02 on the Stations page',
+        }),
       ];
     }
     return [

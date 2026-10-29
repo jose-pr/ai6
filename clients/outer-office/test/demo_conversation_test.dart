@@ -75,8 +75,15 @@ void main() {
     }
     expect(
       find.text(OutsideTextStrip.message),
+      findsNWidgets(2),
+      reason: 'a view and a page card made after reading briefs are marked',
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('navigation-demo-nav-g')),
+        matching: find.text(OutsideTextStrip.message),
+      ),
       findsOneWidget,
-      reason: 'a view made after reading briefs is marked',
     );
     await tester.scrollUntilVisible(
       find.text('The board by Station'),

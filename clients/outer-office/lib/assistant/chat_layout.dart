@@ -139,6 +139,17 @@ class ChatPreferences {
       jsonEncode({'layout': layout.name, 'width': width}),
     );
   }
+
+  /// Where [personId]'s "Open Moneypenny's links at once" is kept.
+  static String followKey(String personId) => 'oo.chat.$personId.follow';
+
+  /// Whether [personId] chose to open her links at once; off unless they did.
+  Future<bool> readFollow(String personId) async =>
+      (await _preferences).getBool(followKey(personId)) ?? false;
+
+  Future<void> writeFollow(String personId, bool follow) async {
+    await (await _preferences).setBool(followKey(personId), follow);
+  }
 }
 
 /// The person's conversation with Moneypenny and where it is shown: one per sign-in,
@@ -199,8 +210,29 @@ class MoneypennyChat extends ChangeNotifier {
   /// The route of the app page the person is on, sent with each message.
   final route = ValueNotifier<OoRoute?>(null);
 
-  /// Opens an app page one of her views links to.
+  /// Opens an app page one of her views, links or navigation cards points to.
   void Function(String link)? onLink;
+
+  /// Whether a page she offers opens without the person's click: the person's choice, off
+  /// by default. Never for one offered after she read outside text, nor over a dialog.
+  bool get followAtOnce => _followAtOnce;
+  bool _followAtOnce = false;
+
+  /// Sets [followAtOnce], kept for the person once they are known.
+  void setFollowAtOnce(bool follow) {
+    if (_followAtOnce == follow) return;
+    _followAtOnce = follow;
+    _followChosen = true;
+    final person = _person;
+    if (person != null) {
+      unawaited(
+        preferences?.writeFollow(person, follow).catchError((Object _) {}),
+      );
+    }
+    notifyListeners();
+  }
+
+  bool _followChosen = false;
 
   /// Opens her memory of the person above the given context.
   void Function(BuildContext context)? onMemory;
@@ -225,10 +257,17 @@ class MoneypennyChat extends ChangeNotifier {
     if (_person == personId) return;
     _person = personId;
     final ({ChatLayout layout, double? width})? saved;
+    final bool follow;
     try {
       saved = await preferences?.read(personId);
+      follow = await preferences?.readFollow(personId) ?? false;
     } on Object {
       return;
+    }
+    if (_disposed || _person != personId) return;
+    if (!_followChosen && follow != _followAtOnce) {
+      _followAtOnce = follow;
+      notifyListeners();
     }
     if (saved == null || _disposed || _person != personId) return;
     _width = settings.clamp(saved.width ?? settings.width);
@@ -361,7 +400,7 @@ class MoneypennyChat extends ChangeNotifier {
             .map((entry) => entry.at)
             .reduce((a, b) => a > b ? a : b);
 
-  /// Marks [unseen] when she answers, shows a view or proposes while hidden.
+  /// Marks [unseen] when she answers, shows a view, offers a page or proposes while hidden.
   void _heard() {
     if (_layout != ChatLayout.collapsed || _unseen) return;
     final seen = _seenUpTo;
@@ -372,7 +411,12 @@ class MoneypennyChat extends ChangeNotifier {
     final news = controller.entries.any(
       (entry) =>
           entry.at > seen &&
-          const {'moneypenny', 'proposal', 'view'}.contains(entry.role),
+          const {
+            'moneypenny',
+            'proposal',
+            'view',
+            'navigation',
+          }.contains(entry.role),
     );
     if (!news) return;
     _unseen = true;

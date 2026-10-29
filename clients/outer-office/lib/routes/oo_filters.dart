@@ -22,6 +22,11 @@ const _labels = {
   'pool': 'Pool',
 };
 
+/// Field [key] of [route] as a chip says it, such as `State: failed, blocked`.
+String routeFieldLabel(OoRoute route, String key) =>
+    '${key == 'tab' ? 'Tab' : _labels[key] ?? key}: '
+    '${key == 'state' && route.states.isNotEmpty ? route.states.join(', ') : route[key]}';
+
 /// Every filter of [route] as a removable chip, and "Clear filters"; nothing when the route
 /// has none. The tab is not a filter.
 class OoFilterBar extends StatelessWidget {
@@ -50,9 +55,7 @@ class OoFilterBar extends StatelessWidget {
             if (key != 'tab')
               InputChip(
                 key: ValueKey('filter-$key'),
-                label: Text(
-                  '${_labels[key] ?? key}: ${route.states.isNotEmpty && key == 'state' ? route.states.join(', ') : route[key]}',
-                ),
+                label: Text(routeFieldLabel(route, key)),
                 onDeleted: () => onRoute(route.without(key)),
                 deleteButtonTooltipMessage: 'Remove this filter',
               ),

@@ -8,6 +8,7 @@ import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_view.dart';
+import 'navigation_card.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
 /// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries
@@ -19,6 +20,8 @@ class AssistantPanel extends StatefulWidget {
     this.route,
     this.onOpen,
     this.onMemory,
+    this.followAtOnce = false,
+    this.onFollowAtOnce,
     this.onClose,
     this.closeTooltip = 'Close Moneypenny',
     this.actions = const [],
@@ -32,11 +35,17 @@ class AssistantPanel extends StatefulWidget {
   final AssistantController controller;
   final OoRoute? route;
 
-  /// Opens an app page a view links to (`app:/missions?operation_id=G`).
+  /// Opens an app page a view, a link or a navigation card points to
+  /// (`app:/missions?operation_id=G`).
   final void Function(String link)? onOpen;
 
   /// Opens the Memory page; without it the menu does not offer it.
   final VoidCallback? onMemory;
+
+  /// Whether pages she offers open without a click, and where the menu changes that;
+  /// without [onFollowAtOnce] the menu does not offer it.
+  final bool followAtOnce;
+  final ValueChanged<bool>? onFollowAtOnce;
 
   /// Closes the chat where it fills the screen (a phone); without it there is no button.
   final VoidCallback? onClose;
@@ -175,20 +184,29 @@ class _AssistantPanelState extends State<AssistantPanel> {
                         : null,
                     icon: const Icon(Icons.add_comment_outlined),
                   ),
-                  if (widget.onMemory case final onMemory?)
+                  if (widget.onMemory != null || widget.onFollowAtOnce != null)
                     PopupMenuButton<void>(
                       tooltip: 'Moneypenny menu',
                       style: const ButtonStyle(
                         visualDensity: VisualDensity.compact,
                       ),
                       itemBuilder: (context) => [
-                        PopupMenuItem(
-                          onTap: onMemory,
-                          child: const ListTile(
-                            leading: Icon(Icons.psychology_outlined),
-                            title: Text('Her memory of you'),
+                        if (widget.onMemory case final onMemory?)
+                          PopupMenuItem(
+                            onTap: onMemory,
+                            child: const ListTile(
+                              leading: Icon(Icons.psychology_outlined),
+                              title: Text('Her memory of you'),
+                            ),
                           ),
-                        ),
+                        if (widget.onFollowAtOnce case final onFollow?)
+                          CheckedPopupMenuItem(
+                            checked: widget.followAtOnce,
+                            onTap: () => onFollow(!widget.followAtOnce),
+                            child: const Text(
+                              "Open Moneypenny's links at once",
+                            ),
+                          ),
                       ],
                     ),
                   ...widget.actions,
@@ -397,6 +415,7 @@ class _EntryView extends StatelessWidget {
         onConfirm: controller.confirm,
         onCancel: controller.cancel,
       ),
+      'navigation' => NavigationCard(data: entry.data, onOpen: onOpen),
       'view' => AssistantViewCard(
         json: entry.data?['view'],
         exposed: entry.data?['exposed'] == true,
