@@ -150,9 +150,9 @@ impl RunnerConfig {
 
 /// The runner's state directory when none is given: `runner` in AI6's state directory.
 pub fn default_state_dir() -> io::Result<PathBuf> {
-    crate::station::safehouse::state_dir()
+    crate::bootstrap::platform_state_dir()
         .map(|dir| dir.join("runner"))
-        .map_err(io::Error::other)
+        .map_err(io::Error::from)
 }
 
 /// Serves the runner until `shutdown` resolves. The harnesses it supervises end with it.

@@ -81,41 +81,42 @@ struct Station {
 }
 
 impl Station {
-    fn start(name: &'static str, location: &str, root: &Path, extra: &[&str]) -> Self {
-        let state = root.join(name);
-        let config_dir = root.join("config");
-        std::fs::create_dir_all(&state).unwrap();
-        std::fs::create_dir_all(&config_dir).unwrap();
+    /// Starts `name` with its own `ai6.cfg`: its state in its own directory, the shared
+    /// `location` as configuration provider and Registry, and the provider polled every
+    /// `poll` seconds when given.
+    fn start(name: &'static str, location: &str, root: &Path, poll: Option<&str>) -> Self {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let poll = poll.map_or(String::new(), |seconds| {
+            format!(
+                "poll = {seconds}
+"
+            )
+        });
+        let bootstrap = dir.join("ai6.cfg");
+        std::fs::write(
+            &bootstrap,
+            format!(
+                "station = '{name}'
+state_dir = '.'
+                 [provider]
+location = '{location}'
+{poll}                 [registry]
+headquarters_lease = {HEADQUARTERS_LEASE_SECS}
+"
+            ),
+        )
+        .unwrap();
         let log = File::create(root.join(format!("{name}.log"))).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_ai6"));
         command
             .args(["serve", "--listen", "127.0.0.1:0", "--role", "control"])
-            .args([
-                "--station",
-                name,
-                "--registry",
-                location,
-                "--config",
-                location,
-            ])
-            .arg("--config-dir")
-            .arg(&config_dir)
-            .args(["--headquarters-lease", HEADQUARTERS_LEASE_SECS])
-            .args(extra)
-            .env("AI6_STATE", &state)
+            .arg("--config")
+            .arg(&bootstrap)
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
             .stderr(log);
-        for inherited in [
-            "AI6_REGISTRY",
-            "AI6_HOME",
-            "AI6_CONFIG_DIR",
-            "AI6_STATION_ID",
-            "AI6_EXPORTS_URL",
-            "AI6_EXPORTS_STATION_TOKEN",
-        ] {
-            command.env_remove(inherited);
-        }
+        command.env_remove("AI6_CONFIG");
         Self {
             name,
             process: command.spawn().expect("ai6 serve starts"),
@@ -204,8 +205,8 @@ fn two_stations_on_one_database_elect_one_headquarters_share_the_roster_and_fail
         .unwrap();
 
     let mut stations = [
-        Station::start("station-a", &location, root.path(), &[]),
-        Station::start("station-b", &location, root.path(), &[]),
+        Station::start("station-a", &location, root.path(), None),
+        Station::start("station-b", &location, root.path(), None),
     ];
     let registry = SqlRegistry::open(&location).unwrap();
 
@@ -289,10 +290,9 @@ fn an_agent_edit_reaches_both_stations(location: &str, write_past_the_checks: &d
     let agent = |priority: i64| json!({"handler": "mock-agent", "priority": priority});
     roster.put(ConfigRecord::Agent, "007", &agent(1)).unwrap();
 
-    let poll = ["--config-poll", "1"];
     let mut stations = [
-        Station::start("station-a", location, root.path(), &poll),
-        Station::start("station-b", location, root.path(), &poll),
+        Station::start("station-a", location, root.path(), Some("1")),
+        Station::start("station-b", location, root.path(), Some("1")),
     ];
     let registry = SqlRegistry::open(location).unwrap();
     until(root.path(), "both Stations to check in", || {

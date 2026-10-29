@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+pub mod bootstrap;
 pub mod directorates;
 pub mod station;
 
@@ -113,8 +114,7 @@ pub use directorates::q::{
     DEFAULT_SECRET_LEASE_TTL, Loadout, LoadoutCatalog, MAX_LOADOUT_BYTES, MAX_SECRET_LEASE_TTL,
     McpServer, QError, QErrorKind, SandboxError, SandboxProfile, SandboxRequest, SecretBackend,
     SecretBackendFailure, SecretBroker, SecretDefinition, SecretError, SecretLease,
-    SecretLeaseRequest, SecretRequest, SecretSource, SecretValue, StationSecrets,
-    claude_mcp_config,
+    SecretLeaseRequest, SecretRequest, SecretValue, StationSecrets, claude_mcp_config,
 };
 pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,

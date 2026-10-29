@@ -960,24 +960,6 @@ impl Roster {
     }
 }
 
-/// Resolves the standard per-user AI6 configuration directory.
-pub fn config_dir() -> Result<PathBuf, RosterError> {
-    if let Some(path) = std::env::var_os("AI6_CONFIG_DIR") {
-        return Ok(PathBuf::from(path));
-    }
-    if let Some(path) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(path).join("ai6"));
-    }
-    #[cfg(windows)]
-    if let Some(path) = std::env::var_os("APPDATA") {
-        return Ok(PathBuf::from(path).join("ai6"));
-    }
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .ok_or_else(|| error("could not determine the user's configuration directory"))?;
-    Ok(PathBuf::from(home).join(".config").join("ai6"))
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OperationsDocument {

@@ -39,13 +39,11 @@ pub(crate) fn parse(url: &str, options: &SqlOptions) -> io::Result<Location> {
     let tls = tls_mode(url)?;
     let (base, pairs) = parameters(url)?;
     let mut root_cert = None;
-    let mut password_file = None;
     let mut given = BTreeSet::new();
     let mut kept = Vec::new();
     for parameter in pairs {
         match parameter.key.as_str() {
             "sslrootcert" => root_cert = Some(parameter.value),
-            "password_file" => password_file = Some(parameter.value),
             "sslmode" => {}
             _ => {
                 given.insert(parameter.key);
@@ -65,12 +63,7 @@ pub(crate) fn parse(url: &str, options: &SqlOptions) -> io::Result<Location> {
         TlsMode::Disable => SslMode::Disable,
         TlsMode::Require | TlsMode::VerifyFull => SslMode::Require,
     });
-    if let Some(path) = password_file {
-        let secret = zeroize::Zeroizing::new(std::fs::read_to_string(&path).map_err(|error| {
-            io::Error::new(error.kind(), format!("password_file {path}: {error}"))
-        })?);
-        config.password(secret.trim_end_matches(['\r', '\n']));
-    } else if config.get_password().is_none()
+    if config.get_password().is_none()
         && let Some(password) = options.password()
     {
         config.password(password);
@@ -610,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn a_password_comes_from_a_file_or_the_options_instead_of_the_location() {
+    fn a_password_comes_from_the_options_instead_of_the_location() {
         let Some(store) = store() else { return };
         let location = store.location();
         let (scheme, rest) = location.split_once("://").unwrap();
@@ -620,15 +613,6 @@ mod tests {
             return;
         };
         let bare = format!("{scheme}://{user}@{host}");
-        let directory = tempfile::tempdir().unwrap();
-        let file = directory.path().join("password");
-        std::fs::write(&file, format!("{password}\n")).unwrap();
-
-        let from_file = format!("{bare}&password_file={}", file.display());
-        SqlRegistry::open(&from_file)
-            .unwrap()
-            .check_in("station-a", Default::default())
-            .unwrap();
         SqlRegistry::open_with(&bare, &SqlOptions::default().with_password(password))
             .unwrap()
             .check_in("station-b", Default::default())

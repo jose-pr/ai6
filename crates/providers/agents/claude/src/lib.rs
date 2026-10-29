@@ -695,7 +695,7 @@ fn script_settings(
     }
     let mut deny_read = vec!["/".to_owned()];
     deny_read.extend(
-        programs::station_paths(root, &program_dirs)
+        programs::station_paths(root, &program_dirs, &mode.station_paths)
             .iter()
             .map(|path| path.to_string_lossy().into_owned()),
     );
@@ -3685,7 +3685,7 @@ mod tests {
                 let deny_read = strings(&fs["denyRead"]);
                 assert_eq!(deny_read[0], "/", "reads denied everywhere: {case}");
                 let station =
-                    programs::station_paths(std::path::Path::new(&working_directory), &[]);
+                    programs::station_paths(std::path::Path::new(&working_directory), &[], &[]);
                 assert!(!station.is_empty(), "{case}");
                 for path in station {
                     let path = path.to_string_lossy().into_owned();

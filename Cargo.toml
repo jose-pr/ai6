@@ -43,8 +43,8 @@ lru = { version = "0.12.5", default-features = false }
 # Compile Station cover policy patterns with Unicode-aware matching.
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
 toml = "0.9"
-# The YAML front matter of a skill's SKILL.md, checked before Moneypenny may load it.
-serde-saphyr = { version = "2", default-features = false, features = ["deserialize"] }
+# YAML configuration documents, and the front matter of a skill's SKILL.md.
+serde-saphyr = { version = "2", default-features = false, features = ["deserialize", "serialize"] }
 tokio = { version = "1", default-features = false, features = ["macros", "net", "rt-multi-thread"] }
 rmcp = { version = "3.7", default-features = false, features = ["macros", "server", "transport-streamable-http-server"] }
 subtle = "2.6"

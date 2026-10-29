@@ -4,7 +4,7 @@
 //! The Station never runs a version-control command itself; a
 //! [`SafeHouseProvider`] does.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use guatiao::library::Object;
@@ -14,9 +14,6 @@ use crate::directorates::q::safehouse::{
     Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseExports, SafeHouseInfo,
     SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
 };
-
-/// The state-directory environment variable used by AI6.
-pub const STATE_ENV: &str = "AI6_STATE";
 
 /// A rejected safe-house operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,29 +205,6 @@ impl SafeHouseHygiene {
     pub fn is_cache(&self, name: &str) -> bool {
         self.caches.iter().any(|cache| cache == name)
     }
-}
-
-/// Resolves AI6's state directory for retained safe houses and Mission reports.
-pub fn state_dir() -> Result<PathBuf, SafeHouseError> {
-    if let Some(path) = std::env::var_os(STATE_ENV) {
-        return Ok(PathBuf::from(path));
-    }
-    if let Some(path) = std::env::var_os("AI6_HOME") {
-        return Ok(PathBuf::from(path).join("state"));
-    }
-    #[cfg(windows)]
-    if let Some(path) = std::env::var_os("LOCALAPPDATA") {
-        return Ok(PathBuf::from(path).join("AI6"));
-    }
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .or_else(|| std::env::var_os("USERPROFILE"))
-                .map(|home| PathBuf::from(home).join(".local").join("state"))
-        })
-        .ok_or_else(|| fail("could not determine AI6 state directory"))?;
-    Ok(base.join("AI6"))
 }
 
 fn fail(error: impl std::fmt::Display) -> SafeHouseError {

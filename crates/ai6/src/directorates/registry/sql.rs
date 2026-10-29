@@ -18,8 +18,9 @@
 //! A PostgreSQL location takes, besides the server's own parameters: `sslmode`
 //! (`verify-full`, the default: TLS with the server's certificate checked against the
 //! platform's roots, or only `sslrootcert=PATH` when given; `require`: TLS without checking
-//! the certificate; `disable`: no TLS) and `password_file=PATH`. [`weakenings`] names what
-//! a location gives up; [`redact`] hides its password for messages.
+//! the certificate; `disable`: no TLS). A password not in the location comes from
+//! [`SqlOptions::with_password`]. [`weakenings`] names what a location gives up; [`redact`]
+//! hides its password for messages.
 
 mod accounts;
 mod agents;
@@ -274,7 +275,7 @@ pub fn weakenings(location: &str) -> Vec<String> {
     if redact(location) != location {
         weaker.push(
             "the PostgreSQL password is in the location, where a process listing shows it; \
-             use password_file or the password variable instead"
+             name a password secret in the bootstrap file instead"
                 .to_owned(),
         );
     }
@@ -311,7 +312,7 @@ impl SqlRegistry {
     /// `location` is `sqlite:PATH` (or `sqlite://PATH`) for a SQLite file, or a PostgreSQL
     /// connection URL (`postgres://` or `postgresql://`), whose parameters (such as
     /// `options=-c search_path=…` for a schema) pass to the server, besides those this module
-    /// reads (`sslmode`, `sslrootcert`, `password_file`).
+    /// reads (`sslmode`, `sslrootcert`).
     ///
     /// # Errors
     ///

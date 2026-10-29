@@ -144,6 +144,12 @@ pub struct StationConfig {
     config_poll: Duration,
     hygiene: crate::station::safehouse::SafeHouseHygiene,
     assistant: AssistantDeskLimits,
+    /// Where the Station keeps its state; `None` is the platform's state directory.
+    state_dir: Option<PathBuf>,
+    /// What the bootstrap file gives up against the defaults, reported at check-in.
+    bootstrap_weakened: Vec<String>,
+    /// The Station's own directories an assistant's interpreters may never read.
+    protected_paths: Vec<PathBuf>,
 }
 
 /// What Moneypenny's desk on a Station allows: how long cloning one of her repositories may
@@ -197,6 +203,46 @@ impl AssistantDeskLimits {
 }
 
 impl StationConfig {
+    /// Keeps the Station's state (its ID, Mission book, safe houses, account homes and
+    /// verified provider libraries) in `dir` instead of the platform's state directory
+    /// ([`platform_state_dir`](crate::bootstrap::platform_state_dir)).
+    #[must_use]
+    pub fn with_state_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.state_dir = Some(dir.into());
+        self
+    }
+
+    /// Reports `weakenings`, what the bootstrap file gives up against the defaults
+    /// ([`Located::weakenings`](crate::bootstrap::Located::weakenings)), at every check-in
+    /// under `bootstrap_weakened`.
+    #[must_use]
+    pub fn with_bootstrap_weakenings(mut self, weakenings: Vec<String>) -> Self {
+        self.bootstrap_weakened = weakenings;
+        self
+    }
+
+    /// Adds a directory of the Station's own, such as its identity directory, that an
+    /// assistant's interpreters may never read. Its state and secrets directories are always
+    /// among them.
+    #[must_use]
+    pub fn with_protected_path(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.protected_paths.push(dir.into());
+        self
+    }
+
+    pub(crate) fn protected_paths(&self) -> &[PathBuf] {
+        &self.protected_paths
+    }
+
+    /// The state directory: the one set with [`StationConfig::with_state_dir`], else the
+    /// platform's.
+    pub(crate) fn state_dir(&self) -> io::Result<PathBuf> {
+        match &self.state_dir {
+            Some(dir) => Ok(dir.clone()),
+            None => crate::bootstrap::platform_state_dir().map_err(io::Error::from),
+        }
+    }
+
     /// What Moneypenny's desk allows here (default [`AssistantDeskLimits::default`]).
     #[must_use]
     pub fn with_assistant_limits(mut self, limits: AssistantDeskLimits) -> Self {
@@ -344,6 +390,9 @@ impl Default for StationConfig {
             config_poll: DEFAULT_CONFIG_POLL,
             hygiene: Default::default(),
             assistant: AssistantDeskLimits::default(),
+            state_dir: None,
+            bootstrap_weakened: Vec::new(),
+            protected_paths: Vec::new(),
         }
     }
 }
@@ -354,6 +403,7 @@ pub struct ServeConfig {
     plugin_paths: Vec<PathBuf>,
     plugin_policy: plugins::PluginPolicy,
     config_dir: Option<PathBuf>,
+    secrets_dir: Option<PathBuf>,
     config_source: Option<Arc<dyn ConfigSource>>,
     registry: Option<Arc<dyn RegistryBackend>>,
     station_id: Option<String>,
@@ -372,6 +422,7 @@ impl ServeConfig {
             plugin_paths: Vec::new(),
             plugin_policy: plugins::PluginPolicy::default(),
             config_dir: None,
+            secrets_dir: None,
             config_source: None,
             registry: None,
             station_id: None,
@@ -404,6 +455,14 @@ impl ServeConfig {
         self
     }
 
+    /// Sets the directory the Station's own secret backend reads relative secret files from
+    /// (default: `secrets` in the configuration directory).
+    #[must_use]
+    pub fn with_secrets_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.secrets_dir = Some(path.into());
+        self
+    }
+
     /// Sets where the roster comes from instead of the configuration directory's TOML files.
     #[must_use]
     pub fn with_config_source(mut self, source: Arc<dyn ConfigSource>) -> Self {
@@ -411,9 +470,8 @@ impl ServeConfig {
         self
     }
 
-    /// Sets the shared Registry. Without one, the daemon opens the Registry `AI6_REGISTRY`
-    /// names (a directory, or a SQL location with the `sqlite` or `postgres` feature), else
-    /// the [`FileRegistry`](crate::FileRegistry) in `AI6_HOME` or the platform state directory.
+    /// Sets the shared Registry. Without one, the daemon uses the
+    /// [`FileRegistry`](crate::FileRegistry) in `registry` under its state directory.
     #[must_use]
     pub fn with_registry(mut self, registry: Arc<dyn RegistryBackend>) -> Self {
         self.registry = Some(registry);
@@ -593,13 +651,21 @@ where
     }
     let config_dir = match config.config_dir.take() {
         Some(path) => path,
-        None => roster::config_dir().map_err(|error| {
+        None => crate::bootstrap::platform_config_dir().map_err(|error| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("AI6 configuration: {error}"),
             )
         })?,
     };
+    let state_dir = config.station.state_dir()?;
+    config.station.state_dir = Some(state_dir.clone());
+    let secrets_dir = config
+        .secrets_dir
+        .take()
+        .unwrap_or_else(|| config_dir.join("secrets"));
+    config.station.protected_paths.push(state_dir.clone());
+    config.station.protected_paths.push(secrets_dir.clone());
     let config_source: Arc<dyn ConfigSource> = match config.config_source.take() {
         Some(source) => source,
         None => Arc::new(TomlConfigDir::new(&config_dir)),
@@ -629,13 +695,13 @@ where
         config.station.credentials =
             std::mem::take(&mut config.station.credentials).with_catalog(catalog);
     }
-    config.station.credentials =
-        std::mem::take(&mut config.station.credentials).in_config_dir(&config_dir);
+    config.station.credentials = std::mem::take(&mut config.station.credentials)
+        .in_secrets_dir(&secrets_dir)
+        .with_default_account_homes(state_dir.join("accounts"));
     let station_id = config
         .station_id
         .take()
-        .or_else(|| std::env::var("AI6_STATION_ID").ok())
-        .unwrap_or_else(daemon_station_id);
+        .unwrap_or_else(|| daemon_station_id(&state_dir));
     crate::directorates::registry::store::validate_station_id(&station_id)?;
     CableEndpoint::try_new(
         "validation-agent".to_owned(),
@@ -656,13 +722,13 @@ where
         Err(error) if error.kind() == io::ErrorKind::NotFound => CableConfig::default(),
         Err(error) => return Err(error),
     };
-    let mission_store = crate::station::safehouse::state_dir()
-        .map_err(io::Error::other)?
-        .join("missions.json");
+    let mission_store = state_dir.join("missions.json");
     let mut missions = MissionStore::open(mission_store)?;
     let intake: Arc<dyn RegistryBackend> = match config.registry.take() {
         Some(registry) => registry,
-        None => crate::directorates::registry::backend::from_environment()?,
+        None => Arc::new(crate::directorates::registry::store::FileRegistry::open(
+            state_dir.join("registry"),
+        )),
     };
     let startup_recovery = recover_startup_missions(&mut missions)?;
     let listener = TcpListener::bind(config.address).await?;
@@ -757,11 +823,7 @@ where
         #[cfg(feature = "publisher")]
         publisher,
     };
-    let token = crate::station::runner::ensure_token_at(
-        &crate::station::safehouse::state_dir()
-            .map_err(io::Error::other)?
-            .join(API_TOKEN_FILE),
-    )?;
+    let token = crate::station::runner::ensure_token_at(&state_dir.join(API_TOKEN_FILE))?;
     let app = api(state.clone(), token);
     let declaring = state.clone();
     let _ = tokio::task::spawn_blocking(move || reload::declare(&declaring)).await;
@@ -1833,7 +1895,7 @@ fn renew_session_leases(state: &DaemonState) {
 /// The default Station identity, stable across restarts: read from `station-id` in the
 /// AI6 state directory, or created there as `<host>-<random>` on first start. A restarted
 /// daemon must keep its identity to renew its own Session leases and Registry records.
-fn daemon_station_id() -> String {
+fn daemon_station_id(dir: &Path) -> String {
     let host = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .unwrap_or_else(|_| "localhost".to_owned());
@@ -1841,10 +1903,7 @@ fn daemon_station_id() -> String {
         let suffix = uuid::Uuid::new_v4().simple().to_string();
         format!("{host}-{}", &suffix[..8])
     };
-    let Ok(dir) = crate::station::safehouse::state_dir() else {
-        return fresh();
-    };
-    persisted_station_id(&dir, fresh)
+    persisted_station_id(dir, fresh)
 }
 
 fn persisted_station_id(dir: &Path, fresh: impl FnOnce() -> String) -> String {
@@ -1979,6 +2038,12 @@ fn publish_station_check_in(state: &DaemonState) {
         theater.sessions = running.get(&theater.id).copied().unwrap_or_default();
     }
     info.insert("theaters".to_owned(), serde_json::json!(theaters));
+    if !state.station.bootstrap_weakened.is_empty() {
+        info.insert(
+            "bootstrap_weakened".to_owned(),
+            serde_json::json!(state.station.bootstrap_weakened),
+        );
+    }
     let plugins_weakened = &state.plugins.scan_summary().weakened;
     if !plugins_weakened.is_empty() {
         info.insert(
@@ -2118,7 +2183,11 @@ fn runner_link(state: &DaemonState, theater_id: &str) -> Result<Option<Arc<Runne
         TheaterAccess::Local => None,
         _ => Some(state.transports.client(theater_id)?),
     };
-    Ok(RunnerLink::for_theater(&theater, transport)?.map(Arc::new))
+    let station_state = state
+        .station
+        .state_dir()
+        .map_err(|error| error.to_string())?;
+    Ok(RunnerLink::for_theater(&theater, transport, &station_state)?.map(Arc::new))
 }
 
 /// The working directory of a Mission whose harness runs on a Theater other than the
@@ -2513,7 +2582,11 @@ fn session_theater(state: &DaemonState, operation_id: Option<&str>) -> Result<St
 
 /// The Station-side scratch directory of a remote-hands Mission. The harness runs here, but
 /// its shell and file tools are off and the Theater's work never touches it.
-fn remote_hands_area(requested: Option<&str>, mission: &Mission) -> Result<WorkingArea, String> {
+fn remote_hands_area(
+    requested: Option<&str>,
+    mission: &Mission,
+    state_dir: &Path,
+) -> Result<WorkingArea, String> {
     if requested.is_some_and(|path| !path.trim().is_empty()) {
         return Err(
             "a Mission on a remote-hands Theater works in the Theater's directory, not in a \
@@ -2521,8 +2594,7 @@ fn remote_hands_area(requested: Option<&str>, mission: &Mission) -> Result<Worki
                 .to_owned(),
         );
     }
-    let path = crate::station::safehouse::state_dir()
-        .map_err(|error| error.to_string())?
+    let path = state_dir
         .join("remote-hands")
         .join(mission.mission_id.as_str());
     fs::create_dir_all(&path).map_err(|error| format!("{}: {error}", path.display()))?;
@@ -3458,7 +3530,7 @@ fn open_safe_house(
         .ok_or_else(|| format!("Operation {:?} has no local checkout path", operation.id))?;
     let root = match state_root {
         Some(path) => path.to_path_buf(),
-        None => crate::station::safehouse::state_dir().map_err(|error| error.to_string())?,
+        None => crate::bootstrap::platform_state_dir().map_err(|error| error.to_string())?,
     };
     let provider = plugins
         .safehouse(&provider_id, None)
@@ -3729,9 +3801,11 @@ async fn start_mission(
         .filter(|record| record.status == SessionStatus::Lost && mission.safe_house.is_none())
         .and_then(|record| record.checkpoint.clone());
     let area_checkpoint = checkpoint.clone();
+    let area_state = state.station.state_dir();
     let area = tokio::task::spawn_blocking(move || {
+        let state_dir = area_state.map_err(|error| error.to_string())?;
         if remote_hands {
-            remote_hands_area(requested_directory.as_deref(), &area_mission)
+            remote_hands_area(requested_directory.as_deref(), &area_mission, &state_dir)
         } else if remote_field {
             theater_area(
                 requested_directory.as_deref(),
@@ -3746,7 +3820,7 @@ async fn start_mission(
                 &plugins,
                 operation_id.as_deref(),
                 requested_directory.as_deref(),
-                None,
+                Some(&state_dir),
                 &area_mission,
                 area_checkpoint,
             )
@@ -4398,13 +4472,14 @@ async fn resume_mission(
                             let plugins = state.plugins.clone();
                             let mission_id = mission.mission_id.clone();
                             let title = mission.prompt.clone();
+                            let state_dir = state.station.state_dir().map_err(runtime_error)?;
                             tokio::task::spawn_blocking(move || {
                                 open_safe_house(
                                     &plugins,
                                     &configured,
                                     &mission_id,
                                     &title,
-                                    None,
+                                    Some(&state_dir),
                                     isolate,
                                     Some(report),
                                     None,

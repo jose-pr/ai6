@@ -299,7 +299,7 @@ impl SecretBroker {
 /// [`SecretDefinition`]: super::SecretDefinition
 #[derive(Debug, Clone, Default)]
 pub struct StationSecrets {
-    sources: BTreeMap<String, super::SecretSource>,
+    sources: BTreeMap<String, crate::bootstrap::SecretRef>,
 }
 
 impl StationSecrets {
@@ -314,11 +314,11 @@ impl StationSecrets {
         }
     }
 
-    /// Resolves relative files against `dir`, the Station's configuration directory.
+    /// Resolves relative files against `dir`, the Station's secrets directory.
     #[must_use]
     pub fn relative_to(mut self, dir: &std::path::Path) -> Self {
         for source in self.sources.values_mut() {
-            if let super::SecretSource::File(path) = source
+            if let crate::bootstrap::SecretRef::File(path) = source
                 && path.is_relative()
             {
                 *path = dir.join(&*path);
@@ -337,8 +337,9 @@ impl SecretBackend for StationSecrets {
         let mut values = BTreeMap::new();
         for name in names {
             let mut value = match self.sources.get(name) {
-                Some(super::SecretSource::Env(variable)) => std::env::var(variable).ok(),
-                Some(super::SecretSource::File(path)) => std::fs::read_to_string(path).ok(),
+                Some(crate::bootstrap::SecretRef::Env(variable)) => std::env::var(variable).ok(),
+                Some(crate::bootstrap::SecretRef::File(path)) => std::fs::read_to_string(path).ok(),
+                Some(crate::bootstrap::SecretRef::Inline(value)) => Some(value.to_string()),
                 None => None,
             }
             .filter(|value| !value.is_empty())

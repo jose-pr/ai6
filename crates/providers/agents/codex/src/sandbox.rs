@@ -61,6 +61,7 @@ impl Profile {
                 environment,
                 &mode.interpreters,
                 &mode.files,
+                &mode.station_paths,
             ),
         }
     }
@@ -243,6 +244,7 @@ fn rules(
     environment: &BTreeMap<String, String>,
     interpreters: &[String],
     files: &[String],
+    station: &[String],
 ) -> Vec<(String, &'static str)> {
     let open = read_dirs(executable, cwd, environment, interpreters);
     let mut rules = vec![
@@ -257,7 +259,7 @@ fn rules(
             .map(|dir| (path_text(&cwd.join(native(dir))), "write")),
     );
     rules.extend(
-        station_paths(cwd, &open)
+        station_paths(cwd, &open, station)
             .iter()
             .map(|path| (path_text(path), "deny")),
     );
@@ -347,7 +349,7 @@ fn probe_in(
     runner: &Runner<'_>,
     dir: &Path,
 ) -> Option<String> {
-    let rules = rules(executable, &canonical(dir), environment, &[], &[]);
+    let rules = rules(executable, &canonical(dir), environment, &[], &[], &[]);
     let mut argv = vec![executable.to_owned()];
     argv.extend(windows_sandbox());
     argv.extend([
@@ -608,7 +610,7 @@ mod tests {
             .filter(|(key, access)| *key != ":root" && access.as_str() == Some("deny"))
             .map(|(key, _)| key.clone())
             .collect();
-        let station: std::collections::BTreeSet<String> = station_paths(&cwd, &[])
+        let station: std::collections::BTreeSet<String> = station_paths(&cwd, &[], &[])
             .iter()
             .map(|path| path_text(path))
             .collect();
@@ -822,8 +824,7 @@ mod tests {
         let paths = denied_station_paths(
             &root.join("elsewhere"),
             &[],
-            Some(state.clone()),
-            Some(home.clone()),
+            &[state.clone(), home.clone()],
             Some(station.clone()),
         );
         assert_eq!(
@@ -833,8 +834,7 @@ mod tests {
         let paths = denied_station_paths(
             &conversation,
             std::slice::from_ref(&install),
-            Some(state),
-            Some(home.clone()),
+            &[state, home.clone()],
             Some(station.clone()),
         );
         assert_eq!(

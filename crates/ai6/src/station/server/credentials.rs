@@ -33,8 +33,8 @@ const MAX_NAMES_DETAIL: usize = 240;
 pub(crate) struct CredentialDesk {
     catalog: Option<Arc<LoadoutCatalog>>,
     backend: Option<Arc<dyn SecretBackend>>,
-    /// Where the Station's own backend finds relative secret files.
-    config_dir: Option<std::path::PathBuf>,
+    /// Where the Station's own backend finds relative secret files: its secrets directory.
+    secrets_dir: Option<std::path::PathBuf>,
     issued: Arc<Mutex<BTreeMap<String, Vec<Issued>>>>,
     /// Pool account logins and the accounts Sessions hold.
     pub(super) accounts: super::accounts::AccountDesk,
@@ -51,7 +51,7 @@ impl std::fmt::Debug for CredentialDesk {
 impl PartialEq for CredentialDesk {
     fn eq(&self, other: &Self) -> bool {
         self.catalog == other.catalog
-            && self.config_dir == other.config_dir
+            && self.secrets_dir == other.secrets_dir
             && Arc::ptr_eq(&self.issued, &other.issued)
             && self.accounts == other.accounts
             && match (&self.backend, &other.backend) {
@@ -105,15 +105,20 @@ impl CredentialDesk {
         self
     }
 
+    pub(crate) fn with_default_account_homes(mut self, dir: std::path::PathBuf) -> Self {
+        self.accounts = self.accounts.with_default_homes(dir);
+        self
+    }
+
     pub(crate) fn with_account_limit_horizon(mut self, horizon: Duration) -> Self {
         self.accounts = self.accounts.with_limit_horizon(horizon);
         self
     }
 
-    /// Resolves relative secret files against the Station's configuration directory, and
+    /// Resolves relative secret files against the Station's secrets directory, and
     /// logs each weakening of its secrets.
-    pub(crate) fn in_config_dir(mut self, dir: &std::path::Path) -> Self {
-        self.config_dir = Some(dir.to_path_buf());
+    pub(crate) fn in_secrets_dir(mut self, dir: &std::path::Path) -> Self {
+        self.secrets_dir = Some(dir.to_path_buf());
         for weakening in self.weakenings() {
             eprintln!("ai6: {weakening}");
         }
@@ -163,7 +168,7 @@ impl CredentialDesk {
 
     /// The backend leases come from: the one set in code, else the Station's own.
     fn broker(&self, catalog: &LoadoutCatalog) -> SecretBroker {
-        let backend: Arc<dyn SecretBackend> = match (&self.backend, &self.config_dir) {
+        let backend: Arc<dyn SecretBackend> = match (&self.backend, &self.secrets_dir) {
             (Some(backend), _) => backend.clone(),
             (None, Some(dir)) => Arc::new(StationSecrets::new(catalog.secrets()).relative_to(dir)),
             (None, None) => Arc::new(StationSecrets::new(catalog.secrets())),

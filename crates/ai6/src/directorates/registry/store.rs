@@ -607,24 +607,6 @@ impl FileRegistry {
         Self { root: root.into() }
     }
 
-    /// Resolves `AI6_REGISTRY`, `AI6_HOME/registry`, or the platform state directory.
-    ///
-    /// # Errors
-    ///
-    /// `Unsupported` when `AI6_REGISTRY` names a SQL Registry, which
-    /// [`backend::from_environment`](super::backend::from_environment) opens.
-    pub fn from_environment() -> io::Result<Self> {
-        let root = default_registry_dir()?;
-        let location = root.to_string_lossy();
-        if location.contains("://") || location.starts_with("sqlite:") {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "AI6_REGISTRY names a SQL Registry, not a directory",
-            ));
-        }
-        Ok(Self::open(root))
-    }
-
     /// Returns the configured Registry root.
     pub fn root(&self) -> &Path {
         &self.root
@@ -2867,37 +2849,6 @@ fn lock_is_contended(error: &io::Error) -> bool {
     return matches!(error.raw_os_error(), Some(32 | 33));
     #[cfg(not(windows))]
     false
-}
-
-/// Returns the default Registry location.
-pub fn default_registry_dir() -> io::Result<PathBuf> {
-    if let Some(path) = nonempty_env("AI6_REGISTRY") {
-        return Ok(path.into());
-    }
-    if let Some(path) = nonempty_env("AI6_HOME") {
-        return Ok(PathBuf::from(path).join("registry"));
-    }
-    #[cfg(windows)]
-    if let Some(path) = nonempty_env("LOCALAPPDATA") {
-        return Ok(PathBuf::from(path).join("AI6").join("registry"));
-    }
-    let state = nonempty_env("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .map(|home| home.join(".local/state"))
-        })
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "no AI6 Registry state directory")
-        })?;
-    Ok(state.join("ai6").join("registry"))
-}
-
-fn nonempty_env(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
 }
 
 pub(super) fn safe_component(value: &str) -> String {

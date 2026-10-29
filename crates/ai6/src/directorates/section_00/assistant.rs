@@ -61,6 +61,7 @@ impl AssistantMode {
             files: Vec::new(),
             read_only: Vec::new(),
             context_file: None,
+            station_paths: Vec::new(),
         }
     }
 

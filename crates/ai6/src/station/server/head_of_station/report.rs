@@ -121,17 +121,15 @@ pub(in super::super) fn station_state(state: &DaemonState) -> StationState {
             state: format!("{:?}", mission.state).to_lowercase(),
         })
         .collect();
-    let disk = crate::station::safehouse::state_dir()
-        .ok()
-        .and_then(|path| {
-            let free = fs2::available_space(&path).ok()?;
-            let total = fs2::total_space(&path).ok()?;
-            Some(Disk {
-                path: path.to_string_lossy().into_owned(),
-                free_mb: free / (1024 * 1024),
-                total_mb: total / (1024 * 1024),
-            })
-        });
+    let disk = state.station.state_dir().ok().and_then(|path| {
+        let free = fs2::available_space(&path).ok()?;
+        let total = fs2::total_space(&path).ok()?;
+        Some(Disk {
+            path: path.to_string_lossy().into_owned(),
+            free_mb: free / (1024 * 1024),
+            total_mb: total / (1024 * 1024),
+        })
+    });
     let theaters = state
         .transports
         .summaries(station_terminal(state, HarnessStdio::Terminal).is_ok())

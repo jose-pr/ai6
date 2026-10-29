@@ -91,6 +91,12 @@ impl AccountDesk {
         self
     }
 
+    /// Makes homes under `dir` unless a directory was already set.
+    pub(crate) fn with_default_homes(mut self, dir: PathBuf) -> Self {
+        self.homes.get_or_insert(dir);
+        self
+    }
+
     pub(crate) fn with_limit_horizon(mut self, horizon: Duration) -> Self {
         self.limit_horizon = Some(horizon);
         self
@@ -105,7 +111,7 @@ impl AccountDesk {
     fn homes(&self) -> Result<PathBuf, String> {
         match &self.homes {
             Some(dir) => Ok(dir.clone()),
-            None => crate::station::safehouse::state_dir()
+            None => crate::bootstrap::platform_state_dir()
                 .map(|dir| dir.join("accounts"))
                 .map_err(|error| format!("no state directory for account homes: {error}")),
         }

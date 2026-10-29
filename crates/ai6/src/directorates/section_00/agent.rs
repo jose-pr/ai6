@@ -107,6 +107,10 @@ pub struct AssistantMode {
     /// file refuses it.
     #[serde(default)]
     pub context_file: Option<String>,
+    /// The Station's own directories (its state, identity and secrets directories) the
+    /// interpreters may never read, besides those a handler denies itself.
+    #[serde(default)]
+    pub station_paths: Vec<String>,
 }
 
 /// The assistant's network policy. `limited` with no hosts, the default, reaches nothing

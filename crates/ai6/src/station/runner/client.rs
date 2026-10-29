@@ -59,10 +59,12 @@ struct Envelope {
 
 impl RunnerLink {
     /// The runner of `theater`, reached through `transport` unless the Theater is the
-    /// Station's own host. `None` when the Theater declares no runner.
+    /// Station's own host, where it keeps its state in `runner` under `station_state` unless
+    /// the Theater says otherwise. `None` when the Theater declares no runner.
     pub(crate) fn for_theater(
         theater: &Theater,
         transport: Option<Arc<TransportClient>>,
+        station_state: &std::path::Path,
     ) -> Result<Option<Self>, String> {
         let Some(settings) = &theater.runner else {
             return Ok(None);
@@ -71,7 +73,7 @@ impl RunnerLink {
             TheaterAccess::Local => Reach::Local {
                 state_dir: match &settings.state_dir {
                     Some(dir) => PathBuf::from(dir),
-                    None => super::default_state_dir().map_err(|error| error.to_string())?,
+                    None => station_state.join("runner"),
                 },
                 command: match &settings.command {
                     Some(command) => PathBuf::from(command),

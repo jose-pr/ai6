@@ -8,7 +8,7 @@
 //!
 //! The traits are synchronous: callers on an async runtime run them on a blocking thread.
 //!
-//! [`open`] and [`from_environment`] pick the store from a location: a directory for the
+//! [`open`] picks the store from a location: a directory for the
 //! [`FileRegistry`], `sqlite:PATH` or a `postgres://` URL for the SQL Registry.
 //!
 //! [`FileRegistry`]: super::store::FileRegistry
@@ -16,7 +16,7 @@
 use std::io;
 use std::sync::Arc;
 
-use super::store::{FileRegistry, default_registry_dir};
+use super::store::FileRegistry;
 
 pub use super::accounts::AccountStore;
 pub use super::agent_records::AgentRecordStore;
@@ -105,31 +105,6 @@ fn is_sql(location: &str) -> bool {
     location.starts_with("sqlite:")
         || location.starts_with("postgres://")
         || location.starts_with("postgresql://")
-}
-
-/// Opens the Registry that `AI6_REGISTRY` names (a directory or SQL location, as for
-/// [`open`]), else the directory `AI6_HOME/registry` or the platform state directory. A
-/// PostgreSQL location without a password takes `AI6_REGISTRY_PASSWORD`.
-///
-/// # Errors
-///
-/// As [`open`], and `NotFound` when no state directory can be determined.
-pub fn from_environment() -> io::Result<Arc<dyn RegistryBackend>> {
-    let location = default_registry_dir()?;
-    let location = location.to_string_lossy();
-    #[cfg(any(feature = "sqlite", feature = "postgres"))]
-    {
-        let mut options = super::sql::SqlOptions::default();
-        if let Some(password) = std::env::var("AI6_REGISTRY_PASSWORD")
-            .ok()
-            .filter(|password| !password.is_empty())
-        {
-            options = options.with_password(password);
-        }
-        open_with(&location, &options)
-    }
-    #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
-    open(&location)
 }
 
 impl<T> RegistryBackend for T where

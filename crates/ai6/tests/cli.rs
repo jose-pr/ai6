@@ -1,7 +1,18 @@
 use std::process::Command;
 
 fn ai6() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_ai6"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ai6"));
+    // A bootstrap file named in the test's own environment must not reach the command.
+    command.env_remove("AI6_CONFIG");
+    command
+}
+
+/// Writes `ai6.cfg` in `dir` keeping the state in `dir/state`, with `extra` appended, and
+/// returns its path. Its directory is the configuration provider and holds the Registry.
+fn bootstrap(dir: &std::path::Path, extra: &str) -> std::path::PathBuf {
+    let path = dir.join("ai6.cfg");
+    std::fs::write(&path, format!("state_dir = \"state\"\n{extra}")).unwrap();
+    path
 }
 
 #[test]
@@ -63,17 +74,18 @@ fn plugins_pin_prints_an_entry_for_a_provider_library_and_refuses_anything_else(
 fn a_named_pin_set_that_does_not_exist_stops_the_station_and_the_runner() {
     let directory = tempfile::tempdir().unwrap();
     let missing = directory.path().join("absent-plugins.toml");
+    let config = bootstrap(directory.path(), "");
+    let config = config.to_str().unwrap();
+    let state = directory.path().join("state");
+    let state = state.to_str().unwrap();
     for arguments in [
-        vec!["serve", "--listen", "127.0.0.1:0"],
-        vec!["runner", "serve"],
+        vec!["serve", "--listen", "127.0.0.1:0", "--config", config],
+        vec!["runner", "serve", "--state-dir", state],
     ] {
         let output = ai6()
             .args(&arguments)
             .arg("--plugin-pins")
             .arg(&missing)
-            .env("AI6_STATE", directory.path())
-            .env("AI6_CONFIG_DIR", directory.path())
-            .env("AI6_REGISTRY", directory.path().join("registry"))
             .output()
             .expect("the AI6 command should start");
         assert!(!output.status.success(), "{arguments:?}");
@@ -174,10 +186,9 @@ fn a_safe_house_cache_that_is_not_a_plain_directory_name_stops_the_station() {
             "127.0.0.1:0",
             "--safe-house-cache",
             "../outside",
+            "--config",
         ])
-        .env("AI6_STATE", directory.path())
-        .env("AI6_CONFIG_DIR", directory.path())
-        .env("AI6_REGISTRY", directory.path().join("registry"))
+        .arg(bootstrap(directory.path(), ""))
         .output()
         .expect("the AI6 command should start");
     assert_eq!(output.status.code(), Some(1), "{output:?}");
@@ -210,8 +221,8 @@ fn theater_provision_names_what_is_missing_before_contacting_anything() {
     .unwrap();
     let run = |theater: &str| {
         let output = ai6()
-            .args(["theater", "provision", theater, "--check", "--config-dir"])
-            .arg(config.path())
+            .args(["theater", "provision", theater, "--check", "--config"])
+            .arg(bootstrap(config.path(), ""))
             .output()
             .expect("the AI6 command should start");
         (
@@ -231,7 +242,7 @@ fn theater_provision_names_what_is_missing_before_contacting_anything() {
 #[test]
 fn sleepers_are_listed_authorized_and_revoked() {
     let config = tempfile::tempdir().unwrap();
-    let registry = tempfile::tempdir().unwrap();
+    let file = bootstrap(config.path(), "");
     std::fs::write(
         config.path().join("operations.toml"),
         "[operation.G]\n[operation.G.sleepers.deps]\nschedule = \"0 3 * * *\"\ntitle = \"Update dependencies\"\n",
@@ -239,10 +250,9 @@ fn sleepers_are_listed_authorized_and_revoked() {
     .unwrap();
     let run = |args: &[&str]| {
         let output = ai6()
-            .args(["sleeper", "--config-dir"])
-            .arg(config.path())
+            .args(["sleeper", "--config"])
+            .arg(&file)
             .args(args)
-            .env("AI6_REGISTRY", registry.path())
             .output()
             .expect("the AI6 command should start");
         (
@@ -264,11 +274,14 @@ fn sleepers_are_listed_authorized_and_revoked() {
 fn identity_and_peers_work_on_a_state_directory_with_the_source_address_shown() {
     use ai6::station::identity::{Identity, PeerId, TrustStore, TrustStoreExt};
 
-    let state = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let file = bootstrap(dir.path(), "");
     let run = |args: &[&str]| {
         let output = ai6()
             .args(args)
-            .env("AI6_STATE", state.path())
+            .arg("--config")
+            .arg(&file)
             .output()
             .expect("the AI6 command should start");
         (
@@ -283,7 +296,7 @@ fn identity_and_peers_work_on_a_state_directory_with_the_source_address_shown() 
     let own = shown.trim().parse::<PeerId>().unwrap();
     assert_eq!(run(&["identity"]).1, shown, "the identity is kept");
     assert_eq!(
-        Identity::read(&state.path().join("identity.pem"))
+        Identity::read(&state.join("identity.pem"))
             .unwrap()
             .unwrap()
             .fingerprint(),
@@ -295,7 +308,7 @@ fn identity_and_peers_work_on_a_state_directory_with_the_source_address_shown() 
 
     let stranger = Identity::generate().unwrap();
     let source: std::net::SocketAddr = "192.0.2.7:4000".parse().unwrap();
-    TrustStore::open(state.path())
+    TrustStore::open(&state)
         .unwrap()
         .record_waiting_certificate(stranger.certificate_der(), Some(source));
     let (ok, waiting) = run(&["peer", "waiting"]);
@@ -323,12 +336,19 @@ fn identity_and_peers_work_on_a_state_directory_with_the_source_address_shown() 
 
 #[test]
 fn agents_are_quarantined_listed_and_released() {
-    let registry = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let file = bootstrap(
+        dir.path(),
+        "[registry]
+location = \"registry\"
+",
+    );
     let run = |args: &[&str]| {
         let output = ai6()
             .arg("quarantine")
             .args(args)
-            .env("AI6_REGISTRY", registry.path())
+            .arg("--config")
+            .arg(&file)
             .output()
             .expect("the AI6 command should start");
         (

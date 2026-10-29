@@ -1571,6 +1571,13 @@ impl Desk {
         let mode = AssistantMode {
             files: vec![PERSONAL.to_owned(), SCRATCH.to_owned()],
             context_file: Some(context.to_string_lossy().into_owned()),
+            station_paths: self
+                .state
+                .station
+                .protected_paths()
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
             ..AssistantMode::moneypenny()
         };
         Ok((mode, Some(Arc::new(Mutex::new(workspace))), notices))
