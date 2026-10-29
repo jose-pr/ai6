@@ -120,6 +120,7 @@ pub fn ai6::directorates::m::assistant::NetworkPolicy::as_str(self) -> &'static 
 pub ai6::directorates::m::assistant::RepoKind::Local
 pub ai6::directorates::m::assistant::RepoKind::Remote
 impl ai6::directorates::m::assistant::RepoKind
+pub fn ai6::directorates::m::assistant::RepoKind::local_path(&str) -> core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::m::assistant::RepoKind::of(&str) -> core::result::Result<Self, alloc::string::String>
 pub struct ai6::directorates::m::assistant::AssistantNarrowing
 impl ai6::directorates::m::assistant::AssistantNarrowing
@@ -134,6 +135,7 @@ pub struct ai6::directorates::m::assistant::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::m::assistant::AssistantSettings::changes_from(&self, &ai6::directorates::m::assistant::AssistantSettings) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::deployment_reach(&self) -> ai6::directorates::section_00::assistant::AssistantReach
 pub fn ai6::directorates::m::assistant::AssistantSettings::has_group_narrowing(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::interpreters(&self) -> &[alloc::string::String]
@@ -1334,6 +1336,7 @@ pub ai6::directorates::q::safehouse::CheckpointSpec::branch: core::option::Optio
 pub ai6::directorates::q::safehouse::CheckpointSpec::exclude: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::q::safehouse::CheckpointSpec::fallback: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::files: core::option::Option<alloc::vec::Vec<ai6::directorates::q::safehouse::CheckpointFile>>
+pub ai6::directorates::q::safehouse::CheckpointSpec::max_bytes: core::option::Option<u64>
 pub ai6::directorates::q::safehouse::CheckpointSpec::message: alloc::string::String
 pub ai6::directorates::q::safehouse::CheckpointSpec::record: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::remote: alloc::string::String
@@ -1344,8 +1347,11 @@ pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::commit: alloc::string:
 pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::remote: alloc::string::String
 pub struct ai6::directorates::q::safehouse::SafeHouseClone
 pub ai6::directorates::q::safehouse::SafeHouseClone::create_source: bool
+pub ai6::directorates::q::safehouse::SafeHouseClone::depth: core::option::Option<u32>
 pub ai6::directorates::q::safehouse::SafeHouseClone::git_dir: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::safehouse::SafeHouseClone::max_bytes: core::option::Option<u64>
 pub ai6::directorates::q::safehouse::SafeHouseClone::path: alloc::string::String
+pub ai6::directorates::q::safehouse::SafeHouseClone::timeout_secs: core::option::Option<u64>
 pub struct ai6::directorates::q::safehouse::SafeHouseExports
 pub ai6::directorates::q::safehouse::SafeHouseExports::dirty: bool
 pub ai6::directorates::q::safehouse::SafeHouseExports::ignored: alloc::vec::Vec<alloc::string::String>
@@ -3026,6 +3032,7 @@ pub fn ai6::directorates::registry::sessions::NewSession::with_account(self, ai6
 pub fn ai6::directorates::registry::sessions::NewSession::with_attempt(self, u32, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionLaunch
@@ -3052,6 +3059,7 @@ pub ai6::directorates::registry::sessions::SessionRecord::launch: core::option::
 pub ai6::directorates::registry::sessions::SessionRecord::lease_expires: f64
 pub ai6::directorates::registry::sessions::SessionRecord::lost: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::mission_id: alloc::string::String
+pub ai6::directorates::registry::sessions::SessionRecord::operation: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::parked_until: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::predecessor: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
@@ -3950,6 +3958,7 @@ pub struct ai6::directorates::section_00::assistant::AssistantCommit
 pub ai6::directorates::section_00::assistant::AssistantCommit::author_email: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantCommit::author_name: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantCommit::change: ai6::directorates::section_00::assistant::AssistantChange
+pub ai6::directorates::section_00::assistant::AssistantCommit::group: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantCommit::kind: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantCommit::message: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantCommit::repo: alloc::string::String
@@ -4296,6 +4305,13 @@ pub mod ai6::station::server
 #[non_exhaustive] pub enum ai6::station::server::StationRole
 pub ai6::station::server::StationRole::Control
 pub ai6::station::server::StationRole::Execution
+pub struct ai6::station::server::AssistantDeskLimits
+impl ai6::station::server::AssistantDeskLimits
+pub fn ai6::station::server::AssistantDeskLimits::with_clone_limits(self, core::time::Duration, u64) -> Self
+pub fn ai6::station::server::AssistantDeskLimits::with_memory_requests(self, usize) -> Self
+pub fn ai6::station::server::AssistantDeskLimits::with_save_limit(self, u64) -> Self
+impl core::default::Default for ai6::station::server::AssistantDeskLimits
+pub fn ai6::station::server::AssistantDeskLimits::default() -> Self
 pub struct ai6::station::server::ServeConfig
 impl ai6::station::server::ServeConfig
 pub fn ai6::station::server::ServeConfig::new(core::net::socket_addr::SocketAddr) -> Self
@@ -4314,6 +4330,7 @@ impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_account_homes(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_account_limit_horizon(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_account_login(self, impl ai6::AccountLogin + 'static) -> Self
+pub fn ai6::station::server::StationConfig::with_assistant_limits(self, ai6::station::server::AssistantDeskLimits) -> Self
 pub fn ai6::station::server::StationConfig::with_config_poll(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
@@ -4579,6 +4596,7 @@ pub ai6::QErrorKind::TooLarge
 pub ai6::RepoKind::Local
 pub ai6::RepoKind::Remote
 impl ai6::directorates::m::assistant::RepoKind
+pub fn ai6::directorates::m::assistant::RepoKind::local_path(&str) -> core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::m::assistant::RepoKind::of(&str) -> core::result::Result<Self, alloc::string::String>
 #[non_exhaustive] pub enum ai6::Require
 pub ai6::Require::Both
@@ -5031,11 +5049,19 @@ pub struct ai6::AssistantCommit
 pub ai6::AssistantCommit::author_email: alloc::string::String
 pub ai6::AssistantCommit::author_name: alloc::string::String
 pub ai6::AssistantCommit::change: ai6::directorates::section_00::assistant::AssistantChange
+pub ai6::AssistantCommit::group: core::option::Option<alloc::string::String>
 pub ai6::AssistantCommit::kind: alloc::string::String
 pub ai6::AssistantCommit::message: alloc::string::String
 pub ai6::AssistantCommit::repo: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantCommit
 pub fn ai6::directorates::section_00::assistant::AssistantCommit::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub struct ai6::AssistantDeskLimits
+impl ai6::station::server::AssistantDeskLimits
+pub fn ai6::station::server::AssistantDeskLimits::with_clone_limits(self, core::time::Duration, u64) -> Self
+pub fn ai6::station::server::AssistantDeskLimits::with_memory_requests(self, usize) -> Self
+pub fn ai6::station::server::AssistantDeskLimits::with_save_limit(self, u64) -> Self
+impl core::default::Default for ai6::station::server::AssistantDeskLimits
+pub fn ai6::station::server::AssistantDeskLimits::default() -> Self
 pub struct ai6::AssistantEvent
 pub ai6::AssistantEvent::cable: core::option::Option<ai6::directorates::section_00::assistant::AssistantCable>
 pub ai6::AssistantEvent::change: core::option::Option<ai6::directorates::section_00::assistant::AssistantChange>
@@ -5123,6 +5149,7 @@ pub struct ai6::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::m::assistant::AssistantSettings::changes_from(&self, &ai6::directorates::m::assistant::AssistantSettings) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::deployment_reach(&self) -> ai6::directorates::section_00::assistant::AssistantReach
 pub fn ai6::directorates::m::assistant::AssistantSettings::has_group_narrowing(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::interpreters(&self) -> &[alloc::string::String]
@@ -5417,6 +5444,7 @@ pub ai6::CheckpointSpec::branch: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::exclude: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::CheckpointSpec::fallback: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::files: core::option::Option<alloc::vec::Vec<ai6::directorates::q::safehouse::CheckpointFile>>
+pub ai6::CheckpointSpec::max_bytes: core::option::Option<u64>
 pub ai6::CheckpointSpec::message: alloc::string::String
 pub ai6::CheckpointSpec::record: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::remote: alloc::string::String
@@ -5944,6 +5972,7 @@ pub fn ai6::directorates::registry::sessions::NewSession::with_account(self, ai6
 pub fn ai6::directorates::registry::sessions::NewSession::with_attempt(self, u32, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::Operation
@@ -6303,8 +6332,11 @@ pub ai6::SafeHouseCheckpoint::commit: alloc::string::String
 pub ai6::SafeHouseCheckpoint::remote: alloc::string::String
 pub struct ai6::SafeHouseClone
 pub ai6::SafeHouseClone::create_source: bool
+pub ai6::SafeHouseClone::depth: core::option::Option<u32>
 pub ai6::SafeHouseClone::git_dir: core::option::Option<alloc::string::String>
+pub ai6::SafeHouseClone::max_bytes: core::option::Option<u64>
 pub ai6::SafeHouseClone::path: alloc::string::String
+pub ai6::SafeHouseClone::timeout_secs: core::option::Option<u64>
 pub struct ai6::SafeHouseExports
 pub ai6::SafeHouseExports::dirty: bool
 pub ai6::SafeHouseExports::ignored: alloc::vec::Vec<alloc::string::String>
@@ -6470,6 +6502,7 @@ pub ai6::SessionRecord::launch: core::option::Option<ai6::directorates::registry
 pub ai6::SessionRecord::lease_expires: f64
 pub ai6::SessionRecord::lost: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::mission_id: alloc::string::String
+pub ai6::SessionRecord::operation: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::parked_until: core::option::Option<f64>
 pub ai6::SessionRecord::predecessor: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
@@ -6714,6 +6747,7 @@ impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_account_homes(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_account_limit_horizon(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_account_login(self, impl ai6::AccountLogin + 'static) -> Self
+pub fn ai6::station::server::StationConfig::with_assistant_limits(self, ai6::station::server::AssistantDeskLimits) -> Self
 pub fn ai6::station::server::StationConfig::with_config_poll(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
