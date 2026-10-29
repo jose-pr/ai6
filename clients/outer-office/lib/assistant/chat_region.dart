@@ -126,7 +126,7 @@ class _ChatShellState extends State<ChatShell> {
       children: [
         // One view at a time; the page stays mounted underneath.
         Offstage(
-          key: const ValueKey('page'),
+          key: const ValueKey('app-page'),
           offstage: full,
           child: TickerMode(enabled: !full, child: widget.child),
         ),
@@ -190,7 +190,7 @@ class ChatRegion extends StatelessWidget {
             return Stack(
               children: [
                 Positioned.fill(
-                  key: const ValueKey('page'),
+                  key: const ValueKey('app-page'),
                   right: side ? width + _ResizeHandle.width : 0,
                   child: Offstage(
                     offstage: centre,
