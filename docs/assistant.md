@@ -342,10 +342,12 @@ what she may run and reach:
 interpreters = ["python3"]        # the default; [] runs no script
 network = "limited"               # the default; or "denied", or "open"
 allowed_hosts = ["docs.python.org", "*.pypi.org"]   # the default is none
+denied_networks = []              # the default: nothing denied (see below)
 unsandboxed_scripts = false       # the default
 
 [assistant.group.contractors]     # a directory group
 network = "denied"
+denied_networks = ["private"]     # added to the deployment's, never taken from it
 
 [assistant.person."eve@sis"]      # one person
 interpreters = []
@@ -353,8 +355,8 @@ interpreters = []
 
 A `[assistant.group.<group>]` or `[assistant.person.<id>]` table takes the same keys and may
 only narrow them: fewer interpreters, a stricter network (`denied` before `limited` before
-`open`), fewer hosts, `unsandboxed_scripts = false`. A table that would widen one is refused
-when the roster loads, naming the key (`assistant.group.contractors.network: "open" is looser
+`open`), fewer hosts, more `denied_networks`, `unsandboxed_scripts = false`. A table that
+would widen one is refused when the roster loads, naming the key (`assistant.group.contractors.network: "open" is looser
 than assistant.network`). Universal Exports works out what each message may use from the
 person's groups and their own table, and every Station caps it by its own roster again, so
 nothing widens on the way.
@@ -367,15 +369,25 @@ a script in bounds is where the sandbox lets it read, write and connect, not whi
 - They write in her working directory, `personal/` and `scratch/` among it, but not in
   `shared/`, `CLAUDE.md`, `AGENTS.md`, or a `.git` directory under the working directory.
   What they leave in `personal/` is saved after the answer like anything else she writes there.
-- They read nothing outside her working directory but the system directories an interpreter
-  needs (`/usr`, `/bin`, `/lib`, `/etc` and the like): not the Station user's home, not AI6's
-  configuration, state, roster or Registry, not her own configuration directory or another
-  conversation's, not `/proc`. Reads are denied everywhere and re-opened only for those.
-- They see none of the harness's environment variables that could hold a credential: the
-  model's key or login, her tool tokens, a proxy URL's basic-auth.
-- They reach only `allowed_hosts` under `limited`, nothing under `denied`, and any host
-  under `open` except this deployment's own (the gateway, the Station), loopback and the
-  cloud metadata address; a host outside what is allowed is refused, never asked about.
+- They read nothing outside her working directory but what an interpreter needs: the system's
+  programs and libraries (`/usr`, `/bin`, `/lib`, `/lib64` on Linux; `/usr`, `/bin`,
+  `/System` and the command line tools on macOS), the install directory of each interpreter as
+  found on the harness's `PATH` (`/opt/python3.12` for `/opt/python3.12/bin/python3`), only the
+  files under `/etc` that a program, its resolver and TLS read (`ld.so.*`, `ssl`, `pki`,
+  `localtime`, `hosts`, `resolv.conf`, `nsswitch.conf`, `passwd`, `group` and the like) and the
+  device files `null`, `zero`, `random`, `urandom` and `tty`. Not the rest of `/etc` (so not
+  `/etc/ai6`), `/opt`, `/var` or `/dev`, not the Station user's home, not her own configuration
+  directory or another conversation's, not `/proc`. Reads are denied everywhere and re-opened
+  only for those, and AI6's state directory, `AI6_HOME`, `/usr/local/etc`, `/usr/etc` and the
+  Station's own program are denied again inside them. Keep the Station's configuration and
+  secrets out of the re-opened paths: an interpreter's install directory is readable whole.
+- They see none of the harness's environment variables but `PATH`, `HOME`, the temporary
+  directory, locale and terminal ones: not the model's key or login, her tool tokens, a proxy
+  URL's basic-auth. A variable whose name is not letters, digits and `_` cannot be hidden, so
+  her harness refuses to start with one in its environment.
+- They reach only `allowed_hosts` under `limited`, nothing under `denied`, and everything the
+  Station reaches under `open`; a host outside what is allowed is refused, never asked about.
+  `denied_networks` takes hosts out of either (below).
 
 Each conversation keeps its own: its own temporary directory, and its own Claude Code
 configuration directory, so one person's transcripts and any stored login never sit where
@@ -415,6 +427,45 @@ ends her answer with the reason, or refuses each script.
 
 `network = "open"` and `unsandboxed_scripts = true` are weakenings: a Station logs them when it
 starts and reports them at check-in, and `open` is logged again with each harness it starts.
+
+### What `open` reaches, and the deny list
+
+`open` means open: her web tools and scripts reach everything the Station can reach, the
+Station's own machine (its loopback services), its network and the cloud's instance metadata
+service included. AI6 does not know a deployment's network, so it refuses nothing by default;
+its own services do not rely on that, since each one asks every request for its token, from
+loopback too (the Station API, the field runner, the Cable and Theater MCP endpoints, the
+gateway and her MCP endpoint), and the gateway accepts an identity a reverse proxy asserts only
+with the proxy's secret.
+
+What she must not reach goes in `denied_networks`, which applies under `limited` too and which
+a group or person table can add to but never take from:
+
+| Entry | Keeps her from |
+| --- | --- |
+| `loopback` | The Station's own machine: `127.0.0.0/8`, `::1`, `0.0.0.0`, `::`, `localhost` and every name under it |
+| `private` | The private networks: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, CGNAT `100.64.0.0/10`, unique-local `fc00::/7` |
+| `link-local` | `169.254.0.0/16` and `fe80::/10`, the metadata address among them |
+| `metadata` | The cloud instance metadata service: `169.254.169.254`, `fd00:ec2::254`, `metadata.google.internal` |
+| `10.20.0.0/16`, `2001:db8::/32` | A network |
+| `192.0.2.7`, `[2001:db8::7]` | One address |
+| `git.corp.example`, `*.corp.example` | A host, or every name under it |
+
+To keep her off the Station's own services name `loopback`; off the office or data centre
+network, `private` and `link-local`; off the instance's cloud credentials, `metadata`.
+A name is checked as given and by every address it resolves to, an IPv4-mapped IPv6 address
+counting as its IPv4 address, so `localtest.me`, `127.0.0.1.nip.io`, `0x7f.1` and
+`[::ffff:127.0.0.1]` are caught by `loopback`. Her WebFetch hook resolves a name before the
+fetch; a name it cannot resolve while the list holds addresses is refused.
+
+Claude Code's sandbox proxy, which carries her scripts' connections, refuses hosts by name and
+by single address, the addresses a name resolves to included, but not by network (measured with
+Claude Code 2.1.310: `127.0.0.0/8` in its deny list left `127.0.0.2` reachable). So with scripts
+and a network that reaches a host, a deny list holding a network or `loopback`, `private` or
+`link-local` refuses to start her harness, naming the entries; list single addresses and
+names instead (`127.0.0.1`, `0.0.0.0`, `[::1]`, `localhost`), or run no interpreter. The proxy
+itself also refuses a name that resolves to a loopback address and the address `127.0.0.1`.
+On Codex her scripts have no network and she has no web tool, so the list has nothing to keep.
 
 ## Her scripts on Codex
 

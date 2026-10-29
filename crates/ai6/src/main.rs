@@ -112,15 +112,18 @@ enum GreenInkCommand {
 #[derive(Debug, Subcommand)]
 enum AssistantCommand {
     /// Claude Code's PreToolUse hook for Moneypenny's WebFetch. Reads the hook's JSON on
-    /// standard input; denies a fetch whose host is one of --deny, or, when --hosts is given,
-    /// is not one of them (`*.example.com` covers the names under it), and denies input it
-    /// cannot read. Prints nothing otherwise; always exits 0.
+    /// standard input; denies a fetch whose host, or an address it resolves to, is in --deny,
+    /// or, when --hosts is given, whose host is not one of them (`*.example.com` covers the
+    /// names under it), and denies input it cannot read. Prints nothing otherwise; always
+    /// exits 0.
     WebGate {
         /// The hosts she may fetch from, separated by commas; none allows any host --deny does
         /// not name.
         #[arg(long, value_delimiter = ',')]
         hosts: Vec<String>,
-        /// Hosts she may never fetch, separated by commas, whatever --hosts says.
+        /// What she may never fetch, separated by commas, whatever --hosts says: categories
+        /// (loopback, private, link-local, metadata), networks (10.0.0.0/8), addresses and
+        /// host names.
         #[arg(long, value_delimiter = ',')]
         deny: Vec<String>,
     },

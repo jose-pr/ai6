@@ -558,13 +558,16 @@ mod client {
 pub const WEB_GATE_ARGS: [&str; 2] = ["assistant", "web-gate"];
 
 #[cfg(feature = "gate")]
-pub use web::{host_in, web_fetch_gate};
+pub use web::{Resolver, host_in, web_fetch_gate, web_fetch_gate_with};
 
 #[cfg(feature = "gate")]
 mod web {
+    use std::net::IpAddr;
+
     use serde_json::Value;
 
     use super::deny;
+    use crate::directorates::section_00::denied::{DenyEntry, DenyList};
 
     /// Whether `host` matches one of `patterns`: an exact lowercased name, or a `*.example.com`
     /// entry covering every name under `example.com` but not `example.com` itself, as Claude
@@ -581,13 +584,35 @@ mod web {
     }
 
     /// Answers Claude Code's `PreToolUse` hook for WebFetch, `input` being the JSON the hook
-    /// reads: the decision that denies the fetch when its URL's host is one of `deny`, or, when
-    /// `allow` is not empty, is not one of `allow` (so a host Claude Code would fetch without a
-    /// rule, such as its documentation domains, is refused too); `None` (let the fetch go on)
-    /// otherwise. An empty `allow` allows every host `deny` does not name, for an `open`
-    /// network kept off loopback, the metadata address and the deployment's own hosts. Input it
-    /// cannot read, or a URL with no host name, is denied.
-    pub fn web_fetch_gate(input: &str, allow: &[String], deny_hosts: &[String]) -> Option<String> {
+    /// reads: the decision that denies the fetch when its URL's host, or an address it resolves
+    /// to, is in `deny` (entries as
+    /// [`DenyEntry`](crate::directorates::section_00::denied::DenyEntry) reads them), or, when
+    /// `allow` is not empty, the host is not one of `allow` (so a host Claude Code would fetch
+    /// without a rule, such as its documentation domains, is refused too); `None` (let the
+    /// fetch go on) otherwise. An empty `allow` and an empty `deny`, an `open` network with no
+    /// deny list, let every fetch go on, to an address too. Input it cannot read, a URL with no
+    /// host, a deny list it cannot read and a name it cannot resolve while `deny` holds
+    /// addresses are denied.
+    pub fn web_fetch_gate(input: &str, allow: &[String], deny: &[String]) -> Option<String> {
+        web_fetch_gate_with(input, allow, deny, &|host| {
+            use std::net::ToSocketAddrs;
+            Ok((host, 0)
+                .to_socket_addrs()?
+                .map(|address| address.ip())
+                .collect())
+        })
+    }
+
+    /// The name resolver [`web_fetch_gate_with`] asks.
+    pub type Resolver<'a> = dyn Fn(&str) -> std::io::Result<Vec<std::net::IpAddr>> + 'a;
+
+    /// [`web_fetch_gate`] with the addresses of a name from `resolve`.
+    pub fn web_fetch_gate_with(
+        input: &str,
+        allow: &[String],
+        deny_entries: &[String],
+        resolve: &Resolver<'_>,
+    ) -> Option<String> {
         let refused = |why: String| {
             Some(deny(&format!(
                 "WebFetch is limited by this deployment; {why}"
@@ -601,23 +626,55 @@ mod web {
         let Some(url) = input.pointer("/tool_input/url").and_then(Value::as_str) else {
             return refused("the hook input names no URL, so the fetch is refused.".to_owned());
         };
-        let host = url::Url::parse(url).ok().and_then(|url| match url.host() {
-            Some(url::Host::Domain(domain)) => {
-                Some(domain.trim_end_matches('.').to_ascii_lowercase())
-            }
-            _ => None,
-        });
-        let Some(host) = host else {
-            return refused("the URL names no host name, so the fetch is refused.".to_owned());
+        let denied = match DenyList::parse(deny_entries) {
+            Ok(denied) => denied,
+            Err(reason) => return refused(format!("its deny list is not readable: {reason}.")),
         };
-        if host_in(&host, deny_hosts) {
+        let (host, address) = match url::Url::parse(url)
+            .ok()
+            .and_then(|url| url.host().map(|h| h.to_owned()))
+        {
+            Some(url::Host::Domain(domain)) => {
+                (domain.trim_end_matches('.').to_ascii_lowercase(), None)
+            }
+            Some(url::Host::Ipv4(v4)) => (v4.to_string(), Some(IpAddr::V4(v4))),
+            Some(url::Host::Ipv6(v6)) => (format!("[{v6}]"), Some(IpAddr::V6(v6))),
+            None => {
+                return refused("the URL names no host, so the fetch is refused.".to_owned());
+            }
+        };
+        let named_denied = match address {
+            Some(address) => denied.denies_address(address),
+            None => denied.denies_name(&host),
+        };
+        if named_denied {
             return refused(format!("{host} is not one it may reach."));
         }
-        if !allow.is_empty() && !host_in(&host, allow) {
+        if !allow.is_empty() && (address.is_some() || !host_in(&host, allow)) {
             return refused(format!(
                 "{host} is not among the hosts it may reach ({}).",
                 allow.join(", ")
             ));
+        }
+        let checks_addresses = denied
+            .entries()
+            .iter()
+            .any(|entry| !matches!(entry, DenyEntry::Host(_)));
+        if address.is_none() && checks_addresses {
+            match resolve(&host) {
+                Ok(addresses) => {
+                    if let Some(found) = addresses.iter().find(|a| denied.denies_address(**a)) {
+                        return refused(format!(
+                            "{host} resolves to {found}, which it may not reach."
+                        ));
+                    }
+                }
+                Err(error) => {
+                    return refused(format!(
+                        "{host} could not be resolved to check its addresses ({error})."
+                    ));
+                }
+            }
         }
         None
     }
@@ -668,33 +725,106 @@ mod web {
             );
         }
 
+        /// A resolver that answers from a table, as public DNS answers these names.
+        fn table(host: &str) -> std::io::Result<Vec<IpAddr>> {
+            let address = match host {
+                "localtest.me" | "127.0.0.1.nip.io" | "spoof.example" => "127.0.0.1",
+                "lan.nip.io" => "10.1.2.3",
+                "meta.example" => "169.254.169.254",
+                "v6.example" => "::ffff:127.0.0.2",
+                "docs.python.org" | "example.com" => "151.101.0.223",
+                _ => return Err(std::io::Error::other("no such host")),
+            };
+            Ok(vec![address.parse().unwrap()])
+        }
+
+        fn gate(url: &str, allow: &[&str], deny: &[&str]) -> Option<String> {
+            let strings = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+            web_fetch_gate_with(&fetch(url), &strings(allow), &strings(deny), &table)
+        }
+
         #[test]
         fn a_deny_list_refuses_its_hosts_even_with_no_allow_list() {
-            let deny_hosts = vec![
-                "localhost".to_owned(),
-                "127.0.0.1".to_owned(),
-                "169.254.169.254".to_owned(),
-                "gateway.ai6.internal".to_owned(),
+            let deny = [
+                "localhost",
+                "127.0.0.1",
+                "169.254.169.254",
+                "gateway.ai6.internal",
             ];
             for refused in [
                 "https://localhost/",
                 "http://127.0.0.1:8080/",
                 "https://169.254.169.254/latest/meta-data/",
                 "https://gateway.ai6.internal/v1/moneypenny/mcp",
+                "http://localtest.me/",
             ] {
-                let decision = web_fetch_gate(&fetch(refused), &[], &deny_hosts).expect(refused);
+                let decision = gate(refused, &[], &deny).expect(refused);
                 assert!(decision.contains("\"deny\""), "{refused}: {decision}");
             }
+            assert_eq!(gate("https://docs.python.org/", &[], &deny), None);
+            // A denied host is refused even when an allow list would admit it.
+            assert!(
+                gate(
+                    "https://gateway.ai6.internal/",
+                    &["gateway.ai6.internal"],
+                    &deny
+                )
+                .is_some()
+            );
+        }
+
+        /// `open` with no deny list is open: the Station's own machine and its network too.
+        #[test]
+        fn an_open_network_with_no_deny_list_refuses_nothing() {
+            for url in [
+                "http://127.0.0.1:7081/",
+                "http://localhost/",
+                "http://10.1.2.3/",
+                "http://169.254.169.254/",
+                "http://[::1]/",
+                "http://localtest.me/",
+            ] {
+                assert_eq!(gate(url, &[], &[]), None, "{url}");
+            }
+        }
+
+        /// The disguises of a loopback address, by spelling and by name, are all caught when
+        /// the deny list names `loopback`; names are checked by the addresses they resolve to.
+        #[test]
+        fn a_denied_category_catches_every_spelling_and_resolving_name() {
+            for url in [
+                "http://0.0.0.0:7081/",
+                "http://127.0.0.2/",
+                "http://[::ffff:127.0.0.1]/",
+                "http://[::1]/",
+                "http://2130706433/",
+                "http://0x7f.1/",
+                "http://127.1/",
+                "http://localtest.me/",
+                "http://127.0.0.1.nip.io/",
+                "http://v6.example/",
+                "http://a.localhost/",
+            ] {
+                let decision = gate(url, &[], &["loopback"]).expect(url);
+                assert!(decision.contains("\"deny\""), "{url}: {decision}");
+            }
+            assert_eq!(gate("http://example.com/", &[], &["loopback"]), None);
+            assert!(gate("http://lan.nip.io/", &[], &["private"]).is_some());
+            assert!(gate("http://meta.example/", &[], &["metadata"]).is_some());
+            assert!(gate("http://metadata.google.internal/", &[], &["metadata"]).is_some());
+            assert!(gate("http://[fd00:ec2::254]/", &[], &["metadata"]).is_some());
+            assert!(gate("http://lan.nip.io/", &[], &["10.0.0.0/8"]).is_some());
+            // A listed host that resolves into a denied range is refused too.
+            assert!(gate("http://localtest.me/", &["localtest.me"], &["loopback"]).is_some());
+            // A name that cannot be resolved cannot be checked, so it is refused.
+            assert!(gate("http://unknown.example/", &[], &["loopback"]).is_some());
+            // With only names denied, no name is resolved.
             assert_eq!(
-                web_fetch_gate(&fetch("https://docs.python.org/"), &[], &deny_hosts),
+                gate("http://unknown.example/", &[], &["intranet.example"]),
                 None
             );
-            // A denied host is refused even when an allow list would admit it.
-            let allow = vec!["gateway.ai6.internal".to_owned()];
-            assert!(
-                web_fetch_gate(&fetch("https://gateway.ai6.internal/"), &allow, &deny_hosts)
-                    .is_some()
-            );
+            // A deny list it cannot read refuses every fetch.
+            assert!(gate("http://example.com/", &[], &["lan"]).is_some());
         }
     }
 }

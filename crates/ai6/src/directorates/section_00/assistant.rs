@@ -194,6 +194,7 @@ fn check_network(network: &AssistantNetwork) -> Result<(), String> {
             return Err(format!("{host:?} is not a host name"));
         }
     }
+    super::denied::DenyList::parse(&network.denied)?;
     Ok(())
 }
 
@@ -262,8 +263,8 @@ pub struct AssistantReach {
 
 impl AssistantReach {
     /// This reach, never wider than `cap`: the interpreters both name, the stricter network
-    /// policy (`denied` < `limited` < `open`) with the hosts both reach, and unsandboxed
-    /// scripts only when both allow them.
+    /// policy (`denied` < `limited` < `open`) with the hosts both reach and what either
+    /// denies, and unsandboxed scripts only when both allow them.
     #[must_use]
     pub fn capped_by(&self, cap: &AssistantReach) -> AssistantReach {
         let interpreters = self
@@ -274,10 +275,16 @@ impl AssistantReach {
             .collect();
         let (mine, theirs) = (&self.network, &cap.network);
         let rank = policy_rank(&mine.policy).min(policy_rank(&theirs.policy));
-        let network = match rank {
+        let mut denied = mine.denied.clone();
+        for entry in &theirs.denied {
+            if !denied.contains(entry) {
+                denied.push(entry.clone());
+            }
+        }
+        let mut network = match rank {
             2 => AssistantNetwork {
                 policy: "open".to_owned(),
-                allowed_hosts: Vec::new(),
+                ..AssistantNetwork::default()
             },
             1 => {
                 // An `open` side reaches every host the other lists.
@@ -294,13 +301,15 @@ impl AssistantReach {
                 AssistantNetwork {
                     policy: "limited".to_owned(),
                     allowed_hosts: hosts,
+                    ..AssistantNetwork::default()
                 }
             }
             _ => AssistantNetwork {
                 policy: "denied".to_owned(),
-                allowed_hosts: Vec::new(),
+                ..AssistantNetwork::default()
             },
         };
+        network.denied = denied;
         AssistantReach {
             interpreters,
             network,
@@ -1289,9 +1298,34 @@ mod tests {
             network: AssistantNetwork {
                 policy: policy.to_owned(),
                 allowed_hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+                ..AssistantNetwork::default()
             },
             unsandboxed_scripts: false,
         }
+    }
+
+    /// A narrowing reach can add to the deny list but never take from it.
+    #[test]
+    fn capping_a_reach_keeps_what_either_side_denies() {
+        let mut deployment = reach(&["python3"], "open", &[]);
+        deployment.network.denied = vec!["loopback".to_owned()];
+        let mut table = reach(&["python3"], "open", &[]);
+        table.network.denied = vec!["private".to_owned(), "loopback".to_owned()];
+        assert_eq!(
+            deployment.capped_by(&table).network.denied,
+            ["loopback", "private"]
+        );
+        assert_eq!(
+            deployment
+                .capped_by(&reach(&["python3"], "limited", &["example.com"]))
+                .network
+                .denied,
+            ["loopback"],
+            "a table that names no deny list removes nothing"
+        );
+        let mut bad = reach(&[], "open", &[]);
+        bad.network.denied = vec!["lan".to_owned()];
+        assert!(bad.validate().is_err());
     }
 
     #[test]

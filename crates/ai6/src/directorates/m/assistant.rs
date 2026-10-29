@@ -27,6 +27,7 @@
 //! interpreters = ["python3"]
 //! network = "limited"
 //! allowed_hosts = ["docs.python.org"]
+//! denied_networks = ["loopback", "metadata"]   # nothing by default
 //! unsandboxed_scripts = false
 //!
 //! [assistant.skills.report-writer]
@@ -53,6 +54,7 @@ use crate::directorates::section_00::agent::AssistantNetwork;
 use crate::directorates::section_00::assistant::{
     AssistantReach, host_pattern, interpreter_name, valid_identity,
 };
+use crate::directorates::section_00::denied::DenyList;
 
 /// The name a person's identifier takes in `personal_repo`.
 pub const PERSON_PLACEHOLDER: &str = "{person}";
@@ -75,6 +77,7 @@ pub struct AssistantSettings {
     interpreters: Vec<String>,
     network: NetworkPolicy,
     allowed_hosts: Vec<String>,
+    denied_networks: Vec<String>,
     unsandboxed_scripts: bool,
     skills: BTreeMap<String, SkillEntry>,
     skills_unpinned: bool,
@@ -93,6 +96,7 @@ impl Default for AssistantSettings {
             interpreters: vec![DEFAULT_INTERPRETER.to_owned()],
             network: NetworkPolicy::Limited,
             allowed_hosts: Vec::new(),
+            denied_networks: Vec::new(),
             unsandboxed_scripts: false,
             skills: BTreeMap::new(),
             skills_unpinned: false,
@@ -116,7 +120,8 @@ pub enum NetworkPolicy {
     /// Only the hosts in `allowed_hosts`; with none, nothing.
     #[default]
     Limited,
-    /// Any host, and web search; a weakening.
+    /// Everything the Station reaches, the Station itself and its network included, less
+    /// `denied_networks`; and web search. A weakening.
     Open,
 }
 
@@ -180,6 +185,7 @@ pub struct AssistantNarrowing {
     interpreters: Option<Vec<String>>,
     network: Option<NetworkPolicy>,
     allowed_hosts: Option<Vec<String>>,
+    denied_networks: Option<Vec<String>>,
     unsandboxed_scripts: Option<bool>,
     skills: Option<Vec<String>>,
 }
@@ -218,6 +224,14 @@ impl AssistantNarrowing {
         self
     }
 
+    /// More that no policy may reach, added to the deployment's `denied_networks` (entries as
+    /// [`DenyEntry`](crate::directorates::section_00::denied::DenyEntry) reads them).
+    #[must_use]
+    pub fn with_denied_networks(mut self, denied: Vec<String>) -> Self {
+        self.denied_networks = Some(denied);
+        self
+    }
+
     /// Only these of the catalog's skills.
     #[must_use]
     pub fn with_skills(mut self, skills: Vec<String>) -> Self {
@@ -235,6 +249,7 @@ impl AssistantNarrowing {
     fn as_cap(&self, deployment: &AssistantReach) -> AssistantReach {
         let network = self.network.unwrap_or(NetworkPolicy::Open);
         let hosts = self.allowed_hosts.clone();
+        let denied = self.denied_networks.clone().unwrap_or_default();
         AssistantReach {
             interpreters: self
                 .interpreters
@@ -244,16 +259,19 @@ impl AssistantNarrowing {
                 (NetworkPolicy::Open, None) => AssistantNetwork {
                     policy: NetworkPolicy::Open.as_str().to_owned(),
                     allowed_hosts: Vec::new(),
+                    denied,
                 },
                 // A host list narrows the hosts; `limited` without one keeps the deployment's.
                 (NetworkPolicy::Open | NetworkPolicy::Limited, hosts) => AssistantNetwork {
                     policy: NetworkPolicy::Limited.as_str().to_owned(),
                     allowed_hosts: hosts
                         .unwrap_or_else(|| deployment.network.allowed_hosts.clone()),
+                    denied,
                 },
                 (NetworkPolicy::Denied, _) => AssistantNetwork {
                     policy: NetworkPolicy::Denied.as_str().to_owned(),
                     allowed_hosts: Vec::new(),
+                    denied,
                 },
             },
             unsandboxed_scripts: self.unsandboxed_scripts.unwrap_or(true),
@@ -304,6 +322,10 @@ impl AssistantNarrowing {
                     ));
                 }
             }
+        }
+        if let Some(denied) = &self.denied_networks {
+            DenyList::parse(denied)
+                .map_err(|reason| format!("{prefix}.denied_networks: {reason}"))?;
         }
         if self.unsandboxed_scripts == Some(true) && !settings.unsandboxed_scripts {
             return Err(format!(
@@ -652,6 +674,16 @@ impl AssistantSettings {
         self
     }
 
+    /// What no policy may reach, `open` and the listed hosts included: categories
+    /// (`loopback`, `private`, `link-local`, `metadata`), networks, addresses and host names as
+    /// [`DenyEntry`](crate::directorates::section_00::denied::DenyEntry) reads them. Empty, the
+    /// default, denies nothing; tables add to it.
+    #[must_use]
+    pub fn with_denied_networks(mut self, denied: Vec<String>) -> Self {
+        self.denied_networks = denied;
+        self
+    }
+
     /// Narrows the scripts, network and skills of the members of directory group `group`.
     #[must_use]
     pub fn with_group(mut self, group: impl Into<String>, narrowing: AssistantNarrowing) -> Self {
@@ -703,6 +735,11 @@ impl AssistantSettings {
         &self.allowed_hosts
     }
 
+    /// What no policy may reach.
+    pub fn denied_networks(&self) -> &[String] {
+        &self.denied_networks
+    }
+
     /// Whether her scripts may run unsandboxed where the harness has no sandbox.
     pub fn unsandboxed_scripts(&self) -> bool {
         self.unsandboxed_scripts
@@ -721,6 +758,7 @@ impl AssistantSettings {
             network: AssistantNetwork {
                 policy: self.network.as_str().to_owned(),
                 allowed_hosts: self.allowed_hosts.clone(),
+                denied: self.denied_networks.clone(),
             },
             unsandboxed_scripts: self.unsandboxed_scripts,
         }
@@ -914,6 +952,8 @@ impl AssistantSettings {
                  `*.` only in front)"
             ));
         }
+        DenyList::parse(&self.denied_networks)
+            .map_err(|reason| format!("assistant.denied_networks: {reason}"))?;
         for (name, skill) in &self.skills {
             let key = format!("assistant.skills.{name}");
             if !skill_name(name) {
@@ -1026,8 +1066,9 @@ impl AssistantSettings {
         }
         if self.network == NetworkPolicy::Open {
             weakened.push(
-                "assistant.network = \"open\": Moneypenny's web tools and scripts reach any \
-                 host, and she may search the web"
+                "assistant.network = \"open\": Moneypenny's web tools and scripts reach every \
+                 host the Station reaches, the Station's own machine and its network included \
+                 but what assistant.denied_networks names, and she may search the web"
                     .to_owned(),
             );
         }
@@ -1327,6 +1368,41 @@ mod tests {
             .with_interpreters(Vec::new());
         assert!(narrowed.weakenings().is_empty());
         assert_eq!(narrowed.validate(), Ok(()));
+    }
+
+    /// `open` denies nothing unless the deployment says so; a table adds to the deny list and
+    /// never takes from it.
+    #[test]
+    fn denied_networks_are_empty_by_default_and_tables_only_add_to_them() {
+        let open: AssistantSettings = toml::from_str("network = \"open\"").unwrap();
+        assert!(open.deployment_reach().network.denied.is_empty());
+        let settings: AssistantSettings = toml::from_str(
+            "network = \"open\"\ndenied_networks = [\"loopback\", \"10.20.0.0/16\"]\n\
+             [group.ops]\ndenied_networks = [\"private\"]\n\
+             [person.\"eve@sis\"]\ndenied_networks = []\n",
+        )
+        .unwrap();
+        assert_eq!(settings.validate(), Ok(()));
+        assert_eq!(
+            settings
+                .reach_for("bob@sis", &["ops".to_owned()])
+                .network
+                .denied,
+            ["loopback", "10.20.0.0/16", "private"]
+        );
+        assert_eq!(
+            settings.reach_for("eve@sis", &[]).network.denied,
+            ["loopback", "10.20.0.0/16"],
+            "an empty table list removes nothing"
+        );
+        for bad in [
+            "denied_networks = [\"lan\"]",
+            "[group.ops]\ndenied_networks = [\"10.0.0.0/40\"]",
+        ] {
+            let settings: AssistantSettings = toml::from_str(bad).unwrap();
+            let error = settings.validate().unwrap_err();
+            assert!(error.contains("denied_networks"), "{error}");
+        }
     }
 
     #[test]

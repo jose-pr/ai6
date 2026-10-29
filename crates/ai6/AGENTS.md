@@ -377,6 +377,7 @@ pub fn config_dir() -> Result<PathBuf, RosterError>;
 #[derive(Default, Serialize, Deserialize)] // serde: unknown keys refused
 pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, write}, org {repo, write}, allow_elevated,
                                 // interpreters (["python3"]), network ("limited"), allowed_hosts ([]),
+                                // denied_networks ([]: nothing denied, under open too),
                                 // unsandboxed_scripts (false), skills.<name> {path, pin}, skills_unpinned,
                                 // skills_allow_tools, group.<group> and person.<id> narrowing tables
 impl AssistantSettings {
@@ -388,6 +389,7 @@ impl AssistantSettings {
     pub fn with_interpreters(self, interpreters: Vec<String>) -> Self;  // empty: no scripts
     pub fn with_network(self, policy: NetworkPolicy, allowed_hosts: Vec<String>) -> Self; // Open: a weakening
     pub fn with_unsandboxed_scripts(self, allow: bool) -> Self;         // a weakening
+    pub fn with_denied_networks(self, denied: Vec<String>) -> Self;     // DenyEntry strings
     pub fn with_skill(self, name: impl Into<String>, skill: SkillEntry) -> Self;
     pub fn with_skills_unpinned(self, allow: bool) -> Self;     // a weakening
     pub fn with_skills_allow_tools(self, allow: bool) -> Self;  // a weakening
@@ -400,6 +402,7 @@ impl AssistantSettings {
     pub fn interpreters(&self) -> &[String];
     pub fn network(&self) -> NetworkPolicy;
     pub fn allowed_hosts(&self) -> &[String];
+    pub fn denied_networks(&self) -> &[String];
     pub fn unsandboxed_scripts(&self) -> bool;
     pub fn deployment_reach(&self) -> AssistantReach;      // before any table
     pub fn has_group_narrowing(&self) -> bool;             // any [assistant.group.<g>] table
@@ -426,12 +429,14 @@ impl AssistantSettings {
 pub enum NetworkPolicy { Denied, #[default] Limited, Open }
 impl NetworkPolicy { pub fn as_str(self) -> &'static str; }
 #[derive(Default, Serialize, Deserialize)] // serde: unknown keys refused; every key optional
-pub struct AssistantNarrowing;  // interpreters, network, allowed_hosts, unsandboxed_scripts, skills
+pub struct AssistantNarrowing;  // interpreters, network, allowed_hosts, denied_networks,
+                                // unsandboxed_scripts, skills
 impl AssistantNarrowing {
     pub fn new() -> Self;                                     // narrows nothing
     pub fn with_interpreters(self, interpreters: Vec<String>) -> Self; // a subset of the deployment's
     pub fn with_network(self, network: NetworkPolicy) -> Self;        // no looser than the deployment's
     pub fn with_allowed_hosts(self, hosts: Vec<String>) -> Self;     // under limited, a subset
+    pub fn with_denied_networks(self, denied: Vec<String>) -> Self;  // added to the deployment's
     pub fn with_unsandboxed_scripts(self, allow: bool) -> Self;       // true only if the deployment allows
     pub fn with_skills(self, skills: Vec<String>) -> Self;            // catalog skills only
     pub fn skills(&self) -> Option<&[String]>;
@@ -2062,17 +2067,22 @@ pub fn pre_tool_use(input: &str, client: Option<&GateClient>) -> Option<String>;
 pub const WEB_GATE_ARGS: [&str; 2];   // ["assistant", "web-gate"]: Moneypenny's WebFetch hook
 // feature `gate`:
 pub fn web_fetch_gate(input: &str, allow: &[String], deny: &[String]) -> Option<String>; // None: goes on
+pub type Resolver<'a> = dyn Fn(&str) -> std::io::Result<Vec<IpAddr>> + 'a;
+pub fn web_fetch_gate_with(input: &str, allow: &[String], deny: &[String], resolve: &Resolver<'_>)
+    -> Option<String>;   // web_fetch_gate with the system resolver
 pub fn host_in(host: &str, patterns: &[String]) -> bool;   // exact, or a leading "*." wildcard
 ```
 
 `web_fetch_gate` takes a WebFetch `PreToolUse` hook input (`tool_input.url`) and denies the
-fetch when the URL's host (lowercased, no trailing dot) is one of `deny`, or, when `allow` is
-not empty, is not one of it (`*.example.com` covers the names under `example.com`, not
-`example.com` itself, as Claude Code's `WebFetch(domain:…)` rules do; `host_in` is the match).
-An empty `allow` lets every host through but the denied, for an `open` network kept off its
-deny list. An address, a URL without a host name and unreadable input are denied. `ai6
-assistant web-gate [--hosts H,…] [--deny H,…]` is that hook: it reads standard input, prints
-the decision and always exits 0. It exists because
+fetch when the URL's host (lowercased, no trailing dot), or an address it resolves to, is in
+`deny` (entries as `denied::DenyEntry` reads them; a name is resolved only when `deny` holds an
+address, a network or a category, and one that does not resolve is then denied), or, when
+`allow` is not empty, the host is not one of it (`*.example.com` covers the names under
+`example.com`, not `example.com` itself, as Claude Code's `WebFetch(domain:…)` rules do;
+`host_in` is the match; an address is never in it). An empty `allow` and `deny` let every
+fetch through, to an address too. A URL without a host, a deny list it cannot read and
+unreadable input are denied. `ai6 assistant web-gate [--hosts H,…] [--deny E,…]` is that hook:
+it reads standard input, prints the decision and always exits 0. It exists because
 Claude Code 2.1.310 fetches its preapproved documentation domains (`docs.python.org`,
 `developer.mozilla.org`) under `dontAsk` although no rule names them (measured against a
 loopback stand-in for the API).
@@ -2855,7 +2865,39 @@ pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
 pub struct McpServerRef { pub name: String /* moneypenny */,
                           pub env_prefix: String /* AI6_MONEYPENNY_MCP: <prefix>_URL, <prefix>_TOKEN */ }
 pub struct AssistantNetwork { pub policy: String /* limited (default) | denied | open */,
-                              pub allowed_hosts: Vec<String> }
+                              pub allowed_hosts: Vec<String>,
+                              pub denied: Vec<String> /* serde default; denied::DenyEntry
+                                                         strings; empty denies nothing */ }
+// Default: limited, no host, nothing denied. `open` reaches everything the Station reaches, the
+// Station's own machine included; only `denied` takes anything out.
+
+// ai6::directorates::section_00::denied
+pub const DENY_CATEGORIES: [&str; 4];   // loopback, private, link-local, metadata
+pub enum DenyEntry { Host(String), Net(IpAddr, u8), Category(&'static str) }
+impl DenyEntry { pub fn parse(entry: &str) -> Result<Self, String>;  // category | CIDR | address
+                                                                       // ([v6] too) | host pattern
+                 pub fn is_range(&self) -> bool; }  // a category but metadata, or a network > 1 address
+pub struct DenyList;  // Default: empty
+impl DenyList { pub fn parse<S: AsRef<str>>(entries: &[S]) -> Result<Self, String>;
+                pub fn is_empty(&self) -> bool; pub fn entries(&self) -> &[DenyEntry];
+                pub fn denies_name(&self, host: &str) -> bool;       // a name, or an address
+                pub fn denies_address(&self, address: IpAddr) -> bool; // v4-mapped/compatible as v4
+                pub fn names_and_addresses(&self) -> Vec<String>;    // categories expanded; [v6]
+                pub fn ranges(&self) -> Vec<&DenyEntry>; }
+// loopback: 127.0.0.0/8, 0.0.0.0, ::1, ::, localhost, *.localhost; private: 10/8, 172.16/12,
+// 192.168/16, 100.64/10, fc00::/7; link-local: 169.254/16, fe80::/10; metadata: 169.254.169.254,
+// fd00:ec2::254, metadata.google.internal.
+
+// ai6::directorates::section_00::programs: where a harness's programs are installed
+pub fn program_dirs(programs: &[&str], cwd: &Path, environment: &BTreeMap<String, String>)
+    -> Vec<PathBuf>;   // install dirs on the environment's PATH, links followed; leaves out `/`
+                       // and any dir that is/holds HOME, cwd, cwd's parent or a credential dir
+pub fn install_dir(path: &Path) -> PathBuf;   // its dir, or the one above when that is `bin`
+pub fn find_program(program: &str, environment: &BTreeMap<String, String>) -> Option<PathBuf>;
+pub fn canonical(path: &Path) -> PathBuf;     // links followed, no `\\?\`; as given on failure
+pub fn path_text(path: &Path) -> String;
+pub fn starts_with(path: &Path, base: &Path) -> bool;   // case ignored on Windows
+pub fn variable(environment: &BTreeMap<String, String>, name: &str) -> Option<String>;
 impl AssistantMode { pub fn moneypenny() -> Self; pub fn validate(&self) -> Result<(), String>;
                      pub fn with_cables(self) -> Self; } // adds server `cables`,
                                                          // prefix AI6_ASSISTANT_CABLE_MCP
@@ -2887,10 +2929,11 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // sandbox (`enabled`, `failIfUnavailable`, `autoAllowBashIfSandboxed: false`,
 // `allowUnsandboxedCommands: false`, `filesystem` {`allowWrite`: the `files` directories,
 // `denyWrite`: `read_only`, `.claude` and the `.git` of the working directory and each writable
-// directory, `denyRead`: `["/"]`, `allowRead`: the working directory, the system directories
-// an interpreter needs and, on Linux, the sandbox's two relay sockets by name (in `/tmp`, or in
+// directory, `denyRead`: `["/"]` and the Station's own paths, `allowRead`: the working
+// directory, the platform paths an interpreter needs (not `/etc` whole), each interpreter's
+// install directory and, on Linux, the sandbox's two relay sockets by name (in `/tmp`, or in
 // the Session's `CLAUDE_CODE_TMPDIR`)}, `network` {`allowedDomains`: the hosts, `["*"]` when open;
-// `deniedDomains`: loopback, the metadata address and the `*_MCP_URL` hosts; `strictAllowlist`},
+// `deniedDomains`: the names and single addresses of `network.denied`; `strictAllowlist`},
 // `credentials.envVars` denying every environment variable but PATH, HOME, temp, locale ones,
 // and the model credentials, `credentials.files` denying the credential directories
 // (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `*_HOME`)) and
@@ -2898,7 +2941,9 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // `unsandboxed` makes it `{"sandbox":{"enabled":false},…}`. Skills without `skill_commands`
 // add `"disableSkillShellExecution": true`. Any network but `denied` adds a
 // `PreToolUse` hook on `WebFetch` running `<gate program> assistant web-gate [--hosts …]
-// [--deny …]` (`onFailure: block`). A network reaching nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1`;
+// [--deny …]` (`onFailure: block`). Refused: a `network.denied` range with scripts that reach a
+// host (UNSUPPORTED), an environment variable name `credentials.envVars` cannot take
+// (BAD_VALUE). A network reaching nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1`;
 // a `context_file` is `--append-system-prompt-file`; every assistant Session has
 // `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Codex refuses `files` and `context_file`
 // (UNSUPPORTED).

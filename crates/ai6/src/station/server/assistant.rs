@@ -1322,8 +1322,8 @@ impl Desk {
         if reach.network.open() {
             (self.log)(
                 "weakening: assistant.network = \"open\": Moneypenny's web tools and scripts \
-                 reach any host but this deployment's own and the loopback and metadata \
-                 addresses",
+                 reach every host the Station reaches, the Station's own machine and its network \
+                 included, but what assistant.denied_networks names",
             );
         }
         mode.network = reach.network.clone();
@@ -5609,6 +5609,7 @@ mod tests {
                 network: crate::directorates::section_00::agent::AssistantNetwork {
                     policy: policy.to_owned(),
                     allowed_hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+                    ..Default::default()
                 },
                 unsandboxed_scripts: true,
             },
@@ -5818,6 +5819,7 @@ mod tests {
                 network: crate::directorates::section_00::agent::AssistantNetwork {
                     policy: "open".to_owned(),
                     allowed_hosts: Vec::new(),
+                    ..Default::default()
                 },
                 unsandboxed_scripts: false,
             },
@@ -5875,6 +5877,7 @@ mod tests {
                 network: crate::directorates::section_00::agent::AssistantNetwork {
                     policy: "open".to_owned(),
                     allowed_hosts: Vec::new(),
+                    ..Default::default()
                 },
                 unsandboxed_scripts: false,
             },
@@ -5912,6 +5915,7 @@ mod tests {
                 network: crate::directorates::section_00::agent::AssistantNetwork {
                     policy: "open".to_owned(),
                     allowed_hosts: Vec::new(),
+                    ..Default::default()
                 },
                 unsandboxed_scripts: false,
             },
@@ -5930,6 +5934,7 @@ mod tests {
                 network: crate::directorates::section_00::agent::AssistantNetwork {
                     policy: "denied".to_owned(),
                     allowed_hosts: Vec::new(),
+                    ..Default::default()
                 },
                 unsandboxed_scripts: false,
             },
@@ -6033,6 +6038,7 @@ mod tests {
                 network: crate::directorates::section_00::agent::AssistantNetwork {
                     policy: "open".to_owned(),
                     allowed_hosts: Vec::new(),
+                    ..Default::default()
                 },
                 unsandboxed_scripts: false,
             },

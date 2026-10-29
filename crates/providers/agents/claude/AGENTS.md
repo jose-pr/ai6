@@ -175,27 +175,46 @@ the sandbox: `enabled`, `failIfUnavailable: true`, `autoAllowBashIfSandboxed: fa
 `allowUnsandboxedCommands: false`, `filesystem` (`allowWrite` the mode's `files` under the
 working directory; `denyWrite` its `read_only` paths, `.claude`, the working directory's
 `.git` and each writable directory's `.git`, so a planted `.git/config` an unsandboxed git
-could act on is refused; `denyRead` `["/"]` and `allowRead` the working directory with the
-system directories an interpreter needs (`/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc`,
-`/opt`, `/dev`; macOS `/usr`, `/bin`, `/sbin`, `/System`, `/Library`, `/opt`, `/etc`, `/var`,
-`/dev`, `/private/etc`, `/private/var/db`) and, on Linux, the sandbox's own network relay
-sockets by name (`/tmp/claude-http-*.sock`, `/tmp/srt-mux-*.sock`, or the same two under the
-Session's `CLAUDE_CODE_TMPDIR` when it has one), so the home directory, AI6's files and IPC
-sockets, `/proc` and other conversations stay unreadable), `network` (`allowedDomains` the
-hosts, `["*"]` for `open`, none for `denied`; `deniedDomains` `localhost`, `*.localhost`,
-`127.0.0.1`, `[::1]`, `169.254.169.254` and the host of each `*_MCP_URL`, an IPv6 one in
-brackets; `strictAllowlist: true`), `credentials.envVars` denying (`mode: "deny"`) every
+could act on is refused; `denyRead` `["/"]` and `allowRead` the working directory, the
+platform's paths an interpreter needs (Linux: `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, the
+`/etc` files `ld.so.cache`, `ld.so.conf`, `ld.so.conf.d`, `ssl`, `pki`, `crypto-policies`,
+`ca-certificates`, `localtime`, `hosts`, `resolv.conf`, `nsswitch.conf`, `host.conf`,
+`gai.conf`, `services`, `protocols`, `passwd`, `group`, `alternatives`, the devices `null`,
+`zero`, `random`, `urandom`, `tty`, and the sandbox's own network relay sockets by name,
+`/tmp/claude-http-*.sock`, `/tmp/srt-mux-*.sock`, or the same two under the Session's
+`CLAUDE_CODE_TMPDIR` when it has one; macOS: `/usr`, `/bin`, `/sbin`, `/System`,
+`/Library/Developer/CommandLineTools`, `/private/var/db/xcode_select_link`,
+`/private/var/select`, the `/private/etc` files `ssl`, `hosts`, `resolv.conf`, `localtime`,
+`passwd`, `group`, `services`, `protocols`, and the same devices) and each interpreter's install
+directory (`ai6::directorates::section_00::programs::program_dirs`: its directory on the
+harness's `PATH` with links followed, the one above when that is `bin`, unless it is `/`, holds
+the home or working directory or a credential directory, or lies in one); `denyRead` also
+`/usr/local/etc`, `/usr/etc`, AI6's state directory, `AI6_HOME` when set and the program
+hosting the handler (its directory, or the file alone when an interpreter's directory holds
+it): a `denyRead` inside an `allowRead` wins, an `allowRead` inside a `denyRead` wins too,
+and the same path in both is readable. So `/etc/ai6`, `/opt`, `/var`, the home directory,
+AI6's files and IPC sockets, `/proc` and other conversations stay unreadable), `network`
+(`allowedDomains` the hosts, `["*"]` for `open`, none for `denied`; `deniedDomains` the names
+and single addresses of `network.denied`, categories expanded, an IPv6 one in brackets, and
+nothing when it is empty, under `open` too; `strictAllowlist: true`), `credentials.envVars`
+denying (`mode: "deny"`) every
 variable of the Session's environment but `PATH`, `HOME`, `USERPROFILE`, `APPDATA`,
 `LOCALAPPDATA`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TERM` and
 `TZ` (the proxy variables among the denied, since a proxy URL may carry basic-auth), and always
 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`;
 `credentials.files` denying each directory a credential variable names (`CLAUDE_CONFIG_DIR`,
-`CODEX_HOME`, any `*_HOME`); and `permissions.blockReadsOutsideWorkingDirectories: true`. A
+`CODEX_HOME`, any `*_HOME`); and `permissions.blockReadsOutsideWorkingDirectories: true`. The
+start is refused (`GUATIAO_ERR_BAD_VALUE`) when the environment has a variable whose name is
+not letters, digits and `_`, which `credentials.envVars` cannot name, and
+(`GUATIAO_ERR_UNSUPPORTED`) when `network.denied` holds a network or a range category
+(`loopback`, `private`, `link-local`) while the network reaches a host: the sandbox's proxy
+matches names and single addresses only. A
 mode with `unsandboxed` gets `{"sandbox":{"enabled":false},"permissions":{…}}` instead. Any
 network but `denied` adds, in the same `--settings`, a `PreToolUse` hook on `WebFetch` running
 `PROGRAM assistant web-gate [--hosts …] [--deny …]` (`PROGRAM` as for the green ink gate,
 `timeout` 60, `onFailure: "block"`, `disableAllHooks: false`): `--hosts` is the `limited`
-allow-list, `--deny` the `deniedDomains`, so `open` allows any host but the denied. A network
+allow-list, `--deny` the entries of `network.denied` as given, which the gate checks by name
+and by every address a name resolves to. A network
 that reaches nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1` to the environment. The desk gives each conversation its own `CLAUDE_CONFIG_DIR`, so the Agent's
 configuration directory (a shared login, every person's transcripts) stays out, and its own
 `TMPDIR` and `CLAUDE_CODE_TMPDIR`, since Claude Code derives the sandbox's `$TMPDIR` from the
@@ -209,7 +228,11 @@ console are not seen.
 
 Measured with 2.1.310 against a loopback stand-in for the API (no model reached), on Linux
 (WSL2 with `bwrap` and `socat`), with the settings above: `python3 -c …` and `python3
-personal/calc.py` ran and `/etc` was readable, `sh -c` was denied; a script reading the home
+personal/calc.py` ran, `ssl`, `sqlite3`, `os.urandom` and HTTPS through the proxy worked, and
+`/etc/passwd` was readable, while `/etc/ai6-probe/secrets/token`, `/etc/hostname` and
+`/etc/shadow` were `No such file` (with `/etc` re-opened whole, as before, the secrets file was
+read); `/usr/local/x` denied inside an allowed `/usr` was unreadable, and a path both allowed
+and denied was readable; `sh -c` was denied; a script reading the home
 directory, another conversation's directory, the context file or the configuration directory
 got `No such file`; writes to `shared/`, `CLAUDE.md`, `<wd>/.git` and `personal/.git` failed
 and left nothing on the host; no credential variable reached it; it saw only PIDs 1 to 3 (its
@@ -217,15 +240,21 @@ own PID namespace) and `/proc/1/environ` was refused; its own `getaddrinfo` fail
 network or resolver in its namespace); with the per-conversation `TMPDIR` it could not read a
 file another conversation left in `/tmp/claude-<uid>`, which it could without; a script
 reached a listed host through the proxy (`502` on a name that does not resolve) and got `403`
-for any other; under `open` it reached `example.com` (`200`) and got `403` "on the deny list"
-for `169.254.169.254`, and loopback was unreachable. `denyRead: ["/"]` without the relay
+for any other; under `open` it reached `example.com`. The proxy matches `deniedDomains`
+entries by name and by the addresses a name resolves to (`localtest.me` and
+`127.0.0.1.nip.io` "resolved to a deny-listed address" with `127.0.0.1` listed) and treats
+`[::ffff:127.0.0.1]`, `2130706433` and `127.1` as `127.0.0.1`, but takes no network:
+`127.0.0.0/8`, `10.0.0.0/8` and `169.254.0.0/16` listed left `127.0.0.2`, `127.5.5.5`,
+`10.1.2.3.nip.io` and `169.254.169.254` reachable. With nothing listed it refused, on its own,
+names that resolve to loopback and the address `127.0.0.1`, while `127.0.0.2` and `0.0.0.0`
+reached a service listening on all addresses. `denyRead: ["/"]` without the relay
 sockets re-opened cuts every script off from the proxy (`RemoteDisconnected`, even for a
 listed host), and re-opening the whole temporary directory makes `bwrap` fail to start, hence
 the two sockets by name. Without deny-all reads a script sees AI6's own IPC sockets in `/tmp`
 (`guatiao-remote-shm-*.sock`); with it, only the two relay sockets. WebFetch fetched a listed
 host and refused an unlisted one, and the hook refused `docs.python.org` and
-`developer.mozilla.org` (documentation domains Claude Code fetches without a rule) and, under
-`open`, `localhost` and `169.254.169.254`. `WebFetch(domain:*)` in `--allowedTools` does not
+`developer.mozilla.org` (documentation domains Claude Code fetches without a rule).
+`WebFetch(domain:*)` in `--allowedTools` does not
 open the sandbox to scripts, so `open` names `*` in `allowedDomains` itself. On native Windows
 `sandbox.enabled` with `failIfUnavailable` makes Claude Code exit at start ("sandbox required
 but unavailable"); with the sandbox off a script reached any host, and a command Claude Code

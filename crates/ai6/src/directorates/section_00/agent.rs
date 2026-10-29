@@ -114,11 +114,18 @@ pub struct AssistantMode {
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct AssistantNetwork {
-    /// `limited` (only `allowed_hosts`), `denied` (nothing) or `open` (anything; a weakening).
+    /// `limited` (only `allowed_hosts`), `denied` (nothing) or `open` (everything the Station
+    /// reaches, the Station itself included; a weakening).
     pub policy: String,
     /// Host names a `limited` policy reaches; ignored otherwise.
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
+    /// What neither policy may reach, though `allowed_hosts` or `open` would: categories,
+    /// networks, addresses and host names as [`DenyEntry`](super::denied::DenyEntry) reads
+    /// them. Empty, the default, denies nothing. A handler that cannot keep a part of it away
+    /// from the harness's tools refuses to start.
+    #[serde(default)]
+    pub denied: Vec<String>,
 }
 
 impl Default for AssistantNetwork {
@@ -126,6 +133,7 @@ impl Default for AssistantNetwork {
         Self {
             policy: "limited".to_owned(),
             allowed_hosts: Vec::new(),
+            denied: Vec::new(),
         }
     }
 }
