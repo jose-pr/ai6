@@ -1,0 +1,49 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import '../../xml/utils/name.dart';
+import '../definitions/cardinality.dart';
+import '../definitions/function.dart';
+import '../evaluation/context.dart';
+import '../types/sequence.dart';
+import '../types/string.dart';
+
+/// https://www.w3.org/TR/xpath-functions-31/#func-base64Binary-from-string
+const fnBase64BinaryFromString = XPathFunctionDefinition(
+  name: XmlName.qualified('xs:base64Binary'),
+  requiredArguments: [
+    XPathArgumentDefinition(
+      name: 'arg',
+      type: xsString,
+      cardinality: XPathCardinality.zeroOrOne,
+    ),
+  ],
+  function: _fnBase64BinaryFromString,
+);
+
+XPathSequence _fnBase64BinaryFromString(XPathContext context, String? arg) {
+  if (arg == null) return XPathSequence.empty;
+  return XPathSequence.single(base64.decode(arg));
+}
+
+/// https://www.w3.org/TR/xpath-functions-31/#func-hexBinary-from-string
+const fnHexBinaryFromString = XPathFunctionDefinition(
+  name: XmlName.qualified('xs:hexBinary'),
+  requiredArguments: [
+    XPathArgumentDefinition(
+      name: 'arg',
+      type: xsString,
+      cardinality: XPathCardinality.zeroOrOne,
+    ),
+  ],
+  function: _fnHexBinaryFromString,
+);
+
+XPathSequence _fnHexBinaryFromString(XPathContext context, String? arg) {
+  if (arg == null) return XPathSequence.empty;
+  final bytes = Uint8List(arg.length ~/ 2);
+  for (var i = 0; i < arg.length; i += 2) {
+    bytes[i ~/ 2] = int.parse(arg.substring(i, i + 2), radix: 16);
+  }
+  return XPathSequence.single(bytes);
+}
