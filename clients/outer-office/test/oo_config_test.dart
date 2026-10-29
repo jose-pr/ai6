@@ -168,8 +168,8 @@ void main() {
       '/etc/oo.cfg',
     );
     expect(
-      configPathFor({'APPDATA': r'C:\Users\a\AppData\Roaming'}, 'windows'),
-      r'C:\Users\a\AppData\Roaming\OO\OO.cfg',
+      configPathFor({'APPDATA': r'D:\Profiles\a\Roaming'}, 'windows'),
+      r'D:\Profiles\a\Roaming\OO\OO.cfg',
     );
     expect(
       configPathFor({'HOME': '/Users/a'}, 'macos'),
