@@ -118,6 +118,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `routeMissions` are held to one shared fixture. The bounds of her views are settings,
   `[assistant.views]` (`AssistantViewLimits`, `AssistantSettings::views`, `ViewLimits`,
   `AssistantConfig::with_view_limits`), sent to the app with each conversation.
+- Moneypenny points to pages: her `navigate` tool (`{"to": ROUTE, "label": TEXT}`) offers an
+  app route, checked as every route is, as a `navigation` entry the app shows as a card with
+  the page and its filters as chips and **Open**. Opening only reads and is not audited; it
+  is a browser history entry, docks an expanded chat and marks the page **Opened by
+  Moneypenny**, as her links do. A per-person choice in her menu, **Open Moneypenny's links
+  at once** (`oo.chat.<person>.follow`, off by default), opens a card as it arrives, never
+  one offered after she read outside text or while a dialog covers the page. Her
+  instructions say to offer the route of the records she summarises and to say when a tool
+  cut what she read; her `audit` tool takes an Operation or a Station as the Audit page does.
 - Moneypenny runs on Codex with scripts and her workspace. With interpreters, the Codex
   handler admits Codex's code-mode tools (`functions.exec`, `functions.wait`) inside Codex's
   own sandbox, a permission profile (`ai6_assistant`) that denies the filesystem but the

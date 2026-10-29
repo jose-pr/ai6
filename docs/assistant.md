@@ -742,6 +742,36 @@ svg_bytes = 65536
 
 The app is sent the bounds with each conversation and checks views against the same values.
 
+## Pages she points to
+
+When a page of the app answers better than a table, such as "the failed Missions of G", she
+offers it with her `navigate` tool: `{"to": ROUTE, "label": TEXT}`, the route in its JSON form
+(`{"page": "missions", "operation_id": "G", "state": ["failed"]}`) and a few words on why
+(at most `short_bytes`, 512 by default). Universal Exports checks the route as it checks every
+route and refuses one that is not valid with the reason ("Navigation refused: …"), so the
+app never receives it. A valid one is a card in the chat: the page's name and every field of
+the route as chips, which the app builds from the route itself, her label beneath, and
+**Open**. Her summaries of records offer the route of what she summarised, and say when a
+tool refused or cut what she could read.
+
+A route names a page and its filters and nothing else: no action, dialog or form value, and
+pages open a selection read only. Opening one only reads, so it is not audited (her `show`
+is not either); the conversation records it. A filtered page always shows its filters as
+chips with **Clear filters**, so nothing a route sets is hidden.
+
+**Open** takes the page in the window: a new browser history entry, so Back returns to the
+page before; an expanded chat docks, and one over the page (a sheet, or full screen on a
+phone) closes, so the page is in view; the page shows **Opened by Moneypenny** until the
+route changes. Her links in text, schedules, graphs and cards open pages the same way.
+
+By default nothing opens until the person chooses **Open**. **Open Moneypenny's links at
+once**, in her menu, opens each card as it arrives instead; it is the person's own choice,
+kept on each device, and off unless they turn it on. Even then a card waits for **Open**
+when she offered it after reading text from outside AI6 (it is framed like such a view),
+or while a dialog covers the page.
+
+Her `audit` tool takes an Operation or a Station, not both, as the Audit page does.
+
 ## In the app
 
 **Ask Moneypenny** (top right on every page, or Ctrl+Alt+I; ⌃⌘I on macOS) opens the chat:
@@ -755,7 +785,8 @@ network and its proposals change nothing.
 The app opens a WebSocket to `/v1/user/moneypenny` and sends its access token in the first
 frame. With each message it sends the page the person is on and its filters, as the page's
 route (for example `app:/missions?operation_id=G&state=failed`), so "why is this one stuck?"
-means something. Her links open app pages the same way. Her answers, the tools she used, her
+means something. Her links and page cards open app pages the same way
+([Pages she points to](#pages-she-points-to)). Her answers, the tools she used, her
 views and her proposals (with **Confirm** and **Cancel**) appear in the chat.
 Conversations are kept per person (20 each, for a week) in Universal Exports' memory;
 reopening one shows what was said. One message is answered at a time.

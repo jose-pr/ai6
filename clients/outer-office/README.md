@@ -67,7 +67,9 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Moneypenny, the assistant: **Ask Moneypenny** on every page opens a chat with her (see
   Layout for where it goes and its shortcuts). She
   answers from AI6's records, through tools that run with the signed-in operator's own
-  permissions, shows tables, charts, cards, timelines and diffs rendered by the app, and
+  permissions, shows tables, charts, cards, timelines and diffs rendered by the app, offers
+  pages as cards (the page and its filters as chips, and **Open**, which only reads and
+  shows **Opened by Moneypenny** on the page), and
   proposes changes the operator confirms or cancels (the exact request is shown); **Stop**
   ends an answer she is still giving. Her menu opens **Her memory of you**, the files of
   `memory/` in the operator's personal repository: open, edit and save, add, or forget one
@@ -230,7 +232,10 @@ back. Every layout shows the same conversation.
 
 A key that types a character in a text field is left to it, so AltGr layouts (where Windows
 reports AltGr as Ctrl+Alt) keep typing. The layout and width are kept per person on each
-device under `oo.chat.<person ID>`; a phone starts with the chat hidden.
+device under `oo.chat.<person ID>`; a phone starts with the chat hidden. **Open
+Moneypenny's links at once** in her menu (`oo.chat.<person ID>.follow`, off by default) opens
+each page card as it arrives, except one she offered after reading outside text or while a
+dialog covers the page.
 
 Web is one Flutter app view: wide windows keep the board beside the selected Session,
 narrow windows navigate to it in-page with browser back. It opens no browser popups and
