@@ -276,6 +276,18 @@ mod tests {
             StreamableHttpClientTransportConfig::with_uri(endpoint.url.clone()),
         );
         assert!(().serve(denied_transport).await.is_err());
+        let mut near = endpoint.token.clone();
+        near.pop();
+        for wrong in ["wrong".to_owned(), near, format!("{}x", endpoint.token)] {
+            let transport = StreamableHttpClientTransport::from_config(
+                StreamableHttpClientTransportConfig::with_uri(endpoint.url.clone())
+                    .auth_header(wrong),
+            );
+            assert!(
+                ().serve(transport).await.is_err(),
+                "a wrong token is refused"
+            );
+        }
 
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(endpoint.url.clone())

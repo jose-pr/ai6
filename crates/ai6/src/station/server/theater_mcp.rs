@@ -454,6 +454,11 @@ mod tests {
             ().serve(denied).await.is_err(),
             "the endpoint needs its token"
         );
+        let wrong = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(endpoint.url.clone())
+                .auth_header(format!("{}x", endpoint.token)),
+        );
+        assert!(().serve(wrong).await.is_err(), "and only its token");
         ().serve(StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(endpoint.url.clone())
                 .auth_header(endpoint.token.clone()),

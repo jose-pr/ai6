@@ -147,7 +147,10 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 
 ## Station service
 
-The loopback service lists providers (`GET /internal/agent-handlers`, `/internal/terminals`,
+Every `/internal` request carries `Authorization: Bearer TOKEN`, the token the Station keeps
+in `api-token` under its state directory (made on first start, readable only by its user on
+Unix); a request without it gets 401 whatever address it comes from. `/healthz` needs none.
+The service lists providers (`GET /internal/agent-handlers`, `/internal/terminals`,
 `/internal/plugins`), creates and inspects Missions (`/internal/missions`), and starts,
 messages, interrupts and resumes them. A start resolves the Operation and Agent, then runs
 the Agent's handler in the Station's terminal provider. Mission records persist atomically

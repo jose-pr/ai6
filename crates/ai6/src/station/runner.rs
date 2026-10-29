@@ -475,8 +475,16 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// The API token, created on first start and readable only by the runner's user.
 fn ensure_token(state_dir: &Path) -> io::Result<String> {
-    let path = state_dir.join(TOKEN_FILE);
-    if let Ok(token) = fs::read_to_string(&path)
+    ensure_token_at(&state_dir.join(TOKEN_FILE))
+}
+
+/// The bearer token kept in the file `path`: read when it holds one, else made from 256 random
+/// bits and written there, readable only by this user on Unix.
+pub(crate) fn ensure_token_at(path: &Path) -> io::Result<String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Ok(token) = fs::read_to_string(path)
         && !token.trim().is_empty()
     {
         return Ok(token.trim().to_owned());
@@ -493,7 +501,7 @@ fn ensure_token(state_dir: &Path) -> io::Result<String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    options.open(&path)?.write_all(token.as_bytes())?;
+    options.open(path)?.write_all(token.as_bytes())?;
     Ok(token)
 }
 
@@ -726,7 +734,12 @@ fn failure(status: StatusCode, message: impl Into<String>) -> Failure {
     Failure(status, message.into())
 }
 
-async fn authorize(State(token): State<String>, request: Request, next: Next) -> Response {
+/// Lets a request through only with `Authorization: Bearer TOKEN`, compared in constant time.
+pub(crate) async fn authorize(
+    State(token): State<String>,
+    request: Request,
+    next: Next,
+) -> Response {
     let supplied = request
         .headers()
         .get(AUTHORIZATION)

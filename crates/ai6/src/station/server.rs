@@ -757,8 +757,64 @@ where
         #[cfg(feature = "publisher")]
         publisher,
     };
+    let token = crate::station::runner::ensure_token_at(
+        &crate::station::safehouse::state_dir()
+            .map_err(io::Error::other)?
+            .join(API_TOKEN_FILE),
+    )?;
+    let app = api(state.clone(), token);
+    let declaring = state.clone();
+    let _ = tokio::task::spawn_blocking(move || reload::declare(&declaring)).await;
+    let scheduler = tokio::spawn(scheduler_loop(state.clone()));
+    let reloading = reload::spawn(&state);
+    #[cfg(feature = "publisher")]
+    let controls = controls::spawn(&state)?;
+    #[cfg(feature = "publisher")]
+    let assistant = assistant::spawn(&state)?;
+    let stopping = state.stopping.clone();
+    let served = axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            stopping.store(true, Ordering::Release);
+        })
+        .await;
+    state.stopping.store(true, Ordering::Release);
+    let _ = tokio::time::timeout(Duration::from_secs(2), scheduler).await;
+    if let Some(reloading) = reloading {
+        let _ = tokio::time::timeout(Duration::from_secs(2), reloading).await;
+    }
+    #[cfg(feature = "publisher")]
+    if let Some(controls) = controls {
+        let _ = tokio::time::timeout(Duration::from_secs(2), controls).await;
+    }
+    #[cfg(feature = "publisher")]
+    if let Some(assistant) = assistant {
+        let _ = tokio::time::timeout(Duration::from_secs(2), assistant).await;
+    }
+    let event_pumps = std::mem::take(
+        &mut *state
+            .event_pumps
+            .lock()
+            .map_err(|_| io::Error::other("event pump registry lock was poisoned"))?,
+    );
+    let drain = async move {
+        for event_pump in event_pumps {
+            let _ = event_pump.await;
+        }
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), drain).await;
+    served.map_err(io::Error::other)
+}
+
+/// The file in the Station's state directory holding the token every `/internal` request
+/// carries as `Authorization: Bearer TOKEN`, created on first start and readable only by the
+/// Station's user.
+pub const API_TOKEN_FILE: &str = "api-token";
+
+/// The Station API: `/healthz` open, every `/internal` route only with `token` as a bearer
+/// token, whatever address the request comes from.
+fn api(state: DaemonState, token: String) -> Router {
     let app = Router::new()
-        .route("/healthz", get(|| async { "ok" }))
         .route("/internal/agent-handlers", get(list_agent_handlers))
         .route("/internal/agent-roles", get(list_agent_roles))
         .route("/internal/terminals", get(list_terminals))
@@ -823,48 +879,12 @@ where
         );
     #[cfg(feature = "publisher")]
     let app = app.route("/internal/publisher", get(publisher_health));
-    let app = app.with_state(reload::Served(state.clone()));
-    let declaring = state.clone();
-    let _ = tokio::task::spawn_blocking(move || reload::declare(&declaring)).await;
-    let scheduler = tokio::spawn(scheduler_loop(state.clone()));
-    let reloading = reload::spawn(&state);
-    #[cfg(feature = "publisher")]
-    let controls = controls::spawn(&state)?;
-    #[cfg(feature = "publisher")]
-    let assistant = assistant::spawn(&state)?;
-    let stopping = state.stopping.clone();
-    let served = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown.await;
-            stopping.store(true, Ordering::Release);
-        })
-        .await;
-    state.stopping.store(true, Ordering::Release);
-    let _ = tokio::time::timeout(Duration::from_secs(2), scheduler).await;
-    if let Some(reloading) = reloading {
-        let _ = tokio::time::timeout(Duration::from_secs(2), reloading).await;
-    }
-    #[cfg(feature = "publisher")]
-    if let Some(controls) = controls {
-        let _ = tokio::time::timeout(Duration::from_secs(2), controls).await;
-    }
-    #[cfg(feature = "publisher")]
-    if let Some(assistant) = assistant {
-        let _ = tokio::time::timeout(Duration::from_secs(2), assistant).await;
-    }
-    let event_pumps = std::mem::take(
-        &mut *state
-            .event_pumps
-            .lock()
-            .map_err(|_| io::Error::other("event pump registry lock was poisoned"))?,
-    );
-    let drain = async move {
-        for event_pump in event_pumps {
-            let _ = event_pump.await;
-        }
-    };
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), drain).await;
-    served.map_err(io::Error::other)
+    app.route_layer(axum::middleware::from_fn_with_state(
+        token,
+        crate::station::runner::authorize,
+    ))
+    .route("/healthz", get(|| async { "ok" }))
+    .with_state(reload::Served(state))
 }
 
 async fn list_agent_handlers(State(state): State<DaemonState>) -> Json<Vec<plugins::ProviderInfo>> {
@@ -6925,6 +6945,68 @@ mod tests {
             "pipe"
         );
         assert_eq!(station_terminal(&state, stdio("tty-agent")).unwrap(), "pty");
+    }
+
+    /// Every `/internal` route needs the API token, from a loopback client as from any other;
+    /// `/healthz` does not.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_station_api_refuses_a_request_without_its_token() {
+        let root = tempfile::tempdir().unwrap();
+        let state = capacity_test_state(root.path(), 1, 1);
+        let token = "t".repeat(64);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let served = tokio::spawn(async move {
+            axum::serve(listener, api(state, "t".repeat(64)))
+                .await
+                .unwrap()
+        });
+        let calls = tokio::task::spawn_blocking(move || {
+            let agent: ureq::Agent = ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .build()
+                .into();
+            let status = |method: &str, path: &str, bearer: Option<&str>| {
+                let url = format!("http://{address}{path}");
+                let mut request = match method {
+                    "GET" => agent.get(&url).force_send_body(),
+                    _ => agent.post(&url),
+                };
+                if let Some(bearer) = bearer {
+                    request = request.header("Authorization", &format!("Bearer {bearer}"));
+                }
+                request
+                    .content_type("application/json")
+                    .send("{}")
+                    .unwrap()
+                    .status()
+                    .as_u16()
+            };
+            let mut seen = Vec::new();
+            for (method, path) in [
+                ("GET", "/internal/missions"),
+                ("POST", "/internal/missions"),
+                ("POST", "/internal/missions/m-1/start"),
+                ("POST", "/internal/missions/m-1/messages"),
+                ("GET", "/internal/terminals"),
+            ] {
+                for bearer in [None, Some("wrong"), Some(&"t".repeat(63)[..])] {
+                    seen.push((method, path, bearer.is_some(), status(method, path, bearer)));
+                }
+            }
+            let allowed = status("GET", "/internal/terminals", Some(&token));
+            let health = status("GET", "/healthz", None);
+            (seen, allowed, health)
+        })
+        .await
+        .unwrap();
+        served.abort();
+        let (seen, allowed, health) = calls;
+        for (method, path, bearer, status) in seen {
+            assert_eq!(status, 401, "{method} {path} with a bearer: {bearer}");
+        }
+        assert_eq!(allowed, 200);
+        assert_eq!(health, 200);
     }
 
     async fn start_json_mission(state: &DaemonState) -> ApiErrorResponse {

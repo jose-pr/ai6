@@ -3186,9 +3186,10 @@ started Mission (the terminal is the one the Station chose at start), including 
 are never persisted. The snapshot format is version 1; any other version is refused. On
 startup, `Working` Missions
 become `Blocked` and the scheduler retries reattachment through the same provider Session ID.
-The daemon's loopback
-`/internal/missions` routes expose Mission state to local control components; Universal Exports
-remains the authenticated public API.
+The daemon's
+`/internal/missions` routes expose Mission state to local control components, each request with
+`Authorization: Bearer TOKEN` from `<state dir>/api-token` (`server::API_TOKEN_FILE`; 401
+otherwise, from loopback too; `/healthz` is open); Universal Exports remains the public API.
 
 ## Operation cover (`ai6::directorates::m::cover`)
 
@@ -3303,8 +3304,8 @@ Cable without caller-selected sender identity; `GET .../cables/held?limit=` list
 held metadata under Release grants; `POST .../cables/{cable_id}/release` releases eligible
 recipients; `POST .../cables/{cable_id}/ack` and
 `POST .../cables/{cable_id}/reply` acknowledge or reply to a delivered Cable. The relay
-snapshots only currently managed Sessions as recipients, and the internal API is loopback
-only.
+snapshots only currently managed Sessions as recipients, and the internal API needs the
+Station's API token.
 With `cables-mcp`, each managed Session receives its own loopback-only, random-token
 authenticated Streamable HTTP MCP endpoint. Claude and Codex handlers receive the endpoint
 URL and token through their launch environment; the bearer token is not placed in process

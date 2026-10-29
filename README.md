@@ -57,10 +57,13 @@ cargo run -p ai6 --features cli -- serve \
   --plugin-path ./target/debug
 ```
 
-Submit a Mission to the Station's private API from another terminal:
+Submit a Mission to the Station's private API from another terminal, with the token the
+Station keeps in `api-token` under its state directory (`AI6_STATE`, else `$AI6_HOME/state`,
+`%LOCALAPPDATA%\AI6` on Windows, or `$XDG_STATE_HOME/AI6`, by default `~/.local/state/AI6`):
 
 ```bash
 curl -f -X POST http://127.0.0.1:7081/internal/missions \
+  -H "authorization: Bearer $(cat ~/.local/state/AI6/api-token)" \
   -H 'content-type: application/json' \
   -d '{"mission_id":"mission-quickstart","operation_id":"G","prompt":"Summarize README.md","role":"case-officer"}'
 ```
