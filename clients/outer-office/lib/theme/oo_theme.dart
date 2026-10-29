@@ -4,6 +4,31 @@ import 'oo_tokens.dart';
 
 export 'oo_tokens.dart';
 
+/// The display face of the wordmark and section labels: Cinzel (SIL OFL 1.1), bundled in
+/// `assets/fonts/`. Body text stays Roboto.
+const ooDisplayFamily = 'Cinzel';
+
+/// A section label such as "RECENT ACTIVITY": Cinzel capitals in `accent`, which reads at
+/// 4.5:1 on `surface` and `raised`.
+TextStyle ooSectionLabel(BuildContext context) => TextStyle(
+  fontFamily: ooDisplayFamily,
+  fontWeight: FontWeight.w700,
+  fontSize: 13,
+  letterSpacing: 2.2,
+  color: OoTokens.of(context).accent,
+);
+
+/// A filled button for a destructive step: `danger` with the readable one of `bg` and
+/// `text` on it.
+ButtonStyle ooDangerButton(OoTokens tokens) => FilledButton.styleFrom(
+  backgroundColor: tokens.danger,
+  foregroundColor: ooReadableOn(tokens.danger, tokens),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+).copyWith(backgroundBuilder: (context, states, child) => child!);
+
+/// Whichever of `bg`, `surface` and `text` reads best on [color].
+Color ooReadableOn(Color color, OoTokens tokens) => _readableOn(color, tokens);
+
 /// The Material theme of one Outer Office theme.
 ///
 /// [highContrast] applies [OoTokens.highContrast]; [reduceMotion] makes page transitions
@@ -60,9 +85,17 @@ ThemeData ooTheme(
     inversePrimary: tokens.accent,
     surfaceTint: const Color(0x00000000),
   );
+  // Cards and panels: a border washed towards the accent, like the reference's gilt edges.
   final rounded = RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(12),
-    side: BorderSide(color: tokens.border),
+    borderRadius: BorderRadius.circular(14),
+    side: BorderSide(color: Color.lerp(tokens.border, tokens.accent, 0.22)!),
+  );
+  final buttonShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(10),
+  );
+  final selectedShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(10),
+    side: BorderSide(color: tokens.accent.withValues(alpha: 0.6)),
   );
   // The rail merges its label styles with no text theme, so they start from one.
   final labels = ThemeData(colorScheme: scheme).textTheme.labelMedium;
@@ -87,7 +120,8 @@ ThemeData ooTheme(
     ),
     navigationRailTheme: NavigationRailThemeData(
       backgroundColor: tokens.surface,
-      indicatorColor: tokens.raised,
+      indicatorColor: tokens.selectedFill,
+      indicatorShape: selectedShape,
       selectedIconTheme: IconThemeData(color: tokens.accent),
       unselectedIconTheme: IconThemeData(color: tokens.muted),
       selectedLabelTextStyle: labels?.copyWith(color: tokens.accent),
@@ -95,7 +129,67 @@ ThemeData ooTheme(
     ),
     navigationDrawerTheme: NavigationDrawerThemeData(
       backgroundColor: tokens.surface,
-      indicatorColor: tokens.raised,
+      indicatorColor: tokens.selectedFill,
+      indicatorShape: selectedShape,
+      tileHeight: 60,
+    ),
+    // Primary buttons are the accent gradient with `bg` text; disabled ones are flat.
+    filledButtonTheme: FilledButtonThemeData(
+      style: ButtonStyle(
+        shape: WidgetStatePropertyAll(buttonShape),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? tokens.raised
+              : tokens.accent,
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) =>
+              states.contains(WidgetState.disabled) ? tokens.muted : tokens.bg,
+        ),
+        backgroundBuilder: (context, states, child) =>
+            states.contains(WidgetState.disabled)
+            ? child!
+            : DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: tokens.accentGradient,
+                  ),
+                  boxShadow: tokens.glow(tokens.accent, radius: 10),
+                ),
+                child: child,
+              ),
+      ),
+    ),
+    // Ghost buttons: `text` on the page, outlined in `muted`.
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: tokens.text,
+        side: BorderSide(color: tokens.muted),
+        shape: buttonShape,
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: tokens.accent,
+        shape: buttonShape,
+      ),
+    ),
+    badgeTheme: BadgeThemeData(
+      backgroundColor: tokens.danger,
+      textColor: onDanger,
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: tokens.raised,
+      side: BorderSide(color: Color.lerp(tokens.border, tokens.accent, 0.3)!),
+      labelStyle: TextStyle(color: tokens.text),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: tokens.accent,
+      linearTrackColor: tokens.border,
     ),
     drawerTheme: DrawerThemeData(backgroundColor: tokens.surface),
     dialogTheme: DialogThemeData(backgroundColor: tokens.surface),
@@ -121,11 +215,12 @@ ThemeData ooTheme(
   );
 }
 
-/// `bg` or `text`, whichever reads better on [color].
+/// Whichever of `bg`, `surface` and `text` reads best on [color].
 Color _readableOn(Color color, OoTokens tokens) =>
-    _contrast(tokens.bg, color) >= _contrast(tokens.text, color)
-    ? tokens.bg
-    : tokens.text;
+    [tokens.bg, tokens.surface, tokens.text].reduce(
+      (best, next) =>
+          _contrast(next, color) > _contrast(best, color) ? next : best,
+    );
 
 double _contrast(Color a, Color b) {
   final la = a.computeLuminance();

@@ -53,9 +53,21 @@ List<(String, Color, Color, double)> promisedPairs(OoTokens t) => [
   ('warning on surface', t.warning, t.surface, 4.5),
   ('danger on surface', t.danger, t.surface, 4.5),
   ('outline (muted) on surface', t.muted, t.surface, 3),
+  // The polish pass: primary button labels on both gradient stops, the wordmark's stops as
+  // large text, the selected rail entry and her person bubble, the bell's count badge.
+  for (final (index, stop) in t.accentGradient.indexed) ...[
+    ('bg on accent gradient stop $index', t.bg, stop, 4.5),
+    ('accent gradient stop $index on surface (large text)', stop, t.surface, 3),
+  ],
+  ('text on the selected fill', t.text, t.selectedFill, 4.5),
+  ('badge label on danger', _readable(t.danger, t), t.danger, 4.5),
+  ('accent on raised (labels in tiles and chips)', t.accent, t.raised, 3),
   for (final (index, color) in t.series.indexed)
     ('series $index on surface', color, t.surface, 3),
 ];
+
+/// The label colour the theme puts on [color].
+Color _readable(Color color, OoTokens t) => ooReadableOn(color, t);
 
 void main() {
   test('the ratio check fails the kit colours it was written to catch', () {
@@ -331,7 +343,14 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(OoIconName.values, hasLength(19));
+    expect(OoIconName.values, hasLength(24));
+    for (final name in OoIconName.values) {
+      final duotone = await tester.runAsync(
+        () => vg.loadPicture(SvgAssetLoader(name.duotoneAsset), null),
+      );
+      expect(duotone!.size, const Size(24, 24), reason: name.duotoneAsset);
+      duotone.picture.dispose();
+    }
     for (final name in OoIconName.values) {
       expect(
         tester.getSize(find.bySemanticsLabel(name.file)),

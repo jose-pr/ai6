@@ -33,9 +33,13 @@ flutter:
   assets:
     - assets/backdrops/
     - assets/brand/moneypenny-128.png
+    - assets/brand/outer-office-256.png
+    - assets/fonts/LICENSE-Cinzel.txt
     - assets/fonts/LICENSE-Noto.txt
     - assets/fonts/LICENSE-Roboto.txt
+    - assets/heroes/
     - assets/icons/
+    - assets/icons/duotone/
   # Bundled so the web engine has its default font without fetching it from Google Fonts.
   fonts:
     - family: Roboto
@@ -44,4 +48,10 @@ flutter:
         - asset: assets/fonts/Roboto-Medium.ttf
           weight: 500
         - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700
+    # The display face of the wordmark and section labels.
+    - family: Cinzel
+      fonts:
+        - asset: assets/fonts/Cinzel-Regular.ttf
+        - asset: assets/fonts/Cinzel-Bold.ttf
           weight: 700

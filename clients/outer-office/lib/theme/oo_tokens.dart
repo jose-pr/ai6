@@ -61,6 +61,8 @@ class OoTokens extends ThemeExtension<OoTokens> {
     required this.danger,
     required this.series,
     this.backdrop,
+    this.hero,
+    this.heroDuotone = false,
   });
 
   final Color bg;
@@ -80,6 +82,71 @@ class OoTokens extends ThemeExtension<OoTokens> {
 
   /// Eight categorical colours for charts, each at least 3:1 on `surface`.
   final List<Color> series;
+
+  /// The art of the Overview hero, painted only by `OoHero`; null when it is turned off.
+  final ImageProvider? hero;
+
+  /// Whether [hero] is drawn in this theme's colours ([heroMatrix]) rather than as drawn.
+  final bool heroDuotone;
+
+  /// Whether this is a dark theme: light text on a dark background.
+  bool get dark => bg.computeLuminance() < text.computeLuminance();
+
+  /// The two stops of the accent gradient (primary buttons, the wordmark), top first: a
+  /// step lighter than `accent` on a dark theme and a step darker on a light one, so `bg`
+  /// reads on both stops at least as well as on `accent`.
+  List<Color> get accentGradient => dark
+      ? [_lightness(accent, 0.1), accent]
+      : [accent, _lightness(accent, -0.06)];
+
+  /// The duotone icon colours: the gradient's light and dark stops and the ink of details.
+  ({Color hi, Color lo, Color ink}) get duotone => dark
+      ? (
+          hi: _lightness(accent, 0.12),
+          lo: _lightness(accent, -0.14),
+          ink: _setLightness(accent, 0.12),
+        )
+      : (
+          hi: _lightness(accent, 0.24),
+          lo: accent,
+          ink: _setLightness(accent, 0.12),
+        );
+
+  /// The fill of a selected rail entry: `raised` washed with `accent`.
+  Color get selectedFill =>
+      Color.alphaBlend(accent.withValues(alpha: 0.16), raised);
+
+  /// A soft glow of [color] around a dot, tile or selected entry; none under high contrast.
+  List<BoxShadow> glow(Color color, {double radius = 8}) => border == muted
+      ? const []
+      : [
+          BoxShadow(
+            color: color.withValues(alpha: dark ? 0.45 : 0.3),
+            blurRadius: radius,
+          ),
+        ];
+
+  /// A 4x5 colour matrix that redraws a dark, mostly blue-grey picture in this theme: its
+  /// darkest parts become `surface`, its brightest `accent`.
+  List<double> get heroMatrix {
+    const gain = 1.6;
+    double c(double v) => v * 255;
+    List<double> row(double from, double to) {
+      final span = (to - from) * gain;
+      return [span * 0.2126, span * 0.7152, span * 0.0722, 0, c(from)];
+    }
+
+    return [
+      ...row(surface.r, accent.r),
+      ...row(surface.g, accent.g),
+      ...row(surface.b, accent.b),
+      0,
+      0,
+      0,
+      1,
+      0,
+    ];
+  }
 
   /// The tokens of the nearest theme.
   static OoTokens of(BuildContext context) =>
@@ -138,6 +205,8 @@ class OoTokens extends ThemeExtension<OoTokens> {
     danger: danger ?? this.danger,
     series: series ?? this.series,
     backdrop: clearBackdrop ? null : backdrop ?? this.backdrop,
+    hero: clearBackdrop ? null : hero,
+    heroDuotone: heroDuotone,
   );
 
   @override
@@ -160,6 +229,8 @@ class OoTokens extends ThemeExtension<OoTokens> {
           mix(series[i], other.series[i]),
       ],
       backdrop: t < 0.5 ? backdrop : other.backdrop,
+      hero: t < 0.5 ? hero : other.hero,
+      heroDuotone: t < 0.5 ? heroDuotone : other.heroDuotone,
     );
   }
 }
@@ -178,6 +249,7 @@ const _nightOps = OoTokens(
   warning: Color(0xFFE9A845),
   danger: Color(0xFFD8595C),
   backdrop: AssetImage('assets/backdrops/night-ops.jpg'),
+  hero: AssetImage('assets/heroes/map.jpg'),
   series: [
     Color(0xFFD6A958),
     Color(0xFFE69F00),
@@ -202,6 +274,8 @@ const _blackOps = OoTokens(
   warning: Color(0xFFE1B76C),
   danger: Color(0xFFDD6A6A),
   backdrop: AssetImage('assets/backdrops/black-ops.jpg'),
+  hero: AssetImage('assets/heroes/map.jpg'),
+  heroDuotone: true,
   series: [
     Color(0xFFCBD1D0),
     Color(0xFFE69F00),
@@ -226,6 +300,7 @@ const _dusk = OoTokens(
   warning: Color(0xFFF1BA69),
   danger: Color(0xFFEC616E),
   backdrop: AssetImage('assets/backdrops/dusk.jpg'),
+  hero: AssetImage('assets/heroes/skyline.jpg'),
   series: [
     Color(0xFFECAC70),
     Color(0xFFE69F00),
@@ -250,6 +325,8 @@ const _classic = OoTokens(
   warning: Color(0xFF915D1D),
   danger: Color(0xFF9F3D34),
   backdrop: AssetImage('assets/backdrops/classic.jpg'),
+  hero: AssetImage('assets/heroes/map.jpg'),
+  heroDuotone: true,
   series: [
     Color(0xFF76582C),
     Color(0xFFAE7800),
@@ -274,6 +351,8 @@ const _light = OoTokens(
   warning: Color(0xFF9D691A),
   danger: Color(0xFFBA4F55),
   backdrop: AssetImage('assets/backdrops/light.jpg'),
+  hero: AssetImage('assets/heroes/map.jpg'),
+  heroDuotone: true,
   series: [
     Color(0xFF2A6D84),
     Color(0xFFC28600),
@@ -286,7 +365,7 @@ const _light = OoTokens(
   ],
 );
 
-// Red File has no wallpaper.
+// Red File has no wallpaper; its hero is the map in its own crimson.
 const _redFile = OoTokens(
   bg: Color(0xFF17090E),
   surface: Color(0xFF240F18),
@@ -298,6 +377,8 @@ const _redFile = OoTokens(
   success: Color(0xFF5ECEA0),
   warning: Color(0xFFE6B04C),
   danger: Color(0xFFFF6C72),
+  hero: AssetImage('assets/heroes/map.jpg'),
+  heroDuotone: true,
   series: [
     Color(0xFFE5555C),
     Color(0xFFE69F00),
@@ -309,3 +390,13 @@ const _redFile = OoTokens(
     Color(0xFFCC79A7),
   ],
 );
+
+/// [color] with its HSL lightness moved by [delta], kept within 0–1.
+Color _lightness(Color color, double delta) {
+  final hsl = HSLColor.fromColor(color);
+  return hsl.withLightness((hsl.lightness + delta).clamp(0, 1)).toColor();
+}
+
+/// [color] at HSL [lightness], hue and saturation kept.
+Color _setLightness(Color color, double lightness) =>
+    HSLColor.fromColor(color).withLightness(lightness).toColor();
