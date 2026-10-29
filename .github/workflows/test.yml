@@ -141,5 +141,7 @@ jobs:
       - run: flutter analyze --fatal-infos
       # Before the tests, so the no-CDN check reads a real build/web.
       - run: flutter build web --release
+      # The Noto fallback fonts the build serves itself, checked against tool/cdn_files.json.
+      - run: dart run tool/cdn_files.dart fill
       - run: flutter test
       - run: flutter build windows --debug
