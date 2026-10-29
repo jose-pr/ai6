@@ -104,15 +104,18 @@ is refused at start. See [Terminals](terminals.md).
 
 Stations sharing a Registry coordinate check-ins, leases and Headquarters election. The
 Registry is a directory every Station mounts, a SQLite file for a single Station, or a
-PostgreSQL database for Stations that share no filesystem. `ai6 serve --registry LOCATION`
-names it: a directory, `sqlite:PATH` or a `postgres://` URL; without it the Station uses
-`AI6_REGISTRY` (read the same way, also by the `ai6` command and Universal Exports), else
-the state directory.
+PostgreSQL database for Stations that share no filesystem. The bootstrap file `ai6.cfg`
+names it in `[registry] location` (or `ai6 serve --registry LOCATION`): a directory,
+`sqlite:PATH` or a `postgres://` URL. Without one the Station uses its configuration
+provider's database when that is SQL, else `registry` in its state directory; the `ai6`
+command reads the same file, and Universal Exports reads `unex.cfg` the same way. One SQL
+location therefore configures a whole HA deployment:
 
-```console
-AI6_REGISTRY_PASSWORD=… AI6_CONFIG_PASSWORD=… ai6 serve \
-  --registry "postgres://ai6@db.internal/ai6?sslrootcert=/etc/ai6/db-ca.pem" \
-  --config "postgres://ai6@db.internal/ai6?sslrootcert=/etc/ai6/db-ca.pem"
+```toml
+# /etc/ai6/ai6.cfg
+[provider]
+location = "postgres://ai6@db.internal/ai6?sslrootcert=/etc/ai6/db-ca.pem"
+password = { file = "db-password" }   # relative to this file
 ```
 
 In a directory Registry lease expiry uses each Station's clock, so Stations need
@@ -120,8 +123,9 @@ synchronized clocks; a SQL Registry uses the database's clock. Check-ins expire 
 seconds; a Station whose check-ins lapse has *gone dark* and its leased briefs are
 recovered by the Headquarters Station: a Session a runner still supervises is adopted by
 another Station, any other is lost and tried again ([Recovery](missions.md#recovery)). The
-Headquarters lease lasts 60 seconds between renewals; `--headquarters-lease SECS` sets how
-long a standby control Station waits before taking over from one that went dark.
+Headquarters lease lasts 60 seconds between renewals; `ai6.cfg`'s `[registry]
+headquarters_lease` sets how long a standby control Station waits before taking over from one
+that went dark.
 
 In a SQL Registry each kind of record has its own table, created on first use; a database
 whose schema version is newer than the Station knows is refused, when it is opened and on
@@ -130,7 +134,7 @@ queue as they do on the directory's lock, and leases, the Headquarters term and 
 fencing behave the same on every backend. A Station that stalls inside a write (a paused
 VM, a half-open connection) loses its session after a quarter of the Headquarters lease,
 so it cannot hold the others back from taking over: the statement, lock and idle
-timeouts, and the connection's own, are derived from `--headquarters-lease`, and a
+timeouts, and the connection's own, are derived from the Headquarters lease, and a
 location that sets one itself keeps it. No secret is stored there: access tokens are kept
 by digest, and credentials stay with Q.
 
@@ -138,9 +142,10 @@ PostgreSQL connections use TLS and verify the server: against the platform's tru
 roots, or only against `sslrootcert=PATH` when the location names a CA file. A location
 may weaken that with `sslmode=require` (encrypted, server not verified) or
 `sslmode=disable` (no TLS); `ai6 serve` and Universal Exports then print a warning at
-start. Keep the password out of the location, where a process listing shows it:
-`password_file=PATH`, or `AI6_REGISTRY_PASSWORD` and `AI6_CONFIG_PASSWORD`. Messages print
-locations with the password hidden.
+start. Keep the password out of the location, where a process listing shows it: `ai6.cfg`'s
+`[provider]` and `[registry] password` take `{ file = "PATH" }` (the default form), `{ env =
+"NAME" }` or the value itself; the last two are printed as a warning and reported at
+check-in. Messages print locations with the password hidden.
 
 Stations and Universal Exports reach the Registry only through the `RegistryBackend`
 traits (one per kind of record: briefs, Stations, Sessions, Cables, approvals and so on),
@@ -333,7 +338,7 @@ Every command that loads providers checks them the same way and takes the same
 `--plugin-pins` and `--plugin-profile`, with the same defaults: the field runner
 (`ai6 runner serve`, whose verified copies go under its own state directory),
 `ai6 theater provision`, and Universal Exports for its access providers
-(`AI6_EXPORTS_PLUGIN_PINS`, `AI6_EXPORTS_PLUGIN_PROFILE`). Each prints what it refused and
+(`--plugin-pins`, and `unex.cfg`'s `[plugins] profile` or `--plugin-profile`). Each prints what it refused and
 every weakening when it starts.
 
 What a pin covers is the library file. A library that imports another non-system library

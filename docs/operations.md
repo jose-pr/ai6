@@ -314,7 +314,8 @@ else (a database, an HTTP API, its own code): it builds the roster from typed re
 `ConfigSource` to `ServeConfig::with_config_source`. Records built this way get the same
 checks as the files; an invalid configuration stops the Station rather than half-loading.
 
-`ai6 serve --config LOCATION` names the source: a configuration directory, or, for
+`ai6.cfg`'s `[provider] location` (or `ai6 serve --provider LOCATION`) names the source:
+a configuration directory (by default the one holding `ai6.cfg`), or, for
 Stations that share one roster without a shared filesystem, `sqlite:PATH` or a
 `postgres://` URL. In a database each Operation, Agent, role and cover is a row of its own
 table (`ai6_config_operations`, `ai6_config_agents`, `ai6_config_roles`,
@@ -329,12 +330,13 @@ would leave the roster invalid. Each change moves the roster to its next revisio
 the same transaction.
 
 Theaters are not part of the roster: each Station reads its own `theaters.toml`, along with
-its loadouts and Cable settings, from the configuration directory (`--config-dir`).
+its loadouts and Cable settings, from the configuration directory (the bootstrap file's own
+directory when the roster is in a database).
 
 ### Changing the configuration of running Stations
 
-A Station asks its roster source for its revision every 5 seconds (`--config-poll SECS`,
-`0` to stop) and applies a new one without a restart: new requests, the scheduler and new
+A Station asks its roster source for its revision every 5 seconds (`ai6.cfg`'s
+`[provider] poll`, `0` to stop) and applies a new one without a restart: new requests, the scheduler and new
 Sessions use it, while a Session already running keeps the roster it started with. Every
 Station sharing a SQL roster therefore takes up an edit within one poll. A new revision is
 checked as the files are checked, every Agent resolved; one that fails is refused once:
@@ -350,12 +352,12 @@ is leased, so it never needs a reload.
 
 Everything else applies only at start, and a change waits for a restart: `theaters.toml`
 and `cables.toml` (a Station that sees either change logs it and lists it as needing a
-restart at check-in), and the command-line settings: listen address, Registry and roster
-locations, Station ID, roles, labels, terminal, plugin paths, the Headquarters lease,
-capacity and watchdog defaults.
+restart at check-in), the bootstrap file `ai6.cfg` (listen address, Registry and provider
+locations, Station ID, plugin paths, the Headquarters lease), and the command-line settings:
+roles, labels, terminal, capacity and watchdog defaults.
 
 Universal Exports edits the roster for operators when it is started with the same
-location (`--roster`, `AI6_EXPORTS_ROSTER`): `roster.read` and `roster.manage` on the
+location (`unex.cfg`'s `[provider] location`, or `--provider`): `roster.read` and `roster.manage` on the
 scope `config:roster` (for example `scope = "config:roster"` in `access.toml`) let a person
 list and change Operations, Agents, roles and covers from Outer Office's Roster page.
 The source checks the whole roster before it keeps an edit; an accepted edit is audited as

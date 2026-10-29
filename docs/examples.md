@@ -6,7 +6,7 @@ Build AI6 and its providers, then use the sample Operation and Agent roster:
 
 ```console
 cargo build --workspace --all-features
-cargo run -p ai6 --features cli -- serve --config-dir ./examples/config --plugin-path ./target/debug
+cargo run -p ai6 --features cli -- serve --provider ./examples/config --plugin-path ./target/debug
 ```
 
 ## Queue a Mission

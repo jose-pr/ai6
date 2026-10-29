@@ -189,8 +189,9 @@ platform's paths an interpreter needs (Linux: `/usr`, `/bin`, `/sbin`, `/lib`, `
 directory (`ai6::directorates::section_00::programs::program_dirs`: its directory on the
 harness's `PATH` with links followed, the one above when that is `bin`, unless it is `/`, holds
 the home or working directory or a credential directory, or lies in one); `denyRead` also
-`programs::station_paths` (`/etc/ai6`, `/usr/local/etc`, `/usr/etc`, AI6's state directory,
-`AI6_HOME` when set and the program hosting the handler, its directory or the file alone when
+`programs::station_paths` (`/etc/ai6`, `/usr/local/etc`, `/usr/etc`, AI6's platform state
+directory, the Station's own directories in `AssistantMode::station_paths`, and the program
+hosting the handler, its directory or the file alone when
 an interpreter's directory holds it; none that holds the working directory): a `denyRead`
 inside an `allowRead` wins, an `allowRead` inside a `denyRead` wins too, and the same path in
 both is readable. So `/etc/ai6`, `/opt`, `/var`, the home directory,

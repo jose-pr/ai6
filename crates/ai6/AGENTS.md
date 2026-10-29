@@ -35,12 +35,12 @@ node that runs them: `station::server` (daemon service and `serve*`), `station::
 (provider host), `station::safehouse` (opens a Mission's safe house through a provider),
 `station::runner` (the field runner), `station::publisher` (`publisher` feature) and
 `station::identity` (`station-tls` feature). The command exposes `ai6 serve`,
-`ai6 runner serve|call`, `ai6 identity` and `ai6 peer waiting|accept`. `ai6 serve
---registry LOCATION` and `--config LOCATION` take a directory, `sqlite:PATH` or a
-`postgres://` URL for the Registry and the roster (defaults: `AI6_REGISTRY`, else the state
-directory; the configuration directory); `--headquarters-lease SECS` (default 60) sets
-`StationConfig::with_headquarters_lease`; `--config-poll SECS` (default 5, 0 off) sets
-`StationConfig::with_config_poll`.
+`ai6 runner serve|call`, `ai6 identity`, `ai6 peer waiting|accept` and `ai6 config path`.
+Each reads the bootstrap file `ai6.cfg` (`ai6::bootstrap`, below; `--config PATH`). `ai6
+serve --provider LOCATION` and `--registry LOCATION` take a directory, `sqlite:PATH` or a
+`postgres://` URL over its `[provider]` and `[registry] location`; `[registry]
+headquarters_lease` (default 60) sets `StationConfig::with_headquarters_lease` and `[provider]
+poll` (default 5, 0 off) `StationConfig::with_config_poll`.
 
 ## Access contracts (`ai6::directorates::m::access`)
 
@@ -517,8 +517,7 @@ matched, or, when only retired Agents qualified, `no qualified Agent for role "R
 retired on 2027-01-31`. `retire_on` is a UTC date; from that day an Agent with
 `on_retire = "desk"` works at `desk` and is still chosen, one with `"retired"` is never
 chosen (its running Missions finish; the Station gives queued ones to the backup or keeps
-them waiting). An invalid date fails resolving the Agent. `operations` yields stable codename order. `config_dir` resolves
-`AI6_CONFIG_DIR`, then `XDG_CONFIG_HOME/ai6`, then the platform configuration directory.
+them waiting). An invalid date fails resolving the Agent. `operations` yields stable codename order.
 `Agent.limits` is layered over the daemon-wide watchdog settings when a Mission starts or
 resumes.
 
@@ -567,6 +566,85 @@ digest on the Operation's timeline (kind `harness`, `project-settings-pinned` or
 `project-settings-ignored` with `reason`), and treats a harness on another host as `ignore`.
 `decision.mcp` under `pinned` is whether the manifest holds `.mcp.json`. `ai6 harness pin DIR`
 prints the manifest and its pin. Weakenings are printed at start.
+
+## Bootstrap files (`ai6::bootstrap`, no feature)
+
+`ai6.cfg` (Station and `ai6` command) and `unex.cfg` (`universal-exports`) hold only what a
+process needs before it reaches its configuration provider. Found by `SearchPath`: `--config`
+(must exist), else the variable (`AI6_CONFIG` / `UNEX_CONFIG`, must exist), else the file in
+`platform_config_dir()`, else in `system_config_dir()`; the first found is the only one read,
+and none means every default. The working directory is never searched. The format follows
+the extension (`format::Format::for_path`: `cfg` and `toml` are TOML, `json`, `yaml`/`yml`);
+a `.cfg` is TOML until a first-line format rule lands. Unknown keys are refused, naming the
+key. A relative path in a file is relative to the file's directory.
+
+```rust
+pub const FILE_NAME: &str = "ai6.cfg";       pub const CONFIG_ENV: &str = "AI6_CONFIG";
+pub const UNEX_FILE_NAME: &str = "unex.cfg"; pub const UNEX_CONFIG_ENV: &str = "UNEX_CONFIG";
+pub const DEFAULT_LISTEN: SocketAddr;        // 127.0.0.1:7081
+pub const DEFAULT_UNEX_LISTEN: SocketAddr;   // 127.0.0.1:7082
+pub const DEFAULT_POLL: Duration;            // 5 s
+
+#[non_exhaustive] #[derive(Clone, PartialEq, Eq)]   // Debug shows Inline(***)
+pub enum SecretRef { File(PathBuf), Env(String), Inline(Zeroizing<String>) }
+// written `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself
+impl SecretRef {
+    pub fn weakening(&self) -> Option<String>;      // Some for Env and Inline
+    pub fn relative_to(self, dir: &Path) -> Self;
+    pub fn read(&self) -> io::Result<Zeroizing<String>>; // a file's one trailing newline dropped; empty is InvalidData
+    pub fn describe(&self) -> String;               // the file or variable, never the value
+}
+pub struct Seconds(pub Duration);                    // a non-negative number of seconds
+
+// every field Option or defaulted; #[non_exhaustive], Deserialize, deny_unknown_fields
+pub struct ProviderSettings { location: Option<String>, password: Option<SecretRef>, poll: Option<Seconds> }
+pub struct RegistrySettings { location: Option<String>, password: Option<SecretRef>, headquarters_lease: Option<Seconds> }
+pub struct IdentitySettings { dir: Option<PathBuf> }
+pub struct PluginSettings { paths: Vec<PathBuf>, profile: Option<PluginProfile> }
+pub struct SecretSettings { dir: Option<PathBuf> }
+pub struct UnexSettings { url: String, token: Option<SecretRef> }  // a url alone publishes nothing
+pub struct Bootstrap { station, state_dir, listen, provider, registry, identity, plugins, secrets: SecretSettings, unex: Option<UnexSettings> }
+pub struct UnexBootstrap { listen, public_origin: Option<String>, station_token: Option<SecretRef>,
+    proxy_secret: Option<SecretRef>, state_dir, provider, registry, plugins }
+impl ProviderSettings { pub fn poll(&self) -> Duration; }                  // DEFAULT_POLL; 0 turns reload off
+impl RegistrySettings { pub fn headquarters_lease(&self) -> Duration; }    // DEFAULT_LEASE
+
+pub struct Located<T> { pub value: T, pub path: Option<PathBuf> }      // None: defaults
+impl<T> Located<T> { pub fn dir(&self) -> Option<&Path>; }
+impl Bootstrap {
+    pub fn find(explicit: Option<&Path>) -> Result<Located<Self>, BootstrapError>;
+    pub fn find_in(search: &SearchPath) -> Result<Located<Self>, BootstrapError>;
+    pub fn read(path: &Path) -> Result<Self, BootstrapError>;
+}
+impl UnexBootstrap { pub fn find(..) ; pub fn read(..); }               // same shapes
+impl Located<Bootstrap> {
+    pub fn state_dir(&self) -> Result<PathBuf, BootstrapError>;          // state_dir, else platform_state_dir()
+    pub fn provider_location(&self) -> Result<String, BootstrapError>;   // [provider] location, else the file's dir, else platform_config_dir()
+    pub fn registry_location(&self) -> Result<String, BootstrapError>;   // [registry] location, else a SQL provider, else <state_dir>/registry
+    pub fn registry_password(&self) -> Option<&SecretRef>;               // the provider's when the Registry is its database
+    pub fn identity_dir(&self) -> Result<PathBuf, BootstrapError>;       // [identity] dir, else state_dir
+    pub fn secrets_dir(&self) -> Result<PathBuf, BootstrapError>;        // [secrets] dir, else secrets/ beside the file
+    pub fn listen(&self) -> SocketAddr;
+    pub fn weakenings(&self) -> Vec<String>;                             // each Env or Inline secret
+}
+// Located<UnexBootstrap>: state_dir, provider_location, registry_location, registry_password, listen, weakenings
+pub struct SearchPath { pub explicit: Option<PathBuf>, pub variable: Option<(String, PathBuf)>, pub candidates: Vec<PathBuf> }
+impl SearchPath { pub fn new(name: &str, variable: &str, explicit: Option<&Path>) -> Self;
+    pub fn locate(&self) -> Result<Option<PathBuf>, BootstrapError>; }   // NotFound for a named file that is missing
+pub fn read_file<T: DeserializeOwned>(path: &Path) -> Result<T, BootstrapError>;
+pub fn is_sql_location(location: &str) -> bool;
+pub fn platform_config_dir() -> Result<PathBuf, BootstrapError>;  // XDG_CONFIG_HOME/ai6, %APPDATA%\ai6, ~/.config/ai6
+pub fn system_config_dir() -> Option<PathBuf>;                     // /etc/ai6, %ProgramData%\ai6
+pub fn platform_state_dir() -> Result<PathBuf, BootstrapError>;   // %LOCALAPPDATA%\AI6, XDG_STATE_HOME/AI6, ~/.local/state/AI6
+#[non_exhaustive] pub struct BootstrapError;  // kind(): NotFound, InvalidData, ...; Into<io::Error>
+// format: EXTENSIONS, Format { Json, Toml, Yaml } (name, for_path, for_extension),
+//         from_str<T>(Format, &str), to_string<T>(Format, &T), FormatError
+```
+
+`StationConfig::with_state_dir`, `with_protected_path` (a directory an assistant's
+interpreters may never read; the state and secrets directories always are, sent as
+`AssistantMode::station_paths`) and `with_bootstrap_weakenings` (sent at check-in as
+`bootstrap_weakened`), and `ServeConfig::with_secrets_dir`, carry the file into a Station.
 
 ## Configuration sources (`ai6::directorates::m::config`)
 
@@ -643,7 +721,7 @@ table as one record keyed `assistant`, none without it), and `put`/`remove` are 
 other store (a database, an HTTP API) builds its roster with `Roster::from_parts`. The
 daemon reads the roster at start (`ServeConfig::with_config_source`; default
 `TomlConfigDir` over the configuration directory) and polls `revision()` every
-`DEFAULT_CONFIG_POLL` (5 s; `StationConfig::with_config_poll`, `ai6 serve --config-poll`,
+`DEFAULT_CONFIG_POLL` (5 s; `StationConfig::with_config_poll`, `ai6.cfg [provider] poll`,
 0 off): a new revision is loaded and applied to requests, the scheduler and new Sessions
 (running Sessions keep theirs); one that fails with `Invalid` is refused once per revision,
 logged, audited (`config.refused`, actor and resource `station:<id>`) and reported at
@@ -900,7 +978,7 @@ in the login environment) and never reads their values. A copied file is written
 is copied only when its SHA-256 differs. `runner.command` must be a path (`~/` = the
 transport's default directory); without `provision.runner` the Station's own executable is
 used only when the Theater reports the Station's `os` and `arch`. The `ai6 theater
-provision THEATER [--check] [--config-dir DIR] [--plugin-path P]...` command prints one line
+provision THEATER [--check] [--config PATH] [--plugin-path P]...` command prints one line
 per step and exits 1 when a step failed, or with `--check` when one would change.
 `Plugins::theater_transport(&TheaterAccess)` builds the `TransportClient` it uses.
 
@@ -1177,9 +1255,6 @@ impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 pub fn open(location: &str) -> io::Result<Arc<dyn RegistryBackend>>;
 /// As `open`, a SQL Registry connected with `options` (features `sqlite` or `postgres`).
 pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn RegistryBackend>>;
-/// `open(AI6_REGISTRY)`, else the directory `AI6_HOME/registry` or the platform state dir;
-/// a PostgreSQL location without a password takes `AI6_REGISTRY_PASSWORD`.
-pub fn from_environment() -> io::Result<Arc<dyn RegistryBackend>>;
 ```
 
 Every trait is re-exported at the crate root. The methods are synchronous; async callers run
@@ -1189,10 +1264,10 @@ on a `FileRegistry` or `SqlRegistry` value needs the family trait in scope
 methods under the module that defines it. `FileRegistry` keeps them in one directory every
 Station shares; `SqlRegistry` (features `sqlite`, `postgres`) in a database. A SQL location
 without its feature is `Unsupported`. The daemon takes `Arc<dyn RegistryBackend>` through
-`ServeConfig::with_registry` (default `backend::from_environment()`), Universal Exports
-through `Gateway::with_registry` (its command uses `from_environment()`), and
-`CableRelay::new` takes one too; the `ai6 quarantine` and `ai6 sleeper` commands open
-`from_environment()`.
+`ServeConfig::with_registry` (default: the `FileRegistry` in `registry` under its state
+directory), Universal Exports through `Gateway::with_registry`, and `CableRelay::new` takes
+one too. The `ai6` and `universal-exports` commands open the location their bootstrap file
+names (`Located::registry_location`, below).
 
 ## SQL Registry (`ai6::directorates::registry::sql`, features `sqlite` or `postgres`)
 
@@ -1202,8 +1277,8 @@ pub struct SqlRegistry;   // every Registry family; also at the crate root
 impl SqlRegistry {
     /// `sqlite:PATH` or `sqlite://PATH` (a SQLite file), or a `postgres://` /
     /// `postgresql://` URL whose parameters pass to the server (such as
-    /// `options=-c%20search_path%3Dai6` for a schema), besides `sslmode`, `sslrootcert`
-    /// and `password_file`, read here. Creates or upgrades the tables.
+    /// `options=-c%20search_path%3Dai6` for a schema), besides `sslmode` and `sslrootcert`,
+    /// read here. Creates or upgrades the tables.
     pub fn open(location: &str) -> io::Result<Self>;   // open_with(location, &SqlOptions::default())
     pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Self>;
 }
@@ -1235,9 +1310,8 @@ against `sslrootcert=PATH` (PEM) when given (`sslrootcert=system` keeps the plat
 and its name or IP address checked. `sslmode=require` encrypts but accepts any certificate;
 `sslmode=disable` sends everything in clear. Both are accepted and named by `weakenings`;
 `ai6 serve` and `universal-exports` print them at start. A password comes from the location,
-from `password_file=PATH` (its first line), or from `SqlOptions::with_password` when the
-location has none (`ai6 serve` reads `AI6_REGISTRY_PASSWORD` and `AI6_CONFIG_PASSWORD`;
-`backend::from_environment` reads `AI6_REGISTRY_PASSWORD`); a password in the location is
+or from `SqlOptions::with_password` when the location has none (the commands pass their
+bootstrap file's `[provider]` and `[registry] password`); a password in the location is
 visible in the process list. Messages from the command show locations through `redact`.
 
 Timeouts (`SqlOptions::for_lease(L)`, at least 1 s each): each session runs
@@ -1246,7 +1320,7 @@ Station that stalls inside a transaction (a paused VM, a half-open connection) l
 session, and the clock row it held, well before a standby must take over; the connection
 uses `connect_timeout` and `keepalives_idle` of `L/6` and `tcp_user_timeout` of `L/4`. A
 location that sets one itself (the parameter, or `-c name=…` in `options`) keeps its own.
-`ai6 serve` derives them from its `--headquarters-lease`. A lock or statement timeout maps
+`ai6 serve` derives them from its `[registry] headquarters_lease`. A lock or statement timeout maps
 to `TimedOut`.
 
 Each record family
@@ -1362,8 +1436,7 @@ BriefStore::set_proposal_vetting(operation: &str, proposal_id: &str, vetting: &V
 ```
 
 `FileRegistry::open(root)` opens the file-backed Registry without creating or changing
-files; `from_environment()` resolves `AI6_REGISTRY`, then
-`AI6_HOME/registry`, then the platform state directory. `list_new()` returns valid
+files. `list_new()` returns valid
 version-1 `Brief` values ordered by priority descending, creation time ascending, then
 key. It skips malformed briefs, rejects unknown fields and
 newer versions, and bounds scans to 1,000 files and individual briefs to 1 MiB. Listing
@@ -1537,8 +1610,8 @@ reloading off; loadouts set with `with_loadouts` are never reloaded), and `with_
 terminal provider that suits the Agent's handler (`choose_terminal` in the terminal API). A
 pin that gives a JSON harness a terminal is refused at Mission start. Empty roles make daemon startup fail. The current Rust scheduler does not yet use election for
 distributed placement. Station and Agent limits count assignments in the shared Registry.
-The default Station ID is `<host>-<process-id>`; `--station` and `AI6_STATION_ID` set an
-explicit identity.
+The default Station ID is `<host>-<random>`, kept in the state directory; `ai6.cfg`
+`station` and `--station` set an explicit identity.
 `Brief::key()` and `Brief::prompt()` expose the key and prompt fields used by Registry intake.
 `Brief.stations` (default empty) limits a Mission to those Stations; it can only narrow the
 Operation's `stations` list. The scheduler places each brief with `placement::place` over
@@ -2457,8 +2530,8 @@ has proved its key, recorded under `peers/waiting` with the address it came from
 bounded per source address, in total, and by how often one peer is written down again (the
 policy's `waiting`: `per_source`, `total` and `rerecord`). An operator lists
 them with `ai6 peer waiting` (fingerprint and source address) and accepts one with
-`ai6 peer accept <fingerprint>`. The default AI6 state location can be overridden with
-`AI6_STATE` or `AI6_HOME`.
+`ai6 peer accept <fingerprint>`. Both work on `ai6.cfg`'s `[identity] dir` (default: its
+state directory).
 `AccessTokenRecord` is the device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
 expiry and optional revocation times; its debug output redacts the digest.
@@ -2566,10 +2639,10 @@ impl SecretDefinition {
     pub fn targets(&self) -> &[String];                   // globs on the approval's target; empty: any
     pub fn unlocked_by(&self, kind: &str, target: &str) -> bool;
     pub fn green_ink_weakening(&self) -> Option<String>;  // Some for green ink without targets
-    pub fn source(&self) -> &SecretSource;
+    pub fn source(&self) -> &SecretRef;
 }
-#[non_exhaustive] pub enum SecretSource { Env(String), File(PathBuf) }   // a relative file: relative to the config dir
-impl SecretSource { pub fn weakening(&self) -> Option<String>; }          // Some for Env: local harnesses inherit it
+// ai6::bootstrap::SecretRef (below); a loadout's `from` is only File or Env, a relative file
+// relative to the Station's secrets directory.
 ```
 
 Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]`,
@@ -2624,7 +2697,7 @@ impl SecretBroker {
     pub fn lease_names(&self, loadout: &Loadout, names: &[String], request: SecretLeaseRequest)
         -> Result<SecretLease, SecretError>;
 }
-/// The Station's own backend: reads each value at lease time from its SecretSource (a file
+/// The Station's own backend: reads each value at lease time from its SecretRef (a file
 /// loses one trailing newline); missing or empty fails; revoke is a no-op.
 pub struct StationSecrets;
 impl StationSecrets {
@@ -2771,7 +2844,7 @@ The daemon reads strict `cables.toml` from its config directory. Missing configu
 denies every action. `[[grants]]` entries name `agent`, `action`, `scope`, and optional
 `name`; `[inbound]` selects `deliver`, `hold`, or `refuse` by Agent; `[channels]` maps
 channel names to Agent lists. `max_fanout`, `sender_rate`, `sender_burst`, `scope_rate`,
-and `scope_burst` bound routing. `ServeConfig::with_station_id` or `AI6_STATION_ID` supplies
+and `scope_burst` bound routing. `ServeConfig::with_station_id` supplies
 the Station identity; the default is `<host>-<random>`, created once and kept in `station-id`
 in the AI6 state directory so a restarted daemon stays the same Station.
 
@@ -2899,13 +2972,14 @@ pub fn path_text(path: &Path) -> String;
 pub fn starts_with(path: &Path, base: &Path) -> bool;   // case ignored on Windows
 pub fn variable(environment: &BTreeMap<String, String>, name: &str) -> Option<String>;
 pub const STATION_CONFIG_ROOTS: [&str; 3];   // /etc/ai6, /usr/local/etc, /usr/etc
-/// What a scripts sandbox denies again: STATION_CONFIG_ROOTS (not on Windows), the state
-/// directory, AI6_HOME and the running program's directory (the program alone when an `open`
-/// directory holds or lies in it); a path that is or holds `cwd` or an `open` directory is
-/// left out.
-pub fn station_paths(cwd: &Path, open: &[PathBuf]) -> Vec<PathBuf>;
-pub fn denied_station_paths(cwd: &Path, open: &[PathBuf], state: Option<PathBuf>,
-    home: Option<PathBuf>, program: Option<PathBuf>) -> Vec<PathBuf>;   // station_paths, given
+/// What a scripts sandbox denies again: STATION_CONFIG_ROOTS (not on Windows), the platform
+/// state directory, the `station` directories (`AssistantMode::station_paths`: the Station's
+/// state, identity and secrets directories) and the running program's directory (the program
+/// alone when an `open` directory holds or lies in it); a path that is or holds `cwd` or an
+/// `open` directory is left out.
+pub fn station_paths(cwd: &Path, open: &[PathBuf], station: &[String]) -> Vec<PathBuf>;
+pub fn denied_station_paths(cwd: &Path, open: &[PathBuf], station: &[PathBuf],
+    program: Option<PathBuf>) -> Vec<PathBuf>;   // station_paths, given
 impl AssistantMode { pub fn moneypenny() -> Self; pub fn validate(&self) -> Result<(), String>;
                      pub fn with_cables(self) -> Self; } // adds server `cables`,
                                                          // prefix AI6_ASSISTANT_CABLE_MCP
@@ -3232,7 +3306,7 @@ returns this value as its optional `cover` field beside `safe_house`. `Mission.r
 stores the canonical configured Agent role independently of `agent_id` and provider
 `session_ids`; selected handler/model/effort settings persist for reattachment.
 `MissionStore::open(path)` persists a JSON snapshot atomically after
-each mutation. The daemon opens `missions.json` under `safehouse::state_dir()`; this is
+each mutation. The daemon opens `missions.json` under its state directory; this is
 runtime Mission state, separate from the durable Registry. The snapshot
 stores non-secret handler, terminal, work-directory, model and effort settings for each
 started Mission (the terminal is the one the Station chose at start), including the cover policy, starting commit and identity; environment values
@@ -3597,9 +3671,9 @@ its events still count as activity.
 
 `Config::try_new(origin, token)` accepts a bare HTTPS origin or an HTTP loopback origin;
 its `Debug` output redacts the token. `ServeConfig::with_publisher(config)` enables
-publication through `serve_with_options`. The `ai6` command reads
-`AI6_EXPORTS_URL` and `AI6_EXPORTS_STATION_TOKEN` together; leaving both unset disables
-publication, and setting only one is a startup error. Redirects are disabled. A bounded
+publication through `serve_with_options`. The `ai6` command publishes when its bootstrap
+file's `[unex]` has a `token` besides its `url`; a `url` alone (what `ai6ctl` reads)
+publishes nothing. Redirects are disabled. A bounded
 background thread orders Session registration, lifecycle updates and raw terminal chunks
 on one event cursor. A separate authenticated long-poll receives validated Guatiao input
 and resize frames from `/v1/station/inputs/next`; AI6 dispatches them only to the live terminal
@@ -3914,9 +3988,8 @@ after `DEFAULT_CACHE_AGE`, 7 days) has `with_caches(names) -> Result<Self, SafeH
 (plain directory names only: not empty, `.`, `..`, `.git`, nor holding `/`, `\` or `:`),
 `with_cache_age(Duration)`, `caches()`, `cache_age()` and `is_cache(name)`. The Station
 offers a lost attempt's checkpoint only when it opens a new isolated safe house. Only isolated safe houses are recorded on
-the Mission and finished by the daemon. `state_dir()` resolves `AI6_STATE`, then
-`AI6_HOME/state`, then `%LOCALAPPDATA%/AI6` on Windows, then `XDG_STATE_HOME/AI6` or
-`~/.local/state/AI6`.
+the Mission and finished by the daemon, under the Station's state directory
+(`StationConfig::with_state_dir`, default `ai6::bootstrap::platform_state_dir()`).
 
 ## Plugin discovery (`ai6::station::plugins`)
 
@@ -3994,9 +4067,10 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
 
 ## Command line
 
-- `ai6 serve [--listen 127.0.0.1:7081] [--station ID] [--role control|execution]... [--label KEY=VALUE]... [--terminal ID] [--config-dir PATH] [--plugin-path PATH]... [--plugin-pins PATH] [--plugin-profile strict|report|off]`
-  (feature `cli`): run the Station and load Operation and Agent configuration. The pin set
-  defaults to `plugins.toml` in the configuration directory; verified copies go to the state
+- `ai6 serve [--config PATH] [--provider LOC] [--registry LOC] [--state-dir PATH] [--station ID] [--listen 127.0.0.1:7081] [--role control|execution]... [--label KEY=VALUE]... [--terminal ID] [--plugin-path PATH]... [--plugin-pins PATH] [--plugin-profile strict|report|off]`
+  (feature `cli`): run the Station from its bootstrap file with these flags over it. The pin
+  set defaults to `plugins.toml` in the provider's directory (the bootstrap file's when the
+  provider is SQL); the profile to `[plugins] profile`; verified copies go to the state
   directory's `plugins/verified/`.
   `--terminal` pins the terminal provider (refused at Mission start for a JSON harness when
   it gives a terminal); without it an available one that suits the handler is used: `pipe`
@@ -4007,13 +4081,10 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
   values replace that default. `--label` adds a placement label. `--resources-every 60`
   sets the seconds between resource samples of each remote Theater (`0` leaves only the
   300-second probe; `StationConfig::with_resources_every`, `DEFAULT_RESOURCES_EVERY`).
-  `--config-poll 5` sets the seconds between checks of the roster source and
-  `loadouts.toml` (`0` off; `StationConfig::with_config_poll`, `DEFAULT_CONFIG_POLL`).
   `--safe-house-cache NAME` (repeatable, replacing `DEFAULT_CACHE_DIRS`) and
   `--safe-house-cache-age 604800` set `StationConfig::with_safe_house_hygiene`; an invalid
   name exits 1. Timeout values are
-  non-negative seconds and may be fractional. `AI6_CONFIG_DIR` overrides the default
-  config directory.
+  non-negative seconds and may be fractional.
 - `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--plugin-pins PATH] [--plugin-profile P] [--terminal ID] [--detach]`:
   run the field runner on this host until Ctrl-C or SIGTERM (provider libraries checked as
   the Station's, verified copies under its state directory); `--detach` starts it in the
@@ -4033,9 +4104,10 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
 - `ai6 theater provision` also takes `--plugin-pins` and `--plugin-profile`.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.
-- `ai6 sleeper [--config-dir PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:
-  show and approve an Operation's standing orders. It reads the Registry from
-  `AI6_REGISTRY` or the platform state directory, like the Station.
+- `ai6 sleeper [--config PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:
+  show and approve an Operation's standing orders. It reads the roster from the
+  configuration provider and the Registry the bootstrap file names, like the Station.
+- `ai6 config path [--config PATH]` prints the bootstrap file in use, or `none (defaults)`.
 - `ai6 quarantine list|add <AGENT> <REASON> [--operation ID | --all]|release <AGENT> (--operation ID | --all)`:
   stop an Agent, or lift that, through the Registry; a Station applies the change within a
   scheduler tick.

@@ -13,7 +13,7 @@ From the repository root:
 
 ```console
 cargo build --workspace --all-features
-cargo run -p ai6 --features cli -- serve --config-dir ./examples/config --plugin-path ./target/debug
+cargo run -p ai6 --features cli -- serve --provider ./examples/config --plugin-path ./target/debug
 cargo run -p universal-exports --features cli -- --help
 cargo run -p ai6ctl -- --help
 ```

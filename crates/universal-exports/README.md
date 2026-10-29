@@ -47,7 +47,7 @@ let config = GatewayConfig::new(
     Duration::from_secs(60),
     Duration::from_secs(30),
 )?;
-let registry = FileRegistry::from_environment()?;
+let registry = FileRegistry::open("/var/lib/ai6/registry");
 let _app = Gateway::with_registry(config, Arc::new(registry)).router();
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
@@ -93,13 +93,12 @@ $env:AI6_EXPORTS_DIRECTORY = 'coqui_access_password'
 $env:AI6_EXPORTS_DIRECTORY_CONFIG = 'C:\secure\accounts.json'
 $env:AI6_EXPORTS_PROXY_USER_HEADER = 'X-Forwarded-User'
 $env:AI6_EXPORTS_PROXY_LOOKUP_BY = 'name'
-$env:AI6_EXPORTS_PROXY_SECRET = '<at least 32 random characters>'
-universal-exports --public-origin https://exports.example
+universal-exports --config C:\secure\unex.cfg   # public_origin, station_token, proxy_secret
 ```
 
 The reverse proxy must overwrite `X-Forwarded-User` after authenticating the
 browser and remove any client-supplied value, and set `X-AI6-Proxy-Secret` to
-`AI6_EXPORTS_PROXY_SECRET` on every request it forwards: an asserted identity without
+`unex.cfg`'s `proxy_secret` on every request it forwards: an asserted identity without
 that secret is refused, since anything reaching the loopback port directly (another
 local process) can set the identity header too. The Directory maps that asserted
 name to the authoritative person record; authorization still comes from the
@@ -202,8 +201,8 @@ Session tuple. A missing policy rule denies access. Provider calls run on Tokio'
 blocking pool. `Gateway::with_registry` enables M-issued access tokens but leaves
 user login and authorization endpoints unavailable. The `universal-exports` command accepts
 provider IDs and an access-policy path to enable user access; it uses the Registry
-selected by `AI6_REGISTRY`: a directory, `sqlite:PATH` or a `postgres://` URL
-(`ai6::directorates::registry::backend::from_environment`).
+`unex.cfg` names: a directory, `sqlite:PATH` or a `postgres://` URL
+(`ai6::directorates::registry::backend::open_with`).
 
 A control goes to the Station holding the Mission's latest Session record, else the one
 holding its brief's lease, else the Headquarters Station, passing over Stations gone dark;
@@ -240,18 +239,34 @@ Queued Missions without a registered Session are not included; creation requires
 not expose terminal data or credentials. Put the public gateway behind the deployment's HTTPS reverse proxy;
 it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 
+## Bootstrap file
+
+The command's bootstrap file is `unex.cfg`: `--config PATH`, else the file `UNEX_CONFIG`
+names, else `unex.cfg` in the user's then the system's configuration directory (as `ai6.cfg`,
+`ai6::bootstrap::UnexBootstrap`). Unknown keys are refused; relative paths are relative to
+the file; a secret is `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself, and the
+last two are printed as a warning at start.
+
+| Key | Effect | Default |
+| --- | --- | --- |
+| `listen` | Loopback address behind the HTTPS reverse proxy (`127.0.0.1` only); `--listen`. | `127.0.0.1:7082` |
+| `public_origin` | Required browser HTTPS origin; `--public-origin`. | None |
+| `station_token` | Required secret: the Stations' channel bearer credential. | None |
+| `proxy_secret` | Secret the reverse proxy sends in `X-AI6-Proxy-Secret`; required with a proxy identity header, at least 32 characters. | None |
+| `state_dir` | Where verified provider libraries, and a default Registry, are kept. | The platform's state directory |
+| `[provider] location`, `password`, `poll` | The configuration provider Stations read; its roster is served under `/v1/user/roster` (a directory read-only, SQL editable); `--provider`. | The file's directory |
+| `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `state_dir` |
+| `[plugins] paths`, `profile` | Provider libraries and how they are checked; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without |
+
 ## Environment variables
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `AI6_EXPORTS_PUBLIC_ORIGIN` | Required public HTTPS origin; overridden by `--public-origin`. | None |
-| `AI6_EXPORTS_PORT` | Loopback listener port; overridden by `--port`. | `7082` |
-| `AI6_EXPORTS_STATION_TOKEN` | Required Station channel bearer credential supplied by Q; environment only. | None |
+| `UNEX_CONFIG` | The bootstrap file; must exist when set. | Search as above |
 | `AI6_EXPORTS_AUTHENTICATOR` | Guatiao Authenticator provider ID. | None |
 | `AI6_EXPORTS_AUTHENTICATOR_CONFIG` | Path to the Authenticator's JSON config object. | None |
 | `AI6_EXPORTS_PROXY_USER_HEADER` | Sanitized authenticated-user header supplied by the trusted reverse proxy. | None |
 | `AI6_EXPORTS_PROXY_LOOKUP_BY` | Directory attribute for the reverse-proxy identity, commonly `name` or `email`. | `name` |
-| `AI6_EXPORTS_PROXY_SECRET` | Required with `AI6_EXPORTS_PROXY_USER_HEADER`: what the proxy sends in `X-AI6-Proxy-Secret`, at least 32 characters; environment only. | None |
 | `AI6_EXPORTS_DIRECTORY` | Guatiao Directory provider ID. | None |
 | `AI6_EXPORTS_DIRECTORY_CONFIG` | Path to the Directory's JSON config object. | None |
 | `AI6_EXPORTS_ACCESS_POLICY` | TOML policy for the built-in RoleAuthorizer; alternative to `AI6_EXPORTS_AUTHORIZER`. | Deny all |
@@ -260,12 +275,9 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 | `AI6_EXPORTS_ACCESS_CACHE_TTL` | Seconds a found person or a granted action is kept, to absorb bursts; `0` keeps none. | `5` |
 | `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL` | Seconds "no such person" or a denial is kept; `0` keeps none. | `1` |
 | `AI6_EXPORTS_ACCESS_CACHE_ENTRIES` | The most lookups, and decisions, kept; `0` keeps none. | `10000` |
-| `AI6_EXPORTS_ROSTER` | The roster the Stations read (as `ai6 serve --config`): a configuration directory (read-only), `sqlite:PATH` or a `postgres://` URL; its password may come from `AI6_CONFIG_PASSWORD`. | None (roster routes answer 503) |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
 | `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None |
-| `AI6_REGISTRY` | Shared Registry used for issued access-token records: a directory, `sqlite:PATH` or a `postgres://` URL (TLS-verified by default; a weaker `sslmode` is printed as a warning). | AI6 state Registry |
-| `AI6_REGISTRY_PASSWORD` | Password for a PostgreSQL `AI6_REGISTRY` that names none. | None |
 
 ## Exit status
 

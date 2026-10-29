@@ -50,7 +50,7 @@ cargo add ai6 --git https://github.com/jose-pr/ai6
 
 ```console
 cargo build --workspace --all-features
-cargo run -p ai6 --features cli -- serve --config-dir ./examples/config --plugin-path ./target/debug
+cargo run -p ai6 --features cli -- serve --provider ./examples/config --plugin-path ./target/debug
 ```
 
 The example configuration registers Operation `G` and Agents `007`, `008` (its backup)
@@ -59,24 +59,62 @@ and `Tanner`.
 ## Command line
 
 ```console
-ai6 serve [--listen 127.0.0.1:7081] [--config-dir PATH] [--plugin-path PATH]...
+ai6 serve [--config PATH] [--provider LOCATION] [--registry LOCATION] [--state-dir PATH]
+          [--station ID] [--listen 127.0.0.1:7081] [--plugin-path PATH]...
           [--plugin-pins PATH] [--plugin-profile strict|report|off]
-          [--registry LOCATION] [--config LOCATION] [--headquarters-lease SECS]
-          [--station ID] [--role control|execution]... [--label KEY=VALUE]...
+          [--role control|execution]... [--label KEY=VALUE]...
           [--terminal ID] [--max-concurrent-missions N] [--resources-every SECS]
-          [--config-poll SECS] [--safe-house-cache NAME]... [--safe-house-cache-age SECS]
+          [--safe-house-cache NAME]... [--safe-house-cache-age SECS]
           [watchdog options]
 ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--plugin-pins PATH]
           [--plugin-profile strict|report|off] [--terminal ID] [--detach]
 ai6 runner call [--state-dir PATH] METHOD PATH
 ai6 plugins pin PATH...
 ai6 harness pin DIR
-ai6 identity
-ai6 peer waiting
-ai6 peer accept FINGERPRINT
-ai6 sleeper [--config-dir PATH] list
-ai6 sleeper [--config-dir PATH] authorize OPERATION NAME
-ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
+ai6 identity [--config PATH]
+ai6 peer [--config PATH] waiting
+ai6 peer [--config PATH] accept FINGERPRINT
+ai6 sleeper [--config PATH] list
+ai6 sleeper [--config PATH] authorize OPERATION NAME
+ai6 sleeper [--config PATH] revoke OPERATION NAME
+ai6 quarantine [--config PATH] list|add|release ...
+ai6 config path [--config PATH]
+```
+
+Settings needed before the configuration provider is reached come from the bootstrap file
+`ai6.cfg`: `--config PATH`, else the file `AI6_CONFIG` names, else `ai6.cfg` in the user's
+configuration directory (`XDG_CONFIG_HOME/ai6`, `%APPDATA%\ai6`, `~/.config/ai6`), else in
+`/etc/ai6` (`%ProgramData%\ai6` on Windows). With none, every key is at its default.
+`ai6 config path` prints the file in use. A flag beats the file, which beats the default.
+
+```toml
+# ai6.cfg: every key optional; relative paths are relative to this file.
+station = "hq-1"                 # default: kept in the state directory
+state_dir = "/var/lib/ai6"       # default: the platform's state directory
+listen = "127.0.0.1:7081"
+
+[provider]                       # where the configuration provider is
+location = "."                   # a directory, sqlite:PATH or postgres://...; default: this file's directory
+password = { file = "db-password" }   # or { env = "NAME" } or the value (a weakening)
+poll = 5                         # seconds; 0 turns reloading off
+
+[registry]
+location = "postgres://db/ai6"   # default: the provider's database when SQL, else <state_dir>/registry
+headquarters_lease = 60          # seconds; also sets the SQL timeouts
+
+[identity]
+dir = "/var/lib/ai6"             # identity.pem and peers/; default: state_dir
+
+[plugins]
+paths = ["/usr/lib/ai6"]
+profile = "strict"               # strict, report or off
+
+[secrets]
+dir = "secrets"                  # where loadout secret files are read; default: secrets/ beside this file
+
+[unex]
+url = "https://ai6.example"      # Universal Exports; ai6ctl reads only this
+token = { file = "unex-token" }  # the Station publishes only with a token
 ```
 
 - `ai6 serve` runs the Station. Harnesses run in an available terminal provider that suits
@@ -85,14 +123,15 @@ ai6 sleeper [--config-dir PATH] revoke OPERATION NAME
   both roles are on by default. `--resources-every` (default 60, `0` off) sets how often each
   remote Theater's CPUs, load and memory are sampled for placement. Watchdog defaults are set with `--stall-timeout`,
   `--loop-timeout`, `--loop-min-lines`, `--blocked-after`, `--max-runtime`, `--history`
-  and `--normalize-digits` (seconds may be fractional). `--registry` and `--config` take
+  and `--normalize-digits` (seconds may be fractional). `--registry` and `--provider` take
   a directory, `sqlite:PATH` or a `postgres://` URL: Stations sharing a PostgreSQL
-  Registry and roster need no shared filesystem. PostgreSQL is reached over TLS with the
-  server verified (`sslrootcert=PATH` for a private CA); `sslmode=require` or `disable`
-  is printed as a warning. Passwords come from `password_file=PATH`,
-  `AI6_REGISTRY_PASSWORD` or `AI6_CONFIG_PASSWORD`. `--headquarters-lease` (default 60
+  Registry and configuration provider need no shared filesystem. PostgreSQL is reached over
+  TLS with the server verified (`sslrootcert=PATH` for a private CA); `sslmode=require` or
+  `disable` is printed as a warning. Passwords are the bootstrap file's `[provider]` and
+  `[registry] password`; one read from the environment or written inline is printed as a
+  warning and reported at check-in. `[registry] headquarters_lease` (default 60
   seconds) is how long a standby control Station waits before taking over; the
-  database timeouts are derived from it. `--config-poll` (default 5 seconds, `0` off) is how
+  database timeouts are derived from it. `[provider] poll` (default 5 seconds, `0` off) is how
   often the Station checks its roster and `loadouts.toml` and applies a change that passes
   the configuration checks without a restart; a refused one is audited and the last good
   configuration keeps running. `--safe-house-cache NAME` (repeatable; default `target`,
@@ -194,8 +233,8 @@ Each Mission snapshots its Operation's cover policy and starting commit; at comp
 audits commit authors and messages and attaches a `cover` report. A violation marks the
 Mission `blown` when the Operation sets `on_blown = "fail"`. With `cables-mcp`, Claude and
 Codex Sessions receive a per-Session MCP endpoint with a random bearer token that is never
-persisted or passed as an argument. With `publisher` and both `AI6_EXPORTS_URL` and
-`AI6_EXPORTS_STATION_TOKEN` set, the Station registers Sessions with Universal Exports, publishes
+persisted or passed as an argument. With `publisher` and the bootstrap file's `[unex] url`
+and `token` set, the Station registers Sessions with Universal Exports, publishes
 lifecycle and terminal output through a bounded queue, and dispatches authorized terminal
 input back to the live Session; its state is at `GET /internal/publisher`.
 

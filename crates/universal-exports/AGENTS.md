@@ -116,8 +116,8 @@ pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
 pub const MIN_PROXY_SECRET_LEN: usize = 32;
 ```
 
-`universal-exports` reads the secret from `AI6_EXPORTS_PROXY_SECRET` (environment only) and
-refuses to start with `AI6_EXPORTS_PROXY_USER_HEADER` but no secret.
+`universal-exports` reads the secret from `unex.cfg`'s `proxy_secret` and refuses to start
+with `AI6_EXPORTS_PROXY_USER_HEADER` but no secret.
 
 All fields are public; `AttachMode` is non-exhaustive. M is the authority that
 chooses the Operation, Mission ID, Session ID and mode. The gateway refuses a
@@ -589,7 +589,7 @@ pub struct Gateway { /* shared, bounded state */ }
 
 impl Gateway {
     pub fn new(config: GatewayConfig) -> Self;
-    /// Any Registry store; the command passes `ai6::directorates::registry::backend::from_environment()?`.
+    /// Any Registry store; the command opens the one `unex.cfg` names.
     pub fn with_registry(config: GatewayConfig, registry: Arc<dyn ai6::RegistryBackend>) -> Self;
     pub fn with_access(
         config: GatewayConfig,
@@ -597,7 +597,7 @@ impl Gateway {
         access: AccessProviders,
     ) -> Self;
     /// Serves `/v1/user/roster/...` from the roster the Stations read; without it those
-    /// routes answer 503. The command opens `AI6_EXPORTS_ROSTER` with ai6's config::open_with.
+    /// routes answer 503. The command opens `unex.cfg`'s provider with ai6's config::open_with.
     #[must_use]
     pub fn with_roster(self, source: Arc<dyn ai6::ConfigSource>) -> Self;
     pub fn authenticate_station(&self, presented: &str) -> Result<(), GatewayError>;
@@ -829,9 +829,10 @@ map these to 400, 401, 403, 404, 409 or 413 responses. The login route also answ
 
 The optional `cli` feature builds the service command:
 
-- `universal-exports --public-origin <HTTPS_ORIGIN> [--port <PORT>] [--plugin-path <PATH>]`
-  starts the loopback gateway. `AI6_EXPORTS_STATION_TOKEN` is required from the environment;
-  it is never accepted as an argument. Set `AI6_EXPORTS_DIRECTORY` and either
+- `universal-exports [--config <PATH>] [--provider <LOC>] [--registry <LOC>] [--listen <ADDR>]
+  [--public-origin <HTTPS_ORIGIN>] [--plugin-path <PATH>]` starts the loopback gateway from
+  `unex.cfg` (below) with these flags over it. Its `station_token` is required and is never
+  accepted as an argument. Set `AI6_EXPORTS_DIRECTORY` and either
   `AI6_EXPORTS_AUTHENTICATOR` or `AI6_EXPORTS_PROXY_USER_HEADER` to enable user access.
   `AI6_EXPORTS_PROXY_LOOKUP_BY` selects the Directory attribute for proxy identity
   resolution and defaults to `name`. `--authenticator-config`,
@@ -843,9 +844,9 @@ The optional `cli` feature builds the service command:
   loads the built-in role policy; `AI6_EXPORTS_AUTHORIZER` selects a custom provider
   instead. Repeat `--plugin-path` for each provider directory or library. The libraries are
   checked as a Station checks its own: `--plugin-pins PATH` (`AI6_EXPORTS_PLUGIN_PINS`; must
-  exist when named, default `plugins.toml` in the AI6 configuration directory) and
-  `--plugin-profile strict|report|off` (`AI6_EXPORTS_PLUGIN_PROFILE`; default strict with a
-  pin set, report without); refusals and weakenings are printed at start. Provider IDs
+  exist when named, default `plugins.toml` in the provider's directory) and `[plugins]
+  profile` or `--plugin-profile strict|report|off` (default strict with a pin set, report
+  without); refusals and weakenings are printed at start. Provider IDs
   are those of the `coqui-access` plugin libraries (`coqui_access_password`, `coqui_access_key`,
   `coqui_access_ldap`, `coqui_access_proxy`, `coqui_access_mtls`, `coqui_roles`). The
   Directory and a plugin Authorizer are loaded behind coqui-access-kit's cache:
@@ -860,15 +861,32 @@ The optional `cli` feature builds the service command:
 listener startup fails, and `2` for invalid arguments. The operator command-line client is
 the separate `ai6ctl` crate.
 
+## Bootstrap file
+
+The command's bootstrap file is `unex.cfg`: `--config PATH`, else the file `UNEX_CONFIG`
+names, else `unex.cfg` in the user's then the system's configuration directory (as `ai6.cfg`,
+`ai6::bootstrap::UnexBootstrap`). Unknown keys are refused; relative paths are relative to
+the file; a secret is `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself, and the
+last two are printed as a warning at start.
+
+| Key | Effect | Default |
+| --- | --- | --- |
+| `listen` | Loopback address behind the HTTPS reverse proxy (`127.0.0.1` only); `--listen`. | `127.0.0.1:7082` |
+| `public_origin` | Required browser HTTPS origin; `--public-origin`. | None |
+| `station_token` | Required secret: the Stations' channel bearer credential. | None |
+| `proxy_secret` | Secret the reverse proxy sends in `X-AI6-Proxy-Secret`; required with a proxy identity header, at least 32 characters. | None |
+| `state_dir` | Where verified provider libraries, and a default Registry, are kept. | The platform's state directory |
+| `[provider] location`, `password`, `poll` | The configuration provider Stations read; its roster is served under `/v1/user/roster` (a directory read-only, SQL editable); `--provider`. | The file's directory |
+| `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `state_dir` |
+| `[plugins] paths`, `profile` | Provider libraries and how they are checked; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without |
+
 ## Environment variables
 
 The library reads no environment variables. The commands read:
 
 | Variable | Effect | Default |
 | --- | --- | --- |
-| `AI6_EXPORTS_PUBLIC_ORIGIN` | Required browser HTTPS origin; overridden by `--public-origin`. | None |
-| `AI6_EXPORTS_PORT` | Loopback listener port; overridden by `--port`. | `7082` |
-| `AI6_EXPORTS_STATION_TOKEN` | Required Station channel bearer credential from Q; accepted only from the environment, never a command-line argument. | None |
+| `UNEX_CONFIG` | The bootstrap file; must exist when set. | Search as above |
 | `AI6_EXPORTS_AUTHENTICATOR` | Guatiao Authenticator provider ID; paired with the Directory setting. | None |
 | `AI6_EXPORTS_AUTHENTICATOR_CONFIG` | Path to a JSON object containing the Authenticator's Guatiao config. | None |
 | `AI6_EXPORTS_PROXY_USER_HEADER` | Sanitized authenticated-user header supplied by the trusted reverse proxy. | None |
@@ -881,7 +899,6 @@ The library reads no environment variables. The commands read:
 | `AI6_EXPORTS_ACCESS_CACHE_TTL` | Seconds a person the Directory found, or an action a plugin Authorizer granted, is kept; `0` keeps none. | `5` |
 | `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL` | Seconds "no such person" or a denial is kept; `0` keeps none. | `1` |
 | `AI6_EXPORTS_ACCESS_CACHE_ENTRIES` | The most lookups, and the most decisions, kept; `0` keeps none. | `10000` |
-| `AI6_EXPORTS_ROSTER` | The roster the Stations read (`ai6 serve --config`): a configuration directory (listed, read-only), `sqlite:PATH` or a `postgres://` URL (editable); overridden by `--roster`. Its password may come from `AI6_CONFIG_PASSWORD`. | None (roster routes answer 503) |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address at the login route. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
 | `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None (the connection's address) |
@@ -890,7 +907,7 @@ The library reads no environment variables. The commands read:
 | `AI6_EXPORTS_URL` | API origin for `ai6ctl`; overridden by `--server`. | `http://127.0.0.1:7082` |
 | `AI6_ACCESS_TOKEN` | User bearer required by every `ai6ctl` command except `health`. | None |
 
-`--help` lists the flag-backed variables and names `AI6_EXPORTS_STATION_TOKEN` in its help text.
+`--help` lists the flag-backed variables and names `unex.cfg` and its `station_token`.
 The command does not log the credential.
 
 ## Gotchas

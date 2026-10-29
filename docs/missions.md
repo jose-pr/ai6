@@ -240,9 +240,9 @@ Registry keeps the newest 10,000 activity events.
 
 ## File-backed intake
 
-The Registry defaults to the platform AI6 state directory and can be overridden
-with `AI6_REGISTRY` or `ai6 serve --registry`, which also take a SQLite or PostgreSQL
-database ([Stations](stations.md#shared-registry)). In a directory, briefs in `new/` are
+The Registry defaults to `registry` in the Station's state directory and can be named
+with `ai6.cfg`'s `[registry] location` or `ai6 serve --registry`, which also take a SQLite or
+PostgreSQL database ([Stations](stations.md#shared-registry)). In a directory, briefs in `new/` are
 claimed atomically and filed under `claimed/`, then `done/` or `failed/`; in a database
 the same states are rows of `ai6_briefs`. The stable brief identity combines its source
 and external record ID. User-supplied integrations can write validated brief JSON into a
@@ -607,7 +607,7 @@ AI6 refuses the resume.
 
 A Station can publish lifecycle and terminal events to Universal Exports. When
 enabled, it consumes the gateway's authenticated input/resize queue and routes frames to
-the matching live provider Session. Configure `AI6_EXPORTS_URL` and
-`AI6_EXPORTS_STATION_TOKEN` together; leave both unset to disable publication. Events use a
+the matching live provider Session. Set `[unex] url` and `token` in `ai6.cfg`; without a
+token the Station publishes nothing. Events use a
 bounded background worker and finite request timeouts, so a gateway outage does not block
 the provider Session. Terminal bytes remain binary.

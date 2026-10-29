@@ -53,12 +53,12 @@ Outer Office needs the Flutter `main` SDK; see
 
 ```bash
 cargo run -p ai6 --features cli -- serve \
-  --config-dir ./examples/config \
+  --provider ./examples/config \
   --plugin-path ./target/debug
 ```
 
 Submit a Mission to the Station's private API from another terminal, with the token the
-Station keeps in `api-token` under its state directory (`AI6_STATE`, else `$AI6_HOME/state`,
+Station keeps in `api-token` under its state directory (`state_dir` in `ai6.cfg`, else
 `%LOCALAPPDATA%\AI6` on Windows, or `$XDG_STATE_HOME/AI6`, by default `~/.local/state/AI6`):
 
 ```bash
@@ -79,17 +79,19 @@ flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release \
 ## Command line
 
 ```text
-ai6 serve [--listen ADDRESS] [--config-dir PATH] [--plugin-path PATH]...
+ai6 serve [--config PATH] [--provider LOCATION] [--registry LOCATION] [--state-dir PATH]
+          [--station ID] [--listen ADDRESS] [--plugin-path PATH]...
           [--plugin-pins PATH] [--plugin-profile strict|report|off]
-          [--station ID] [--role control|execution]... [--label KEY=VALUE]...
-          [--terminal ID] [--registry LOCATION] [--config LOCATION]
+          [--role control|execution]... [--label KEY=VALUE]... [--terminal ID]
+ai6 config path [--config PATH]
 ai6 plugins pin PATH...
 ai6 harness pin DIR
 ai6 identity
 ai6 peer waiting
 ai6 peer accept FINGERPRINT
 
-universal-exports --public-origin HTTPS_ORIGIN [--port PORT] [--plugin-path PATH]...
+universal-exports [--config PATH] [--provider LOCATION] [--registry LOCATION]
+          [--listen ADDRESS] [--public-origin HTTPS_ORIGIN] [--plugin-path PATH]...
 
 ai6ctl health
 ai6ctl stations
@@ -103,9 +105,12 @@ ai6ctl session SESSION_ID
 ai6ctl session interrupt SESSION_ID
 ```
 
-`ai6ctl` reads `AI6_EXPORTS_URL` for the Universal Exports origin and a user bearer from
-`AI6_ACCESS_TOKEN`. A Station publishes to Universal Exports when `AI6_EXPORTS_URL` and
-`AI6_EXPORTS_STATION_TOKEN` are both set.
+A Station and the `ai6` command read what they need before they reach their configuration
+provider from the bootstrap file `ai6.cfg` (`--config`, else `AI6_CONFIG`, else the user's
+then the system's configuration directory); Universal Exports reads `unex.cfg` the same way
+(`UNEX_CONFIG`). `ai6ctl` reads `AI6_EXPORTS_URL` for the Universal Exports origin and a user
+bearer from `AI6_ACCESS_TOKEN`. A Station publishes to Universal Exports when `ai6.cfg` has
+`[unex] url` and `token`.
 
 ## API overview
 

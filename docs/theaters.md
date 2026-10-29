@@ -107,7 +107,7 @@ for every step. A file is written beside its destination and moved over it, so a
 runner is replaced safely. `--check` only looks: a step that would act prints
 `would-change`, and nothing on the Theater is written. The command exits non-zero when a
 step failed, or with `--check` when one would change. Pass `--plugin-path` for the
-Theater's transport provider and `--config-dir` for another configuration directory.
+Theater's transport provider and `--config` for another bootstrap file.
 
 `runner.command` must be a path for the runner to be installed (`~/` is the transport's
 default directory, the login user's home over SSH). Provisioning carries no secret: harness

@@ -197,7 +197,7 @@ repository is created, empty and bare, the first time a conversation or a change
 Unix (`0700` directories, `0600` files; on Windows it takes its parent directory's access);
 `ssh://`, `https://` and `user@host:` repositories are reached with the Station user's Git
 credentials and must exist. Universal Exports reads the
-table from the roster it serves (`--roster`) and sends each message with the person's
+table from the roster it serves (its configuration provider) and sends each message with the person's
 workspace; without `personal_repo` nothing changes from a plain conversation. A Station takes
 no repository on Universal Exports' word: it fills the person's in from its own roster's
 `[assistant]` and refuses a message or commit naming any repository that roster does not give
@@ -378,8 +378,9 @@ a script in bounds is where the sandbox lets it read, write and connect, not whi
   device files `null`, `zero`, `random`, `urandom` and `tty`. Not the rest of `/etc` (so not
   `/etc/ai6`), `/opt`, `/var` or `/dev`, not the Station user's home, not her own configuration
   directory or another conversation's, not `/proc`. Reads are denied everywhere and re-opened
-  only for those, and AI6's state directory, `AI6_HOME`, `/usr/local/etc`, `/usr/etc` and the
-  Station's own program are denied again inside them. Keep the Station's configuration and
+  only for those, and the Station's state, identity and secrets directories, AI6's platform
+  state directory, `/usr/local/etc`, `/usr/etc` and the Station's own program are denied
+  again inside them. Keep the Station's configuration and
   secrets out of the re-opened paths: an interpreter's install directory is readable whole.
 - They see none of the harness's environment variables but `PATH`, `HOME`, the temporary
   directory, locale and terminal ones: not the model's key or login, her tool tokens, a proxy
@@ -486,8 +487,9 @@ profile and `elevated` needs the whole filesystem readable (Codex 0.164).
 Codex's `:minimal` is wider than Claude Code's system paths: with Codex 0.164 it re-opens all
 of `/etc`, `/usr`, `/dev`, `/proc` and `/run` on Linux, and `C:\Windows`, `C:\Program Files`
 and `C:\ProgramData` on Windows. So the handler denies the Station's own paths again inside
-it: `/etc/ai6`, `/usr/local/etc` and `/usr/etc` (not on Windows), AI6's state directory,
-`AI6_HOME`, and the directory of the Station's own program (or only the program, when an
+it: `/etc/ai6`, `/usr/local/etc` and `/usr/etc` (not on Windows), the Station's state,
+identity and secrets directories, AI6's platform state directory, and the directory of the
+Station's own program (or only the program, when an
 interpreter's install directory holds it). Keep the Station's configuration and secrets in
 one of those, or outside what `:minimal` opens: elsewhere under `/etc` or `C:\ProgramData`
 her scripts can read what the Station's user can.

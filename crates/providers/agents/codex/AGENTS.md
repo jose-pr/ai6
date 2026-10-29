@@ -126,8 +126,8 @@ directory (`ai6::credential_dir_var`), or lies inside a credential directory.
 `/proc` and `/run` on Linux, and `C:\Windows`, `C:\Program Files` and `C:\ProgramData` on
 Windows (measured with Codex 0.164.0, `codex sandbox -P`), and a `deny` inside a readable
 directory wins whatever the order. So the Station's paths are denied again: `/etc/ai6`,
-`/usr/local/etc` and `/usr/etc` (not on Windows), `ai6::station::safehouse::state_dir()`,
-`AI6_HOME`, and the directory of the program hosting the handler (`current_exe`), or only that
+`/usr/local/etc` and `/usr/etc` (not on Windows), `ai6::bootstrap::platform_state_dir()`,
+the Station's own directories in `AssistantMode::station_paths`, and the directory of the program hosting the handler (`current_exe`), or only that
 program when its directory holds or lies in a readable install directory. A path that is or
 holds the working directory or a readable install directory is not denied. A deny of a path that
 does not exist is accepted.
