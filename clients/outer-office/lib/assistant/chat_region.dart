@@ -1,8 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../routes/oo_route.dart';
 import '../shell/oo_shell.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
@@ -24,7 +24,7 @@ class ChatShell extends StatefulWidget {
     required this.chat,
     required this.child,
     this.personId,
-    this.page = const {},
+    this.route,
     this.onLink,
     this.onMemory,
     super.key,
@@ -34,8 +34,8 @@ class ChatShell extends StatefulWidget {
   final Widget child;
   final String? personId;
 
-  /// The app page the person is on, sent with each message to her.
-  final Map<String, String> page;
+  /// The route of the app page the person is on, sent with each message to her.
+  final OoRoute? route;
 
   /// Opens an app page one of her views links to.
   final void Function(String link)? onLink;
@@ -87,11 +87,11 @@ class _ChatShellState extends State<ChatShell> {
     chat
       ..onLink = widget.onLink
       ..onMemory = widget.onMemory;
-    final page = widget.page;
+    final route = widget.route;
     final person = widget.personId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || widget.chat != chat) return;
-      if (!mapEquals(chat.page.value, page)) chat.page.value = page;
+      if (chat.route.value != route) chat.route.value = route;
       if (person != null && chat.person != person) {
         final narrow = MediaQuery.sizeOf(context).width < OoBreakpoints.compact;
         chat.restore(person, narrow: narrow);
@@ -313,8 +313,8 @@ class ChatPanel extends StatelessWidget {
       child: Focus(
         focusNode: chat.region,
         child: ValueListenableBuilder(
-          valueListenable: chat.page,
-          builder: (context, page, _) => AssistantPanel(
+          valueListenable: chat.route,
+          builder: (context, route, _) => AssistantPanel(
             // Keeps the scroll and the panel's state as it moves around the page. The
             // full-screen chat mounts its own: moving a keyed subtree out of it into the
             // page's just-onstage region fails Flutter's semantics geometry assertion.
@@ -322,7 +322,7 @@ class ChatPanel extends StatelessWidget {
                 ? null
                 : chat.panelKey,
             controller: chat.controller,
-            page: page,
+            route: route,
             onOpen: (link) => chat.onLink?.call(link),
             onMemory: chat.onMemory == null
                 ? null

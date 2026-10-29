@@ -248,20 +248,23 @@ class _InstantTransitions extends PageTransitionsBuilder {
 ///
 /// [themeId] is a stored preference ([ooThemePreference]): with [ooSystemTheme] the app
 /// follows the operating system between Light and Night Ops. The system's high-contrast and
-/// reduced-motion settings apply to every theme.
+/// reduced-motion settings apply to every theme. It shows [home], or, given [routerConfig],
+/// the pages of that router.
 class OoMaterialApp extends StatelessWidget {
   const OoMaterialApp({
     required this.themeId,
     required this.backdrop,
     required this.title,
-    required this.home,
+    this.home,
+    this.routerConfig,
     super.key,
-  });
+  }) : assert((home == null) != (routerConfig == null));
 
   final String themeId;
   final bool backdrop;
   final String title;
-  final Widget home;
+  final Widget? home;
+  final RouterConfig<Object>? routerConfig;
 
   @override
   Widget build(BuildContext context) {
@@ -274,15 +277,26 @@ class OoMaterialApp extends StatelessWidget {
       reduceMotion: reduceMotion,
       backdrop: backdrop,
     );
+    final themeMode = chosen == null ? ThemeMode.system : ThemeMode.light;
+    final animation = reduceMotion ? Duration.zero : kThemeAnimationDuration;
+    if (routerConfig case final routerConfig?) {
+      return MaterialApp.router(
+        title: title,
+        debugShowCheckedModeBanner: false,
+        theme: theme(chosen ?? OoThemeId.light),
+        darkTheme: theme(chosen ?? OoThemeId.nightOps),
+        themeMode: themeMode,
+        themeAnimationDuration: animation,
+        routerConfig: routerConfig,
+      );
+    }
     return MaterialApp(
       title: title,
       debugShowCheckedModeBanner: false,
       theme: theme(chosen ?? OoThemeId.light),
       darkTheme: theme(chosen ?? OoThemeId.nightOps),
-      themeMode: chosen == null ? ThemeMode.system : ThemeMode.light,
-      themeAnimationDuration: reduceMotion
-          ? Duration.zero
-          : kThemeAnimationDuration,
+      themeMode: themeMode,
+      themeAnimationDuration: animation,
       home: home,
     );
   }

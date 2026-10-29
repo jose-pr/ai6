@@ -17,11 +17,14 @@ enum OoPage {
   roster('roster', 'Roster', OoIconName.roster),
   pools('pools', 'Account Pools', OoIconName.pools),
   timeline('timeline', 'Timeline', OoIconName.timeline),
-  audit('audit', 'Audit', OoIconName.audit);
+  audit('audit', 'Audit', OoIconName.audit),
+
+  /// Her memory of the person; opened from her chat, not the rail.
+  memory('memory', "Moneypenny's memory", OoIconName.moneypenny);
 
   const OoPage(this.id, this.label, this.iconName);
 
-  /// The page's name in Moneypenny's page context, such as `green_ink`.
+  /// The page's name in its route, such as `green_ink`.
   final String id;
   final String label;
   final OoIconName iconName;
@@ -340,33 +343,3 @@ class _DrawerHeading extends StatelessWidget {
 
 /// The Outer Office app icon from the brand pack, 256 px.
 const ooAppMark = 'assets/brand/outer-office-256.png';
-
-/// A page made of [tabs], each a label and its body: one tab is shown without a tab bar,
-/// none says [empty].
-class OoTabs extends StatelessWidget {
-  const OoTabs({required this.tabs, required this.empty, super.key});
-
-  final List<(String, Widget)> tabs;
-  final String empty;
-
-  @override
-  Widget build(BuildContext context) {
-    if (tabs.isEmpty) return Center(child: Text(empty));
-    if (tabs.length == 1) return tabs.single.$2;
-    return DefaultTabController(
-      length: tabs.length,
-      child: Column(
-        children: [
-          TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [for (final (label, _) in tabs) Tab(text: label)],
-          ),
-          Expanded(
-            child: TabBarView(children: [for (final (_, body) in tabs) body]),
-          ),
-        ],
-      ),
-    );
-  }
-}

@@ -7,6 +7,8 @@ import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/chat_layout.dart';
 import 'package:outer_office/assistant/chat_region.dart';
 import 'package:outer_office/main.dart';
+import 'package:outer_office/routes/oo_route.dart';
+import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/settings/oo_config.dart';
 import 'package:outer_office/shell/app_window.dart';
 import 'package:outer_office/shell/overview_page.dart';
@@ -391,7 +393,7 @@ void main() {
     expect(channel.sent.last, {
       'type': 'message',
       'text': 'Status?',
-      'page': {'view': 'overview'},
+      'route': {'page': 'overview'},
     });
     expect(chat.message.text, isEmpty);
   });
@@ -581,7 +583,13 @@ void main() {
     addTearDown(chat.dispose);
     await tester.pumpWidget(
       MaterialApp(
-        home: MissionBoardPage(board: board, desktopWindows: true, chat: chat),
+        home: MissionBoardPage(
+          board: board,
+          desktopWindows: true,
+          chat: chat,
+          route: const OoRoute(OoPage.overview),
+          onRoute: (_) {},
+        ),
       ),
     );
     chat.open();

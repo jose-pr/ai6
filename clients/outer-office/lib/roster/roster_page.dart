@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../routes/oo_filters.dart';
+import '../routes/oo_route.dart';
 
 /// The roster revision a Station runs, what it refused and which changed files wait for a
 /// restart, as it reported them at check-in.
@@ -141,20 +143,38 @@ const _assistantKind = 'assistant';
 /// The key of the one record of a family that has one, such as Moneypenny's settings.
 const _singletonKey = 'settings';
 
+/// A route's roster `kind` and the kind the gateway's roster API names.
+const _routeKinds = {
+  'operation': 'operations',
+  'agent': 'agents',
+  'role': 'roles',
+  'cover': 'covers',
+  'assistant': _assistantKind,
+};
+
 /// The roster every Station reads: Operations, Agents, roles, cover policies and Moneypenny's
 /// settings, edited through Universal Exports. Each Station takes up an accepted edit at its
 /// next poll; what an edit of her settings weakens stays shown until the next edit.
+///
+/// The [route] (page `roster`) names the `kind` shown (Agents when absent) and may narrow
+/// the list to the record whose key is `key`.
 class RosterPage extends StatefulWidget {
-  const RosterPage({required this.board, super.key});
+  const RosterPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<RosterPage> createState() => _RosterPageState();
 }
 
 class _RosterPageState extends State<RosterPage> {
-  String _kind = 'agents';
   RosterRecords? _records;
   String? _error;
   bool _loading = false;
@@ -162,10 +182,25 @@ class _RosterPageState extends State<RosterPage> {
   /// What the last accepted edit weakens, as the gateway words it.
   List<String> _weakened = const [];
 
+  /// The API kind the route names.
+  String get _kind => _routeKinds[widget.route['kind'] ?? 'agent']!;
+
   @override
   void initState() {
     super.initState();
     unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(RosterPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['kind'] != widget.route['kind']) {
+      setState(() {
+        _records = null;
+        _weakened = const [];
+      });
+      unawaited(_load());
+    }
   }
 
   Future<void> _load() async {
@@ -239,6 +274,11 @@ class _RosterPageState extends State<RosterPage> {
   @override
   Widget build(BuildContext context) {
     final records = _records;
+    final key = widget.route['key'];
+    final shown = [
+      for (final record in records?.records ?? const <RosterRecord>[])
+        if (key == null || record.key == key) record,
+    ];
     final canEdit =
         widget.board.canManageRoster && (records?.writable ?? false);
     // Moneypenny's settings are one record: once it exists it is edited, not added.
@@ -263,12 +303,12 @@ class _RosterPageState extends State<RosterPage> {
                 ],
                 onChanged: (kind) {
                   if (kind == null || kind == _kind) return;
-                  setState(() {
-                    _kind = kind;
-                    _records = null;
-                    _weakened = const [];
-                  });
-                  unawaited(_load());
+                  final singular = _routeKinds.entries
+                      .firstWhere((entry) => entry.value == kind)
+                      .key;
+                  widget.onRoute(
+                    widget.route.without('key').withField('kind', singular),
+                  );
                 },
               ),
               IconButton(
@@ -285,6 +325,7 @@ class _RosterPageState extends State<RosterPage> {
             ],
           ),
         ),
+        OoFilterBar(route: widget.route, onRoute: widget.onRoute),
         if (records != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -314,10 +355,15 @@ class _RosterPageState extends State<RosterPage> {
             RosterRecords(records: []) => const Center(
               child: Text('No records of this kind.'),
             ),
+            _ when shown.isEmpty => Center(
+              child: Text(
+                'No ${_kinds[_kind]} record is keyed ${widget.route['key']}.',
+              ),
+            ),
             _ => ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
-                for (final record in records.records)
+                for (final record in shown)
                   Card(
                     child: ListTile(
                       title: Text(record.key),

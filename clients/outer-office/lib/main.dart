@@ -27,6 +27,9 @@ import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
 import 'pools/pools_page.dart';
 import 'roster/roster_page.dart';
+import 'routes/oo_filters.dart';
+import 'routes/oo_route.dart';
+import 'routes/oo_router.dart';
 import 'settings/connection_settings.dart';
 import 'settings/oo_config.dart';
 import 'settings/oo_config_file.dart';
@@ -2660,7 +2663,9 @@ class MissionAttemptSummary {
   ].join(' · ');
 }
 
-class OuterOfficeApp extends StatelessWidget {
+/// The app: its pages are routes ([OoRoute]), read from and written to the web URL after the
+/// `#` (`#/missions?state=failed`).
+class OuterOfficeApp extends StatefulWidget {
   const OuterOfficeApp({
     required this.board,
     required this.desktopWindows,
@@ -2675,17 +2680,50 @@ class OuterOfficeApp extends StatelessWidget {
   final ChatSettings chatSettings;
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: board,
-    builder: (context, _) => OoMaterialApp(
-      themeId: board.themeId,
-      backdrop: board.backdrop,
-      title: 'Outer Office | AI6',
-      home: _AccessGate(
-        board: board,
-        desktopWindows: desktopWindows,
-        chatSettings: chatSettings,
+  State<OuterOfficeApp> createState() => _OuterOfficeAppState();
+}
+
+class _OuterOfficeAppState extends State<OuterOfficeApp> {
+  late final OoRouterDelegate _router = OoRouterDelegate(
+    shell: (context, router) => _AccessGate(
+      board: widget.board,
+      desktopWindows: widget.desktopWindows,
+      chatSettings: widget.chatSettings,
+      router: router,
+    ),
+    memory: (context) => widget.board.demo || widget.board.accessToken != null
+        ? MemoryPage(board: widget.board)
+        : null,
+  );
+  final _location = PlatformRouteInformationProvider(
+    initialRouteInformation: RouteInformation(
+      uri: Uri.parse(
+        WidgetsBinding.instance.platformDispatcher.defaultRouteName,
       ),
+    ),
+  );
+  late final RouterConfig<OoRoute> _config = RouterConfig(
+    routeInformationProvider: _location,
+    routeInformationParser: OoRouteParser(onUnknown: _router.unknown),
+    routerDelegate: _router,
+    backButtonDispatcher: RootBackButtonDispatcher(),
+  );
+
+  @override
+  void dispose() {
+    _router.dispose();
+    _location.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.board,
+    builder: (context, _) => OoMaterialApp(
+      themeId: widget.board.themeId,
+      backdrop: widget.board.backdrop,
+      title: 'Outer Office | AI6',
+      routerConfig: _config,
     ),
   );
 }
@@ -2695,11 +2733,13 @@ class _AccessGate extends StatefulWidget {
     required this.board,
     required this.desktopWindows,
     required this.chatSettings,
+    required this.router,
   });
 
   final MissionBoard board;
   final bool desktopWindows;
   final ChatSettings chatSettings;
+  final OoRouterDelegate router;
 
   @override
   State<_AccessGate> createState() => _AccessGateState();
@@ -2763,6 +2803,10 @@ class _AccessGateState extends State<_AccessGate> {
         board: board,
         desktopWindows: widget.desktopWindows,
         chat: chat,
+        route: widget.router.page,
+        onRoute: (route) => widget.router.go(context, route),
+        notice: widget.router.notice,
+        onDismissNotice: widget.router.dismissNotice,
       );
     },
   );
@@ -2905,6 +2949,10 @@ class MissionBoardPage extends StatefulWidget {
     required this.board,
     required this.desktopWindows,
     this.chat,
+    required this.route,
+    required this.onRoute,
+    this.notice,
+    this.onDismissNotice,
     super.key,
   });
 
@@ -2914,24 +2962,34 @@ class MissionBoardPage extends StatefulWidget {
   /// The conversation with Moneypenny; none in the preview or before sign-in.
   final MoneypennyChat? chat;
 
+  /// The page shown and its filters.
+  final OoRoute route;
+
+  /// Opens another route: a new history entry for another page, a replaced one for a
+  /// filter of this page.
+  final ValueChanged<OoRoute> onRoute;
+
+  /// Why a link opened Overview instead of its page, until dismissed.
+  final String? notice;
+  final VoidCallback? onDismissNotice;
+
   @override
   State<MissionBoardPage> createState() => _MissionBoardPageState();
 }
 
 class _MissionBoardPageState extends State<MissionBoardPage> {
-  String? _selectedState;
   SessionSummary? _selectedWebSession;
-  OoPage _page = OoPage.overview;
 
-  /// Opens the app page a view links to: a Mission on Missions, a Station or Theater on
-  /// Stations. Anything else is ignored. A chat covering the page makes way for it.
+  /// Opens the app page a view links to (`app:/missions?operation_id=G`); a link that is not
+  /// a route is ignored. A chat covering the page makes way for it.
   void _openLink(String link) {
-    final page = link.startsWith('app:/missions/')
-        ? OoPage.missions
-        : link.startsWith('app:/stations/') || link.startsWith('app:/theaters/')
-        ? OoPage.stations
-        : null;
-    if (page == null || !mounted) return;
+    final OoRoute route;
+    try {
+      route = OoRoute.parseUri(link);
+    } on FormatException {
+      return;
+    }
+    if (!mounted) return;
     if (widget.chat case final chat?) {
       switch (chatPlacement(chat.layout, MediaQuery.sizeOf(context).width)) {
         case ChatPlacement.centre:
@@ -2941,7 +2999,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         case _:
       }
     }
-    setState(() => _page = page);
+    widget.onRoute(route);
   }
 
   bool get _canReadRoles =>
@@ -2977,47 +3035,101 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     }
   }
 
-  Widget _pageBody(BuildContext context, OoPage page, List<OoPage> pages) =>
+  void _open(OoPage page) {
+    // An expanded chat hides the page; going to a page shows it.
+    if (widget.chat case final chat? when chat.layout == ChatLayout.expanded) {
+      chat.dock();
+    }
+    widget.onRoute(OoRoute(page));
+  }
+
+  /// The tab a person picks, kept in the route.
+  void _tab(OoRoute route, String tab) =>
+      widget.onRoute(route.withField('tab', tab));
+
+  Widget _pageBody(BuildContext context, OoRoute route, List<OoPage> pages) =>
       AnimatedBuilder(
         animation: widget.board,
         builder: (context, _) {
           final board = widget.board;
-          return switch (page) {
-            OoPage.overview => OverviewPage(
+          final onRoute = widget.onRoute;
+          return switch (route.page) {
+            OoPage.overview || OoPage.memory => OverviewPage(
               board: board,
               pages: pages,
-              onOpen: (page) => setState(() => _page = page),
+              onOpen: _open,
               assistant: widget.chat?.controller,
               onAsk: (text) {
                 widget.chat?.open();
                 widget.chat?.controller.ask(
                   text,
-                  page: {'view': OoPage.overview.id},
+                  route: const OoRoute(OoPage.overview),
                 );
               },
             ),
-            OoPage.operations => OperationsPage(board: board),
-            OoPage.missions => _missionsBody(context),
+            OoPage.operations => OperationsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.missions => _missionsBody(context, route),
             OoPage.sessions => SessionsPage(
               board: board,
+              route: route,
+              onRoute: onRoute,
               onOpen: (session) => _openSession(context, session),
             ),
             OoPage.agents => OoTabs(
               empty: 'No Agents are available to this account.',
+              selected: route['tab'],
+              onSelect: (tab) => _tab(route, tab),
               tabs: [
-                if (_canReadRoles) ('Agents', AgentsPage(board: board)),
-                if (_canReadRoles) ('Roles', AgentRolesPage(board: board)),
+                if (_canReadRoles)
+                  (
+                    'agents',
+                    'Agents',
+                    AgentsPage(board: board, route: route, onRoute: onRoute),
+                  ),
+                if (_canReadRoles)
+                  (
+                    'roles',
+                    'Roles',
+                    AgentRolesPage(
+                      board: board,
+                      route: route,
+                      onRoute: onRoute,
+                    ),
+                  ),
               ],
             ),
             OoPage.stations => OoTabs(
               empty: 'No Stations are available to this account.',
+              selected: route['tab'],
+              onSelect: (tab) => _tab(route, tab),
               tabs: [
-                ('Stations', _stationsTab(context)),
-                ('Theaters', _TheatersTab(board: board.stationBoard)),
+                ('overview', 'Stations', _stationsTab(context, route)),
+                (
+                  'theaters',
+                  'Theaters',
+                  _TheatersTab(
+                    board: board.stationBoard,
+                    stationId: route['station_id'],
+                    theaterId: route['theater_id'],
+                  ),
+                ),
                 if (board.demo || board.readableStations.isNotEmpty)
-                  ('Settings', StationSettingsPage(board: board)),
+                  (
+                    'settings',
+                    'Settings',
+                    StationSettingsPage(
+                      board: board,
+                      route: route,
+                      onRoute: onRoute,
+                    ),
+                  ),
                 if (board.previewOperations.isNotEmpty)
                   (
+                    'placement',
                     'Placement',
                     ListView(children: [_PlacementPanel(board: board)]),
                   ),
@@ -3025,76 +3137,136 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
             ),
             OoPage.greenInk => OoTabs(
               empty: 'No green ink is available to this account.',
+              selected: route['tab'],
+              onSelect: (tab) => _tab(route, tab),
               tabs: [
                 if (board.greenInkOperations.isNotEmpty)
-                  ('Inbox', GreenInkPage(board: board)),
+                  (
+                    'inbox',
+                    'Inbox',
+                    GreenInkPage(board: board, route: route, onRoute: onRoute),
+                  ),
                 if (board.classAuthorizationOperations.isNotEmpty)
                   (
+                    'classes',
                     'Class authorisations',
-                    ClassAuthorizationsPage(board: board),
+                    ClassAuthorizationsPage(
+                      board: board,
+                      route: route,
+                      onRoute: onRoute,
+                    ),
                   ),
               ],
             ),
             OoPage.briefings => OoTabs(
               empty: 'No briefings are available to this account.',
+              selected: route['tab'],
+              onSelect: (tab) => _tab(route, tab),
               tabs: [
-                ('Mission proposals', MissionProposalsPage(board: board)),
-                ('Held briefs', HeldBriefsPage(board: board)),
+                (
+                  'proposals',
+                  'Mission proposals',
+                  MissionProposalsPage(
+                    board: board,
+                    route: route,
+                    onRoute: onRoute,
+                  ),
+                ),
+                (
+                  'held',
+                  'Held briefs',
+                  HeldBriefsPage(board: board, route: route, onRoute: onRoute),
+                ),
               ],
             ),
-            OoPage.roster => RosterPage(board: board),
-            OoPage.pools => AccountPoolsPage(board: board),
-            OoPage.timeline => OperationTimelinePage(board: board),
-            OoPage.audit => AuditLogPage(board: board),
+            OoPage.roster => RosterPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.pools => AccountPoolsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.timeline => OperationTimelinePage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.audit => AuditLogPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
           };
         },
       );
 
-  Widget _stationsTab(BuildContext context) => ListView(
-    children: [
-      _StationOverview(
-        board: widget.board.stationBoard,
-        onCreateMission: (operationId) =>
-            _showCreateMission(context, operationId, widget.board),
-        canCreateMission: (operationId) =>
-            !widget.board.demo && widget.board.canCreateMission(operationId),
-      ),
-      if (widget.board.demo) const _DemoBanner(),
-      if (widget.board.error != null)
-        _ErrorBanner(
-          apiOrigin: widget.board.apiOrigin,
-          onRetry: widget.board.refresh,
+  Widget _stationsTab(BuildContext context, OoRoute route) {
+    final stationBoard = widget.board.stationBoard;
+    final stationId = route['station_id'];
+    return ListView(
+      children: [
+        OoFilterBar(
+          route: route,
+          onRoute: widget.onRoute,
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
         ),
-    ],
-  );
+        _StationOverview(
+          board: stationId == null
+              ? stationBoard
+              : StationBoardSummary(
+                  headquartersStation: stationBoard.headquartersStation,
+                  stations: [
+                    for (final station in stationBoard.stations)
+                      if (station.stationId == stationId) station,
+                  ],
+                ),
+          empty: stationId == null
+              ? 'No Stations have checked in yet.'
+              : 'Station $stationId is not on this board.',
+          onCreateMission: (operationId) =>
+              _showCreateMission(context, operationId, widget.board),
+          canCreateMission: (operationId) =>
+              !widget.board.demo && widget.board.canCreateMission(operationId),
+        ),
+        if (widget.board.demo) const _DemoBanner(),
+        if (widget.board.error != null)
+          _ErrorBanner(
+            apiOrigin: widget.board.apiOrigin,
+            onRetry: widget.board.refresh,
+          ),
+      ],
+    );
+  }
 
   // Sized by the width the page has, not the window's: a docked chat takes part of it.
-  Widget _missionsBody(BuildContext context) => LayoutBuilder(
+  Widget _missionsBody(BuildContext context, OoRoute route) => LayoutBuilder(
     builder: (context, constraints) =>
-        _missionsBoard(context, constraints.maxWidth),
+        _missionsBoard(context, route, constraints.maxWidth),
   );
 
-  Widget _missionsBoard(BuildContext context, double width) {
-    final sessions = widget.board.sessions
-        .where(
-          (session) =>
-              _selectedState == null ||
-              (session.state ?? 'working') == _selectedState,
-        )
-        .toList();
-    final missions = groupMissions(sessions);
+  Widget _missionsBoard(BuildContext context, OoRoute route, double width) {
+    final missions = routeMissions(widget.board, route);
     // The page's width beside the labelled rail at the wide breakpoint.
     final showSessionPane =
         !widget.desktopWindows &&
         width >= OoBreakpoints.wide - OoRail.width - 1;
+    final missionId = route['mission_id'];
     final boardView = CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
           child: _BoardHeader(
             sessions: widget.board.sessions,
-            selectedState: _selectedState,
-            onSelectState: (state) => setState(() => _selectedState = state),
+            selectedStates: route.states,
+            onSelectStates: (states) =>
+                widget.onRoute(route.withField('state', states)),
+            sort: OoSortMenu(route: route, onRoute: widget.onRoute),
           ),
+        ),
+        SliverToBoxAdapter(
+          child: OoFilterBar(route: route, onRoute: widget.onRoute),
         ),
         if (widget.board.demo) const SliverToBoxAdapter(child: _DemoBanner()),
         if (widget.board.error != null)
@@ -3109,10 +3281,19 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
             hasScrollBody: false,
             child: Center(child: CircularProgressIndicator()),
           )
-        else if (missions.isEmpty && _selectedState != null)
+        else if (missions.isEmpty && missionId != null)
           SliverFillRemaining(
             hasScrollBody: false,
-            child: _EmptyFilter(state: _selectedState!),
+            child: _EmptyFilter(
+              text:
+                  'Mission $missionId of Operation ${route['operation_id']} is not on this '
+                  'board.',
+            ),
+          )
+        else if (missions.isEmpty && route.filtered)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: _EmptyFilter(text: 'No Missions match these filters.'),
           )
         else if (missions.isEmpty && widget.board.error == null)
           const SliverFillRemaining(hasScrollBody: false, child: _EmptyBoard())
@@ -3162,31 +3343,31 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     );
   }
 
+  /// Copies the web link of the current page, `<OO_API origin>/#<route>`: the web app is
+  /// served from the gateway's origin.
+  Future<void> _copyLink(BuildContext context, OoRoute route) async {
+    final link = '${widget.board.apiOrigin.origin}/#${route.location}';
+    await Clipboard.setData(ClipboardData(text: link));
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Copied $link')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = _pages(widget.board);
-    final page = pages.contains(_page) ? _page : OoPage.overview;
+    final route = pages.contains(widget.route.page)
+        ? widget.route
+        : const OoRoute(OoPage.overview);
     final chat = widget.chat;
-    final selectedSession = _selectedWebSession;
     final width = MediaQuery.sizeOf(context).width;
     final phone = width < OoBreakpoints.phone;
-    void open(OoPage page) {
-      // An expanded chat hides the page; going to a page shows it.
-      if (chat?.layout == ChatLayout.expanded) chat!.dock();
-      setState(() => _page = page);
-    }
-
+    final notice = widget.notice;
     return ChatShell(
       chat: chat,
       personId: widget.board.userSession?.personId,
-      page: {
-        'view': page.id,
-        if (selectedSession != null) ...{
-          'operation_id': selectedSession.operationId,
-          'mission_id': selectedSession.missionId,
-          'session_id': selectedSession.sessionId,
-        },
-      },
+      route: route,
       onLink: _openLink,
       onMemory: (context) => Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -3195,18 +3376,26 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
       ),
       child: OoShell(
         pages: pages,
-        page: page,
-        onSelect: open,
+        page: route.page,
+        onSelect: _open,
         search: (expanded) => AnimatedBuilder(
           animation: widget.board,
           builder: (context, _) => OoSearch(
             board: widget.board,
             pages: pages,
-            onOpen: open,
+            onOpen: _open,
             expanded: expanded,
           ),
         ),
         actions: [
+          if (!phone)
+            Builder(
+              builder: (context) => IconButton(
+                tooltip: 'Copy link to this page',
+                onPressed: () => unawaited(_copyLink(context, route)),
+                icon: const Icon(Icons.link),
+              ),
+            ),
           if (chat != null)
             MoneypennyButton(chat: chat)
           else
@@ -3218,7 +3407,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           AnimatedBuilder(
             animation: widget.board,
             builder: (context, _) =>
-                AttentionBell(board: widget.board, pages: pages, onOpen: open),
+                AttentionBell(board: widget.board, pages: pages, onOpen: _open),
           ),
           if (!phone)
             IconButton(
@@ -3238,28 +3427,132 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         ],
         body: ChatRegion(
           chat: chat,
-          pageLabel: page.label,
-          child: _pageBody(context, page, pages),
+          pageLabel: route.page.label,
+          child: Column(
+            children: [
+              if (notice != null)
+                MaterialBanner(
+                  content: Text(notice),
+                  leading: const Icon(Icons.link_off),
+                  actions: [
+                    TextButton(
+                      onPressed: widget.onDismissNotice,
+                      child: const Text('Dismiss'),
+                    ),
+                  ],
+                ),
+              Expanded(child: _pageBody(context, route, pages)),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
+/// The Missions a Missions [route] selects from the board, in its order. A state filter keeps
+/// the Sessions in those states (a Mission shows when one of its Sessions does); Station and
+/// Agent come from the Mission's brief and attempts.
+List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
+  final states = route.states;
+  final sessions = [
+    for (final session in board.sessions)
+      if (states.isEmpty || states.contains(session.state ?? 'working'))
+        session,
+  ];
+  final text = route['text']?.toLowerCase();
+  bool matches(MissionGroup mission) {
+    if (route['operation_id'] case final operation?
+        when mission.operationId != operation) {
+      return false;
+    }
+    if (route['mission_id'] case final id? when mission.missionId != id) {
+      return false;
+    }
+    final brief = board.missionBrief(mission.operationId, mission.missionId);
+    if (route['station_id'] case final station?) {
+      final stations = {
+        ?brief?.stationId,
+        for (final attempt in board.attempts(
+          mission.operationId,
+          mission.missionId,
+        ))
+          attempt.station,
+      };
+      if (!stations.contains(station)) return false;
+    }
+    if (route['agent'] case final agent? when brief?.agentId != agent) {
+      return false;
+    }
+    if (text != null) {
+      final haystack = [
+        mission.operationId,
+        mission.missionId,
+        for (final session in mission.sessions) session.sessionId,
+        ?brief?.prompt,
+      ];
+      if (!haystack.any((item) => item.toLowerCase().contains(text))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  double updated(MissionGroup mission) => mission.sessions
+      .map((session) => session.updatedAt ?? 0)
+      .reduce((a, b) => a > b ? a : b);
+  // The board holds no creation time: the earliest update it holds stands in for one.
+  double created(MissionGroup mission) => mission.sessions
+      .map((session) => session.updatedAt ?? 0)
+      .reduce((a, b) => a < b ? a : b);
+  final key = switch (route['sort']) {
+    'updated' => updated,
+    'created' => created,
+    'state' => (
+      MissionGroup mission,
+    ) => boardStates.indexOf(mission.state).toDouble(),
+    _ => null,
+  };
+  // Ties keep the board's order (Operation, then Mission ID); `List.sort` is not stable.
+  final missions = groupMissions(sessions).where(matches).indexed.toList();
+  if (key != null) {
+    missions.sort((a, b) {
+      final order = key(a.$2).compareTo(key(b.$2));
+      return order != 0 ? order : a.$1.compareTo(b.$1);
+    });
+  }
+  final ordered = [for (final (_, mission) in missions) mission];
+  return route['order'] == 'desc' ? ordered.reversed.toList() : ordered;
+}
+
 /// Every Theater each Station reports, with what it can do and why it may not be used.
 class _TheatersTab extends StatelessWidget {
-  const _TheatersTab({required this.board});
+  const _TheatersTab({required this.board, this.stationId, this.theaterId});
 
   final StationBoardSummary board;
+
+  /// Only this Station's Theaters, and of them only [theaterId], when given.
+  final String? stationId;
+  final String? theaterId;
 
   @override
   Widget build(BuildContext context) {
     final theaters = [
       for (final station in board.stations)
-        for (final theater in station.theaters) (station, theater),
+        if (stationId == null || station.stationId == stationId)
+          for (final theater in station.theaters)
+            if (theaterId == null || theater.id == theaterId)
+              (station, theater),
     ];
     if (theaters.isEmpty) {
-      return const Center(child: Text('No Station reports a Theater.'));
+      return Center(
+        child: Text(switch ((stationId, theaterId)) {
+          (final station?, final theater?) =>
+            'Station $station reports no Theater $theater.',
+          (final station?, null) => 'Station $station reports no Theater.',
+          _ => 'No Station reports a Theater.',
+        }),
+      );
     }
     final muted = OoTokens.of(context).muted;
     return ListView.separated(
@@ -3316,37 +3609,60 @@ class AuditEntrySummary {
 }
 
 class MissionProposalsPage extends StatefulWidget {
-  const MissionProposalsPage({required this.board, super.key});
+  const MissionProposalsPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+
+  /// A Briefings route: its `operation_id` and `item_id` (a proposal ID).
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<MissionProposalsPage> createState() => _MissionProposalsPageState();
 }
 
 class _MissionProposalsPageState extends State<MissionProposalsPage> {
-  String? _operationId;
   Future<List<MissionProposalSummary>>? _proposals;
   bool _deciding = false;
 
   List<String> get _operations => widget.board.proposalOperations;
 
+  /// The route's Operation, else the first this person may create Missions in.
+  String? get _operationId =>
+      widget.route['operation_id'] ??
+      (_operations.isEmpty ? null : _operations.first);
+
+  void _load() {
+    final operationId = _operationId;
+    _proposals = operationId != null && _operations.contains(operationId)
+        ? widget.board.loadMissionProposals(operationId)
+        : null;
+  }
+
   @override
   void initState() {
     super.initState();
-    final operations = _operations;
-    if (operations.isNotEmpty) {
-      _operationId = operations.first;
-      _proposals = widget.board.loadMissionProposals(_operationId!);
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(MissionProposalsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
+      _load();
     }
   }
 
   void _selectOperation(String? operationId) {
     if (operationId == null) return;
-    setState(() {
-      _operationId = operationId;
-      _proposals = widget.board.loadMissionProposals(operationId);
-    });
+    widget.onRoute(
+      widget.route.without('item_id').withField('operation_id', operationId),
+    );
   }
 
   Future<void> _decide(
@@ -3407,6 +3723,16 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
   Widget build(BuildContext context) {
     final operations = _operations;
     final operationId = _operationId;
+    final itemId = widget.route['item_id'];
+    if (operations.isNotEmpty &&
+        operationId != null &&
+        !operations.contains(operationId)) {
+      return Center(
+        child: Text(
+          'Operation $operationId does not grant this account Mission creation.',
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.all(24),
       child: operations.isEmpty
@@ -3419,6 +3745,8 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 420),
                   child: DropdownButtonFormField<String>(
+                    // Keyed so that a route change replaces the field's first value.
+                    key: ValueKey(operationId),
                     initialValue: operationId,
                     decoration: const InputDecoration(labelText: 'Operation'),
                     items: operations
@@ -3429,7 +3757,13 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                     onChanged: _selectOperation,
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
+                OoFilterBar(
+                  route: widget.route,
+                  onRoute: widget.onRoute,
+                  padding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
@@ -3469,10 +3803,18 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                       if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }
-                      final proposals = snapshot.data!;
+                      final proposals = [
+                        for (final proposal in snapshot.data!)
+                          if (itemId == null || proposal.id == itemId) proposal,
+                      ];
                       if (proposals.isEmpty) {
-                        return const Center(
-                          child: Text('No pending Mission proposals.'),
+                        return Center(
+                          child: Text(
+                            itemId == null
+                                ? 'No pending Mission proposals.'
+                                : 'No pending Mission proposal $itemId in Operation '
+                                      '$operationId.',
+                          ),
                         );
                       }
                       return ListView.separated(
@@ -3572,9 +3914,18 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
 }
 
 class StationSettingsPage extends StatefulWidget {
-  const StationSettingsPage({required this.board, super.key});
+  const StationSettingsPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+
+  /// A Stations route: its `station_id` picks the Station.
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<StationSettingsPage> createState() => _StationSettingsPageState();
@@ -3592,11 +3943,27 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
       ? const ['station-control-01']
       : widget.board.readableStations;
 
+  /// The route's Station, else the first whose settings this person may read.
+  String? get _routeStation =>
+      widget.route['station_id'] ??
+      (_stations.isEmpty ? null : _stations.first);
+
   @override
   void initState() {
     super.initState();
-    final stations = _stations;
-    if (stations.isNotEmpty) _selectStation(stations.first);
+    final station = _routeStation;
+    if (station != null && _stations.contains(station)) _load(station);
+  }
+
+  @override
+  void didUpdateWidget(StationSettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final station = _routeStation;
+    if (station != _stationId &&
+        station != null &&
+        _stations.contains(station)) {
+      _load(station);
+    }
   }
 
   @override
@@ -3609,6 +3976,12 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
 
   void _selectStation(String? stationId) {
     if (stationId == null) return;
+    widget.onRoute(
+      widget.route.without('theater_id').withField('station_id', stationId),
+    );
+  }
+
+  void _load(String stationId) {
     final settings = widget.board.loadStationSettings(stationId);
     setState(() {
       _stationId = stationId;
@@ -3673,6 +4046,14 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
     if (stations.isEmpty) {
       return const Center(child: Text('No Stations grant settings access.'));
     }
+    final station = _routeStation;
+    if (station != null && !stations.contains(station)) {
+      return Center(
+        child: Text(
+          'Station $station does not grant this account settings access.',
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -3681,6 +4062,8 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: DropdownButtonFormField<String>(
+              // Keyed so that a route change replaces the field's first value.
+              key: ValueKey(_stationId),
               initialValue: _stationId,
               decoration: const InputDecoration(labelText: 'Station'),
               items: [
@@ -3801,16 +4184,24 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
 }
 
 class AgentRolesPage extends StatefulWidget {
-  const AgentRolesPage({required this.board, super.key});
+  const AgentRolesPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+
+  /// An Agents route: its `operation_id` and `role`.
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<AgentRolesPage> createState() => _AgentRolesPageState();
 }
 
 class _AgentRolesPageState extends State<AgentRolesPage> {
-  String? _operationId;
   Future<List<AgentRoleSummary>>? _roles;
 
   List<String> get _operations =>
@@ -3823,22 +4214,37 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
           .toList(growable: false) ??
       const [];
 
+  /// The route's Operation, else the first whose roles this person may read.
+  String? get _operationId =>
+      widget.route['operation_id'] ??
+      (_operations.isEmpty ? null : _operations.first);
+
+  void _load() {
+    final operationId = _operationId;
+    _roles = operationId != null && _operations.contains(operationId)
+        ? widget.board.loadAgentRoles(operationId)
+        : null;
+  }
+
   @override
   void initState() {
     super.initState();
-    final operations = _operations;
-    if (operations.isNotEmpty) {
-      _operationId = operations.first;
-      _roles = widget.board.loadAgentRoles(_operationId!);
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(AgentRolesPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
+      _load();
     }
   }
 
   void _selectOperation(String? operationId) {
     if (operationId == null) return;
-    setState(() {
-      _operationId = operationId;
-      _roles = widget.board.loadAgentRoles(operationId);
-    });
+    widget.onRoute(
+      widget.route.without('role').withField('operation_id', operationId),
+    );
   }
 
   Future<void> _editRole([AgentRoleSummary? role]) async {
@@ -3912,6 +4318,16 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
         operationId != null &&
         widget.board.canConfigureAgentRoles(operationId) &&
         !widget.board.demo;
+    final roleId = widget.route['role'];
+    if (operations.isNotEmpty &&
+        operationId != null &&
+        !operations.contains(operationId)) {
+      return Center(
+        child: Text(
+          'Operation $operationId does not grant this account Agent role access.',
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.all(24),
       child: operations.isEmpty
@@ -3922,6 +4338,8 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 420),
                   child: DropdownButtonFormField<String>(
+                    // Keyed so that a route change replaces the field's first value.
+                    key: ValueKey(operationId),
                     initialValue: operationId,
                     decoration: const InputDecoration(labelText: 'Operation'),
                     items: operations
@@ -3932,7 +4350,13 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
                     onChanged: _selectOperation,
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 8),
+                OoFilterBar(
+                  route: widget.route,
+                  onRoute: widget.onRoute,
+                  padding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
@@ -3960,16 +4384,25 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
                       if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }
-                      if (snapshot.data!.isEmpty) {
-                        return const Center(
-                          child: Text('No Agent roles are configured.'),
+                      final roles = [
+                        for (final role in snapshot.data!)
+                          if (roleId == null || role.id == roleId) role,
+                      ];
+                      if (roles.isEmpty) {
+                        return Center(
+                          child: Text(
+                            roleId == null
+                                ? 'No Agent roles are configured.'
+                                : 'Role $roleId is not configured in Operation '
+                                      '$operationId.',
+                          ),
                         );
                       }
                       return ListView.separated(
-                        itemCount: snapshot.data!.length,
+                        itemCount: roles.length,
                         separatorBuilder: (_, _) => const SizedBox(height: 8),
                         itemBuilder: (context, index) {
-                          final role = snapshot.data![index];
+                          final role = roles[index];
                           return Card(
                             child: ListTile(
                               title: Text(role.id),
@@ -4104,9 +4537,18 @@ class _AgentRoleEditorDialogState extends State<AgentRoleEditorDialog> {
 }
 
 class AuditLogPage extends StatefulWidget {
-  const AuditLogPage({required this.board, super.key});
+  const AuditLogPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+
+  /// An Audit route: its `operation_id` or `station_id` keeps only that scope's records.
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<AuditLogPage> createState() => _AuditLogPageState();
@@ -4123,16 +4565,34 @@ class _AuditLogPageState extends State<AuditLogPage> {
 
   void _refresh() => setState(() => _records = widget.board.loadAudit());
 
+  bool _selected(AuditEntrySummary record) {
+    if (widget.route['operation_id'] case final operation?) {
+      return record.operation == operation;
+    }
+    if (widget.route['station_id'] case final station?) {
+      return record.resource == 'station:$station';
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      Align(
-        alignment: Alignment.centerRight,
-        child: IconButton(
-          tooltip: 'Refresh audit log',
-          onPressed: _refresh,
-          icon: const Icon(Icons.refresh),
-        ),
+      Row(
+        children: [
+          Expanded(
+            child: OoFilterBar(
+              route: widget.route,
+              onRoute: widget.onRoute,
+              padding: const EdgeInsets.fromLTRB(20, 8, 8, 0),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Refresh audit log',
+            onPressed: _refresh,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
       Expanded(
         child: FutureBuilder<List<AuditEntrySummary>>(
@@ -4146,10 +4606,14 @@ class _AuditLogPageState extends State<AuditLogPage> {
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final records = snapshot.requireData;
+            final records = snapshot.requireData.where(_selected).toList();
             if (records.isEmpty) {
-              return const Center(
-                child: Text('No audit records are available.'),
+              return Center(
+                child: Text(
+                  widget.route.filtered
+                      ? 'No audit records match these filters.'
+                      : 'No audit records are available.',
+                ),
               );
             }
             return ListView.separated(
@@ -4378,11 +4842,15 @@ class _Swatch extends StatelessWidget {
 class _StationOverview extends StatelessWidget {
   const _StationOverview({
     required this.board,
+    required this.empty,
     required this.onCreateMission,
     required this.canCreateMission,
   });
 
   final StationBoardSummary board;
+
+  /// What shows when [board] has no Station.
+  final String empty;
   final ValueChanged<String> onCreateMission;
   final bool Function(String operationId) canCreateMission;
 
@@ -4401,10 +4869,10 @@ class _StationOverview extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         if (board.stations.isEmpty)
-          const Card(
+          Card(
             child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('No Stations have checked in yet.'),
+              padding: const EdgeInsets.all(16),
+              child: Text(empty),
             ),
           )
         else
@@ -4822,13 +5290,19 @@ class _StationCard extends StatelessWidget {
 class _BoardHeader extends StatelessWidget {
   const _BoardHeader({
     required this.sessions,
-    required this.selectedState,
-    required this.onSelectState,
+    required this.selectedStates,
+    required this.onSelectStates,
+    required this.sort,
   });
 
   final List<SessionSummary> sessions;
-  final String? selectedState;
-  final ValueChanged<String?> onSelectState;
+
+  /// The states shown; none means every state.
+  final List<String> selectedStates;
+  final ValueChanged<List<String>> onSelectStates;
+
+  /// The sort control beside the heading.
+  final Widget sort;
 
   @override
   Widget build(BuildContext context) {
@@ -4850,10 +5324,17 @@ class _BoardHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            'Mission board',
-            style: Theme.of(context).textTheme.headlineMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Mission board',
+                  style: Theme.of(context).textTheme.headlineMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+              sort,
+            ],
           ),
           const SizedBox(height: 16),
           Wrap(
@@ -4863,17 +5344,21 @@ class _BoardHeader extends StatelessWidget {
               _CountChip(
                 label: 'Sessions',
                 count: sessions.length,
-                selected: selectedState == null,
-                onPressed: () => onSelectState(null),
+                selected: selectedStates.isEmpty,
+                onPressed: () => onSelectStates(const []),
               ),
-              for (final state in missionStates)
+              for (final state in boardStates)
                 _CountChip(
                   label: state,
                   count: counts[state] ?? 0,
                   state: state,
-                  selected: selectedState == state,
-                  onPressed: () =>
-                      onSelectState(selectedState == state ? null : state),
+                  selected: selectedStates.contains(state),
+                  // One state at a time from the chips; a link may name several.
+                  onPressed: () => onSelectStates(
+                    selectedStates.length == 1 && selectedStates.single == state
+                        ? const []
+                        : [state],
+                  ),
                 ),
             ],
           ),
@@ -4915,27 +5400,13 @@ class _CountChip extends StatelessWidget {
 }
 
 class _EmptyFilter extends StatelessWidget {
-  const _EmptyFilter({required this.state});
+  const _EmptyFilter({required this.text});
 
-  final String state;
+  final String text;
 
   @override
-  Widget build(BuildContext context) =>
-      Center(child: Text('No ${state.toUpperCase()} Sessions'));
+  Widget build(BuildContext context) => Center(child: Text(text));
 }
-
-/// The board's states of a Mission or Session, in the board's order.
-const missionStates = [
-  'queued',
-  'working',
-  'blocked',
-  'stalled',
-  'parked',
-  'quarantined',
-  'done',
-  'failed',
-  'abandoned',
-];
 
 /// One Mission on the board and its Sessions.
 class MissionGroup {

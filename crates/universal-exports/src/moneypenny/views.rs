@@ -2,20 +2,21 @@
 //!
 //! She builds a view with the `show` tool; the gateway refuses one that is not exactly this
 //! schema, within these bounds, and tells her why, so the app is never sent one. Nothing in a
-//! view runs: there is no HTML, no script and no outside link (a Markdown link must point into
-//! the app, `app:/...`). A form drafts the input of one of her `propose_*` tools; submitting it
+//! view runs: there is no HTML, no script and no outside link (a Markdown link must be an app
+//! route, `app:/<page>?...`, see [`super::routes`]). A form drafts the input of one of her `propose_*` tools; submitting it
 //! records a proposal, which the person still confirms.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::actions;
+use super::checks::{identifier, short};
+use super::routes::Route;
 
 /// The schema version this gateway shows.
 pub(crate) const VIEW_VERSION: u32 = 1;
 const MAX_BLOCKS: usize = 24;
 const MAX_TEXT: usize = 8 * 1024;
-const MAX_SHORT: usize = 512;
 const MAX_COLUMNS: usize = 12;
 const MAX_ROWS: usize = 200;
 const MAX_ITEMS: usize = 100;
@@ -136,15 +137,6 @@ pub(crate) enum Block {
     },
 }
 
-fn short(what: &str, text: &str) -> Result<(), String> {
-    if text.len() > MAX_SHORT || text.chars().any(|c| c.is_control() && c != '\n') {
-        return Err(format!(
-            "{what} is longer than {MAX_SHORT} bytes or has control characters"
-        ));
-    }
-    Ok(())
-}
-
 fn scalar(what: &str, value: &Value) -> Result<(), String> {
     match value {
         Value::Null | Value::Bool(_) => Ok(()),
@@ -156,15 +148,7 @@ fn scalar(what: &str, value: &Value) -> Result<(), String> {
     }
 }
 
-fn identifier(what: &str, text: &str) -> Result<(), String> {
-    if ai6::directorates::section_00::assistant::valid_identity(text) {
-        Ok(())
-    } else {
-        Err(format!("{what} is not an identifier"))
-    }
-}
-
-/// Every Markdown link points into the app (`app:/...`).
+/// Every Markdown link is an app route (`app:/<page>?...`).
 fn links_stay_in_the_app(markdown: &str) -> Result<(), String> {
     let mut rest = markdown;
     while let Some(at) = rest.find("](") {
@@ -174,9 +158,25 @@ fn links_stay_in_the_app(markdown: &str) -> Result<(), String> {
                 "a link must point into the app (app:/...); outside links are not shown".to_owned(),
             );
         }
+        let end = target.find(')').unwrap_or(target.len());
+        Route::parse_uri(&target[..end])
+            .map_err(|reason| format!("a link is not an app route: {reason}"))?;
         rest = target;
     }
     Ok(())
+}
+
+/// The page a card opens: a Mission on Missions, a Station on Stations, a Theater on the
+/// Stations page's Theaters tab (a card names no Station, which selecting a Theater needs).
+fn card_route(card: &str, id: &str, operation_id: Option<&str>) -> Result<Route, String> {
+    let json = match card {
+        "mission" => serde_json::json!({
+            "page": "missions", "operation_id": operation_id, "mission_id": id
+        }),
+        "station" => serde_json::json!({"page": "stations", "station_id": id}),
+        _ => serde_json::json!({"page": "stations", "tab": "theaters"}),
+    };
+    Route::from_json(&json)
 }
 
 impl View {
@@ -308,6 +308,7 @@ impl Block {
                 if card == "mission" && operation_id.is_none() {
                     return Err("a Mission card names its operation_id".to_owned());
                 }
+                card_route(card, id, operation_id.as_deref())?;
                 if let Some(state) = state {
                     short("state", state)?;
                 }

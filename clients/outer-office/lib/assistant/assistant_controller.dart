@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../routes/oo_route.dart';
+
 /// A text channel to Universal Exports' Moneypenny socket; tests give a fake one.
 abstract interface class AssistantChannel {
   Stream<String> get incoming;
@@ -96,7 +98,7 @@ class AssistantController extends ChangeNotifier {
   String? problem;
 
   /// A message asked before the conversation was ready, sent when it is.
-  ({String text, Map<String, String> page})? _pending;
+  ({String text, OoRoute? route})? _pending;
 
   /// Opens the socket and says hello, resuming the last conversation when there is one.
   void open() {
@@ -153,7 +155,7 @@ class AssistantController extends ChangeNotifier {
             jsonEncode({
               'type': 'message',
               'text': pending.text,
-              if (pending.page.isNotEmpty) 'page': pending.page,
+              if (pending.route case final route?) 'route': route.toJson(),
             }),
           );
         }
@@ -198,21 +200,25 @@ class AssistantController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sends a message, with the app page the person is on (`view`, `operation_id`, …).
-  void say(String text, {Map<String, String> page = const {}}) {
+  /// Sends a message, with the [route] of the page the person is on.
+  void say(String text, {OoRoute? route}) {
     if (text.trim().isEmpty) return;
-    _send({'type': 'message', 'text': text, if (page.isNotEmpty) 'page': page});
+    _send({
+      'type': 'message',
+      'text': text,
+      if (route != null) 'route': route.toJson(),
+    });
   }
 
   /// Sends a message now when the conversation is ready, else opens it and sends the
   /// message once Universal Exports says it is ready.
-  void ask(String text, {Map<String, String> page = const {}}) {
+  void ask(String text, {OoRoute? route}) {
     if (text.trim().isEmpty) return;
     if (connected) {
-      say(text, page: page);
+      say(text, route: route);
       return;
     }
-    _pending = (text: text, page: page);
+    _pending = (text: text, route: route);
     open();
   }
 

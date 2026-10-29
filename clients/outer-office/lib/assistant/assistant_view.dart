@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:material_ui/material_ui.dart';
 
 import '../held/held_briefs_page.dart' show revealInvisible;
+import '../routes/oo_route.dart';
+import '../shell/oo_shell.dart' show OoPage;
 
 /// The view schema version this app renders. Universal Exports refuses any other view
 /// before it reaches the app; the app checks again and shows a refusal, never a guess.
@@ -83,10 +85,7 @@ String? _optionalShort(Map<String, Object?> json, String key) =>
     json[key] == null ? null : _short(json[key], key);
 
 String _identifier(Object? value, String what) {
-  if (value is! String ||
-      value.isEmpty ||
-      utf8.encode(value).length > 256 ||
-      value.runes.any((rune) => rune < 0x20 || rune == 0x7F)) {
+  if (value is! String || !isIdentifier(value)) {
     throw FormatException('$what is not an identifier');
   }
   return value;
@@ -154,6 +153,16 @@ class TextBlock extends ViewBlock {
         throw const FormatException(
           'a link must point into the app (app:/...); outside links are not shown',
         );
+      }
+      final close = markdown.indexOf(')', match.end);
+      final target = markdown.substring(
+        match.end,
+        close < 0 ? markdown.length : close,
+      );
+      try {
+        OoRoute.parseUri(target);
+      } on FormatException catch (error) {
+        throw FormatException('a link is not an app route: ${error.message}');
       }
     }
     return TextBlock(markdown);
@@ -295,11 +304,7 @@ class CardBlock extends ViewBlock {
   final List<(String, Object?)> fields;
 
   /// The app page the card opens.
-  String get link => switch (card) {
-    'mission' => 'app:/missions/$operationId/$id',
-    'station' => 'app:/stations/$id',
-    _ => 'app:/theaters/$id',
-  };
+  String get link => _cardRoute(card, id, operationId).toUri();
 
   factory CardBlock._parse(Map json) {
     final block = _object(json, 'a card', const {
@@ -320,9 +325,11 @@ class CardBlock extends ViewBlock {
     if (card == 'mission' && operation == null) {
       throw const FormatException('a Mission card names its operation_id');
     }
+    final id = _identifier(block['id'], 'id');
+    _cardRoute(card as String, id, operation);
     return CardBlock(
-      card: card as String,
-      id: _identifier(block['id'], 'id'),
+      card: card,
+      id: id,
       operationId: operation,
       state: _optionalShort(block, 'state'),
       fields: block['fields'] == null
@@ -331,6 +338,17 @@ class CardBlock extends ViewBlock {
     );
   }
 }
+
+/// The page a card opens: a Mission on Missions, a Station on Stations, a Theater on the
+/// Stations page's Theaters tab (a card names no Station, which selecting a Theater needs).
+OoRoute _cardRoute(String card, String id, String? operationId) =>
+    switch (card) {
+      'mission' => const OoRoute(
+        OoPage.missions,
+      ).withField('operation_id', operationId).withField('mission_id', id),
+      'station' => const OoRoute(OoPage.stations).withField('station_id', id),
+      _ => const OoRoute(OoPage.stations).withField('tab', 'theaters'),
+    };
 
 class TimelineBlock extends ViewBlock {
   const TimelineBlock(this.items);
@@ -525,7 +543,7 @@ class AssistantViewCard extends StatelessWidget {
 
   final Object? json;
 
-  /// Opens an app page (`app:/...`).
+  /// Opens an app page (`app:/<page>?...`).
   final void Function(String link)? onOpen;
 
   /// Submits the view's form with the person's values.

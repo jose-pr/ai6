@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../green_ink/green_ink_page.dart' show utcTime;
 import '../main.dart';
+import '../routes/oo_filters.dart';
+import '../routes/oo_route.dart';
 
 /// One thing vetting found in a brief.
 @immutable
@@ -37,10 +39,11 @@ List<VettingFinding> vettingFindings(Map<String, dynamic>? vetting) => [
     VettingFinding.fromJson(finding as Map<String, dynamic>),
 ];
 
-/// Whether [rune] renders as nothing: direction controls and marks, zero-width characters,
-/// variation selectors, fillers, invisible operators and the soft hyphen, as AI6's vetting
-/// counts them. Tag characters are decoded apart by [revealInvisible].
-bool _isInvisible(int rune) =>
+/// Whether [rune] renders as nothing: tag characters, direction controls and marks,
+/// zero-width characters, variation selectors, fillers, invisible operators and the soft
+/// hyphen, as AI6's vetting counts them.
+bool isInvisible(int rune) =>
+    (rune >= 0xE0000 && rune <= 0xE007F) ||
     (rune >= 0x202A && rune <= 0x202E) ||
     (rune >= 0x2066 && rune <= 0x2069) ||
     rune == 0x200E ||
@@ -79,7 +82,7 @@ String revealInvisible(String text) {
       continue;
     }
     flushTags();
-    if (_isInvisible(rune)) {
+    if (isInvisible(rune)) {
       shown.write(
         '<U+${rune.toRadixString(16).toUpperCase().padLeft(4, '0')}>',
       );
@@ -134,33 +137,65 @@ class HeldBriefSummary {
 
 /// Briefs vetting held: what it found in each, the brief's text only on request, and a
 /// release or refusal. Needs `mission.create`.
+///
+/// The [route] (page `briefings`) names the Operation and may narrow the list to the held
+/// brief whose key is `item_id`.
 class HeldBriefsPage extends StatefulWidget {
-  const HeldBriefsPage({required this.board, super.key});
+  const HeldBriefsPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<HeldBriefsPage> createState() => _HeldBriefsPageState();
 }
 
 class _HeldBriefsPageState extends State<HeldBriefsPage> {
-  String? _operationId;
   Future<List<HeldBriefSummary>>? _held;
   bool _deciding = false;
+
+  /// The route's Operation when the person may read it, `null` when not, else the first.
+  String? get _operationId {
+    final operations = widget.board.proposalOperations;
+    final named = widget.route['operation_id'];
+    if (named != null) return operations.contains(named) ? named : null;
+    return operations.isEmpty ? null : operations.first;
+  }
 
   @override
   void initState() {
     super.initState();
-    final operations = widget.board.proposalOperations;
-    if (operations.isNotEmpty) _select(operations.first);
+    _reload();
+  }
+
+  @override
+  void didUpdateWidget(HeldBriefsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
+      _reload();
+    }
+  }
+
+  void _reload() {
+    final operationId = _operationId;
+    setState(() {
+      _held = operationId == null
+          ? null
+          : widget.board.loadHeldBriefs(operationId);
+    });
   }
 
   void _select(String? operationId) {
-    if (operationId == null) return;
-    setState(() {
-      _operationId = operationId;
-      _held = widget.board.loadHeldBriefs(operationId);
-    });
+    if (operationId == null || operationId == _operationId) return;
+    widget.onRoute(
+      widget.route.without('item_id').withField('operation_id', operationId),
+    );
   }
 
   Future<void> _decide(HeldBriefSummary held, {required bool release}) async {
@@ -178,7 +213,7 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
         reason: reason.isEmpty ? null : reason,
       );
       if (!mounted) return;
-      _select(held.operationId);
+      _reload();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -200,11 +235,12 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
   Widget build(BuildContext context) {
     final operations = widget.board.proposalOperations;
     final operationId = _operationId;
-    if (operations.isEmpty || operationId == null) {
+    if (operations.isEmpty) {
       return const Center(
         child: Text('No Operations grant Mission creation access.'),
       );
     }
+    final itemId = widget.route['item_id'];
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -213,6 +249,8 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: DropdownButtonFormField<String>(
+              // The field keeps its first value; a new selection is a new field.
+              key: ValueKey(operationId),
               initialValue: operationId,
               decoration: const InputDecoration(labelText: 'Operation'),
               items: [
@@ -222,49 +260,74 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
               onChanged: _select,
             ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
+          OoFilterBar(
+            route: widget.route,
+            onRoute: widget.onRoute,
+            padding: const EdgeInsets.only(top: 8),
+          ),
+          if (operationId == null)
+            Expanded(
+              child: Center(
                 child: Text(
-                  'Vetting held these briefs; none runs until you release it.',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  'Operation ${widget.route['operation_id']} does not grant '
+                  'Mission creation access.',
                 ),
               ),
-              IconButton(
-                tooltip: 'Refresh held briefs',
-                onPressed: _deciding ? null : () => _select(operationId),
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-          if (widget.board.demo)
-            const Chip(label: Text('Preview data — decisions disabled')),
-          const SizedBox(height: 8),
-          Expanded(
-            child: FutureBuilder<List<HeldBriefSummary>>(
-              future: _held,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text(snapshot.error.toString()));
-                }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final held = snapshot.data!;
-                if (held.isEmpty) {
-                  return const Center(child: Text('No briefs are held.'));
-                }
-                return ListView.separated(
-                  itemCount: held.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 8),
-                  itemBuilder: (context, index) =>
-                      _heldCard(context, held[index]),
-                );
-              },
+            )
+          else ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Vetting held these briefs; none runs until you release it.',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh held briefs',
+                  onPressed: _deciding ? null : _reload,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
             ),
-          ),
+            if (widget.board.demo)
+              const Chip(label: Text('Preview data — decisions disabled')),
+            const SizedBox(height: 8),
+            Expanded(
+              child: FutureBuilder<List<HeldBriefSummary>>(
+                future: _held,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(child: Text(snapshot.error.toString()));
+                  }
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final held = [
+                    for (final brief in snapshot.data!)
+                      if (itemId == null || brief.key == itemId) brief,
+                  ];
+                  if (held.isEmpty) {
+                    return Center(
+                      child: Text(
+                        itemId == null
+                            ? 'No briefs are held.'
+                            : 'No brief $itemId is held in Operation $operationId.',
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    itemCount: held.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (context, index) =>
+                        _heldCard(context, held[index]),
+                  );
+                },
+              ),
+            ),
+          ],
         ],
       ),
     );

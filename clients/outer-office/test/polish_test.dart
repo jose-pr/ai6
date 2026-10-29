@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/chat_region.dart';
 import 'package:outer_office/main.dart';
+import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/shell/top_bar.dart';
 import 'package:outer_office/theme/oo_decor.dart';
@@ -212,7 +213,7 @@ void main() {
     expect(channel.sent.last, {
       'type': 'message',
       'text': 'What needs my attention?',
-      'page': {'view': 'overview'},
+      'route': {'page': 'overview'},
     });
   });
 
@@ -222,7 +223,14 @@ void main() {
     final board = signedIn(FakeChannel());
     addTearDown(board.dispose);
     await tester.pumpWidget(
-      MaterialApp(home: MissionBoardPage(board: board, desktopWindows: false)),
+      MaterialApp(
+        home: MissionBoardPage(
+          board: board,
+          desktopWindows: false,
+          route: const OoRoute(OoPage.overview),
+          onRoute: (_) {},
+        ),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'), findsNothing);
@@ -243,14 +251,17 @@ void main() {
       connect: () => channel,
     );
     addTearDown(controller.dispose);
-    controller.ask('Summarise the board', page: const {'view': 'overview'});
+    controller.ask(
+      'Summarise the board',
+      route: const OoRoute(OoPage.overview),
+    );
     expect(channel.sent.single, {'type': 'hello', 'token': 'user-token'});
     channel.answer({'type': 'ready', 'conversation': 'c-1', 'entries': []});
     return pumpEventQueue().then((_) {
       expect(channel.sent.last, {
         'type': 'message',
         'text': 'Summarise the board',
-        'page': {'view': 'overview'},
+        'route': {'page': 'overview'},
       });
       expect(channel.sent, hasLength(2));
     });

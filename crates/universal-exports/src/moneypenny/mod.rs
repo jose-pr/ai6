@@ -27,9 +27,11 @@
 
 pub(crate) mod actions;
 pub(crate) mod cables;
+mod checks;
 mod guide;
 pub(crate) mod mcp;
 pub(crate) mod memory;
+pub(crate) mod routes;
 mod store;
 pub(crate) mod tools;
 pub(crate) mod views;
@@ -549,14 +551,15 @@ impl Assistant {
         (id, shown, events)
     }
 
-    /// Queues the person's message for a Station.
+    /// Queues the person's message for a Station, after the page line of `route` (the app page
+    /// they sent it from, in the route's JSON form) when it is a route.
     async fn message(
         &self,
         gateway: &Gateway,
         conversation_id: &str,
         person_id: &str,
         text: &str,
-        page: Option<&Value>,
+        route: Option<&Value>,
     ) -> Result<(), (&'static str, String)> {
         if text.trim().is_empty() || text.len() > MAX_MESSAGE_BYTES {
             return Err((
@@ -577,7 +580,7 @@ impl Assistant {
                 "Sign in again to talk to Moneypenny.".to_owned(),
             )
         })?;
-        let message = match page.and_then(page_line) {
+        let message = match route.and_then(page_line) {
             Some(line) => format!("{line}\n\n{text}"),
             None => text.to_owned(),
         };
@@ -2034,29 +2037,11 @@ fn recap(conversation: &Conversation) -> Option<String> {
     (recap.len() < MAX_ASSISTANT_CONTEXT_BYTES / 2).then_some(recap)
 }
 
-/// The line that tells Moneypenny which app page the person is on, from the page's known
-/// keys only, each a short identifier.
-fn page_line(page: &Value) -> Option<String> {
-    let page = page.as_object()?;
-    let mut parts = Vec::new();
-    for key in [
-        "view",
-        "operation_id",
-        "mission_id",
-        "station_id",
-        "session_id",
-    ] {
-        if let Some(value) = page.get(key).and_then(Value::as_str)
-            && value.len() <= 128
-            && !value.is_empty()
-            && value
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':' | '/'))
-        {
-            parts.push(format!("{key}={value}"));
-        }
-    }
-    (!parts.is_empty()).then(|| format!("[App page: {}]", parts.join(" ")))
+/// The line that tells Moneypenny which app page the person was on when they sent a message:
+/// the route in its link form, percent-encoded, or nothing when it is not a route.
+fn page_line(route: &Value) -> Option<String> {
+    let route = routes::Route::from_json(route).ok()?;
+    Some(format!("[App page: {}]", route.to_uri()))
 }
 
 fn cut(text: &str, limit: usize) -> String {
@@ -2250,7 +2235,7 @@ enum FromApp {
     Message {
         text: String,
         #[serde(default)]
-        page: Option<Value>,
+        route: Option<Value>,
     },
     New {},
     Confirm {
@@ -2326,9 +2311,9 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
             incoming = receiver.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
                     match serde_json::from_str::<FromApp>(&text) {
-                        Ok(FromApp::Message { text, page }) => {
+                        Ok(FromApp::Message { text, route }) => {
                             if let Err((code, message)) = assistant
-                                .message(&gateway, &conversation_id, &person.id, &text, page.as_ref())
+                                .message(&gateway, &conversation_id, &person.id, &text, route.as_ref())
                                 .await
                                 && sender.send(frame(&problem(code, &message))).await.is_err()
                             {

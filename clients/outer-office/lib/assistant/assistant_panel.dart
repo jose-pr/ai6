@@ -4,18 +4,19 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../held/held_briefs_page.dart' show revealInvisible;
+import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_view.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
-/// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries [page],
-/// the app page the person is on, so "this Mission" means something to her. Its menu opens
-/// her memory of the person ([onMemory]). Enter sends; Shift+Enter starts a new line.
+/// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries
+/// [route], the app page the person is on, so "this Mission" means something to her. Its menu
+/// opens her memory of the person ([onMemory]). Enter sends; Shift+Enter starts a new line.
 class AssistantPanel extends StatefulWidget {
   const AssistantPanel({
     required this.controller,
-    this.page = const {},
+    this.route,
     this.onOpen,
     this.onMemory,
     this.onClose,
@@ -29,9 +30,9 @@ class AssistantPanel extends StatefulWidget {
   });
 
   final AssistantController controller;
-  final Map<String, String> page;
+  final OoRoute? route;
 
-  /// Opens an app page a view links to (`app:/missions/G/m-1`).
+  /// Opens an app page a view links to (`app:/missions?operation_id=G`).
   final void Function(String link)? onOpen;
 
   /// Opens the Memory page; without it the menu does not offer it.
@@ -84,7 +85,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
         !widget.controller.connected) {
       return;
     }
-    widget.controller.say(text, page: widget.page);
+    widget.controller.say(text, route: widget.route);
     _message.clear();
   }
 
@@ -261,7 +262,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
                       ActionChip(
                         label: Text(prompt),
                         onPressed: () =>
-                            widget.controller.say(prompt, page: widget.page),
+                            widget.controller.say(prompt, route: widget.route),
                       ),
                   ],
                 ),

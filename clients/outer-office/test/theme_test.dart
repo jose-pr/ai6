@@ -19,6 +19,7 @@ import 'package:material_ui/material_ui.dart'
         Theme,
         ThemeData;
 import 'package:outer_office/main.dart';
+import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/theme/oo_icon.dart';
 import 'package:outer_office/theme/oo_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -153,7 +154,7 @@ void main() {
     for (final state in ['queued', 'done', 'abandoned']) {
       expect(tokens.stateColor(state), tokens.muted, reason: state);
     }
-    expect(missionStates, hasLength(9));
+    expect(boardStates, hasLength(9));
   });
 
   test('high contrast and turning the wallpaper off drop the wallpaper', () {

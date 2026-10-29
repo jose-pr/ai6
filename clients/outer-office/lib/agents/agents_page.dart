@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../routes/oo_filters.dart';
+import '../routes/oo_route.dart';
 
 /// The clearances, lowest first.
 const clearances = ['desk', 'field', '00'];
@@ -242,17 +244,26 @@ String _date(double unix) => DateTime.fromMillisecondsSinceEpoch(
 ).toIso8601String().substring(0, 10);
 
 /// The Agents of an Operation: their record there, clearance, retirement and promotion.
+///
+/// The [route] (page `agents`) names the Operation (`operation_id`, else the first the person
+/// may read) and may narrow the list to one `agent`.
 class AgentsPage extends StatefulWidget {
-  const AgentsPage({required this.board, super.key});
+  const AgentsPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<AgentsPage> createState() => _AgentsPageState();
 }
 
 class _AgentsPageState extends State<AgentsPage> {
-  String? _operation;
   List<AgentSummary> _agents = const [];
   bool _loading = false;
   bool _changing = false;
@@ -260,12 +271,30 @@ class _AgentsPageState extends State<AgentsPage> {
 
   List<String> get _operations => widget.board.agentOperations;
 
+  /// The Operation shown: the route's when the person may read it, else none.
+  String? get _operation {
+    final operations = _operations;
+    final named = widget.route['operation_id'];
+    if (named != null) return operations.contains(named) ? named : null;
+    return operations.isEmpty ? null : operations.first;
+  }
+
   @override
   void initState() {
     super.initState();
-    final operations = _operations;
-    _operation = operations.isEmpty ? null : operations.first;
     unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(AgentsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
+      setState(() {
+        _agents = const [];
+        _error = null;
+      });
+      unawaited(_load());
+    }
   }
 
   Future<void> _load() async {
@@ -274,7 +303,7 @@ class _AgentsPageState extends State<AgentsPage> {
     setState(() => _loading = true);
     try {
       final agents = await widget.board.loadAgents(operation);
-      if (!mounted) return;
+      if (!mounted || operation != _operation) return;
       setState(() {
         _agents = agents;
         _error = null;
@@ -362,6 +391,11 @@ class _AgentsPageState extends State<AgentsPage> {
       );
     }
     final operation = _operation;
+    final named = widget.route['agent'];
+    final agents = [
+      for (final agent in _agents)
+        if (named == null || agent.agent == named) agent,
+    ];
     final canConfigure =
         operation != null &&
         !widget.board.demo &&
@@ -376,19 +410,19 @@ class _AgentsPageState extends State<AgentsPage> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               DropdownButton<String>(
-                value: _operation,
+                value: operation,
                 hint: const Text('Operation'),
                 items: [
                   for (final operation in operations)
                     DropdownMenuItem(value: operation, child: Text(operation)),
                 ],
-                onChanged: (operation) {
-                  if (operation == null || operation == _operation) return;
-                  setState(() {
-                    _operation = operation;
-                    _agents = const [];
-                  });
-                  unawaited(_load());
+                onChanged: (chosen) {
+                  if (chosen == null || chosen == operation) return;
+                  widget.onRoute(
+                    widget.route
+                        .without('agent')
+                        .withField('operation_id', chosen),
+                  );
                 },
               ),
               IconButton(
@@ -399,22 +433,34 @@ class _AgentsPageState extends State<AgentsPage> {
             ],
           ),
         ),
+        OoFilterBar(route: widget.route, onRoute: widget.onRoute),
         if (_error case final error?)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(error),
           ),
         Expanded(
-          child: _agents.isEmpty
+          child: operation == null
+              ? Center(
+                  child: Text(
+                    'Operation ${widget.route['operation_id']}\'s Agents are '
+                    'not visible to this account.',
+                  ),
+                )
+              : agents.isEmpty
               ? Center(
                   child: _loading
                       ? const CircularProgressIndicator()
-                      : const Text('No Agent is posted to this Operation.'),
+                      : Text(
+                          named == null
+                              ? 'No Agent is posted to this Operation.'
+                              : 'Agent $named is not in Operation $operation.',
+                        ),
                 )
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   children: [
-                    for (final agent in _agents)
+                    for (final agent in agents)
                       _AgentTile(
                         agent: agent,
                         onLower:

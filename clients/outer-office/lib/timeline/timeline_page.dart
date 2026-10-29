@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../routes/oo_filters.dart';
+import '../routes/oo_route.dart';
 
 /// One entry of an Operation's activity timeline: metadata only.
 @immutable
@@ -102,14 +104,20 @@ IconData _kindIcon(String kind) => switch (kind) {
 
 /// An Operation's activity, newest first, filterable by Mission. Refreshing adds what is
 /// new above what is already loaded, so older pages and the scroll position stay.
+///
+/// The [route] (page `timeline`) names the Operation and the Mission filter (`mission_id`).
 class OperationTimelinePage extends StatefulWidget {
   const OperationTimelinePage({
     required this.board,
+    required this.route,
+    required this.onRoute,
     this.refreshEvery = const Duration(seconds: 10),
     super.key,
   });
 
   final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   /// How often new activity is fetched while the page is shown; `null` only on request.
   final Duration? refreshEvery;
@@ -120,22 +128,40 @@ class OperationTimelinePage extends StatefulWidget {
 
 class _OperationTimelinePageState extends State<OperationTimelinePage> {
   final _missionFilter = TextEditingController();
-  String? _operation;
-  String? _mission;
   List<TimelineItemSummary> _items = const [];
   String? _nextCursor;
   bool _loading = false;
   String? _error;
   Timer? _timer;
 
+  /// The route's Operation when the person may read it, `null` when not, else the first.
+  String? get _operation {
+    final operations = widget.board.timelineOperations;
+    final named = widget.route['operation_id'];
+    if (named != null) return operations.contains(named) ? named : null;
+    return operations.isEmpty ? null : operations.first;
+  }
+
+  String? get _mission => widget.route['mission_id'];
+
   @override
   void initState() {
     super.initState();
-    final operations = widget.board.timelineOperations;
-    _operation = operations.isEmpty ? null : operations.first;
+    _missionFilter.text = _mission ?? '';
     unawaited(_reload());
     if (widget.refreshEvery case final every?) {
       _timer = Timer.periodic(every, (_) => unawaited(_refresh()));
+    }
+  }
+
+  @override
+  void didUpdateWidget(OperationTimelinePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final mission = _mission ?? '';
+    if (_missionFilter.text.trim() != mission) _missionFilter.text = mission;
+    if (oldWidget.route['operation_id'] != widget.route['operation_id'] ||
+        oldWidget.route['mission_id'] != _mission) {
+      unawaited(_reload());
     }
   }
 
@@ -170,8 +196,10 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
       _nextCursor = null;
       _loading = true;
     });
+    final asked = (_operation, _mission);
     final page = await _fetch();
-    if (!mounted) return;
+    // A later choice of Operation or Mission has its own reload.
+    if (!mounted || asked != (_operation, _mission)) return;
     setState(() {
       _loading = false;
       if (page != null) {
@@ -216,8 +244,11 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
     final mission = _missionFilter.text.trim();
     final next = mission.isEmpty ? null : mission;
     if (next == _mission) return;
-    _mission = next;
-    unawaited(_reload());
+    try {
+      widget.onRoute(widget.route.withField('mission_id', next));
+    } on FormatException catch (error) {
+      setState(() => _error = error.message);
+    }
   }
 
   @override
@@ -228,6 +259,7 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
         child: Text('No Operation timeline is visible to this account.'),
       );
     }
+    final operation = _operation;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -239,16 +271,19 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               DropdownButton<String>(
-                value: _operation,
+                value: operation,
                 hint: const Text('Operation'),
                 items: [
                   for (final operation in operations)
                     DropdownMenuItem(value: operation, child: Text(operation)),
                 ],
-                onChanged: (operation) {
-                  if (operation == null || operation == _operation) return;
-                  setState(() => _operation = operation);
-                  unawaited(_reload());
+                onChanged: (chosen) {
+                  if (chosen == null || chosen == operation) return;
+                  widget.onRoute(
+                    widget.route
+                        .without('mission_id')
+                        .withField('operation_id', chosen),
+                  );
                 },
               ),
               SizedBox(
@@ -274,17 +309,30 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
             ],
           ),
         ),
+        OoFilterBar(route: widget.route, onRoute: widget.onRoute),
         if (_error case final error?)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(error),
           ),
         Expanded(
-          child: _items.isEmpty
+          child: operation == null
+              ? Center(
+                  child: Text(
+                    'Operation ${widget.route['operation_id']}\'s timeline is '
+                    'not visible to this account.',
+                  ),
+                )
+              : _items.isEmpty
               ? Center(
                   child: _loading
                       ? const CircularProgressIndicator()
-                      : const Text('No activity recorded yet.'),
+                      : Text(
+                          _mission == null
+                              ? 'No activity recorded yet.'
+                              : 'No activity of Mission $_mission in Operation '
+                                    '$operation.',
+                        ),
                 )
               : ListView.builder(
                   key: const PageStorageKey('operation-timeline'),

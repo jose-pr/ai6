@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
 import '../shell/app_window.dart';
 import '../shell/oo_shell.dart';
@@ -195,8 +196,8 @@ class MoneypennyChat extends ChangeNotifier {
     skipTraversal: true,
   );
 
-  /// The app page the person is on, sent with each message.
-  final page = ValueNotifier<Map<String, String>>(const {});
+  /// The route of the app page the person is on, sent with each message.
+  final route = ValueNotifier<OoRoute?>(null);
 
   /// Opens an app page one of her views links to.
   void Function(String link)? onLink;
@@ -468,7 +469,7 @@ class MoneypennyChat extends ChangeNotifier {
     message.dispose();
     composer.dispose();
     region.dispose();
-    page.dispose();
+    route.dispose();
     super.dispose();
   }
 }

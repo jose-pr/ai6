@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../routes/oo_filters.dart';
+import '../routes/oo_route.dart';
 
 /// The time in UTC, to the second.
 String utcTime(double at) => DateTime.fromMillisecondsSinceEpoch(
@@ -145,6 +147,8 @@ class _OperationPicker extends StatelessWidget {
   Widget build(BuildContext context) => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 420),
     child: DropdownButtonFormField<String>(
+      // The field keeps its first value; a new selection is a new field.
+      key: ValueKey(selected),
       initialValue: selected,
       decoration: const InputDecoration(labelText: 'Operation'),
       items: [
@@ -156,35 +160,70 @@ class _OperationPicker extends StatelessWidget {
   );
 }
 
+/// The Operation a green ink page shows: [route]'s `operation_id` when it is one of
+/// [operations], `null` when it is not, else the first of them.
+String? _routeOperation(OoRoute route, List<String> operations) {
+  final named = route['operation_id'];
+  if (named != null) return operations.contains(named) ? named : null;
+  return operations.isEmpty ? null : operations.first;
+}
+
 /// The Green ink inbox: steps Agents wait to take, each approved for a chosen time or
 /// rejected with a reason. Needs `approval.decide`.
+///
+/// The [route] (page `green_ink`) names the Operation and may narrow the inbox to one
+/// `request_id`.
 class GreenInkPage extends StatefulWidget {
-  const GreenInkPage({required this.board, super.key});
+  const GreenInkPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<GreenInkPage> createState() => _GreenInkPageState();
 }
 
 class _GreenInkPageState extends State<GreenInkPage> {
-  String? _operationId;
   Future<List<GreenInkRequestSummary>>? _requests;
   bool _deciding = false;
+
+  String? get _operationId =>
+      _routeOperation(widget.route, widget.board.greenInkOperations);
 
   @override
   void initState() {
     super.initState();
-    final operations = widget.board.greenInkOperations;
-    if (operations.isNotEmpty) _select(operations.first);
+    _reload();
+  }
+
+  @override
+  void didUpdateWidget(GreenInkPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
+      _reload();
+    }
+  }
+
+  void _reload() {
+    final operationId = _operationId;
+    setState(() {
+      _requests = operationId == null
+          ? null
+          : widget.board.loadGreenInk(operationId);
+    });
   }
 
   void _select(String? operationId) {
-    if (operationId == null) return;
-    setState(() {
-      _operationId = operationId;
-      _requests = widget.board.loadGreenInk(operationId);
-    });
+    if (operationId == null || operationId == _operationId) return;
+    widget.onRoute(
+      widget.route.without('request_id').withField('operation_id', operationId),
+    );
   }
 
   Future<void> _ask(
@@ -220,7 +259,7 @@ class _GreenInkPageState extends State<GreenInkPage> {
         note: note,
       );
       if (!mounted) return;
-      _select(request.operationId);
+      _reload();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(approve ? 'Signed in green ink.' : 'Step rejected.'),
@@ -240,21 +279,49 @@ class _GreenInkPageState extends State<GreenInkPage> {
   Widget build(BuildContext context) {
     final operations = widget.board.greenInkOperations;
     final operationId = _operationId;
-    if (operations.isEmpty || operationId == null) {
+    if (operations.isEmpty) {
       return const Center(
         child: Text('No Operations grant approval.decide to this account.'),
       );
     }
+    final picker = _OperationPicker(
+      operations: operations,
+      selected: operationId,
+      onChanged: _select,
+    );
+    final filters = OoFilterBar(
+      route: widget.route,
+      onRoute: widget.onRoute,
+      padding: const EdgeInsets.only(top: 8),
+    );
+    if (operationId == null) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            picker,
+            filters,
+            Expanded(
+              child: Center(
+                child: Text(
+                  'Operation ${widget.route['operation_id']} does not grant '
+                  'approval.decide to this account.',
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final requestId = widget.route['request_id'];
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _OperationPicker(
-            operations: operations,
-            selected: operationId,
-            onChanged: _select,
-          ),
+          picker,
+          filters,
           const SizedBox(height: 16),
           Row(
             children: [
@@ -266,7 +333,7 @@ class _GreenInkPageState extends State<GreenInkPage> {
               ),
               IconButton(
                 tooltip: 'Refresh green ink',
-                onPressed: _deciding ? null : () => _select(operationId),
+                onPressed: _deciding ? null : _reload,
                 icon: const Icon(Icons.refresh),
               ),
             ],
@@ -284,10 +351,18 @@ class _GreenInkPageState extends State<GreenInkPage> {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final requests = snapshot.data!;
+                final requests = [
+                  for (final request in snapshot.data!)
+                    if (requestId == null || request.id == requestId) request,
+                ];
                 if (requests.isEmpty) {
-                  return const Center(
-                    child: Text('No steps are waiting for green ink.'),
+                  return Center(
+                    child: Text(
+                      requestId == null
+                          ? 'No steps are waiting for green ink.'
+                          : 'Request $requestId is not waiting in Operation '
+                                '$operationId.',
+                    ),
                   );
                 }
                 return ListView.separated(
@@ -430,10 +505,19 @@ class _DecisionDialogState extends State<_DecisionDialog> {
 
 /// An Operation's class authorisations, with a way to revoke the live ones. Needs
 /// `approval.class`.
+///
+/// The [route] (page `green_ink`) names the Operation.
 class ClassAuthorizationsPage extends StatefulWidget {
-  const ClassAuthorizationsPage({required this.board, super.key});
+  const ClassAuthorizationsPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   State<ClassAuthorizationsPage> createState() =>
@@ -441,23 +525,40 @@ class ClassAuthorizationsPage extends StatefulWidget {
 }
 
 class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
-  String? _operationId;
   Future<List<ClassAuthorizationSummary>>? _records;
   bool _revoking = false;
+
+  String? get _operationId =>
+      _routeOperation(widget.route, widget.board.classAuthorizationOperations);
 
   @override
   void initState() {
     super.initState();
-    final operations = widget.board.classAuthorizationOperations;
-    if (operations.isNotEmpty) _select(operations.first);
+    _reload();
+  }
+
+  @override
+  void didUpdateWidget(ClassAuthorizationsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
+      _reload();
+    }
+  }
+
+  void _reload() {
+    final operationId = _operationId;
+    setState(() {
+      _records = operationId == null
+          ? null
+          : widget.board.loadClassAuthorizations(operationId);
+    });
   }
 
   void _select(String? operationId) {
-    if (operationId == null) return;
-    setState(() {
-      _operationId = operationId;
-      _records = widget.board.loadClassAuthorizations(operationId);
-    });
+    if (operationId == null || operationId == _operationId) return;
+    widget.onRoute(
+      widget.route.without('request_id').withField('operation_id', operationId),
+    );
   }
 
   Future<void> _revoke(
@@ -491,7 +592,7 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
         operationId: operationId,
         id: record.id,
       );
-      if (mounted) _select(operationId);
+      if (mounted) _reload();
     } on Object catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -506,9 +607,39 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
   Widget build(BuildContext context) {
     final operations = widget.board.classAuthorizationOperations;
     final operationId = _operationId;
-    if (operations.isEmpty || operationId == null) {
+    if (operations.isEmpty) {
       return const Center(
         child: Text('No Operations grant approval.class to this account.'),
+      );
+    }
+    final picker = _OperationPicker(
+      operations: operations,
+      selected: operationId,
+      onChanged: _select,
+    );
+    final filters = OoFilterBar(
+      route: widget.route,
+      onRoute: widget.onRoute,
+      padding: const EdgeInsets.only(top: 8),
+    );
+    if (operationId == null) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            picker,
+            filters,
+            Expanded(
+              child: Center(
+                child: Text(
+                  'Operation ${widget.route['operation_id']} does not grant '
+                  'approval.class to this account.',
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
     return Padding(
@@ -516,11 +647,8 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _OperationPicker(
-            operations: operations,
-            selected: operationId,
-            onChanged: _select,
-          ),
+          picker,
+          filters,
           const SizedBox(height: 16),
           Text(
             'Standing approvals: a matching request is signed without asking.',

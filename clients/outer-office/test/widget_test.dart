@@ -5,14 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show
-        FilledButton,
-        Key,
-        MaterialApp,
-        ScaffoldMessenger,
-        Tab,
-        SwitchListTile,
-        TextField;
+    show FilledButton, Key, ScaffoldMessenger, Tab, SwitchListTile, TextField;
 import 'package:outer_office/main.dart';
 
 import 'shell_navigation.dart';
@@ -193,7 +186,7 @@ void main() {
     );
     addTearDown(board.dispose);
     await tester.pumpWidget(
-      MaterialApp(home: MissionBoardPage(board: board, desktopWindows: false)),
+      OuterOfficeApp(board: board, desktopWindows: false),
     );
     await openPage(tester, 'Missions');
 
@@ -213,7 +206,7 @@ void main() {
     );
     addTearDown(board.dispose);
     await tester.pumpWidget(
-      MaterialApp(home: MissionBoardPage(board: board, desktopWindows: false)),
+      OuterOfficeApp(board: board, desktopWindows: false),
     );
     await openPage(tester, 'Agents');
     await tester.tap(find.widgetWithText(Tab, 'Roles'));
@@ -234,9 +227,7 @@ void main() {
       );
       addTearDown(board.dispose);
       await tester.pumpWidget(
-        MaterialApp(
-          home: MissionBoardPage(board: board, desktopWindows: false),
-        ),
+        OuterOfficeApp(board: board, desktopWindows: false),
       );
       await openPage(tester, 'Briefings');
       await tester.tap(find.text('Mission proposals'));

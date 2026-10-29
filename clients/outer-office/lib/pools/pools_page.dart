@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../routes/oo_filters.dart';
+import '../routes/oo_route.dart';
 
 /// How much of one provider quota window an account has used.
 @immutable
@@ -116,14 +118,20 @@ class PoolAccountSummary {
 }
 
 /// The pool accounts an Operation may draw from.
+///
+/// The [route] (page `pools`) names the Operation and may narrow the list to one `pool`.
 class AccountPoolsPage extends StatefulWidget {
   const AccountPoolsPage({
     required this.board,
+    required this.route,
+    required this.onRoute,
     this.refreshEvery = const Duration(seconds: 15),
     super.key,
   });
 
   final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   /// How often the accounts are fetched again while the page is shown.
   final Duration? refreshEvery;
@@ -133,20 +141,37 @@ class AccountPoolsPage extends StatefulWidget {
 }
 
 class _AccountPoolsPageState extends State<AccountPoolsPage> {
-  String? _operation;
   List<PoolAccountSummary> _accounts = const [];
   bool _loading = false;
   String? _error;
   Timer? _timer;
 
+  /// The route's Operation when the person may read it, `null` when not, else the first.
+  String? get _operation {
+    final operations = widget.board.poolOperations;
+    final named = widget.route['operation_id'];
+    if (named != null) return operations.contains(named) ? named : null;
+    return operations.isEmpty ? null : operations.first;
+  }
+
   @override
   void initState() {
     super.initState();
-    final operations = widget.board.poolOperations;
-    _operation = operations.isEmpty ? null : operations.first;
     unawaited(_load());
     if (widget.refreshEvery case final every?) {
       _timer = Timer.periodic(every, (_) => unawaited(_load()));
+    }
+  }
+
+  @override
+  void didUpdateWidget(AccountPoolsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
+      setState(() {
+        _accounts = const [];
+        _error = null;
+      });
+      unawaited(_load());
     }
   }
 
@@ -162,7 +187,7 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
     setState(() => _loading = true);
     try {
       final accounts = await widget.board.loadPools(operation);
-      if (!mounted) return;
+      if (!mounted || operation != _operation) return;
       setState(() {
         _accounts = accounts;
         _error = null;
@@ -182,6 +207,12 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
         child: Text('No account pool is visible to this account.'),
       );
     }
+    final operation = _operation;
+    final pool = widget.route['pool'];
+    final accounts = [
+      for (final account in _accounts)
+        if (pool == null || account.pool == pool) account,
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -192,19 +223,19 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               DropdownButton<String>(
-                value: _operation,
+                value: operation,
                 hint: const Text('Operation'),
                 items: [
                   for (final operation in operations)
                     DropdownMenuItem(value: operation, child: Text(operation)),
                 ],
-                onChanged: (operation) {
-                  if (operation == null || operation == _operation) return;
-                  setState(() {
-                    _operation = operation;
-                    _accounts = const [];
-                  });
-                  unawaited(_load());
+                onChanged: (chosen) {
+                  if (chosen == null || chosen == operation) return;
+                  widget.onRoute(
+                    widget.route
+                        .without('pool')
+                        .withField('operation_id', chosen),
+                  );
                 },
               ),
               IconButton(
@@ -215,22 +246,35 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
             ],
           ),
         ),
+        OoFilterBar(route: widget.route, onRoute: widget.onRoute),
         if (_error case final error?)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(error),
           ),
         Expanded(
-          child: _accounts.isEmpty
+          child: operation == null
+              ? Center(
+                  child: Text(
+                    'Operation ${widget.route['operation_id']}\'s account pools '
+                    'are not visible to this account.',
+                  ),
+                )
+              : accounts.isEmpty
               ? Center(
                   child: _loading
                       ? const CircularProgressIndicator()
-                      : const Text('No pool account serves this Operation.'),
+                      : Text(
+                          pool == null
+                              ? 'No pool account serves this Operation.'
+                              : 'No account pool named $pool in Operation '
+                                    '$operation.',
+                        ),
                 )
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   children: [
-                    for (final account in _accounts)
+                    for (final account in accounts)
                       _AccountTile(account: account),
                   ],
                 ),

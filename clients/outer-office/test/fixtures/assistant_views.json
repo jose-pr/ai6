@@ -6,7 +6,7 @@
       "blocks": [
         {
           "kind": "text",
-          "markdown": "# Stalled\n\nThe Session **stopped writing** for *ten minutes*.\n\n- Station `worker` is full\n- See [the Mission](app:/missions/G/mission-7)"
+          "markdown": "# Stalled\n\nThe Session **stopped writing** for *ten minutes*.\n\n- Station `worker` is full\n- See [the Mission](app:/missions?operation_id=G&mission_id=mission-7)"
         }
       ]
     },
@@ -128,6 +128,18 @@
     {
       "reason": "into the app",
       "view": {"version": 1, "blocks": [{"kind": "text", "markdown": "[log in](https://evil.example/login)"}]}
+    },
+    {
+      "reason": "a link is not an app route: unknown page missions/G/mission-7",
+      "view": {"version": 1, "blocks": [{"kind": "text", "markdown": "[the Mission](app:/missions/G/mission-7)"}]}
+    },
+    {
+      "reason": "a link is not an app route: missions has no token",
+      "view": {"version": 1, "blocks": [{"kind": "text", "markdown": "[x](app:/missions?token=secret)"}]}
+    },
+    {
+      "reason": "block 0: card is mission, station or theater",
+      "view": {"version": 1, "blocks": [{"kind": "card", "card": "session", "id": "s-1"}]}
     },
     {
       "reason": "one cell per column",

@@ -146,10 +146,24 @@ void main() {
     expect(find.text('working 1'), findsOneWidget);
   });
 
-  testWidgets('Sessions sort by any column and open without a wallpaper', (
-    tester,
-  ) async {
-    await demoAt(tester, const Size(1400, 900));
+  testWidgets('Sessions sort by state or update time and open without a '
+      'wallpaper', (tester) async {
+    final board = await demoAt(tester, const Size(1400, 900));
+    board.sessions = [
+      for (final (session, at) in [
+        (board.sessions[0], 300.0),
+        (board.sessions[1], 100.0),
+        (board.sessions[2], 200.0),
+      ])
+        SessionSummary(
+          operationId: session.operationId,
+          missionId: session.missionId,
+          sessionId: session.sessionId,
+          state: session.state,
+          sequence: session.sequence,
+          updatedAt: at,
+        ),
+    ];
     await openPage(tester, 'Sessions');
     expectNoBackdrop(find.byType(DataTable));
     expect(find.byType(OoBackdrop), findsNothing);
@@ -172,16 +186,24 @@ void main() {
       'preview-session-008',
       'preview-session-021',
     ]);
-    await tester.tap(find.text('Event'));
+    await tester.tap(find.text('Updated (UTC)'));
     await tester.pumpAndSettle();
     expect(order(), [
       'preview-session-008',
+      'preview-session-021',
       'preview-session-007',
+    ]);
+    expect(find.text('Sorted by: updated'), findsOneWidget);
+    await tester.tap(find.text('Updated (UTC)'));
+    await tester.pumpAndSettle();
+    expect(order().first, 'preview-session-007');
+    await tester.tap(find.text('State'));
+    await tester.pumpAndSettle();
+    expect(order(), [
+      'preview-session-007',
+      'preview-session-008',
       'preview-session-021',
     ]);
-    await tester.tap(find.text('Event'));
-    await tester.pumpAndSettle();
-    expect(order().first, 'preview-session-021');
 
     await tester.tap(find.text('preview-session-008'));
     await tester.pumpAndSettle();

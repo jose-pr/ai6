@@ -7,6 +7,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/assistant/assistant_view.dart';
+import 'package:outer_office/routes/oo_route.dart';
+import 'package:outer_office/shell/oo_shell.dart';
 
 /// One view of every kind and the views Universal Exports refuses, shared with its tests.
 final Map<String, Object?> fixture = (jsonDecode(
@@ -75,7 +77,7 @@ void main() {
     expect(find.text('Stalled'), findsOneWidget);
     expect(find.text('the Mission'), findsOneWidget);
     await tester.tap(find.text('the Mission'));
-    expect(opened, ['app:/missions/G/mission-7']);
+    expect(opened, ['app:/missions?operation_id=G&mission_id=mission-7']);
 
     await showView(tester, valid['table']);
     expect(find.byType(DataTable), findsOneWidget);
@@ -99,7 +101,7 @@ void main() {
     expect(find.text('Station worker'), findsOneWidget);
     expect(find.text('Theater build-box'), findsOneWidget);
     await tester.tap(find.text('Station worker'));
-    expect(opened, ['app:/stations/worker']);
+    expect(opened, ['app:/stations?station_id=worker']);
 
     await showView(tester, valid['timeline']);
     expect(find.text('stalled'), findsOneWidget);
@@ -156,7 +158,7 @@ void main() {
         home: Scaffold(
           body: AssistantPanel(
             controller: controller,
-            page: const {'view': 'stations'},
+            route: const OoRoute(OoPage.stations),
           ),
         ),
       ),
@@ -190,7 +192,7 @@ void main() {
     expect(channel.sent.last, {
       'type': 'message',
       'text': 'Which Stations are busy?',
-      'page': {'view': 'stations'},
+      'route': {'page': 'stations'},
     });
 
     channel

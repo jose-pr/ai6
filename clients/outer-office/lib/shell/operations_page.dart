@@ -1,19 +1,51 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../routes/oo_filters.dart';
+import '../routes/oo_route.dart';
 import '../theme/oo_backdrop.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 
-/// The Operations open to the person, each with its Missions on the board counted by state.
+/// The Operations open to the person, each with its Missions on the board counted by state;
+/// the route's `operation_id` shows only that one.
 class OperationsPage extends StatelessWidget {
-  const OperationsPage({required this.board, super.key});
+  const OperationsPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
 
   final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
 
   @override
   Widget build(BuildContext context) {
-    final operations = board.userSession?.operations ?? const [];
+    final open = board.userSession?.operations ?? const [];
+    final selected = route['operation_id'];
+    final operations = [
+      for (final operation in open)
+        if (selected == null || operation.operationId == selected) operation,
+    ];
+    if (selected != null && operations.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OoFilterBar(
+            route: route,
+            onRoute: onRoute,
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          ),
+          Expanded(
+            child: Center(
+              child: Text('Operation $selected is not open to this account.'),
+            ),
+          ),
+        ],
+      );
+    }
     if (operations.isEmpty) {
       return const Center(
         child: OoBackdrop(
@@ -27,10 +59,18 @@ class OperationsPage extends StatelessWidget {
     final missions = groupMissions(board.sessions);
     return ListView.separated(
       padding: const EdgeInsets.all(24),
-      itemCount: operations.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      itemCount: operations.length + 1,
+      separatorBuilder: (_, index) =>
+          SizedBox(height: index == 0 && !route.filtered ? 0 : 12),
       itemBuilder: (context, index) {
-        final operation = operations[index];
+        if (index == 0) {
+          return OoFilterBar(
+            route: route,
+            onRoute: onRoute,
+            padding: EdgeInsets.zero,
+          );
+        }
+        final operation = operations[index - 1];
         final counts = <String, int>{};
         for (final mission in missions.where(
           (mission) => mission.operationId == operation.operationId,
@@ -87,7 +127,7 @@ class _OperationCard extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  for (final state in missionStates)
+                  for (final state in boardStates)
                     if (counts[state] case final count?)
                       Chip(
                         avatar: OoStateMark(state),

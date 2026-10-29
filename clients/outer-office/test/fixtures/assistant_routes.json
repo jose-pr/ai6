@@ -1,0 +1,93 @@
+{
+  "valid": [
+    {"json": {"page": "overview"}, "uri": "app:/overview"},
+    {"json": {"page": "operations", "operation_id": "G"}, "uri": "app:/operations?operation_id=G"},
+    {
+      "json": {"page": "missions", "operation_id": "G", "state": ["failed"]},
+      "uri": "app:/missions?operation_id=G&state=failed"
+    },
+    {
+      "json": {
+        "page": "missions",
+        "operation_id": "G",
+        "state": ["blocked", "stalled"],
+        "station_id": "worker",
+        "agent": "008",
+        "text": "pull request #12, \"retry\"",
+        "sort": "updated",
+        "order": "desc",
+        "mission_id": "mission-7"
+      },
+      "uri": "app:/missions?operation_id=G&state=blocked,stalled&station_id=worker&agent=008&text=pull%20request%20%2312%2C%20%22retry%22&sort=updated&order=desc&mission_id=mission-7"
+    },
+    {"json": {"page": "missions", "text": "café ☕"}, "uri": "app:/missions?text=caf%C3%A9%20%E2%98%95"},
+    {
+      "json": {"page": "sessions", "state": "working", "sort": "state", "order": "asc", "session_id": "s-1"},
+      "uri": "app:/sessions?state=working&sort=state&order=asc&session_id=s-1"
+    },
+    {
+      "json": {"page": "stations", "station_id": "worker", "tab": "theaters", "theater_id": "local"},
+      "uri": "app:/stations?station_id=worker&tab=theaters&theater_id=local"
+    },
+    {
+      "json": {"page": "agents", "tab": "roles", "operation_id": "G", "role": "reviewer"},
+      "uri": "app:/agents?tab=roles&operation_id=G&role=reviewer"
+    },
+    {
+      "json": {"page": "green_ink", "tab": "inbox", "operation_id": "G", "request_id": "ink-1"},
+      "uri": "app:/green_ink?tab=inbox&operation_id=G&request_id=ink-1"
+    },
+    {
+      "json": {"page": "briefings", "tab": "held", "operation_id": "G", "item_id": "G/issue 4"},
+      "uri": "app:/briefings?tab=held&operation_id=G&item_id=G%2Fissue%204"
+    },
+    {"json": {"page": "roster", "kind": "agent", "key": "008"}, "uri": "app:/roster?kind=agent&key=008"},
+    {"json": {"page": "pools", "operation_id": "G", "pool": "claude-max"}, "uri": "app:/pools?operation_id=G&pool=claude-max"},
+    {
+      "json": {"page": "timeline", "operation_id": "G", "mission_id": "mission-7"},
+      "uri": "app:/timeline?operation_id=G&mission_id=mission-7"
+    },
+    {"json": {"page": "audit", "station_id": "hq"}, "uri": "app:/audit?station_id=hq"},
+    {"json": {"page": "memory"}, "uri": "app:/memory"}
+  ],
+  "invalid": [
+    {"json": ["missions"], "reason": "a route is an object naming its page"},
+    {"json": {"operation_id": "G"}, "reason": "a route is an object naming its page"},
+    {"json": {"page": "settings"}, "reason": "unknown page settings"},
+    {"json": {"page": "missions", "token": "secret"}, "reason": "missions has no token"},
+    {"json": {"page": "overview", "operation_id": "G"}, "reason": "overview has no operation_id"},
+    {"json": {"page": "missions", "operation_id": 7}, "reason": "operation_id is a string"},
+    {"json": {"page": "missions", "operation_id": ""}, "reason": "operation_id is not an identifier"},
+    {"json": {"page": "missions", "operation_id": "G\u0007"}, "reason": "operation_id is not an identifier"},
+    {"json": {"page": "missions", "state": "failed"}, "reason": "state is a list of board states"},
+    {"json": {"page": "missions", "state": []}, "reason": "state lists 1 to 9 distinct board states"},
+    {"json": {"page": "missions", "state": ["failed", "failed"]}, "reason": "state lists 1 to 9 distinct board states"},
+    {"json": {"page": "missions", "state": ["lost"]}, "reason": "lost is not a board state"},
+    {"json": {"page": "sessions", "state": ["working"]}, "reason": "state is a string"},
+    {"json": {"page": "sessions", "state": "lost"}, "reason": "state is one of queued, working, blocked, stalled, parked, quarantined, done, failed, abandoned"},
+    {"json": {"page": "missions", "sort": "priority"}, "reason": "sort is one of updated, created, state"},
+    {"json": {"page": "missions", "text": "a\u200bb"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
+    {"json": {"page": "missions", "text": "line\nbreak"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
+    {"json": {"page": "missions", "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
+    {"json": {"page": "missions", "mission_id": "mission-7"}, "reason": "mission_id needs operation_id"},
+    {"json": {"page": "stations", "theater_id": "local"}, "reason": "theater_id needs station_id"},
+    {"json": {"page": "stations", "tab": "terminals"}, "reason": "tab is one of overview, theaters, settings, placement"},
+    {"json": {"page": "roster", "kind": "agents"}, "reason": "kind is one of operation, agent, role, cover, assistant"},
+    {"json": {"page": "audit", "operation_id": "G", "station_id": "hq"}, "reason": "audit takes operation_id or station_id, not both"},
+    {"uri": "https://example.org/missions", "reason": "a route link starts with app:/"},
+    {"uri": "app:/missions/G/mission-7", "reason": "unknown page missions/G/mission-7"},
+    {"uri": "app:/stations/worker", "reason": "unknown page stations/worker"},
+    {"uri": "app:/missions?", "reason": "a query parameter is key=value"},
+    {"uri": "app:/missions?operation_id", "reason": "a query parameter is key=value"},
+    {"uri": "app:/missions?=G", "reason": "a query parameter is key=value"},
+    {"uri": "app:/missions?view=board", "reason": "missions has no view"},
+    {"uri": "app:/missions?operation_id=G&operation_id=H", "reason": "operation_id appears twice"},
+    {"uri": "app:/missions?operation_id=G%2", "reason": "operation_id is not percent-encoded UTF-8"},
+    {"uri": "app:/missions?operation_id=G%FF", "reason": "operation_id is not percent-encoded UTF-8"},
+    {"uri": "app:/missions?state=failed,", "reason": " is not a board state"},
+    {"uri": "app:/missions?state=failed,failed", "reason": "state lists 1 to 9 distinct board states"},
+    {"uri": "app:/missions?operation_id=G%0A", "reason": "operation_id is not an identifier"},
+    {"uri": "app:/missions?text=%E2%80%8B", "reason": "text is 1 to 128 bytes without control or invisible characters"},
+    {"uri": "app:/missions?mission_id=m-1", "reason": "mission_id needs operation_id"}
+  ]
+}
