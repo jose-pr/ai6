@@ -4210,6 +4210,8 @@ pub fn ai6::station::plugins::Plugins::authenticator(&self, &str, core::option::
 pub fn ai6::station::plugins::Plugins::authenticators(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::authorizer(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn coqui_access::kind::Authorizer>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::authorizers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::cached_authorizer(&self, &str, core::option::Option<&guatiao::value::value::Value>, coqui_access_kit::cache::CacheOptions) -> core::result::Result<alloc::sync::Arc<coqui_access_kit::cache::Cached<dyn coqui_access::kind::Authorizer>>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::cached_directory(&self, &str, core::option::Option<&guatiao::value::value::Value>, coqui_access_kit::cache::CacheOptions) -> core::result::Result<alloc::sync::Arc<coqui_access_kit::cache::Cached<dyn coqui_access::kind::Directory>>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::choose_terminal(&self, ai6::directorates::q::terminal::HarnessStdio, core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::station::plugins::Plugins::directories(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::directory(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn coqui_access::kind::Directory>, ai6::station::plugins::PluginBuildError>
