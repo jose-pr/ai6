@@ -19,6 +19,10 @@
 //! repositories are trusted text and expose nothing. Jobs carry it as
 //! [`ai6::AssistantJob::exposed`].
 //!
+//! `show` and `navigate` only add an entry for the app: a view, or an app page offered as a
+//! card the person opens ([`routes`]). Neither reads nor changes anything, so neither is
+//! audited, and both are stamped `exposed` in an exposed conversation without raising it.
+//!
 //! Routes: `GET /v1/user/moneypenny` (the app's WebSocket), `POST /v1/moneypenny/mcp` (the
 //! harness's tools, with a token bound to the person and the conversation),
 //! `/v1/user/assistant/memory` (the person's memory, [`memory`]),
@@ -1732,6 +1736,46 @@ impl Assistant {
         }
     }
 
+    /// Offers the person an app page, when `input` is `{"to": ROUTE, "label": TEXT}` with a
+    /// valid route; otherwise tells her why and offers nothing. It changes nothing, so it is
+    /// allowed in an exposed conversation and not audited; its entry is stamped as a view is.
+    pub(crate) fn navigate(&self, granted: &Granted, input: &Value) -> tools::Outcome {
+        let (route, label) = match navigation(input, &self.config) {
+            Ok(navigation) => navigation,
+            Err(reason) => {
+                return tools::Outcome::error(format!("Navigation refused: {reason}"));
+            }
+        };
+        let id = format!("nav-{}", Uuid::new_v4().simple());
+        let max_entries = self.config.bounds();
+        let mut desk = self.desk();
+        let Some(conversation) = desk
+            .store
+            .owned(&granted.conversation_id, &granted.person_id)
+        else {
+            return tools::Outcome::error("The conversation is gone.");
+        };
+        let mut data = json!({"id": id, "route": route.to_json(), "label": label});
+        if conversation.exposed {
+            data["exposed"] = Value::Bool(true);
+        }
+        conversation.push(
+            Entry {
+                role: Role::Navigation,
+                text: label,
+                at: now(),
+                data: Some(data),
+            },
+            max_entries,
+        );
+        desk.store
+            .trim_person(&granted.person_id, self.config.person_bytes);
+        tools::Outcome {
+            text: format!("Offered to the person as {id}; the page opens when they choose it."),
+            is_error: false,
+        }
+    }
+
     /// Turns a submitted form into a proposal of its tool, made in this socket's session.
     async fn submit(
         &self,
@@ -2083,6 +2127,27 @@ fn recap(conversation: &Conversation) -> Option<String> {
 fn page_line(route: &Value, limits: routes::Limits) -> Option<String> {
     let route = routes::Route::from_json(route, limits).ok()?;
     Some(format!("[App page: {}]", route.to_uri()))
+}
+
+/// The input of `navigate`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Navigate {
+    to: Value,
+    label: String,
+}
+
+/// The route and label of a `navigate` input: exactly `{"to": ROUTE, "label": TEXT}`, the
+/// route valid within `config`'s route limits and the label a short text of the views.
+fn navigation(input: &Value, config: &AssistantConfig) -> Result<(routes::Route, String), String> {
+    let navigate: Navigate = serde_json::from_value(input.clone())
+        .map_err(|_| "navigate takes exactly {\"to\": {\"page\": ...}, \"label\": \"...\"}")?;
+    let route = routes::Route::from_json(&navigate.to, config.route_limits())?;
+    if navigate.label.trim().is_empty() {
+        return Err("the label is empty".to_owned());
+    }
+    checks::short_within("the label", &navigate.label, config.views.short_bytes)?;
+    Ok((route, navigate.label))
 }
 
 fn cut(text: &str, limit: usize) -> String {

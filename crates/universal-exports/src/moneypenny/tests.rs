@@ -1282,9 +1282,181 @@ async fn configured_view_limits_bound_her_views_and_reach_the_app() {
     assert_eq!(graph["properties"]["nodes"]["maxItems"], 2);
 }
 
+/// Registers Mission `mission` of Operation G with Session `session`, which reports `state`.
+async fn session_in_state(served: &Served, mission: &str, session: &str, state: &str) {
+    let client = reqwest::Client::new();
+    let registered = client
+        .post(format!("{}/v1/station/sessions", served.base))
+        .bearer_auth(STATION_TOKEN)
+        .json(&json!({"operation_id": "G", "mission_id": mission, "session_id": session}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(registered.status(), StatusCode::CREATED);
+    let reported = client
+        .post(format!(
+            "{}/v1/station/sessions/{session}/lifecycle/1",
+            served.base
+        ))
+        .bearer_auth(STATION_TOKEN)
+        .json(&json!({"operation_id": "G", "mission_id": mission, "state": state}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reported.status(), StatusCode::ACCEPTED);
+}
+
+/// The navigation entries of `frames`, as the app is sent them.
+fn navigations(frames: &[Value]) -> Vec<&Value> {
+    frames
+        .iter()
+        .filter(|frame| frame["type"] == "entry" && frame["entry"]["role"] == "navigation")
+        .map(|frame| &frame["entry"])
+        .collect()
+}
+
+#[tokio::test]
+async fn navigate_offers_each_valid_route_and_refuses_each_invalid_one_with_its_reason() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Where do I look?").await;
+    let token = &job.mcp_token;
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../clients/outer-office/test/fixtures/assistant_routes.json"
+    ))
+    .unwrap();
+    let valid = fixture["valid"].as_array().unwrap();
+    for case in valid {
+        let offered = call_tool(
+            &served,
+            token,
+            "navigate",
+            json!({"to": case["json"], "label": "This page"}),
+        )
+        .await;
+        assert_eq!(offered["isError"], false, "{}: {offered}", case["json"]);
+        let text = offered["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("Offered to the person as nav-"), "{text}");
+        assert!(
+            text.ends_with("; the page opens when they choose it."),
+            "{text}"
+        );
+    }
+    let mut refusals = 0;
+    for case in fixture["invalid"].as_array().unwrap() {
+        let Some(route) = case.get("json") else {
+            continue;
+        };
+        let refused = call_tool(
+            &served,
+            token,
+            "navigate",
+            json!({"to": route, "label": "This page"}),
+        )
+        .await;
+        assert_eq!(refused["isError"], true, "{route}");
+        assert_eq!(
+            refused["content"][0]["text"],
+            format!("Navigation refused: {}", case["reason"].as_str().unwrap()),
+            "{route}"
+        );
+        refusals += 1;
+    }
+    assert!(refusals > 10, "{refusals}");
+    for (input, reason) in [
+        (
+            json!({"to": {"page": "overview"}}),
+            "navigate takes exactly {\"to\": {\"page\": ...}, \"label\": \"...\"}",
+        ),
+        (
+            json!({"to": {"page": "overview"}, "label": "x", "open": true}),
+            "navigate takes exactly {\"to\": {\"page\": ...}, \"label\": \"...\"}",
+        ),
+        (
+            json!({"to": {"page": "overview"}, "label": "  "}),
+            "the label is empty",
+        ),
+        (
+            json!({"to": {"page": "overview"}, "label": "x".repeat(513)}),
+            "the label is longer than 512 bytes or has control characters",
+        ),
+    ] {
+        let refused = call_tool(&served, token, "navigate", input.clone()).await;
+        assert_eq!(
+            refused["content"][0]["text"],
+            format!("Navigation refused: {reason}"),
+            "{input}"
+        );
+    }
+
+    let frames = finish(&served, &mut app, &job).await;
+    let entries = navigations(&frames);
+    assert_eq!(entries.len(), valid.len(), "a refused route offers nothing");
+    for (entry, case) in entries.iter().zip(valid) {
+        assert_eq!(entry["text"], "This page");
+        assert_eq!(entry["data"]["route"], case["json"]);
+        assert_eq!(entry["data"]["label"], "This page");
+        assert!(
+            entry["data"]["id"].as_str().unwrap().starts_with("nav-"),
+            "{entry}"
+        );
+        assert!(entry["data"].get("exposed").is_none(), "{entry}");
+    }
+    assert!(
+        audits(&served, "moneypenny.confirmed").is_empty(),
+        "navigation is not audited"
+    );
+}
+
+#[tokio::test]
+async fn navigation_after_outside_text_is_stamped_and_never_raises_exposure() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Show me G's failures.").await;
+    let token = &job.mcp_token;
+    let to = json!({"page": "missions", "operation_id": "G", "state": ["failed"]});
+    let clean = call_tool(
+        &served,
+        token,
+        "navigate",
+        json!({"to": to, "label": "G's failed Missions"}),
+    )
+    .await;
+    assert_eq!(clean["isError"], false, "{clean}");
+    let still = exposure_of(&served, "hq", &job.conversation_id).await;
+    assert_eq!(
+        still.json::<Value>().await.unwrap(),
+        json!({"exposed": false}),
+        "offering a page reads nothing"
+    );
+    // A Mission's brief is outside text; a page offered after reading it is stamped.
+    let missions = call_tool(&served, token, "missions", json!({"operation_id": "G"})).await;
+    assert_eq!(missions["isError"], false);
+    let stamped = call_tool(
+        &served,
+        token,
+        "navigate",
+        json!({"to": to, "label": "G's failed Missions"}),
+    )
+    .await;
+    assert_eq!(stamped["isError"], false, "{stamped}");
+    let now = exposure_of(&served, "hq", &job.conversation_id).await;
+    assert_eq!(now.json::<Value>().await.unwrap(), json!({"exposed": true}));
+
+    let frames = finish(&served, &mut app, &job).await;
+    let entries = navigations(&frames);
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries[0]["data"].get("exposed").is_none(),
+        "{}",
+        entries[0]
+    );
+    assert_eq!(entries[1]["data"]["exposed"], true);
+    assert_eq!(entries[1]["data"]["route"], to);
+}
+
 #[tokio::test]
 async fn the_missions_tool_filters_by_state_station_and_agent() {
     let served = served(AssistantConfig::default()).await;
+    session_in_state(&served, "mission-f", "session-f", "failed").await;
     let (_app, job) = accepted(&served, &served.operator, "Which Missions failed?").await;
     let ids = |result: &Value| -> Vec<String> {
         let text = result["content"][0]["text"].as_str().unwrap();
@@ -1299,11 +1471,17 @@ async fn the_missions_tool_filters_by_state_station_and_agent() {
             .collect()
     };
     // mission-g's one Session has reported no state, so it is working; its brief names Agent
-    // 007, and no Registry record places it on a Station. The rest is the shared fixture.
+    // 007, and no Registry record places it on a Station. mission-f's Session failed. The
+    // rest is the shared fixture.
     for (filter, expected) in [
-        (json!({}), vec!["mission-g"]),
-        (json!({"state": ["failed"]}), vec![]),
-        (json!({"state": ["working", "failed"]}), vec!["mission-g"]),
+        (json!({}), vec!["mission-f", "mission-g"]),
+        (json!({"state": ["failed"]}), vec!["mission-f"]),
+        (json!({"state": ["done"]}), vec![]),
+        (
+            json!({"state": ["working", "failed"]}),
+            vec!["mission-f", "mission-g"],
+        ),
+        (json!({"state": ["working"]}), vec!["mission-g"]),
         (
             json!({"agent": "007", "text": "FIX THE BUILD"}),
             vec!["mission-g"],

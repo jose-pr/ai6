@@ -30,7 +30,8 @@ pub struct ViewLimits {
     pub view_bytes: usize,
     /// Bytes of a text block's Markdown (default 8 KiB).
     pub text_bytes: usize,
-    /// Bytes of a title, label, cell or other short text (default 512).
+    /// Bytes of a title, label, cell or other short text, and of a `navigate` card's label
+    /// (default 512).
     pub short_bytes: usize,
     /// Columns of a table (default 12).
     pub columns: usize,

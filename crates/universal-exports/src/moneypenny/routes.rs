@@ -246,7 +246,6 @@ impl Route {
     }
 
     /// The JSON form.
-    #[cfg(test)]
     pub(crate) fn to_json(&self) -> Value {
         let mut object = serde_json::Map::new();
         object.insert("page".to_owned(), Value::from(self.page.name()));
@@ -353,8 +352,18 @@ impl Route {
 
     /// The link form, its query in the page's field order.
     pub(crate) fn to_uri(&self) -> String {
-        let query = self
-            .fields
+        let query = self.query();
+        if query.is_empty() {
+            format!("app:/{}", self.page.name())
+        } else {
+            format!("app:/{}?{query}", self.page.name())
+        }
+    }
+
+    /// The fields as a percent-encoded query without the `?`, in the page's field order; an
+    /// Audit route's is the query of `GET /v1/user/audit`.
+    pub(crate) fn query(&self) -> String {
+        self.fields
             .iter()
             .map(|(name, field)| {
                 let value = match field {
@@ -368,12 +377,7 @@ impl Route {
                 format!("{name}={value}")
             })
             .collect::<Vec<_>>()
-            .join("&");
-        if query.is_empty() {
-            format!("app:/{}", self.page.name())
-        } else {
-            format!("app:/{}?{query}", self.page.name())
-        }
+            .join("&")
     }
 
     /// Checks each field against its kind and the page's rules, and puts them in field order.
@@ -454,6 +458,61 @@ impl Route {
         }
         Ok(Self { page, fields })
     }
+}
+
+/// The JSON form as one flat JSON Schema object: `page` and every field of any page, each
+/// optional. Which fields a page takes, and the rest of the rules, are [`Route::from_json`]'s.
+pub(crate) fn schema() -> Value {
+    let mut properties = serde_json::Map::new();
+    let pages: Vec<&str> = Page::ALL.into_iter().map(Page::name).collect();
+    properties.insert(
+        "page".to_owned(),
+        serde_json::json!({"type": "string", "enum": pages, "description": "The page."}),
+    );
+    for page in Page::ALL {
+        for (name, kind) in page.fields() {
+            let schema = match kind {
+                Kind::Identifier | Kind::Text => serde_json::json!({"type": "string"}),
+                // `state` is a list on Missions and one state on Sessions.
+                Kind::States | Kind::OneOf(_) if *name == "state" => serde_json::json!({
+                    "type": ["array", "string"],
+                    "items": {"type": "string", "enum": STATES},
+                    "description": "Missions: a list of board states; Sessions: one."
+                }),
+                Kind::States => {
+                    serde_json::json!({"type": "array", "items": {"type": "string"}})
+                }
+                Kind::OneOf(words) => {
+                    // A name such as `tab` takes other words on another page: list them all.
+                    let mut all: Vec<String> = properties
+                        .get(*name)
+                        .and_then(|known| known["enum"].as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect();
+                    for word in *words {
+                        if !all.iter().any(|known| known == word) {
+                            all.push((*word).to_owned());
+                        }
+                    }
+                    properties.insert(
+                        (*name).to_owned(),
+                        serde_json::json!({"type": "string", "enum": all}),
+                    );
+                    continue;
+                }
+            };
+            properties.entry((*name).to_owned()).or_insert(schema);
+        }
+    }
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": ["page"],
+        "additionalProperties": false
+    })
 }
 
 /// The link form and every page with its fields, for Moneypenny.

@@ -175,6 +175,17 @@ fn missions_route(input: &Map<String, Value>, limits: routes::Limits) -> Result<
     Route::from_json(&Value::Object(json), limits)
 }
 
+/// The Audit route an `audit` call names: its Operation or Station as the Audit page's filter.
+fn audit_route(input: &Map<String, Value>, limits: routes::Limits) -> Result<Route, String> {
+    let mut json: Map<String, Value> = input
+        .iter()
+        .filter(|(key, _)| *key != "limit")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    json.insert("page".to_owned(), Value::from("audit"));
+    Route::from_json(&Value::Object(json), limits)
+}
+
 /// Every read tool, sorted by name so the list is the same on every call.
 pub(crate) fn read_tools() -> &'static [Tool] {
     READ_TOOLS
@@ -192,9 +203,9 @@ static READ_TOOLS: &[Tool] = &[
     Tool {
         name: "audit",
         description: "The newest audit records (who did what, when) of an Operation or a \
-                      Station, or of everything the person may audit. Call it when asked who \
-                      changed something. Needs audit.read; a refusal means the person may not \
-                      read the audit log.",
+                      Station (not both, as on the Audit page), or of everything the person \
+                      may audit. Call it when asked who changed something. Needs audit.read; \
+                      a refusal means the person may not read the audit log.",
         schema: || {
             object(
                 &[
@@ -208,14 +219,10 @@ static READ_TOOLS: &[Tool] = &[
                 &[],
             )
         },
-        plan: |input, _| {
-            let mut query = Vec::new();
-            if let Some(operation) = optional_id(input, "operation_id")? {
-                query.push(format!("operation_id={}", encode(operation)));
-            }
-            if let Some(station) = optional_id(input, "station_id")? {
-                query.push(format!("station_id={}", encode(station)));
-            }
+        plan: |input, limits| {
+            let filter = audit_route(input, limits)?.query();
+            let mut query: Vec<String> =
+                Some(filter).filter(|q| !q.is_empty()).into_iter().collect();
             if let Some(limit) = input.get("limit").and_then(Value::as_u64) {
                 query.push(format!("limit={}", limit.clamp(1, 500)));
             }
@@ -831,6 +838,31 @@ mod tests {
             panic!("a read")
         };
         assert_eq!(calls[0].1.path, "/v1/operations/G%2F../missions/m%231");
+    }
+
+    #[test]
+    fn the_audit_tool_filters_as_the_audit_page_does() {
+        let audit = read_tools()
+            .iter()
+            .find(|tool| tool.name == "audit")
+            .unwrap();
+        let path = |input: Value| match (audit.plan)(
+            input.as_object().unwrap(),
+            routes::Limits::default(),
+        ) {
+            Ok(Plan::Read(calls)) => Ok(calls[0].1.path.clone()),
+            Ok(Plan::Guide(_)) => panic!("a read"),
+            Err(reason) => Err(reason),
+        };
+        assert_eq!(path(json!({})).unwrap(), "/v1/user/audit");
+        assert_eq!(
+            path(json!({"station_id": "hq 1", "limit": 900})).unwrap(),
+            "/v1/user/audit?station_id=hq%201&limit=500"
+        );
+        assert_eq!(
+            path(json!({"operation_id": "G", "station_id": "hq"})).unwrap_err(),
+            "audit takes operation_id or station_id, not both"
+        );
     }
 
     #[test]

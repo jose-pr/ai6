@@ -32,6 +32,9 @@ pub(crate) enum Role {
     Proposal,
     /// A view Moneypenny showed; `data` is `{id, view}`.
     View,
+    /// A page Moneypenny offered to open; `data` is `{id, route, label}`, the route in its
+    /// JSON form. The person opens it; following it only reads.
+    Navigation,
     /// What happened to the conversation itself, such as an answer the person stopped.
     Notice,
 }

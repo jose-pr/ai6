@@ -37,6 +37,14 @@ const SHOW: &str = "Show the person a view in the app: text (Markdown; links onl
                     filter; url(#id) may name only its own ids. A view outside the schema is \
                     refused with the reason; fix it and show it again.";
 
+const NAVIGATE: &str = "Offer the person a page of the app, with its filters: \"to\" is the \
+                        route as JSON (the page, below, and its fields; Missions take state as \
+                        a list), \"label\" says in a few words why. The app shows a card the \
+                        person opens; it opens at once only if they chose that, so never say \
+                        you opened it. Use it when a filtered page answers better than a table, \
+                        and to point to the records you summarised. A route that is not valid \
+                        is refused with the reason.";
+
 fn answer(id: &Value, result: Value) -> Response {
     Json(json!({"jsonrpc": "2.0", "id": id, "result": result})).into_response()
 }
@@ -46,8 +54,19 @@ fn failure(id: &Value, code: i64, message: &str) -> Response {
         .into_response()
 }
 
-/// The tools as `tools/list` lists them, by name: the read tools and the `propose_*` tools,
-/// which only record a proposal.
+/// The `navigate` tool's input schema: the route in its JSON form, flat (see
+/// [`routes::schema`]), and a label.
+fn navigate_schema(limits: &views::ViewLimits) -> Value {
+    let mut label = tools::text("Why this page, in a few words; the app titles the card itself.");
+    label["maxLength"] = Value::from(limits.short_bytes);
+    tools::object(
+        &[("to", routes::schema()), ("label", label)],
+        &["to", "label"],
+    )
+}
+
+/// The tools as `tools/list` lists them, by name: the read tools, `show`, `navigate` and the
+/// `propose_*` tools, which only record a proposal.
 fn listed(limits: &views::ViewLimits) -> Value {
     let mut tools: Vec<Value> = tools::read_tools()
         .iter()
@@ -72,6 +91,12 @@ fn listed(limits: &views::ViewLimits) -> Value {
             "name": "show",
             "description": format!("{SHOW} {}", routes::describe()),
             "inputSchema": views::schema(limits),
+            "annotations": {"readOnlyHint": true, "openWorldHint": false}
+        })))
+        .chain(std::iter::once(json!({
+            "name": "navigate",
+            "description": format!("{NAVIGATE} {}", routes::describe()),
+            "inputSchema": navigate_schema(limits),
             "annotations": {"readOnlyHint": true, "openWorldHint": false}
         })))
         .chain(std::iter::once(json!({
@@ -143,6 +168,8 @@ pub(crate) async fn endpoint(
                 }
             } else if name == "show" {
                 assistant.show(&granted, &input)
+            } else if name == "navigate" {
+                assistant.navigate(&granted, &input)
             } else if name == actions::SHARED_CHANGE {
                 assistant.propose_shared(&gateway, &granted, &input).await
             } else if let Some(tool) = write {
@@ -166,4 +193,55 @@ pub(crate) async fn endpoint(
         }
         _ => failure(&id, -32601, "this server has no such method"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listed_tools_are_sorted_and_navigate_has_a_strict_schema() {
+        let listed = listed(&views::ViewLimits::default());
+        let tools = listed["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted);
+        let navigate = tools
+            .iter()
+            .find(|tool| tool["name"] == "navigate")
+            .unwrap();
+        assert_eq!(
+            navigate["annotations"],
+            json!({"readOnlyHint": true, "openWorldHint": false})
+        );
+        let schema = &navigate["inputSchema"];
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["required"], json!(["to", "label"]));
+        assert_eq!(schema["properties"]["label"]["maxLength"], 512);
+        let to = &schema["properties"]["to"];
+        assert_eq!(to["additionalProperties"], false);
+        assert_eq!(to["required"], json!(["page"]));
+        assert_eq!(
+            to["properties"]["page"]["enum"].as_array().unwrap().len(),
+            13
+        );
+        // Every field of every page, and the words of each page's tabs.
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../clients/outer-office/test/fixtures/assistant_routes.json"
+        ))
+        .unwrap();
+        for case in fixture["valid"].as_array().unwrap() {
+            for (key, value) in case["json"].as_object().unwrap() {
+                let property = &to["properties"][key];
+                assert!(property.is_object(), "{key}");
+                if let (Some(words), Some(word)) = (property["enum"].as_array(), value.as_str()) {
+                    assert!(words.iter().any(|known| known == word), "{key}: {word}");
+                }
+            }
+        }
+    }
 }
