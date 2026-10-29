@@ -147,13 +147,28 @@ url = "https://ai6.example"           # desktop; on the web the page's own origi
 [appearance]
 theme = "night-ops"                   # night-ops, black-ops, dusk, classic, light, red-file or system
 
+[chat]                                # Moneypenny's chat; logical pixels, every key optional
+min_width = 320                       # the docked chat's narrowest drag
+max_width = 720                       # and widest
+width = 400                           # its width until the person drags it
+width_step = 16                       # an arrow key on the drag handle moves it this far
+min_page_width = 360                  # the page keeps at least this much beside it
+text_width = 960                      # expanded: her text keeps to a column this wide
+window_width = 520                    # desktop: her own window's size when popped out
+window_height = 760
+transition_ms = 200                   # how long the chat takes to move; 0 for none
+
 [assets]
 cdn = "none"                          # web only: none, fonts or all (read by the page's bootstrap)
 ```
 
 The build define `OO_API` beats `[unex] url`, which beats the loopback default. A theme the
 person chooses (`oo.theme`, kept on the device or in the browser) beats `[appearance] theme`,
-which beats Night Ops; an unknown theme id is logged and read as the default. The operator
+which beats Night Ops; an unknown theme id is logged and read as the default. In `[chat]`
+each value is a positive number (`transition_ms` a whole one, 0 allowed) and `width` lies
+between `min_width` and `max_width`, or the file is refused; a width the person drags to
+(`oo.chat.<person ID>`) beats `width` and is kept within the limits. The system's reduced
+motion setting turns transitions off whatever `transition_ms` says. The operator
 menu on desktop writes `[unex] url` back in the format the file declares, keeping its `#!`
 line; a YAML file keeps its comments, a TOML or JSON one does not. The address applies at the
 next start.

@@ -73,6 +73,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   its icons, and the web build loads CanvasKit from `canvaskit/` and fallback fonts from
   `assets/fonts/fallback/`. `[assets] cdn = "fonts"` or `"all"` in the `OO.cfg` beside
   `index.html` opts in to Google Fonts, or to it and Flutter's CDN for the engine.
+- Moneypenny's chat in Outer Office moves like an editor's chat view: hidden behind the
+  top-bar button (with a dot when she answered or proposed something meanwhile); docked
+  beside the page from 1200 px, resizable from 320 to 720 px by its drag handle or the arrow
+  keys, a modal sheet from 900 px and full screen below; expanded into the centre, the rail
+  kept and the page left as it was; or, on desktop, in her own window. Ctrl+Alt+I (⌃⌘I on
+  macOS) opens, focuses or hides it, Ctrl+Alt+Shift+I expands it, Ctrl+Alt+O pops it out or
+  brings it back, Esc steps back; Enter sends and Shift+Enter starts a new line. Each
+  person's layout and width are kept on each device as `oo.chat.<person>`. `OO.cfg`'s
+  `[chat]` sets its sizes (the docked width and its limits, the arrow-key step, the page's
+  minimum beside it, the expanded text column, her window's size) and transition time.
 - The Outer Office web build serves the Noto fallback fonts itself (727 files, 34.4 MiB,
   OFL-1.1), so text in other scripts and emoji render with no outside request;
   `tool/cdn_files.dart fill` puts them in after `flutter build web`, from the `deps`

@@ -39,6 +39,12 @@ on the hero.
   popup is a separate feature and would need an explicit `window.open` plus messaging.
 - Native desktop windows are a separate, experimental Flutter feature. Opening or closing
   a Session window must not start, resume or stop its provider Session.
+- Every native window (a Session's, Moneypenny's popped-out chat) opens through
+  `openAppWindow` (`lib/shell/app_window.dart`). Moneypenny's conversation and layout live
+  in one `MoneypennyChat` per sign-in (`lib/assistant/chat_layout.dart`), so every layout
+  and window shows the same conversation and only one `AssistantPanel` is mounted at a time.
+  Her shortcuts are one `HardwareKeyboard` handler in `ChatShell`, which also serves her
+  window.
 - The Windows runner starts `FlutterEngine` without a `FlutterViewController` host. `WindowManager` owns all native views, so do not reintroduce the legacy blank host window alongside the Dart-created windows.
 - The live terminal uses Guatiao's Dart wire receiver and `web_socket_channel`. Web builds must run `dart run tool/build_guatiao_wasm.dart` before a non-demo Flutter build; this copies the ignored module from the pinned Guatiao Cargo source into `web/`.
 - Attachment credentials remain in memory and one-use cookies stay out of URLs and UI. A browser app and Universal Exports must share an HTTPS origin; desktop connections require a public HTTPS gateway origin.

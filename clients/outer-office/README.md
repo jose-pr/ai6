@@ -64,7 +64,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   expiry), each approved for a chosen time with an optional note or rejected with a reason
   (`approval.decide`), and the Operation's class authorisations with their uses, revoking
   the live ones (`approval.class`). A Session held for green ink shows `BLOCKED · GREEN INK`.
-- Moneypenny, the assistant: **Ask Moneypenny** on every page opens a chat with her. She
+- Moneypenny, the assistant: **Ask Moneypenny** on every page opens a chat with her (see
+  Layout for where it goes and its shortcuts). She
   answers from AI6's records, through tools that run with the signed-in operator's own
   permissions, shows tables, charts, cards, timelines and diffs rendered by the app, and
   proposes changes the operator confirms or cancels (the exact request is shown); **Stop**
@@ -205,10 +206,33 @@ one view at a time, its pages as rows with icon tiles. Below 600 px (a phone) th
 keeps the page title, search, Moneypenny, the bell and the person's initials; Overview is
 one column, tables are lists, and Moneypenny's chat fills the screen.
 
+Moneypenny's chat is hidden behind the top bar's Moneypenny button until opened; a dot on
+the button says she answered or proposed something meanwhile. Docked, it sits beside the
+page from 1200 px wide (drag the handle, or focus it and use the arrow keys, to make it 320
+to 720 px wide; `OO.cfg`'s `[chat]` changes these and its other sizes, see
+[Configuration](https://jose-pr.github.io/ai6/configuration/)), is a modal sheet over the
+page from 900 px, and fills the screen below
+that. Expanded, it takes the centre, the rail stays, and the page keeps its scroll and
+filters for **Back to …**; below 900 px it is the same as docked. On desktop **Pop out**
+moves her into her own window, "Moneypenny | Outer Office"; closing that window brings her
+back. Every layout shows the same conversation.
+
+| Keys (macOS) | Effect |
+| --- | --- |
+| Ctrl+Alt+I (⌃⌘I) | Open the chat where it was last open and focus the composer; focus it if open; hide it if it has focus |
+| Ctrl+Alt+Shift+I (⌃⌘⇧I) | Expanded or docked |
+| Ctrl+Alt+O (⌃⌘O) | Desktop: pop out, or bring back |
+| Esc | In the composer: back to the page; expanded: docked; sheet or full screen: hide |
+| Enter, Shift+Enter | Send; a new line |
+
+A key that types a character in a text field is left to it, so AltGr layouts (where Windows
+reports AltGr as Ctrl+Alt) keep typing. The layout and width are kept per person on each
+device under `oo.chat.<person ID>`; a phone starts with the chat hidden.
+
 Web is one Flutter app view: wide windows keep the board beside the selected Session,
 narrow windows navigate to it in-page with browser back. It opens no browser popups and
-no embedded Flutter views. Native desktop opens each Session in its own window sharing
-the board's state.
+no embedded Flutter views. Native desktop opens each Session, and Moneypenny when popped
+out, in its own window sharing the board's state.
 
 ## Development
 

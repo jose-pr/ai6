@@ -693,11 +693,17 @@ person still confirms.
 
 ## In the app
 
-**Ask Moneypenny** (top right on every page) opens the chat. The app opens a WebSocket to
-`/v1/user/moneypenny` and sends its access token in the first frame. With each message it
-says which page the person is on (for example the Stations page, or the Session open beside
-the board), so "why is this one stuck?" means something. Her answers, the tools she used,
-her views and her proposals (with **Confirm** and **Cancel**) appear in the panel.
+**Ask Moneypenny** (top right on every page, or Ctrl+Alt+I; ⌃⌘I on macOS) opens the chat:
+beside the page in a wide window, over it in a narrower one, full screen on a phone. It can
+be expanded into the centre (Ctrl+Alt+Shift+I) and, on desktop, popped out into its own
+window (Ctrl+Alt+O); every layout shows the same conversation, and the app remembers the
+layout per person on each device (the app's README has the details).
+
+The app opens a WebSocket to `/v1/user/moneypenny` and sends its access token in the first
+frame. With each message it says which page the person is on (for example the Stations page,
+or the Session open beside the board), so "why is this one stuck?" means something. Her
+answers, the tools she used, her views and her proposals (with **Confirm** and **Cancel**)
+appear in the chat.
 Conversations are kept per person (20 each, for a week) in Universal Exports' memory;
 reopening one shows what was said. One message is answered at a time.
 
