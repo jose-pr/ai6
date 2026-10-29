@@ -4927,7 +4927,7 @@ mod tests {
             serde_json::json!({
                 "revision": "18446744073709551615",
                 "refused": ["roster revision 7: Agent \"009\": clearance"],
-                "needs_restart": ["theaters.toml"]
+                "needs_restart": ["theater"]
             }),
         );
         worker_info.insert(
@@ -5862,7 +5862,7 @@ mod tests {
             serde_json::json!({
                 "revision": "18446744073709551615",
                 "refused": ["roster revision 7: Agent \"009\": clearance"],
-                "needs_restart": ["theaters.toml"]
+                "needs_restart": ["theater"]
             }),
             "the configuration a Station runs, as it reported it"
         );

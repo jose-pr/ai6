@@ -56,6 +56,8 @@ fn rewritten(extension: &str, header: &str) -> tempfile::TempDir {
 fn the_example_configuration_reads_alike_in_every_format() {
     let expected = FileProvider::new(examples()).load("").unwrap();
     assert!(expected.roster.operation("G").is_ok(), "the examples load");
+    assert!(expected.settings.theaters.find("build-box").is_some());
+    assert_eq!(expected.settings.station.max_concurrent_missions, Some(4));
     for extension in ["toml", "json", "yaml", "yml", "cfg"] {
         let dir = rewritten(extension, "");
         let read = FileProvider::new(dir.path()).load("").unwrap();
@@ -83,7 +85,7 @@ fn a_cfg_family_file_reads_the_format_its_first_line_names() {
 #[cfg(feature = "sqlite")]
 #[test]
 fn a_sqlite_provider_holding_the_example_records_reads_alike() {
-    use ai6::{ConfigRecord, ConfigScope, SqlProvider};
+    use ai6::{ConfigScope, SqlProvider};
 
     let file = FileProvider::new(examples());
     let expected = file.load("").unwrap();
