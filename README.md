@@ -11,7 +11,7 @@ It holds the packages from `pub.dev` (`pub/hosted/`, with their hashes in
 commit below. Pub checks the files out from it on first use. The Flutter SDK's own packages
 (`flutter`, `flutter_test`) come with the SDK and are not here.
 
-Built from `main` at `5ec81d7b` with Flutter `main` (Dart 3.15 dev).
+Built from `main` at `0df0390a` with Flutter `main` (Dart 3.15 dev).
 
 ## Use it
 
