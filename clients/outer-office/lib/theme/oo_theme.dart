@@ -85,10 +85,11 @@ ThemeData ooTheme(
     inversePrimary: tokens.accent,
     surfaceTint: const Color(0x00000000),
   );
-  // Cards and panels: a border washed towards the accent, like the reference's gilt edges.
+  // Cards and panels have neutral edges: accent edges and glow mark only the selection and
+  // the primary action.
   final rounded = RoundedRectangleBorder(
     borderRadius: BorderRadius.circular(14),
-    side: BorderSide(color: Color.lerp(tokens.border, tokens.accent, 0.22)!),
+    side: BorderSide(color: tokens.border),
   );
   final buttonShape = RoundedRectangleBorder(
     borderRadius: BorderRadius.circular(10),
@@ -183,7 +184,7 @@ ThemeData ooTheme(
     ),
     chipTheme: ChipThemeData(
       backgroundColor: tokens.raised,
-      side: BorderSide(color: Color.lerp(tokens.border, tokens.accent, 0.3)!),
+      side: BorderSide(color: tokens.border),
       labelStyle: TextStyle(color: tokens.text),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
     ),

@@ -72,7 +72,7 @@ class OverviewPage extends StatelessWidget {
     final muted = TextStyle(color: tokens.muted);
 
     final heroText = Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -419,15 +419,20 @@ class _ActiveOperations extends StatelessWidget {
                         style: text.bodyMedium,
                       ),
                     ),
-                    Text(
-                      [
-                        if (station.headquarters) 'HQS',
-                        station.healthy
-                            ? '${station.running} of ${station.capacity} running'
-                            : 'dark',
-                      ].join(' · '),
-                      style: text.bodySmall?.copyWith(
-                        color: station.healthy ? tokens.muted : tokens.danger,
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        [
+                          if (station.headquarters) 'HQS',
+                          station.healthy
+                              ? '${station.running} of ${station.capacity} running'
+                              : 'dark',
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.bodySmall?.copyWith(
+                          color: station.healthy ? tokens.muted : tokens.danger,
+                        ),
                       ),
                     ),
                   ],
@@ -915,10 +920,7 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
               DecoratedBox(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: tokens.accent.withValues(alpha: 0.7),
-                  ),
-                  boxShadow: tokens.glow(tokens.danger, radius: 12),
+                  border: Border.all(color: tokens.border),
                 ),
                 child: const MoneypennyAvatar(size: 64),
               ),

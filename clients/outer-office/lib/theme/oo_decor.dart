@@ -4,7 +4,7 @@ import 'oo_icon.dart';
 import 'oo_theme.dart';
 
 /// A rounded tile holding a duotone icon, like the stat cards of the design reference:
-/// `raised` to `surface`, a thin accent edge and a soft accent glow.
+/// `raised` to `surface` with a neutral edge; the icon carries the accent.
 class OoTile extends StatelessWidget {
   const OoTile(this.icon, {this.size = 56, this.semanticLabel, super.key});
 
@@ -27,14 +27,7 @@ class OoTile extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: tokens.gradient(tokens.raised, tokens.surface),
         ),
-        border: Border.all(color: tokens.accent.withValues(alpha: 0.4)),
-        boxShadow: [
-          for (final shadow in tokens.glow(tokens.accent, radius: size / 5))
-            BoxShadow(
-              color: shadow.color.withValues(alpha: shadow.color.a * 0.45),
-              blurRadius: shadow.blurRadius,
-            ),
-        ],
+        border: Border.all(color: tokens.border),
       ),
       alignment: Alignment.center,
       child: OoDuotone(icon, size: size * 0.6, semanticLabel: semanticLabel),
@@ -42,8 +35,8 @@ class OoTile extends StatelessWidget {
   }
 }
 
-/// A status dot in [color] with a glow of the same colour. Always put its meaning in text
-/// beside it: colour alone says nothing to some people.
+/// A status dot in [color]. Always put its meaning in text beside it: colour alone says
+/// nothing to some people.
 class OoStatusDot extends StatelessWidget {
   const OoStatusDot(this.color, {this.size = 9, super.key});
 
@@ -54,11 +47,7 @@ class OoStatusDot extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     width: size,
     height: size,
-    decoration: BoxDecoration(
-      color: color,
-      shape: BoxShape.circle,
-      boxShadow: OoTokens.of(context).glow(color, radius: size),
-    ),
+    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
   );
 }
 
@@ -135,7 +124,7 @@ class OoPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -168,7 +157,7 @@ class OoHero extends StatelessWidget {
 
   final Widget child;
 
-  /// Null to take the height it is given.
+  /// The least height; null to take the height it is given.
   final double? height;
 
   @override
@@ -196,25 +185,24 @@ class OoHero extends StatelessWidget {
         child: image,
       );
     }
+    final full = height;
     return Container(
-      height: height,
+      // At least [height]: large text grows the panel, and the hero with it.
+      constraints: full == null
+          ? null
+          : BoxConstraints(minWidth: double.infinity, minHeight: full),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Color.lerp(tokens.border, tokens.accent, 0.22)!,
-        ),
+        border: Border.all(color: tokens.border),
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
-        fit: StackFit.expand,
+        alignment: Alignment.bottomLeft,
         children: [
           // Positioned, so the art adds nothing to the hero's intrinsic height: beside
           // another panel the hero takes that panel's height whatever the art's shape.
           Positioned.fill(child: image),
-          Align(
-            alignment: Alignment.bottomLeft,
-            child: Padding(padding: const EdgeInsets.all(14), child: panel),
-          ),
+          Padding(padding: const EdgeInsets.all(12), child: panel),
         ],
       ),
     );

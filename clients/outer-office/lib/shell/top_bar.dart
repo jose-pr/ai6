@@ -295,7 +295,7 @@ class UserChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: tokens.raised,
         shape: BoxShape.circle,
-        border: Border.all(color: tokens.accent.withValues(alpha: 0.7)),
+        border: Border.all(color: tokens.border),
       ),
       child: initials == null
           ? Icon(Icons.person_outline, size: 19, color: tokens.text)
@@ -325,28 +325,39 @@ class UserChip extends StatelessWidget {
                   const SizedBox(width: 10),
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 160),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: tokens.text,
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w500,
-                          ),
+                    // Large text shrinks the two lines to the bar's height.
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 160),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: tokens.text,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            if (group != null)
+                              Text(
+                                group,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: tokens.muted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                          ],
                         ),
-                        if (group != null)
-                          Text(
-                            group,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: tokens.muted, fontSize: 12),
-                          ),
-                      ],
+                      ),
                     ),
                   ),
                 ],
