@@ -39,7 +39,10 @@ pub(crate) fn set_terminal_mode(master: &dyn MasterPty) -> io::Result<()> {
     mode.local_flags
         .remove(LocalFlags::ICANON | LocalFlags::IEXTEN | LocalFlags::ECHO | LocalFlags::ECHONL);
     // Nothing uses flow control, and with it a ^S written would stop the program's output.
-    mode.input_flags.remove(InputFlags::IXON);
+    // With IMAXBEL, FreeBSD 14.5 answers input past a full queue with BEL in the output, ahead
+    // of the program's own (measured); the writer waits instead.
+    mode.input_flags
+        .remove(InputFlags::IXON | InputFlags::IMAXBEL);
     // ISIG, ICRNL and OPOST stay on: the Claude Code handler interrupts by writing ^C, Enter from
     // an attached viewer arrives as CR, and the viewer's terminal emulator needs CRLF line ends.
 

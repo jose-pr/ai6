@@ -32,7 +32,8 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   0.9 creates every pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR` and offers no way not
   to. On Unix, and for other terminal queries, the bytes pass through as output.
 - **Terminal mode on Unix**: before the program starts, the terminal is set to
-  non-canonical mode with no echo (`ICANON`, `IEXTEN`, `ECHO`, `ECHONL` and `IXON` off;
+  non-canonical mode with no echo (`ICANON`, `IEXTEN`, `ECHO`, `ECHONL`, `IXON` and `IMAXBEL`
+  off, the last because FreeBSD answers input past a full queue with BEL in the output;
   `VMIN` 1, `VTIME` 0), so an input line of any length reaches the program whole and what
   is written never comes back as output. `ISIG` stays on (a written `^C` is SIGINT to the
   program), as do `ICRNL` (Enter typed in an attached viewer arrives as CR) and `OPOST`
@@ -75,3 +76,7 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   if it is not, the start fails and the child is killed.
 - After renaming or removing a provider library, clean the plugin directory: a Station
   loads every provider library it finds.
+- On FreeBSD 14.5 the output of a program that exits within milliseconds of starting
+  (`sh -c 'printf X'`) does not arrive, and `read` reports the end with nothing: three
+  contract tests fail there. A program that lives longer (one reading its input first, as the
+  harnesses do) is read in full.
