@@ -36,6 +36,7 @@ nav:
   - Architecture: architecture.md
   - Organization: organization.md
   - Access and sign-in: access.md
+  - Configuration: configuration.md
   - Guides:
       - Operations: operations.md
       - Stations and failover: stations.md

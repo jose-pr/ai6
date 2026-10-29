@@ -11,8 +11,10 @@ The crate has no library target.
 
 ## Commands
 
-All commands accept `--server <ORIGIN>` (env `AI6_EXPORTS_URL`, default
-`http://127.0.0.1:7082`). The origin must have no credentials or path; HTTP is accepted
+All commands accept `--server <ORIGIN>` (env `UNEX_URL`) and `--config <PATH>`. The origin
+is `--server`, else `UNEX_URL`, else `[unex] url` of the `ai6.cfg` the `ai6` command would read
+(`--config`, `AI6_CONFIG`, the user's then the system's configuration directory; nothing else
+of it is read), else `http://127.0.0.1:7082`. The origin must have no credentials or path; HTTP is accepted
 only for loopback, HTTPS is required elsewhere. Redirects are not followed.
 
 - `ai6ctl health` checks `GET /health` and prints `Universal Exports is healthy`.
@@ -126,8 +128,9 @@ signed by the token's person and audited with the step, never the Agent's reason
 
 | Variable | Effect | Default |
 | --- | --- | --- |
-| `AI6_EXPORTS_URL` | Universal Exports origin; overridden by `--server`. | `http://127.0.0.1:7082` |
-| `AI6_ACCESS_TOKEN` | User bearer; required by every command except `health`. | None |
+| `UNEX_URL` | Universal Exports origin; overridden by `--server`. | `[unex] url` of `ai6.cfg`, else `http://127.0.0.1:7082` |
+| `AI6_CONFIG` | The `ai6.cfg` to read `[unex] url` from; must exist when set. | The search of the `ai6` command |
+| `UNEX_ACCESS_TOKEN` | User bearer; required by every command except `health`. | None |
 
 ## Exit status
 

@@ -16,7 +16,7 @@ handler names:
 - Any other handler (`terminal`, the default) gets `pty` (`ai6::DEFAULT_TERMINAL`) when it is
   available, else another provider with a terminal, else any available provider.
 
-`ai6 serve --terminal ID`, or `StationConfig::with_terminal` in Rust, pins one. A pin is used
+The `station` record's `terminal`, or `StationConfig::with_terminal` in Rust, pins one. A pin is used
 when it suits the harness; a pin that gives a JSON harness a terminal is refused at Mission
 start with the reason, never silently replaced. A field runner chooses the same way among the
 providers it loads, under its own `terminal` setting or the Station's. A resumed Session

@@ -657,8 +657,34 @@ Guatiao provider.
 ```rust
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConfigRevision;   // opaque; new(u64), get()
-#[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq)]
-pub struct Settings { pub theaters: Theaters }        // the non-roster families, for one Station
+#[non_exhaustive] #[derive(Clone, Default)]   // the non-roster families, for one Station
+pub struct Settings {
+    pub theaters: Theaters,
+    pub loadouts: LoadoutCatalog,            // loadout, sandbox, mcp, secret, pool records
+    pub cables: CableConfig,                 // default denies every action
+    pub pins: Option<PinSet>,                // plugin records; None when there are none
+    pub station: StationRuntime,             // station record
+    pub tls: Option<serde_json::Value>,      // tls record, a coqui-peer-tls Policy document
+    pub access: Option<serde_json::Value>,   // access record, the gateway's role policy
+    pub unex: UnexRecord,                    // unex record
+}
+impl Settings {
+    pub fn access_authorizer(&self) -> Result<RoleAuthorizer, String>;   // none: deny all
+    #[cfg(feature = "station-tls")]
+    pub fn tls_policy(&self) -> Result<coqui_peer_tls::Policy, String>;  // over Policy::default()
+}
+// Deserialize + Serialize, deny_unknown_fields, every key optional:
+pub struct StationRuntime { max_concurrent_missions, stall_timeout, loop_timeout, loop_min_lines,
+    blocked_after, max_runtime, history, normalize_digits, roles, labels, terminal,
+    resources_every, safe_house_caches, safe_house_cache_age }   // seconds as f64
+impl StationRuntime { pub fn validate(&self) -> Result<(), String>;
+    pub fn duration(seconds: Option<f64>) -> Option<Duration>; }
+pub struct UnexRecord { authenticator, authenticator_config, directory, directory_config,
+    authorizer, authorizer_config, proxy_user_header, proxy_lookup_by /* "name" */,
+    login_tries_per_address, login_tries_per_name, client_address_header, access_cache_ttl,
+    access_cache_negative_ttl, access_cache_entries, assistant /* true */,
+    assistant_agent /* "moneypenny" */ }
+impl UnexRecord { pub fn weakenings(&self) -> Vec<String>; }   // inline credentials in *_config
 #[non_exhaustive] #[derive(Clone)]
 pub struct ConfigSnapshot { pub revision: ConfigRevision, pub roster: Roster, pub settings: Settings }
 impl ConfigSnapshot {
@@ -678,24 +704,36 @@ pub trait ConfigProvider: Send + Sync {
         -> Result<ConfigRevision, RosterError>;
     fn remove(&self, record: ConfigRecord, scope: &ConfigScope, key: &str)
         -> Result<Option<ConfigRevision>, RosterError>;   // None: there was none
+    /// Several records as one change: all or none (default: put one by one).
+    fn put_all(&self, scope: &ConfigScope, records: &[(ConfigRecord, String, serde_json::Value)])
+        -> Result<Option<ConfigRevision>, RosterError>;
+    /// Global and each Station scope that holds records (default: Global).
+    fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError>;
 }
+pub const IMPORT_ORDER: [ConfigRecord; 17];   // each family after those it refers to
+pub fn family_document(record: ConfigRecord, records) -> Result<String, RosterError>;   // TOML
+pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, RosterError>;
 #[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
-pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater }
+pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater, Loadout, Sandbox,
+    Mcp, Secret, Pool, Cables, Plugin, Station, Tls, Access, Unex }
 impl ConfigRecord {
-    pub const ALL: [Self; 6];
+    pub const ALL: [Self; 17];
     pub const SINGLETON_KEY: &'static str;      // "settings": a singleton family's one record
-    pub const fn name(self) -> &'static str;    // "operation" | "agent" | "role" | "assistant" | "cover" | "theater"
+    pub const fn name(self) -> &'static str;    // "operation", "agent", ... "unex"
     pub fn from_name(name: &str) -> Option<Self>;
-    pub const fn file(self) -> &'static str;    // family file stem: operations | agents | covers | theaters
-    pub const fn is_singleton(self) -> bool;    // Assistant
-    pub const fn station_scoped(self) -> bool;  // Theater
-    pub const fn applies_live(self) -> bool;    // all but Theater
+    pub const fn file(self) -> &'static str;    // operations | agents | covers | theaters | loadouts
+                                                // | cables | plugins | station | tls | access | unex
+    pub const fn is_singleton(self) -> bool;    // Assistant, Cables, Station, Tls, Access, Unex
+    pub const fn is_whole_file(self) -> bool;   // the singletons but Assistant
+    pub const fn station_scoped(self) -> bool;  // Theater, the loadout families, Cables, Plugin, Station, Tls
+    pub const fn applies_live(self) -> bool;    // all but Theater, Cables, Plugin, Station, Tls, Unex
 }
 #[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub enum ConfigScope { Global, Station(String) }
 impl ConfigScope {
     pub fn as_text(&self) -> String;              // "" | "station:<id>"
-    pub fn parse(text: &str) -> Option<Self>;
+    pub fn parse(text: &str) -> Option<Self>;    // None for an id that is not one plain component
+    pub fn is_plain(id: &str) -> bool;            // not empty, ., .., nor holding / \ :
     pub fn of_station(station: &str) -> Self;     // Global for ""
 }
 #[non_exhaustive] #[derive(Clone, PartialEq)]
@@ -708,8 +746,8 @@ pub struct ConfigDefinitions {
 #[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigStatus {
     pub revision: Option<String>,    // decimal: a digest can pass 2^53
-    pub refused: Vec<String>,        // why the newest configuration / loadouts.toml is refused
-    pub needs_restart: Vec<String>,  // family names ("theater") and files ("cables.toml")
+    pub refused: Vec<String>,        // why the newest configuration is refused
+    pub needs_restart: Vec<String>,  // restart-only family names ("theater", "cables")
 }
 pub struct FileProvider;     // ConfigProvider (+ definitions, read-only); new(root), root()
 pub struct MemoryProvider;   // ConfigProvider (read-only); new(roster), with_settings(Settings),
@@ -737,8 +775,11 @@ Station scope, or a singleton under another key, is `Invalid`.
 `cfg`, `toml`, `json`, `yaml`, `yml` (`ai6::bootstrap::format`), and a Station's own records
 from `stations/<id>/` beside them. Each top-level table of a file names a family that file
 holds: `operations` (`[operation.<id>]`), `agents` (`[agent.<codename>]`, `[role.<id>]`,
-`[assistant]`), `covers` (`[cover.<name>]`), `theaters` (`[theater.<id>]`); anything else is
-`Invalid`, naming the table, and two files for one family are `Invalid`, naming both. A
+`[assistant]`), `covers` (`[cover.<name>]`), `theaters` (`[theater.<id>]`), `loadouts`
+(`[loadout.*]`, `[sandbox.*]`, `[mcp.*]`, `[secret.*]`, `[pool.*]`); `plugins` is `[[library]]`
+entries keyed by `file`; `cables`, `station`, `tls`, `access` and `unex` are each one record,
+the whole file. Anything else is `Invalid`, naming the table, and two files for one family
+are `Invalid`, naming both. `ai6.cfg` and `unex.cfg` are never family files. A
 relative skill path in `[assistant]` is relative to the directory. Its revision is a digest of
 every family file of the view (global and the Station's own) with their relative paths, taken
 before they are parsed, so `changes_since` reads them but parses nothing while they are
@@ -755,10 +796,9 @@ and new Sessions (running Sessions keep theirs); a changed family that only a re
 (`theater`) is logged and listed in `config.needs_restart` by name. A revision that fails with
 `Invalid` is refused once per revision, logged, audited (`config.refused`, actor and resource
 `station:<id>`) and reported at check-in (`config.refused`) while the last good configuration
-keeps running. `loadouts.toml` is read again from the configuration directory when its
-contents change (unless loadouts were set in code), with the same refusal rule, and the
-Station then declares its pool accounts again. `cables.toml` is read only at start: a change
-is listed as `cables.toml`. The bootstrap file and `ServeConfig` settings apply only at start.
+keeps running. Loadouts apply live (unless they were set in code), and the Station then
+declares its pool accounts again; `cables`, `plugin`, `station` and `tls` apply at restart like
+`theater`. The bootstrap file and `ServeConfig` settings apply only at start.
 
 `SqlProvider` keeps one table per family, `ai6_config_<name>` (`scope`, `key`, `definition`,
 `revision`; primary key `(scope, key)`): a row is a record's scope text, key and a JSON object
@@ -4092,25 +4132,25 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
 
 ## Command line
 
-- `ai6 serve [--config PATH] [--provider LOC] [--registry LOC] [--state-dir PATH] [--station ID] [--listen 127.0.0.1:7081] [--role control|execution]... [--label KEY=VALUE]... [--terminal ID] [--plugin-path PATH]... [--plugin-pins PATH] [--plugin-profile strict|report|off]`
-  (feature `cli`): run the Station from its bootstrap file with these flags over it. The pin
-  set defaults to `plugins.toml` in the provider's directory (the bootstrap file's when the
-  provider is SQL); the profile to `[plugins] profile`; verified copies go to the state
-  directory's `plugins/verified/`.
-  `--terminal` pins the terminal provider (refused at Mission start for a JSON harness when
-  it gives a terminal); without it an available one that suits the handler is used: `pipe`
-  preferred for a JSON harness, `pty` otherwise. It accepts
-  `--max-concurrent-missions 4`, `--stall-timeout 300`, `--loop-timeout 300`,
-  `--loop-min-lines 50`, `--blocked-after 10`, optional `--max-runtime`, `--history 4096`
-  and `--normalize-digits`. Station roles default to control and execution; repeated `--role`
-  values replace that default. `--label` adds a placement label. `--resources-every 60`
-  sets the seconds between resource samples of each remote Theater (`0` leaves only the
-  300-second probe; `StationConfig::with_resources_every`, `DEFAULT_RESOURCES_EVERY`).
-  `--safe-house-cache NAME` (repeatable, replacing `DEFAULT_CACHE_DIRS`) and
-  `--safe-house-cache-age 604800` set `StationConfig::with_safe_house_hygiene`; an invalid
-  name exits 1. Timeout values are
-  non-negative seconds and may be fractional.
-- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--plugin-pins PATH] [--plugin-profile P] [--terminal ID] [--detach]`:
+- `ai6 serve [--config PATH] [--provider LOC] [--registry LOC] [--state-dir PATH] [--station ID] [--listen 127.0.0.1:7081] [--plugin-path PATH]... [--plugin-profile strict|report|off]`
+  (feature `cli`): run the Station from its bootstrap file with these flags over it. Its
+  runtime settings are the provider's `station` record (`StationRuntime`, applied by
+  `serve_with_options` over `ServeConfig`): `max_concurrent_missions`, the watchdog's
+  `stall_timeout`, `loop_timeout`, `loop_min_lines`, `blocked_after`, `max_runtime`,
+  `history` and `normalize_digits`, `roles` (default control and execution), `labels`,
+  `terminal` (refused at Mission start for a JSON harness when it gives a terminal; without
+  it `pipe` is preferred for a JSON harness, `pty` otherwise), `resources_every` (`0` leaves
+  only the 300-second probe), `safe_house_caches` (replacing `DEFAULT_CACHE_DIRS`) and
+  `safe_house_cache_age`; seconds may be fractional, and an invalid value exits 1. The pins
+  are the provider's `plugin` records (`ServeConfig::with_plugin_policy` overrides them in
+  code); the profile is `[plugins] profile` (`ServeConfig::with_plugin_profile`); verified
+  copies go to the state directory's `plugins/verified/`.
+- `ai6 config show FAMILY [KEY] [--scope station:ID]` prints records as TOML;
+  `ai6 config import DIR [--scope station:ID]` loads a configuration directory's records
+  into a writable provider with `ConfigProvider::put_all` (checked whole, one transaction on
+  SQL); `ai6 config export DIR` writes every family of every scope as TOML family files
+  (`config::export`, owner-only on Unix).
+- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH] [--plugin-profile P] [--terminal ID] [--detach]`:
   run the field runner on this host until Ctrl-C or SIGTERM (provider libraries checked as
   the Station's, verified copies under its state directory); `--detach` starts it in the
   background and prints its `runner.json`. `ai6 runner call [--state-dir PATH] METHOD PATH`
@@ -4119,14 +4159,14 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
 - `ai6 green-ink gate`: Claude Code's `PreToolUse` hook for shell commands (see Harness
   gate); the Claude handler passes it through `--settings`. Always exits 0.
 - `ai6 plugins pin PATH...` prints the `plugins.toml` entries that pin AI6 provider
-  libraries by SHA-256; anything else is refused with a non-zero exit. `--plugin-pins PATH`
-  on any command must name an existing file; only the default `plugins.toml` may be absent.
+  libraries by SHA-256; anything else is refused with a non-zero exit. The runner's `--pins
+  PATH` must name an existing file.
 - `ai6 harness pin DIR` prints a working directory's harness manifest (`# sha256:..  PATH`
   per file) and the `pin = "sha256:..."` line for `[operation.ID.harness]`.
 - `ai6 assistant pin-skill DIR` prints a skill directory's manifest
   (`ProjectManifest::read_tree`, `# sha256:..  PATH` per file) and the `pin = "sha256:..."`
   line for `[assistant.skills.NAME]`; a directory it cannot read exits non-zero.
-- `ai6 theater provision` also takes `--plugin-pins` and `--plugin-profile`.
+- `ai6 theater provision` also takes `--config`, `--plugin-path` and `--plugin-profile`.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists rejected peer certificates; `ai6 peer accept <ID>` pins one.
 - `ai6 sleeper [--config PATH] list|authorize <OPERATION> <NAME>|revoke <OPERATION> <NAME>`:

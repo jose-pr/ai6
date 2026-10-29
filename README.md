@@ -52,9 +52,7 @@ Outer Office needs the Flutter `main` SDK; see
 `PATH`:
 
 ```bash
-cargo run -p ai6 --features cli -- serve \
-  --provider ./examples/config \
-  --plugin-path ./target/debug
+cargo run -p ai6 --features cli -- serve --config ./examples/config/ai6.cfg
 ```
 
 Submit a Mission to the Station's private API from another terminal, with the token the
@@ -81,9 +79,8 @@ flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release \
 ```text
 ai6 serve [--config PATH] [--provider LOCATION] [--registry LOCATION] [--state-dir PATH]
           [--station ID] [--listen ADDRESS] [--plugin-path PATH]...
-          [--plugin-pins PATH] [--plugin-profile strict|report|off]
-          [--role control|execution]... [--label KEY=VALUE]... [--terminal ID]
-ai6 config path [--config PATH]
+          [--plugin-profile strict|report|off]
+ai6 config path|show|import|export [--config PATH]
 ai6 plugins pin PATH...
 ai6 harness pin DIR
 ai6 identity
@@ -108,9 +105,11 @@ ai6ctl session interrupt SESSION_ID
 A Station and the `ai6` command read what they need before they reach their configuration
 provider from the bootstrap file `ai6.cfg` (`--config`, else `AI6_CONFIG`, else the user's
 then the system's configuration directory); Universal Exports reads `unex.cfg` the same way
-(`UNEX_CONFIG`). `ai6ctl` reads `AI6_EXPORTS_URL` for the Universal Exports origin and a user
-bearer from `AI6_ACCESS_TOKEN`. A Station publishes to Universal Exports when `ai6.cfg` has
-`[unex] url` and `token`.
+(`UNEX_CONFIG`). Everything else is a record of the configuration provider every Station
+reads ([Configuration](https://jose-pr.github.io/ai6/configuration/)). `ai6ctl` reads
+`--server`, else `UNEX_URL`, else `ai6.cfg`'s `[unex] url` for the Universal Exports origin,
+and a user bearer from `UNEX_ACCESS_TOKEN`. A Station publishes to Universal Exports when
+`ai6.cfg` has `[unex] url` and `token`.
 
 ## API overview
 

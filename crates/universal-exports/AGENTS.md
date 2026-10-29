@@ -117,7 +117,7 @@ pub const MIN_PROXY_SECRET_LEN: usize = 32;
 ```
 
 `universal-exports` reads the secret from `unex.cfg`'s `proxy_secret` and refuses to start
-with `AI6_EXPORTS_PROXY_USER_HEADER` but no secret.
+with the `unex` record's `proxy_user_header` but no secret.
 
 All fields are public; `AttachMode` is non-exhaustive. M is the authority that
 chooses the Operation, Mission ID, Session ID and mode. The gateway refuses a
@@ -830,32 +830,23 @@ map these to 400, 401, 403, 404, 409 or 413 responses. The login route also answ
 The optional `cli` feature builds the service command:
 
 - `universal-exports [--config <PATH>] [--provider <LOC>] [--registry <LOC>] [--listen <ADDR>]
-  [--public-origin <HTTPS_ORIGIN>] [--plugin-path <PATH>]` starts the loopback gateway from
-  `unex.cfg` (below) with these flags over it. Its `station_token` is required and is never
-  accepted as an argument. Set `AI6_EXPORTS_DIRECTORY` and either
-  `AI6_EXPORTS_AUTHENTICATOR` or `AI6_EXPORTS_PROXY_USER_HEADER` to enable user access.
-  `AI6_EXPORTS_PROXY_LOOKUP_BY` selects the Directory attribute for proxy identity
-  resolution and defaults to `name`. `--authenticator-config`,
-  `--directory-config` and `--authorizer-config` each load one provider's JSON
-  configuration from a file; the corresponding `AI6_EXPORTS_*_CONFIG` variables are
-  also supported. A config file must contain an object, is limited to 1 MiB and 64
-  nested values, and is schema-validated by Guatiao. The same file can configure a
-  provider used for both authentication and directory lookup. `AI6_EXPORTS_ACCESS_POLICY`
-  loads the built-in role policy; `AI6_EXPORTS_AUTHORIZER` selects a custom provider
-  instead. Repeat `--plugin-path` for each provider directory or library. The libraries are
-  checked as a Station checks its own: `--plugin-pins PATH` (`AI6_EXPORTS_PLUGIN_PINS`; must
-  exist when named, default `plugins.toml` in the provider's directory) and `[plugins]
-  profile` or `--plugin-profile strict|report|off` (default strict with a pin set, report
-  without); refusals and weakenings are printed at start. Provider IDs
-  are those of the `coqui-access` plugin libraries (`coqui_access_password`, `coqui_access_key`,
-  `coqui_access_ldap`, `coqui_access_proxy`, `coqui_access_mtls`, `coqui_roles`). The
-  Directory and a plugin Authorizer are loaded behind coqui-access-kit's cache:
-  `--access-cache-ttl`, `--access-cache-negative-ttl` and `--access-cache-entries` (below)
-  bound how long and how many answers are kept; a lifetime past the default is printed as a
-  warning at start.
-  `--login-tries-per-address`, `--login-tries-per-name` and `--client-address-header` set
-  the login limits above. Moneypenny is served by default as the roster Agent
-  `--assistant-agent` (default `moneypenny`); `--no-assistant` turns her off.
+  [--public-origin <HTTPS_ORIGIN>] [--plugin-path <PATH>]... [--plugin-profile P]` starts the
+  loopback gateway from `unex.cfg` (below) with these flags over it. Its `station_token` is
+  required and is never accepted as an argument. It opens the configuration provider and
+  reads its `unex` record (`ai6::UnexRecord`: `authenticator`, `directory`, `authorizer`, their
+  `*_config` JSON objects, `proxy_user_header`, `proxy_lookup_by` (default `name`),
+  `login_tries_per_address`, `login_tries_per_name`, `client_address_header`,
+  `access_cache_ttl`, `access_cache_negative_ttl`, `access_cache_entries`, `assistant`
+  (default true) and `assistant_agent` (default `moneypenny`)) and its `access` record, the
+  role policy (`Settings::access_authorizer`; none denies every action). User access needs
+  `directory` and either `authenticator` or `proxy_user_header`; `access` and `authorizer`
+  are exclusive. Provider configurations are limited to 64 nested values and validated by
+  Guatiao; an inline credential in one is printed as a weakening. Provider libraries are
+  checked against the provider's `plugin` records under `[plugins] profile`. The Directory and
+  a plugin Authorizer are loaded behind coqui-access-kit's cache; a lifetime past the default
+  is printed as a warning. The gateway polls the provider every `[provider] poll` seconds and
+  swaps in a changed `access` record (a refused one keeps the last good policy); a changed
+  `unex` or `plugin` record is logged as needing a restart.
 
 `universal-exports` returns `0` after graceful shutdown, `1` when configuration or
 listener startup fails, and `2` for invalid arguments. The operator command-line client is
@@ -882,30 +873,9 @@ last two are printed as a warning at start.
 
 ## Environment variables
 
-The library reads no environment variables. The commands read:
-
-| Variable | Effect | Default |
-| --- | --- | --- |
-| `UNEX_CONFIG` | The bootstrap file; must exist when set. | Search as above |
-| `AI6_EXPORTS_AUTHENTICATOR` | Guatiao Authenticator provider ID; paired with the Directory setting. | None |
-| `AI6_EXPORTS_AUTHENTICATOR_CONFIG` | Path to a JSON object containing the Authenticator's Guatiao config. | None |
-| `AI6_EXPORTS_PROXY_USER_HEADER` | Sanitized authenticated-user header supplied by the trusted reverse proxy. | None |
-| `AI6_EXPORTS_PROXY_LOOKUP_BY` | Directory attribute used to resolve that identity. | `name` |
-| `AI6_EXPORTS_DIRECTORY` | Guatiao Directory provider ID; required for Authenticator or proxy-based user access. | None |
-| `AI6_EXPORTS_DIRECTORY_CONFIG` | Path to a JSON object containing the Directory's Guatiao config. | None |
-| `AI6_EXPORTS_ACCESS_POLICY` | TOML configuration for the built-in role Authorizer. | Deny all |
-| `AI6_EXPORTS_AUTHORIZER` | Optional custom Authorizer provider ID; conflicts with access-policy. | None |
-| `AI6_EXPORTS_AUTHORIZER_CONFIG` | Path to a JSON object containing the custom Authorizer's Guatiao config. | None |
-| `AI6_EXPORTS_ACCESS_CACHE_TTL` | Seconds a person the Directory found, or an action a plugin Authorizer granted, is kept; `0` keeps none. | `5` |
-| `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL` | Seconds "no such person" or a denial is kept; `0` keeps none. | `1` |
-| `AI6_EXPORTS_ACCESS_CACHE_ENTRIES` | The most lookups, and the most decisions, kept; `0` keeps none. | `10000` |
-| `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address at the login route. | `5` |
-| `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
-| `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None (the connection's address) |
-| `AI6_EXPORTS_ASSISTANT_AGENT` | The roster Agent that is Moneypenny; overridden by `--assistant-agent`. | `moneypenny` |
-| `AI6_EXPORTS_NO_ASSISTANT` | Serve no assistant (`--no-assistant`). | Unset (served) |
-| `AI6_EXPORTS_URL` | API origin for `ai6ctl`; overridden by `--server`. | `http://127.0.0.1:7082` |
-| `AI6_ACCESS_TOKEN` | User bearer required by every `ai6ctl` command except `health`. | None |
+The library reads no environment variables. The command reads `UNEX_CONFIG` (the bootstrap
+file; must exist when set) and the variables its secret references name. `ai6ctl` reads
+`UNEX_URL` and `UNEX_ACCESS_TOKEN` (its own header).
 
 `--help` lists the flag-backed variables and names `unex.cfg` and its `station_token`.
 The command does not log the credential.

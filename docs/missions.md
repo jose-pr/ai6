@@ -32,8 +32,8 @@ An authorized user needs `mission.create` for the target Operation. The gateway 
 the queued Mission ID without echoing the prompt:
 
 ```bash
-curl -f -X POST "$AI6_EXPORTS_URL/v1/user/operations/G/missions" \
-  -H "authorization: Bearer $AI6_ACCESS_TOKEN" \
+curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions" \
+  -H "authorization: Bearer $UNEX_ACCESS_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"title":"Fix the flaky watchdog test","prompt":"Investigate the intermittent failure."}'
 ```
@@ -58,8 +58,8 @@ There is no pause: providers have none. A quarantined Mission is released by an 
 (`ai6 quarantine release`), not retried.
 
 ```bash
-curl -f -X POST "$AI6_EXPORTS_URL/v1/user/operations/G/missions/mission-007/actions" \
-  -H "authorization: Bearer $AI6_ACCESS_TOKEN" \
+curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions/mission-007/actions" \
+  -H "authorization: Bearer $UNEX_ACCESS_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"action":"resume","message":"The review is unblocked; carry on.","idempotency_key":"resume-1"}'
 ```
@@ -111,8 +111,8 @@ the outcome, the step and the expiry (in a message to its live Session, or by re
 Session with it), and the Mission is `working` again once nothing it asked for is pending.
 
 ```bash
-curl -f -X POST "$AI6_EXPORTS_URL/v1/user/operations/G/green-ink/$REQUEST_ID/approve" \
-  -H "authorization: Bearer $AI6_ACCESS_TOKEN" \
+curl -f -X POST "$UNEX_URL/v1/user/operations/G/green-ink/$REQUEST_ID/approve" \
+  -H "authorization: Bearer $UNEX_ACCESS_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"expires_in_secs": 1800, "note": "Push the release branch only."}'
 ```

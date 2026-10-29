@@ -33,8 +33,8 @@ cargo install --path crates/ai6ctl
 ## Quick start
 
 ```console
-export AI6_EXPORTS_URL=https://exports.example
-export AI6_ACCESS_TOKEN=...   # from POST /v1/auth/login
+export UNEX_URL=https://exports.example   # or [unex] url in ai6.cfg
+export UNEX_ACCESS_TOKEN=...              # from POST /v1/auth/login
 ai6ctl health
 ai6ctl stations
 ai6ctl station station-007
@@ -88,8 +88,9 @@ and print the control's `STATUS`, the Mission's `STATE` and any `REASON`.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `AI6_EXPORTS_URL` | Universal Exports origin; overridden by `--server`. | `http://127.0.0.1:7082` |
-| `AI6_ACCESS_TOKEN` | User bearer required by every command except `health`. | None |
+| `UNEX_URL` | Universal Exports origin; overridden by `--server`. | `[unex] url` of `ai6.cfg`, else `http://127.0.0.1:7082` |
+| `AI6_CONFIG` | The `ai6.cfg` to read `[unex] url` from; must exist when set. | `ai6.cfg` in the user's, then the system's configuration directory |
+| `UNEX_ACCESS_TOKEN` | User bearer required by every command except `health`. | None |
 
 ## Exit status
 

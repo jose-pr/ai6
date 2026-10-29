@@ -10,7 +10,8 @@ and from this guide.
 Her model runs on a Station, through the same [AgentHandler providers](agents.md) as every
 Agent: Claude Code or Codex, with whatever subscription login or API key the Agent's
 environment gives them. No API key is needed beyond what the harness already uses. She is a
-roster Agent, `moneypenny` unless Universal Exports names another (`--assistant-agent`):
+roster Agent, `moneypenny` unless Universal Exports names another (the `unex` record's
+`assistant_agent`):
 
 ```toml
 [agent.moneypenny]
@@ -715,8 +716,8 @@ answered does nothing.
 
 | Setting | Default | Where |
 | --- | --- | --- |
-| The Agent she is | `moneypenny` | `universal-exports --assistant-agent`, `AI6_EXPORTS_ASSISTANT_AGENT` |
-| Serve her at all | yes | `--no-assistant`, `AI6_EXPORTS_NO_ASSISTANT` |
+| The Agent she is | `moneypenny` | the `unex` record's `assistant_agent` ([Configuration](configuration.md)) |
+| Serve her at all | yes | the `unex` record's `assistant` |
 | Conversations kept | 20 a person, 2,000 in all, 7 days | `AssistantConfig::with_conversation_limits` |
 | Tool token lifetime | 1 hour | `AssistantConfig::with_token_ttl` |
 | Time for a Station to take a message | 60 seconds | `AssistantConfig::with_answer_timeout` |

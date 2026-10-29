@@ -30,8 +30,8 @@ Each provider takes a JSON object; every key is optional.
 
 Universal Exports keeps what its Directory and Authorizer answer for a few seconds, to absorb
 bursts: a person found or an action granted 5 s, "no such person" or a denial 1 s, at most
-10 000 of each (`AI6_EXPORTS_ACCESS_CACHE_TTL`, `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL`,
-`AI6_EXPORTS_ACCESS_CACHE_ENTRIES`; `0` turns one off). A removed account or a withdrawn
+10 000 of each (the `unex` record's `access_cache_ttl`, `access_cache_negative_ttl` and
+`access_cache_entries`, [Configuration](configuration.md); `0` turns one off). A removed account or a withdrawn
 grant can pass for up to the first; passwords and keys are always checked at the provider.
 A longer lifetime is reported at start.
 
@@ -85,7 +85,7 @@ role = "memory-admin"
 Universal Exports counts every password or key try against the client address and against
 the account name before an Authenticator is asked. A try past either count is refused with
 `429 Too Many Requests` and a `Retry-After`, even if its secret is right. The defaults are 5 a
-minute per address and 10 in ten minutes per name; `--login-tries-per-address`,
-`--login-tries-per-name` and `--client-address-header` change them. The gateway listens on
+minute per address and 10 in ten minutes per name; the `unex` record's
+`login_tries_per_address`, `login_tries_per_name` and `client_address_header` change them. The gateway listens on
 loopback behind a reverse proxy, so name the header the proxy fills with the client address
 (`x-forwarded-for` or `x-real-ip`) or all clients share one count.

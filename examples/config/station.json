@@ -1,0 +1,8 @@
+{
+  "max_concurrent_missions": 4,
+  "stall_timeout": 300,
+  "blocked_after": 10,
+  "roles": ["control", "execution"],
+  "labels": {"site": "example"},
+  "resources_every": 60
+}

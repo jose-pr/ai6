@@ -64,45 +64,52 @@ argument.
 `ai6ctl` crate.
 
 ```console
-universal-exports --public-origin https://exports.example
+universal-exports --config /etc/ai6/unex.cfg
 ```
 
-User access requires a Directory and an authorization policy. Login can use a
-Guatiao Authenticator or an identity asserted by the trusted reverse proxy.
-Providers are the loadable libraries of
-[`coqui-access`](https://github.com/Boriken-Dev/coqui-access) (`--plugin-path` names the
-directory they are in), checked against a pin set as a Station checks its own
-(`--plugin-pins`, `--plugin-profile`). Provider config is read from a JSON object file and validated
-against each provider's Guatiao schema. For example, password accounts use the same config
-for both provider kinds. Pass its path with `--authenticator-config` and
-`--directory-config`; select the provider IDs (`coqui_access_password`) with `--authenticator`
-and `--directory`.
+What it needs before it reaches the configuration provider is in its bootstrap file,
+`unex.cfg` ([Configuration](https://jose-pr.github.io/ai6/configuration/)): its loopback listener, the public
+origin, the Stations' token and the reverse proxy's secret as secret references, and the
+provider, Registry and provider libraries. Everything else is a record of the provider the
+Stations read: the `unex` record holds sign-in, login limits, the access cache and the
+assistant, and the `access` record the role policy, which applies without a restart.
 
-```json
-{"source": {"file": {"path": "accounts.toml", "format": "toml"}}}
+User access requires a Directory and an authorization policy. Login can use a Guatiao
+Authenticator or an identity asserted by the trusted reverse proxy. Providers are the
+loadable libraries of [`coqui-access`](https://github.com/Boriken-Dev/coqui-access)
+(`--plugin-path` or `[plugins] paths` names the directory they are in), checked against the
+provider's `plugin` records as a Station checks its own. Each provider's configuration is a
+JSON object in the `unex` record, validated against its Guatiao schema; password accounts use
+the same configuration for both provider kinds:
+
+```toml
+# unex.toml, the unex record of a configuration directory
+authenticator = "coqui_access_password"
+directory = "coqui_access_password"
+authenticator_config = { source = { file = { path = "accounts.toml", format = "toml" } } }
+directory_config = { source = { file = { path = "accounts.toml", format = "toml" } } }
 ```
 
-The JSON config is limited to 1 MiB and 64 nested values. Provider-specific data
-stays in its own file; command-line arguments contain only file paths.
+A configuration is limited to 64 nested values. A credential written inline in one is
+reported as a weakening: name a file instead.
 
-For an existing authenticated reverse proxy, configure the same identity header
-it already asserts upstream:
+For an existing authenticated reverse proxy, configure the same identity header it already
+asserts upstream:
 
-```powershell
-$env:AI6_EXPORTS_DIRECTORY = 'coqui_access_password'
-$env:AI6_EXPORTS_DIRECTORY_CONFIG = 'C:\secure\accounts.json'
-$env:AI6_EXPORTS_PROXY_USER_HEADER = 'X-Forwarded-User'
-$env:AI6_EXPORTS_PROXY_LOOKUP_BY = 'name'
-universal-exports --config C:\secure\unex.cfg   # public_origin, station_token, proxy_secret
+```toml
+# unex.toml
+directory = "coqui_access_password"
+directory_config = { source = { file = { path = "C:/secure/accounts.toml", format = "toml" } } }
+proxy_user_header = "X-Forwarded-User"
+proxy_lookup_by = "name"
 ```
 
-The reverse proxy must overwrite `X-Forwarded-User` after authenticating the
-browser and remove any client-supplied value, and set `X-AI6-Proxy-Secret` to
-`unex.cfg`'s `proxy_secret` on every request it forwards: an asserted identity without
-that secret is refused, since anything reaching the loopback port directly (another
-local process) can set the identity header too. The Directory maps that asserted
-name to the authoritative person record; authorization still comes from the
-configured access policy.
+The reverse proxy must overwrite `X-Forwarded-User` after authenticating the browser and
+remove any client-supplied value, and set `X-AI6-Proxy-Secret` to `unex.cfg`'s
+`proxy_secret` on every request it forwards: an asserted identity without that secret is
+refused, since anything reaching the loopback port directly (another local process) can set
+the identity header too. The Directory maps that asserted name to the authoritative person
+record; authorization still comes from the access policy.
 
 ## API overview
 
@@ -187,8 +194,8 @@ the native desktop client can reach the loopback listener without an Origin head
 Password and key tries are limited: before an Authenticator is asked, a try is counted against
 the client address and against the account name, and one past either count is refused with
 `429` and a `Retry-After`, whether or not its secret is right. The defaults are 5 a minute
-per address and 10 in ten minutes per name; `--login-tries-per-address`,
-`--login-tries-per-name` and `--client-address-header` change them. Behind the reverse proxy
+per address and 10 in ten minutes per name; the `unex` record's `login_tries_per_address`,
+`login_tries_per_name` and `client_address_header` change them. Behind the reverse proxy
 every connection comes from the proxy, so name the header it fills with the client address
 (`x-forwarded-for` or `x-real-ip`) or every client shares one count.
 Successful login returns a short-lived user bearer token. Password secrets are
@@ -262,22 +269,10 @@ last two are printed as a warning at start.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `UNEX_CONFIG` | The bootstrap file; must exist when set. | Search as above |
-| `AI6_EXPORTS_AUTHENTICATOR` | Guatiao Authenticator provider ID. | None |
-| `AI6_EXPORTS_AUTHENTICATOR_CONFIG` | Path to the Authenticator's JSON config object. | None |
-| `AI6_EXPORTS_PROXY_USER_HEADER` | Sanitized authenticated-user header supplied by the trusted reverse proxy. | None |
-| `AI6_EXPORTS_PROXY_LOOKUP_BY` | Directory attribute for the reverse-proxy identity, commonly `name` or `email`. | `name` |
-| `AI6_EXPORTS_DIRECTORY` | Guatiao Directory provider ID. | None |
-| `AI6_EXPORTS_DIRECTORY_CONFIG` | Path to the Directory's JSON config object. | None |
-| `AI6_EXPORTS_ACCESS_POLICY` | TOML policy for the built-in RoleAuthorizer; alternative to `AI6_EXPORTS_AUTHORIZER`. | Deny all |
-| `AI6_EXPORTS_AUTHORIZER` | Optional custom Guatiao Authorizer provider ID; alternative to `AI6_EXPORTS_ACCESS_POLICY`. | None |
-| `AI6_EXPORTS_AUTHORIZER_CONFIG` | Path to the custom Authorizer's JSON config object. | None |
-| `AI6_EXPORTS_ACCESS_CACHE_TTL` | Seconds a found person or a granted action is kept, to absorb bursts; `0` keeps none. | `5` |
-| `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL` | Seconds "no such person" or a denial is kept; `0` keeps none. | `1` |
-| `AI6_EXPORTS_ACCESS_CACHE_ENTRIES` | The most lookups, and decisions, kept; `0` keeps none. | `10000` |
-| `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address. | `5` |
-| `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
-| `AI6_EXPORTS_CLIENT_ADDRESS_HEADER` | Header the trusted proxy sets to the client address; the last entry counts. | None |
+| `UNEX_CONFIG` | The bootstrap file; must exist when set. | `unex.cfg` in the user's, then the system's configuration directory |
+
+Secret references in `unex.cfg` may name others (`{ env = "NAME" }`), which is reported as a
+weakening. The `unex` record's keys are listed in [Configuration](https://jose-pr.github.io/ai6/configuration/).
 
 ## Exit status
 

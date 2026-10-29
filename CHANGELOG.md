@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Configuration moved to bootstrap files and a configuration provider
+  ([Configuration](https://jose-pr.github.io/ai6/configuration/)). A Station and the `ai6`
+  command read `ai6.cfg`, Universal Exports `unex.cfg`, and Outer Office `OO.cfg`, each found
+  by `--config`, a variable (`AI6_CONFIG`, `UNEX_CONFIG`, `OO_CONFIG`) or the user's then the
+  system's configuration directory, holding only what starting needs: locations, listeners,
+  directories, and secrets as references to a file, a variable or an inline value (the last
+  two reported as weakenings). Everything else is a record in one provider every Station reads:
+  a directory of family files in TOML, JSON or YAML (`FileProvider`) or SQLite and PostgreSQL
+  tables (`SqlProvider`), each record global or one Station's own: Operations, Agents, roles,
+  covers, Moneypenny's settings, Theaters, loadouts and pools, Cables, provider pins, the
+  Station's runtime settings, its TLS policy (`tls`, reported at check-in as `tls_weakened`),
+  and Universal Exports' sign-in and role policy (`unex`, `access`). `ai6 config
+  path|show|import|export` read and write them. `ConfigSource`, `TomlConfigDir`,
+  `SqlConfigSource` and `MemoryConfigSource` became `ConfigProvider`, `FileProvider`,
+  `SqlProvider` and `MemoryProvider`; a singleton record is keyed `settings`.
+  Removed: the flags `--config-dir`, `--config-poll`, `--headquarters-lease`,
+  `--max-concurrent-missions`, the watchdog flags, `--role`, `--label`, `--terminal`,
+  `--resources-every`, `--safe-house-cache`, `--safe-house-cache-age` and `--plugin-pins` of
+  `ai6 serve` (the roster's `--config` is now `--provider`); `--port`, `--roster`,
+  `--plugin-pins`, the sign-in, login-limit, access-cache and assistant flags of
+  `universal-exports`; the runner's `--plugin-pins` (now `--pins`); the variables `AI6_HOME`,
+  `AI6_STATE`, `AI6_REGISTRY`, `AI6_CONFIG_DIR`, `AI6_STATION_ID`, `AI6_CONFIG_PASSWORD`,
+  `AI6_REGISTRY_PASSWORD`, `AI6_ACCESS_TOKEN` (now `UNEX_ACCESS_TOKEN`) and every
+  `AI6_EXPORTS_*` (`ai6ctl` reads `UNEX_URL`, else `ai6.cfg`'s `[unex] url`); `password_file=`
+  in SQL locations; a pin set's `profile`, which is each host's own `[plugins] profile`.
 - The Station API asks every `/internal` request for `Authorization: Bearer TOKEN`, the token
   in `api-token` under the Station's state directory, made on first start; `/healthz` stays
   open. Universal Exports accepts an identity its reverse proxy asserts only with

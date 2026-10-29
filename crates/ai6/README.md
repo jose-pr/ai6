@@ -50,7 +50,7 @@ cargo add ai6 --git https://github.com/jose-pr/ai6
 
 ```console
 cargo build --workspace --all-features
-cargo run -p ai6 --features cli -- serve --provider ./examples/config --plugin-path ./target/debug
+cargo run -p ai6 --features cli -- serve --config ./examples/config/ai6.cfg
 ```
 
 The example configuration registers Operation `G` and Agents `007`, `008` (its backup)
@@ -61,12 +61,8 @@ and `Tanner`.
 ```console
 ai6 serve [--config PATH] [--provider LOCATION] [--registry LOCATION] [--state-dir PATH]
           [--station ID] [--listen 127.0.0.1:7081] [--plugin-path PATH]...
-          [--plugin-pins PATH] [--plugin-profile strict|report|off]
-          [--role control|execution]... [--label KEY=VALUE]...
-          [--terminal ID] [--max-concurrent-missions N] [--resources-every SECS]
-          [--safe-house-cache NAME]... [--safe-house-cache-age SECS]
-          [watchdog options]
-ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--plugin-pins PATH]
+          [--plugin-profile strict|report|off]
+ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH]
           [--plugin-profile strict|report|off] [--terminal ID] [--detach]
 ai6 runner call [--state-dir PATH] METHOD PATH
 ai6 plugins pin PATH...
@@ -79,6 +75,9 @@ ai6 sleeper [--config PATH] authorize OPERATION NAME
 ai6 sleeper [--config PATH] revoke OPERATION NAME
 ai6 quarantine [--config PATH] list|add|release ...
 ai6 config path [--config PATH]
+ai6 config show FAMILY [KEY] [--scope station:ID] [--config PATH]
+ai6 config import DIR [--scope station:ID] [--config PATH]
+ai6 config export DIR [--config PATH]
 ```
 
 Settings needed before the configuration provider is reached come from the bootstrap file
@@ -117,13 +116,15 @@ url = "https://ai6.example"      # Universal Exports; ai6ctl reads only this
 token = { file = "unex-token" }  # the Station publishes only with a token
 ```
 
-- `ai6 serve` runs the Station. Harnesses run in an available terminal provider that suits
-  the handler (`pipe` for one that speaks JSON, else `pty`, preferred); `--terminal` pins one.
-  Agents and handlers do not choose it. `--role` and `--label` configure placement;
-  both roles are on by default. `--resources-every` (default 60, `0` off) sets how often each
-  remote Theater's CPUs, load and memory are sampled for placement. Watchdog defaults are set with `--stall-timeout`,
-  `--loop-timeout`, `--loop-min-lines`, `--blocked-after`, `--max-runtime`, `--history`
-  and `--normalize-digits` (seconds may be fractional). `--registry` and `--provider` take
+- `ai6 serve` runs the Station. Its runtime settings are the provider's `station` record
+  ([Configuration](https://jose-pr.github.io/ai6/configuration/)). Harnesses run in an
+  available terminal provider that suits the handler (`pipe` for one that speaks JSON, else
+  `pty`, preferred); the record's `terminal` pins one. Agents and handlers do not choose it.
+  `roles` and `labels` configure placement; both roles are on by default.
+  `resources_every` (default 60, `0` off) sets how often each remote Theater's CPUs, load and
+  memory are sampled for placement. Watchdog defaults are `stall_timeout`, `loop_timeout`,
+  `loop_min_lines`, `blocked_after`, `max_runtime`, `history` and `normalize_digits`
+  (seconds may be fractional). `--registry` and `--provider` take
   a directory, `sqlite:PATH` or a `postgres://` URL: Stations sharing a PostgreSQL
   Registry and configuration provider need no shared filesystem. PostgreSQL is reached over
   TLS with the server verified (`sslrootcert=PATH` for a private CA); `sslmode=require` or
@@ -132,12 +133,11 @@ token = { file = "unex-token" }  # the Station publishes only with a token
   warning and reported at check-in. `[registry] headquarters_lease` (default 60
   seconds) is how long a standby control Station waits before taking over; the
   database timeouts are derived from it. `[provider] poll` (default 5 seconds, `0` off) is how
-  often the Station checks its roster and `loadouts.toml` and applies a change that passes
-  the configuration checks without a restart; a refused one is audited and the last good
-  configuration keeps running. `--safe-house-cache NAME` (repeatable; default `target`,
-  `node_modules`, `.dart_tool`) names the directories a Head of Station may remove from the
-  safe house of a Mission that is over, once it has been left alone for
-  `--safe-house-cache-age` seconds (default 604800, 7 days).
+  often the Station checks its provider and applies a change of the families that apply live
+  without a restart; a refused one is audited and the last good configuration keeps running.
+  `safe_house_caches` (default `target`, `node_modules`, `.dart_tool`) names the directories a
+  Head of Station may remove from the safe house of a Mission that is over, once it has been
+  left alone for `safe_house_cache_age` seconds (default 604800, 7 days).
 - `ai6 runner serve` runs the field runner on a Theater: it supervises harnesses there for
   Stations, spooling their events under its state directory (default `runner` in AI6's state
   directory) and serving them on a token-protected loopback port. `--detach` starts it in

@@ -6,10 +6,13 @@ host's CPU and memory (`resources`). One
 control Station holds the Headquarters lease at a time and is the **Headquarters Station
 (HQS)**; M's authority follows that lease.
 
-Start a Station with both roles:
+A Station's roles and labels are its `station` record ([Configuration](configuration.md)):
+`stations/<id>/station.toml` in a configuration directory, or the `station:<id>` row of a
+SQL provider, over the global `station` record. Start a Station with both roles, the
+default:
 
 ```console
-ai6 serve --station hq-1 --role control --role execution
+ai6 serve --station hq-1
 ```
 
 A standby control Station takes over the Headquarters lease if it expires
@@ -17,18 +20,21 @@ A standby control Station takes over the Headquarters lease if it expires
 each time a different Station takes it; Session leases draw their fencing tokens from it
 ([Recovery](missions.md#recovery)):
 
-```console
-ai6 serve --station hq-2 --role control
+```toml
+# stations/hq-2/station.toml
+roles = ["control"]
 ```
 
 An execution-only Station (an *outstation*) runs work but cannot hold the lease:
 
-```console
-ai6 serve --station lab-gpu --role execution --label gpu=yes
+```toml
+# stations/lab-gpu/station.toml
+roles = ["execution"]
+labels = { gpu = "yes" }
 ```
 
 The default roles are `control` and `execution`. Every Station is also labeled with its
-Station ID, host and operating system; `--label KEY=VALUE` adds more.
+Station ID, host and operating system; the record's `labels` adds more.
 
 ## Serving Operations
 
@@ -97,7 +103,7 @@ those hosting the Operation.
 The Station, not the Agent, decides which terminal provider harnesses run in. It uses
 an available provider that suits what the handler declares: one without a terminal,
 preferring `pipe`, for a harness that speaks JSON (Claude Code, Codex), else preferring
-`pty`. `ai6 serve --terminal ID` pins one, and a Mission whose harness the pin does not suit
+`pty`. The `station` record's `terminal` pins one, and a Mission whose harness the pin does not suit
 is refused at start. See [Terminals](terminals.md).
 
 ## Shared Registry
@@ -253,7 +259,7 @@ Station enforces in its own code, whatever the prompt or the Operation's policy 
 | What | When |
 | --- | --- |
 | Read anything `station_report` shows | always |
-| `caches`: remove the cache directories (`target`, `node_modules`, `.dart_tool`; `ai6 serve --safe-house-cache NAME` replaces the list); in a Git safe house only those Git ignores whole | unattended, for a Mission that is over whose safe house has been left alone for 7 days (`--safe-house-cache-age SECS`) |
+| `caches`: remove the cache directories (`target`, `node_modules`, `.dart_tool`; the `station` record's `safe_house_caches` replaces the list); in a Git safe house only those Git ignores whole | unattended, for a Mission that is over whose safe house has been left alone for 7 days (`safe_house_cache_age`) |
 | `remove` a safe house whose work all exists elsewhere (every commit on a remote, checked against the remote itself; nothing uncommitted or untracked; ignored files only inside cache directories) | unattended, for a Mission that is over |
 | `remove` a safe house holding anything else (unpushed commits, uncommitted or ignored files such as `.env`, submodules, Git LFS objects), or whose provider cannot tell (the `copy` provider) | green ink, kind `safe-house-delete`, asked of the Operation the safe house belongs to; no class authorisation approves it. The round carries on; a later call, in this round or a later one, removes it once a person approved, spending that approval on that one removal |
 | `provision_theater` with `apply`: the steps a Theater's declaration calls for | unattended; anything outside the declaration is a finding |
@@ -289,11 +295,11 @@ under `peers/`, in its state directory. The mechanism is the shared
 ## Provider libraries: pins and publishers
 
 A Station runs every provider library it loads with its own privileges, so it checks them
-first (bona fides). A **pin set**, `plugins.toml` in the configuration directory (or
-`ai6 serve --plugin-pins PATH`, which must exist), names the libraries it accepts:
+first (bona fides). The **pin set**, the `plugin` records of its configuration provider
+(`plugins.toml` in a configuration directory, global or in `stations/<id>/`), names the
+libraries it accepts:
 
 ```toml
-# profile = "strict"   # optional; see below
 [[library]]
 file = "ai6_agent_claude.dll"
 pin = "sha256:..."               # the library's own digest
@@ -322,7 +328,8 @@ library signed with the same key loads on every Station without re-pinning; remo
 `publisher` line, or the entry, is how a key or a library stops being accepted. There is no
 key server and no revocation list.
 
-The **profile** (`--plugin-profile`, else the pin set's `profile`) decides what loads:
+The **profile** (`--plugin-profile`, else `ai6.cfg`'s `[plugins] profile`; each host's own,
+never the shared provider's) decides what loads:
 
 | Profile | Default when | What loads |
 | --- | --- | --- |
@@ -334,12 +341,13 @@ Every weakening is printed when the Station starts, listed by `GET /internal/plu
 each library's digest and verdict, and published in the Station's check-in
 (`plugins_weakened`). Only the libraries that declare an AI6 provider kind are checked.
 
-Every command that loads providers checks them the same way and takes the same
-`--plugin-pins` and `--plugin-profile`, with the same defaults: the field runner
-(`ai6 runner serve`, whose verified copies go under its own state directory),
-`ai6 theater provision`, and Universal Exports for its access providers
-(`--plugin-pins`, and `unex.cfg`'s `[plugins] profile` or `--plugin-profile`). Each prints what it refused and
-every weakening when it starts.
+Every command that loads providers checks them the same way, with the same defaults:
+`ai6 theater provision`, Universal Exports for its access providers (the provider's `plugin`
+records, `unex.cfg`'s `[plugins] profile` or `--plugin-profile`), and the field runner
+(`ai6 runner serve --pins PATH --plugin-profile P`, whose verified copies go under its own
+state directory; a Station starting one on its own host writes the pins it resolved into the
+runner's state directory and passes them). Each prints what it refused and every weakening
+when it starts.
 
 What a pin covers is the library file. A library that imports another non-system library
 gets it from wherever the operating system's loader finds it; on Windows that includes
