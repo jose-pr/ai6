@@ -2434,8 +2434,9 @@ A `PeerId` is the SHA-256 of the certificate, printed `sha256:<hex>` and read in
 `PinnedOrCa`, `AnyWithKeyProof`), `CaPolicy`,
 `Policy`, `TrustStore`, `WaitingEntry` and the rest are re-exported from those crates; their
 API headers describe them. `open_identity` stores the certificate and private key in
-`identity.pem` (Unix mode `0600`). `Policy::strict()` is the default: TLS 1.3, SHA-2 pins;
-`Policy::compatible()` and `legacy()` loosen it and `Built::weakened` lists what is looser.
+`identity.pem` (Unix mode `0600`). AI6 passes `Policy::modern()`: TLS 1.3, SHA-2 pins;
+coqui-peer-tls's default `intermediate()` and `legacy()` loosen it, and `Built::weakened` lists
+what is looser than that default.
 `client_config` pins the server's fingerprint; `server_config` requires a client certificate
 and proof of its key, then applies `trust`. A peer not in the store is refused and, once it
 has proved its key, recorded under `peers/waiting` with the address it came from; waiting is

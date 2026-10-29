@@ -1082,7 +1082,7 @@ fn quarantine_command(command: QuarantineCommand) -> Result<String, String> {
 
 fn peer_command(command: PeerCommand) -> Result<String, String> {
     let state_dir = ai6::station::safehouse::state_dir().map_err(|error| error.to_string())?;
-    let peers = identity::open_peers(&state_dir, &identity::Policy::strict())
+    let peers = identity::open_peers(&state_dir, &identity::Policy::modern())
         .map_err(|error| error.to_string())?;
     match command {
         PeerCommand::Accept { id } => {

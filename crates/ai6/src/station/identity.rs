@@ -4,7 +4,7 @@
 //! from `coqui-peer-tls` and `coqui-peer`; this module fixes where AI6 keeps them and the
 //! protocol it speaks. A peer is named by its [`PeerId`], printed `sha256:<hex>` and read in
 //! any spelling `coqui-peer` knows, grouped base32 included. Every setting that decides what a
-//! handshake accepts is a [`Policy`]: callers pass [`Policy::strict`] (TLS 1.3, SHA-2 pins)
+//! handshake accepts is a [`Policy`]: callers pass [`Policy::modern`] (TLS 1.3, SHA-2 pins)
 //! unless an operator chose otherwise.
 
 use std::fmt;
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn the_policy_bounds_the_waiting_list_per_source_address() {
         let directory = tempfile::tempdir().unwrap();
-        let mut policy = Policy::strict();
+        let mut policy = Policy::modern();
         policy.waiting.per_source = 1;
         let peers = open_peers(directory.path(), &policy).unwrap();
         let source: SocketAddr = "192.0.2.7:4000".parse().unwrap();
@@ -222,7 +222,7 @@ mod tests {
     async fn mtls_refuses_an_unknown_peer_lists_it_with_its_address_and_accepts_it_after_the_operator()
      {
         let directory = tempfile::tempdir().unwrap();
-        let policy = Policy::strict();
+        let policy = Policy::modern();
         let peers = open_peers(directory.path(), &policy).unwrap();
         let server_identity = Identity::generate().unwrap();
         let client_identity = Identity::generate().unwrap();
@@ -254,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_client_refuses_a_server_that_is_not_the_pinned_station() {
-        let policy = Policy::strict();
+        let policy = Policy::modern();
         let server_identity = Identity::generate().unwrap();
         let client_identity = Identity::generate().unwrap();
         let other = Identity::generate().unwrap();
@@ -266,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn ca_signed_peer_connects_when_subject_and_san_match_listener_globs() {
         let directory = tempfile::tempdir().unwrap();
-        let policy = Policy::strict();
+        let policy = Policy::modern();
         let (ca_pem, issuer) = ca();
         let ca_path = directory.path().join("ca.pem");
         fs::write(&ca_path, ca_pem).unwrap();
@@ -277,6 +277,7 @@ mod tests {
                 ca_file: ca_path.clone(),
                 subject: vec![subject.to_owned()],
                 san: vec!["localhost".to_owned()],
+                ip_in_dns: true,
             })
         };
         let server = server_config(&server_identity, &trust("*AI6 Client*"), &policy).unwrap();
@@ -293,7 +294,7 @@ mod tests {
     #[test]
     fn a_looser_policy_is_reported() {
         let identity = Identity::generate().unwrap();
-        let mut policy = Policy::strict();
+        let mut policy = Policy::modern();
         policy.check_validity = false;
         let built = server_config(&identity, &Trust::AnyWithKeyProof, &policy).unwrap();
         assert_eq!(built.weakened.len(), 1);

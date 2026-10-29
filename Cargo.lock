@@ -59,8 +59,8 @@ dependencies = [
  "coqui-access",
  "coqui-access-key-plugin",
  "coqui-access-ldap-plugin",
- "coqui-access-local-plugin",
- "coqui-access-peer-plugin",
+ "coqui-access-mtls-plugin",
+ "coqui-access-password-plugin",
  "coqui-access-proxy-plugin",
  "coqui-peer",
  "coqui-peer-tls",
@@ -92,7 +92,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-rustls",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
  "ureq",
  "url",
  "uuid",
@@ -114,7 +114,7 @@ version = "0.1.0"
 dependencies = [
  "ai6",
  "serde_json",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -148,7 +148,7 @@ dependencies = [
  "ai6",
  "serde",
  "serde_json",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
  "ureq",
  "url",
 ]
@@ -161,7 +161,7 @@ dependencies = [
  "data-encoding",
  "serde",
  "serde_json",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
  "ureq",
  "url",
 ]
@@ -194,7 +194,7 @@ dependencies = [
  "ai6-transport-container",
  "serde",
  "serde_json",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -204,7 +204,7 @@ dependencies = [
  "ai6",
  "serde",
  "tempfile",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -214,7 +214,7 @@ dependencies = [
  "ai6",
  "serde",
  "tempfile",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -234,7 +234,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -248,7 +248,7 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -731,7 +731,7 @@ dependencies = [
 [[package]]
 name = "coqui-access"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "guatiao",
 ]
@@ -739,31 +739,37 @@ dependencies = [
 [[package]]
 name = "coqui-access-key"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
- "serde",
 ]
 
 [[package]]
 name = "coqui-access-key-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-access-key",
  "coqui-access-kit",
- "coqui-access-plugin-support",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
 name = "coqui-access-kit"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "argon2",
- "getrandom 0.3.4",
+ "coqui-access",
+ "data-encoding",
+ "getrandom 0.4.3",
+ "guatiao-serde",
+ "moka",
+ "serde",
  "sha2",
  "subtle",
 ]
@@ -771,9 +777,11 @@ dependencies = [
 [[package]]
 name = "coqui-access-ldap"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
+ "coqui-access-kit",
+ "coqui-peer-tls",
  "ldap3",
  "rustls",
 ]
@@ -781,88 +789,94 @@ dependencies = [
 [[package]]
 name = "coqui-access-ldap-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-access-ldap",
 ]
 
 [[package]]
-name = "coqui-access-local"
+name = "coqui-access-mtls"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
- "serde",
+ "coqui-peer",
+ "coqui-peer-tls",
 ]
 
 [[package]]
-name = "coqui-access-local-plugin"
+name = "coqui-access-mtls-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
- "coqui-access-local",
- "coqui-access-plugin-support",
-]
-
-[[package]]
-name = "coqui-access-peer"
-version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
-dependencies = [
- "coqui-access",
- "coqui-access-kit",
+ "coqui-access-mtls",
+ "coqui-peer",
  "coqui-peer-tls",
  "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
-name = "coqui-access-peer-plugin"
+name = "coqui-access-password"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
- "coqui-access-peer",
- "coqui-access-plugin-support",
 ]
 
 [[package]]
-name = "coqui-access-plugin-support"
+name = "coqui-access-password-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
+ "coqui-access-password",
  "serde",
- "toml",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
 name = "coqui-access-proxy"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
+ "coqui-access-kit",
+ "coqui-net-acl",
+ "coqui-peer-tls",
+ "data-encoding",
+ "percent-encoding",
+ "rustls-pki-types",
 ]
 
 [[package]]
 name = "coqui-access-proxy-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-access-proxy",
 ]
 
 [[package]]
-name = "coqui-peer"
+name = "coqui-net-acl"
 version = "0.0.0-alpha.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2af45ca87c29c957642b6e314f405649a3054759931dbd87967487878abeb96a"
+checksum = "d116efeb3a87b3e4f9c9c00dc93124d1c1c212c05c49f86c616c0fc8a3ff305e"
+
+[[package]]
+name = "coqui-peer"
+version = "0.0.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1104dd1f80f66a107e141b425516487c83f04b9bc570ab9e4acd06fe0f4dace"
 dependencies = [
  "data-encoding",
  "serde",
@@ -875,14 +889,15 @@ dependencies = [
 
 [[package]]
 name = "coqui-peer-tls"
-version = "0.0.0-alpha.0"
+version = "0.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ab9999193f5f28303f2128faadcff3498f3204365c8db05fc98aab373fa5bf"
+checksum = "1b3dc15e86bd976c69b29425319a822dd3415393b41e8550d44180f6a2e5cca4"
 dependencies = [
  "coqui-peer",
  "globset",
  "rcgen",
  "rustls",
+ "rustls-webpki",
  "time",
  "tokio",
  "tokio-rustls",
@@ -892,7 +907,7 @@ dependencies = [
 [[package]]
 name = "coqui-roles"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
 ]
@@ -900,7 +915,7 @@ dependencies = [
 [[package]]
 name = "coqui-roles-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=be835968e676ca28d60aa609870a03871794ed9f#be835968e676ca28d60aa609870a03871794ed9f"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=4c2410d4e653e7bd089c597e6eee6d3c84662786#4c2410d4e653e7bd089c597e6eee6d3c84662786"
 dependencies = [
  "coqui-access",
  "coqui-roles",
@@ -950,6 +965,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98b0cc327b5bc766e7fda9c9260cc0fa81b43a8e240440422dff70788e3f9ef1"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -1641,7 +1674,7 @@ dependencies = [
 [[package]]
 name = "guatiao"
 version = "0.0.0-alpha.1"
-source = "git+https://github.com/Boriken-Dev/guatiao?rev=1738fa73a2871df2f355c631026a8c6dbb94fa92#1738fa73a2871df2f355c631026a8c6dbb94fa92"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=a67fd4be0aa319795614ac6fe12d35d856ec3d8b#a67fd4be0aa319795614ac6fe12d35d856ec3d8b"
 dependencies = [
  "guatiao-derive",
  "libloading",
@@ -1651,11 +1684,20 @@ dependencies = [
 [[package]]
 name = "guatiao-derive"
 version = "0.0.0-alpha.1"
-source = "git+https://github.com/Boriken-Dev/guatiao?rev=1738fa73a2871df2f355c631026a8c6dbb94fa92#1738fa73a2871df2f355c631026a8c6dbb94fa92"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=a67fd4be0aa319795614ac6fe12d35d856ec3d8b#a67fd4be0aa319795614ac6fe12d35d856ec3d8b"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "guatiao-serde"
+version = "0.0.0-alpha.1"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=a67fd4be0aa319795614ac6fe12d35d856ec3d8b#a67fd4be0aa319795614ac6fe12d35d856ec3d8b"
+dependencies = [
+ "guatiao",
+ "serde",
 ]
 
 [[package]]
@@ -2242,6 +2284,23 @@ dependencies = [
  "ctutils",
  "hybrid-array",
  "num-traits",
+]
+
+[[package]]
+name = "moka"
+version = "0.12.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4293f18e7567a1caf3c584855554377025c65e0aa445344d04171f5ad63d19b9"
+dependencies = [
+ "crossbeam-channel",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "equivalent",
+ "parking_lot",
+ "portable-atomic",
+ "smallvec",
+ "tagptr",
+ "uuid",
 ]
 
 [[package]]
@@ -3917,6 +3976,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tagptr"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4125,10 +4190,25 @@ dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
  "toml_writer",
  "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
+version = "1.1.8+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20489e00e4d8741d6be680764cc12e270655e375a20d1011e844a9c3379e678d"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 1.1.2+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -4136,6 +4216,15 @@ name = "toml_datetime"
 version = "0.7.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b86d767906c6c42421dcba507eb9d203e779497710a47782a224bb871653053"
 dependencies = [
  "serde_core",
 ]

@@ -876,11 +876,11 @@ mod tests {
         };
         let authenticators = ids(plugins.authenticators());
         for id in [
-            "coqui_access_local",
+            "coqui_access_password",
             "coqui_access_key",
             "coqui_access_ldap",
             "coqui_access_proxy",
-            "coqui_access_peer",
+            "coqui_access_mtls",
         ] {
             assert!(
                 authenticators.iter().any(|loaded| loaded == id),
@@ -890,20 +890,20 @@ mod tests {
         }
         let directories = ids(plugins.directories());
         for id in [
-            "coqui_access_local",
+            "coqui_access_password",
             "coqui_access_key",
             "coqui_access_ldap",
-            "coqui_access_peer",
+            "coqui_access_mtls",
         ] {
             assert!(directories.iter().any(|loaded| loaded == id), "{id}");
         }
         assert!(ids(plugins.authorizers()).contains(&"coqui_roles".to_owned()));
-        assert!(ids(plugins.account_managers()).contains(&"coqui_access_local".to_owned()));
+        assert!(ids(plugins.account_managers()).contains(&"coqui_access_password".to_owned()));
         assert!(plugins.scan_summary().failed.is_empty());
     }
 
     #[test]
-    fn the_local_provider_reads_a_file_source_and_logs_a_person_in() {
+    fn the_password_provider_reads_a_file_source_and_logs_a_person_in() {
         use crate::{AccountPut, Attempt, Verdict};
 
         let directory = tempfile::tempdir().unwrap();
@@ -914,7 +914,10 @@ mod tests {
                 "source",
                 object(vec![(
                     "file",
-                    object(vec![("path", text(path.to_str().unwrap()))]),
+                    object(vec![
+                        ("path", text(path.to_str().unwrap())),
+                        ("format", text("toml")),
+                    ]),
                 )]),
             ),
             (
@@ -926,7 +929,7 @@ mod tests {
             ),
         ]);
         let accounts = plugins
-            .accounts("coqui_access_local", Some(&config))
+            .accounts("coqui_access_password", Some(&config))
             .unwrap();
         accounts
             .put(AccountPut {
@@ -937,10 +940,10 @@ mod tests {
             })
             .unwrap();
         let authenticator = plugins
-            .authenticator("coqui_access_local", Some(&config))
+            .authenticator("coqui_access_password", Some(&config))
             .unwrap();
         let people = plugins
-            .directory("coqui_access_local", Some(&config))
+            .directory("coqui_access_password", Some(&config))
             .unwrap();
         let attempt = |secret: &str| Attempt {
             name: Some("007".to_owned()),

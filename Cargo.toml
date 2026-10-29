@@ -23,11 +23,11 @@ publish = false
 
 [workspace.dependencies]
 # guatiao main, pinned until a release carries what these crates use.
-guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "1738fa73a2871df2f355c631026a8c6dbb94fa92" }
+guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "a67fd4be0aa319795614ac6fe12d35d856ec3d8b" }
 # Shared access kinds, models, role authorizer and the five access providers, pinned to the
 # same guatiao revision as above so kinds and plugins agree.
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "be835968e676ca28d60aa609870a03871794ed9f" }
-coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "be835968e676ca28d60aa609870a03871794ed9f" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "4c2410d4e653e7bd089c597e6eee6d3c84662786" }
+coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "4c2410d4e653e7bd089c597e6eee6d3c84662786" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
@@ -52,8 +52,8 @@ zeroize = { version = "1", default-features = false, features = ["alloc"] }
 ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
 # Station-to-station mutual TLS: identity, fingerprints, a trust store with per-source caps
 # and policy profiles. Alpha releases, pinned exactly: the family is released together.
-coqui-peer = "=0.0.0-alpha.0"
-coqui-peer-tls = { version = "=0.0.0-alpha.0", features = ["generate", "ca", "tokio", "tls12"] }
+coqui-peer = "=0.0.0-alpha.1"
+coqui-peer-tls = { version = "=0.0.0-alpha.1", features = ["generate", "ca", "tokio"] }
 # The configuration types coqui-peer-tls returns; shared with ureq, on the ring provider.
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 # Self-signed and CA-issued certificates for the Station TLS tests.

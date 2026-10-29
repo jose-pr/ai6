@@ -628,7 +628,7 @@ mod tests {
     // A changed required signature affects every built transport.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(TransportVtable::FLOOR_HASH, 3711047304);
+        assert_eq!(TransportVtable::FLOOR_HASH, 543045806);
         assert_eq!(TransportForwardVtable::FLOOR_HASH, 3937278426);
     }
 
