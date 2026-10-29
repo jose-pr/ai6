@@ -7,40 +7,27 @@
 //! running Session keeps the configuration it started with. A changed family that only a
 //! restart applies is reported as needing one, at check-in and in the log. A revision that is
 //! not acceptable is refused once, logged and audited, and the last good configuration keeps
-//! running. `loadouts.toml` is read again when it changes, and the Station then declares its
-//! pool accounts again; `cables.toml` is read only at start.
+//! running. When its loadouts change, the Station declares its pool accounts again.
 
 use std::collections::BTreeSet;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
-
-use sha2::{Digest, Sha256};
 
 use super::{DaemonState, accounts, publish_station_check_in};
 use crate::directorates::m::config::{
     ConfigProvider, ConfigRevision, ConfigSnapshot, ConfigStatus,
 };
 use crate::directorates::m::roster::{Roster, RosterErrorKind};
-use crate::directorates::q::{LoadoutCatalog, QErrorKind};
+use crate::directorates::q::LoadoutCatalog;
 use crate::directorates::registry::store::AuditRecord;
 
-/// The loadouts a Station reads from its configuration directory.
-pub(super) const LOADOUTS_FILE: &str = "loadouts.toml";
-/// Files a Station reads beside its provider, only when it starts.
-const RESTART_FILES: [&str; 1] = ["cables.toml"];
 /// The audit action of a refused configuration.
 const REFUSED_ACTION: &str = "config.refused";
 /// The Registry's bound on an audit target.
 const MAX_TARGET_BYTES: usize = 512;
 /// How often the poll task checks whether the Station is stopping.
 const STOP_CHECK: Duration = Duration::from_millis(250);
-
-/// A file's SHA-256, `None` when it does not exist.
-type FileDigest = Option<[u8; 32]>;
 
 /// The configuration a Station runs and where it reads it again, shared by every copy of the
 /// Station's state. The default holds nothing and reads nothing: each copy keeps its own.
@@ -51,23 +38,17 @@ pub(super) struct LiveConfig {
     station: String,
     /// What the Station started with, to tell which restart-only families changed since.
     started: Option<ConfigSnapshot>,
-    /// The configuration directory: `loadouts.toml` and the files only a restart applies.
-    config_dir: Option<PathBuf>,
     live: Mutex<Live>,
 }
 
 #[derive(Default)]
 struct Live {
     roster: Option<Arc<Roster>>,
-    /// `Some` when the loadouts come from `loadouts.toml`, which is then read again.
+    /// `Some` when the loadouts come from the provider, which then replaces them.
     catalog: Option<Option<Arc<LoadoutCatalog>>>,
     revision: Option<ConfigRevision>,
     /// The roster revision refused last, and why.
     refused: Option<(ConfigRevision, String)>,
-    /// `loadouts.toml` as last read, applied or refused.
-    loadouts: FileDigest,
-    loadouts_refused: Option<String>,
-    started_with: Vec<(&'static str, FileDigest)>,
     needs_restart: BTreeSet<&'static str>,
     /// The last failure to read the configuration, logged once.
     unavailable: Option<String>,
@@ -75,37 +56,24 @@ struct Live {
 
 impl LiveConfig {
     /// The configuration Station `station` starts with: `started`, its view of `source`,
-    /// running `roster`, and the loadouts `catalog` when it was read from `config_dir`'s
-    /// `loadouts.toml` (`None` when the loadouts were set in code, which no reload replaces).
+    /// running `roster`, and the loadouts `catalog` when they came from the provider (`None`
+    /// when they were set in code, which no reload replaces).
     pub(super) fn new(
         source: Arc<dyn ConfigProvider>,
         station: &str,
         started: ConfigSnapshot,
-        config_dir: &Path,
         roster: Arc<Roster>,
         catalog: Option<Option<Arc<LoadoutCatalog>>>,
     ) -> Self {
         let revision = started.revision;
-        let loadouts = if catalog.is_some() {
-            digest(&config_dir.join(LOADOUTS_FILE)).unwrap_or_default()
-        } else {
-            None
-        };
-        let started_with = RESTART_FILES
-            .into_iter()
-            .map(|name| (name, digest(&config_dir.join(name)).unwrap_or_default()))
-            .collect();
         Self {
             source: Some(source),
             station: station.to_owned(),
             started: Some(started),
-            config_dir: Some(config_dir.to_path_buf()),
             live: Mutex::new(Live {
                 roster: Some(roster),
                 catalog,
                 revision: Some(revision),
-                loadouts,
-                started_with,
                 ..Live::default()
             }),
         }
@@ -129,7 +97,6 @@ impl LiveConfig {
                 .refused
                 .iter()
                 .map(|(_, reason)| reason.clone())
-                .chain(live.loadouts_refused.clone())
                 .collect(),
             needs_restart: live
                 .needs_restart
@@ -195,9 +162,7 @@ pub(super) fn declare(state: &DaemonState) {
 /// Reads the configuration again and applies what changed; whether anything did. Blocks on
 /// the source and the Registry.
 pub(super) fn poll(state: &DaemonState) -> bool {
-    let roster = poll_roster(state);
-    let loadouts = poll_loadouts(state);
-    poll_restart_files(state);
+    let (roster, loadouts) = poll_provider(state);
     if !(roster || loadouts) {
         return false;
     }
@@ -222,16 +187,17 @@ pub(super) fn poll(state: &DaemonState) -> bool {
     true
 }
 
-fn poll_roster(state: &DaemonState) -> bool {
+/// Whether a new revision was applied, and whether the loadouts changed with it.
+fn poll_provider(state: &DaemonState) -> (bool, bool) {
     let Some(source) = &state.config.source else {
-        return false;
+        return (false, false);
     };
     let station = state.config.station.as_str();
     let revision = match source.revision(station) {
         Ok(revision) => revision,
         Err(error) => {
             unavailable(state, &error.to_string());
-            return false;
+            return (false, false);
         }
     };
     {
@@ -243,20 +209,27 @@ fn poll_roster(state: &DaemonState) -> bool {
                     "ai6: the configuration source is back at the revision this Station runs"
                 );
             }
-            return false;
+            return (false, false);
         }
         if live
             .refused
             .as_ref()
             .is_some_and(|(refused, _)| *refused == revision)
         {
-            return false;
+            return (false, false);
         }
     }
     match source.load(station) {
         Ok(snapshot) => {
             restart_families(state, &snapshot);
+            let loadouts = (snapshot.settings.loadouts != LoadoutCatalog::default())
+                .then(|| Arc::new(snapshot.settings.loadouts));
             let mut live = state.config.lock();
+            let loadouts_changed =
+                live.catalog.is_some() && live.catalog.as_ref() != Some(&loadouts);
+            if live.catalog.is_some() {
+                live.catalog = Some(loadouts);
+            }
             live.roster = Some(Arc::new(snapshot.roster));
             live.revision = Some(snapshot.revision);
             live.refused = None;
@@ -264,67 +237,17 @@ fn poll_roster(state: &DaemonState) -> bool {
                 "ai6: configuration revision {} applied",
                 snapshot.revision.get()
             );
-            true
+            (true, loadouts_changed)
         }
         Err(error) if error.kind() == RosterErrorKind::Unavailable => {
             unavailable(state, &error.to_string());
-            false
+            (false, false)
         }
         Err(error) => {
-            let reason = format!("roster revision {}: {error}", revision.get());
+            let reason = format!("configuration revision {}: {error}", revision.get());
             state.config.lock().refused = Some((revision, reason.clone()));
             refuse(state, &reason);
-            false
-        }
-    }
-}
-
-fn poll_loadouts(state: &DaemonState) -> bool {
-    let Some(dir) = &state.config.config_dir else {
-        return false;
-    };
-    if state.config.lock().catalog.is_none() {
-        return false;
-    }
-    let path = dir.join(LOADOUTS_FILE);
-    let digest = match digest(&path) {
-        Ok(digest) => digest,
-        Err(error) => {
-            unavailable(state, &format!("{}: {error}", path.display()));
-            return false;
-        }
-    };
-    if state.config.lock().loadouts == digest {
-        return false;
-    }
-    let catalog = match digest {
-        Some(_) => LoadoutCatalog::load(&path).map(|catalog| Some(Arc::new(catalog))),
-        None => Ok(None),
-    };
-    match catalog {
-        Ok(catalog) => {
-            let mut live = state.config.lock();
-            live.loadouts = digest;
-            live.loadouts_refused = None;
-            if live.catalog.as_ref() == Some(&catalog) {
-                return false;
-            }
-            live.catalog = Some(catalog);
-            eprintln!("ai6: {LOADOUTS_FILE} applied");
-            true
-        }
-        Err(error) if error.kind() == QErrorKind::Io => {
-            unavailable(state, &format!("{}: {error}", path.display()));
-            false
-        }
-        Err(error) => {
-            let reason = format!("{LOADOUTS_FILE}: {error}");
-            let mut live = state.config.lock();
-            live.loadouts = digest;
-            live.loadouts_refused = Some(reason.clone());
-            drop(live);
-            refuse(state, &reason);
-            false
+            (false, false)
         }
     }
 }
@@ -345,25 +268,6 @@ fn restart_families(state: &DaemonState, snapshot: &ConfigSnapshot) {
             live.needs_restart.remove(record.name());
         } else if live.needs_restart.insert(record.name()) {
             eprintln!("ai6: {record} changed; restart the Station to apply it");
-        }
-    }
-}
-
-/// Notes each file read only at start that differs from what the Station started with.
-fn poll_restart_files(state: &DaemonState) {
-    let Some(dir) = &state.config.config_dir else {
-        return;
-    };
-    let started_with = state.config.lock().started_with.clone();
-    for (name, original) in started_with {
-        let Ok(now) = digest(&dir.join(name)) else {
-            continue;
-        };
-        let mut live = state.config.lock();
-        if now == original {
-            live.needs_restart.remove(name);
-        } else if live.needs_restart.insert(name) {
-            eprintln!("ai6: {name} changed; restart the Station to apply it");
         }
     }
 }
@@ -418,17 +322,12 @@ fn bounded(text: &str) -> String {
     line
 }
 
-fn digest(path: &Path) -> io::Result<FileDigest> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(Some(Sha256::digest(&bytes).into())),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use axum::extract::FromRef;
+
+    use std::fs;
+    use std::path::Path;
 
     use super::super::tests::test_state;
     use super::*;
@@ -440,14 +339,18 @@ mod tests {
         [pool.team.account.alpha]\nkind = \"claude-oauth-token\"\nsecret = \"env-alpha\"\n\
         [pool.team.account.beta]\nkind = \"anthropic-api-key\"\nsecret = \"env-beta\"\n";
 
-    /// Makes `state` run what `source` holds, reading its loadouts from `root` when
-    /// `loadouts` says so, as `serve` does.
-    fn live(state: &mut DaemonState, root: &Path, source: Arc<dyn ConfigProvider>, loadouts: bool) {
+    /// Makes `state` run what `source` holds, taking its loadouts from it when `loadouts`
+    /// says so, as `serve` does.
+    fn live(
+        state: &mut DaemonState,
+        _root: &Path,
+        source: Arc<dyn ConfigProvider>,
+        loadouts: bool,
+    ) {
         let snapshot = source.load(&state.station_id).unwrap();
         let catalog = loadouts.then(|| {
-            let path = root.join(LOADOUTS_FILE);
-            path.is_file()
-                .then(|| Arc::new(LoadoutCatalog::load(&path).unwrap()))
+            (snapshot.settings.loadouts != LoadoutCatalog::default())
+                .then(|| Arc::new(snapshot.settings.loadouts.clone()))
         });
         state.roster = Arc::new(snapshot.roster.clone());
         state
@@ -458,7 +361,6 @@ mod tests {
             source,
             &state.station_id,
             snapshot,
-            root,
             state.roster.clone(),
             catalog,
         ));
@@ -533,7 +435,7 @@ mod tests {
     fn changed_loadouts_declare_pool_accounts_again_and_bad_ones_are_refused() {
         let root = tempfile::tempdir().unwrap();
         let mut state = test_state(root.path(), "", AGENTS);
-        let loadouts = root.path().join(LOADOUTS_FILE);
+        let loadouts = root.path().join("loadouts.toml");
         fs::write(&loadouts, POOLS).unwrap();
         live(
             &mut state,
@@ -728,9 +630,8 @@ mod tests {
         poll(&state);
         assert!(state.config.status().needs_restart.is_empty());
 
-        let cables = root.path().join("cables.toml");
-        fs::write(&cables, "").unwrap();
+        fs::write(root.path().join("cables.toml"), "max_fanout = 3\n").unwrap();
         poll(&state);
-        assert_eq!(state.config.status().needs_restart, ["cables.toml"]);
+        assert_eq!(state.config.status().needs_restart, ["cables"]);
     }
 }

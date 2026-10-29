@@ -875,6 +875,9 @@ name = "coqui-net-acl"
 version = "0.0.0-alpha.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d116efeb3a87b3e4f9c9c00dc93124d1c1c212c05c49f86c616c0fc8a3ff305e"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "coqui-peer"
@@ -897,11 +900,13 @@ version = "0.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b3dc15e86bd976c69b29425319a822dd3415393b41e8550d44180f6a2e5cca4"
 dependencies = [
+ "coqui-net-acl",
  "coqui-peer",
  "globset",
  "rcgen",
  "rustls",
  "rustls-webpki",
+ "serde",
  "time",
  "tokio",
  "tokio-rustls",

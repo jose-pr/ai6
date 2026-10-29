@@ -16,7 +16,7 @@ fn bootstrap(dir: &std::path::Path, extra: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn serve_help_lists_watchdog_configuration() {
+fn serve_help_lists_only_what_starting_needs() {
     let output = ai6()
         .args(["serve", "--help"])
         .output()
@@ -24,17 +24,28 @@ fn serve_help_lists_watchdog_configuration() {
 
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).expect("help should be UTF-8");
-    for flag in [
-        "--stall-timeout",
-        "--loop-timeout",
-        "--loop-min-lines",
-        "--blocked-after",
-        "--max-runtime",
-        "--history",
-        "--normalize-digits",
-    ] {
-        assert!(help.contains(flag), "serve help should include {flag}");
-    }
+    let flags: Vec<&str> = help
+        .split_whitespace()
+        .filter(|word| word.starts_with("--"))
+        .map(|word| word.trim_end_matches([',', '.', ')']))
+        .filter(|word| !word.contains('`'))
+        .collect();
+    let mut flags: Vec<&str> = flags.into_iter().filter(|flag| *flag != "--help").collect();
+    flags.sort_unstable();
+    flags.dedup();
+    assert_eq!(
+        flags,
+        [
+            "--config",
+            "--listen",
+            "--plugin-path",
+            "--plugin-profile",
+            "--provider",
+            "--registry",
+            "--state-dir",
+            "--station",
+        ]
+    );
 }
 
 #[test]
@@ -71,30 +82,22 @@ fn plugins_pin_prints_an_entry_for_a_provider_library_and_refuses_anything_else(
 }
 
 #[test]
-fn a_named_pin_set_that_does_not_exist_stops_the_station_and_the_runner() {
+fn a_named_pin_set_that_does_not_exist_stops_the_runner() {
     let directory = tempfile::tempdir().unwrap();
     let missing = directory.path().join("absent-plugins.toml");
-    let config = bootstrap(directory.path(), "");
-    let config = config.to_str().unwrap();
-    let state = directory.path().join("state");
-    let state = state.to_str().unwrap();
-    for arguments in [
-        vec!["serve", "--listen", "127.0.0.1:0", "--config", config],
-        vec!["runner", "serve", "--state-dir", state],
-    ] {
-        let output = ai6()
-            .args(&arguments)
-            .arg("--plugin-pins")
-            .arg(&missing)
-            .output()
-            .expect("the AI6 command should start");
-        assert!(!output.status.success(), "{arguments:?}");
-        let error = String::from_utf8(output.stderr).unwrap();
-        assert!(
-            error.contains("absent-plugins.toml") && error.contains("does not exist"),
-            "{arguments:?}: {error}"
-        );
-    }
+    let output = ai6()
+        .args(["runner", "serve", "--state-dir"])
+        .arg(directory.path().join("state"))
+        .arg("--plugin-pins")
+        .arg(&missing)
+        .output()
+        .expect("the AI6 command should start");
+    assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        error.contains("absent-plugins.toml") && error.contains("does not exist"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -177,38 +180,23 @@ fn assistant_pin_skill_prints_the_pin_the_roster_takes() {
 }
 
 #[test]
-fn a_safe_house_cache_that_is_not_a_plain_directory_name_stops_the_station() {
-    let directory = tempfile::tempdir().unwrap();
-    let output = ai6()
-        .args([
-            "serve",
-            "--listen",
-            "127.0.0.1:0",
-            "--safe-house-cache",
-            "../outside",
-            "--config",
-        ])
-        .arg(bootstrap(directory.path(), ""))
-        .output()
-        .expect("the AI6 command should start");
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    let error = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        error.contains("--safe-house-cache") && error.contains("../outside"),
-        "{error}"
-    );
-}
-
-#[test]
-fn negative_watchdog_timeout_is_an_invalid_invocation() {
-    let output = ai6()
-        .args(["serve", "--stall-timeout", "-1"])
-        .output()
-        .expect("the AI6 command should start");
-
-    assert_eq!(output.status.code(), Some(2));
-    let error = String::from_utf8(output.stderr).expect("CLI error should be UTF-8");
-    assert!(error.contains("invalid value"));
+fn a_station_record_the_station_refuses_stops_it() {
+    for (station, named) in [
+        ("safe_house_caches = [\"../outside\"]\n", "../outside"),
+        ("stall_timeout = -1\n", "stall_timeout"),
+        ("roles = [\"spy\"]\n", "station.roles"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("station.toml"), station).unwrap();
+        let output = ai6()
+            .args(["serve", "--listen", "127.0.0.1:0", "--config"])
+            .arg(bootstrap(directory.path(), ""))
+            .output()
+            .expect("the AI6 command should start");
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(error.contains(named), "{station}: {error}");
+    }
 }
 
 #[test]
@@ -538,4 +526,42 @@ fn the_green_ink_hook_denies_a_governed_step_and_stays_silent_otherwise() {
     assert!(garbled.status.success());
     let decision: serde_json::Value = serde_json::from_slice(&garbled.stdout).unwrap();
     assert_eq!(decision["hookSpecificOutput"]["permissionDecision"], "deny");
+}
+
+#[test]
+fn config_import_into_sqlite_then_export_round_trips_the_examples() {
+    use ai6::ConfigProvider as _;
+
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/config");
+    let dir = tempfile::tempdir().unwrap();
+    let file = bootstrap(dir.path(), "[provider]\nlocation = \"sqlite:ai6.db\"\n");
+    let run = |args: &[&std::ffi::OsStr]| {
+        let output = ai6()
+            .arg("config")
+            .args(args)
+            .arg("--config")
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let imported = run(&["import".as_ref(), examples.as_os_str()]);
+    assert!(imported.starts_with("Imported "), "{imported}");
+    let shown = run(&["show".as_ref(), "agent".as_ref(), "007".as_ref()]);
+    assert!(shown.contains("[agent.007]"), "{shown}");
+    let out = dir.path().join("exported");
+    run(&["export".as_ref(), out.as_os_str()]);
+    let shape = |dir: &std::path::Path| {
+        let snapshot = ai6::FileProvider::new(dir).load("").unwrap();
+        format!("{:?}\n{:?}", snapshot.roster, snapshot.settings)
+    };
+    assert_eq!(shape(&out), shape(&examples));
+
+    let refused = ai6()
+        .args(["config", "show", "agents", "--config"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
 }

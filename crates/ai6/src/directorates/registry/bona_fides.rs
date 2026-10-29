@@ -507,12 +507,13 @@ pub enum PinCheck {
     Refused(String),
 }
 
-/// The provider libraries a Station accepts, and the profile it loads them under.
+/// The provider libraries a Station accepts; the profile it loads them under is the host's
+/// own ([`PluginProfile`]).
 ///
-/// Built in code with [`PinSet::with_library`], or read from a `plugins.toml`:
+/// Built in code with [`PinSet::with_library`], or read from `plugin` records or a
+/// `plugins.toml`:
 ///
 /// ```toml
-/// profile = "strict"          # optional: strict when a pin set exists, report otherwise
 /// [[library]]
 /// file = "ai6_claude.dll"
 /// pin = "sha256:..."
@@ -527,9 +528,6 @@ pub enum PinCheck {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PinSet {
-    /// The profile the pin set asks for; a Station's own setting overrides it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub profile: Option<PluginProfile>,
     /// The accepted libraries.
     #[serde(default, rename = "library")]
     pub libraries: Vec<LibraryPin>,
@@ -539,13 +537,6 @@ impl PinSet {
     /// An empty pin set.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Asks for `profile`.
-    #[must_use]
-    pub fn with_profile(mut self, profile: PluginProfile) -> Self {
-        self.profile = Some(profile);
-        self
     }
 
     /// Accepts one more library.
@@ -858,14 +849,13 @@ mod tests {
     fn a_pin_set_reads_from_toml_and_refuses_entries_that_accept_nothing() {
         let key = format!("ed25519:{}", "ab".repeat(32));
         let pins = PinSet::from_toml(&format!(
-            "profile = \"report\"\n[[library]]\nfile = \"a.so\"\npin = \"sha256:{}\"\n\
+            "[[library]]\nfile = \"a.so\"\npin = \"sha256:{}\"\n\
              [[library]]\nfile = \"b.so\"\npublisher = \"{key}\"\n\
              [[library]]\nfile = \"c.so\"\npin = \"sha1:{}\"\npublisher = \"{key}\"\nrequire = \"both\"\n",
             "0".repeat(64),
             "1".repeat(40),
         ))
         .unwrap();
-        assert_eq!(pins.profile, Some(PluginProfile::Report));
         assert_eq!(pins.libraries.len(), 3);
         assert_eq!(pins.libraries[1].publisher.unwrap().to_string(), key);
         assert_eq!(pins.libraries[2].require, Require::Both);

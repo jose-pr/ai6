@@ -31,13 +31,18 @@ use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use serde::Deserialize as _;
 use sha2::{Digest, Sha256};
 
+use crate::directorates::m::access::{RoleAuthorizer, role_authorizer_from_toml};
 use crate::directorates::m::cover::{Covers, cover_from};
 use crate::directorates::m::roster::{
     Roster, RosterError, RosterErrorKind, error, error_of, roster_from_definitions,
 };
 use crate::directorates::m::theaters::Theaters;
+use crate::directorates::q::LoadoutCatalog;
+use crate::directorates::registry::bona_fides::PinSet;
+use crate::directorates::registry::cables::CableConfig;
 
 /// The families of record a configuration provider holds.
 #[non_exhaustive]
@@ -54,26 +59,66 @@ pub enum ConfigRecord {
     Assistant,
     /// A cover policy: the keys of a `[cover.<name>]` table.
     Cover,
-    /// A Theater: the keys of a `[theater.<id>]` table; global or one Station's.
+    /// A Theater: the keys of a `[theater.<id>]` table.
     Theater,
+    /// An Agent's loadout: the keys of a `[loadout.<agent>]` table.
+    Loadout,
+    /// A sandbox profile loadouts name: the keys of a `[sandbox.<name>]` table.
+    Sandbox,
+    /// An MCP server loadouts name: the keys of an `[mcp.<name>]` table.
+    Mcp,
+    /// How a loadout secret reaches a Session, never its value: a `[secret.<name>]` table.
+    Secret,
+    /// An account pool and its accounts (references to secrets, never values): a
+    /// `[pool.<id>]` table.
+    Pool,
+    /// The Cable relay's grants, channels and limits: the whole `cables` file; a singleton.
+    Cables,
+    /// One accepted provider library: a `[[library]]` entry of the `plugins` file, keyed by
+    /// its `file`.
+    Plugin,
+    /// The Station's runtime settings ([`StationRuntime`]): the whole `station` file; a
+    /// singleton.
+    Station,
+    /// The Station TLS policy (a coqui-peer-tls `Policy` document): the whole `tls` file; a
+    /// singleton.
+    Tls,
+    /// Universal Exports' role policy: `[role.<name>]` and `[[rule]]` of the whole `access`
+    /// file; a singleton.
+    Access,
+    /// Universal Exports' sign-in, limits and assistant ([`UnexRecord`]): the whole `unex`
+    /// file; a singleton.
+    Unex,
 }
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 17] = [
         Self::Operation,
         Self::Agent,
         Self::Role,
         Self::Assistant,
         Self::Cover,
         Self::Theater,
+        Self::Loadout,
+        Self::Sandbox,
+        Self::Mcp,
+        Self::Secret,
+        Self::Pool,
+        Self::Cables,
+        Self::Plugin,
+        Self::Station,
+        Self::Tls,
+        Self::Access,
+        Self::Unex,
     ];
 
     /// The key of a singleton family's one record.
     pub const SINGLETON_KEY: &'static str = "settings";
 
-    /// The family's name, which is also its table in its family file: `operation`, `agent`,
-    /// `role`, `assistant`, `cover` or `theater`.
+    /// The family's name: `operation`, `agent`, `role`, `assistant`, `cover`, `theater`,
+    /// `loadout`, `sandbox`, `mcp`, `secret`, `pool`, `cables`, `plugin`, `station`, `tls`,
+    /// `access` or `unex`. For a family that shares its file, it is also its table there.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Operation => "operation",
@@ -82,6 +127,17 @@ impl ConfigRecord {
             Self::Assistant => "assistant",
             Self::Cover => "cover",
             Self::Theater => "theater",
+            Self::Loadout => "loadout",
+            Self::Sandbox => "sandbox",
+            Self::Mcp => "mcp",
+            Self::Secret => "secret",
+            Self::Pool => "pool",
+            Self::Cables => "cables",
+            Self::Plugin => "plugin",
+            Self::Station => "station",
+            Self::Tls => "tls",
+            Self::Access => "access",
+            Self::Unex => "unex",
         }
     }
 
@@ -90,30 +146,60 @@ impl ConfigRecord {
         Self::ALL.into_iter().find(|record| record.name() == name)
     }
 
-    /// The family file that holds it, without its extension: `operations`, `agents`,
-    /// `covers` or `theaters`.
+    /// The family file that holds it, without its extension.
     pub const fn file(self) -> &'static str {
         match self {
             Self::Operation => "operations",
             Self::Agent | Self::Role | Self::Assistant => "agents",
             Self::Cover => "covers",
             Self::Theater => "theaters",
+            Self::Loadout | Self::Sandbox | Self::Mcp | Self::Secret | Self::Pool => "loadouts",
+            Self::Cables => "cables",
+            Self::Plugin => "plugins",
+            Self::Station => "station",
+            Self::Tls => "tls",
+            Self::Access => "access",
+            Self::Unex => "unex",
         }
     }
 
     /// Whether the family has one record, keyed [`SINGLETON_KEY`](Self::SINGLETON_KEY).
     pub const fn is_singleton(self) -> bool {
-        matches!(self, Self::Assistant)
+        matches!(
+            self,
+            Self::Assistant | Self::Cables | Self::Station | Self::Tls | Self::Access | Self::Unex
+        )
+    }
+
+    /// Whether the record is its whole family file rather than a table in it.
+    pub const fn is_whole_file(self) -> bool {
+        self.is_singleton() && !matches!(self, Self::Assistant)
     }
 
     /// Whether a Station may have records of its own in this family.
     pub const fn station_scoped(self) -> bool {
-        matches!(self, Self::Theater)
+        matches!(
+            self,
+            Self::Theater
+                | Self::Loadout
+                | Self::Sandbox
+                | Self::Mcp
+                | Self::Secret
+                | Self::Pool
+                | Self::Cables
+                | Self::Plugin
+                | Self::Station
+                | Self::Tls
+        )
     }
 
-    /// Whether a running Station applies a change without a restart.
+    /// Whether a running Station, or Universal Exports for `access`, applies a change
+    /// without a restart.
     pub const fn applies_live(self) -> bool {
-        !matches!(self, Self::Theater)
+        !matches!(
+            self,
+            Self::Theater | Self::Cables | Self::Plugin | Self::Station | Self::Tls | Self::Unex
+        )
     }
 }
 
@@ -229,10 +315,271 @@ impl ConfigRevision {
 
 /// What a snapshot holds besides the roster, resolved for one Station.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct Settings {
     /// The Theaters the Station declares (`theater` records).
     pub theaters: Theaters,
+    /// Loadouts, sandbox profiles, MCP servers, secret references and account pools
+    /// (`loadout`, `sandbox`, `mcp`, `secret` and `pool` records).
+    pub loadouts: LoadoutCatalog,
+    /// The Cable relay's settings (the `cables` record); the defaults deny every action.
+    pub cables: CableConfig,
+    /// The accepted provider libraries (`plugin` records); `None` when there are none.
+    pub pins: Option<PinSet>,
+    /// The Station's runtime settings (the `station` record).
+    pub station: StationRuntime,
+    /// The Station TLS policy document (the `tls` record); `None` is the library's default.
+    pub tls: Option<serde_json::Value>,
+    /// Universal Exports' role policy document (the `access` record); `None` denies every
+    /// action.
+    pub access: Option<serde_json::Value>,
+    /// Universal Exports' sign-in, limits and assistant (the `unex` record).
+    pub unex: UnexRecord,
+}
+
+impl Settings {
+    /// Universal Exports' role policy: the `access` record, else one that denies every
+    /// action.
+    ///
+    /// # Errors
+    ///
+    /// The policy's error for a document it does not accept.
+    pub fn access_authorizer(&self) -> Result<RoleAuthorizer, String> {
+        match &self.access {
+            Some(document) => json_to_toml(document.clone())
+                .and_then(|value| {
+                    role_authorizer_from_toml(&toml::to_string(&value).unwrap_or_default())
+                        .map_err(|reason| reason.to_string())
+                })
+                .map_err(|reason| format!("access: {reason}")),
+            None => Ok(RoleAuthorizer::default()),
+        }
+    }
+
+    /// The Station TLS policy: the `tls` record read over the library's default policy
+    /// (`profile` picks a preset).
+    ///
+    /// # Errors
+    ///
+    /// The policy's own error for a document it does not accept.
+    #[cfg(feature = "station-tls")]
+    pub fn tls_policy(&self) -> Result<coqui_peer_tls::Policy, String> {
+        match &self.tls {
+            Some(document) => coqui_peer_tls::Policy::deserialize(document)
+                .map_err(|reason| format!("tls: {reason}")),
+            None => Ok(coqui_peer_tls::Policy::default()),
+        }
+    }
+}
+
+/// A Station's runtime settings, the `station` record: each key a Station applies at start
+/// in place of its built-in default.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StationRuntime {
+    /// Agent Sessions it runs at once.
+    pub max_concurrent_missions: Option<usize>,
+    /// Seconds without provider or terminal activity before a Session stalls.
+    pub stall_timeout: Option<f64>,
+    /// Seconds without novel terminal output before repeated output stalls a Session.
+    pub loop_timeout: Option<f64>,
+    /// Repeated terminal lines required before loop detection applies.
+    pub loop_min_lines: Option<usize>,
+    /// Quiet seconds before a prompt-shaped terminal tail marks a Session blocked.
+    pub blocked_after: Option<f64>,
+    /// Longest a Session runs, in seconds.
+    pub max_runtime: Option<f64>,
+    /// Distinct terminal lines kept for repeated-output detection.
+    pub history: Option<usize>,
+    /// Whether digit runs are normalized when comparing terminal lines for loops.
+    pub normalize_digits: Option<bool>,
+    /// `control` (elects Headquarters) and `execution` (runs assigned Missions); both by
+    /// default.
+    pub roles: Option<Vec<String>>,
+    /// Placement labels.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
+    /// The terminal provider harnesses run in; by default one that suits the handler.
+    pub terminal: Option<String>,
+    /// Seconds between samples of each remote Theater's resources; 0 leaves only the
+    /// requirements probe.
+    pub resources_every: Option<f64>,
+    /// Directory names the Head of Station may remove from a finished Mission's safe house.
+    pub safe_house_caches: Option<Vec<String>>,
+    /// Seconds a finished Mission's safe house is left alone before its caches may go.
+    pub safe_house_cache_age: Option<f64>,
+}
+
+impl StationRuntime {
+    /// Checks every value: seconds finite and not negative, a capacity of 1 to 1,024, known
+    /// roles, non-empty labels.
+    ///
+    /// # Errors
+    ///
+    /// Names the first key that is not acceptable.
+    pub fn validate(&self) -> Result<(), String> {
+        for (key, seconds) in [
+            ("stall_timeout", self.stall_timeout),
+            ("loop_timeout", self.loop_timeout),
+            ("blocked_after", self.blocked_after),
+            ("max_runtime", self.max_runtime),
+            ("resources_every", self.resources_every),
+            ("safe_house_cache_age", self.safe_house_cache_age),
+        ] {
+            if let Some(seconds) = seconds
+                && std::time::Duration::try_from_secs_f64(seconds).is_err()
+            {
+                return Err(format!(
+                    "station.{key}: seconds must be finite and not negative"
+                ));
+            }
+        }
+        if let Some(capacity) = self.max_concurrent_missions
+            && !(1..=crate::directorates::registry::store::MAX_STATION_MISSION_CAPACITY)
+                .contains(&capacity)
+        {
+            return Err("station.max_concurrent_missions: from 1 to 1024".to_owned());
+        }
+        if let Some(roles) = &self.roles
+            && (roles.is_empty()
+                || roles
+                    .iter()
+                    .any(|role| role != "control" && role != "execution"))
+        {
+            return Err("station.roles: control and/or execution".to_owned());
+        }
+        if self
+            .labels
+            .iter()
+            .any(|(key, value)| key.trim().is_empty() || value.trim().is_empty())
+        {
+            return Err("station.labels: keys and values must be non-empty".to_owned());
+        }
+        Ok(())
+    }
+
+    /// A number of seconds as a duration; values were checked by [`validate`](Self::validate).
+    pub fn duration(seconds: Option<f64>) -> Option<std::time::Duration> {
+        seconds.and_then(|seconds| std::time::Duration::try_from_secs_f64(seconds).ok())
+    }
+}
+
+/// Universal Exports' settings that are not host-local, the `unex` record. Provider
+/// configurations are JSON objects handed to the Guatiao provider as they are; a credential
+/// inside one names a file, never a value.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnexRecord {
+    /// The Authenticator provider ID for user sign-in.
+    pub authenticator: Option<String>,
+    /// The Authenticator's configuration.
+    pub authenticator_config: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The Directory provider ID; required when user access is configured.
+    pub directory: Option<String>,
+    /// The Directory's configuration.
+    pub directory_config: Option<serde_json::Map<String, serde_json::Value>>,
+    /// A custom Authorizer provider ID, in place of the `access` record's role policy.
+    pub authorizer: Option<String>,
+    /// The custom Authorizer's configuration.
+    pub authorizer_config: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The sanitized header a trusted reverse proxy sets to the signed-in user.
+    pub proxy_user_header: Option<String>,
+    /// The Directory attribute that resolves the reverse proxy's user.
+    #[serde(default = "UnexRecord::default_lookup_by")]
+    pub proxy_lookup_by: String,
+    /// Password or key tries a minute from one client address.
+    pub login_tries_per_address: Option<u32>,
+    /// Tries in ten minutes for one account name, from anywhere.
+    pub login_tries_per_name: Option<u32>,
+    /// The header a trusted proxy sets to the client address.
+    pub client_address_header: Option<String>,
+    /// Seconds a found person or a granted action is kept; 0 keeps none.
+    pub access_cache_ttl: Option<f64>,
+    /// Seconds "no such person" or a denial is kept; 0 keeps none.
+    pub access_cache_negative_ttl: Option<f64>,
+    /// The most lookups, and decisions, kept; 0 keeps none.
+    pub access_cache_entries: Option<u64>,
+    /// Whether Moneypenny is served.
+    #[serde(default = "UnexRecord::default_assistant")]
+    pub assistant: bool,
+    /// The roster Agent that is Moneypenny.
+    #[serde(default = "UnexRecord::default_assistant_agent")]
+    pub assistant_agent: String,
+}
+
+impl Default for UnexRecord {
+    fn default() -> Self {
+        Self {
+            authenticator: None,
+            authenticator_config: None,
+            directory: None,
+            directory_config: None,
+            authorizer: None,
+            authorizer_config: None,
+            proxy_user_header: None,
+            proxy_lookup_by: Self::default_lookup_by(),
+            login_tries_per_address: None,
+            login_tries_per_name: None,
+            client_address_header: None,
+            access_cache_ttl: None,
+            access_cache_negative_ttl: None,
+            access_cache_entries: None,
+            assistant: Self::default_assistant(),
+            assistant_agent: Self::default_assistant_agent(),
+        }
+    }
+}
+
+impl UnexRecord {
+    /// Each value in a provider configuration whose key names a credential (`password`,
+    /// `secret`, `token`, `key`) and that is written inline rather than as a file, worded for a
+    /// log line.
+    pub fn weakenings(&self) -> Vec<String> {
+        fn inline(path: &str, value: &serde_json::Value, found: &mut Vec<String>) {
+            if let serde_json::Value::Object(entries) = value {
+                for (key, value) in entries {
+                    let lower = key.to_ascii_lowercase();
+                    let credential = ["password", "secret", "token"]
+                        .iter()
+                        .any(|word| lower.contains(word))
+                        || lower == "key"
+                        || lower.ends_with("_key");
+                    let names_file = lower.ends_with("_file") || lower.ends_with("_path");
+                    if credential && !names_file && value.is_string() {
+                        found.push(format!(
+                            "unex.{path}.{key} is a credential written inline in the shared                              configuration; name a file instead"
+                        ));
+                    }
+                    inline(&format!("{path}.{key}"), value, found);
+                }
+            }
+        }
+        let mut found = Vec::new();
+        for (name, config) in [
+            ("authenticator_config", &self.authenticator_config),
+            ("directory_config", &self.directory_config),
+            ("authorizer_config", &self.authorizer_config),
+        ] {
+            if let Some(config) = config {
+                inline(name, &serde_json::Value::Object(config.clone()), &mut found);
+            }
+        }
+        found
+    }
+
+    fn default_lookup_by() -> String {
+        "name".to_owned()
+    }
+
+    const fn default_assistant() -> bool {
+        true
+    }
+
+    fn default_assistant_agent() -> String {
+        "moneypenny".to_owned()
+    }
 }
 
 /// The configuration of one Station at one [`ConfigRevision`].
@@ -369,6 +716,163 @@ pub trait ConfigProvider: Send + Sync {
         let _ = (record, scope, key);
         Err(read_only())
     }
+
+    /// Stores every record of `records` at `scope`, checked as one change: all of them are
+    /// kept, or none. The default stores them one by one with [`put`](ConfigProvider::put),
+    /// which a provider that has transactions overrides.
+    ///
+    /// # Errors
+    ///
+    /// As [`put`](ConfigProvider::put).
+    fn put_all(
+        &self,
+        scope: &ConfigScope,
+        records: &[(ConfigRecord, String, serde_json::Value)],
+    ) -> Result<Option<ConfigRevision>, RosterError> {
+        let mut revision = None;
+        for (record, key, definition) in records {
+            revision = Some(self.put(*record, scope, key, definition)?);
+        }
+        Ok(revision)
+    }
+
+    /// The scopes that hold records: [`ConfigScope::Global`] and each Station with records of
+    /// its own. The default is the global scope alone.
+    ///
+    /// # Errors
+    ///
+    /// As [`load`](ConfigProvider::load).
+    fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError> {
+        Ok(vec![ConfigScope::Global])
+    }
+}
+
+/// The families in the order an import stores them, so each refers only to records already
+/// stored: roles before the Agents that hold them, Agents before the Operations that name them.
+pub const IMPORT_ORDER: [ConfigRecord; 17] = [
+    ConfigRecord::Role,
+    ConfigRecord::Cover,
+    ConfigRecord::Assistant,
+    ConfigRecord::Agent,
+    ConfigRecord::Operation,
+    ConfigRecord::Theater,
+    ConfigRecord::Sandbox,
+    ConfigRecord::Mcp,
+    ConfigRecord::Secret,
+    ConfigRecord::Pool,
+    ConfigRecord::Loadout,
+    ConfigRecord::Cables,
+    ConfigRecord::Plugin,
+    ConfigRecord::Station,
+    ConfigRecord::Tls,
+    ConfigRecord::Access,
+    ConfigRecord::Unex,
+];
+
+/// One family's records as the part of its family file they make: `[name.<key>]` tables, a
+/// singleton's `[name]` table, a whole file, or `[[library]]` entries.
+fn family_value(
+    record: ConfigRecord,
+    records: impl IntoIterator<Item = (String, serde_json::Value)>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut document = serde_json::Map::new();
+    let records: Vec<_> = records.into_iter().collect();
+    if records.is_empty() {
+        return document;
+    }
+    if record.is_whole_file() {
+        if let Some((_, serde_json::Value::Object(whole))) = records.into_iter().next() {
+            return whole;
+        }
+        return document;
+    }
+    let value = if record == ConfigRecord::Plugin {
+        serde_json::Value::Array(
+            records
+                .into_iter()
+                .map(|(key, mut definition)| {
+                    if let Some(entry) = definition.as_object_mut() {
+                        entry.insert("file".to_owned(), serde_json::Value::String(key));
+                    }
+                    definition
+                })
+                .collect(),
+        )
+    } else if record.is_singleton() {
+        records
+            .into_iter()
+            .next()
+            .map(|(_, definition)| definition)
+            .unwrap_or_default()
+    } else {
+        serde_json::Value::Object(records.into_iter().collect())
+    };
+    let name = if record == ConfigRecord::Plugin {
+        "library"
+    } else {
+        record.name()
+    };
+    document.insert(name.to_owned(), value);
+    document
+}
+
+/// `records` of `record` as the TOML text of their family file.
+///
+/// # Errors
+///
+/// A record TOML cannot hold (a `null`).
+pub fn family_document(
+    record: ConfigRecord,
+    records: impl IntoIterator<Item = (String, serde_json::Value)>,
+) -> Result<String, RosterError> {
+    let value = json_to_toml(serde_json::Value::Object(family_value(record, records)))
+        .map_err(|reason| error(format!("{record}: {reason}")))?;
+    toml::to_string(&value).map_err(|reason| error(format!("{record}: {reason}")))
+}
+
+/// Writes every family of every scope `provider` holds into `dir` as TOML family files, laid
+/// out as a [`FileProvider`] reads them, and returns how many files it wrote.
+///
+/// # Errors
+///
+/// As [`ConfigProvider::definitions`]; `Unavailable` when a file cannot be written.
+pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, RosterError> {
+    let mut written = 0;
+    for scope in provider.scopes()? {
+        let target = match &scope {
+            ConfigScope::Global => dir.to_path_buf(),
+            ConfigScope::Station(id) => dir.join("stations").join(id),
+        };
+        let mut files: BTreeMap<&'static str, serde_json::Map<String, serde_json::Value>> =
+            BTreeMap::new();
+        for record in ConfigRecord::ALL {
+            let records = provider.definitions(record, &scope)?.records;
+            if records.is_empty() {
+                continue;
+            }
+            files
+                .entry(record.file())
+                .or_default()
+                .extend(family_value(record, records));
+        }
+        for (stem, document) in files {
+            let value = json_to_toml(serde_json::Value::Object(document))
+                .map_err(|reason| error(format!("{stem}: {reason}")))?;
+            let text =
+                toml::to_string(&value).map_err(|reason| error(format!("{stem}: {reason}")))?;
+            let path = target.join(format!("{stem}.toml"));
+            std::fs::create_dir_all(&target)
+                .and_then(|()| std::fs::write(&path, text))
+                .map_err(|failure| {
+                    error_of(
+                        RosterErrorKind::Unavailable,
+                        format!("{}: {failure}", path.display()),
+                    )
+                })?;
+            written += 1;
+        }
+    }
+    Ok(written)
 }
 
 /// Opens the configuration provider at `location`: `sqlite:PATH` (or `sqlite://PATH`) or a
@@ -491,6 +995,106 @@ pub(crate) fn assemble(
         .map_err(|reason| error(format!("{source}: {reason}")))?;
     let theaters = Theaters::from_records(family(ConfigRecord::Theater))
         .map_err(|reason| error(format!("{source}: {reason}")))?;
+    let tables = |records: &[ConfigRecord]| {
+        let mut document = toml::Table::new();
+        for record in records {
+            let entries = family(*record);
+            if entries.is_empty() {
+                continue;
+            }
+            let table: serde_json::Map<String, serde_json::Value> = entries.into_iter().collect();
+            document.insert(
+                record.name().to_owned(),
+                json_to_toml(serde_json::Value::Object(table))
+                    .map_err(|reason| error(format!("{source}: {record}: {reason}")))?,
+            );
+        }
+        Ok::<_, RosterError>(toml::to_string(&document).unwrap_or_default())
+    };
+    let loadouts = tables(&[
+        ConfigRecord::Loadout,
+        ConfigRecord::Sandbox,
+        ConfigRecord::Mcp,
+        ConfigRecord::Secret,
+        ConfigRecord::Pool,
+    ])?;
+    let loadouts = if loadouts.trim().is_empty() {
+        LoadoutCatalog::default()
+    } else {
+        loadouts
+            .parse::<LoadoutCatalog>()
+            .map_err(|reason| error(format!("{source}: loadouts: {reason}")))?
+    };
+    let singleton = |record: ConfigRecord| -> Result<Option<String>, RosterError> {
+        family(record)
+            .into_iter()
+            .next()
+            .map(|(_, definition)| {
+                json_to_toml(definition)
+                    .map(|value| toml::to_string(&value).unwrap_or_default())
+                    .map_err(|reason| error(format!("{source}: {record}: {reason}")))
+            })
+            .transpose()
+    };
+    let cables = match singleton(ConfigRecord::Cables)? {
+        Some(text) => CableConfig::parse_toml(&text)
+            .map_err(|reason| error(format!("{source}: cables: {reason}")))?,
+        None => CableConfig::default(),
+    };
+    let libraries = family(ConfigRecord::Plugin);
+    let pins = if libraries.is_empty() {
+        None
+    } else {
+        let library: Vec<serde_json::Value> = libraries
+            .into_iter()
+            .map(|(key, mut definition)| {
+                if let Some(entry) = definition.as_object_mut() {
+                    entry.insert("file".to_owned(), serde_json::Value::String(key));
+                }
+                definition
+            })
+            .collect();
+        let text = json_to_toml(serde_json::json!({ "library": library }))
+            .map(|value| toml::to_string(&value).unwrap_or_default())
+            .map_err(|reason| error(format!("{source}: plugin: {reason}")))?;
+        Some(
+            PinSet::from_toml(&text)
+                .map_err(|reason| error(format!("{source}: plugin: {reason}")))?,
+        )
+    };
+    let station = match family(ConfigRecord::Station).into_iter().next() {
+        Some((_, definition)) => {
+            let station = StationRuntime::deserialize(definition)
+                .map_err(|reason| error(format!("{source}: station: {reason}")))?;
+            station
+                .validate()
+                .map_err(|reason| error(format!("{source}: {reason}")))?;
+            station
+        }
+        None => StationRuntime::default(),
+    };
+    let tls = family(ConfigRecord::Tls)
+        .into_iter()
+        .next()
+        .map(|(_, definition)| definition);
+    #[cfg(feature = "station-tls")]
+    if let Some(document) = &tls {
+        coqui_peer_tls::Policy::deserialize(document)
+            .map_err(|reason| error(format!("{source}: tls: {reason}")))?;
+    }
+    let access = family(ConfigRecord::Access)
+        .into_iter()
+        .next()
+        .map(|(_, definition)| definition);
+    if let Some(text) = singleton(ConfigRecord::Access)? {
+        role_authorizer_from_toml(&text)
+            .map_err(|reason| error(format!("{source}: access: {reason}")))?;
+    }
+    let unex = match family(ConfigRecord::Unex).into_iter().next() {
+        Some((_, definition)) => UnexRecord::deserialize(definition)
+            .map_err(|reason| error(format!("{source}: unex: {reason}")))?,
+        None => UnexRecord::default(),
+    };
     let fingerprints = ConfigRecord::ALL
         .into_iter()
         .map(|record| {
@@ -501,9 +1105,24 @@ pub(crate) fn assemble(
     Ok(ConfigSnapshot {
         revision,
         roster,
-        settings: Settings { theaters },
+        settings: Settings {
+            theaters,
+            loadouts,
+            cables,
+            pins,
+            station,
+            tls,
+            access,
+            unex,
+        },
         fingerprints,
     })
+}
+
+/// A JSON value as TOML, for the loaders that read a TOML document; `null` has no TOML form
+/// and is refused.
+fn json_to_toml(value: serde_json::Value) -> Result<toml::Value, String> {
+    toml::Value::deserialize(value).map_err(|reason| reason.to_string())
 }
 
 /// Configuration kept in memory, built in code. Its revision counts the replacements.
@@ -618,6 +1237,38 @@ mod tests {
                 .changes_since("", second.revision)
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[cfg(feature = "station-tls")]
+    #[test]
+    fn the_tls_record_is_read_over_the_library_default_and_names_its_weakenings() {
+        let settings = |document: Option<serde_json::Value>| Settings {
+            tls: document,
+            ..Settings::default()
+        };
+        let default = coqui_peer_tls::Policy::default();
+        assert_eq!(settings(None).tls_policy().unwrap(), default);
+        let read = settings(Some(serde_json::json!({
+            "profile": "modern",
+            "cipher_profiles": ["fips-140-3-compliant"],
+        })))
+        .tls_policy()
+        .unwrap();
+        assert_eq!(read.cipher_profiles.len(), 1);
+        assert_eq!(read.cipher_profiles[0].as_str(), "fips-140-3-compliant");
+        assert!(
+            read.weakened_against(&default).is_empty(),
+            "modern is stricter"
+        );
+        let legacy = settings(Some(serde_json::json!({"profile": "legacy"})))
+            .tls_policy()
+            .unwrap();
+        assert!(!legacy.weakened_against(&default).is_empty());
+        assert!(
+            settings(Some(serde_json::json!({"profile": "lax"})))
+                .tls_policy()
+                .is_err()
         );
     }
 

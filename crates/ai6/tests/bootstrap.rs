@@ -237,7 +237,7 @@ fn serve_help_lists_none_of_the_removed_flags() {
         "--config-dir",
         "--config-poll",
         "--headquarters-lease",
-        "AI6_EXPORTS_",
+        "EXPORTS_",
     ] {
         assert!(!help.contains(removed), "{removed}");
     }

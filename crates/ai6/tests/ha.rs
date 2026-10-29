@@ -107,10 +107,20 @@ headquarters_lease = {HEADQUARTERS_LEASE_SECS}
             ),
         )
         .unwrap();
+        // Both Stations only stand for Headquarters: a Station record every Station reads.
+        SqlProvider::open(location)
+            .unwrap()
+            .put(
+                ConfigRecord::Station,
+                &ConfigScope::Global,
+                ConfigRecord::SINGLETON_KEY,
+                &json!({"roles": ["control"]}),
+            )
+            .unwrap();
         let log = File::create(root.join(format!("{name}.log"))).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_ai6"));
         command
-            .args(["serve", "--listen", "127.0.0.1:0", "--role", "control"])
+            .args(["serve", "--listen", "127.0.0.1:0"])
             .arg("--config")
             .arg(&bootstrap)
             .stdin(Stdio::null())

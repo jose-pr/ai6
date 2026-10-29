@@ -107,11 +107,7 @@ impl PluginPolicy {
     /// libraries into `verified_dir`. The profile is the pin set's own, else `strict` with
     /// a pin set and `report` without.
     pub fn new(pins: Option<PinSet>, verified_dir: impl Into<PathBuf>) -> Self {
-        let profile = pins
-            .as_ref()
-            .map_or(PluginProfile::default_for(false), |pins| {
-                pins.profile.unwrap_or(PluginProfile::default_for(true))
-            });
+        let profile = PluginProfile::default_for(pins.is_some());
         Self {
             profile,
             pins: pins.unwrap_or_default(),

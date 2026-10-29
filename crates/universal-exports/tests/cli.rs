@@ -29,8 +29,9 @@ fn help_names_the_bootstrap_file_and_its_overrides() {
     for removed in [
         "--port",
         "--roster",
-        "AI6_EXPORTS_PORT",
-        "AI6_EXPORTS_PUBLIC_ORIGIN",
+        "--plugin-pins",
+        "--authenticator",
+        "AI6_",
     ] {
         assert!(!help.contains(removed), "{removed}");
     }

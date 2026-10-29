@@ -64,8 +64,8 @@ use crate::directorates::q::terminal::{DEFAULT_TERMINAL, HarnessStdio, Terminal,
 use crate::directorates::q::transport::TransportClient;
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{
-    CableConfig, CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay,
-    CableRelayError, CableRelease, CableSendRequest, CableTarget,
+    CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay, CableRelayError,
+    CableRelease, CableSendRequest, CableTarget,
 };
 use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionStatus, SessionUpdate,
@@ -150,6 +150,11 @@ pub struct StationConfig {
     bootstrap_weakened: Vec<String>,
     /// The Station's own directories an assistant's interpreters may never read.
     protected_paths: Vec<PathBuf>,
+    /// What the Station TLS policy gives up against the library's default, reported at
+    /// check-in.
+    tls_weakened: Vec<String>,
+    /// The pins and profile a runner the Station starts on its own host checks against.
+    runner_pins: Option<(crate::PinSet, crate::PluginProfile)>,
 }
 
 /// What Moneypenny's desk on a Station allows: how long cloning one of her repositories may
@@ -393,6 +398,8 @@ impl Default for StationConfig {
             state_dir: None,
             bootstrap_weakened: Vec::new(),
             protected_paths: Vec::new(),
+            tls_weakened: Vec::new(),
+            runner_pins: None,
         }
     }
 }
@@ -401,7 +408,8 @@ impl Default for StationConfig {
 pub struct ServeConfig {
     address: SocketAddr,
     plugin_paths: Vec<PathBuf>,
-    plugin_policy: plugins::PluginPolicy,
+    plugin_policy: Option<plugins::PluginPolicy>,
+    plugin_profile: Option<crate::PluginProfile>,
     config_dir: Option<PathBuf>,
     secrets_dir: Option<PathBuf>,
     config_source: Option<Arc<dyn ConfigProvider>>,
@@ -420,7 +428,8 @@ impl ServeConfig {
         Self {
             address,
             plugin_paths: Vec::new(),
-            plugin_policy: plugins::PluginPolicy::default(),
+            plugin_policy: None,
+            plugin_profile: None,
             config_dir: None,
             secrets_dir: None,
             config_source: None,
@@ -440,10 +449,19 @@ impl ServeConfig {
         self
     }
 
-    /// Sets how the provider libraries on the plugin paths are checked before they load
-    /// (default: `report`, no pins).
+    /// Sets how the provider libraries on the plugin paths are checked before they load, in
+    /// place of the policy built from the provider's `plugin` records (default: those pins,
+    /// `strict` with any and `report` with none).
     pub fn with_plugin_policy(mut self, policy: plugins::PluginPolicy) -> Self {
-        self.plugin_policy = policy;
+        self.plugin_policy = Some(policy);
+        self
+    }
+
+    /// Loads provider libraries under `profile` whatever the pins ask for: the host's own
+    /// choice ([`PluginSettings::profile`](crate::bootstrap::PluginSettings)).
+    #[must_use]
+    pub fn with_plugin_profile(mut self, profile: crate::PluginProfile) -> Self {
+        self.plugin_profile = Some(profile);
         self
     }
 
@@ -613,6 +631,74 @@ where
     .await
 }
 
+/// Applies the provider's `station` record over what `config` was built with.
+fn apply_runtime(
+    config: &mut ServeConfig,
+    runtime: &crate::directorates::m::config::StationRuntime,
+) -> io::Result<()> {
+    use crate::directorates::m::config::StationRuntime;
+    let seconds = StationRuntime::duration;
+    if let Some(capacity) = runtime.max_concurrent_missions {
+        config.max_concurrent_missions = capacity;
+    }
+    let mut watchdog = config.watchdog.clone();
+    if let Some(timeout) = seconds(runtime.stall_timeout) {
+        watchdog = watchdog.with_stall_timeout(timeout);
+    }
+    if let Some(timeout) = seconds(runtime.loop_timeout) {
+        watchdog = watchdog.with_loop_timeout(timeout);
+    }
+    if let Some(lines) = runtime.loop_min_lines {
+        watchdog = watchdog.with_loop_min_lines(lines);
+    }
+    if let Some(after) = seconds(runtime.blocked_after) {
+        watchdog = watchdog.with_blocked_after(after);
+    }
+    if let Some(limit) = seconds(runtime.max_runtime) {
+        watchdog = watchdog.with_max_runtime(Some(limit));
+    }
+    if let Some(history) = runtime.history {
+        watchdog = watchdog.with_history(history);
+    }
+    if let Some(normalize) = runtime.normalize_digits {
+        watchdog = watchdog.with_normalize_digits(normalize);
+    }
+    config.watchdog = watchdog;
+    if let Some(roles) = &runtime.roles {
+        config.station.roles = roles
+            .iter()
+            .filter_map(|role| match role.as_str() {
+                "control" => Some(StationRole::Control),
+                "execution" => Some(StationRole::Execution),
+                _ => None,
+            })
+            .collect();
+    }
+    for (key, value) in &runtime.labels {
+        config.station.labels.insert(key.clone(), value.clone());
+    }
+    if let Some(terminal) = &runtime.terminal {
+        config.station.terminal = Some(terminal.clone());
+    }
+    if let Some(every) = seconds(runtime.resources_every) {
+        config.station.resources_every = every;
+    }
+    if let Some(caches) = &runtime.safe_house_caches {
+        config.station.hygiene = std::mem::take(&mut config.station.hygiene)
+            .with_caches(caches.clone())
+            .map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("station.safe_house_caches: {error}"),
+                )
+            })?;
+    }
+    if let Some(age) = seconds(runtime.safe_house_cache_age) {
+        config.station.hygiene = std::mem::take(&mut config.station.hygiene).with_cache_age(age);
+    }
+    Ok(())
+}
+
 fn recover_startup_missions(missions: &mut MissionStore) -> io::Result<BTreeSet<String>> {
     let pending = missions
         .list()
@@ -631,24 +717,6 @@ pub async fn serve_with_options<F>(mut config: ServeConfig, shutdown: F) -> io::
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    if config.station.roles.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "a Station needs at least one role",
-        ));
-    }
-    if config.max_concurrent_missions == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "max concurrent Missions must be greater than zero",
-        ));
-    }
-    if config.station.headquarters_lease.is_zero() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "the Headquarters lease must be positive",
-        ));
-    }
     let config_dir = match config.config_dir.take() {
         Some(path) => path,
         None => crate::bootstrap::platform_config_dir().map_err(|error| {
@@ -682,6 +750,61 @@ where
         )
     })?;
     let started = snapshot.clone();
+    apply_runtime(&mut config, &snapshot.settings.station)?;
+    if config.station.roles.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a Station needs at least one role",
+        ));
+    }
+    if config.max_concurrent_missions == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "max concurrent Missions must be greater than zero",
+        ));
+    }
+    if config.station.headquarters_lease.is_zero() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the Headquarters lease must be positive",
+        ));
+    }
+    #[cfg(feature = "station-tls")]
+    {
+        let policy = snapshot
+            .settings
+            .tls_policy()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        config.station.tls_weakened = policy
+            .weakened_against(&coqui_peer_tls::Policy::default())
+            .into_iter()
+            .map(|weakening| {
+                format!(
+                    "{} = {} (default {})",
+                    weakening.setting, weakening.value, weakening.strict
+                )
+            })
+            .collect();
+        for weakening in &config.station.tls_weakened {
+            eprintln!("ai6: warning: the Station TLS policy: {weakening}");
+        }
+    }
+    let plugin_policy = match config.plugin_policy.take() {
+        Some(policy) => policy,
+        None => {
+            let policy = plugins::PluginPolicy::new(
+                snapshot.settings.pins.clone(),
+                state_dir.join("plugins").join("verified"),
+            );
+            match config.plugin_profile {
+                Some(profile) => policy.with_profile(profile),
+                None => policy,
+            }
+        }
+    };
+    config.station.runner_pins = Some((plugin_policy.pins().clone(), plugin_policy.profile()));
+    let cable_config = snapshot.settings.cables.clone();
+    let provider_loadouts = snapshot.settings.loadouts.clone();
     let roster = snapshot.roster;
     let mut theaters = snapshot.settings.theaters;
     for theater in std::mem::take(&mut config.station.extra_theaters) {
@@ -693,14 +816,10 @@ where
         })?;
     }
     config.station.theaters = theaters;
-    let loadouts = config_dir.join(reload::LOADOUTS_FILE);
-    let loadouts_from_file = !config.station.credentials.has_catalog();
-    if loadouts_from_file && loadouts.is_file() {
-        let catalog = crate::directorates::q::LoadoutCatalog::load(&loadouts).map_err(|error| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("AI6 loadouts: {error}"))
-        })?;
+    let loadouts_from_provider = !config.station.credentials.has_catalog();
+    if loadouts_from_provider && provider_loadouts != Default::default() {
         config.station.credentials =
-            std::mem::take(&mut config.station.credentials).with_catalog(catalog);
+            std::mem::take(&mut config.station.credentials).with_catalog(provider_loadouts);
     }
     config.station.credentials = std::mem::take(&mut config.station.credentials)
         .in_secrets_dir(&secrets_dir)
@@ -714,16 +833,6 @@ where
         None,
     )
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
-    let cable_config = match fs::read_to_string(config_dir.join("cables.toml")) {
-        Ok(source) => CableConfig::parse_toml(&source).map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("AI6 Cable configuration: {error}"),
-            )
-        })?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => CableConfig::default(),
-        Err(error) => return Err(error),
-    };
     let mission_store = state_dir.join("missions.json");
     let mut missions = MissionStore::open(mission_store)?;
     let intake: Arc<dyn RegistryBackend> = match config.registry.take() {
@@ -741,9 +850,8 @@ where
         config_source,
         &station_id,
         started,
-        &config_dir,
         roster.clone(),
-        loadouts_from_file.then(|| config.station.credentials.shared_catalog()),
+        loadouts_from_provider.then(|| config.station.credentials.shared_catalog()),
     ));
     let missions = Arc::new(Mutex::new(missions));
     let sessions = Arc::new(Mutex::new(BTreeMap::new()));
@@ -782,7 +890,7 @@ where
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
     let plugins = Arc::new(plugins::Plugins::scan_with(
         &config.plugin_paths,
-        &config.plugin_policy,
+        &plugin_policy,
     ));
     plugins::log_scan(plugins.scan_summary());
     let transports = Arc::new(
@@ -2041,6 +2149,12 @@ fn publish_station_check_in(state: &DaemonState) {
         theater.sessions = running.get(&theater.id).copied().unwrap_or_default();
     }
     info.insert("theaters".to_owned(), serde_json::json!(theaters));
+    if !state.station.tls_weakened.is_empty() {
+        info.insert(
+            "tls_weakened".to_owned(),
+            serde_json::json!(state.station.tls_weakened),
+        );
+    }
     if !state.station.bootstrap_weakened.is_empty() {
         info.insert(
             "bootstrap_weakened".to_owned(),
@@ -2190,7 +2304,13 @@ fn runner_link(state: &DaemonState, theater_id: &str) -> Result<Option<Arc<Runne
         .station
         .state_dir()
         .map_err(|error| error.to_string())?;
-    Ok(RunnerLink::for_theater(&theater, transport, &station_state)?.map(Arc::new))
+    let link = RunnerLink::for_theater(&theater, transport, &station_state)?;
+    Ok(link
+        .map(|link| match &state.station.runner_pins {
+            Some((pins, profile)) => link.with_pins(pins.clone(), *profile),
+            None => link,
+        })
+        .map(Arc::new))
 }
 
 /// The working directory of a Mission whose harness runs on a Theater other than the

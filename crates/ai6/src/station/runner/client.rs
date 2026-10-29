@@ -44,6 +44,9 @@ pub(crate) struct RunnerLink {
     reach: Reach,
     plugin_paths: Vec<String>,
     terminal: Option<String>,
+    /// The pins and profile the Station resolved, which a runner it starts on its own host
+    /// checks its libraries against.
+    pins: Option<(crate::PinSet, crate::PluginProfile)>,
 }
 
 /// Why a request got no answer from the runner: the link is down, or no runner serves.
@@ -109,7 +112,16 @@ impl RunnerLink {
             reach,
             plugin_paths: settings.plugin_paths.clone(),
             terminal: settings.terminal.clone(),
+            pins: None,
         }
+    }
+
+    /// Starts a runner on the Station's own host checking its libraries against `pins` under
+    /// `profile`, written to `plugins.toml` in the runner's state directory.
+    #[must_use]
+    pub(crate) fn with_pins(mut self, pins: crate::PinSet, profile: crate::PluginProfile) -> Self {
+        self.pins = Some((pins, profile));
+        self
     }
 
     /// The terminal provider pinned for the runner, if any.
@@ -193,6 +205,19 @@ impl RunnerLink {
                 let mut arguments: Vec<std::ffi::OsString> =
                     arguments.into_iter().map(Into::into).collect();
                 arguments.extend(["--state-dir".into(), state_dir.as_os_str().to_owned()]);
+                if let Some((pins, profile)) = &self.pins {
+                    let path = state_dir.join("plugins.toml");
+                    let text = toml::to_string(pins).map_err(|error| error.to_string())?;
+                    std::fs::create_dir_all(state_dir)
+                        .and_then(|()| std::fs::write(&path, text))
+                        .map_err(|error| format!("{}: {error}", path.display()))?;
+                    arguments.extend([
+                        "--plugin-pins".into(),
+                        path.into_os_string(),
+                        "--plugin-profile".into(),
+                        profile.as_str().into(),
+                    ]);
+                }
                 super::spawn_detached(command, &arguments, state_dir).map_err(|error| {
                     format!("the runner could not start ({not_running}): {error}")
                 })?;

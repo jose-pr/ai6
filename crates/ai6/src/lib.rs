@@ -32,7 +32,7 @@ pub use directorates::m::assistant::{
 pub use directorates::m::config::SqlProvider;
 pub use directorates::m::config::{
     ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
-    ConfigStatus, FileProvider, MemoryProvider, Settings,
+    ConfigStatus, FileProvider, MemoryProvider, Settings, StationRuntime, UnexRecord,
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::harness::{

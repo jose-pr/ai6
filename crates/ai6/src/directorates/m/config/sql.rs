@@ -295,6 +295,54 @@ impl ConfigProvider for SqlProvider {
             Ok(tx.execute(&sql, &[scope_text.into(), key.into()])? > 0)
         })
     }
+    /// Stores every record in one transaction, checked once at the end.
+    fn put_all(
+        &self,
+        scope: &ConfigScope,
+        records: &[(ConfigRecord, String, serde_json::Value)],
+    ) -> Result<Option<ConfigRevision>, RosterError> {
+        for (record, key, definition) in records {
+            if key.trim().is_empty() || !definition.is_object() {
+                return Err(error(format!(
+                    "{SOURCE}: a {record} needs a key and a JSON object"
+                )));
+            }
+            check_placement(*record, scope, key, &SOURCE)?;
+        }
+        let scope_text = scope.as_text();
+        self.change(scope, move |tx, revision| {
+            let mut changed = false;
+            for (record, key, definition) in records {
+                let sql = format!(
+                    "INSERT INTO {} (scope, key, definition, revision) VALUES ($1, $2, $3, $4) \
+                     ON CONFLICT (scope, key) DO UPDATE SET definition = excluded.definition, \
+                     revision = excluded.revision",
+                    table(*record)
+                );
+                changed |= tx.execute(
+                    &sql,
+                    &[
+                        scope_text.clone().into(),
+                        key.as_str().into(),
+                        definition.to_string().into(),
+                        revision.into(),
+                    ],
+                )? > 0;
+            }
+            Ok(changed)
+        })
+    }
+
+    fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError> {
+        let records = self.db.read(records).map_err(failed)?;
+        let mut scopes: BTreeSet<ConfigScope> = [ConfigScope::Global].into();
+        for (_, (scope, _, _)) in &records.rows {
+            if let Some(scope) = ConfigScope::parse(scope) {
+                scopes.insert(scope);
+            }
+        }
+        Ok(scopes.into_iter().collect())
+    }
 }
 
 #[cfg(test)]

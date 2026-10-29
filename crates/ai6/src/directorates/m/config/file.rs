@@ -92,7 +92,7 @@ impl FileProvider {
     }
 
     /// The scopes a view reads: global, and `station`'s own when it names one.
-    fn scopes(station: &str) -> Vec<ConfigScope> {
+    fn view_scopes(station: &str) -> Vec<ConfigScope> {
         let mut scopes = vec![ConfigScope::Global];
         if !station.is_empty() {
             scopes.push(ConfigScope::of_station(station));
@@ -103,7 +103,7 @@ impl FileProvider {
     /// The digest of every family file of `station`'s view.
     fn digest(&self, station: &str) -> Result<ConfigRevision, RosterError> {
         let mut digest = Sha256::new();
-        for scope in Self::scopes(station) {
+        for scope in Self::view_scopes(station) {
             for path in Self::found(&self.scope_dir(&scope))?.values() {
                 let bytes = fs::read(path).map_err(|failure| unavailable(path, &failure))?;
                 let relative = path.strip_prefix(&self.root).unwrap_or(path);
@@ -137,9 +137,10 @@ fn unavailable(path: &Path, failure: &io::Error) -> RosterError {
     )
 }
 
-/// Reads the family file `path` (stem `stem`) into `layer`: each top-level table names a
-/// family the file holds; a table family's entries are its records, a singleton's table is
-/// its one record.
+/// Reads the family file `path` (stem `stem`) into `layer`. A whole-file family's record is
+/// the document; `plugins` is `[[library]]` entries keyed by their `file`; otherwise each
+/// top-level table names a family the file holds: a table family's entries are its records,
+/// a singleton's table is its one record.
 fn read_family(
     stem: &str,
     path: &Path,
@@ -157,6 +158,44 @@ fn read_family(
         serde_json::Value::Null => serde_json::Map::new(),
         _ => return Err(in_file(&"the document is not a table")),
     };
+    if let Some(record) = ConfigRecord::ALL
+        .into_iter()
+        .find(|record| record.file() == stem && record.is_whole_file())
+    {
+        check_placement(record, scope, ConfigRecord::SINGLETON_KEY, &path.display())?;
+        layer.entry(record).or_default().insert(
+            ConfigRecord::SINGLETON_KEY.to_owned(),
+            serde_json::Value::Object(document),
+        );
+        return Ok(());
+    }
+    if stem == ConfigRecord::Plugin.file() {
+        let records = layer.entry(ConfigRecord::Plugin).or_default();
+        for (name, value) in document {
+            let serde_json::Value::Array(libraries) = value.clone() else {
+                return Err(in_file(&format!("unknown key `{name}`")));
+            };
+            if name != "library" {
+                return Err(in_file(&format!("unknown key `{name}`")));
+            }
+            for library in libraries {
+                let serde_json::Value::Object(mut library) = library else {
+                    return Err(in_file(&"a [[library]] entry is not a table"));
+                };
+                let Some(serde_json::Value::String(file)) = library.remove("file") else {
+                    return Err(in_file(&"a [[library]] entry names no file"));
+                };
+                check_placement(ConfigRecord::Plugin, scope, &file, &path.display())?;
+                if records
+                    .insert(file.clone(), serde_json::Value::Object(library))
+                    .is_some()
+                {
+                    return Err(in_file(&format!("library {file:?} is given twice")));
+                }
+            }
+        }
+        return Ok(());
+    }
     for (name, value) in document {
         let record = ConfigRecord::from_name(&name)
             .filter(|record| record.file() == stem)
@@ -208,6 +247,26 @@ impl ConfigProvider for FileProvider {
 
     fn revision(&self, station: &str) -> Result<ConfigRevision, RosterError> {
         self.digest(station)
+    }
+
+    fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError> {
+        let mut scopes = vec![ConfigScope::Global];
+        let stations = self.root.join(STATIONS_DIR);
+        let entries = match fs::read_dir(&stations) {
+            Ok(entries) => entries,
+            Err(failure) if failure.kind() == io::ErrorKind::NotFound => return Ok(scopes),
+            Err(failure) => return Err(unavailable(&stations, &failure)),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|failure| unavailable(&stations, &failure))?;
+            if entry.path().is_dir()
+                && let Some(id) = entry.file_name().to_str()
+            {
+                scopes.push(ConfigScope::of_station(id));
+            }
+        }
+        scopes.sort();
+        Ok(scopes)
     }
 
     /// The family's records at `scope` as JSON; the files themselves are edited by hand, so

@@ -30,6 +30,8 @@ use crate::directorates::registry::sleepers::Sleeper;
 use crate::directorates::registry::store::validate_station_id;
 
 const AGENTS_FILE: &str = "agents.toml";
+/// An Operation's own agents file, without its extension.
+const AGENTS_STEM: &str = "agents";
 const OPERATIONS_FILE: &str = "operations.toml";
 /// The clearances, lowest first.
 pub(crate) const CLEARANCES: &[&str] = &["desk", "field", "00"];
@@ -786,8 +788,7 @@ impl Roster {
         let operation = operation_key.map(|key| self.operation(key)).transpose()?;
         let mut definitions = self.agents.clone();
         if let Some(operation) = operation
-            && let Some(path) = self.operation_agent_file(operation)
-            && path.exists()
+            && let Some(path) = self.operation_agent_file(operation)?
         {
             let local = parse_operation_agents(&path)?;
             definitions.extend(
@@ -842,8 +843,7 @@ impl Roster {
         } = *query;
         let mut keys: BTreeSet<String> = self.agents.keys().cloned().collect();
         if let Some(operation) = operation_key.map(|key| self.operation(key)).transpose()?
-            && let Some(path) = self.operation_agent_file(operation)
-            && path.exists()
+            && let Some(path) = self.operation_agent_file(operation)?
         {
             let local = parse_operation_agents(&path)?;
             keys.extend(local.agent.into_keys());
@@ -924,9 +924,7 @@ impl Roster {
     pub fn agents_for_operation(&self, operation_key: &str) -> Result<Vec<Agent>, RosterError> {
         let operation = self.operation(operation_key)?;
         let mut keys: BTreeSet<String> = self.agents.keys().cloned().collect();
-        if let Some(path) = self.operation_agent_file(operation)
-            && path.exists()
-        {
+        if let Some(path) = self.operation_agent_file(operation)? {
             let local = parse_operation_agents(&path)?;
             keys.extend(local.agent.into_keys());
         }
@@ -945,18 +943,35 @@ impl Roster {
         self.operations.values()
     }
 
-    fn operation_agent_file(&self, operation: &Operation) -> Option<PathBuf> {
-        operation
-            .config
-            .clone()
-            .or_else(|| {
-                if operation.theater.is_none() {
-                    operation.path.as_ref().map(|path| path.join(".ai6"))
-                } else {
-                    None
-                }
-            })
-            .map(|directory| directory.join(AGENTS_FILE))
+    /// The Operation's own agents file in its trusted `.ai6` directory: `agents.cfg`,
+    /// `.toml`, `.json`, `.yaml` or `.yml`; `None` when there is none.
+    fn operation_agent_file(&self, operation: &Operation) -> Result<Option<PathBuf>, RosterError> {
+        let Some(directory) = operation.config.clone().or_else(|| {
+            if operation.theater.is_none() {
+                operation.path.as_ref().map(|path| path.join(".ai6"))
+            } else {
+                None
+            }
+        }) else {
+            return Ok(None);
+        };
+        let found: Vec<PathBuf> = crate::bootstrap::format::EXTENSIONS
+            .iter()
+            .map(|extension| directory.join(format!("{AGENTS_STEM}.{extension}")))
+            .filter(|path| path.is_file())
+            .collect();
+        match found.as_slice() {
+            [] => Ok(None),
+            [path] => Ok(Some(path.clone())),
+            _ => Err(error(format!(
+                "{} are the same file; keep one of them",
+                found
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            ))),
+        }
     }
 }
 
@@ -1510,7 +1525,10 @@ fn parse_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, RosterErro
         };
         error_of(kind, format!("{}: {e}", path.display()))
     })?;
-    toml::from_str(&text).map_err(|e| error(format!("{}: {e}", path.display())))
+    let format =
+        crate::bootstrap::format::Format::for_path(path).map_err(|e| error(e.to_string()))?;
+    crate::bootstrap::format::from_str(format, &text)
+        .map_err(|e| error(format!("{}: {e}", path.display())))
 }
 
 fn parse_operation_agents(path: &Path) -> Result<AgentsDocument, RosterError> {

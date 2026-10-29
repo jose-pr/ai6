@@ -57,7 +57,7 @@ ureq = { version = "3", default-features = false, features = ["json", "rustls"] 
 # Station-to-station mutual TLS: identity, fingerprints, a trust store with per-source caps
 # and policy profiles. Alpha releases, pinned exactly: the family is released together.
 coqui-peer = "=0.0.0-alpha.1"
-coqui-peer-tls = { version = "=0.0.0-alpha.1", features = ["generate", "ca", "tokio"] }
+coqui-peer-tls = { version = "=0.0.0-alpha.1", features = ["generate", "ca", "tokio", "serde"] }
 # The configuration types coqui-peer-tls returns; shared with ureq, on the ring provider.
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 # Self-signed and CA-issued certificates for the Station TLS tests.

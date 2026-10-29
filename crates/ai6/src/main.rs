@@ -103,6 +103,37 @@ enum ConfigCommand {
         #[command(flatten)]
         bootstrap: BootstrapArg,
     },
+    /// Print one family's records at a scope as TOML, or the record KEY alone.
+    Show {
+        /// The family: operation, agent, role, assistant, cover, theater, loadout, sandbox,
+        /// mcp, secret, pool, cables, plugin, station, tls, access or unex.
+        family: String,
+        /// One record's key.
+        key: Option<String>,
+        /// `station:<id>` for one Station's own records (default: the global ones).
+        #[arg(long, default_value = "")]
+        scope: String,
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+    },
+    /// Load a configuration directory's family files into the configuration provider, which
+    /// must take changes (SQL); checked whole and refused whole.
+    Import {
+        /// The directory, laid out as a configuration directory.
+        dir: PathBuf,
+        /// Load its records at `station:<id>` (default: global).
+        #[arg(long, default_value = "")]
+        scope: String,
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+    },
+    /// Write every family's global records, and each Station's own, as TOML family files.
+    Export {
+        /// The directory to write; files in it are replaced.
+        dir: PathBuf,
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -184,8 +215,10 @@ enum TheaterCommand {
         /// the bootstrap file's `[plugins] paths`.
         #[arg(long = "plugin-path")]
         plugin_paths: Vec<PathBuf>,
-        #[command(flatten)]
-        pins: PinArgs,
+        /// How provider libraries are checked: strict, report or off (default: `[plugins]
+        /// profile`, else strict with `plugin` records and report without).
+        #[arg(long, value_name = "PROFILE")]
+        plugin_profile: Option<ai6::PluginProfile>,
     },
 }
 
@@ -325,54 +358,11 @@ struct ServeArgs {
     /// bootstrap file's `[plugins] paths`.
     #[arg(long = "plugin-path")]
     plugin_paths: Vec<PathBuf>,
-    #[command(flatten)]
-    pins: PinArgs,
-    /// Maximum number of Agent Sessions this daemon may run at once.
-    #[arg(long, default_value_t = ai6::DEFAULT_MAX_CONCURRENT_MISSIONS)]
-    max_concurrent_missions: usize,
-    /// Seconds without provider or terminal activity before a Session stalls.
-    #[arg(long, allow_hyphen_values = true, value_parser = parse_duration, default_value = "300")]
-    stall_timeout: Duration,
-    /// Seconds without novel terminal output before repeated output stalls a Session.
-    #[arg(long, allow_hyphen_values = true, value_parser = parse_duration, default_value = "300")]
-    loop_timeout: Duration,
-    /// Repeated terminal lines required before loop detection applies.
-    #[arg(long, default_value_t = ai6::directorates::medical::watchdog::DEFAULT_LOOP_MIN_LINES)]
-    loop_min_lines: usize,
-    /// Quiet seconds before a prompt-shaped terminal tail marks a Session blocked.
-    #[arg(long, allow_hyphen_values = true, value_parser = parse_duration, default_value = "10")]
-    blocked_after: Duration,
-    /// Optional maximum Session runtime in seconds.
-    #[arg(long, allow_hyphen_values = true, value_parser = parse_duration)]
-    max_runtime: Option<Duration>,
-    /// Distinct terminal lines retained for repeated-output detection.
-    #[arg(long, default_value_t = ai6::directorates::medical::watchdog::DEFAULT_LINE_HISTORY)]
-    history: usize,
-    /// Normalize digit runs when comparing terminal lines for loops.
-    #[arg(long, default_value_t = false)]
-    normalize_digits: bool,
-    /// Station roles: control elects Headquarters; execution runs assigned Missions.
-    #[arg(long, value_parser = ["control", "execution"])]
-    role: Vec<String>,
-    /// Station placement label in KEY=VALUE form.
-    #[arg(long = "label", value_name = "KEY=VALUE", value_parser = parse_station_label)]
-    labels: Vec<(String, String)>,
-    /// Pin the terminal provider agent harnesses run in (default: an available one that suits the
-    /// handler: without a terminal, preferring `pipe`, for a JSON harness; else preferring `pty`).
-    #[arg(long)]
-    terminal: Option<String>,
-    /// Seconds between samples of each remote Theater's CPUs, load and memory; 0 leaves only
-    /// the 300-second requirements probe.
-    #[arg(long, value_parser = parse_duration, default_value = "60")]
-    resources_every: Duration,
-    /// A directory name the Head of Station may remove from the safe house of a Mission that
-    /// is over, as a rebuildable cache; repeat for each. Replaces the default list (target,
-    /// node_modules, .dart_tool).
-    #[arg(long = "safe-house-cache", value_name = "NAME")]
-    safe_house_caches: Vec<String>,
-    /// Seconds the safe house of a Mission that is over is left alone before its caches may go.
-    #[arg(long, value_parser = parse_duration, default_value = "604800")]
-    safe_house_cache_age: Duration,
+    /// How provider libraries are checked: strict (only pinned or signed ones load, from a
+    /// verified copy), report (all load; unpinned ones are reported) or off (default:
+    /// `[plugins] profile`, else strict with `plugin` records and report without).
+    #[arg(long, value_name = "PROFILE")]
+    plugin_profile: Option<ai6::PluginProfile>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -390,6 +380,21 @@ enum PeerCommand {
 #[tokio::main]
 async fn main() -> ExitCode {
     match Cli::parse().command {
+        Command::Config {
+            command:
+                command @ (ConfigCommand::Show { .. }
+                | ConfigCommand::Import { .. }
+                | ConfigCommand::Export { .. }),
+        } => match config_command(command) {
+            Ok(output) => {
+                print!("{output}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("ai6: {error}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Config {
             command: ConfigCommand::Path { bootstrap },
         } => match ai6::bootstrap::SearchPath::new(
@@ -535,21 +540,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
         station,
         listen,
         plugin_paths,
-        pins,
-        max_concurrent_missions,
-        stall_timeout,
-        loop_timeout,
-        loop_min_lines,
-        blocked_after,
-        max_runtime,
-        history,
-        normalize_digits,
-        role,
-        labels,
-        terminal,
-        resources_every,
-        safe_house_caches,
-        safe_house_cache_age,
+        plugin_profile,
     } = args;
     let mut located = match load_bootstrap(&bootstrap) {
         Ok(located) => located,
@@ -565,6 +556,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
     settings.station = station.or(settings.station.take());
     settings.listen = listen.or(settings.listen);
     settings.plugins.paths.extend(plugin_paths);
+    settings.plugins.profile = plugin_profile.or(settings.plugins.profile);
     let opened = match open_station(&located) {
         Ok(opened) => opened,
         Err(error) => {
@@ -572,17 +564,6 @@ async fn serve(args: ServeArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut hygiene =
-        ai6::station::safehouse::SafeHouseHygiene::default().with_cache_age(safe_house_cache_age);
-    if !safe_house_caches.is_empty() {
-        hygiene = match hygiene.with_caches(safe_house_caches) {
-            Ok(hygiene) => hygiene,
-            Err(error) => {
-                eprintln!("ai6: --safe-house-cache: {error}");
-                return ExitCode::FAILURE;
-            }
-        };
-    }
     let publisher = match publisher_config(&located) {
         Ok(config) => config,
         Err(error) => {
@@ -594,54 +575,22 @@ async fn serve(args: ServeArgs) -> ExitCode {
     for weakening in &weakenings {
         eprintln!("ai6: warning: {weakening}");
     }
-    let mut station_config = ai6::StationConfig::default()
+    let station_config = ai6::StationConfig::default()
         .with_state_dir(&opened.state_dir)
         .with_protected_path(&opened.identity_dir)
         .with_bootstrap_weakenings(weakenings)
-        .with_resources_every(resources_every)
         .with_config_poll(located.value.provider.poll())
-        .with_headquarters_lease(opened.lease)
-        .with_safe_house_hygiene(hygiene);
-    if !role.is_empty() {
-        station_config =
-            station_config.with_roles(role.iter().filter_map(|role| match role.as_str() {
-                "control" => Some(ai6::StationRole::Control),
-                "execution" => Some(ai6::StationRole::Execution),
-                _ => None,
-            }));
-    }
-    for (key, value) in labels {
-        station_config = station_config.with_label(key, value);
-    }
-    if let Some(terminal) = terminal {
-        station_config = station_config.with_terminal(terminal);
-    }
-    let plugin_policy = match plugin_policy(&pins, &located, &opened) {
-        Ok(policy) => policy,
-        Err(error) => {
-            eprintln!("ai6: provider library pins: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
+        .with_headquarters_lease(opened.lease);
     let mut config = ai6::ServeConfig::new(located.listen())
         .with_plugin_paths(located.value.plugins.paths.clone())
-        .with_plugin_policy(plugin_policy)
-        .with_max_concurrent_missions(max_concurrent_missions)
         .with_station_config(station_config)
         .with_config_dir(&opened.config_dir)
         .with_secrets_dir(&opened.secrets_dir)
         .with_config_provider(opened.provider)
-        .with_registry(opened.registry)
-        .with_watchdog(
-            ai6::WatchdogConfig::default()
-                .with_stall_timeout(stall_timeout)
-                .with_loop_timeout(loop_timeout)
-                .with_loop_min_lines(loop_min_lines)
-                .with_blocked_after(blocked_after)
-                .with_max_runtime(max_runtime)
-                .with_history(history)
-                .with_normalize_digits(normalize_digits),
-        );
+        .with_registry(opened.registry);
+    if let Some(profile) = located.value.plugins.profile {
+        config = config.with_plugin_profile(profile);
+    }
     if let Some(station) = &located.value.station {
         config = config.with_station_id(station);
     }
@@ -707,6 +656,91 @@ fn open_station(located: &Located<Bootstrap>) -> Result<Opened, String> {
     })
 }
 
+/// Runs `ai6 config show|import|export`.
+fn config_command(command: ConfigCommand) -> Result<String, String> {
+    use ai6::{ConfigProvider as _, ConfigRecord, ConfigScope};
+    let scope_of = |text: &str| {
+        ConfigScope::parse(text).ok_or_else(|| format!("--scope {text:?}: \"\" or station:<id>"))
+    };
+    let open = |bootstrap: &BootstrapArg| -> Result<Arc<dyn ai6::ConfigProvider>, String> {
+        let located = load_bootstrap(bootstrap)?;
+        let location = located
+            .provider_location()
+            .map_err(|error| error.to_string())?;
+        open_provider(
+            &location,
+            located.value.registry.headquarters_lease(),
+            located.value.provider.password.as_ref(),
+        )
+    };
+    match command {
+        ConfigCommand::Path { .. } => Ok(String::new()),
+        ConfigCommand::Show {
+            family,
+            key,
+            scope,
+            bootstrap,
+        } => {
+            let record = ConfigRecord::from_name(&family)
+                .ok_or_else(|| format!("{family:?} is not a configuration family"))?;
+            let records = open(&bootstrap)?
+                .definitions(record, &scope_of(&scope)?)
+                .map_err(|error| error.to_string())?
+                .records;
+            let records: Vec<_> = match &key {
+                Some(key) => records
+                    .into_iter()
+                    .filter(|(found, _)| found == key)
+                    .collect(),
+                None => records,
+            };
+            if key.is_some() && records.is_empty() {
+                return Err(format!("no {family} record {:?}", key.unwrap_or_default()));
+            }
+            ai6::directorates::m::config::family_document(record, records)
+                .map_err(|error| error.to_string())
+        }
+        ConfigCommand::Import {
+            dir,
+            scope,
+            bootstrap,
+        } => {
+            let scope = scope_of(&scope)?;
+            let station = match &scope {
+                ConfigScope::Station(id) => id.clone(),
+                _ => String::new(),
+            };
+            let source = ai6::FileProvider::new(&dir);
+            // The directory must be acceptable on its own before anything is written.
+            source.load("").map_err(|error| error.to_string())?;
+            let target = open(&bootstrap)?;
+            let mut records = Vec::new();
+            for record in ai6::directorates::m::config::IMPORT_ORDER {
+                let read = ai6::FileProvider::new(&dir)
+                    .definitions(record, &ConfigScope::Global)
+                    .map_err(|error| error.to_string())?;
+                records.extend(
+                    read.records
+                        .into_iter()
+                        .map(|(key, value)| (record, key, value)),
+                );
+            }
+            target
+                .put_all(&scope, &records)
+                .map_err(|error| error.to_string())?;
+            target.load(&station).map_err(|error| error.to_string())?;
+            Ok(format!("Imported {} records at {scope}\n", records.len()))
+        }
+        ConfigCommand::Export { dir, bootstrap } => {
+            let provider = open(&bootstrap)?;
+            std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+            let written = ai6::directorates::m::config::export(provider.as_ref(), &dir)
+                .map_err(|error| error.to_string())?;
+            Ok(format!("Wrote {written} files to {}\n", dir.display()))
+        }
+    }
+}
+
 /// The Station this command acts for: the bootstrap file's `station`, else the ID a Station
 /// keeps in its state directory, else none (`""`, the global records).
 fn station_of(located: &Located<Bootstrap>, opened: &Opened) -> String {
@@ -754,21 +788,22 @@ fn open_registry(located: &Located<Bootstrap>) -> Result<Arc<dyn ai6::RegistryBa
     Ok(registry)
 }
 
-/// The provider library policy of a Station: the pin set `--plugin-pins` names (which must
-/// exist), else `plugins.toml` in its configuration directory; the profile from
-/// `--plugin-profile`, else `[plugins] profile`; verified copies under its state directory's
+/// The provider library policy of this host for `snapshot`: its `plugin` records, under
+/// `[plugins] profile` when set; verified copies under the state directory's
 /// `plugins/verified`.
 fn plugin_policy(
-    args: &PinArgs,
     located: &Located<Bootstrap>,
     opened: &Opened,
-) -> Result<ai6::station::plugins::PluginPolicy, String> {
-    load_plugin_policy(
-        args.plugin_pins.as_deref(),
-        Some(&opened.config_dir.join("plugins.toml")),
-        args.plugin_profile.or(located.value.plugins.profile),
-        &opened.state_dir,
-    )
+    snapshot: &ai6::ConfigSnapshot,
+) -> ai6::station::plugins::PluginPolicy {
+    let policy = ai6::station::plugins::PluginPolicy::new(
+        snapshot.settings.pins.clone(),
+        opened.state_dir.join("plugins").join("verified"),
+    );
+    match located.value.plugins.profile {
+        Some(profile) => policy.with_profile(profile),
+        None => policy,
+    }
 }
 
 fn load_plugin_policy(
@@ -960,7 +995,7 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
         check,
         bootstrap,
         plugin_paths,
-        pins,
+        plugin_profile,
     } = command;
     let mut located = match load_bootstrap(&bootstrap) {
         Ok(located) => located,
@@ -970,6 +1005,7 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
         }
     };
     located.value.plugins.paths.extend(plugin_paths);
+    located.value.plugins.profile = plugin_profile.or(located.value.plugins.profile);
     let opened = match open_station(&located) {
         Ok(opened) => opened,
         Err(error) => {
@@ -978,31 +1014,18 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
         }
     };
     let station = station_of(&located, &opened);
-    let found = opened
-        .provider
-        .load(&station)
-        .map_err(|error| error.to_string())
-        .and_then(|snapshot| {
-            snapshot
-                .settings
-                .theaters
-                .find(&theater)
-                .ok_or_else(|| format!("the configuration declares no Theater {theater:?}"))
-        });
-    let declared = match found {
-        Ok(declared) => declared,
+    let snapshot = match opened.provider.load(&station) {
+        Ok(snapshot) => snapshot,
         Err(error) => {
             eprintln!("ai6: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let policy = match plugin_policy(&pins, &located, &opened) {
-        Ok(policy) => policy,
-        Err(error) => {
-            eprintln!("ai6: provider library pins: {error}");
-            return ExitCode::FAILURE;
-        }
+    let Some(declared) = snapshot.settings.theaters.find(&theater) else {
+        eprintln!("ai6: the configuration declares no Theater {theater:?}");
+        return ExitCode::FAILURE;
     };
+    let policy = plugin_policy(&located, &opened, &snapshot);
     let plugins = ai6::station::plugins::Plugins::scan_with(&located.value.plugins.paths, &policy);
     ai6::station::plugins::log_scan(plugins.scan_summary());
     let client = match plugins.theater_transport(&declared.access) {
@@ -1075,24 +1098,6 @@ async fn termination_signal() {
     }
     #[cfg(not(unix))]
     shutdown_signal().await;
-}
-
-fn parse_duration(value: &str) -> Result<Duration, String> {
-    let seconds = value
-        .parse::<f64>()
-        .map_err(|_| "duration must be a number of seconds".to_owned())?;
-    Duration::try_from_secs_f64(seconds)
-        .map_err(|_| "duration must be finite and non-negative".to_owned())
-}
-
-fn parse_station_label(value: &str) -> Result<(String, String), String> {
-    let (key, value) = value
-        .split_once('=')
-        .ok_or_else(|| "station labels use KEY=VALUE".to_owned())?;
-    if key.trim().is_empty() || value.trim().is_empty() {
-        return Err("station label keys and values must be non-empty".to_owned());
-    }
-    Ok((key.to_owned(), value.to_owned()))
 }
 
 fn station_identity(bootstrap: &BootstrapArg) -> Result<identity::Identity, String> {
@@ -1254,11 +1259,16 @@ fn quarantine_command(
 }
 
 fn peer_command(bootstrap: &BootstrapArg, command: PeerCommand) -> Result<String, String> {
-    let dir = load_bootstrap(bootstrap)?
-        .identity_dir()
-        .map_err(|error| error.to_string())?;
-    let peers = identity::open_peers(&dir, &identity::Policy::modern())
-        .map_err(|error| error.to_string())?;
+    let located = load_bootstrap(bootstrap)?;
+    let dir = located.identity_dir().map_err(|error| error.to_string())?;
+    let opened = open_station(&located)?;
+    let policy = opened
+        .provider
+        .load(&station_of(&located, &opened))
+        .map_err(|error| error.to_string())?
+        .settings
+        .tls_policy()?;
+    let peers = identity::open_peers(&dir, &policy).map_err(|error| error.to_string())?;
     match command {
         PeerCommand::Accept { id } => {
             let id = id
@@ -1344,62 +1354,12 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use clap::{CommandFactory, Parser};
+    use clap::CommandFactory;
 
-    use super::{Cli, Command, ServeArgs, parse_duration};
+    use super::Cli;
 
     #[test]
     fn cli_definition_is_consistent() {
         Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn duration_parser_accepts_fractional_seconds_and_rejects_invalid_values() {
-        assert_eq!(parse_duration("0.025").unwrap().as_millis(), 25);
-        assert!(parse_duration("-1").is_err());
-        assert!(parse_duration("NaN").is_err());
-        assert!(parse_duration("invalid").is_err());
-    }
-
-    #[test]
-    fn serve_cli_parses_watchdog_limits() {
-        let cli = Cli::try_parse_from([
-            "ai6",
-            "serve",
-            "--stall-timeout",
-            "12.5",
-            "--loop-timeout",
-            "8",
-            "--loop-min-lines",
-            "7",
-            "--blocked-after",
-            "1.5",
-            "--max-runtime",
-            "60",
-            "--history",
-            "120",
-            "--normalize-digits",
-        ])
-        .unwrap();
-        let Command::Serve(args) = cli.command else {
-            panic!("serve arguments should select the serve command");
-        };
-        let ServeArgs {
-            stall_timeout,
-            loop_timeout,
-            loop_min_lines,
-            blocked_after,
-            max_runtime,
-            history,
-            normalize_digits,
-            ..
-        } = *args;
-        assert_eq!(stall_timeout.as_secs_f64(), 12.5);
-        assert_eq!(loop_timeout.as_secs(), 8);
-        assert_eq!(loop_min_lines, 7);
-        assert_eq!(blocked_after.as_millis(), 1500);
-        assert_eq!(max_runtime.unwrap().as_secs(), 60);
-        assert_eq!(history, 120);
-        assert!(normalize_digits);
     }
 }
