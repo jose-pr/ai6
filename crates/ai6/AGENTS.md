@@ -3880,7 +3880,8 @@ required setting answers `PluginBuildError::ConfigurationRequired`.
 `scan_summary()` reports loaded, skipped, failed and unreadable paths.
 `terminal_offers()` lists the available terminal providers that build with their defaults,
 each with its `Terminal::tty`, and `choose_terminal(stdio, pinned)` applies `choose_terminal`
-(see the terminal API) to them; a Station and a runner choose a harness's terminal with it.
+(see the terminal API) to them, with a pinned provider built and asked its own `tty`; a
+Station and a runner choose a harness's terminal with it.
 
 ```rust
 impl Plugins { pub fn scan_with(paths: &[PathBuf], policy: &PluginPolicy) -> Plugins; } // scan() = default policy

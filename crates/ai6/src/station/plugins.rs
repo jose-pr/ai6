@@ -397,7 +397,9 @@ impl Plugins {
     }
 
     /// The terminal provider for a harness that talks over `stdio`, `pinned` or chosen among
-    /// [`Plugins::terminal_offers`]; see [`choose_terminal`].
+    /// [`Plugins::terminal_offers`]; see [`choose_terminal`]. A pinned provider is built and
+    /// asked [`Terminal::tty`] itself, whether or not it is among the offers; one that does not
+    /// build is returned for the caller's construction to report.
     ///
     /// # Errors
     ///
@@ -408,7 +410,17 @@ impl Plugins {
         stdio: HarnessStdio,
         pinned: Option<&str>,
     ) -> Result<String, TerminalRefusal> {
-        choose_terminal(stdio, &self.terminal_offers(), pinned)
+        let mut offers = self.terminal_offers();
+        if let Some(pinned) = pinned {
+            offers.retain(|offer| offer.id != pinned);
+            if let Ok(built) = self.terminal(pinned, None) {
+                offers.push(TerminalOffer {
+                    id: pinned.to_owned(),
+                    tty: built.tty(),
+                });
+            }
+        }
+        choose_terminal(stdio, &offers, pinned)
     }
 
     /// Constructs a Terminal from its provider ID and optional Guatiao config.
@@ -1384,6 +1396,18 @@ mod tests {
             Err(TerminalRefusal::NoPipe)
         );
         assert_eq!(pty_only.choose_terminal(interactive, None).unwrap(), "pty");
+        assert_eq!(
+            pty_only.choose_terminal(json, Some("pty")),
+            Err(TerminalRefusal::PinnedHasTerminal {
+                provider: "pty".to_owned()
+            }),
+            "a pinned provider is asked whether it gives a terminal"
+        );
+        assert_eq!(
+            pty_only.choose_terminal(json, Some("absent")).unwrap(),
+            "absent",
+            "one that does not build is left to the construction to report"
+        );
     }
 }
 
