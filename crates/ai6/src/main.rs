@@ -222,17 +222,17 @@ enum TheaterCommand {
     },
 }
 
-/// How provider libraries are checked before they load.
+/// How a runner checks provider libraries before they load.
 #[derive(Debug, Args)]
 struct PinArgs {
-    /// The provider library pin set (default: plugins.toml in the configuration directory);
-    /// a file named here must exist.
-    #[arg(long, value_name = "PATH")]
+    /// The pin set, as `[[library]]` entries; a file named here must exist (default:
+    /// plugins.toml in the user's configuration directory, when there is one). A Station
+    /// passes the pins it resolved.
+    #[arg(long = "pins", value_name = "PATH")]
     plugin_pins: Option<PathBuf>,
     /// How provider libraries are checked: strict (only pinned or signed ones load, from a
-    /// verified copy), report (all load; unpinned ones are reported) or off (default: the
-    /// bootstrap file's `[plugins] profile`, else the pin set's, else strict with a pin set
-    /// and report without).
+    /// verified copy), report (all load; unpinned ones are reported) or off (default: strict
+    /// with a pin set and report without).
     #[arg(long, value_name = "PROFILE")]
     plugin_profile: Option<ai6::PluginProfile>,
 }
@@ -894,7 +894,7 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                     arguments.extend(["--terminal".into(), terminal.into()]);
                 }
                 if let Some(pins) = &args.pins.plugin_pins {
-                    arguments.extend(["--plugin-pins".into(), pins.into()]);
+                    arguments.extend(["--pins".into(), pins.into()]);
                 }
                 if let Some(profile) = args.pins.plugin_profile {
                     arguments.extend(["--plugin-profile".into(), profile.as_str().into()]);

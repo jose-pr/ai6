@@ -88,7 +88,7 @@ fn a_named_pin_set_that_does_not_exist_stops_the_runner() {
     let output = ai6()
         .args(["runner", "serve", "--state-dir"])
         .arg(directory.path().join("state"))
-        .arg("--plugin-pins")
+        .arg("--pins")
         .arg(&missing)
         .output()
         .expect("the AI6 command should start");

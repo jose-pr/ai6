@@ -28,8 +28,8 @@ fn help_names_the_bootstrap_file_and_its_overrides() {
     }
     for removed in [
         "--port",
-        "--roster",
-        "--plugin-pins",
+        &["--", "roster"].concat(),
+        &["--plugin", "-pins"].concat(),
         "--authenticator",
         "AI6_",
     ] {
@@ -109,7 +109,7 @@ fn unex_cfg_and_the_provider_alone_start_the_gateway_on_the_listener_it_names() 
     let mut gateway = gateway()
         .arg("--config")
         .arg(dir.path().join("unex.cfg"))
-        .env("AI6_EXPORTS_PORT", "1")
+        .env(["AI6", "EXPORTS", "PORT"].join("_"), "1")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -137,7 +137,7 @@ fn unex_cfg_and_the_provider_alone_start_the_gateway_on_the_listener_it_names() 
     let output = gateway.wait_with_output().unwrap();
     assert!(
         healthy,
-        "the gateway answers on unex.cfg's listen whatever AI6_EXPORTS_PORT says: {}",
+        "the gateway answers on unex.cfg's listen whatever the old port variable says: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }

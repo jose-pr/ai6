@@ -18,7 +18,12 @@ fn example_documents() -> Vec<(String, serde_json::Value)> {
             continue;
         };
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
-        if !["operations", "agents", "covers", "theaters"].contains(&stem.as_str()) {
+        // Family files only: the bootstrap files beside them are not.
+        if !ai6::ConfigRecord::ALL
+            .iter()
+            .any(|record| record.file() == stem)
+            || path.extension().is_some_and(|extension| extension == "cfg")
+        {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap();
@@ -86,14 +91,7 @@ fn a_sqlite_provider_holding_the_example_records_reads_alike() {
     let sql =
         SqlProvider::open(&format!("sqlite:{}", dir.path().join("ai6.db").display())).unwrap();
     // Roles first: an Agent's roles must exist when it is checked.
-    let order = [
-        ConfigRecord::Role,
-        ConfigRecord::Cover,
-        ConfigRecord::Theater,
-        ConfigRecord::Assistant,
-        ConfigRecord::Agent,
-        ConfigRecord::Operation,
-    ];
+    let order = ai6::directorates::m::config::IMPORT_ORDER;
     for record in order {
         let records = file
             .definitions(record, &ConfigScope::Global)

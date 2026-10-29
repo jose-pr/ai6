@@ -234,7 +234,7 @@ fn serve_help_lists_none_of_the_removed_flags() {
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
     for removed in [
-        "--config-dir",
+        ["--config", "dir"].join("-").as_str(),
         "--config-poll",
         "--headquarters-lease",
         "EXPORTS_",

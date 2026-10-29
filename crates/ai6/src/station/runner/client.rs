@@ -212,7 +212,7 @@ impl RunnerLink {
                         .and_then(|()| std::fs::write(&path, text))
                         .map_err(|error| format!("{}: {error}", path.display()))?;
                     arguments.extend([
-                        "--plugin-pins".into(),
+                        "--pins".into(),
                         path.into_os_string(),
                         "--plugin-profile".into(),
                         profile.as_str().into(),
