@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use std::env::consts::DLL_EXTENSION;
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use coqui_access_kit::{CacheOptions, Cached};
 use coqui_peer::PeerId;
 use guatiao::library::{
     Declared, Instance, Kind, KindMismatch, Order, Registry, SearchPath, bundle_binary, probe,
@@ -494,6 +496,30 @@ impl Plugins {
         build::<dyn Authorizer>(&self.registry, provider, config)
     }
 
+    /// Constructs a Directory, its lookups kept as `cache` says
+    /// ([`CacheOptions::default`]: 5 s found, 1 s not found, 10 000 entries).
+    pub fn cached_directory(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+        cache: CacheOptions,
+    ) -> Result<Arc<Cached<dyn Directory>>, PluginBuildError> {
+        let directory: Arc<dyn Directory> = Arc::from(self.directory(provider, config)?);
+        Ok(Arc::new(Cached::new(directory, cache)))
+    }
+
+    /// Constructs an Authorizer, its decisions kept as `cache` says
+    /// ([`CacheOptions::default`]: 5 s granted, 1 s denied, 10 000 entries).
+    pub fn cached_authorizer(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+        cache: CacheOptions,
+    ) -> Result<Arc<Cached<dyn Authorizer>>, PluginBuildError> {
+        let authorizer: Arc<dyn Authorizer> = Arc::from(self.authorizer(provider, config)?);
+        Ok(Arc::new(Cached::new(authorizer, cache)))
+    }
+
     /// Returns the scan results for diagnosis when a provider was expected but is absent.
     pub fn scan_summary(&self) -> &PluginScanSummary {
         &self.summary
@@ -960,9 +986,28 @@ mod tests {
         else {
             panic!("the stored account should log in");
         };
-        let person = people.lookup(lookup).unwrap().unwrap();
+        let person = people.lookup(lookup.clone()).unwrap().unwrap();
         assert_eq!(person.name, "007");
         assert_eq!(person.groups, ["field"]);
+
+        // Loaded behind a cache, the directory answers a repeated lookup from memory until
+        // the account changes.
+        let cached = plugins
+            .cached_directory(
+                "coqui_access_password",
+                Some(&config),
+                CacheOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(cached.options(), CacheOptions::default());
+        assert_eq!(cached.lookup(lookup.clone()).unwrap().unwrap().name, "007");
+        accounts.remove("007".to_owned()).unwrap();
+        assert!(
+            cached.lookup(lookup.clone()).unwrap().is_some(),
+            "kept for the cache's ttl"
+        );
+        cached.invalidate(&lookup);
+        assert!(cached.lookup(lookup).unwrap().is_none());
     }
 
     /// A directory under the build's own output: a library loaded from it stays mapped for

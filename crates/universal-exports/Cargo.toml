@@ -12,7 +12,7 @@ exclude = [".*", "*.local.*"]
 
 [features]
 default = []
-cli = ["ai6/daemon", "ai6/sqlite", "ai6/postgres", "dep:clap", "tokio/signal"]
+cli = ["ai6/daemon", "ai6/sqlite", "ai6/postgres", "dep:clap", "dep:coqui-access-kit", "tokio/signal"]
 
 [[bin]]
 name = "universal-exports"
@@ -26,6 +26,7 @@ required-features = ["cli"]
 
 [dependencies]
 ai6 = { path = "../ai6" }
+coqui-access-kit = { workspace = true, optional = true }
 axum = { workspace = true, features = ["form", "matched-path", "original-uri", "tower-log", "ws"] }
 clap = { workspace = true, optional = true, features = ["env", "error-context", "suggestions"] }
 futures-util = { workspace = true }

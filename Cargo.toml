@@ -28,6 +28,8 @@ guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "a67fd4be0aa31
 # same guatiao revision as above so kinds and plugins agree.
 coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "4c2410d4e653e7bd089c597e6eee6d3c84662786" }
 coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "4c2410d4e653e7bd089c597e6eee6d3c84662786" }
+# Short-lived caches in front of the Directory and Authorizer a gateway loads.
+coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "4c2410d4e653e7bd089c597e6eee6d3c84662786", features = ["cache"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
 serde = { version = "1", default-features = false, features = ["derive"] }

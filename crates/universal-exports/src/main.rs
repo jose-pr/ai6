@@ -12,6 +12,7 @@ use std::time::Duration;
 use ai6::guatiao::{ToValue, Value};
 use ai6::{Authenticator, Authorizer, Directory, RoleAuthorizer};
 use clap::Parser;
+use coqui_access_kit::CacheOptions;
 use guatiao::value::Number;
 use serde_json::Value as JsonValue;
 use universal_exports::{
@@ -98,6 +99,19 @@ struct Cli {
     /// JSON configuration file for the selected custom Authorizer.
     #[arg(long, env = "AI6_EXPORTS_AUTHORIZER_CONFIG", requires = "authorizer")]
     authorizer_config: Option<PathBuf>,
+    /// Seconds the loaded Directory's person and the loaded Authorizer's grant are kept, to
+    /// absorb bursts (a revoked account or grant can pass this long); 0 keeps none.
+    #[arg(long, env = "AI6_EXPORTS_ACCESS_CACHE_TTL", value_name = "SECONDS",
+          default_value = "5", value_parser = seconds)]
+    access_cache_ttl: Duration,
+    /// Seconds "no such person" and a denial are kept; 0 keeps none.
+    #[arg(long, env = "AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL", value_name = "SECONDS",
+          default_value = "1", value_parser = seconds)]
+    access_cache_negative_ttl: Duration,
+    /// The most lookups, and the most decisions, kept; 0 keeps none.
+    #[arg(long, env = "AI6_EXPORTS_ACCESS_CACHE_ENTRIES", value_name = "ENTRIES",
+          default_value_t = coqui_access_kit::cache::DEFAULT_MAX_ENTRIES)]
+    access_cache_entries: u64,
     /// The roster the Stations read (the location they take with `ai6 serve --config`): a
     /// configuration directory (read-only), `sqlite:PATH` or a `postgres://` URL, served for
     /// administration under /v1/user/roster. The password may come from AI6_CONFIG_PASSWORD.
@@ -250,6 +264,31 @@ fn plugin_policy(cli: &Cli) -> Result<ai6::station::plugins::PluginPolicy, Strin
     .map_err(|error| format!("provider library pins: {error}"))
 }
 
+/// Seconds as a duration: a whole or fractional number, not negative.
+fn seconds(text: &str) -> Result<Duration, String> {
+    text.trim()
+        .parse::<f64>()
+        .ok()
+        .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
+        .ok_or_else(|| "expected a number of seconds, 0 or more".to_owned())
+}
+
+/// How the loaded Directory and Authorizer keep their answers; a lifetime past the default is
+/// reported, since it widens the window in which a revocation is not yet seen.
+fn access_cache(cli: &Cli) -> CacheOptions {
+    let cache = CacheOptions::default()
+        .ttl(cli.access_cache_ttl)
+        .negative_ttl(cli.access_cache_negative_ttl)
+        .max_entries(cli.access_cache_entries);
+    if cache.exceeds_default() {
+        eprintln!(
+            "universal-exports: warning: access answers are kept {:?} ({:?} for a refusal),              longer than the default: a revoked account or grant passes that long",
+            cache.ttl, cache.negative_ttl
+        );
+    }
+    cache
+}
+
 fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {
     let needs_directory = cli.authenticator.is_some()
         || cli.proxy_user_header.is_some()
@@ -296,17 +335,14 @@ fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {
                 .map_err(|error| error.to_string())
         })
         .transpose()?;
-    let directory: Arc<dyn Directory> = Arc::from(
-        plugins
-            .directory(directory_id, directory_config.as_ref())
-            .map_err(|error| error.to_string())?,
-    );
+    let cache = access_cache(cli);
+    let directory: Arc<dyn Directory> = plugins
+        .cached_directory(directory_id, directory_config.as_ref(), cache)
+        .map_err(|error| error.to_string())?;
     let authorizer: Arc<dyn Authorizer> = if let Some(provider) = &cli.authorizer {
-        Arc::from(
-            plugins
-                .authorizer(provider, authorizer_config.as_ref())
-                .map_err(|error| error.to_string())?,
-        )
+        plugins
+            .cached_authorizer(provider, authorizer_config.as_ref(), cache)
+            .map_err(|error| error.to_string())?
     } else if let Some(path) = &cli.access_policy {
         Arc::new(ai6::load_role_authorizer(path).map_err(|error| error.to_string())?)
     } else {
@@ -472,6 +508,39 @@ mod tests {
                 .unwrap()
                 .profile(),
             ai6::PluginProfile::Report
+        );
+    }
+
+    #[test]
+    fn the_access_cache_defaults_to_seconds_and_reads_fractions_or_none() {
+        let cli = |extra: &[&str]| {
+            let mut arguments = vec!["universal-exports", "--public-origin", "https://localhost"];
+            arguments.extend_from_slice(extra);
+            Cli::try_parse_from(arguments).unwrap()
+        };
+        assert_eq!(access_cache(&cli(&[])), CacheOptions::default());
+        let tuned = access_cache(&cli(&[
+            "--access-cache-ttl",
+            "0.5",
+            "--access-cache-negative-ttl",
+            "0",
+            "--access-cache-entries",
+            "10",
+        ]));
+        assert_eq!(
+            (tuned.ttl, tuned.negative_ttl, tuned.max_entries),
+            (Duration::from_millis(500), Duration::ZERO, 10)
+        );
+        assert!(access_cache(&cli(&["--access-cache-ttl", "60"])).exceeds_default());
+        assert!(
+            Cli::try_parse_from([
+                "universal-exports",
+                "--public-origin",
+                "https://localhost",
+                "--access-cache-ttl",
+                "-1",
+            ])
+            .is_err()
         );
     }
 
