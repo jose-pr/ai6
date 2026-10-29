@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_svg: ^2.3.0
   guatiao:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
@@ -29,4 +30,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/backdrops/
     - assets/brand/moneypenny-128.png
+    - assets/icons/
