@@ -473,9 +473,10 @@ On Codex her scripts run in Codex's own sandbox, under a permission profile
 ([Codex permissions](https://learn.chatgpt.com/docs/permissions)) the handler passes as
 `ai6_assistant`: the whole filesystem denied, the platform's own paths (`:minimal`) and her
 working directory readable, and only `personal/` and `scratch/` writable (a `.git` under them
-stays read-only). The directory the `codex` executable is in, and the one each interpreter is
-in as found on the harness's `PATH`, are readable too, unless that directory is or holds the
-home directory, her working directory or a credential directory (`CODEX_HOME`, any
+stays read-only). The install directory of the `codex` executable and of each interpreter, as
+found on the harness's `PATH`, is readable too (`/opt/python3.12` for
+`/opt/python3.12/bin/python3`, as for Claude Code), unless that directory is `/`, is or holds
+the home directory, her working directory or a credential directory (`CODEX_HOME`, any
 `*_HOME`), or lies inside a credential directory: an interpreter there is unreachable. Her
 scripts keep only the environment variables Claude Code's keep
 (`shell_environment_policy.include_only`). On Windows the handler sets `windows.sandbox =

@@ -113,9 +113,11 @@ stay on (`features.shell_tool=false` is left out), `thread/start` and `thread/re
 ```
 
 An executable or interpreter is found on the environment's `PATH` (Windows `PATHEXT`) with
-links followed; its directory is left out when it is or holds the home directory
-(`HOME`/`USERPROFILE`), the working directory, its parent or a credential directory
-(`ai6::credential_dir_var`), or lies inside a credential directory. The profile has no network:
+links followed, and its install directory is readable
+(`ai6::directorates::section_00::programs::program_dirs`: the directory above `bin`, so
+`/opt/py/bin/python3` opens `/opt/py`); that directory is left out when it is `/`, is or holds
+the home directory (`HOME`/`USERPROFILE`), the working directory, its parent or a credential
+directory (`ai6::credential_dir_var`), or lies inside a credential directory. The profile has no network:
 measured with Codex 0.164.0, app-server threads ran no proxy for a profile's network, so a
 script reached unlisted hosts and host loopback; scripts get none under every policy, which a
 developer-instructions line tells her (when the policy names hosts) and standard error logs.

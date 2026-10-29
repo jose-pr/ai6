@@ -16,7 +16,10 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::section_00::agent::AssistantMode;
-use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
+use ai6::directorates::section_00::assistant::SCRIPT_ENVIRONMENT;
+use ai6::directorates::section_00::programs::{
+    canonical, find_program, path_text, program_dirs, variable,
+};
 
 use crate::tools::CONFIG_ENVIRONMENT;
 
@@ -53,8 +56,8 @@ pub(crate) fn overrides(
     ];
     rules.extend(
         read_dirs(executable, cwd, environment, &mode.interpreters)
-            .into_iter()
-            .map(|dir| (path_text(&dir), "read")),
+            .iter()
+            .map(|dir| (path_text(dir), "read")),
     );
     rules.extend(
         mode.files
@@ -105,107 +108,18 @@ fn native(dir: &str) -> PathBuf {
     dir.split('/').collect()
 }
 
-/// `path` as text, without Windows' verbatim `\\?\` prefix, which Codex does not expect.
-fn path_text(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    text.strip_prefix(r"\\?\")
-        .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
-        .unwrap_or(&text)
-        .to_owned()
-}
-
-/// The directories scripts also read: where the codex executable is (bubblewrap runs it again
-/// inside the sandbox on Linux) and where each interpreter is, as found on the harness's
-/// `PATH` with links followed. A directory that is or holds the home directory, the working
-/// directory or its parent (other conversations), or a credential directory, or lies inside a
-/// credential directory, is left out: an interpreter there is unreachable.
+/// The install directories scripts also read ([`program_dirs`]): the codex executable's
+/// (bubblewrap runs it again inside the sandbox on Linux) and each interpreter's.
 fn read_dirs(
     executable: &str,
     cwd: &Path,
     environment: &BTreeMap<String, String>,
     interpreters: &[String],
 ) -> Vec<PathBuf> {
-    let credentials: Vec<PathBuf> = environment
-        .iter()
-        .filter(|(name, _)| credential_dir_var(name))
-        .map(|(_, path)| canonical(Path::new(path)))
+    let programs: Vec<&str> = std::iter::once(executable)
+        .chain(interpreters.iter().map(String::as_str))
         .collect();
-    let mut kept: Vec<PathBuf> = ["HOME", "USERPROFILE"]
-        .into_iter()
-        .filter_map(|name| variable(environment, name).or_else(|| std::env::var(name).ok()))
-        .map(|home| canonical(Path::new(&home)))
-        .collect();
-    kept.push(canonical(cwd));
-    kept.extend(cwd.parent().map(canonical));
-    kept.extend(credentials.iter().cloned());
-    let mut dirs = Vec::new();
-    for program in std::iter::once(executable).chain(interpreters.iter().map(String::as_str)) {
-        let Some(dir) = resolve(program, environment)
-            .and_then(|found| canonical(&found).parent().map(Path::to_path_buf))
-        else {
-            continue;
-        };
-        let holds = |inner: &Path| starts_with(inner, &dir);
-        if kept.iter().any(|path| holds(path))
-            || credentials.iter().any(|path| starts_with(&dir, path))
-            || dirs.contains(&dir)
-        {
-            continue;
-        }
-        dirs.push(dir);
-    }
-    dirs
-}
-
-/// `name`'s value in `environment`, case ignored as Windows ignores it.
-fn variable(environment: &BTreeMap<String, String>, name: &str) -> Option<String> {
-    environment
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.clone())
-}
-
-/// `path` with links followed, or as given when it cannot be resolved.
-fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path)
-        .map(|resolved| PathBuf::from(path_text(&resolved)))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
-
-/// Whether `path` is `base` or lies under it, case ignored on Windows.
-fn starts_with(path: &Path, base: &Path) -> bool {
-    if cfg!(windows) {
-        let lower = |path: &Path| PathBuf::from(path_text(path).to_lowercase());
-        lower(path).starts_with(lower(base))
-    } else {
-        path.starts_with(base)
-    }
-}
-
-/// Where `program` is: itself when it names a path, else the first match on the `PATH` of
-/// `environment` (the process's own when it has none), with Windows' executable extensions.
-fn resolve(program: &str, environment: &BTreeMap<String, String>) -> Option<PathBuf> {
-    let given = Path::new(program);
-    if given.components().count() > 1 || given.is_absolute() {
-        return given.is_file().then(|| given.to_path_buf());
-    }
-    let path = variable(environment, "PATH").or_else(|| std::env::var("PATH").ok())?;
-    let extensions: Vec<String> = if cfg!(windows) && given.extension().is_none() {
-        variable(environment, "PATHEXT")
-            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned())
-            .split(';')
-            .filter(|ext| !ext.is_empty())
-            .map(str::to_owned)
-            .collect()
-    } else {
-        vec![String::new()]
-    };
-    std::env::split_paths(&path).find_map(|dir| {
-        extensions
-            .iter()
-            .map(|ext| dir.join(format!("{program}{ext}")))
-            .find(|candidate| candidate.is_file())
-    })
+    program_dirs(&programs, cwd, environment)
 }
 
 /// Why Codex cannot run an assistant's scripts in its sandbox here, `None` when it can: the
@@ -333,7 +247,7 @@ fn run(
     cwd: &Path,
     environment: &BTreeMap<String, String>,
 ) -> std::io::Result<(bool, String)> {
-    let program = resolve(&argv[0], environment).unwrap_or_else(|| PathBuf::from(&argv[0]));
+    let program = find_program(&argv[0], environment).unwrap_or_else(|| PathBuf::from(&argv[0]));
     let mut child = std::process::Command::new(program)
         .args(&argv[1..])
         .current_dir(cwd)
