@@ -42,7 +42,7 @@ pub struct RosterRecord {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RosterRecords {
     /// `operations`, `agents`, `roles`, `covers` or `assistant` (at most one record, keyed
-    /// `assistant`).
+    /// `settings`).
     pub kind: String,
     /// The roster revision they were read at, in decimal; Stations report the revision they
     /// run at check-in.
@@ -91,7 +91,7 @@ fn checked_key(key: &str) -> Result<(), ApiError> {
     }
 }
 
-fn source(gateway: &Gateway) -> Result<std::sync::Arc<dyn ai6::ConfigSource>, ApiError> {
+fn source(gateway: &Gateway) -> Result<std::sync::Arc<dyn ai6::ConfigProvider>, ApiError> {
     gateway.roster.clone().ok_or_else(ApiError::unavailable)
 }
 
@@ -150,13 +150,14 @@ pub(crate) async fn records(
     let record = kind_of(&kind)?;
     authorize_resource_action(&gateway, person, ROSTER_RESOURCE.to_owned(), "roster.read").await?;
     let source = source(&gateway)?;
-    let definitions = tokio::task::spawn_blocking(move || source.definitions(record))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|error| match error.kind() {
-            RosterErrorKind::ReadOnly => ApiError::from(GatewayError::Conflict),
-            _ => ApiError::unavailable(),
-        })?;
+    let definitions =
+        tokio::task::spawn_blocking(move || source.definitions(record, &ai6::ConfigScope::Global))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(|error| match error.kind() {
+                RosterErrorKind::ReadOnly => ApiError::from(GatewayError::Conflict),
+                _ => ApiError::unavailable(),
+            })?;
     Ok(Json(RosterRecords {
         kind,
         revision: definitions.revision.get().to_string(),
@@ -242,10 +243,10 @@ pub(crate) async fn put_record(
         // before it, and only for an accepted edit, whose definition the source parsed the
         // same way.
         let current = (record == ConfigRecord::Assistant)
-            .then(|| source.load())
+            .then(|| source.load(""))
             .transpose()?
             .map(|snapshot| snapshot.roster.assistant().clone());
-        let revision = source.put(record, &key, &definition)?;
+        let revision = source.put(record, &ai6::ConfigScope::Global, &key, &definition)?;
         let weakened = current
             .zip(serde_json::from_value::<AssistantSettings>(definition).ok())
             .map(|(current, settings)| settings.changes_from(&current))
@@ -289,9 +290,10 @@ pub(crate) async fn remove_record(
     .await?;
     let source = source(&gateway)?;
     let target = format!("{} {key}", record.name());
-    let outcome = tokio::task::spawn_blocking(move || source.remove(record, &key))
-        .await
-        .map_err(|_| ApiError::internal())?;
+    let outcome =
+        tokio::task::spawn_blocking(move || source.remove(record, &ai6::ConfigScope::Global, &key))
+            .await
+            .map_err(|_| ApiError::internal())?;
     settle(
         &gateway,
         &person,
@@ -382,7 +384,7 @@ mod tests {
             "[agent.007]\nhandler = \"mock-agent\"\n",
         )
         .unwrap();
-        let source = Arc::new(ai6::TomlConfigDir::new(directory.path()));
+        let source = Arc::new(ai6::FileProvider::new(directory.path()));
         let served = served_with_roster(ROLES, Some(source)).await;
         let listed: serde_json::Value = call(
             &served,
@@ -413,17 +415,23 @@ mod tests {
     #[cfg(feature = "cli")]
     #[tokio::test]
     async fn an_edit_writes_through_the_source_and_a_bad_one_is_refused_and_audited() {
-        use ai6::{ConfigRecord, ConfigSource, SqlConfigSource};
+        use ai6::{ConfigProvider, ConfigRecord, SqlProvider};
 
         let directory = tempfile::tempdir().unwrap();
         let location = format!("sqlite:{}", directory.path().join("roster.db").display());
-        let source = Arc::new(SqlConfigSource::open(&location).unwrap());
+        let source = Arc::new(SqlProvider::open(&location).unwrap());
         source
-            .put(ConfigRecord::Operation, "G", &json!({"roster": ["007"]}))
+            .put(
+                ConfigRecord::Operation,
+                &ai6::ConfigScope::Global,
+                "G",
+                &json!({"roster": ["007"]}),
+            )
             .unwrap();
         source
             .put(
                 ConfigRecord::Agent,
+                &ai6::ConfigScope::Global,
                 "007",
                 &json!({"handler": "mock-agent", "priority": 1}),
             )
@@ -483,11 +491,11 @@ mod tests {
         .await;
         assert_eq!(edited.status(), StatusCode::OK);
         let edited: serde_json::Value = edited.json().await.unwrap();
-        let revision = source.revision().unwrap();
+        let revision = source.revision("").unwrap();
         assert_eq!(edited["revision"], revision.get().to_string());
         assert_eq!(
             source
-                .load()
+                .load("")
                 .unwrap()
                 .roster
                 .agent(Some("G"), "007")
@@ -515,7 +523,7 @@ mod tests {
             refused["refused"].as_str().unwrap().contains("clearance"),
             "{refused}"
         );
-        assert_eq!(source.revision().unwrap(), revision, "nothing changed");
+        assert_eq!(source.revision("").unwrap(), revision, "nothing changed");
         let refusals = audits(&served, "roster.refused");
         assert_eq!(refusals.len(), 1);
         assert!(
@@ -565,11 +573,11 @@ mod tests {
     #[cfg(feature = "cli")]
     #[tokio::test]
     async fn the_assistant_record_is_edited_like_any_other_and_reports_its_weakenings() {
-        use ai6::{ConfigSource, SqlConfigSource};
+        use ai6::{ConfigProvider, SqlProvider};
 
         let directory = tempfile::tempdir().unwrap();
         let location = format!("sqlite:{}", directory.path().join("roster.db").display());
-        let source = Arc::new(SqlConfigSource::open(&location).unwrap());
+        let source = Arc::new(SqlProvider::open(&location).unwrap());
         let served = served_with_roster(ROLES, Some(source.clone())).await;
 
         let listed: serde_json::Value = call(
@@ -591,7 +599,7 @@ mod tests {
             &served,
             &served.viewer,
             reqwest::Method::PUT,
-            "roster/assistant/assistant",
+            "roster/assistant/settings",
             Some(json!({"allow_elevated": true})),
         )
         .await;
@@ -601,7 +609,7 @@ mod tests {
             &served,
             &served.operator,
             reqwest::Method::PUT,
-            "roster/assistant/assistant",
+            "roster/assistant/settings",
             Some(json!({"personal_repo": "/srv/mp/{person_digest}.git"})),
         )
         .await;
@@ -625,7 +633,7 @@ mod tests {
             &served,
             &served.operator,
             reqwest::Method::PUT,
-            "roster/assistant/assistant",
+            "roster/assistant/settings",
             Some(json!({"allow_elevated": true, "org": {"repo": "/srv/org.git", "write": true}})),
         )
         .await;
@@ -645,26 +653,26 @@ mod tests {
             &served,
             &served.operator,
             reqwest::Method::PUT,
-            "roster/assistant/assistant",
+            "roster/assistant/settings",
             Some(json!({"allow_elevated": true, "org": {"repo": "/srv/org.git", "write": true}})),
         )
         .await;
         assert_eq!(again.status(), StatusCode::OK);
         let again: serde_json::Value = again.json().await.unwrap();
         assert!(again.get("weakened").is_none(), "{again}");
-        let settings = source.load().unwrap().roster.assistant().clone();
+        let settings = source.load("").unwrap().roster.assistant().clone();
         assert!(settings.allow_elevated());
         assert_eq!(
             settings.personal_repo(),
             None,
             "the record is replaced whole"
         );
-        let revision = source.revision().unwrap();
+        let revision = source.revision("").unwrap();
 
         for (key, definition, reason) in [
-            ("moneypenny", json!({}), "\"assistant\""),
+            ("moneypenny", json!({}), "\"settings\""),
             (
-                "assistant",
+                "settings",
                 json!({"personal_repo": "ext::sh"}),
                 "assistant.personal_repo",
             ),
@@ -684,24 +692,24 @@ mod tests {
                 "{refused}"
             );
         }
-        assert_eq!(source.revision().unwrap(), revision, "nothing changed");
+        assert_eq!(source.revision("").unwrap(), revision, "nothing changed");
         assert_eq!(audits(&served, "roster.refused").len(), 2);
         assert_eq!(
             audits(&served, "roster.update")[0].target,
-            "assistant assistant"
+            "assistant settings"
         );
 
         let removed = call(
             &served,
             &served.operator,
             reqwest::Method::DELETE,
-            "roster/assistant/assistant",
+            "roster/assistant/settings",
             None,
         )
         .await;
         assert_eq!(removed.status(), StatusCode::OK);
         assert_eq!(
-            source.load().unwrap().roster.assistant(),
+            source.load("").unwrap().roster.assistant(),
             &ai6::AssistantSettings::default()
         );
     }

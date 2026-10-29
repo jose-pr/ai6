@@ -276,18 +276,18 @@ fn roster_kind() -> Value {
     json!({
         "type": "string",
         "enum": ["operations", "agents", "roles", "covers", "assistant"],
-        "description": "Which records; assistant is your own settings, one record keyed assistant."
+        "description": "Which records; assistant is your own settings, one record keyed settings."
     })
 }
 
 /// The settings a `propose_roster_edit` of the `assistant` record sets, or why they are not
-/// acceptable settings under the key `assistant`.
+/// acceptable settings under the key `settings`.
 fn assistant_record(input: &Map<String, Value>) -> Result<ai6::AssistantSettings, String> {
     let key = input.get("key").and_then(Value::as_str).unwrap_or_default();
-    if key != ai6::ConfigRecord::ASSISTANT_KEY {
+    if key != ai6::ConfigRecord::SINGLETON_KEY {
         return Err(format!(
             "the assistant record is keyed {:?}",
-            ai6::ConfigRecord::ASSISTANT_KEY
+            ai6::ConfigRecord::SINGLETON_KEY
         ));
     }
     let definition = input.get("definition").cloned().unwrap_or(json!({}));
@@ -685,7 +685,7 @@ mod tests {
         );
         let strict = edit
             .draft(
-                &json!({"kind": "assistant", "key": "assistant",
+                &json!({"kind": "assistant", "key": "settings",
                         "definition": {"personal_repo": "/srv/mp/{person_digest}.git"}}),
                 "p-2",
                 Some(
@@ -694,11 +694,11 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(strict.call.path, "/v1/user/roster/assistant/assistant");
+        assert_eq!(strict.call.path, "/v1/user/roster/assistant/settings");
         assert!(!strict.summary.contains("Weakens"), "{}", strict.summary);
         let loose = edit
             .draft(
-                &json!({"kind": "assistant", "key": "assistant",
+                &json!({"kind": "assistant", "key": "settings",
                         "definition": {"allow_elevated": true}}),
                 "p-3",
                 Some(&ai6::AssistantSettings::default()),
@@ -713,8 +713,8 @@ mod tests {
         );
         for refused in [
             json!({"kind": "assistant", "key": "moneypenny", "definition": {}}),
-            json!({"kind": "assistant", "key": "assistant", "definition": {"unknown": 1}}),
-            json!({"kind": "assistant", "key": "assistant",
+            json!({"kind": "assistant", "key": "settings", "definition": {"unknown": 1}}),
+            json!({"kind": "assistant", "key": "settings",
                    "definition": {"personal_repo": "ext::sh"}}),
         ] {
             let error = edit
@@ -730,7 +730,7 @@ mod tests {
                 "contractors",
                 ai6::AssistantNarrowing::new().with_interpreters(Vec::new()),
             );
-        let quiet = json!({"kind": "assistant", "key": "assistant",
+        let quiet = json!({"kind": "assistant", "key": "settings",
                            "definition": {"personal_repo": "/srv/other/{person_digest}.git"}});
         let moved = edit.draft(&quiet, "p-4", Some(&current)).unwrap();
         for named in [

@@ -40,7 +40,7 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use crate::directorates::m::approvals::GREEN_INK_REASON;
-use crate::directorates::m::config::{ConfigSource, TomlConfigDir};
+use crate::directorates::m::config::{ConfigProvider, FileProvider};
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::identity::MAX_ID_BYTES;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, parked_until};
@@ -404,7 +404,7 @@ pub struct ServeConfig {
     plugin_policy: plugins::PluginPolicy,
     config_dir: Option<PathBuf>,
     secrets_dir: Option<PathBuf>,
-    config_source: Option<Arc<dyn ConfigSource>>,
+    config_source: Option<Arc<dyn ConfigProvider>>,
     registry: Option<Arc<dyn RegistryBackend>>,
     station_id: Option<String>,
     station: StationConfig,
@@ -449,7 +449,7 @@ impl ServeConfig {
 
     /// Sets the configuration directory. The Station reads its Theaters, loadouts and Cable
     /// settings there, and its roster (`operations.toml`, `agents.toml`, `covers.toml`)
-    /// unless [`ServeConfig::with_config_source`] names another source.
+    /// unless [`ServeConfig::with_config_provider`] names another source.
     pub fn with_config_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.config_dir = Some(path.into());
         self
@@ -465,7 +465,7 @@ impl ServeConfig {
 
     /// Sets where the roster comes from instead of the configuration directory's TOML files.
     #[must_use]
-    pub fn with_config_source(mut self, source: Arc<dyn ConfigSource>) -> Self {
+    pub fn with_config_provider(mut self, source: Arc<dyn ConfigProvider>) -> Self {
         self.config_source = Some(source);
         self
     }
@@ -666,17 +666,24 @@ where
         .unwrap_or_else(|| config_dir.join("secrets"));
     config.station.protected_paths.push(state_dir.clone());
     config.station.protected_paths.push(secrets_dir.clone());
-    let config_source: Arc<dyn ConfigSource> = match config.config_source.take() {
+    let config_source: Arc<dyn ConfigProvider> = match config.config_source.take() {
         Some(source) => source,
-        None => Arc::new(TomlConfigDir::new(&config_dir)),
+        None => Arc::new(FileProvider::new(&config_dir)),
     };
-    let snapshot = config_source.load().map_err(|error| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("AI6 roster: {error}"))
+    let station_id = config
+        .station_id
+        .take()
+        .unwrap_or_else(|| daemon_station_id(&state_dir));
+    crate::directorates::registry::store::validate_station_id(&station_id)?;
+    let snapshot = config_source.load(&station_id).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("AI6 configuration: {error}"),
+        )
     })?;
-    let (revision, roster) = (snapshot.revision, snapshot.roster);
-    let mut theaters = Theaters::load(&config_dir).map_err(|error| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("AI6 Theaters: {error}"))
-    })?;
+    let started = snapshot.clone();
+    let roster = snapshot.roster;
+    let mut theaters = snapshot.settings.theaters;
     for theater in std::mem::take(&mut config.station.extra_theaters) {
         theaters.insert(theater).map_err(|error| {
             io::Error::new(
@@ -698,11 +705,6 @@ where
     config.station.credentials = std::mem::take(&mut config.station.credentials)
         .in_secrets_dir(&secrets_dir)
         .with_default_account_homes(state_dir.join("accounts"));
-    let station_id = config
-        .station_id
-        .take()
-        .unwrap_or_else(|| daemon_station_id(&state_dir));
-    crate::directorates::registry::store::validate_station_id(&station_id)?;
     CableEndpoint::try_new(
         "validation-agent".to_owned(),
         "validation-operation".to_owned(),
@@ -737,9 +739,10 @@ where
     let roster = Arc::new(roster);
     let live_config = Arc::new(reload::LiveConfig::new(
         config_source,
+        &station_id,
+        started,
         &config_dir,
         roster.clone(),
-        revision,
         loadouts_from_file.then(|| config.station.credentials.shared_catalog()),
     ));
     let missions = Arc::new(Mutex::new(missions));
@@ -6238,7 +6241,7 @@ mod tests {
 
         assert_eq!(event.kind, "completed");
     }
-    use crate::directorates::m::config::MemoryConfigSource;
+    use crate::directorates::m::config::MemoryProvider;
     use crate::directorates::m::limits::RESET_GRACE_SECS;
     use crate::directorates::q::safehouse::{
         ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseSession,
@@ -7958,7 +7961,7 @@ mod tests {
         operation.max_concurrent = Some(1);
         let mut agent = roster::Agent::new("007");
         agent.handler = Some("mock-agent".to_owned());
-        let source = MemoryConfigSource::new(
+        let source = MemoryProvider::new(
             Roster::builder()
                 .operation(operation)
                 .agent(agent)
@@ -7978,7 +7981,7 @@ mod tests {
         let state = DaemonState {
             config: Default::default(),
             plugins: Arc::new(test_plugins()),
-            roster: Arc::new(source.load().unwrap().roster),
+            roster: Arc::new(source.load("").unwrap().roster),
             intake: registry,
             missions: Arc::new(Mutex::new(MissionStore::default())),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),

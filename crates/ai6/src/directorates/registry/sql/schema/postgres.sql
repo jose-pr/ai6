@@ -226,36 +226,54 @@ CREATE TABLE ai6_usage (
     PRIMARY KEY (operation, mission)
 );
 
--- The roster: each definition is a JSON object with the keys of the record's table in
--- operations.toml, agents.toml or covers.toml.
-CREATE TABLE ai6_config_operations (
-    id TEXT PRIMARY KEY,
+-- The configuration provider: one table per record family. scope is '' for a global
+-- record or station:<id> for one Station's; definition is a JSON object with the keys of the
+-- record's table in its family file. A singleton family's one record is keyed 'settings'.
+
+CREATE TABLE ai6_config_operation (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
     definition TEXT NOT NULL,
-    revision BIGINT NOT NULL
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_agents (
-    id TEXT PRIMARY KEY,
+CREATE TABLE ai6_config_agent (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
     definition TEXT NOT NULL,
-    revision BIGINT NOT NULL
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_roles (
-    id TEXT PRIMARY KEY,
+CREATE TABLE ai6_config_role (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
     definition TEXT NOT NULL,
-    revision BIGINT NOT NULL
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_covers (
-    name TEXT PRIMARY KEY,
-    definition TEXT NOT NULL,
-    revision BIGINT NOT NULL
-);
-
--- Moneypenny's settings: at most one row, named 'assistant', holding the keys of the
--- [assistant] table of agents.toml.
 CREATE TABLE ai6_config_assistant (
-    name TEXT PRIMARY KEY,
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
     definition TEXT NOT NULL,
-    revision BIGINT NOT NULL
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
+);
+
+CREATE TABLE ai6_config_cover (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
+);
+
+CREATE TABLE ai6_config_theater (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
 );

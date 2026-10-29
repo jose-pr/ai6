@@ -343,7 +343,7 @@ async fn assistant_settings(gateway: &Gateway) -> Result<AssistantSettings, Stri
     let Some(source) = gateway.roster.clone() else {
         return Ok(AssistantSettings::default());
     };
-    tokio::task::spawn_blocking(move || source.load())
+    tokio::task::spawn_blocking(move || source.load(""))
         .await
         .map_err(|error| error.to_string())?
         .map(|snapshot| snapshot.roster.assistant().clone())

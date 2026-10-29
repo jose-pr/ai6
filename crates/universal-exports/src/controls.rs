@@ -732,7 +732,7 @@ pub(crate) mod tests {
     /// As [`served_with`], serving roster administration from `roster`.
     pub(crate) async fn served_with_roster(
         roles: &str,
-        roster: Option<Arc<dyn ai6::ConfigSource>>,
+        roster: Option<Arc<dyn ai6::ConfigProvider>>,
     ) -> Served {
         let directory = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(directory.path());

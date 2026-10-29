@@ -846,6 +846,25 @@ impl Theaters {
 
     /// Parses the text of a `theaters.toml`.
     pub fn parse(text: &str) -> Result<Self, TheaterError> {
+        let document: toml::Table =
+            toml::from_str(text).map_err(|e| TheaterError(e.to_string()))?;
+        Self::from_document(toml::Value::Table(document))
+    }
+
+    /// The Theaters of `theater` records, each the keys of a `[theater.<id>]` table, as a
+    /// configuration provider holds them.
+    pub(crate) fn from_records(
+        records: impl IntoIterator<Item = (String, serde_json::Value)>,
+    ) -> Result<Self, TheaterError> {
+        let theater: serde_json::Map<String, serde_json::Value> = records.into_iter().collect();
+        Self::from_document(serde_json::json!({ "theater": theater }))
+    }
+
+    fn from_document<'de, D>(document: D) -> Result<Self, TheaterError>
+    where
+        D: serde::Deserializer<'de>,
+        D::Error: std::fmt::Display,
+    {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Document {
@@ -873,7 +892,7 @@ impl Theaters {
             #[serde(default)]
             provision: Option<ProvisionSpec>,
         }
-        let document: Document = toml::from_str(text).map_err(|e| TheaterError(e.to_string()))?;
+        let document = Document::deserialize(document).map_err(|e| TheaterError(e.to_string()))?;
         let mut theaters = Self::default();
         for (id, definition) in document.theater {
             theaters.insert(Theater {

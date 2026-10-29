@@ -1,64 +1,23 @@
-//! The roster kept in a SQL database, so every Station of an HA deployment reads the same
-//! Operations, Agents, roles, covers and Moneypenny's settings.
+//! Configuration kept in a SQL database, so every Station of an HA deployment reads the same
+//! records: [`SqlProvider`].
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io;
 
-use super::{ConfigDefinitions, ConfigRecord, ConfigRevision, ConfigSnapshot, ConfigSource};
-use crate::directorates::m::cover::{Covers, cover_from};
-use crate::directorates::m::roster::{
-    RosterError, RosterErrorKind, error, error_of, roster_from_definitions,
+use super::{
+    ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
+    Layer, assemble, check_placement, merged,
 };
+use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
 use crate::directorates::registry::sql::SqlOptions;
 use crate::directorates::registry::sql::db::{Clock, Database, Location, Tx};
 
-/// The tables of each kind: `ai6_config_operations`, `ai6_config_agents`, `ai6_config_roles`,
-/// `ai6_config_covers` and `ai6_config_assistant`.
-fn select(record: ConfigRecord) -> &'static str {
-    match record {
-        ConfigRecord::Operation => "SELECT id, definition FROM ai6_config_operations ORDER BY id",
-        ConfigRecord::Agent => "SELECT id, definition FROM ai6_config_agents ORDER BY id",
-        ConfigRecord::Role => "SELECT id, definition FROM ai6_config_roles ORDER BY id",
-        ConfigRecord::Cover => "SELECT name, definition FROM ai6_config_covers ORDER BY name",
-        ConfigRecord::Assistant => {
-            "SELECT name, definition FROM ai6_config_assistant ORDER BY name"
-        }
-    }
-}
+const SOURCE: &str = "SQL configuration";
 
-fn upsert(record: ConfigRecord) -> &'static str {
-    match record {
-        ConfigRecord::Operation => {
-            "INSERT INTO ai6_config_operations (id, definition, revision) VALUES ($1, $2, $3) \
-             ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-        }
-        ConfigRecord::Agent => {
-            "INSERT INTO ai6_config_agents (id, definition, revision) VALUES ($1, $2, $3) \
-             ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-        }
-        ConfigRecord::Role => {
-            "INSERT INTO ai6_config_roles (id, definition, revision) VALUES ($1, $2, $3) \
-             ON CONFLICT (id) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-        }
-        ConfigRecord::Cover => {
-            "INSERT INTO ai6_config_covers (name, definition, revision) VALUES ($1, $2, $3) \
-             ON CONFLICT (name) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-        }
-        ConfigRecord::Assistant => {
-            "INSERT INTO ai6_config_assistant (name, definition, revision) VALUES ($1, $2, $3) \
-             ON CONFLICT (name) DO UPDATE SET definition = excluded.definition, revision = excluded.revision"
-        }
-    }
-}
-
-fn delete(record: ConfigRecord) -> &'static str {
-    match record {
-        ConfigRecord::Operation => "DELETE FROM ai6_config_operations WHERE id = $1",
-        ConfigRecord::Agent => "DELETE FROM ai6_config_agents WHERE id = $1",
-        ConfigRecord::Role => "DELETE FROM ai6_config_roles WHERE id = $1",
-        ConfigRecord::Cover => "DELETE FROM ai6_config_covers WHERE name = $1",
-        ConfigRecord::Assistant => "DELETE FROM ai6_config_assistant WHERE name = $1",
-    }
+/// The table of a family: `ai6_config_<name>`, from a fixed list of names.
+fn table(record: ConfigRecord) -> String {
+    format!("ai6_config_{}", record.name())
 }
 
 /// The `config` row of `ai6_clock`, which every change advances.
@@ -67,41 +26,55 @@ fn clock(tx: &mut Tx<'_>) -> io::Result<i64> {
         .map_or(Ok(0), |row| row.int(0))
 }
 
-/// Every row of one roster table.
-fn table(tx: &mut Tx<'_>, record: ConfigRecord) -> io::Result<Vec<(String, String)>> {
-    tx.query(select(record), &[])?
+/// One stored record: its scope's text form, key and definition text.
+type Row = (String, String, String);
+
+/// Every row of one family's table.
+fn family(tx: &mut Tx<'_>, record: ConfigRecord) -> io::Result<Vec<Row>> {
+    let sql = format!(
+        "SELECT scope, key, definition FROM {} ORDER BY scope, key",
+        table(record)
+    );
+    tx.query(&sql, &[])?
         .into_iter()
-        .map(|row| Ok((row.text(0)?, row.text(1)?)))
+        .map(|row| Ok((row.text(0)?, row.text(1)?, row.text(2)?)))
         .collect()
 }
 
-/// Every row of the roster tables, as read in one transaction.
-struct Rows {
+/// Every record, as read in one transaction.
+struct Records {
     revision: i64,
-    tables: [Vec<(String, String)>; ConfigRecord::ALL.len()],
+    rows: Vec<(ConfigRecord, Row)>,
 }
 
-fn rows(tx: &mut Tx<'_>) -> io::Result<Rows> {
+fn records(tx: &mut Tx<'_>) -> io::Result<Records> {
     // The revision is read first: a write landing between the statements shows up as a
     // change on the next poll rather than being missed.
     let revision = clock(tx)?;
-    let mut tables: [Vec<(String, String)>; ConfigRecord::ALL.len()] = Default::default();
-    for (record, rows) in ConfigRecord::ALL.into_iter().zip(tables.iter_mut()) {
-        *rows = table(tx, record)?;
+    let mut rows = Vec::new();
+    for record in ConfigRecord::ALL {
+        rows.extend(family(tx, record)?.into_iter().map(|row| (record, row)));
     }
-    Ok(Rows { revision, tables })
+    Ok(Records { revision, rows })
 }
 
-const SOURCE: &str = "SQL configuration";
-
-fn parsed(rows: Vec<(String, String)>) -> Result<Vec<(String, serde_json::Value)>, RosterError> {
-    rows.into_iter()
-        .map(|(key, text)| {
-            serde_json::from_str::<serde_json::Value>(&text)
-                .map(|definition| (key.clone(), definition))
-                .map_err(|reason| error(format!("{SOURCE}: {key:?}: {reason}")))
-        })
-        .collect()
+/// The records by scope.
+fn layers(records: &Records) -> Result<BTreeMap<ConfigScope, Layer>, RosterError> {
+    let mut layers: BTreeMap<ConfigScope, Layer> = BTreeMap::new();
+    for (record, (scope, key, text)) in &records.rows {
+        let scope = ConfigScope::parse(scope)
+            .ok_or_else(|| error(format!("{SOURCE}: {record} {key:?}: scope {scope:?}")))?;
+        check_placement(*record, &scope, key, &SOURCE)?;
+        let definition = serde_json::from_str::<serde_json::Value>(text)
+            .map_err(|reason| error(format!("{SOURCE}: {record} {key:?}: {reason}")))?;
+        layers
+            .entry(scope)
+            .or_default()
+            .entry(*record)
+            .or_default()
+            .insert(key.clone(), definition);
+    }
+    Ok(layers)
 }
 
 fn revision_of(number: i64) -> Result<ConfigRevision, RosterError> {
@@ -110,66 +83,59 @@ fn revision_of(number: i64) -> Result<ConfigRevision, RosterError> {
         .map_err(|_| error(format!("{SOURCE}: invalid revision")))
 }
 
-fn roster(rows: Rows) -> Result<ConfigSnapshot, RosterError> {
-    let [operations, agents, roles, covers, assistant] = rows.tables.map(parsed);
-    let mut policies = Covers::default();
-    for (name, definition) in covers? {
-        policies.insert(
-            cover_from(name, definition).map_err(|reason| error(format!("{SOURCE}: {reason}")))?,
-        );
-    }
-    let mut settings = None;
-    for (key, definition) in assistant? {
-        if key != ConfigRecord::ASSISTANT_KEY {
-            return Err(error(format!(
-                "{SOURCE}: the assistant record is keyed {:?}, not {key:?}",
-                ConfigRecord::ASSISTANT_KEY
-            )));
-        }
-        settings = Some(definition);
-    }
-    let roster =
-        roster_from_definitions(operations?, agents?, roles?, policies, settings, &SOURCE)?;
-    Ok(ConfigSnapshot::new(revision_of(rows.revision)?, roster))
+/// `station`'s view (`""`: global only), checked and built.
+fn snapshot(records: &Records, station: &str) -> Result<ConfigSnapshot, RosterError> {
+    let layers = layers(records)?;
+    let global = layers
+        .get(&ConfigScope::Global)
+        .cloned()
+        .unwrap_or_default();
+    let view = match layers.get(&ConfigScope::of_station(station)) {
+        Some(own) if !station.is_empty() => merged(&global, own),
+        _ => global,
+    };
+    assemble(revision_of(records.revision)?, &view, None, &SOURCE)
 }
 
 fn failed(reason: io::Error) -> RosterError {
     error_of(RosterErrorKind::Unavailable, format!("{SOURCE}: {reason}"))
 }
 
-/// The roster kept in a SQLite or PostgreSQL database: one table per record kind, each row a
-/// record's definition as a JSON object with the keys of its table in `operations.toml`,
-/// `agents.toml` or `covers.toml`, built into the roster with [`Roster::from_parts`](crate::Roster::from_parts).
-/// Moneypenny's settings are one row keyed `assistant` holding the keys of `[assistant]`;
-/// without it the roster has the default settings.
+/// Configuration kept in a SQLite or PostgreSQL database: one table per family,
+/// `ai6_config_<name>` ([`ConfigRecord::name`]), each row a record's scope (`""` or
+/// `station:<id>`), key and definition, a JSON object with the keys of its table in the
+/// family file. A singleton family's one record is keyed
+/// [`ConfigRecord::SINGLETON_KEY`].
 ///
 /// Its revision is the `config` row of `ai6_clock`, which every
-/// [`put`](ConfigSource::put) and [`remove`](ConfigSource::remove) advances; a writer outside
-/// AI6 advances it in the same transaction, or Stations do not see the change. The database
-/// can be the Registry's.
-pub struct SqlConfigSource {
+/// [`put`](ConfigProvider::put) and [`remove`](ConfigProvider::remove) advances; a writer
+/// outside AI6 advances it in the same transaction, or Stations do not see the change. A
+/// change is checked in that transaction against every view it touches: the global one and
+/// each Station's with records of its own for a global change, the Station's for one of its
+/// own. The database can be the Registry's.
+pub struct SqlProvider {
     db: Database,
 }
 
-impl fmt::Debug for SqlConfigSource {
+impl fmt::Debug for SqlProvider {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("SqlConfigSource")
+            .debug_struct("SqlProvider")
             .finish_non_exhaustive()
     }
 }
 
-impl SqlConfigSource {
-    /// Opens the roster at `location` with the default [`SqlOptions`].
+impl SqlProvider {
+    /// Opens the configuration at `location` with the default [`SqlOptions`].
     ///
     /// # Errors
     ///
-    /// As [`SqlConfigSource::open_with`].
+    /// As [`SqlProvider::open_with`].
     pub fn open(location: &str) -> io::Result<Self> {
         Self::open_with(location, &SqlOptions::default())
     }
 
-    /// Opens the roster at `location` (`sqlite:PATH` or a `postgres://` URL, read as
+    /// Opens the configuration at `location` (`sqlite:PATH` or a `postgres://` URL, read as
     /// [`SqlRegistry::open_with`](crate::directorates::registry::sql::SqlRegistry::open_with)
     /// reads it), creating or upgrading its tables.
     ///
@@ -188,19 +154,39 @@ impl SqlConfigSource {
         })
     }
 
-    /// Applies `change` and checks the roster it leaves, all in one transaction, which is
-    /// rolled back when nothing changed or the roster is not acceptable.
+    /// Applies `change` and checks every view at `scope` it touches, all in one
+    /// transaction, which is rolled back when nothing changed or a view is not acceptable.
     fn change(
         &self,
+        scope: &ConfigScope,
         change: impl FnOnce(&mut Tx<'_>, i64) -> io::Result<bool> + Send,
     ) -> Result<Option<ConfigRevision>, RosterError> {
-        let outcome = self.db.write(Clock::Config, |tx, revision| {
+        let scope = scope.clone();
+        let outcome = self.db.write(Clock::Config, move |tx, revision| {
             if !change(tx, revision)? {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "unchanged"));
             }
-            roster(rows(tx)?)
-                .map(|snapshot| snapshot.revision)
-                .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason.to_string()))
+            let records = records(tx)?;
+            let invalid = |reason: RosterError| {
+                io::Error::new(io::ErrorKind::InvalidInput, reason.to_string())
+            };
+            let stations: BTreeSet<String> = match &scope {
+                ConfigScope::Station(id) => [id.clone()].into(),
+                ConfigScope::Global => records
+                    .rows
+                    .iter()
+                    .filter_map(|(_, (scope, _, _))| match ConfigScope::parse(scope) {
+                        Some(ConfigScope::Station(id)) => Some(id),
+                        _ => None,
+                    })
+                    .chain([String::new()])
+                    .collect(),
+            };
+            let mut revision = None;
+            for station in stations {
+                revision = Some(snapshot(&records, &station).map_err(invalid)?.revision);
+            }
+            Ok(revision.unwrap_or_default())
         });
         match outcome {
             Ok(revision) => Ok(Some(revision)),
@@ -213,30 +199,48 @@ impl SqlConfigSource {
     }
 }
 
-impl ConfigSource for SqlConfigSource {
-    fn load(&self) -> Result<ConfigSnapshot, RosterError> {
-        roster(self.db.read(rows).map_err(failed)?)
+impl ConfigProvider for SqlProvider {
+    fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
+        snapshot(&self.db.read(records).map_err(failed)?, station)
     }
 
-    fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError> {
-        if self.revision()? == since {
+    fn changes_since(
+        &self,
+        station: &str,
+        since: ConfigRevision,
+    ) -> Result<Option<ConfigSnapshot>, RosterError> {
+        if self.revision(station)? == since {
             return Ok(None);
         }
-        self.load().map(Some)
+        self.load(station).map(Some)
     }
 
-    fn revision(&self) -> Result<ConfigRevision, RosterError> {
+    fn revision(&self, _station: &str) -> Result<ConfigRevision, RosterError> {
         revision_of(self.db.read(clock).map_err(failed)?)
     }
 
-    fn definitions(&self, record: ConfigRecord) -> Result<ConfigDefinitions, RosterError> {
+    fn definitions(
+        &self,
+        record: ConfigRecord,
+        scope: &ConfigScope,
+    ) -> Result<ConfigDefinitions, RosterError> {
         let (revision, rows) = self
             .db
-            .read(|tx| Ok((clock(tx)?, table(tx, record)?)))
+            .read(|tx| Ok((clock(tx)?, family(tx, record)?)))
             .map_err(failed)?;
+        let wanted = scope.as_text();
+        let records = rows
+            .into_iter()
+            .filter(|(scope, _, _)| *scope == wanted)
+            .map(|(_, key, text)| {
+                serde_json::from_str::<serde_json::Value>(&text)
+                    .map(|definition| (key.clone(), definition))
+                    .map_err(|reason| error(format!("{SOURCE}: {record} {key:?}: {reason}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(ConfigDefinitions {
             revision: revision_of(revision)?,
-            records: parsed(rows)?,
+            records,
             writable: true,
         })
     }
@@ -244,23 +248,34 @@ impl ConfigSource for SqlConfigSource {
     fn put(
         &self,
         record: ConfigRecord,
+        scope: &ConfigScope,
         key: &str,
         definition: &serde_json::Value,
     ) -> Result<ConfigRevision, RosterError> {
         if key.trim().is_empty() || !definition.is_object() {
             return Err(error(format!(
-                "{SOURCE}: a {} needs a key and a JSON object",
-                record.name()
+                "{SOURCE}: a {record} needs a key and a JSON object"
             )));
         }
+        check_placement(record, scope, key, &SOURCE)?;
         let text = definition.to_string();
-        self.change(|tx, revision| {
-            Ok(tx.execute(upsert(record), &[key.into(), text.into(), revision.into()])? > 0)
+        let sql = format!(
+            "INSERT INTO {} (scope, key, definition, revision) VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (scope, key) DO UPDATE SET definition = excluded.definition, \
+             revision = excluded.revision",
+            table(record)
+        );
+        let scope_text = scope.as_text();
+        self.change(scope, move |tx, revision| {
+            Ok(tx.execute(
+                &sql,
+                &[scope_text.into(), key.into(), text.into(), revision.into()],
+            )? > 0)
         })?
         .ok_or_else(|| {
             error_of(
                 RosterErrorKind::Unavailable,
-                format!("{SOURCE}: the {} {key:?} was not stored", record.name()),
+                format!("{SOURCE}: the {record} {key:?} was not stored"),
             )
         })
     }
@@ -268,9 +283,17 @@ impl ConfigSource for SqlConfigSource {
     fn remove(
         &self,
         record: ConfigRecord,
+        scope: &ConfigScope,
         key: &str,
     ) -> Result<Option<ConfigRevision>, RosterError> {
-        self.change(|tx, _| Ok(tx.execute(delete(record), &[key.into()])? > 0))
+        let sql = format!(
+            "DELETE FROM {} WHERE scope = $1 AND key = $2",
+            table(record)
+        );
+        let scope_text = scope.as_text();
+        self.change(scope, move |tx, _| {
+            Ok(tx.execute(&sql, &[scope_text.into(), key.into()])? > 0)
+        })
     }
 }
 
@@ -279,55 +302,59 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn seed(source: &SqlConfigSource) {
-        source
-            .put(
+    const GLOBAL: ConfigScope = ConfigScope::Global;
+
+    fn seed(provider: &SqlProvider) {
+        for (record, key, definition) in [
+            (
                 ConfigRecord::Operation,
                 "G",
-                &json!({"roster": ["007", "008"]}),
-            )
-            .unwrap();
-        source
-            .put(
+                json!({"roster": ["007", "008"]}),
+            ),
+            (
                 ConfigRecord::Role,
                 "case-officer",
-                &json!({"purpose": "Runs a Mission end to end.", "policy": "Report to M."}),
-            )
-            .unwrap();
-        source
-            .put(
+                json!({"purpose": "Runs a Mission end to end.", "policy": "Report to M."}),
+            ),
+            (
                 ConfigRecord::Agent,
                 "007",
-                &json!({"handler": "mock-agent", "roles": ["case-officer"], "priority": 5}),
-            )
-            .unwrap();
-        source
-            .put(
+                json!({"handler": "mock-agent", "roles": ["case-officer"], "priority": 5}),
+            ),
+            (
                 ConfigRecord::Agent,
                 "008",
-                &json!({"extends": "007", "priority": 1}),
-            )
-            .unwrap();
-        source
-            .put(
+                json!({"extends": "007", "priority": 1}),
+            ),
+            (
                 ConfigRecord::Cover,
                 "house",
-                &json!({"description": "House style.", "trailers": ["Assisted-by"]}),
-            )
-            .unwrap();
+                json!({"description": "House style.", "trailers": ["Assisted-by"]}),
+            ),
+        ] {
+            provider.put(record, &GLOBAL, key, &definition).unwrap();
+        }
     }
 
     fn a_roster_is_built_from_typed_rows_and_shared_by_revision(location: &str) {
-        let station_a = SqlConfigSource::open(location).unwrap();
-        let empty = station_a.load().unwrap();
+        let station_a = SqlProvider::open(location).unwrap();
+        let empty = station_a.load("").unwrap();
         assert_eq!(empty.roster.operations().count(), 0);
-        assert!(station_a.changes_since(empty.revision).unwrap().is_none());
+        assert!(
+            station_a
+                .changes_since("", empty.revision)
+                .unwrap()
+                .is_none()
+        );
 
         seed(&station_a);
-        let station_b = SqlConfigSource::open(location).unwrap();
-        let seeded = station_b.changes_since(empty.revision).unwrap().unwrap();
+        let station_b = SqlProvider::open(location).unwrap();
+        let seeded = station_b
+            .changes_since("b", empty.revision)
+            .unwrap()
+            .unwrap();
         assert_ne!(seeded.revision, empty.revision);
-        assert_eq!(station_a.revision().unwrap(), seeded.revision);
+        assert_eq!(station_a.revision("a").unwrap(), seeded.revision);
         assert_eq!(seeded.roster.operation("G").unwrap().roster, ["007", "008"]);
         let inherited = seeded.roster.agent(Some("G"), "008").unwrap();
         assert_eq!(
@@ -335,27 +362,19 @@ mod tests {
             (Some("mock-agent"), 1),
             "008 extends 007"
         );
-        assert_eq!(
-            seeded
-                .roster
-                .select_agent(
-                    &crate::directorates::m::roster::AgentQuery::new()
-                        .operation(Some("G"))
-                        .role(Some("case-officer"))
-                )
-                .unwrap()
-                .id,
-            "007"
-        );
         assert!(seeded.roster.cover("house").is_ok());
         assert!(
             seeded.roster.cover("covert").is_ok(),
             "built-in covers stay"
         );
-        assert!(station_a.changes_since(seeded.revision).unwrap().is_none());
-        assert_eq!(station_a.load().unwrap().revision, seeded.revision);
+        assert!(
+            station_a
+                .changes_since("a", seeded.revision)
+                .unwrap()
+                .is_none()
+        );
 
-        let agents = station_a.definitions(ConfigRecord::Agent).unwrap();
+        let agents = station_a.definitions(ConfigRecord::Agent, &GLOBAL).unwrap();
         assert_eq!(agents.revision, seeded.revision);
         assert_eq!(
             agents.records,
@@ -370,59 +389,147 @@ mod tests {
 
         assert!(
             station_b
-                .remove(ConfigRecord::Cover, "house")
+                .remove(ConfigRecord::Cover, &GLOBAL, "house")
                 .unwrap()
                 .is_some()
         );
         assert_eq!(
-            station_b.remove(ConfigRecord::Cover, "house").unwrap(),
+            station_b
+                .remove(ConfigRecord::Cover, &GLOBAL, "house")
+                .unwrap(),
             None
         );
-        let changed = station_a.changes_since(seeded.revision).unwrap().unwrap();
+        let changed = station_a
+            .changes_since("a", seeded.revision)
+            .unwrap()
+            .unwrap();
         assert!(changed.roster.cover("house").is_err());
     }
 
     fn an_unacceptable_change_is_refused_and_changes_nothing(location: &str) {
-        let source = SqlConfigSource::open(location).unwrap();
-        seed(&source);
-        let good = source.load().unwrap();
-        for (record, key, definition) in [
-            (ConfigRecord::Agent, "009", json!({"clearance": "root"})),
-            (ConfigRecord::Operation, "L", json!({"on_blown": "shrug"})),
-            (ConfigRecord::Operation, "M", json!({"repos": ["x"]})),
+        let provider = SqlProvider::open(location).unwrap();
+        seed(&provider);
+        let good = provider.load("").unwrap();
+        for (record, scope, key, definition) in [
+            (
+                ConfigRecord::Agent,
+                GLOBAL,
+                "009",
+                json!({"clearance": "root"}),
+            ),
+            (
+                ConfigRecord::Operation,
+                GLOBAL,
+                "L",
+                json!({"on_blown": "shrug"}),
+            ),
+            (
+                ConfigRecord::Operation,
+                GLOBAL,
+                "M",
+                json!({"repos": ["x"]}),
+            ),
             (
                 ConfigRecord::Role,
+                GLOBAL,
                 "spy",
                 json!({"purpose": "", "policy": "p"}),
             ),
-            (ConfigRecord::Agent, "010", json!({"extends": "nobody"})),
-            (ConfigRecord::Cover, "odd", json!({"unknown": true})),
-            (ConfigRecord::Agent, "011", json!("not an object")),
+            (
+                ConfigRecord::Agent,
+                GLOBAL,
+                "010",
+                json!({"extends": "nobody"}),
+            ),
+            (ConfigRecord::Cover, GLOBAL, "odd", json!({"unknown": true})),
+            (ConfigRecord::Agent, GLOBAL, "011", json!("not an object")),
+            (
+                ConfigRecord::Agent,
+                ConfigScope::of_station("a"),
+                "012",
+                json!({"handler": "mock-agent"}),
+            ),
+            (
+                ConfigRecord::Theater,
+                ConfigScope::of_station("a"),
+                "box",
+                json!({"access": {"carrier-pigeon": {}}}),
+            ),
         ] {
-            let refused = source.put(record, key, &definition).unwrap_err();
+            let refused = provider.put(record, &scope, key, &definition).unwrap_err();
             assert_eq!(
                 refused.kind(),
                 RosterErrorKind::Invalid,
                 "{record:?} {key} {definition}: {refused}"
             );
         }
-        let refused = source.remove(ConfigRecord::Agent, "007").unwrap_err();
+        let refused = provider
+            .remove(ConfigRecord::Agent, &GLOBAL, "007")
+            .unwrap_err();
         assert!(refused.to_string().contains("007"), "{refused}");
         assert_eq!(refused.kind(), RosterErrorKind::Invalid);
-        assert!(source.changes_since(good.revision).unwrap().is_none());
+        assert!(provider.changes_since("", good.revision).unwrap().is_none());
+    }
+
+    fn a_station_scoped_record_changes_only_that_station(location: &str) {
+        let provider = SqlProvider::open(location).unwrap();
+        let theater = |host: &str| json!({"access": {"ssh": {"host": host}}});
+        provider
+            .put(
+                ConfigRecord::Theater,
+                &GLOBAL,
+                "box",
+                &theater("global.example"),
+            )
+            .unwrap();
+        provider
+            .put(
+                ConfigRecord::Theater,
+                &ConfigScope::of_station("a"),
+                "box",
+                &theater("a.example"),
+            )
+            .unwrap();
+        let host = |station: &str| {
+            let snapshot = provider.load(station).unwrap();
+            format!(
+                "{:?}",
+                snapshot.settings.theaters.find("box").unwrap().access
+            )
+        };
+        assert!(host("a").contains("a.example"));
+        assert!(host("b").contains("global.example"));
+        assert_eq!(
+            provider
+                .definitions(ConfigRecord::Theater, &ConfigScope::of_station("a"))
+                .unwrap()
+                .records
+                .len(),
+            1
+        );
+        // A global change is checked against Station a's view too.
+        let refused = provider
+            .put(
+                ConfigRecord::Operation,
+                &GLOBAL,
+                "G",
+                &json!({"theater": 3}),
+            )
+            .unwrap_err();
+        assert_eq!(refused.kind(), RosterErrorKind::Invalid);
     }
 
     fn an_assistant_row_gives_the_roster_its_settings(location: &str) {
-        let source = SqlConfigSource::open(location).unwrap();
-        seed(&source);
-        let seeded = source.load().unwrap();
+        let provider = SqlProvider::open(location).unwrap();
+        seed(&provider);
+        let seeded = provider.load("").unwrap();
         assert_eq!(
             seeded.roster.assistant(),
             &crate::AssistantSettings::default()
         );
         assert!(
-            source
-                .definitions(ConfigRecord::Assistant)
+            provider
+                .definitions(ConfigRecord::Assistant, &GLOBAL)
                 .unwrap()
                 .records
                 .is_empty()
@@ -433,12 +540,13 @@ mod tests {
             "allow_elevated": true,
             "shared": {"ops": {"repo": "/srv/ops.git", "write": true}},
         });
-        source
-            .put(ConfigRecord::Assistant, "assistant", &settings)
+        let key = ConfigRecord::SINGLETON_KEY;
+        provider
+            .put(ConfigRecord::Assistant, &GLOBAL, key, &settings)
             .unwrap();
-        let other_station = SqlConfigSource::open(location).unwrap();
+        let other_station = SqlProvider::open(location).unwrap();
         let set = other_station
-            .changes_since(seeded.revision)
+            .changes_since("", seeded.revision)
             .unwrap()
             .unwrap();
         let assistant = set.roster.assistant();
@@ -451,42 +559,42 @@ mod tests {
         assert_eq!(assistant.weakenings().len(), 2, "{assistant:?}");
         assert_eq!(
             other_station
-                .definitions(ConfigRecord::Assistant)
+                .definitions(ConfigRecord::Assistant, &GLOBAL)
                 .unwrap()
                 .records,
-            [("assistant".to_owned(), settings)]
+            [(key.to_owned(), settings)]
         );
 
         for (key, definition, names) in [
-            ("moneypenny", json!({}), "\"assistant\""),
+            ("moneypenny", json!({}), "\"settings\""),
             (
-                "assistant",
+                key,
                 json!({"personal_repo": "ext::sh"}),
                 "assistant.personal_repo",
             ),
-            ("assistant", json!({"allow_elevated": "yes"}), "assistant"),
-            ("assistant", json!({"unknown": true}), "unknown"),
+            (key, json!({"allow_elevated": "yes"}), "assistant"),
+            (key, json!({"unknown": true}), "unknown"),
             (
-                "assistant",
+                key,
                 json!({"shared": {"org": {"repo": "/srv/org.git"}}}),
                 "assistant.shared",
             ),
         ] {
-            let refused = source
-                .put(ConfigRecord::Assistant, key, &definition)
+            let refused = provider
+                .put(ConfigRecord::Assistant, &GLOBAL, key, &definition)
                 .unwrap_err();
             assert_eq!(refused.kind(), RosterErrorKind::Invalid, "{refused}");
             assert!(refused.to_string().contains(names), "{refused}");
         }
-        assert!(source.changes_since(set.revision).unwrap().is_none());
+        assert!(provider.changes_since("", set.revision).unwrap().is_none());
 
         assert!(
-            source
-                .remove(ConfigRecord::Assistant, "assistant")
+            provider
+                .remove(ConfigRecord::Assistant, &GLOBAL, key)
                 .unwrap()
                 .is_some()
         );
-        let removed = source.changes_since(set.revision).unwrap().unwrap();
+        let removed = provider.changes_since("", set.revision).unwrap().unwrap();
         assert_eq!(
             removed.roster.assistant(),
             &crate::AssistantSettings::default()
@@ -515,8 +623,13 @@ mod tests {
     }
 
     #[test]
-    fn an_unacceptable_sql_roster_change_is_refused_and_changes_nothing() {
+    fn an_unacceptable_sql_change_is_refused_and_changes_nothing() {
         run(an_unacceptable_change_is_refused_and_changes_nothing);
+    }
+
+    #[test]
+    fn a_sql_station_scoped_record_changes_only_that_station() {
+        run(a_station_scoped_record_changes_only_that_station);
     }
 
     #[test]

@@ -29,10 +29,10 @@ pub use directorates::m::assistant::{
     AssistantNarrowing, AssistantSettings, NetworkPolicy, RepoKind, SharedRepo, SkillEntry,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
-pub use directorates::m::config::SqlConfigSource;
+pub use directorates::m::config::SqlProvider;
 pub use directorates::m::config::{
-    ConfigDefinitions, ConfigRecord, ConfigRevision, ConfigSnapshot, ConfigSource, ConfigStatus,
-    MemoryConfigSource, TomlConfigDir,
+    ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
+    ConfigStatus, FileProvider, MemoryProvider, Settings,
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::harness::{

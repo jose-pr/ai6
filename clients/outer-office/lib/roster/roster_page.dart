@@ -135,8 +135,11 @@ const _kinds = {
   _assistantKind: "Moneypenny's settings",
 };
 
-/// The kind of Moneypenny's `[assistant]` settings: at most one record, keyed like the kind.
+/// The kind of Moneypenny's `[assistant]` settings: at most one record, keyed `settings`.
 const _assistantKind = 'assistant';
+
+/// The key of the one record of a family that has one, such as Moneypenny's settings.
+const _singletonKey = 'settings';
 
 /// The roster every Station reads: Operations, Agents, roles, cover policies and Moneypenny's
 /// settings, edited through Universal Exports. Each Station takes up an accepted edit at its
@@ -454,7 +457,7 @@ class _RecordEditor extends StatefulWidget {
 class _RecordEditorState extends State<_RecordEditor> {
   late final _fixedKey = widget.kind == _assistantKind;
   late final _key = TextEditingController(
-    text: widget.record?.key ?? (_fixedKey ? _assistantKind : ''),
+    text: widget.record?.key ?? (_fixedKey ? _singletonKey : ''),
   );
   late final _definition = TextEditingController(
     text: const JsonEncoder.withIndent('  ')

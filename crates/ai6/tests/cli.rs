@@ -231,7 +231,7 @@ fn theater_provision_names_what_is_missing_before_contacting_anything() {
         )
     };
     let (ok, error) = run("absent");
-    assert!(!ok && error.contains("theaters.toml declares no Theater \"absent\""));
+    assert!(!ok && error.contains("declares no Theater \"absent\""));
     let (ok, error) = run("box");
     assert!(
         !ok && error.contains("no provider `ssh` is loaded"),

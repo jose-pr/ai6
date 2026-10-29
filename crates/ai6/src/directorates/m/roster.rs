@@ -452,7 +452,7 @@ pub enum RosterErrorKind {
     Invalid,
     /// The configuration could not be read or written; trying again may succeed.
     Unavailable,
-    /// The source does not take changes ([`ConfigSource::put`](crate::ConfigSource::put)).
+    /// The source does not take changes ([`ConfigProvider::put`](crate::ConfigProvider::put)).
     ReadOnly,
 }
 
@@ -1287,14 +1287,15 @@ impl AgentRoleDefinition {
 /// `assistant` holds the keys of `[assistant]`, checked by [`AssistantSettings::validate`];
 /// `None` is the default settings. `source` names where they came from in error messages.
 ///
-/// Agents are resolved here, `extends` included, so the roster holds them complete.
-#[cfg(any(feature = "sqlite", feature = "postgres"))]
+/// Agents are resolved here, `extends` included, so the roster holds them complete. A
+/// relative skill path in the assistant settings is resolved against `base` when given.
 pub(crate) fn roster_from_definitions<'de, D>(
     operations: impl IntoIterator<Item = (String, D)>,
     agents: impl IntoIterator<Item = (String, D)>,
     roles: impl IntoIterator<Item = (String, D)>,
     covers: Covers,
     assistant: Option<D>,
+    base: Option<&Path>,
     source: &dyn fmt::Display,
 ) -> Result<Roster, RosterError>
 where
@@ -1335,8 +1336,11 @@ where
     }
     let assistant = match assistant {
         Some(definition) => {
-            let settings = AssistantSettings::deserialize(definition)
+            let mut settings = AssistantSettings::deserialize(definition)
                 .map_err(|reason| error(format!("{source}: assistant: {reason}")))?;
+            if let Some(base) = base {
+                settings.resolve_paths(base);
+            }
             settings
                 .validate()
                 .map_err(|reason| error(format!("{source}: {reason}")))?;

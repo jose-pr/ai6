@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ai6::directorates::m::config::{ConfigRecord, ConfigSource, SqlConfigSource};
+use ai6::directorates::m::config::{ConfigProvider, ConfigRecord, ConfigScope, SqlProvider};
 use ai6::directorates::registry::sql::SqlRegistry;
 use ai6::{AuditStore, GONE_DARK_AFTER, HeadquartersLease, RosterErrorKind, StationStore};
 use serde_json::json;
@@ -181,10 +181,11 @@ fn two_stations_on_one_database_elect_one_headquarters_share_the_roster_and_fail
     let root = tempfile::tempdir().unwrap();
 
     // The roster lives only in the database.
-    let roster = SqlConfigSource::open(&location).unwrap();
+    let roster = SqlProvider::open(&location).unwrap();
     roster
         .put(
             ConfigRecord::Operation,
+            &ConfigScope::Global,
             "G",
             &json!({"description": "Shared through PostgreSQL", "roster": ["007"]}),
         )
@@ -192,6 +193,7 @@ fn two_stations_on_one_database_elect_one_headquarters_share_the_roster_and_fail
     roster
         .put(
             ConfigRecord::Role,
+            &ConfigScope::Global,
             "case-officer",
             &json!({"purpose": "Runs a Mission end to end.", "policy": "Report to M."}),
         )
@@ -199,6 +201,7 @@ fn two_stations_on_one_database_elect_one_headquarters_share_the_roster_and_fail
     roster
         .put(
             ConfigRecord::Agent,
+            &ConfigScope::Global,
             "007",
             &json!({"handler": "mock-agent", "roles": ["case-officer"]}),
         )
@@ -283,12 +286,19 @@ fn both(registry: &SqlRegistry, check: impl Fn(&Info) -> bool) -> bool {
 /// running the last good roster.
 fn an_agent_edit_reaches_both_stations(location: &str, write_past_the_checks: &dyn Fn()) {
     let root = tempfile::tempdir().unwrap();
-    let roster = SqlConfigSource::open(location).unwrap();
+    let roster = SqlProvider::open(location).unwrap();
     roster
-        .put(ConfigRecord::Operation, "G", &json!({"roster": ["007"]}))
+        .put(
+            ConfigRecord::Operation,
+            &ConfigScope::Global,
+            "G",
+            &json!({"roster": ["007"]}),
+        )
         .unwrap();
     let agent = |priority: i64| json!({"handler": "mock-agent", "priority": priority});
-    roster.put(ConfigRecord::Agent, "007", &agent(1)).unwrap();
+    roster
+        .put(ConfigRecord::Agent, &ConfigScope::Global, "007", &agent(1))
+        .unwrap();
 
     let mut stations = [
         Station::start("station-a", location, root.path(), Some("1")),
@@ -300,7 +310,7 @@ fn an_agent_edit_reaches_both_stations(location: &str, write_past_the_checks: &d
     });
 
     let edited = roster
-        .put(ConfigRecord::Agent, "007", &agent(9))
+        .put(ConfigRecord::Agent, &ConfigScope::Global, "007", &agent(9))
         .unwrap()
         .get()
         .to_string();
@@ -312,7 +322,12 @@ fn an_agent_edit_reaches_both_stations(location: &str, write_past_the_checks: &d
     });
 
     let refused = roster
-        .put(ConfigRecord::Agent, "009", &json!({"clearance": "root"}))
+        .put(
+            ConfigRecord::Agent,
+            &ConfigScope::Global,
+            "009",
+            &json!({"clearance": "root"}),
+        )
         .unwrap_err();
     assert_eq!(refused.kind(), RosterErrorKind::Invalid, "{refused}");
 
@@ -355,7 +370,7 @@ fn an_agent_edit_reaches_both_stations(location: &str, write_past_the_checks: &d
 /// Adds Agent 009 with a clearance no roster accepts, advancing the roster's revision in the
 /// same transaction, as a writer outside AI6 is told to.
 const PAST_THE_CHECKS: &str = "UPDATE ai6_clock SET revision = revision + 1 WHERE name = 'config'; \
-     INSERT INTO ai6_config_agents (id, definition, revision) \
+     INSERT INTO ai6_config_agent (key, definition, revision) \
      SELECT '009', '{\"clearance\": \"root\"}', revision FROM ai6_clock WHERE name = 'config';";
 
 #[test]

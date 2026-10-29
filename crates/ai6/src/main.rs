@@ -630,7 +630,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
         .with_station_config(station_config)
         .with_config_dir(&opened.config_dir)
         .with_secrets_dir(&opened.secrets_dir)
-        .with_config_source(opened.provider)
+        .with_config_provider(opened.provider)
         .with_registry(opened.registry)
         .with_watchdog(
             ai6::WatchdogConfig::default()
@@ -664,7 +664,7 @@ fn load_bootstrap(bootstrap: &BootstrapArg) -> Result<Located<Bootstrap>, String
 
 /// What a Station opens from its bootstrap file before it serves.
 struct Opened {
-    provider: Arc<dyn ai6::ConfigSource>,
+    provider: Arc<dyn ai6::ConfigProvider>,
     registry: Arc<dyn ai6::RegistryBackend>,
     /// Where Theaters, loadouts, Cables and pins are read until they are provider records:
     /// the provider's directory, else the bootstrap file's, else the user's.
@@ -707,13 +707,24 @@ fn open_station(located: &Located<Bootstrap>) -> Result<Opened, String> {
     })
 }
 
+/// The Station this command acts for: the bootstrap file's `station`, else the ID a Station
+/// keeps in its state directory, else none (`""`, the global records).
+fn station_of(located: &Located<Bootstrap>, opened: &Opened) -> String {
+    if let Some(station) = &located.value.station {
+        return station.clone();
+    }
+    std::fs::read_to_string(opened.state_dir.join("station-id"))
+        .map(|text| text.trim().to_owned())
+        .unwrap_or_default()
+}
+
 /// Opens the configuration provider at `location`, connecting a SQL one with timeouts from
 /// `lease` and `password`.
 fn open_provider(
     location: &str,
     lease: Duration,
     password: Option<&SecretRef>,
-) -> Result<Arc<dyn ai6::ConfigSource>, String> {
+) -> Result<Arc<dyn ai6::ConfigProvider>, String> {
     let options = sql_options(lease, password, "provider")?;
     let shown = ai6::directorates::registry::sql::redact(location);
     let provider =
@@ -966,12 +977,17 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let found = ai6::Theaters::load(&opened.config_dir)
+    let station = station_of(&located, &opened);
+    let found = opened
+        .provider
+        .load(&station)
         .map_err(|error| error.to_string())
-        .and_then(|theaters| {
-            theaters
+        .and_then(|snapshot| {
+            snapshot
+                .settings
+                .theaters
                 .find(&theater)
-                .ok_or_else(|| format!("theaters.toml declares no Theater {theater:?}"))
+                .ok_or_else(|| format!("the configuration declares no Theater {theater:?}"))
         });
     let declared = match found {
         Ok(declared) => declared,
@@ -1095,7 +1111,7 @@ fn sleeper_command(bootstrap: &BootstrapArg, command: SleeperCommand) -> Result<
         located.value.registry.headquarters_lease(),
         located.value.provider.password.as_ref(),
     )?
-    .load()
+    .load("")
     .map_err(|e| e.to_string())?
     .roster;
     let registry = open_registry(&located)?;

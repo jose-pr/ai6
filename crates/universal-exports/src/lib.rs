@@ -23,7 +23,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ai6::directorates::registry::backend::*;
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
-    Authorizer, Brief, ConfigSource, Directory, Lookup, MissionProposal, MissionUsage, Origin,
+    Authorizer, Brief, ConfigProvider, Directory, Lookup, MissionProposal, MissionUsage, Origin,
     Person, Provenance, Quarantine, StationSettings, Verdict,
 };
 
@@ -434,7 +434,7 @@ pub struct Gateway {
     input_rx: std::sync::Arc<Mutex<mpsc::Receiver<AgentInput>>>,
     registry: Option<Arc<dyn RegistryBackend>>,
     access: Option<AccessProviders>,
-    roster: Option<Arc<dyn ConfigSource>>,
+    roster: Option<Arc<dyn ConfigProvider>>,
     login_guard: std::sync::Arc<LoginGuard>,
     controls: Arc<std::sync::Mutex<ControlBook>>,
     control_ready: Arc<tokio::sync::Notify>,
@@ -535,7 +535,7 @@ impl Gateway {
     /// Station reads. Edits need a source that takes changes, such as a SQL roster; without a
     /// source those routes answer 503.
     #[must_use]
-    pub fn with_roster(mut self, source: Arc<dyn ConfigSource>) -> Self {
+    pub fn with_roster(mut self, source: Arc<dyn ConfigProvider>) -> Self {
         self.roster = Some(source);
         self
     }

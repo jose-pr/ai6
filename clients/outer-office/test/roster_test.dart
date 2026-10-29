@@ -203,7 +203,7 @@ void main() {
             'records': [
               if (stored)
                 {
-                  'key': 'assistant',
+                  'key': 'settings',
                   'definition': {
                     'personal_repo': '/srv/moneypenny/{person_digest}.git',
                   },
@@ -241,7 +241,7 @@ void main() {
     await tester.tap(find.text("Moneypenny's settings").last);
     await tester.pumpAndSettle();
     expect(requests.last.url.path, '/v1/user/roster/assistant');
-    expect(find.text('assistant'), findsOneWidget);
+    expect(find.text('settings'), findsOneWidget);
     expect(find.textContaining('person_digest'), findsOneWidget);
     expect(
       find.text('Add'),
@@ -249,7 +249,7 @@ void main() {
       reason: 'the one record exists, so it is edited, not added',
     );
 
-    await tester.tap(find.byTooltip('Edit assistant'));
+    await tester.tap(find.byTooltip('Edit settings'));
     await tester.pumpAndSettle();
     expect(
       find.byKey(const Key('roster-key')),
@@ -265,7 +265,7 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     final put = requests.lastWhere((request) => request.method == 'PUT');
-    expect(put.url.path, '/v1/user/roster/assistant/assistant');
+    expect(put.url.path, '/v1/user/roster/assistant/settings');
     expect(jsonDecode(put.body)['allow_elevated'], true);
     expect(find.textContaining('roster revision 13'), findsOneWidget);
     expect(
@@ -277,12 +277,12 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.byTooltip('Remove assistant'));
+    await tester.tap(find.byTooltip('Remove settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Remove'));
     await tester.pumpAndSettle();
     final delete = requests.lastWhere((request) => request.method == 'DELETE');
-    expect(delete.url.path, '/v1/user/roster/assistant/assistant');
+    expect(delete.url.path, '/v1/user/roster/assistant/settings');
     expect(
       find.textContaining('assistant.allow_elevated = true'),
       findsNothing,
@@ -297,7 +297,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       requests.lastWhere((request) => request.method == 'PUT').url.path,
-      '/v1/user/roster/assistant/assistant',
+      '/v1/user/roster/assistant/settings',
       reason: 'a new record of this kind is keyed assistant',
     );
   });

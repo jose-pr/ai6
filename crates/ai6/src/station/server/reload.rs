@@ -1,13 +1,14 @@
 //! Live configuration: the roster and loadouts a Station reads again while it runs.
 //!
 //! Every poll ([`DEFAULT_CONFIG_POLL`](super::DEFAULT_CONFIG_POLL) unless the Station says
-//! otherwise) asks the configuration source for its revision. A new revision is loaded, which
-//! checks it as the configuration files are checked, and applied: requests, the scheduler and
-//! new Sessions use it, while a running Session keeps the configuration it started with. A
-//! revision that is not acceptable is refused once, logged and audited, and the last good
-//! configuration keeps running. `loadouts.toml` is read again when it changes, and the Station
-//! then declares its pool accounts again. Files read only at start are reported as needing a
-//! restart, at check-in and in the log.
+//! otherwise) asks the configuration provider for the revision of the Station's own view. A
+//! new revision is loaded, which checks it as the family files are checked, and the families
+//! that apply live are applied: requests, the scheduler and new Sessions use them, while a
+//! running Session keeps the configuration it started with. A changed family that only a
+//! restart applies is reported as needing one, at check-in and in the log. A revision that is
+//! not acceptable is refused once, logged and audited, and the last good configuration keeps
+//! running. `loadouts.toml` is read again when it changes, and the Station then declares its
+//! pool accounts again; `cables.toml` is read only at start.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -20,15 +21,17 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use super::{DaemonState, accounts, publish_station_check_in};
-use crate::directorates::m::config::{ConfigRevision, ConfigSource, ConfigStatus};
+use crate::directorates::m::config::{
+    ConfigProvider, ConfigRevision, ConfigSnapshot, ConfigStatus,
+};
 use crate::directorates::m::roster::{Roster, RosterErrorKind};
 use crate::directorates::q::{LoadoutCatalog, QErrorKind};
 use crate::directorates::registry::store::AuditRecord;
 
 /// The loadouts a Station reads from its configuration directory.
 pub(super) const LOADOUTS_FILE: &str = "loadouts.toml";
-/// Files a Station reads only when it starts.
-const RESTART_FILES: [&str; 2] = ["theaters.toml", "cables.toml"];
+/// Files a Station reads beside its provider, only when it starts.
+const RESTART_FILES: [&str; 1] = ["cables.toml"];
 /// The audit action of a refused configuration.
 const REFUSED_ACTION: &str = "config.refused";
 /// The Registry's bound on an audit target.
@@ -43,7 +46,11 @@ type FileDigest = Option<[u8; 32]>;
 /// Station's state. The default holds nothing and reads nothing: each copy keeps its own.
 #[derive(Default)]
 pub(super) struct LiveConfig {
-    source: Option<Arc<dyn ConfigSource>>,
+    source: Option<Arc<dyn ConfigProvider>>,
+    /// The Station whose view of the provider it reads.
+    station: String,
+    /// What the Station started with, to tell which restart-only families changed since.
+    started: Option<ConfigSnapshot>,
     /// The configuration directory: `loadouts.toml` and the files only a restart applies.
     config_dir: Option<PathBuf>,
     live: Mutex<Live>,
@@ -67,16 +74,18 @@ struct Live {
 }
 
 impl LiveConfig {
-    /// The configuration a Station starts with: `roster` at `revision` from `source`, and the
-    /// loadouts `catalog` when it was read from `config_dir`'s `loadouts.toml` (`None` when
-    /// the loadouts were set in code, which no reload replaces).
+    /// The configuration Station `station` starts with: `started`, its view of `source`,
+    /// running `roster`, and the loadouts `catalog` when it was read from `config_dir`'s
+    /// `loadouts.toml` (`None` when the loadouts were set in code, which no reload replaces).
     pub(super) fn new(
-        source: Arc<dyn ConfigSource>,
+        source: Arc<dyn ConfigProvider>,
+        station: &str,
+        started: ConfigSnapshot,
         config_dir: &Path,
         roster: Arc<Roster>,
-        revision: ConfigRevision,
         catalog: Option<Option<Arc<LoadoutCatalog>>>,
     ) -> Self {
+        let revision = started.revision;
         let loadouts = if catalog.is_some() {
             digest(&config_dir.join(LOADOUTS_FILE)).unwrap_or_default()
         } else {
@@ -88,6 +97,8 @@ impl LiveConfig {
             .collect();
         Self {
             source: Some(source),
+            station: station.to_owned(),
+            started: Some(started),
             config_dir: Some(config_dir.to_path_buf()),
             live: Mutex::new(Live {
                 roster: Some(roster),
@@ -215,7 +226,8 @@ fn poll_roster(state: &DaemonState) -> bool {
     let Some(source) = &state.config.source else {
         return false;
     };
-    let revision = match source.revision() {
+    let station = state.config.station.as_str();
+    let revision = match source.revision(station) {
         Ok(revision) => revision,
         Err(error) => {
             unavailable(state, &error.to_string());
@@ -241,8 +253,9 @@ fn poll_roster(state: &DaemonState) -> bool {
             return false;
         }
     }
-    match source.load() {
+    match source.load(station) {
         Ok(snapshot) => {
+            restart_families(state, &snapshot);
             let mut live = state.config.lock();
             live.roster = Some(Arc::new(snapshot.roster));
             live.revision = Some(snapshot.revision);
@@ -312,6 +325,26 @@ fn poll_loadouts(state: &DaemonState) -> bool {
             drop(live);
             refuse(state, &reason);
             false
+        }
+    }
+}
+
+/// Notes each family only a restart applies whose records differ from what the Station
+/// started with.
+fn restart_families(state: &DaemonState, snapshot: &ConfigSnapshot) {
+    let Some(started) = &state.config.started else {
+        return;
+    };
+    let changed = started.changed_families(snapshot);
+    let mut live = state.config.lock();
+    for record in crate::directorates::m::config::ConfigRecord::ALL {
+        if record.applies_live() {
+            continue;
+        }
+        if !changed.contains(&record) {
+            live.needs_restart.remove(record.name());
+        } else if live.needs_restart.insert(record.name()) {
+            eprintln!("ai6: {record} changed; restart the Station to apply it");
         }
     }
 }
@@ -399,7 +432,7 @@ mod tests {
 
     use super::super::tests::test_state;
     use super::*;
-    use crate::directorates::m::config::TomlConfigDir;
+    use crate::directorates::m::config::FileProvider;
 
     const AGENTS: &str = "[agent.007]\nhandler = \"mock-agent\"\npriority = 1\n";
 
@@ -409,23 +442,24 @@ mod tests {
 
     /// Makes `state` run what `source` holds, reading its loadouts from `root` when
     /// `loadouts` says so, as `serve` does.
-    fn live(state: &mut DaemonState, root: &Path, source: Arc<dyn ConfigSource>, loadouts: bool) {
-        let snapshot = source.load().unwrap();
+    fn live(state: &mut DaemonState, root: &Path, source: Arc<dyn ConfigProvider>, loadouts: bool) {
+        let snapshot = source.load(&state.station_id).unwrap();
         let catalog = loadouts.then(|| {
             let path = root.join(LOADOUTS_FILE);
             path.is_file()
                 .then(|| Arc::new(LoadoutCatalog::load(&path).unwrap()))
         });
-        state.roster = Arc::new(snapshot.roster);
+        state.roster = Arc::new(snapshot.roster.clone());
         state
             .station
             .credentials
             .set_catalog(catalog.clone().flatten());
         state.config = Arc::new(LiveConfig::new(
             source,
+            &state.station_id,
+            snapshot,
             root,
             state.roster.clone(),
-            snapshot.revision,
             catalog,
         ));
     }
@@ -451,7 +485,7 @@ mod tests {
         live(
             &mut state,
             root.path(),
-            Arc::new(TomlConfigDir::new(root.path())),
+            Arc::new(FileProvider::new(root.path())),
             false,
         );
         assert!(!poll(&state), "nothing changed");
@@ -504,7 +538,7 @@ mod tests {
         live(
             &mut state,
             root.path(),
-            Arc::new(TomlConfigDir::new(root.path())),
+            Arc::new(FileProvider::new(root.path())),
             true,
         );
         declare(&state);
@@ -550,18 +584,25 @@ mod tests {
     /// by each, audited by each, and the roster they ran keeps running.
     #[cfg(any(feature = "sqlite", feature = "postgres"))]
     fn an_edit_in_a_shared_sql_roster_reaches_every_station(location: &str) {
-        use crate::directorates::m::config::{ConfigRecord, SqlConfigSource};
+        use crate::directorates::m::config::{ConfigRecord, ConfigScope, SqlProvider};
         use crate::directorates::registry::sql::db::{Clock, Database, Location};
         use crate::directorates::registry::sql::{SqlOptions, SqlRegistry};
         use serde_json::json;
 
-        let admin = SqlConfigSource::open(location).unwrap();
+        let admin = SqlProvider::open(location).unwrap();
+        let global = ConfigScope::Global;
         admin
-            .put(ConfigRecord::Operation, "G", &json!({"roster": ["007"]}))
+            .put(
+                ConfigRecord::Operation,
+                &global,
+                "G",
+                &json!({"roster": ["007"]}),
+            )
             .unwrap();
         admin
             .put(
                 ConfigRecord::Agent,
+                &global,
                 "007",
                 &json!({"handler": "mock-agent", "priority": 1}),
             )
@@ -577,7 +618,7 @@ mod tests {
             live(
                 &mut state,
                 root.path(),
-                Arc::new(SqlConfigSource::open(location).unwrap()),
+                Arc::new(SqlProvider::open(location).unwrap()),
                 false,
             );
             state
@@ -589,6 +630,7 @@ mod tests {
         let edited = admin
             .put(
                 ConfigRecord::Agent,
+                &global,
                 "007",
                 &json!({"handler": "mock-agent", "priority": 9}),
             )
@@ -607,7 +649,7 @@ mod tests {
             Database::open(Location::parse(location).unwrap(), &SqlOptions::default()).unwrap();
         db.write(Clock::Config, |tx, revision| {
             tx.execute(
-                "INSERT INTO ai6_config_agents (id, definition, revision) VALUES ($1, $2, $3)",
+                "INSERT INTO ai6_config_agent (key, definition, revision) VALUES ($1, $2, $3)",
                 &[
                     "009".into(),
                     r#"{"clearance":"root"}"#.into(),
@@ -635,7 +677,7 @@ mod tests {
             "{refused:?}"
         );
 
-        admin.remove(ConfigRecord::Agent, "009").unwrap();
+        admin.remove(ConfigRecord::Agent, &global, "009").unwrap();
         for station in &stations {
             assert!(poll(station));
             assert!(station.config.status().refused.is_empty());
@@ -661,21 +703,34 @@ mod tests {
     }
 
     #[test]
-    fn files_read_only_at_start_are_reported_as_needing_a_restart() {
+    fn restart_only_families_and_files_are_reported_as_needing_a_restart() {
         let root = tempfile::tempdir().unwrap();
         let mut state = test_state(root.path(), "", AGENTS);
         live(
             &mut state,
             root.path(),
-            Arc::new(TomlConfigDir::new(root.path())),
+            Arc::new(FileProvider::new(root.path())),
             false,
         );
         let theaters = root.path().join("theaters.toml");
-        fs::write(&theaters, "[theater.box]\nkind = \"local\"\n").unwrap();
-        assert!(!poll(&state), "a restart applies it, not a poll");
-        assert_eq!(state.config.status().needs_restart, ["theaters.toml"]);
+        fs::write(&theaters, "[theater.box]\naccess = \"local\"\n").unwrap();
+        poll(&state);
+        assert_eq!(state.config.status().needs_restart, ["theater"]);
+        assert!(
+            state.current().station.theaters.find("box").is_none(),
+            "a restart applies it, not a poll"
+        );
+        let agents = root.path().join("agents.toml");
+        fs::write(&agents, AGENTS.replace("priority = 1", "priority = 6")).unwrap();
+        assert!(poll(&state), "an Agent applies live beside it");
+        assert_eq!(priority(&state.current()), 6);
         fs::remove_file(&theaters).unwrap();
         poll(&state);
         assert!(state.config.status().needs_restart.is_empty());
+
+        let cables = root.path().join("cables.toml");
+        fs::write(&cables, "").unwrap();
+        poll(&state);
+        assert_eq!(state.config.status().needs_restart, ["cables.toml"]);
     }
 }

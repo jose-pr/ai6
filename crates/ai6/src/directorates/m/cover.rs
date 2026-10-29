@@ -462,7 +462,6 @@ struct CoverDefinition {
 }
 
 /// A cover policy from the keys of its `[cover.<name>]` table, in any serde format.
-#[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub(crate) fn cover_from<'de, D>(name: String, definition: D) -> Result<Cover, CoverError>
 where
     D: serde::Deserializer<'de>,

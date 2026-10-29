@@ -1,38 +1,45 @@
-//! Where a Station's [`Roster`] comes from.
+//! Where a Station's configuration comes from: its configuration provider.
 //!
-//! A [`ConfigSource`] hands out the roster at a [`ConfigRevision`] and says cheaply whether
-//! it has changed since. [`TomlConfigDir`] reads `operations.toml`, `agents.toml` and
-//! `covers.toml` from a configuration directory, the default; [`MemoryConfigSource`] holds a
-//! roster built in code; with the `sqlite` or `postgres` feature, `SqlConfigSource` keeps it in
-//! a database every Station shares. Any other store builds its roster with
+//! A [`ConfigProvider`] holds records of each family ([`ConfigRecord`]) at a scope
+//! ([`ConfigScope`]): global, or one Station's. A Station's view of a family is its own
+//! records over the global ones, key by key; a singleton family's one record replaces the
+//! global one whole. The provider hands out that view checked and built
+//! ([`ConfigSnapshot`]: the roster and the [`Settings`]) at a [`ConfigRevision`], and says
+//! cheaply whether it has changed since.
+//!
+//! [`FileProvider`] reads a directory of family files (`operations.toml`, `agents.yaml`,
+//! `stations/<id>/theaters.json`, ...), read-only; [`MemoryProvider`] holds a roster built in
+//! code; with the `sqlite` or `postgres` feature, `SqlProvider` keeps the records in a
+//! database every Station shares and takes changes. Any other store builds its roster with
 //! [`Roster::from_parts`].
 //!
-//! A source that takes changes ([`ConfigSource::put`], [`ConfigSource::remove`]) checks the
-//! roster each one leaves before keeping it; a Station polls its source and applies a new
-//! revision without a restart.
-//!
-//! Theaters are not part of it: each Station reads its own.
+//! A provider that takes changes ([`ConfigProvider::put`], [`ConfigProvider::remove`]) checks
+//! every view a change touches before keeping it; a Station polls its provider and applies a
+//! new revision of the families that apply live without a restart.
 
+mod file;
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 mod sql;
 
+pub use file::FileProvider;
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
-pub use sql::SqlConfigSource;
+pub use sql::SqlProvider;
 
+use std::collections::BTreeMap;
 use std::fmt;
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use sha2::{Digest, Sha256};
 
-use crate::directorates::m::roster::{Roster, RosterError, RosterErrorKind, error, error_of};
+use crate::directorates::m::cover::{Covers, cover_from};
+use crate::directorates::m::roster::{
+    Roster, RosterError, RosterErrorKind, error, error_of, roster_from_definitions,
+};
+use crate::directorates::m::theaters::Theaters;
 
-/// The files a [`TomlConfigDir`] builds its roster from.
-const ROSTER_FILES: [&str; 3] = ["operations.toml", "agents.toml", "covers.toml"];
-
-/// The kinds of record a roster is built from.
+/// The families of record a configuration provider holds.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ConfigRecord {
@@ -42,64 +49,140 @@ pub enum ConfigRecord {
     Agent,
     /// An Agent role: the keys of a `[role.<id>]` table.
     Role,
+    /// Moneypenny's settings ([`AssistantSettings`](crate::AssistantSettings)): the keys of
+    /// the `[assistant]` table; a singleton.
+    Assistant,
     /// A cover policy: the keys of a `[cover.<name>]` table.
     Cover,
-    /// Moneypenny's settings ([`AssistantSettings`](crate::AssistantSettings)): the keys of
-    /// the `[assistant]` table, one record keyed [`ASSISTANT_KEY`](Self::ASSISTANT_KEY).
-    Assistant,
+    /// A Theater: the keys of a `[theater.<id>]` table; global or one Station's.
+    Theater,
 }
 
 impl ConfigRecord {
-    /// Every kind, in the order a roster is built.
-    pub const ALL: [Self; 5] = [
+    /// Every family, in the order a snapshot is built.
+    pub const ALL: [Self; 6] = [
         Self::Operation,
         Self::Agent,
         Self::Role,
-        Self::Cover,
         Self::Assistant,
+        Self::Cover,
+        Self::Theater,
     ];
 
-    /// The key of the one [`Assistant`](Self::Assistant) record.
-    pub const ASSISTANT_KEY: &'static str = "assistant";
+    /// The key of a singleton family's one record.
+    pub const SINGLETON_KEY: &'static str = "settings";
 
-    /// The name of its table in the configuration files: `operation`, `agent`, `role`,
-    /// `cover` or `assistant`.
+    /// The family's name, which is also its table in its family file: `operation`, `agent`,
+    /// `role`, `assistant`, `cover` or `theater`.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Operation => "operation",
             Self::Agent => "agent",
             Self::Role => "role",
-            Self::Cover => "cover",
             Self::Assistant => "assistant",
+            Self::Cover => "cover",
+            Self::Theater => "theater",
         }
     }
 
-    /// The kind whose [`name`](Self::name) is `name`.
+    /// The family whose [`name`](Self::name) is `name`.
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|record| record.name() == name)
     }
 
-    /// The file of a configuration directory that holds this kind.
-    const fn file(self) -> &'static str {
+    /// The family file that holds it, without its extension: `operations`, `agents`,
+    /// `covers` or `theaters`.
+    pub const fn file(self) -> &'static str {
         match self {
-            Self::Operation => "operations.toml",
-            Self::Agent | Self::Role | Self::Assistant => "agents.toml",
-            Self::Cover => "covers.toml",
+            Self::Operation => "operations",
+            Self::Agent | Self::Role | Self::Assistant => "agents",
+            Self::Cover => "covers",
+            Self::Theater => "theaters",
+        }
+    }
+
+    /// Whether the family has one record, keyed [`SINGLETON_KEY`](Self::SINGLETON_KEY).
+    pub const fn is_singleton(self) -> bool {
+        matches!(self, Self::Assistant)
+    }
+
+    /// Whether a Station may have records of its own in this family.
+    pub const fn station_scoped(self) -> bool {
+        matches!(self, Self::Theater)
+    }
+
+    /// Whether a running Station applies a change without a restart.
+    pub const fn applies_live(self) -> bool {
+        !matches!(self, Self::Theater)
+    }
+}
+
+impl fmt::Display for ConfigRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+/// Where a record applies: to every Station, or to one.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConfigScope {
+    /// Every Station, unless it has a record of its own with the same key.
+    #[default]
+    Global,
+    /// One Station, by ID.
+    Station(String),
+}
+
+impl ConfigScope {
+    /// The text form a provider stores: `""` for [`Global`](Self::Global), `station:<id>`.
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::Global => String::new(),
+            Self::Station(id) => format!("station:{id}"),
+        }
+    }
+
+    /// The scope of a text form: `""` or `station:<id>`; `None` for anything else.
+    pub fn parse(text: &str) -> Option<Self> {
+        if text.is_empty() {
+            return Some(Self::Global);
+        }
+        text.strip_prefix("station:")
+            .filter(|id| !id.is_empty())
+            .map(|id| Self::Station(id.to_owned()))
+    }
+
+    /// The scope a Station's own records have; [`Global`](Self::Global) for `""`.
+    pub fn of_station(station: &str) -> Self {
+        if station.is_empty() {
+            Self::Global
+        } else {
+            Self::Station(station.to_owned())
         }
     }
 }
 
-/// The records of one kind as a source holds them, at one revision.
+impl fmt::Display for ConfigScope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Global => formatter.write_str("global"),
+            Self::Station(id) => write!(formatter, "station:{id}"),
+        }
+    }
+}
+
+/// The records of one family at one scope as a provider holds them, at one revision.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfigDefinitions {
     /// The revision they were read at.
     pub revision: ConfigRevision,
-    /// Each record's key and definition: a JSON object with the keys of its table in the
-    /// configuration files, ordered by key.
+    /// Each record's key and definition: a JSON object with the keys of its table in its
+    /// family file, ordered by key.
     pub records: Vec<(String, serde_json::Value)>,
-    /// Whether the source takes [`put`](ConfigSource::put) and
-    /// [`remove`](ConfigSource::remove).
+    /// Whether the provider takes [`put`](ConfigProvider::put) and
+    /// [`remove`](ConfigProvider::remove).
     pub writable: bool,
 }
 
@@ -107,15 +190,15 @@ pub struct ConfigDefinitions {
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConfigStatus {
-    /// The [`ConfigRevision`] of the roster it runs, in decimal: a digest can pass the 2^53
-    /// a JSON number holds exactly.
+    /// The [`ConfigRevision`] it runs, in decimal: a digest can pass the 2^53 a JSON number
+    /// holds exactly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
-    /// Why it refused the newest roster or `loadouts.toml`, while it keeps running the last
-    /// good one.
+    /// Why it refused the newest configuration, while it keeps running the last good one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refused: Vec<String>,
-    /// Files changed since it started that only a restart applies, such as `theaters.toml`.
+    /// Families changed since it started that only a restart applies, such as `theater`, or
+    /// files a Station still reads beside its provider, such as `cables.toml`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs_restart: Vec<String>,
 }
@@ -123,12 +206,12 @@ pub struct ConfigStatus {
 fn read_only() -> RosterError {
     error_of(
         RosterErrorKind::ReadOnly,
-        "this configuration source does not take changes",
+        "this configuration provider does not take changes",
     )
 }
 
-/// Which state of a [`ConfigSource`] a [`ConfigSnapshot`] is: opaque, compared only for
-/// equality, and chosen by the source.
+/// Which state of a [`ConfigProvider`] a [`ConfigSnapshot`] is: opaque, compared only for
+/// equality, and chosen by the provider.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConfigRevision(u64);
 
@@ -144,90 +227,130 @@ impl ConfigRevision {
     }
 }
 
-/// A roster at one [`ConfigRevision`].
+/// What a snapshot holds besides the roster, resolved for one Station.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Settings {
+    /// The Theaters the Station declares (`theater` records).
+    pub theaters: Theaters,
+}
+
+/// The configuration of one Station at one [`ConfigRevision`].
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ConfigSnapshot {
-    /// Which state of the source this is.
+    /// Which state of the provider this is.
     pub revision: ConfigRevision,
     /// The checked roster.
     pub roster: Roster,
+    /// Everything else.
+    pub settings: Settings,
+    /// A digest of each family's records in this view, to tell which families a later
+    /// snapshot changed.
+    fingerprints: BTreeMap<ConfigRecord, [u8; 32]>,
 }
 
 impl ConfigSnapshot {
-    /// A snapshot of `roster` at `revision`.
-    pub fn new(revision: ConfigRevision, roster: Roster) -> Self {
-        Self { revision, roster }
+    /// A snapshot of `roster` and `settings` at `revision`.
+    pub fn new(revision: ConfigRevision, roster: Roster, settings: Settings) -> Self {
+        Self {
+            revision,
+            roster,
+            settings,
+            fingerprints: BTreeMap::new(),
+        }
+    }
+
+    /// The families whose records differ between this snapshot and `other`. Snapshots built
+    /// in code ([`ConfigSnapshot::new`]) carry no records and differ in none.
+    pub fn changed_families(&self, other: &Self) -> Vec<ConfigRecord> {
+        ConfigRecord::ALL
+            .into_iter()
+            .filter(|record| self.fingerprints.get(record) != other.fingerprints.get(record))
+            .collect()
     }
 }
 
-/// Where the Station's Operations, Agents, roles, covers and Moneypenny's settings come from.
+/// Where the Station's Operations, Agents, roles, covers, Moneypenny's settings and its other
+/// configuration come from.
 ///
-/// A source hands out only rosters that passed the same checks as the configuration files
-/// ([`Roster::load`], [`Roster::from_parts`]): an invalid configuration is an error, never a
-/// roster. Calls are synchronous; the daemon makes them off its async workers.
-pub trait ConfigSource: Send + Sync {
-    /// The roster, with the revision it is at.
+/// A provider hands out only configuration that passed the same checks as the family files
+/// do: an invalid configuration is an error, never a snapshot. Calls are synchronous; the
+/// daemon makes them off its async workers.
+pub trait ConfigProvider: Send + Sync {
+    /// The configuration of `station` (`""`: the global records only), with the revision it
+    /// is at.
     ///
     /// # Errors
     ///
     /// Returns an error when the configuration cannot be read or is not acceptable.
-    fn load(&self) -> Result<ConfigSnapshot, RosterError>;
+    fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError>;
 
-    /// The roster again when the source is no longer at revision `since`, else `None`.
+    /// The configuration of `station` again when the provider is no longer at revision
+    /// `since`, else `None`.
     ///
-    /// The default loads and compares revisions; a source that can tell cheaply overrides
+    /// The default loads and compares revisions; a provider that can tell cheaply overrides
     /// it.
     ///
     /// # Errors
     ///
-    /// As [`load`](ConfigSource::load).
-    fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError> {
-        let snapshot = self.load()?;
+    /// As [`load`](ConfigProvider::load).
+    fn changes_since(
+        &self,
+        station: &str,
+        since: ConfigRevision,
+    ) -> Result<Option<ConfigSnapshot>, RosterError> {
+        let snapshot = self.load(station)?;
         Ok((snapshot.revision != since).then_some(snapshot))
     }
 
-    /// The revision the source is at now, without building its roster.
+    /// The revision `station`'s configuration is at now, without building it.
     ///
     /// A Station compares it with the revision it runs and the last one it refused, so an
-    /// unacceptable revision is checked and reported once. The default loads the roster; a
-    /// source that can tell cheaply overrides it.
+    /// unacceptable revision is checked and reported once. The default loads; a provider
+    /// that can tell cheaply overrides it.
     ///
     /// # Errors
     ///
-    /// As [`load`](ConfigSource::load).
-    fn revision(&self) -> Result<ConfigRevision, RosterError> {
-        self.load().map(|snapshot| snapshot.revision)
+    /// As [`load`](ConfigProvider::load).
+    fn revision(&self, station: &str) -> Result<ConfigRevision, RosterError> {
+        self.load(station).map(|snapshot| snapshot.revision)
     }
 
-    /// The records of one kind as the source holds them, for an administrator to read and
-    /// edit.
+    /// The records of one family at `scope` as the provider holds them, for an administrator
+    /// to read and edit.
     ///
     /// # Errors
     ///
-    /// [`RosterErrorKind::ReadOnly`] from a source that cannot list them (the default);
-    /// otherwise as [`load`](ConfigSource::load).
-    fn definitions(&self, record: ConfigRecord) -> Result<ConfigDefinitions, RosterError> {
-        let _ = record;
+    /// [`RosterErrorKind::ReadOnly`] from a provider that cannot list them (the default);
+    /// otherwise as [`load`](ConfigProvider::load).
+    fn definitions(
+        &self,
+        record: ConfigRecord,
+        scope: &ConfigScope,
+    ) -> Result<ConfigDefinitions, RosterError> {
+        let _ = (record, scope);
         Err(read_only())
     }
 
-    /// Stores one record's definition under `key`, replacing what was there, and returns the
-    /// revision the source moved to. `definition` is a JSON object with the keys of the
-    /// record's table in the configuration files.
+    /// Stores one record's definition under `key` at `scope`, replacing what was there, and
+    /// returns the revision the provider moved to. `definition` is a JSON object with the
+    /// keys of the record's table in its family file.
     ///
     /// # Errors
     ///
-    /// [`RosterErrorKind::ReadOnly`] from a source that takes no changes (the default);
-    /// [`RosterErrorKind::Invalid`], changing nothing, when the roster it would leave is not
-    /// acceptable; [`RosterErrorKind::Unavailable`] when the source fails.
+    /// [`RosterErrorKind::ReadOnly`] from a provider that takes no changes (the default);
+    /// [`RosterErrorKind::Invalid`], changing nothing, when a configuration it would leave is
+    /// not acceptable or the family has no records at that scope;
+    /// [`RosterErrorKind::Unavailable`] when the provider fails.
     fn put(
         &self,
         record: ConfigRecord,
+        scope: &ConfigScope,
         key: &str,
         definition: &serde_json::Value,
     ) -> Result<ConfigRevision, RosterError> {
-        let _ = (record, key, definition);
+        let _ = (record, scope, key, definition);
         Err(read_only())
     }
 
@@ -235,44 +358,45 @@ pub trait ConfigSource: Send + Sync {
     ///
     /// # Errors
     ///
-    /// As [`put`](ConfigSource::put): a removal that leaves the roster unacceptable (an Agent
-    /// another still extends, say) is refused.
+    /// As [`put`](ConfigProvider::put): a removal that leaves a configuration unacceptable
+    /// (an Agent another still extends, say) is refused.
     fn remove(
         &self,
         record: ConfigRecord,
+        scope: &ConfigScope,
         key: &str,
     ) -> Result<Option<ConfigRevision>, RosterError> {
-        let _ = (record, key);
+        let _ = (record, scope, key);
         Err(read_only())
     }
 }
 
-/// Opens the roster at `location`: `sqlite:PATH` (or `sqlite://PATH`) or a `postgres://`
-/// URL for a `SqlConfigSource`, anything else a configuration directory ([`TomlConfigDir`]).
+/// Opens the configuration provider at `location`: `sqlite:PATH` (or `sqlite://PATH`) or a
+/// `postgres://` URL for a `SqlProvider`, anything else a [`FileProvider`] directory.
 ///
 /// # Errors
 ///
 /// `Unsupported` for a SQL location when this build lacks its cargo feature (`sqlite`,
 /// `postgres`); the database's error when it cannot be opened. A directory is not read
-/// until the roster is loaded.
-pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>> {
+/// until it is loaded.
+pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>> {
     #[cfg(any(feature = "sqlite", feature = "postgres"))]
     return open_with(
         location,
         &crate::directorates::registry::sql::SqlOptions::default(),
     );
     #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
-    if is_sql(location) {
+    if crate::bootstrap::is_sql_location(location) {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "this build of ai6 has no SQL configuration support (cargo features `sqlite`, `postgres`)",
         ))
     } else {
-        Ok(Arc::new(TomlConfigDir::new(location)))
+        Ok(Arc::new(FileProvider::new(location)))
     }
 }
 
-/// As [`open`], connecting a SQL roster with `options` (password, timeouts).
+/// As [`open`], connecting a SQL provider with `options` (password, timeouts).
 ///
 /// # Errors
 ///
@@ -281,188 +405,169 @@ pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>> {
 pub fn open_with(
     location: &str,
     options: &crate::directorates::registry::sql::SqlOptions,
-) -> io::Result<Arc<dyn ConfigSource>> {
-    if is_sql(location) {
-        Ok(Arc::new(SqlConfigSource::open_with(location, options)?))
+) -> io::Result<Arc<dyn ConfigProvider>> {
+    if crate::bootstrap::is_sql_location(location) {
+        Ok(Arc::new(SqlProvider::open_with(location, options)?))
     } else {
-        Ok(Arc::new(TomlConfigDir::new(location)))
+        Ok(Arc::new(FileProvider::new(location)))
     }
 }
 
-fn is_sql(location: &str) -> bool {
-    location.starts_with("sqlite:")
-        || location.starts_with("postgres://")
-        || location.starts_with("postgresql://")
-}
+/// Each family's records by key, at one scope or in one Station's view.
+pub(crate) type Layer = BTreeMap<ConfigRecord, BTreeMap<String, serde_json::Value>>;
 
-/// The configuration directory: `operations.toml`, `agents.toml` and `covers.toml`, read
-/// with [`Roster::load`] and every Agent resolved ([`Roster::check_agents`]).
-///
-/// Its revision is a digest of those three files' contents, so asking for changes reads
-/// them but parses nothing until one differs.
-#[derive(Debug, Clone)]
-pub struct TomlConfigDir {
-    root: PathBuf,
-}
-
-impl TomlConfigDir {
-    /// The configuration in `root`. Nothing is read until the source is asked.
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
-    }
-
-    /// The configuration directory.
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    fn digest(&self) -> Result<ConfigRevision, RosterError> {
-        let mut digest = Sha256::new();
-        for name in ROSTER_FILES {
-            let path = self.root.join(name);
-            match fs::read(&path) {
-                Ok(bytes) => {
-                    digest.update([1]);
-                    digest.update((bytes.len() as u64).to_le_bytes());
-                    digest.update(&bytes);
-                }
-                Err(failure) if failure.kind() == io::ErrorKind::NotFound => digest.update([0]),
-                Err(failure) => {
-                    return Err(error_of(
-                        RosterErrorKind::Unavailable,
-                        format!("{}: {failure}", path.display()),
-                    ));
-                }
-            }
+/// `station`'s records over `global`'s, key by key.
+pub(crate) fn merged(global: &Layer, station: &Layer) -> Layer {
+    let mut view = global.clone();
+    for (record, records) in station {
+        let family = view.entry(*record).or_default();
+        for (key, definition) in records {
+            family.insert(key.clone(), definition.clone());
         }
-        let digest = digest.finalize();
-        let mut number = [0; 8];
-        number.copy_from_slice(&digest[..8]);
-        Ok(ConfigRevision::new(u64::from_le_bytes(number)))
     }
+    view
 }
 
-impl ConfigSource for TomlConfigDir {
-    fn load(&self) -> Result<ConfigSnapshot, RosterError> {
-        // The revision is taken before the files are parsed, so a file changed in between
-        // shows up as a change on the next poll rather than being missed.
-        let revision = self.digest()?;
-        let roster = Roster::load(&self.root)?;
-        roster.check_agents().map_err(|reason| {
-            error(format!(
-                "{}: {reason}",
-                self.root.join("agents.toml").display()
-            ))
-        })?;
-        Ok(ConfigSnapshot::new(revision, roster))
+/// Refuses a record a family does not take at `scope`, or a singleton with another key.
+pub(crate) fn check_placement(
+    record: ConfigRecord,
+    scope: &ConfigScope,
+    key: &str,
+    source: &dyn fmt::Display,
+) -> Result<(), RosterError> {
+    if *scope != ConfigScope::Global && !record.station_scoped() {
+        return Err(error(format!(
+            "{source}: {record} records are global; {scope} cannot have one"
+        )));
     }
-
-    fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError> {
-        if self.digest()? == since {
-            return Ok(None);
-        }
-        self.load().map(Some)
+    if record.is_singleton() && key != ConfigRecord::SINGLETON_KEY {
+        return Err(error(format!(
+            "{source}: the {record} record is keyed {:?}, not {key:?}",
+            ConfigRecord::SINGLETON_KEY
+        )));
     }
+    Ok(())
+}
 
-    fn revision(&self) -> Result<ConfigRevision, RosterError> {
-        self.digest()
+/// Builds and checks the configuration of one view: the roster, every Agent resolved, and the
+/// settings. A relative path in the assistant settings is resolved against `base`.
+pub(crate) fn assemble(
+    revision: ConfigRevision,
+    view: &Layer,
+    base: Option<&Path>,
+    source: &dyn fmt::Display,
+) -> Result<ConfigSnapshot, RosterError> {
+    let family = |record: ConfigRecord| -> Vec<(String, serde_json::Value)> {
+        view.get(&record)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(|(key, definition)| (key.clone(), definition.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut covers = Covers::default();
+    for (name, definition) in family(ConfigRecord::Cover) {
+        covers.insert(
+            cover_from(name, definition).map_err(|reason| error(format!("{source}: {reason}")))?,
+        );
     }
-
-    /// The record's tables as JSON; the files themselves are edited by hand, so the
-    /// directory takes no [`put`](ConfigSource::put).
-    fn definitions(&self, record: ConfigRecord) -> Result<ConfigDefinitions, RosterError> {
-        let revision = self.digest()?;
-        let path = self.root.join(record.file());
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(failure) if failure.kind() == io::ErrorKind::NotFound => {
-                return Ok(ConfigDefinitions {
-                    revision,
-                    records: Vec::new(),
-                    writable: false,
-                });
-            }
-            Err(failure) => {
-                return Err(error_of(
-                    RosterErrorKind::Unavailable,
-                    format!("{}: {failure}", path.display()),
-                ));
-            }
-        };
-        let in_file = |reason: &dyn fmt::Display| error(format!("{}: {reason}", path.display()));
-        let mut document: toml::Table = toml::from_str(&text).map_err(|reason| in_file(&reason))?;
-        let records = match document.remove(record.name()) {
-            // `[assistant]` is the settings themselves, not a table of records.
-            Some(toml::Value::Table(table)) if record == ConfigRecord::Assistant => {
-                vec![(
-                    ConfigRecord::ASSISTANT_KEY.to_owned(),
-                    serde_json::to_value(table).map_err(|reason| in_file(&reason))?,
-                )]
-            }
-            Some(toml::Value::Table(table)) => table
-                .into_iter()
-                .map(|(key, value)| {
-                    serde_json::to_value(value)
-                        .map(|definition| (key, definition))
-                        .map_err(|reason| in_file(&reason))
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-            Some(_) => return Err(in_file(&format!("`{}` is not a table", record.name()))),
-            None => Vec::new(),
-        };
-        Ok(ConfigDefinitions {
-            revision,
-            records,
-            writable: false,
+    let assistant = family(ConfigRecord::Assistant)
+        .into_iter()
+        .next()
+        .map(|(_, definition)| definition);
+    let roster = roster_from_definitions(
+        family(ConfigRecord::Operation),
+        family(ConfigRecord::Agent),
+        family(ConfigRecord::Role),
+        covers,
+        assistant,
+        base,
+        source,
+    )?;
+    roster
+        .check_agents()
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
+    let theaters = Theaters::from_records(family(ConfigRecord::Theater))
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
+    let fingerprints = ConfigRecord::ALL
+        .into_iter()
+        .map(|record| {
+            let text = serde_json::to_string(&view.get(&record)).unwrap_or_default();
+            (record, Sha256::digest(text.as_bytes()).into())
         })
-    }
+        .collect();
+    Ok(ConfigSnapshot {
+        revision,
+        roster,
+        settings: Settings { theaters },
+        fingerprints,
+    })
 }
 
-/// A roster kept in memory, built in code. Its revision counts the rosters it has held.
-pub struct MemoryConfigSource {
-    state: Mutex<(u64, Roster)>,
+/// Configuration kept in memory, built in code. Its revision counts the replacements.
+pub struct MemoryProvider {
+    state: Mutex<(u64, Roster, Settings)>,
 }
 
-impl fmt::Debug for MemoryConfigSource {
+impl fmt::Debug for MemoryProvider {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("MemoryConfigSource")
+            .debug_struct("MemoryProvider")
             .finish_non_exhaustive()
     }
 }
 
-impl MemoryConfigSource {
-    /// A source holding `roster` at revision 0.
+impl MemoryProvider {
+    /// A provider holding `roster` and default settings at revision 0, the same for every
+    /// Station.
     pub fn new(roster: Roster) -> Self {
         Self {
-            state: Mutex::new((0, roster)),
+            state: Mutex::new((0, roster, Settings::default())),
         }
     }
 
-    /// Replaces the roster; the source moves to its next revision.
+    /// This provider with `settings` instead of the defaults.
+    #[must_use]
+    pub fn with_settings(self, settings: Settings) -> Self {
+        let mut state = self
+            .state
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.2 = settings;
+        Self {
+            state: Mutex::new(state),
+        }
+    }
+
+    /// Replaces the roster, keeping the settings; the provider moves to its next revision.
     pub fn replace(&self, roster: Roster) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.0 += 1;
         state.1 = roster;
     }
+
+    /// Replaces the roster and the settings; the provider moves to its next revision.
+    pub fn replace_all(&self, roster: Roster, settings: Settings) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.0 += 1;
+        state.1 = roster;
+        state.2 = settings;
+    }
 }
 
-impl ConfigSource for MemoryConfigSource {
-    fn load(&self) -> Result<ConfigSnapshot, RosterError> {
+impl ConfigProvider for MemoryProvider {
+    fn load(&self, _station: &str) -> Result<ConfigSnapshot, RosterError> {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         Ok(ConfigSnapshot::new(
             ConfigRevision::new(state.0),
             state.1.clone(),
+            state.2.clone(),
         ))
     }
 
-    fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError> {
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        Ok((state.0 != since.get())
-            .then(|| ConfigSnapshot::new(ConfigRevision::new(state.0), state.1.clone())))
-    }
-
-    fn revision(&self) -> Result<ConfigRevision, RosterError> {
+    fn revision(&self, _station: &str) -> Result<ConfigRevision, RosterError> {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         Ok(ConfigRevision::new(state.0))
     }
@@ -492,119 +597,65 @@ mod tests {
     }
 
     #[test]
-    fn a_memory_source_reports_each_replacement_once() {
-        let source = MemoryConfigSource::new(roster("007"));
-        let first = source.load().unwrap();
+    fn a_memory_provider_reports_each_replacement_once() {
+        let provider = MemoryProvider::new(roster("007"));
+        let first = provider.load("").unwrap();
         assert_eq!(first.roster.agent(Some("G"), "007").unwrap().id, "007");
-        assert!(source.changes_since(first.revision).unwrap().is_none());
+        assert!(
+            provider
+                .changes_since("", first.revision)
+                .unwrap()
+                .is_none()
+        );
 
-        source.replace(roster("008"));
-        let second = source.changes_since(first.revision).unwrap().unwrap();
+        provider.replace(roster("008"));
+        let second = provider.changes_since("", first.revision).unwrap().unwrap();
         assert_ne!(second.revision, first.revision);
         assert!(second.roster.agent(Some("G"), "007").is_err());
         assert_eq!(second.roster.agent(Some("G"), "008").unwrap().id, "008");
-        assert!(source.changes_since(second.revision).unwrap().is_none());
-    }
-
-    #[test]
-    fn a_config_directory_changes_when_a_roster_file_does() {
-        let root = tempfile::tempdir().unwrap();
-        let source = TomlConfigDir::new(root.path());
-        let empty = source.load().unwrap();
-        assert_eq!(empty.roster.operations().count(), 0);
-        assert!(source.changes_since(empty.revision).unwrap().is_none());
-
-        fs::write(root.path().join("operations.toml"), "[operation.G]\n").unwrap();
-        let changed = source.changes_since(empty.revision).unwrap().unwrap();
-        assert_eq!(changed.roster.operation("G").unwrap().id, "G");
-        assert!(source.changes_since(changed.revision).unwrap().is_none());
-
-        // A file the roster is not read from is not a change.
-        fs::write(root.path().join("theaters.toml"), "").unwrap();
-        assert!(source.changes_since(changed.revision).unwrap().is_none());
-    }
-
-    #[test]
-    fn a_config_directory_lists_its_tables_and_takes_no_changes() {
-        let root = tempfile::tempdir().unwrap();
-        let source = TomlConfigDir::new(root.path());
-        fs::write(
-            root.path().join("agents.toml"),
-            "[agent.007]\nhandler = \"mock-agent\"\npriority = 5\n\
-             [role.case-officer]\npurpose = \"Runs it.\"\npolicy = \"Report.\"\n\
-             [assistant]\nallow_elevated = true\n[assistant.shared.ops]\nrepo = \"/srv/ops.git\"\n",
-        )
-        .unwrap();
-        assert_eq!(
-            source.definitions(ConfigRecord::Assistant).unwrap().records,
-            [(
-                "assistant".to_owned(),
-                serde_json::json!({"allow_elevated": true, "shared": {"ops": {"repo": "/srv/ops.git"}}})
-            )]
-        );
-        let agents = source.definitions(ConfigRecord::Agent).unwrap();
-        assert_eq!(agents.revision, source.revision().unwrap());
-        assert!(!agents.writable);
-        assert_eq!(
-            agents.records,
-            [(
-                "007".to_owned(),
-                serde_json::json!({"handler": "mock-agent", "priority": 5})
-            )]
-        );
-        let roles = source.definitions(ConfigRecord::Role).unwrap();
-        assert_eq!(roles.records[0].0, "case-officer");
         assert!(
-            source
-                .definitions(ConfigRecord::Operation)
+            provider
+                .changes_since("", second.revision)
                 .unwrap()
-                .records
-                .is_empty()
+                .is_none()
         );
-        let refused = source
-            .put(ConfigRecord::Agent, "008", &serde_json::json!({}))
-            .unwrap_err();
-        assert_eq!(refused.kind(), RosterErrorKind::ReadOnly);
-        assert_eq!(ConfigRecord::from_name("agent"), Some(ConfigRecord::Agent));
+    }
+
+    #[test]
+    fn scopes_have_a_text_form_and_families_know_where_they_apply() {
+        assert_eq!(ConfigScope::Global.as_text(), "");
+        assert_eq!(ConfigScope::of_station("a").as_text(), "station:a");
+        assert_eq!(
+            ConfigScope::parse("station:a"),
+            Some(ConfigScope::of_station("a"))
+        );
+        assert_eq!(ConfigScope::parse(""), Some(ConfigScope::Global));
+        assert_eq!(ConfigScope::parse("station:"), None);
+        assert_eq!(ConfigScope::parse("hq"), None);
+        assert_eq!(ConfigScope::of_station(""), ConfigScope::Global);
+        assert!(ConfigRecord::Theater.station_scoped() && !ConfigRecord::Theater.applies_live());
+        assert!(!ConfigRecord::Agent.station_scoped() && ConfigRecord::Agent.applies_live());
         assert_eq!(
             ConfigRecord::from_name("assistant"),
             Some(ConfigRecord::Assistant)
         );
-
-        fs::remove_file(root.path().join("agents.toml")).unwrap();
         assert!(
-            source
-                .definitions(ConfigRecord::Assistant)
-                .unwrap()
-                .records
-                .is_empty()
+            check_placement(
+                ConfigRecord::Agent,
+                &ConfigScope::of_station("a"),
+                "007",
+                &"t"
+            )
+            .is_err()
         );
-    }
-
-    #[test]
-    fn an_agent_that_cannot_resolve_makes_a_config_directory_invalid() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(
-            root.path().join("agents.toml"),
-            "[agent.008]\nextends = \"nobody\"\n",
-        )
-        .unwrap();
-        let refused = TomlConfigDir::new(root.path()).load().unwrap_err();
-        assert_eq!(refused.kind(), RosterErrorKind::Invalid);
-        assert!(refused.to_string().contains("nobody"), "{refused}");
-    }
-
-    #[test]
-    fn an_invalid_config_directory_is_an_error_not_a_roster() {
-        let root = tempfile::tempdir().unwrap();
-        let source = TomlConfigDir::new(root.path());
-        let good = source.load().unwrap();
-        fs::write(
-            root.path().join("operations.toml"),
-            "[operation.G]\non_blown = \"shrug\"\n",
-        )
-        .unwrap();
-        let refused = source.changes_since(good.revision).unwrap_err();
-        assert!(refused.to_string().contains("on_blown"), "{refused}");
+        assert!(
+            check_placement(
+                ConfigRecord::Assistant,
+                &ConfigScope::Global,
+                "assistant",
+                &"t"
+            )
+            .is_err()
+        );
     }
 }
