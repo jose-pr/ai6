@@ -36,6 +36,7 @@ class OoAppearanceChooser extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
+    final tokens = OoTokens.of(context);
     OoTokens shown(OoThemeId id) =>
         highContrast ? id.tokens.highContrast() : id.tokens;
     return Column(
@@ -61,8 +62,12 @@ class OoAppearanceChooser extends StatelessWidget {
         const SizedBox(height: 8),
         SwitchListTile.adaptive(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Wallpaper'),
-          subtitle: Text(highContrast ? wallpaperOffHint : wallpaperHint),
+          // Explicit colours: switched off by high contrast, the tile must still read.
+          title: Text('Wallpaper', style: TextStyle(color: tokens.text)),
+          subtitle: Text(
+            highContrast ? wallpaperOffHint : wallpaperHint,
+            style: TextStyle(color: tokens.muted),
+          ),
           value: backdrop && !highContrast,
           onChanged: highContrast ? null : onBackdrop,
         ),

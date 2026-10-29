@@ -20,6 +20,7 @@ import 'package:material_ui/material_ui.dart'
         SizedBox,
         SwitchListTile,
         TargetPlatform,
+        Text,
         Theme,
         ThemeData;
 import 'package:outer_office/main.dart';
@@ -496,6 +497,14 @@ void main() {
       expect(wallpaper.value, isFalse);
       expect(wallpaper.onChanged, isNull);
       expect(board.backdrop, isTrue);
+      // Disabled, the tile still reads: muted, not the faded disabled colour.
+      expect(
+        tester
+            .widget<Text>(find.text(OoAppearanceChooser.wallpaperOffHint))
+            .style
+            ?.color,
+        OoTokens.of(tester.element(find.text('Wallpaper'))).muted,
+      );
     });
 
     testWidgets('a choice is stored and survives a restart', (tester) async {
