@@ -45,6 +45,23 @@ String ooThemePreference(String? stored) =>
     ? stored!
     : OoThemeId.nightOps.id;
 
+/// How a theme redraws its hero art in its own colours.
+enum OoArtTint {
+  /// As drawn.
+  none,
+
+  /// A dark, mostly blue-grey picture: its darkest parts become `surface`, its brightest
+  /// `accent`.
+  night,
+
+  /// [night] at a lower gain: the lines stay nearer `surface`.
+  quiet,
+
+  /// A light paper picture (`paper.jpg`): the paper becomes `surface`, its darkest lines
+  /// `muted`.
+  paper,
+}
+
 /// The opacity of the `surface` panel that holds text over art (`OoHero`, `OoBackdrop`).
 const ooArtPanelOpacity = 0.92;
 
@@ -69,7 +86,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
     required this.series,
     this.backdrop,
     this.hero,
-    this.heroDuotone = false,
+    this.heroTint = OoArtTint.none,
     this.decorated = true,
   });
 
@@ -96,8 +113,8 @@ class OoTokens extends ThemeExtension<OoTokens> {
   /// The art of the Overview hero, painted only by `OoHero`; null when it is turned off.
   final ImageProvider? hero;
 
-  /// Whether [hero] is drawn in this theme's colours ([heroMatrix]) rather than as drawn.
-  final bool heroDuotone;
+  /// How [hero] is redrawn in this theme's colours ([heroMatrix]).
+  final OoArtTint heroTint;
 
   /// Whether ornament is drawn: glows, decorative gradients, the wallpaper and the hero
   /// art. False under high contrast ([highContrast]), where every one of them is flat.
@@ -148,26 +165,41 @@ class OoTokens extends ThemeExtension<OoTokens> {
           ),
         ];
 
-  /// A 4x5 colour matrix that redraws a dark, mostly blue-grey picture in this theme: its
-  /// darkest parts become `surface`, its brightest `accent`.
-  List<double> get heroMatrix {
-    const gain = 1.6;
-    double c(double v) => v * 255;
-    List<double> row(double from, double to) {
-      final span = (to - from) * gain;
-      return [span * 0.2126, span * 0.7152, span * 0.0722, 0, c(from)];
+  /// The 4x5 colour matrix that redraws [hero] as [heroTint] says, or null to draw it as
+  /// it is.
+  List<double>? get heroMatrix {
+    // Rows map the picture's luminance (0-255) linearly from `low` at [from] to `high`
+    // at [to], channel by channel.
+    List<double> rows(Color from, Color to, double low, double high) {
+      List<double> row(double a, double b) {
+        final gain = (b - a) * 255 / (high - low);
+        return [
+          gain * 0.2126,
+          gain * 0.7152,
+          gain * 0.0722,
+          0,
+          a * 255 - gain * low,
+        ];
+      }
+
+      return [
+        ...row(from.r, to.r),
+        ...row(from.g, to.g),
+        ...row(from.b, to.b),
+        0,
+        0,
+        0,
+        1,
+        0,
+      ];
     }
 
-    return [
-      ...row(surface.r, accent.r),
-      ...row(surface.g, accent.g),
-      ...row(surface.b, accent.b),
-      0,
-      0,
-      0,
-      1,
-      0,
-    ];
+    return switch (heroTint) {
+      OoArtTint.none => null,
+      OoArtTint.night => rows(surface, accent, 0, 255 / 1.6),
+      OoArtTint.quiet => rows(surface, accent, 0, 255 / 0.9),
+      OoArtTint.paper => rows(muted, surface, _paperLines, _paperTone),
+    };
   }
 
   /// The tokens of the nearest theme.
@@ -230,7 +262,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
     series: series ?? this.series,
     backdrop: clearBackdrop ? null : backdrop ?? this.backdrop,
     hero: clearBackdrop ? null : hero,
-    heroDuotone: heroDuotone,
+    heroTint: heroTint,
     decorated: decorated ?? this.decorated,
   );
 
@@ -255,7 +287,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
       ],
       backdrop: t < 0.5 ? backdrop : other.backdrop,
       hero: t < 0.5 ? hero : other.hero,
-      heroDuotone: t < 0.5 ? heroDuotone : other.heroDuotone,
+      heroTint: t < 0.5 ? heroTint : other.heroTint,
       // A change into or out of high contrast draws no ornament on the way.
       decorated: decorated && other.decorated,
     );
@@ -304,7 +336,7 @@ const _blackOps = OoTokens(
   danger: Color(0xFFDD6A6A),
   backdrop: AssetImage('assets/backdrops/black-ops.jpg'),
   hero: AssetImage('assets/heroes/map.jpg'),
-  heroDuotone: true,
+  heroTint: OoArtTint.quiet,
   series: [
     Color(0xFF3987E5), // blue
     Color(0xFFD95926), // orange
@@ -354,8 +386,8 @@ const _classic = OoTokens(
   warning: Color(0xFF915D1D),
   danger: Color(0xFF9F3D34),
   backdrop: AssetImage('assets/backdrops/classic.jpg'),
-  hero: AssetImage('assets/heroes/map.jpg'),
-  heroDuotone: true,
+  hero: AssetImage('assets/heroes/paper.jpg'),
+  heroTint: OoArtTint.paper,
   series: [
     Color(0xFF7A6DF5), // violet
     Color(0xFFD6551C), // orange
@@ -380,8 +412,7 @@ const _light = OoTokens(
   warning: Color(0xFF9D691A),
   danger: Color(0xFFBA4F55),
   backdrop: AssetImage('assets/backdrops/light.jpg'),
-  hero: AssetImage('assets/heroes/map.jpg'),
-  heroDuotone: true,
+  hero: AssetImage('assets/heroes/paper.jpg'),
   series: [
     Color(0xFF3481E0), // blue
     Color(0xFFEB6834), // orange
@@ -407,7 +438,7 @@ const _redFile = OoTokens(
   warning: Color(0xFFE6B04C),
   danger: Color(0xFFFF6C72),
   hero: AssetImage('assets/heroes/map.jpg'),
-  heroDuotone: true,
+  heroTint: OoArtTint.night,
   series: [
     Color(0xFFE65960), // accent
     Color(0xFF3987E5), // blue
@@ -419,6 +450,10 @@ const _redFile = OoTokens(
     Color(0xFFDE9FFE), // purple
   ],
 );
+
+// The luminance (0-255) of `paper.jpg`'s darkest line and of its paper (the median).
+const _paperLines = 70.0;
+const _paperTone = 240.0;
 
 /// [color] with its HSL lightness moved by [delta], kept within 0–1.
 Color _lightness(Color color, double delta) {

@@ -53,6 +53,8 @@ class OoBackdrop extends StatelessWidget {
           // Decoded at the view's width, not the 1920 px source.
           image: ResizeImage(image, width: width < 1 ? 1 : width),
           fit: BoxFit.cover,
+          // A wallpaper that fails to load leaves the page's own background.
+          onError: (error, stack) {},
         ),
       ),
       child: framed,

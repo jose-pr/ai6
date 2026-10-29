@@ -178,10 +178,13 @@ class OoHero extends StatelessWidget {
       fit: BoxFit.cover,
       excludeFromSemantics: true,
       gaplessPlayback: true,
+      // Art that fails to load leaves the plain surface; the panel still shows.
+      errorBuilder: (context, error, stack) =>
+          ColoredBox(color: tokens.surface),
     );
-    if (tokens.heroDuotone) {
+    if (tokens.heroMatrix case final matrix?) {
       image = ColorFiltered(
-        colorFilter: ColorFilter.matrix(tokens.heroMatrix),
+        colorFilter: ColorFilter.matrix(matrix),
         child: image,
       );
     }
