@@ -22,6 +22,137 @@ pub use ai6::Rule
 pub use ai6::Verdict
 pub use ai6::Waiting
 pub use ai6::guatiao
+pub mod ai6::bootstrap
+pub mod ai6::bootstrap::format
+#[non_exhaustive] pub enum ai6::bootstrap::format::Format
+pub ai6::bootstrap::format::Format::Json
+pub ai6::bootstrap::format::Format::Toml
+pub ai6::bootstrap::format::Format::Yaml
+impl ai6::bootstrap::format::Format
+pub fn ai6::bootstrap::format::Format::for_extension(&str) -> core::option::Option<Self>
+pub fn ai6::bootstrap::format::Format::for_path(&std::path::Path) -> core::result::Result<Self, ai6::bootstrap::format::FormatError>
+pub const fn ai6::bootstrap::format::Format::name(self) -> &'static str
+impl core::fmt::Display for ai6::bootstrap::format::Format
+pub fn ai6::bootstrap::format::Format::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::bootstrap::format::FormatError(_)
+impl core::error::Error for ai6::bootstrap::format::FormatError
+impl core::fmt::Display for ai6::bootstrap::format::FormatError
+pub fn ai6::bootstrap::format::FormatError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const ai6::bootstrap::format::EXTENSIONS: [&str; 5]
+pub fn ai6::bootstrap::format::from_str<T: serde_core::de::DeserializeOwned>(ai6::bootstrap::format::Format, &str) -> core::result::Result<T, ai6::bootstrap::format::FormatError>
+pub fn ai6::bootstrap::format::to_string<T: serde_core::ser::Serialize>(ai6::bootstrap::format::Format, &T) -> core::result::Result<alloc::string::String, ai6::bootstrap::format::FormatError>
+#[non_exhaustive] pub enum ai6::bootstrap::SecretRef
+pub ai6::bootstrap::SecretRef::Env(alloc::string::String)
+pub ai6::bootstrap::SecretRef::File(std::path::PathBuf)
+pub ai6::bootstrap::SecretRef::Inline(zeroize::Zeroizing<alloc::string::String>)
+impl ai6::bootstrap::SecretRef
+pub fn ai6::bootstrap::SecretRef::describe(&self) -> alloc::string::String
+pub fn ai6::bootstrap::SecretRef::read(&self) -> core::io::error::Result<zeroize::Zeroizing<alloc::string::String>>
+pub fn ai6::bootstrap::SecretRef::relative_to(self, &std::path::Path) -> Self
+pub fn ai6::bootstrap::SecretRef::weakening(&self) -> core::option::Option<alloc::string::String>
+impl core::fmt::Debug for ai6::bootstrap::SecretRef
+pub fn ai6::bootstrap::SecretRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for ai6::bootstrap::SecretRef
+pub fn ai6::bootstrap::SecretRef::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+#[non_exhaustive] pub struct ai6::bootstrap::Bootstrap
+pub ai6::bootstrap::Bootstrap::identity: ai6::bootstrap::IdentitySettings
+pub ai6::bootstrap::Bootstrap::listen: core::option::Option<core::net::socket_addr::SocketAddr>
+pub ai6::bootstrap::Bootstrap::plugins: ai6::bootstrap::PluginSettings
+pub ai6::bootstrap::Bootstrap::provider: ai6::bootstrap::ProviderSettings
+pub ai6::bootstrap::Bootstrap::registry: ai6::bootstrap::RegistrySettings
+pub ai6::bootstrap::Bootstrap::secrets: ai6::bootstrap::SecretSettings
+pub ai6::bootstrap::Bootstrap::state_dir: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::Bootstrap::station: core::option::Option<alloc::string::String>
+pub ai6::bootstrap::Bootstrap::unex: core::option::Option<ai6::bootstrap::UnexSettings>
+impl ai6::bootstrap::Bootstrap
+pub fn ai6::bootstrap::Bootstrap::find(core::option::Option<&std::path::Path>) -> core::result::Result<ai6::bootstrap::Located<Self>, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Bootstrap::find_in(&ai6::bootstrap::SearchPath) -> core::result::Result<ai6::bootstrap::Located<Self>, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Bootstrap::read(&std::path::Path) -> core::result::Result<Self, ai6::bootstrap::BootstrapError>
+#[non_exhaustive] pub struct ai6::bootstrap::BootstrapError
+impl ai6::bootstrap::BootstrapError
+pub fn ai6::bootstrap::BootstrapError::kind(&self) -> core::io::error::ErrorKind
+impl core::convert::From<ai6::bootstrap::BootstrapError> for core::io::error::Error
+pub fn core::io::error::Error::from(ai6::bootstrap::BootstrapError) -> Self
+impl core::error::Error for ai6::bootstrap::BootstrapError
+impl core::fmt::Display for ai6::bootstrap::BootstrapError
+pub fn ai6::bootstrap::BootstrapError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::bootstrap::IdentitySettings
+pub ai6::bootstrap::IdentitySettings::dir: core::option::Option<std::path::PathBuf>
+pub struct ai6::bootstrap::Located<T>
+pub ai6::bootstrap::Located::path: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::Located::value: T
+impl ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::identity_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::listen(&self) -> core::net::socket_addr::SocketAddr
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::provider_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::registry_password(&self) -> core::option::Option<&ai6::bootstrap::SecretRef>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::secrets_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+impl ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::listen(&self) -> core::net::socket_addr::SocketAddr
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::provider_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::registry_password(&self) -> core::option::Option<&ai6::bootstrap::SecretRef>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+impl<T> ai6::bootstrap::Located<T>
+pub fn ai6::bootstrap::Located<T>::dir(&self) -> core::option::Option<&std::path::Path>
+#[non_exhaustive] pub struct ai6::bootstrap::PluginSettings
+pub ai6::bootstrap::PluginSettings::paths: alloc::vec::Vec<std::path::PathBuf>
+pub ai6::bootstrap::PluginSettings::profile: core::option::Option<ai6::directorates::registry::bona_fides::PluginProfile>
+#[non_exhaustive] pub struct ai6::bootstrap::ProviderSettings
+pub ai6::bootstrap::ProviderSettings::location: core::option::Option<alloc::string::String>
+pub ai6::bootstrap::ProviderSettings::password: core::option::Option<ai6::bootstrap::SecretRef>
+pub ai6::bootstrap::ProviderSettings::poll: core::option::Option<ai6::bootstrap::Seconds>
+impl ai6::bootstrap::ProviderSettings
+pub fn ai6::bootstrap::ProviderSettings::poll(&self) -> core::time::Duration
+#[non_exhaustive] pub struct ai6::bootstrap::RegistrySettings
+pub ai6::bootstrap::RegistrySettings::headquarters_lease: core::option::Option<ai6::bootstrap::Seconds>
+pub ai6::bootstrap::RegistrySettings::location: core::option::Option<alloc::string::String>
+pub ai6::bootstrap::RegistrySettings::password: core::option::Option<ai6::bootstrap::SecretRef>
+impl ai6::bootstrap::RegistrySettings
+pub fn ai6::bootstrap::RegistrySettings::headquarters_lease(&self) -> core::time::Duration
+pub struct ai6::bootstrap::SearchPath
+pub ai6::bootstrap::SearchPath::candidates: alloc::vec::Vec<std::path::PathBuf>
+pub ai6::bootstrap::SearchPath::explicit: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::SearchPath::variable: core::option::Option<(alloc::string::String, std::path::PathBuf)>
+impl ai6::bootstrap::SearchPath
+pub fn ai6::bootstrap::SearchPath::locate(&self) -> core::result::Result<core::option::Option<std::path::PathBuf>, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::SearchPath::new(&str, &str, core::option::Option<&std::path::Path>) -> Self
+pub struct ai6::bootstrap::Seconds(pub core::time::Duration)
+impl<'de> serde_core::de::Deserialize<'de> for ai6::bootstrap::Seconds
+pub fn ai6::bootstrap::Seconds::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+#[non_exhaustive] pub struct ai6::bootstrap::SecretSettings
+pub ai6::bootstrap::SecretSettings::dir: core::option::Option<std::path::PathBuf>
+#[non_exhaustive] pub struct ai6::bootstrap::UnexBootstrap
+pub ai6::bootstrap::UnexBootstrap::listen: core::option::Option<core::net::socket_addr::SocketAddr>
+pub ai6::bootstrap::UnexBootstrap::plugins: ai6::bootstrap::PluginSettings
+pub ai6::bootstrap::UnexBootstrap::provider: ai6::bootstrap::ProviderSettings
+pub ai6::bootstrap::UnexBootstrap::proxy_secret: core::option::Option<ai6::bootstrap::SecretRef>
+pub ai6::bootstrap::UnexBootstrap::public_origin: core::option::Option<alloc::string::String>
+pub ai6::bootstrap::UnexBootstrap::registry: ai6::bootstrap::RegistrySettings
+pub ai6::bootstrap::UnexBootstrap::state_dir: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::UnexBootstrap::station_token: core::option::Option<ai6::bootstrap::SecretRef>
+impl ai6::bootstrap::UnexBootstrap
+pub fn ai6::bootstrap::UnexBootstrap::find(core::option::Option<&std::path::Path>) -> core::result::Result<ai6::bootstrap::Located<Self>, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::UnexBootstrap::read(&std::path::Path) -> core::result::Result<Self, ai6::bootstrap::BootstrapError>
+#[non_exhaustive] pub struct ai6::bootstrap::UnexSettings
+pub ai6::bootstrap::UnexSettings::token: core::option::Option<ai6::bootstrap::SecretRef>
+pub ai6::bootstrap::UnexSettings::url: alloc::string::String
+pub const ai6::bootstrap::CONFIG_ENV: &str
+pub const ai6::bootstrap::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
+pub const ai6::bootstrap::DEFAULT_POLL: core::time::Duration
+pub const ai6::bootstrap::DEFAULT_UNEX_LISTEN: core::net::socket_addr::SocketAddr
+pub const ai6::bootstrap::FILE_NAME: &str
+pub const ai6::bootstrap::UNEX_CONFIG_ENV: &str
+pub const ai6::bootstrap::UNEX_FILE_NAME: &str
+pub fn ai6::bootstrap::is_sql_location(&str) -> bool
+pub fn ai6::bootstrap::platform_config_dir() -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::platform_state_dir() -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::read_file<T: serde_core::de::DeserializeOwned>(&std::path::Path) -> core::result::Result<T, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::system_config_dir() -> core::option::Option<std::path::PathBuf>
 pub mod ai6::directorates
 pub mod ai6::directorates::m
 pub mod ai6::directorates::m::access
@@ -782,7 +913,6 @@ impl core::default::Default for ai6::directorates::m::roster::Workspace
 pub fn ai6::directorates::m::roster::Workspace::default() -> Self
 pub const ai6::directorates::m::roster::DEFAULT_CHECKPOINT_SECS: u64
 pub const ai6::directorates::m::roster::DEFAULT_RETIRE_WARNING_DAYS: u32
-pub fn ai6::directorates::m::roster::config_dir() -> core::result::Result<std::path::PathBuf, ai6::directorates::m::roster::RosterError>
 pub mod ai6::directorates::m::theaters
 #[non_exhaustive] pub enum ai6::directorates::m::theaters::AgentMode
 pub ai6::directorates::m::theaters::AgentMode::Auto
@@ -1706,11 +1836,6 @@ pub ai6::directorates::q::SecretError::InvalidTtl
 impl core::error::Error for ai6::SecretError
 impl core::fmt::Display for ai6::SecretError
 pub fn ai6::SecretError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-#[non_exhaustive] pub enum ai6::directorates::q::SecretSource
-pub ai6::directorates::q::SecretSource::Env(alloc::string::String)
-pub ai6::directorates::q::SecretSource::File(std::path::PathBuf)
-impl ai6::directorates::q::SecretSource
-pub fn ai6::directorates::q::SecretSource::weakening(&self) -> core::option::Option<alloc::string::String>
 pub struct ai6::directorates::q::Account
 impl ai6::Account
 pub fn ai6::Account::concurrency(&self) -> core::option::Option<usize>
@@ -1831,7 +1956,7 @@ pub fn ai6::directorates::q::SecretDefinition::green_ink_weakening(&self) -> cor
 pub fn ai6::directorates::q::SecretDefinition::kinds(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::SecretDefinition::name(&self) -> &str
 pub fn ai6::directorates::q::SecretDefinition::new(impl core::convert::Into<alloc::string::String>) -> Self
-pub fn ai6::directorates::q::SecretDefinition::source(&self) -> &ai6::directorates::q::SecretSource
+pub fn ai6::directorates::q::SecretDefinition::source(&self) -> &ai6::bootstrap::SecretRef
 pub fn ai6::directorates::q::SecretDefinition::targets(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::SecretDefinition::unlocked_by(&self, &str, &str) -> bool
 pub struct ai6::directorates::q::SecretLease
@@ -2578,7 +2703,6 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_cleared(&self, 
 pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::backend::from_environment() -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
 pub fn ai6::directorates::registry::backend::open(&str) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
 pub fn ai6::directorates::registry::backend::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
 pub mod ai6::directorates::registry::bona_fides
@@ -3402,7 +3526,6 @@ pub fn ai6::directorates::registry::store::Brief::key(&self) -> alloc::string::S
 pub fn ai6::directorates::registry::store::Brief::prompt(&self) -> alloc::string::String
 pub struct ai6::directorates::registry::store::FileRegistry
 impl ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::from_environment() -> core::io::error::Result<Self>
 pub fn ai6::directorates::registry::store::FileRegistry::open(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::directorates::registry::store::FileRegistry::root(&self) -> &std::path::Path
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
@@ -3713,7 +3836,6 @@ pub fn ai6::directorates::registry::store::FileRegistry::headquarters(&self) -> 
 pub fn ai6::directorates::registry::store::FileRegistry::set_station_settings(&self, &str, &ai6::directorates::registry::store::StationSettings) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::station_settings(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::StationSettings>>
 pub fn ai6::directorates::registry::store::FileRegistry::stations(&self, core::time::Duration) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::StationRecord>>
-pub fn ai6::directorates::registry::store::default_registry_dir() -> core::io::error::Result<std::path::PathBuf>
 pub mod ai6::directorates::registry::timeline
 #[non_exhaustive] pub struct ai6::directorates::registry::timeline::TimelineEvent
 pub ai6::directorates::registry::timeline::TimelineEvent::action: alloc::string::String
@@ -3852,6 +3974,7 @@ pub ai6::directorates::section_00::agent::AssistantMode::read_only: alloc::vec::
 pub ai6::directorates::section_00::agent::AssistantMode::skill_commands: bool
 pub ai6::directorates::section_00::agent::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::skills_dir: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AssistantMode::station_paths: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantMode::unsandboxed: bool
 impl ai6::directorates::section_00::agent::AssistantMode
 pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
@@ -4150,13 +4273,13 @@ pub type ai6::directorates::section_00::gate::Resolver<'a> = (dyn core::ops::fun
 pub mod ai6::directorates::section_00::programs
 pub const ai6::directorates::section_00::programs::STATION_CONFIG_ROOTS: [&str; 3]
 pub fn ai6::directorates::section_00::programs::canonical(&std::path::Path) -> std::path::PathBuf
-pub fn ai6::directorates::section_00::programs::denied_station_paths(&std::path::Path, &[std::path::PathBuf], core::option::Option<std::path::PathBuf>, core::option::Option<std::path::PathBuf>, core::option::Option<std::path::PathBuf>) -> alloc::vec::Vec<std::path::PathBuf>
+pub fn ai6::directorates::section_00::programs::denied_station_paths(&std::path::Path, &[std::path::PathBuf], &[std::path::PathBuf], core::option::Option<std::path::PathBuf>) -> alloc::vec::Vec<std::path::PathBuf>
 pub fn ai6::directorates::section_00::programs::find_program(&str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::section_00::programs::install_dir(&std::path::Path) -> std::path::PathBuf
 pub fn ai6::directorates::section_00::programs::path_text(&std::path::Path) -> alloc::string::String
 pub fn ai6::directorates::section_00::programs::program_dirs(&[&str], &std::path::Path, &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> alloc::vec::Vec<std::path::PathBuf>
 pub fn ai6::directorates::section_00::programs::starts_with(&std::path::Path, &std::path::Path) -> bool
-pub fn ai6::directorates::section_00::programs::station_paths(&std::path::Path, &[std::path::PathBuf]) -> alloc::vec::Vec<std::path::PathBuf>
+pub fn ai6::directorates::section_00::programs::station_paths(&std::path::Path, &[std::path::PathBuf], &[alloc::string::String]) -> alloc::vec::Vec<std::path::PathBuf>
 pub fn ai6::directorates::section_00::programs::variable(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, &str) -> core::option::Option<alloc::string::String>
 pub mod ai6::station
 pub mod ai6::station::elevation
@@ -4336,8 +4459,6 @@ impl core::default::Default for ai6::station::safehouse::SafeHouseHygiene
 pub fn ai6::station::safehouse::SafeHouseHygiene::default() -> Self
 pub const ai6::station::safehouse::DEFAULT_CACHE_AGE: core::time::Duration
 pub const ai6::station::safehouse::DEFAULT_CACHE_DIRS: [&str; 3]
-pub const ai6::station::safehouse::STATE_ENV: &str
-pub fn ai6::station::safehouse::state_dir() -> core::result::Result<std::path::PathBuf, ai6::station::safehouse::SafeHouseError>
 pub mod ai6::station::server
 #[non_exhaustive] pub enum ai6::station::server::StationRole
 pub ai6::station::server::StationRole::Control
@@ -4359,6 +4480,7 @@ pub fn ai6::station::server::ServeConfig::with_plugin_paths(self, impl core::ite
 pub fn ai6::station::server::ServeConfig::with_plugin_policy(self, ai6::station::plugins::PluginPolicy) -> Self
 pub fn ai6::station::server::ServeConfig::with_publisher(self, ai6::station::publisher::Config) -> Self
 pub fn ai6::station::server::ServeConfig::with_registry(self, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
+pub fn ai6::station::server::ServeConfig::with_secrets_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::ServeConfig::with_station_config(self, ai6::station::server::StationConfig) -> Self
 pub fn ai6::station::server::ServeConfig::with_station_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
@@ -4368,14 +4490,17 @@ pub fn ai6::station::server::StationConfig::with_account_homes(self, impl core::
 pub fn ai6::station::server::StationConfig::with_account_limit_horizon(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_account_login(self, impl ai6::AccountLogin + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_assistant_limits(self, ai6::station::server::AssistantDeskLimits) -> Self
+pub fn ai6::station::server::StationConfig::with_bootstrap_weakenings(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_config_poll(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_loadouts(self, ai6::directorates::q::LoadoutCatalog) -> Self
+pub fn ai6::station::server::StationConfig::with_protected_path(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_safe_house_hygiene(self, ai6::station::safehouse::SafeHouseHygiene) -> Self
 pub fn ai6::station::server::StationConfig::with_secret_backend(self, impl ai6::SecretBackend + 'static) -> Self
+pub fn ai6::station::server::StationConfig::with_state_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
 impl core::default::Default for ai6::station::server::StationConfig
@@ -4694,11 +4819,6 @@ pub ai6::SecretError::InvalidTtl
 impl core::error::Error for ai6::SecretError
 impl core::fmt::Display for ai6::SecretError
 pub fn ai6::SecretError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-#[non_exhaustive] pub enum ai6::SecretSource
-pub ai6::SecretSource::Env(alloc::string::String)
-pub ai6::SecretSource::File(std::path::PathBuf)
-impl ai6::directorates::q::SecretSource
-pub fn ai6::directorates::q::SecretSource::weakening(&self) -> core::option::Option<alloc::string::String>
 #[non_exhaustive] pub enum ai6::SessionError
 pub ai6::SessionError::Ended
 pub ai6::SessionError::Exists
@@ -5147,6 +5267,7 @@ pub ai6::AssistantMode::read_only: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::skill_commands: bool
 pub ai6::AssistantMode::skills: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::skills_dir: core::option::Option<alloc::string::String>
+pub ai6::AssistantMode::station_paths: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantMode::unsandboxed: bool
 impl ai6::directorates::section_00::agent::AssistantMode
 pub fn ai6::directorates::section_00::agent::AssistantMode::moneypenny() -> Self
@@ -5662,7 +5783,6 @@ pub ai6::FileData::data: guatiao::value::convert::Bytes
 pub ai6::FileData::size: u64
 pub struct ai6::FileRegistry
 impl ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::from_environment() -> core::io::error::Result<Self>
 pub fn ai6::directorates::registry::store::FileRegistry::open(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::directorates::registry::store::FileRegistry::root(&self) -> &std::path::Path
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
@@ -6447,7 +6567,7 @@ pub fn ai6::directorates::q::SecretDefinition::green_ink_weakening(&self) -> cor
 pub fn ai6::directorates::q::SecretDefinition::kinds(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::SecretDefinition::name(&self) -> &str
 pub fn ai6::directorates::q::SecretDefinition::new(impl core::convert::Into<alloc::string::String>) -> Self
-pub fn ai6::directorates::q::SecretDefinition::source(&self) -> &ai6::directorates::q::SecretSource
+pub fn ai6::directorates::q::SecretDefinition::source(&self) -> &ai6::bootstrap::SecretRef
 pub fn ai6::directorates::q::SecretDefinition::targets(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::SecretDefinition::unlocked_by(&self, &str, &str) -> bool
 pub struct ai6::SecretLease
@@ -6494,6 +6614,7 @@ pub fn ai6::station::server::ServeConfig::with_plugin_paths(self, impl core::ite
 pub fn ai6::station::server::ServeConfig::with_plugin_policy(self, ai6::station::plugins::PluginPolicy) -> Self
 pub fn ai6::station::server::ServeConfig::with_publisher(self, ai6::station::publisher::Config) -> Self
 pub fn ai6::station::server::ServeConfig::with_registry(self, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
+pub fn ai6::station::server::ServeConfig::with_secrets_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::ServeConfig::with_station_config(self, ai6::station::server::StationConfig) -> Self
 pub fn ai6::station::server::ServeConfig::with_station_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
@@ -6790,14 +6911,17 @@ pub fn ai6::station::server::StationConfig::with_account_homes(self, impl core::
 pub fn ai6::station::server::StationConfig::with_account_limit_horizon(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_account_login(self, impl ai6::AccountLogin + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_assistant_limits(self, ai6::station::server::AssistantDeskLimits) -> Self
+pub fn ai6::station::server::StationConfig::with_bootstrap_weakenings(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_config_poll(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_headquarters_lease(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_loadouts(self, ai6::directorates::q::LoadoutCatalog) -> Self
+pub fn ai6::station::server::StationConfig::with_protected_path(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_safe_house_hygiene(self, ai6::station::safehouse::SafeHouseHygiene) -> Self
 pub fn ai6::station::server::StationConfig::with_secret_backend(self, impl ai6::SecretBackend + 'static) -> Self
+pub fn ai6::station::server::StationConfig::with_state_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
 impl core::default::Default for ai6::station::server::StationConfig
