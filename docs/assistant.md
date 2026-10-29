@@ -23,7 +23,9 @@ context = "The operators here prefer short answers."
 Each message the person sends goes from the app to Universal Exports, which hands it to a
 Station: the one already running the conversation, else the Headquarters Station, else any
 healthy Station. A Station that has no such Agent, no such handler, a quarantine on it, or
-four assistant Sessions running already refuses, and the next one is asked. The Station keeps
+four assistant Sessions running or starting already refuses, and the next one is asked. A
+Station takes each conversation's messages in order and different conversations' at the same
+time, so one whose repositories are slow to clone holds up no one else. The Station keeps
 one harness per conversation, so a follow-up reaches it at once; after ten idle minutes it
 closes, and the next message resumes the same provider Session. A harness that exits or
 fails is closed at once and the conversation shows why, with the harness's exit status and

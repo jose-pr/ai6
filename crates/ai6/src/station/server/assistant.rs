@@ -575,6 +575,8 @@ pub(super) struct Desk {
     idle: Duration,
     max_live: usize,
     live: Arc<Mutex<BTreeMap<String, Live>>>,
+    /// Harnesses being started, not yet in `live`.
+    starting: AtomicUsize,
     known: Arc<Mutex<BTreeMap<String, String>>>,
     /// Where the conversations' working directories go, made at the first start.
     areas: Mutex<Option<Root>>,
@@ -607,6 +609,7 @@ impl Desk {
             idle: IDLE,
             max_live: MAX_LIVE,
             live: Arc::default(),
+            starting: AtomicUsize::new(0),
             known: Arc::default(),
             areas: Mutex::default(),
             houses: Arc::new(move || {
@@ -996,10 +999,15 @@ impl Desk {
         if !self.harness.available(&handler) {
             return Err(format!("this Station has no {handler:?} handler"));
         }
-        let live = self.live.lock().map_err(|_| "assistant lock failed")?.len();
-        if live >= self.max_live {
-            return Err("this Station runs as many assistant Sessions as it may".to_owned());
-        }
+        // Conversations start at once, so one starting holds its place until it runs.
+        let _starting = {
+            let live = self.live.lock().map_err(|_| "assistant lock failed")?;
+            if live.len() + self.starting.load(Ordering::Acquire) >= self.max_live {
+                return Err("this Station runs as many assistant Sessions as it may".to_owned());
+            }
+            self.starting.fetch_add(1, Ordering::AcqRel);
+            Starting(&self.starting)
+        };
         let area = self.area(&job.conversation_id)?;
         if self.elevated() {
             (self.log)(
@@ -1643,6 +1651,15 @@ impl Desk {
         std::fs::create_dir_all(&area)
             .map_err(|error| format!("assistant working directory not made: {error}"))?;
         Ok(area.to_string_lossy().into_owned())
+    }
+}
+
+/// A harness being started, counted against [`Desk::max_live`] until it is dropped.
+struct Starting<'a>(&'a AtomicUsize);
+
+impl Drop for Starting<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -2353,18 +2370,58 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     )
     .with_exposure(exposure);
     let stopping = state.stopping.clone();
+    let mut dispatch = Dispatch::new(Arc::new(desk));
     Ok(Some(tokio::spawn(async move {
         while !stopping.load(Ordering::Acquire) {
             tokio::select! {
                 job = receiver.recv() => match job {
-                    Some(job) => desk.handle(job).await,
+                    Some(job) => dispatch.send(job),
                     None => break,
                 },
                 () = tokio::time::sleep(STOP_CHECK) => {}
             }
         }
-        desk.close_all();
+        dispatch.desk.close_all();
     })))
+}
+
+/// Hands each job to the desk on a task of its own: a conversation's jobs one after another in
+/// the order they came, other conversations' meanwhile, so one person's slow clone or harness
+/// start holds up no one else.
+struct Dispatch {
+    desk: Arc<Desk>,
+    /// Told when each conversation's last job sent is done.
+    tails: std::collections::HashMap<String, tokio::sync::oneshot::Receiver<()>>,
+}
+
+impl Dispatch {
+    fn new(desk: Arc<Desk>) -> Self {
+        Self {
+            desk,
+            tails: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Starts `job` once its conversation's job before it, if any, is done.
+    fn send(&mut self, job: AssistantJob) {
+        // A conversation whose last job is done (or whose task ended) waits for nothing.
+        self.tails.retain(|_, tail| {
+            matches!(
+                tail.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            )
+        });
+        let (done, tail) = tokio::sync::oneshot::channel();
+        let before = self.tails.insert(job.conversation_id.clone(), tail);
+        let desk = self.desk.clone();
+        tokio::spawn(async move {
+            if let Some(before) = before {
+                let _ = before.await;
+            }
+            desk.handle(job).await;
+            let _ = done.send(());
+        });
+    }
 }
 
 /// The desk's own link to Universal Exports, with the Station's credential.
@@ -2866,7 +2923,7 @@ mod tests {
                           [agent.007]\nhandler = \"mock-agent\"\n";
 
     struct Fixture {
-        desk: Desk,
+        desk: Arc<Desk>,
         asked: Arc<Mutex<Asked>>,
         reports: Arc<Mutex<Vec<AssistantReport>>>,
         /// What the desk wrote to the Station's log.
@@ -2909,8 +2966,15 @@ mod tests {
             script,
             Script::Answers,
         );
-        fixture.desk.houses = git_houses();
+        fixture.desk_mut().houses = git_houses();
         fixture
+    }
+
+    impl Fixture {
+        /// The desk, to rewire before anything else holds it.
+        fn desk_mut(&mut self) -> &mut Desk {
+            Arc::get_mut(&mut self.desk).expect("the desk is not shared yet")
+        }
     }
 
     impl Drop for Fixture {
@@ -2978,7 +3042,7 @@ mod tests {
         )
         .with_exposure(exposure.clone());
         Fixture {
-            desk,
+            desk: Arc::new(desk),
             asked,
             reports,
             logged,
@@ -3461,7 +3525,7 @@ mod tests {
                 });
             });
         });
-        fixture.desk.outbox = Outbox {
+        fixture.desk_mut().outbox = Outbox {
             report,
             held,
             parked: Arc::default(),
@@ -3848,7 +3912,7 @@ mod tests {
             })
             .collect();
         let audit = registry.clone();
-        fixture.desk.state.cables = Arc::new(
+        fixture.desk_mut().state.cables = Arc::new(
             CableRelay::new(
                 registry.clone(),
                 CablePolicy::try_new(grants, BTreeMap::new()).unwrap(),
@@ -4578,11 +4642,11 @@ mod tests {
         let (release, held) = std::sync::mpsc::channel::<()>();
         let held = Arc::new(Mutex::new(held));
         let houses = fixture.desk.houses.clone();
-        fixture.desk.houses = Arc::new(move || {
+        fixture.desk_mut().houses = Arc::new(move || {
             let _ = held.lock().unwrap().recv_timeout(Duration::from_secs(30));
             houses()
         });
-        fixture.desk.memory_jobs = Arc::new(tokio::sync::Semaphore::new(1));
+        fixture.desk_mut().memory_jobs = Arc::new(tokio::sync::Semaphore::new(1));
         let write = |id: &str| {
             remembering(
                 id,
@@ -4604,6 +4668,49 @@ mod tests {
         release.send(()).unwrap();
         let (kind, text, _) = memory_answer(&fixture, "slow").await;
         assert_eq!(kind, EVENT_ACCEPTED, "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_stalled_clone_holds_up_only_its_own_conversation() {
+        let people = tempfile::tempdir().unwrap();
+        let mut fixture = git_fixture(people.path(), Script::Answers);
+        // The first clone stalls until released, as a remote that never answers would.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let held = Arc::new(Mutex::new(Some(held)));
+        let houses = fixture.desk.houses.clone();
+        fixture.desk_mut().houses = Arc::new(move || {
+            let waiting = held.lock().unwrap().take();
+            if let Some(held) = waiting {
+                let _ = held.recv_timeout(Duration::from_secs(30));
+            }
+            houses()
+        });
+        let completed = |conversation: &str| {
+            kinds(&fixture, conversation)
+                .iter()
+                .filter(|kind| *kind == EVENT_COMPLETED)
+                .count()
+        };
+        let mut dispatch = Dispatch::new(fixture.desk.clone());
+        let mine = people.path().join("eve.git");
+        dispatch.send(working("c-slow", "first", workspace(&mine)));
+        dispatch.send(working("c-slow", "second", workspace(&mine)));
+        dispatch.send(job("c-other", "meanwhile"));
+        until(|| completed("c-other") == 1).await;
+        assert_eq!(completed("c-slow"), 0, "still cloning");
+        release.send(()).unwrap();
+        until(|| completed("c-slow") == 2).await;
+        // Its own messages kept their order.
+        let prompts: Vec<String> = fixture
+            .asked
+            .lock()
+            .unwrap()
+            .starts
+            .iter()
+            .map(|start| start.prompt.clone())
+            .collect();
+        assert_eq!(prompts, ["meanwhile", "first"], "second reached it warm");
+        drop(dispatch);
     }
 
     #[tokio::test]
@@ -5526,7 +5633,7 @@ mod tests {
             Script::Computes,
             Script::Answers,
         );
-        fixture.desk.houses = git_houses();
+        fixture.desk_mut().houses = git_houses();
         let bare = people.path().join("eve.git");
         // Universal Exports asks for more than this Station's roster gives.
         let asked = reaching(
