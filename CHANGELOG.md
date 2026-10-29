@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (new Overview, Operations and Sessions pages; Agents, Green Ink, Briefings and Roster take
   Administration's tabs; Theaters, settings and placement are tabs of Stations) that has
   labels from 1200 px, is compact from 900 px and sits behind a menu button below that.
+  It opens on Overview, whose attention list includes the briefs vetting holds, read with
+  the board from each Operation where the person has `mission.create`.
 - Outer Office makes no request outside its own origin by default: it bundles Roboto and
   its icons, and the web build loads CanvasKit from `canvaskit/` and fallback fonts from
   `assets/fonts/fallback/`. `[assets] cdn = "fonts"` or `"all"` in the `OO.cfg` beside

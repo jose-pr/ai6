@@ -40,8 +40,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Stations, with tabs for every Station's Theaters, each Station's settings (its Mission
   capacity and resource limits: the free memory and CPU past which it takes no new
   Missions; 0 MiB and 100% turn them off) and a placement preview.
-- Overview: counts of Operations, Stations online and dark, active Missions and waiting
-  Sessions, and what needs attention; Operations: each Operation's Missions by state;
+- Overview, the page Outer Office opens on: counts of Operations, Stations online and
+  dark, active Missions and waiting Sessions, and what needs attention (blocked Sessions,
+  briefs vetting holds in the Operations where the person has `mission.create`, dark
+  Stations), each with a link to its page; Operations: each Operation's Missions by state;
   Sessions: every Session in a table sorted by any column.
 - Roster: the Operations, Agents, Agent roles, cover policies and Moneypenny's settings every
   Station reads, with the revision each Station runs and what any Station refused or waits to
@@ -183,7 +185,7 @@ pages and may load what they need.
 
 A top bar, a rail of pages (Overview, Operations, Missions, Sessions, Agents, Stations,
 Green Ink, Briefings, Roster, Account Pools, Timeline, Audit; each shown only with its
-permission) and the page. From 1200 px wide the rail has labels beside its icons, from 900
+permission) and the page, Overview after sign-in. From 1200 px wide the rail has labels beside its icons, from 900
 px labels below them, and narrower it opens from a menu button, one view at a time.
 
 Web is one Flutter app view: wide windows keep the board beside the selected Session,
