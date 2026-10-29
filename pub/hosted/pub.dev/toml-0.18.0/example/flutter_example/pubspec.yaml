@@ -1,0 +1,23 @@
+name: flutter_example
+description: An example that demonstrates how to load a configuration file from an asset in Flutter.
+publish_to: none
+
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  toml:
+    path: ../../
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/example.toml

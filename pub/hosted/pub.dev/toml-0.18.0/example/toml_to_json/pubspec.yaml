@@ -1,0 +1,13 @@
+name: toml_to_json
+description: An example application for the conversion of TOML documents to JSON.
+repository: https://github.com/just95/toml.dart/tree/main/example/toml_to_json
+publish_to: none
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+dependencies:
+  toml:
+    path: ../../
+dev_dependencies:
+  lints: ^6.0.0
+executables:
+  toml-to-json: toml_to_json

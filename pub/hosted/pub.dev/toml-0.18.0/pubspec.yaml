@@ -1,0 +1,14 @@
+name: toml
+version: 0.18.0
+description: Parser and encoder for TOML v1.0.0 (Tom's Obvious, Minimal Language) configuration files.
+repository: https://github.com/just95/toml.dart
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+dependencies:
+  meta: ^1.16.0
+  petitparser: ^7.0.1
+  collection: ^1.16.0
+  web: ^1.1.1
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.26.3

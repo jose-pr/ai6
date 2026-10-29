@@ -1,0 +1,21 @@
+name: example
+description: An example that demonstrates how to load a configuration file via HTTP in the browser.
+repository: https://github.com/just95/toml.dart/tree/main/example/http_config_loader
+publish_to: none
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+dependencies:
+  toml:
+    path: ../../
+  web: ^1.1.1
+dev_dependencies:
+  # Dependencies for `webdev`.
+  # See also https://dart.dev/tools/webdev#depending-on-build_-packages.
+  build_runner: ^2.4.11
+  build_web_compilers: ^4.0.10
+  # Dependencies for `dartanalyzer`.
+  lints: ^6.0.0
+  # Dependencies for continuous integration.
+  webdriver: ^3.0.3
+  shelf: ^1.4.2
+  shelf_static: ^1.1.2
