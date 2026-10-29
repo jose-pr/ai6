@@ -109,18 +109,12 @@ impl AgentHandler for ClaudeHandler {
             "--verbose".to_string(),
             "--replay-user-messages".to_string(),
         ];
-        if !request.initial_context.is_empty() {
-            argv.extend([
-                "--append-system-prompt".to_string(),
-                request.initial_context.join("\n\n"),
-            ]);
-        }
-        if let Some(model) = request.model.as_ref() {
-            argv.extend(["--model".to_string(), model.clone()]);
-        }
-        if let Some(effort) = request.effort.as_ref() {
-            argv.extend(["--effort".to_string(), effort.clone()]);
-        }
+        add_launch_options(
+            &mut argv,
+            &request.initial_context,
+            request.model.as_deref(),
+            request.effort.as_deref(),
+        );
         add_budget(&mut argv, request.max_cost_micro_usd);
         let mode = Mode {
             project_settings: request.project_settings,
@@ -171,18 +165,12 @@ impl AgentHandler for ClaudeHandler {
         // Claude Code 2.1.310 reuses the system prompt it recorded with the Session
         // (`--system-prompt-snapshot`, on by default) until the Session is compacted; after
         // that, or with the snapshot off, it builds the prompt from this launch's flags.
-        if !request.initial_context.is_empty() {
-            argv.extend([
-                "--append-system-prompt".to_string(),
-                request.initial_context.join("\n\n"),
-            ]);
-        }
-        if let Some(model) = request.model {
-            argv.extend(["--model".to_string(), model]);
-        }
-        if let Some(effort) = request.effort {
-            argv.extend(["--effort".to_string(), effort]);
-        }
+        add_launch_options(
+            &mut argv,
+            &request.initial_context,
+            request.model.as_deref(),
+            request.effort.as_deref(),
+        );
         add_budget(&mut argv, request.max_cost_micro_usd);
         let mode = Mode {
             project_settings: request.project_settings,
@@ -218,6 +206,25 @@ impl AgentHandler for ClaudeHandler {
             return Err(error);
         }
         Ok(operation.into_object())
+    }
+}
+
+/// Adds the standing context, model and effort, each as one `--flag=VALUE` argument: a value
+/// that starts with `-` is then never read as another option.
+fn add_launch_options(
+    argv: &mut Vec<String>,
+    context: &[String],
+    model: Option<&str>,
+    effort: Option<&str>,
+) {
+    if !context.is_empty() {
+        argv.push(format!("--append-system-prompt={}", context.join("\n\n")));
+    }
+    if let Some(model) = model {
+        argv.push(format!("--model={model}"));
+    }
+    if let Some(effort) = effort {
+        argv.push(format!("--effort={effort}"));
     }
 }
 
@@ -1100,9 +1107,9 @@ impl ClaudeSession {
     /// closing it; `None` when it calls none. The flags it was started with are meant to make
     /// this impossible; this backs them up. Which paths, commands and hosts a built-in tool may
     /// reach is the permission rules' and the sandbox's to enforce.
-    fn tripped(&self, seen: &AgentEvent) -> Option<AgentEvent> {
+    fn tripped(&self, seen: &AgentEvent, value: &Value) -> Option<AgentEvent> {
         let allowed = self.restricted.as_ref()?;
-        let forbidden = seen
+        let mut forbidden = seen
             .tools
             .iter()
             .filter(|tool| {
@@ -1114,6 +1121,11 @@ impl ClaudeSession {
             })
             .cloned()
             .collect::<Vec<_>>();
+        for block in unexpected_blocks(value) {
+            if !forbidden.contains(&block) {
+                forbidden.push(block);
+            }
+        }
         if forbidden.is_empty() {
             return None;
         }
@@ -1228,7 +1240,7 @@ impl ClaudeSession {
             return self.read_event(remaining.as_millis().min(i64::MAX as u128) as i64);
         }
         if let Some(event) = decode_event(&value, line.clone()) {
-            if let Some(ended) = self.tripped(&event) {
+            if let Some(ended) = self.tripped(&event, &value) {
                 return Ok(Some(ended));
             }
             return Ok(Some(event));
@@ -1506,6 +1518,37 @@ fn decode_tools(value: &Value) -> Vec<String> {
                 kind if kind.ends_with("_tool_use") => Some(format!("{kind}:{name}")),
                 _ => None,
             }
+        })
+        .collect()
+}
+
+/// The content block types an `assistant` message of a restricted Session may hold: prose,
+/// reasoning, and a call of a tool Claude Code runs (checked by name).
+const EXPECTED_BLOCKS: [&str; 4] = ["text", "thinking", "redacted_thinking", "tool_use"];
+
+/// Every content block of an `assistant` message whose type is not [`EXPECTED_BLOCKS`], as
+/// `TYPE` or `TYPE:NAME`: a call the Messages API runs itself (`server_tool_use`,
+/// `mcp_tool_use`), its result (`web_search_tool_result`, `mcp_tool_result`), a block with no
+/// type, or one of a type Claude Code adds later.
+fn unexpected_blocks(value: &Value) -> Vec<String> {
+    if value.get("type").and_then(Value::as_str) != Some("assistant") {
+        return Vec::new();
+    }
+    value
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|block| {
+            let kind = block.get("type").and_then(Value::as_str).unwrap_or("");
+            if EXPECTED_BLOCKS.contains(&kind) {
+                return None;
+            }
+            let kind = if kind.is_empty() { "untyped" } else { kind };
+            Some(match block.get("name").and_then(Value::as_str) {
+                Some(name) => format!("{kind}:{name}"),
+                None => kind.to_owned(),
+            })
         })
         .collect()
 }
@@ -1852,14 +1895,34 @@ mod tests {
         assert!(
             specs[0]
                 .argv
-                .windows(2)
-                .any(|pair| { pair == ["--append-system-prompt", "context before the prompt"] })
+                .iter()
+                .any(|arg| arg == "--append-system-prompt=context before the prompt")
         );
         assert!(
             specs[1]
                 .argv
                 .windows(2)
                 .any(|pair| { pair == ["--resume", session_id.as_str()] })
+        );
+    }
+
+    /// A model, effort or context starting with `-` stays the value of its own option.
+    #[test]
+    fn launch_option_values_are_never_read_as_options() {
+        let mut argv = Vec::new();
+        add_launch_options(
+            &mut argv,
+            &["- a bullet".to_owned()],
+            Some("--dangerously-skip-permissions"),
+            Some("-p"),
+        );
+        assert_eq!(
+            argv,
+            [
+                "--append-system-prompt=- a bullet",
+                "--model=--dangerously-skip-permissions",
+                "--effort=-p",
+            ]
         );
     }
 
@@ -2005,16 +2068,8 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--resume", "claude-session-42"])
         );
-        assert!(
-            spec.argv
-                .windows(2)
-                .any(|pair| pair == ["--model", "sonnet"])
-        );
-        assert!(
-            spec.argv
-                .windows(2)
-                .any(|pair| pair == ["--effort", "high"])
-        );
+        assert!(spec.argv.iter().any(|arg| arg == "--model=sonnet"));
+        assert!(spec.argv.iter().any(|arg| arg == "--effort=high"));
         assert_eq!(spec.cwd.as_deref(), Some("C:\\station\\mission-42"));
         assert_eq!(
             spec.env.as_ref().unwrap().get("TOKEN").map(String::as_str),
@@ -3037,9 +3092,9 @@ mod tests {
                 "{argv:?}"
             );
             assert!(!argv.iter().any(|a| a == "--settings"), "no gate to pass");
-            assert_eq!(
-                after("--append-system-prompt"),
-                "You are Moneypenny.",
+            assert!(
+                argv.iter()
+                    .any(|a| a == "--append-system-prompt=You are Moneypenny."),
                 "the instructions on start and on resume"
             );
             assert!(
@@ -4136,9 +4191,28 @@ mod tests {
 
     #[test]
     fn a_server_side_tool_call_ends_a_restricted_session() {
-        for block in [
-            r#"{"type":"server_tool_use","id":"srvtoolu_1","name":"advisor","input":{}}"#,
-            r#"{"type":"mcp_tool_use","id":"mcptoolu_1","name":"board","server_name":"moneypenny"}"#,
+        for (block, named) in [
+            (
+                r#"{"type":"server_tool_use","id":"srvtoolu_1","name":"advisor","input":{}}"#,
+                "server_tool_use:advisor",
+            ),
+            (
+                r#"{"type":"mcp_tool_use","id":"mcptoolu_1","name":"board","server_name":"moneypenny"}"#,
+                "mcp_tool_use:board",
+            ),
+            (
+                r#"{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}"#,
+                "web_search_tool_result",
+            ),
+            (
+                r#"{"type":"code_execution_tool_result","tool_use_id":"srvtoolu_2"}"#,
+                "code_execution_tool_result",
+            ),
+            (
+                r#"{"type":"container_upload","file_id":"f"}"#,
+                "container_upload",
+            ),
+            (r#"{"text":"no type"}"#, "untyped"),
         ] {
             let mut input =
                 b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-1\"}\n".to_vec();
@@ -4161,8 +4235,31 @@ mod tests {
                 .collect::<Vec<_>>();
             assert_eq!(kinds.len(), 2, "{block}: {kinds:?}");
             assert_eq!(kinds[1].0, "failed");
-            assert!(kinds[1].1.contains("_tool_use:"), "{}", kinds[1].1);
+            assert!(kinds[1].1.contains(named), "{}", kinds[1].1);
         }
+    }
+
+    /// Prose, reasoning and an allowed call pass the tripwire.
+    #[test]
+    fn expected_blocks_keep_a_restricted_session_going() {
+        let message = json!({"type": "assistant", "message": {"content": [
+            {"type": "thinking", "thinking": "hm"},
+            {"type": "redacted_thinking", "data": "x"},
+            {"type": "text", "text": "ok"},
+            {"type": "tool_use", "id": "t", "name": "mcp__moneypenny__board", "input": {}},
+        ]}});
+        assert!(unexpected_blocks(&message).is_empty());
+        let session = ClaudeSession::new(
+            ResumeTerminalSession {
+                input: Mutex::new(Vec::new()),
+                writes: Arc::new(Mutex::new(Vec::new())),
+            }
+            .into_object(),
+            None,
+        )
+        .restricted_to(restriction(false, Some(&AssistantMode::moneypenny())));
+        let event = decode_event(&message, Vec::new()).unwrap();
+        assert!(session.tripped(&event, &message).is_none());
     }
 
     #[test]

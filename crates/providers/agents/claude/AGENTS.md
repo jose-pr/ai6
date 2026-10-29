@@ -15,6 +15,8 @@ It exposes `ClaudeHandler` and `ClaudeConfig` from the root. The crate contains 
 kind. `ClaudeConfig` selects the executable; `ClaudeHandler` launches Claude Code through
 the terminal instance supplied by AI6. Initial context becomes appended system
 instructions (`--append-system-prompt`) before the task prompt is written to the stream.
+It, the model and the effort are each passed as one `--flag=VALUE` argument, so a value that
+starts with `-` is never read as another option.
 Claude's provider Session ID is returned from `session_id()` after the provider emits it
 and is supplied unchanged to `resume`. Claude Code 2.1.310 records the system prompt with
 the Session (`--system-prompt-snapshot`, on by default) and reuses it on resume until the
@@ -24,12 +26,13 @@ A restricted Session (`answer_only`, or `assistant`) whose `assistant` message c
 not named `mcp__<server>__<tool>` for one of its servers (nor, for an assistant, one of the
 built-in tools its mode offers: the file tools, `Bash`, `WebFetch`, `WebSearch`) is killed,
 ends with a `failed`
-event naming the tools, and nothing read after that becomes an event. A call is any
-`tool_use` content block (named by its `name`) and any other block whose type ends in
-`_tool_use` (named `TYPE:NAME`, such as `server_tool_use:advisor` or `mcp_tool_use:echo`):
-those the Messages API runs itself, outside every MCP server, so a restricted Session never
-may. Whether Claude Code's stream carries such blocks is not documented; the block types
-are the Messages API's. A restricted Session also runs with
+event naming the tools, and nothing read after that becomes an event. The check is an
+allow-list of content block types: `text`, `thinking`, `redacted_thinking` and a `tool_use`
+of an allowed name pass; any other block trips it, named `TYPE` or `TYPE:NAME`
+(`server_tool_use:advisor`, `mcp_tool_use:echo`, `web_search_tool_result`, `untyped`, or a
+type Claude Code adds later): those the Messages API runs itself, outside every MCP server,
+and their results, which a restricted Session never may have. Whether Claude Code's stream
+carries such blocks is not documented; the block types are the Messages API's. A restricted Session also runs with
 `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` in its environment, overriding the Agent's: Claude Code
 2.1.310 otherwise attaches its server-side `advisor` tool to model requests (seen with
 `claude-opus-5-5`), and neither `--restricted`, `--tools=` nor a deny rule removes it. That
