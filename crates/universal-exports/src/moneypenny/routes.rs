@@ -291,6 +291,66 @@ impl Route {
         Self::checked(page, fields, limits)
     }
 
+    /// The text value of field `name`, when the route sets it.
+    fn text(&self, name: &str) -> Option<&str> {
+        self.fields.iter().find_map(|(field, value)| match value {
+            Field::Text(text) if *field == name => Some(text.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Whether this Missions route's page shows `mission`, an item of `GET /v1/missions`; the
+    /// app's `routeMissions` decides the same, and `assistant_routes.json` holds the cases both
+    /// test. A state filter keeps the Sessions in those states (a Session without one is
+    /// working) and the Mission shows when one is kept; Station, Agent and text then look at
+    /// the kept Sessions, the text also at the Operation, the Mission and the brief's prompt,
+    /// without regard to case. Any other page shows none.
+    pub(crate) fn shows_mission(&self, mission: &Value) -> bool {
+        if self.page != Page::Missions {
+            return false;
+        }
+        let states = self.fields.iter().find_map(|(_, value)| match value {
+            Field::States(states) => Some(states),
+            Field::Text(_) => None,
+        });
+        let sessions: Vec<&Value> = mission["sessions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|session| {
+                states.is_none_or(|states| {
+                    let state = session["state"].as_str().unwrap_or("working");
+                    states.iter().any(|wanted| wanted == state)
+                })
+            })
+            .collect();
+        if sessions.is_empty() {
+            return false;
+        }
+        let equals = |key: &str, value: &Value| self.text(key).is_none_or(|wanted| value == wanted);
+        let any_session = |key: &str, field: &str| {
+            self.text(key)
+                .is_none_or(|wanted| sessions.iter().any(|session| session[field] == wanted))
+        };
+        let text = self.text("text").is_none_or(|wanted| {
+            let wanted = wanted.to_lowercase();
+            [
+                &mission["operation_id"],
+                &mission["mission_id"],
+                &mission["brief"]["prompt"],
+            ]
+            .into_iter()
+            .chain(sessions.iter().map(|session| &session["session_id"]))
+            .filter_map(Value::as_str)
+            .any(|item| item.to_lowercase().contains(&wanted))
+        });
+        equals("operation_id", &mission["operation_id"])
+            && equals("mission_id", &mission["mission_id"])
+            && any_session("station_id", "station_id")
+            && any_session("agent", "agent")
+            && text
+    }
+
     /// The link form, its query in the page's field order.
     pub(crate) fn to_uri(&self) -> String {
         let query = self
@@ -479,6 +539,32 @@ mod tests {
             "../../../../clients/outer-office/test/fixtures/assistant_routes.json"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn missions_routes_show_the_fixture_missions_the_app_shows() {
+        let fixture = fixture();
+        let missions = fixture["missions"]["board"].as_array().unwrap();
+        for case in fixture["missions"]["cases"].as_array().unwrap() {
+            let route = Route::from_json(&case["route"], Limits::default()).unwrap();
+            let shown: Vec<&str> = missions
+                .iter()
+                .filter(|mission| route.shows_mission(mission))
+                .map(|mission| mission["mission_id"].as_str().unwrap())
+                .collect();
+            let expected: Vec<&str> = case["shows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap())
+                .collect();
+            assert_eq!(shown, expected, "{}", case["route"]);
+        }
+        let other = Route::from_json(&json!({"page": "sessions"}), Limits::default()).unwrap();
+        assert!(
+            !other.shows_mission(&missions[0]),
+            "only a Missions route shows Missions"
+        );
     }
 
     #[test]

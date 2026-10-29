@@ -1,13 +1,10 @@
 //! Text checks shared by views and routes.
 
-/// The longest short text in a view, in bytes.
-const MAX_SHORT: usize = 512;
-
-/// At most [`MAX_SHORT`] bytes, without control characters but newlines.
-pub(crate) fn short(what: &str, text: &str) -> Result<(), String> {
-    if text.len() > MAX_SHORT || text.chars().any(|c| c.is_control() && c != '\n') {
+/// At most `max` bytes, without control characters but newlines.
+pub(crate) fn short_within(what: &str, text: &str, max: usize) -> Result<(), String> {
+    if text.len() > max || text.chars().any(|c| c.is_control() && c != '\n') {
         return Err(format!(
-            "{what} is longer than {MAX_SHORT} bytes or has control characters"
+            "{what} is longer than {max} bytes or has control characters"
         ));
     }
     Ok(())

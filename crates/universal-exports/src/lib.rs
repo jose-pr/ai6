@@ -56,7 +56,7 @@ pub use controls::ControlStatus;
 pub use held::{HeldBriefDecision, HeldBriefEntry};
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
-pub use moneypenny::AssistantConfig;
+pub use moneypenny::{AssistantConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
 pub use roster::{RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{DEFAULT_TIMELINE_PAGE, MAX_TIMELINE_PAGE, TimelineItem, TimelinePage};

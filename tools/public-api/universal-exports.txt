@@ -57,6 +57,7 @@ pub fn universal_exports::AssistantConfig::with_memory_requests(self, usize, usi
 pub fn universal_exports::AssistantConfig::with_route_text_bytes(self, usize) -> Self
 pub fn universal_exports::AssistantConfig::with_token_ttl(self, core::time::Duration) -> Self
 pub fn universal_exports::AssistantConfig::with_tool_calls_per_minute(self, u32) -> Self
+pub fn universal_exports::AssistantConfig::with_view_limits(self, universal_exports::ViewLimits) -> Self
 impl core::default::Default for universal_exports::AssistantConfig
 pub fn universal_exports::AssistantConfig::default() -> Self
 pub struct universal_exports::AttachGrant
@@ -279,6 +280,27 @@ pub universal_exports::TimelineItem::target: core::option::Option<alloc::string:
 pub universal_exports::TimelinePage::items: alloc::vec::Vec<universal_exports::TimelineItem>
 pub universal_exports::TimelinePage::next_cursor: core::option::Option<alloc::string::String>
 pub universal_exports::TimelinePage::operation_id: alloc::string::String
+pub struct universal_exports::ViewLimits
+pub universal_exports::ViewLimits::blocks: usize
+pub universal_exports::ViewLimits::columns: usize
+pub universal_exports::ViewLimits::diff_bytes: usize
+pub universal_exports::ViewLimits::fields: usize
+pub universal_exports::ViewLimits::graph_edges: usize
+pub universal_exports::ViewLimits::graph_nodes: usize
+pub universal_exports::ViewLimits::items: usize
+pub universal_exports::ViewLimits::pie_slices: usize
+pub universal_exports::ViewLimits::points: usize
+pub universal_exports::ViewLimits::rows: usize
+pub universal_exports::ViewLimits::schedule_rows: usize
+pub universal_exports::ViewLimits::series: usize
+pub universal_exports::ViewLimits::short_bytes: usize
+pub universal_exports::ViewLimits::svg_bytes: usize
+pub universal_exports::ViewLimits::svg_depth: usize
+pub universal_exports::ViewLimits::svg_elements: usize
+pub universal_exports::ViewLimits::text_bytes: usize
+pub universal_exports::ViewLimits::view_bytes: usize
+impl core::default::Default for universal_exports::ViewLimits
+pub fn universal_exports::ViewLimits::default() -> Self
 pub const universal_exports::DEFAULT_TIMELINE_PAGE: usize
 pub const universal_exports::MAX_TIMELINE_PAGE: usize
 pub const universal_exports::MIN_PROXY_SECRET_LEN: usize

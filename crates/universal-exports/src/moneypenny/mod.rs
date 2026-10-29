@@ -33,8 +33,11 @@ pub(crate) mod mcp;
 pub(crate) mod memory;
 pub(crate) mod routes;
 mod store;
+mod svg;
 pub(crate) mod tools;
 pub(crate) mod views;
+
+pub use views::ViewLimits;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -85,6 +88,7 @@ pub struct AssistantConfig {
     memory_per_person: usize,
     memory_total: usize,
     route_text_bytes: usize,
+    views: views::ViewLimits,
 }
 
 impl Default for AssistantConfig {
@@ -105,6 +109,7 @@ impl Default for AssistantConfig {
             memory_per_person: 2,
             memory_total: 16,
             route_text_bytes: routes::DEFAULT_TEXT_BYTES,
+            views: views::ViewLimits::default(),
         }
     }
 }
@@ -220,6 +225,14 @@ impl AssistantConfig {
     pub fn with_memory_requests(mut self, per_person: usize, total: usize) -> Self {
         self.memory_per_person = per_person.max(1);
         self.memory_total = total.max(1);
+        self
+    }
+
+    /// The bounds of the views she shows ([`ViewLimits`], each at least 1); the app is sent
+    /// them with each conversation and checks views against the same values.
+    #[must_use]
+    pub fn with_view_limits(mut self, limits: ViewLimits) -> Self {
+        self.views = limits.at_least_one();
         self
     }
 
@@ -516,6 +529,11 @@ fn now() -> f64 {
 }
 
 impl Assistant {
+    /// The settings it was started with.
+    pub(crate) fn config(&self) -> &AssistantConfig {
+        &self.config
+    }
+
     pub(crate) fn new(config: AssistantConfig) -> Self {
         Self {
             config,
@@ -548,7 +566,7 @@ impl Assistant {
             conversation.bearer = bearer.to_owned();
             return (
                 conversation.id.clone(),
-                ready(conversation),
+                ready(conversation, &self.config.views),
                 conversation.events.subscribe(),
             );
         }
@@ -562,7 +580,7 @@ impl Assistant {
         let id = Uuid::new_v4().to_string();
         let conversation =
             Conversation::new(id.clone(), person_id.to_owned(), bearer.to_owned(), now);
-        let shown = ready(&conversation);
+        let shown = ready(&conversation, &self.config.views);
         let events = conversation.events.subscribe();
         desk.store.conversations.insert(id.clone(), conversation);
         (id, shown, events)
@@ -1675,7 +1693,7 @@ impl Assistant {
     /// Shows a view Moneypenny built, when it is exactly the view schema; otherwise tells her
     /// why and shows nothing.
     pub(crate) fn show(&self, granted: &Granted, input: &Value) -> tools::Outcome {
-        let view = match views::parse(input, self.config.route_limits()) {
+        let view = match views::parse(input, &self.config.views, self.config.route_limits()) {
             Ok(view) => view,
             Err(reason) => {
                 return tools::Outcome::error(format!(
@@ -1692,12 +1710,17 @@ impl Assistant {
         else {
             return tools::Outcome::error("The conversation is gone.");
         };
+        // Built after reading outside text: the app frames it so the person checks it first.
+        let mut data = json!({"id": id, "view": view});
+        if conversation.exposed {
+            data["exposed"] = Value::Bool(true);
+        }
         conversation.push(
             Entry {
                 role: Role::View,
                 text: view.title.clone().unwrap_or_default(),
                 at: now(),
-                data: Some(json!({"id": id, "view": view})),
+                data: Some(data),
             },
             max_entries,
         );
@@ -2004,8 +2027,8 @@ fn expire_proposals(conversation: &mut Conversation) {
 /// What the app is shown when it opens a conversation.
 ///
 /// Only the newest entries that fit [`READY_ENTRIES`] and [`READY_BYTES`] are sent; `earlier`
-/// counts those left out.
-fn ready(conversation: &Conversation) -> Value {
+/// counts those left out. `view_limits` are the bounds the app checks views against.
+fn ready(conversation: &Conversation, limits: &views::ViewLimits) -> Value {
     let mut shown = Vec::new();
     let mut bytes = 0;
     for entry in conversation.entries.iter().rev().take(READY_ENTRIES) {
@@ -2022,6 +2045,7 @@ fn ready(conversation: &Conversation) -> Value {
         "entries": shown,
         "earlier": conversation.entries.len() - shown.len(),
         "busy": conversation.busy,
+        "view_limits": limits,
     })
 }
 

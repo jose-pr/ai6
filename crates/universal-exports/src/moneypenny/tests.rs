@@ -1173,6 +1173,156 @@ async fn views_are_shown_only_when_they_fit_the_schema_and_forms_become_proposal
 }
 
 #[tokio::test]
+async fn a_view_shown_after_reading_outside_text_is_stamped_exposed_and_svg_is_canonical() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Draw me the Stations.").await;
+    let token = &job.mcp_token;
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../clients/outer-office/test/fixtures/assistant_views.json"
+    ))
+    .unwrap();
+
+    // Nothing outside AI6 read yet: the field is absent.
+    let messy = "<svg viewBox=\"0 0 10 10\">\n  <!-- x -->\n  <title>t</title>\n</svg>";
+    let clean = call_tool(
+        &served,
+        token,
+        "show",
+        json!({"view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": messy}]}}),
+    )
+    .await;
+    assert_eq!(clean["isError"], false, "{clean}");
+    let refused = call_tool(
+        &served,
+        token,
+        "show",
+        json!({"view": fixture["invalid"].as_array().unwrap().iter()
+            .find(|case| case["reason"] == "<script> is refused").unwrap()["view"]}),
+    )
+    .await;
+    assert_eq!(refused["isError"], true);
+    assert!(
+        refused["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("<script> is refused"),
+        "{refused}"
+    );
+
+    // A Mission's brief is outside text; a view after reading it is stamped.
+    let missions = call_tool(&served, token, "missions", json!({})).await;
+    assert_eq!(missions["isError"], false);
+    let exposed = call_tool(
+        &served,
+        token,
+        "show",
+        json!({"view": fixture["valid"]["graph"]}),
+    )
+    .await;
+    assert_eq!(exposed["isError"], false, "{exposed}");
+
+    let frames = finish(&served, &mut app, &job).await;
+    let views: Vec<&Value> = frames
+        .iter()
+        .filter(|frame| frame["type"] == "entry" && frame["entry"]["role"] == "view")
+        .map(|frame| &frame["entry"]["data"])
+        .collect();
+    assert_eq!(views.len(), 2, "the refused view never reached the app");
+    assert!(views[0].get("exposed").is_none(), "{}", views[0]);
+    assert_eq!(
+        views[0]["view"]["blocks"][0]["svg"],
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title></svg>"
+    );
+    assert_eq!(views[1]["exposed"], true);
+    assert_eq!(views[1]["view"], fixture["valid"]["graph"]);
+}
+
+#[tokio::test]
+async fn configured_view_limits_bound_her_views_and_reach_the_app() {
+    let limits = crate::ViewLimits {
+        graph_nodes: 2,
+        ..Default::default()
+    };
+    let served = served(AssistantConfig::default().with_view_limits(limits)).await;
+    let (_app, ready) = open(&served, &served.operator).await;
+    assert_eq!(ready["view_limits"]["graph_nodes"], 2);
+    assert_eq!(ready["view_limits"]["svg_bytes"], 32 * 1024);
+    let (_app, job) = accepted(&served, &served.operator, "Draw where G runs.").await;
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../clients/outer-office/test/fixtures/assistant_views.json"
+    ))
+    .unwrap();
+    let refused = call_tool(
+        &served,
+        &job.mcp_token,
+        "show",
+        json!({"view": fixture["valid"]["graph"]}),
+    )
+    .await;
+    assert_eq!(refused["isError"], true);
+    let reason = refused["content"][0]["text"].as_str().unwrap();
+    assert!(reason.contains("a graph has 1 to 2 nodes"), "{reason}");
+    let listed = mcp(&served, &job.mcp_token, "tools/list", json!({}))
+        .await
+        .json::<Value>()
+        .await
+        .unwrap();
+    let show = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "show")
+        .unwrap();
+    let graph = show["inputSchema"]["properties"]["view"]["properties"]["blocks"]["items"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|block| block["properties"]["kind"]["const"] == "graph")
+        .unwrap();
+    assert_eq!(graph["properties"]["nodes"]["maxItems"], 2);
+}
+
+#[tokio::test]
+async fn the_missions_tool_filters_by_state_station_and_agent() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Which Missions failed?").await;
+    let ids = |result: &Value| -> Vec<String> {
+        let text = result["content"][0]["text"].as_str().unwrap();
+        let start = text.find('[').unwrap();
+        let end = text.rfind(']').unwrap();
+        serde_json::from_str::<Value>(&text[start..=end])
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|mission| mission["mission_id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    // mission-g's one Session has reported no state, so it is working; its brief names Agent
+    // 007, and no Registry record places it on a Station. The rest is the shared fixture.
+    for (filter, expected) in [
+        (json!({}), vec!["mission-g"]),
+        (json!({"state": ["failed"]}), vec![]),
+        (json!({"state": ["working", "failed"]}), vec!["mission-g"]),
+        (
+            json!({"agent": "007", "text": "FIX THE BUILD"}),
+            vec!["mission-g"],
+        ),
+        (json!({"station_id": "worker"}), vec![]),
+        (json!({"station_id": "hq"}), vec![]),
+        (json!({"operation_id": "G", "agent": "008"}), vec![]),
+    ] {
+        let result = call_tool(&served, &job.mcp_token, "missions", filter.clone()).await;
+        assert_eq!(result["isError"], false, "{filter}: {result}");
+        assert_eq!(ids(&result), expected, "{filter}");
+    }
+    for refused in [json!({"state": []}), json!({"state": ["lost"]})] {
+        let result = call_tool(&served, &job.mcp_token, "missions", refused.clone()).await;
+        assert_eq!(result["isError"], true, "{refused}: {result}");
+    }
+}
+
+#[tokio::test]
 async fn the_harness_token_outlives_many_messages_to_its_station() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, first) = accepted(&served, &served.operator, "message 1").await;

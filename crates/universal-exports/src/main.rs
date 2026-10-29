@@ -18,6 +18,7 @@ use guatiao::value::Number;
 use serde_json::Value as JsonValue;
 use universal_exports::{
     AccessProviders, AssistantConfig, Gateway, GatewayConfig, GatewayLimits, LoginLimits,
+    ViewLimits,
 };
 
 const MAX_PROVIDER_CONFIG_DEPTH: usize = 64;
@@ -207,7 +208,8 @@ async fn run(cli: Cli) -> Result<(), String> {
     gateway = gateway.with_roster(provider.clone());
     if record.assistant {
         let mut assistant = AssistantConfig::new(record.assistant_agent.clone())
-            .map_err(|error| format!("the assistant Agent is not valid: {error}"))?;
+            .map_err(|error| format!("the assistant Agent is not valid: {error}"))?
+            .with_view_limits(view_limits(snapshot.roster.assistant().views())?);
         if let Some(bytes) = record.route_text_bytes {
             assistant =
                 assistant.with_route_text_bytes(usize::try_from(bytes).unwrap_or(usize::MAX));
@@ -330,6 +332,47 @@ async fn follow_policy(
             Err(error) => eprintln!("universal-exports: configuration poll failed: {error}"),
         }
     }
+}
+
+/// Moneypenny's view bounds from `[assistant.views]`, each absent one at its default.
+fn view_limits(record: &ai6::AssistantViewLimits) -> Result<ViewLimits, String> {
+    let mut limits = ViewLimits::default();
+    for (key, value, limit) in [
+        ("blocks", record.blocks, &mut limits.blocks),
+        ("view_bytes", record.view_bytes, &mut limits.view_bytes),
+        ("text_bytes", record.text_bytes, &mut limits.text_bytes),
+        ("short_bytes", record.short_bytes, &mut limits.short_bytes),
+        ("columns", record.columns, &mut limits.columns),
+        ("rows", record.rows, &mut limits.rows),
+        ("items", record.items, &mut limits.items),
+        ("series", record.series, &mut limits.series),
+        ("points", record.points, &mut limits.points),
+        ("pie_slices", record.pie_slices, &mut limits.pie_slices),
+        ("diff_bytes", record.diff_bytes, &mut limits.diff_bytes),
+        ("fields", record.fields, &mut limits.fields),
+        (
+            "schedule_rows",
+            record.schedule_rows,
+            &mut limits.schedule_rows,
+        ),
+        ("graph_nodes", record.graph_nodes, &mut limits.graph_nodes),
+        ("graph_edges", record.graph_edges, &mut limits.graph_edges),
+        ("svg_bytes", record.svg_bytes, &mut limits.svg_bytes),
+        (
+            "svg_elements",
+            record.svg_elements,
+            &mut limits.svg_elements,
+        ),
+        ("svg_depth", record.svg_depth, &mut limits.svg_depth),
+    ] {
+        if let Some(value) = value {
+            *limit = usize::try_from(value)
+                .ok()
+                .filter(|value| *value >= 1)
+                .ok_or_else(|| format!("assistant.views.{key} must be at least 1"))?;
+        }
+    }
+    Ok(limits)
 }
 
 fn login_limits(record: &UnexRecord) -> Result<LoginLimits, String> {
@@ -593,6 +636,36 @@ mod tests {
         );
         assert!(access_cache(&record(serde_json::json!({"access_cache_ttl": -1}))).is_err());
         assert!(login_limits(&record(serde_json::json!({"login_tries_per_name": 0}))).is_err());
+    }
+
+    #[test]
+    fn view_limits_default_and_read_each_setting_of_the_record() {
+        let record = |json: serde_json::Value| -> ai6::AssistantSettings {
+            serde_json::from_value(json).unwrap()
+        };
+        assert_eq!(
+            view_limits(record(serde_json::json!({})).views()).unwrap(),
+            ViewLimits::default()
+        );
+        let tuned = record(serde_json::json!({"views": {"svg_bytes": 65536, "graph_nodes": 100}}));
+        let tuned = view_limits(tuned.views()).unwrap();
+        assert_eq!((tuned.svg_bytes, tuned.graph_nodes), (65536, 100));
+        assert_eq!(tuned.blocks, ViewLimits::default().blocks);
+        let zero = record(serde_json::json!({"views": {"rows": 0}}));
+        assert!(
+            view_limits(zero.views())
+                .unwrap_err()
+                .contains("assistant.views.rows")
+        );
+        let refused = zero.validate().unwrap_err();
+        assert!(refused.contains("assistant.views.rows"), "{refused}");
+        assert!(
+            serde_json::from_value::<ai6::AssistantSettings>(
+                serde_json::json!({"views": {"pixels": 1}})
+            )
+            .is_err(),
+            "an unknown bound is refused"
+        );
     }
 
     #[test]

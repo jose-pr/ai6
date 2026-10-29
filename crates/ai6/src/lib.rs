@@ -26,7 +26,8 @@ pub use directorates::m::approvals::{
     SAFE_HOUSE_DELETE, classify, clearance_at_least,
 };
 pub use directorates::m::assistant::{
-    AssistantNarrowing, AssistantSettings, NetworkPolicy, RepoKind, SharedRepo, SkillEntry,
+    AssistantNarrowing, AssistantSettings, AssistantViewLimits, NetworkPolicy, RepoKind,
+    SharedRepo, SkillEntry,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::m::config::SqlProvider;

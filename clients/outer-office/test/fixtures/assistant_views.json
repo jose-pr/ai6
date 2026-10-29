@@ -59,6 +59,101 @@
         }
       ]
     },
+    "stacked_bar_chart": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "chart",
+          "chart": "bar",
+          "stacked": true,
+          "title": "Missions by state",
+          "x_label": "Operation",
+          "series": [
+            {"name": "done", "points": [{"x": "G", "y": 12}, {"x": "Q", "y": 4}]},
+            {"name": "failed", "points": [{"x": "G", "y": 2}, {"x": "Q", "y": 1}]},
+            {"name": "working", "points": [{"x": "G", "y": 3}]}
+          ]
+        }
+      ]
+    },
+    "pie_chart": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "chart",
+          "chart": "pie",
+          "title": "Sessions by Station",
+          "series": [
+            {"name": "Sessions", "points": [{"x": "hq", "y": 2}, {"x": "worker", "y": 5}, {"x": "field-2", "y": 0}]}
+          ]
+        }
+      ]
+    },
+    "schedule": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "schedule",
+          "title": "Attempts of mission-7",
+          "rows": [
+            {"label": "attempt 1", "start": "2026-10-29T08:00:00Z", "end": "2026-10-29T08:40:00Z", "state": "failed", "link": "app:/missions?operation_id=G&mission_id=mission-7"},
+            {"label": "attempt 2", "start": "2026-10-29T09:10:00+01:00", "end": "2026-10-29T08:55:30.5Z", "state": "working"}
+          ]
+        }
+      ]
+    },
+    "graph": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "graph",
+          "title": "Where G runs",
+          "nodes": [
+            {"id": "G", "label": "Operation G", "kind": "operation"},
+            {"id": "hq", "label": "hq", "kind": "station", "state": "healthy", "link": "app:/stations?station_id=hq"},
+            {"id": "worker", "label": "worker", "kind": "station", "state": "healthy"},
+            {"id": "build-box", "label": "build-box", "kind": "theater"},
+            {"id": "mission-7", "label": "mission-7", "kind": "mission", "state": "stalled"}
+          ],
+          "edges": [
+            {"from": "G", "to": "hq"},
+            {"from": "G", "to": "worker"},
+            {"from": "worker", "to": "build-box", "label": "ssh"},
+            {"from": "build-box", "to": "mission-7"}
+          ]
+        }
+      ]
+    },
+    "tree_graph": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "graph",
+          "layout": "tree",
+          "nodes": [
+            {"id": "G", "label": "Operation G", "kind": "operation"},
+            {"id": "m1", "label": "mission-1", "kind": "mission"},
+            {"id": "m2", "label": "mission-2", "kind": "mission"},
+            {"id": "s1", "label": "session-1", "kind": "session", "state": "done"}
+          ],
+          "edges": [
+            {"from": "G", "to": "m1"},
+            {"from": "G", "to": "m2"},
+            {"from": "m1", "to": "s1"}
+          ]
+        }
+      ]
+    },
+    "svg": {
+      "version": 1,
+      "blocks": [
+        {
+          "kind": "svg",
+          "title": "hq hands mission-7 to worker",
+          "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 240 80\"><title>hq hands mission-7 to worker</title><defs><linearGradient id=\"wire\"><stop offset=\"0\" stop-color=\"#3fa7ff\"/><stop offset=\"1\" stop-color=\"#9b6bff\"/></linearGradient></defs><rect x=\"10\" y=\"20\" width=\"70\" height=\"40\" rx=\"6\" fill=\"none\" stroke=\"currentColor\"/><text x=\"45\" y=\"45\" text-anchor=\"middle\" fill=\"currentColor\" font-size=\"14\">hq</text><line x1=\"80\" y1=\"40\" x2=\"160\" y2=\"40\" stroke=\"url(#wire)\" stroke-width=\"3\"/><rect x=\"160\" y=\"20\" width=\"70\" height=\"40\" rx=\"6\" fill=\"none\" stroke=\"currentColor\"/><text x=\"195\" y=\"45\" text-anchor=\"middle\" fill=\"currentColor\" font-size=\"14\">worker</text></svg>"
+        }
+      ]
+    },
     "cards": {
       "version": 1,
       "blocks": [
@@ -152,6 +247,116 @@
     {
       "reason": "1 to 24 blocks",
       "view": {"version": 1, "blocks": []}
+    },
+    {
+      "reason": "values are 0 or more",
+      "view": {"version": 1, "blocks": [{"kind": "chart", "chart": "pie", "series": [{"name": "a", "points": [{"x": "up", "y": 3}, {"x": "down", "y": -1}]}]}]}
+    },
+    {
+      "reason": "a pie has one series",
+      "view": {"version": 1, "blocks": [{"kind": "chart", "chart": "pie", "series": [{"name": "a", "points": [{"x": "a", "y": 1}]}, {"name": "b", "points": [{"x": "b", "y": 1}]}]}]}
+    },
+    {
+      "reason": "only a bar chart is stacked",
+      "view": {"version": 1, "blocks": [{"kind": "chart", "chart": "line", "stacked": true, "series": [{"name": "a", "points": [{"x": 1, "y": 1}]}]}]}
+    },
+    {
+      "reason": "starts before it ends",
+      "view": {"version": 1, "blocks": [{"kind": "schedule", "rows": [{"label": "backwards", "start": "2026-10-29T09:00:00Z", "end": "2026-10-29T09:00:00Z"}]}]}
+    },
+    {
+      "reason": "all RFC 3339 times or all numbers",
+      "view": {"version": 1, "blocks": [{"kind": "schedule", "rows": [{"label": "mixed", "start": 1, "end": "2026-10-29T09:00:00Z"}]}]}
+    },
+    {
+      "reason": "is not an RFC 3339 time",
+      "view": {"version": 1, "blocks": [{"kind": "schedule", "rows": [{"label": "vague", "start": "yesterday", "end": "today"}]}]}
+    },
+    {
+      "reason": "into the app",
+      "view": {"version": 1, "blocks": [{"kind": "schedule", "rows": [{"label": "out", "start": 1, "end": 2, "link": "https://evil.example/login"}]}]}
+    },
+    {
+      "reason": "a link is not an app route: missions has no token",
+      "view": {"version": 1, "blocks": [{"kind": "schedule", "rows": [{"label": "leak", "start": 1, "end": 2, "link": "app:/missions?token=secret"}]}]}
+    },
+    {
+      "reason": "a link is not an app route: unknown page stations/hq",
+      "view": {"version": 1, "blocks": [{"kind": "graph", "nodes": [{"id": "hq", "label": "hq", "link": "app:/stations/hq"}]}]}
+    },
+    {
+      "reason": "unknown node",
+      "view": {"version": 1, "blocks": [{"kind": "graph", "nodes": [{"id": "hq", "label": "hq"}], "edges": [{"from": "hq", "to": "nowhere"}]}]}
+    },
+    {
+      "reason": "at most one parent",
+      "view": {"version": 1, "blocks": [{"kind": "graph", "layout": "tree", "nodes": [{"id": "a", "label": "a"}, {"id": "b", "label": "b"}, {"id": "c", "label": "c"}], "edges": [{"from": "a", "to": "c"}, {"from": "b", "to": "c"}]}]}
+    },
+    {
+      "reason": "a tree has one root",
+      "view": {"version": 1, "blocks": [{"kind": "graph", "layout": "tree", "nodes": [{"id": "a", "label": "a"}, {"id": "b", "label": "b"}], "edges": []}]}
+    },
+    {
+      "reason": "a tree has no cycle",
+      "view": {"version": 1, "blocks": [{"kind": "graph", "layout": "tree", "nodes": [{"id": "r", "label": "r"}, {"id": "a", "label": "a"}, {"id": "b", "label": "b"}], "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "a"}]}]}
+    },
+    {
+      "reason": "an SVG has a title",
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": " ", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title></svg>"}]}
+    },
+    {
+      "reason": "<script> is refused",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title><script>alert(1)</script></svg>"}]}
+    },
+    {
+      "reason": "attribute onload is refused",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\" onload=\"alert(1)\"><title>t</title></svg>"}]}
+    },
+    {
+      "reason": "attribute href is refused",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title><rect href=\"https://evil.example/\" width=\"5\" height=\"5\"/></svg>"}]}
+    },
+    {
+      "reason": "<foreignObject> is refused",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title><foreignObject width=\"10\" height=\"10\"><p xmlns=\"http://www.w3.org/1999/xhtml\">Sign in</p></foreignObject></svg>"}]}
+    },
+    {
+      "reason": "<image> is refused",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title><image width=\"10\" height=\"10\"/></svg>"}]}
+    },
+    {
+      "reason": "attribute style is refused",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title><rect style=\"fill:red\" width=\"5\" height=\"5\"/></svg>"}]}
+    },
+    {
+      "reason": "no DOCTYPE or entity",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<!DOCTYPE svg [<!ENTITY lol \"lol\">]><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>&lol;</title></svg>"}]}
+    },
+    {
+      "reason": "<use> is refused",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title><rect id=\"r\" width=\"5\" height=\"5\"/><use/></svg>"}]}
+    },
+    {
+      "reason": "only url(#id) to an id of this SVG",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title><rect fill=\"url(https://evil.example/paint.svg#p)\" width=\"5\" height=\"5\"/></svg>"}]}
+    },
+    {
+      "reason": "at most 2000 elements",
+      "gateway_only": true,
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/></svg>"}]}
+    },
+    {
+      "reason": "root element",
+      "view": {"version": 1, "blocks": [{"kind": "svg", "title": "t", "svg": "<html><body>Sign in</body></html>"}]}
     }
   ]
 }

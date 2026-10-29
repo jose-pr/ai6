@@ -392,6 +392,20 @@ impl AssistantConfig {
     /// links and cards and in a message's `route`; past it the view is refused, or the page
     /// line dropped
     pub fn with_route_text_bytes(self, bytes: usize) -> Self;
+    /// The bounds of her views, each raised to at least 1; sent to the app as `view_limits`.
+    /// The command reads them from `[assistant.views]` at start
+    pub fn with_view_limits(self, limits: ViewLimits) -> Self;
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ViewLimits {   // Default: the value in each comment
+    pub blocks: usize /* 24 */, pub view_bytes: usize /* 64 KiB */,
+    pub text_bytes: usize /* 8 KiB */, pub short_bytes: usize /* 512 */,
+    pub columns: usize /* 12 */, pub rows: usize /* 200 */, pub items: usize /* 100 */,
+    pub series: usize /* 8 */, pub points: usize /* 200 */, pub pie_slices: usize /* 12 */,
+    pub diff_bytes: usize /* 16 KiB */, pub fields: usize /* 20 */,
+    pub schedule_rows: usize /* 50 */, pub graph_nodes: usize /* 60 */,
+    pub graph_edges: usize /* 120 */, pub svg_bytes: usize /* 32 KiB */,
+    pub svg_elements: usize /* 2000 */, pub svg_depth: usize /* 16 */,
 }
 impl Gateway { pub fn with_assistant(self, config: AssistantConfig) -> Self; }
 ```
@@ -799,7 +813,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/station/inputs/next` | Bearer-authenticated long poll; returns one binary Guatiao terminal input or resize frame with `x-ai6-operation-id`, `x-ai6-mission-id` and `x-ai6-session-id` headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
 | `GET /v1/station/controls/next?station=<id>&wait_ms=<n>` | Bearer-authenticated long poll for that Station's next control (`wait_ms` default 1000, capped at 25000); `200` with one `application/vnd.ai6.guatiao` control value frame on channel 4 (the receiver builds the schema from any control) and the control becomes `delivered`, or `204`. Stations share one credential, so `station` is the caller's own word. |
 | `POST /v1/station/controls/{control_id}/result` | Bearer-authenticated outcome `{"station","outcome":"applied"\|"rejected","state"?,"reason"?}`; `state` is a Mission state name, `reason` is cut to 512 characters without control characters. `204`; `404` unknown, `403` another Station's control, `409` already finished. |
-| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized","message"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"earlier","busy"}` (the newest 100 entries within 512 KiB; `earlier` counts those left out); a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"route"?:ROUTE}` (an app route in its JSON form, `{"page":"missions","operation_id":"G",…}`) (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}`, `{"type":"submit","view":ID,"values":{…}}` and `{"type":"interrupt"}` (answered `{"type":"interrupt","stopping":bool}`; see Moneypenny, the assistant); the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal"\|"view"\|"notice","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
+| `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized","message"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"earlier","busy","view_limits":{…}}` (the newest 100 entries within 512 KiB; `earlier` counts those left out); a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"route"?:ROUTE}` (an app route in its JSON form, `{"page":"missions","operation_id":"G",…}`) (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}`, `{"type":"submit","view":ID,"values":{…}}` and `{"type":"interrupt"}` (answered `{"type":"interrupt","stopping":bool}`; see Moneypenny, the assistant); the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal"\|"view"\|"notice","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/user/assistant/memory[?person=ID]` | User bearer. The files of `memory/` in the person's personal repository: `{"person","commit"?,"files":[{"path","bytes"}],"more"}`, each path relative to `memory/`, in path order. `404` when the roster gives nobody a personal repository, `400` an identifier `{person}` refuses, `503` without `with_assistant` or no Station checking in. Errors are `{"error": TEXT}` (see Moneypenny, the assistant, Memory). |
 | `GET /v1/user/assistant/memory/{path}[?person=ID]` | User bearer. `{"path","text","digest","commit"}`; `{path}` relative to `memory/`, up to seven names of ASCII letters, digits, `.`, `-` and `_`, none starting with `.` (`400` otherwise); `404` a missing file; `502` a file over 64 KiB or not UTF-8. |

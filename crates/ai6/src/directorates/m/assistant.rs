@@ -84,6 +84,8 @@ pub struct AssistantSettings {
     skills_allow_tools: bool,
     group: BTreeMap<String, AssistantNarrowing>,
     person: BTreeMap<String, AssistantNarrowing>,
+    #[serde(skip_serializing_if = "AssistantViewLimits::is_unset")]
+    views: AssistantViewLimits,
 }
 
 impl Default for AssistantSettings {
@@ -103,7 +105,103 @@ impl Default for AssistantSettings {
             skills_allow_tools: false,
             group: BTreeMap::new(),
             person: BTreeMap::new(),
+            views: AssistantViewLimits::default(),
         }
+    }
+}
+
+/// The bounds Universal Exports holds Moneypenny's views to, `[assistant.views]`. Each is at
+/// least 1; an absent one takes Universal Exports' default.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantViewLimits {
+    /// Blocks in one view (default 24).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<u64>,
+    /// Bytes of one view as JSON (default 65536).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_bytes: Option<u64>,
+    /// Bytes of a text block's Markdown (default 8192).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_bytes: Option<u64>,
+    /// Bytes of a title, label, cell or other short text (default 512).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub short_bytes: Option<u64>,
+    /// Columns of a table (default 12).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub columns: Option<u64>,
+    /// Rows of a table (default 200).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u64>,
+    /// Items of a key-value list or a timeline (default 100).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<u64>,
+    /// Series of a chart (default 8).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series: Option<u64>,
+    /// Points of one series (default 200).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub points: Option<u64>,
+    /// Slices of a pie (default 12).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pie_slices: Option<u64>,
+    /// Bytes of each side of a diff (default 16384).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff_bytes: Option<u64>,
+    /// Fields of a form or a card (default 20).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fields: Option<u64>,
+    /// Rows of a schedule (default 50).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule_rows: Option<u64>,
+    /// Nodes of a graph (default 60).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_nodes: Option<u64>,
+    /// Edges of a graph (default 120).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_edges: Option<u64>,
+    /// Bytes of an SVG drawing (default 32768).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub svg_bytes: Option<u64>,
+    /// Elements of an SVG drawing (default 2000).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub svg_elements: Option<u64>,
+    /// How deep an SVG drawing nests its elements (default 16).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub svg_depth: Option<u64>,
+}
+
+impl AssistantViewLimits {
+    fn is_unset(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Each bound that is set, by its key.
+    pub fn set(&self) -> Vec<(&'static str, u64)> {
+        [
+            ("blocks", self.blocks),
+            ("view_bytes", self.view_bytes),
+            ("text_bytes", self.text_bytes),
+            ("short_bytes", self.short_bytes),
+            ("columns", self.columns),
+            ("rows", self.rows),
+            ("items", self.items),
+            ("series", self.series),
+            ("points", self.points),
+            ("pie_slices", self.pie_slices),
+            ("diff_bytes", self.diff_bytes),
+            ("fields", self.fields),
+            ("schedule_rows", self.schedule_rows),
+            ("graph_nodes", self.graph_nodes),
+            ("graph_edges", self.graph_edges),
+            ("svg_bytes", self.svg_bytes),
+            ("svg_elements", self.svg_elements),
+            ("svg_depth", self.svg_depth),
+        ]
+        .into_iter()
+        .filter_map(|(key, value)| value.map(|value| (key, value)))
+        .collect()
     }
 }
 
@@ -740,6 +838,18 @@ impl AssistantSettings {
         &self.denied_networks
     }
 
+    /// The bounds of the views she shows, `[assistant.views]`.
+    pub fn views(&self) -> &AssistantViewLimits {
+        &self.views
+    }
+
+    /// Sets the bounds of the views she shows.
+    #[must_use]
+    pub fn with_views(mut self, views: AssistantViewLimits) -> Self {
+        self.views = views;
+        self
+    }
+
     /// Whether her scripts may run unsandboxed where the harness has no sandbox.
     pub fn unsandboxed_scripts(&self) -> bool {
         self.unsandboxed_scripts
@@ -908,6 +1018,9 @@ impl AssistantSettings {
     ///
     /// A message naming the first setting out of bounds, as `assistant.<key>`.
     pub fn validate(&self) -> Result<(), String> {
+        if let Some((key, _)) = self.views.set().into_iter().find(|(_, value)| *value == 0) {
+            return Err(format!("assistant.views.{key} must be at least 1"));
+        }
         if let Some(template) = &self.personal_repo {
             RepoKind::of(template)
                 .map_err(|reason| format!("assistant.personal_repo: {reason}"))?;

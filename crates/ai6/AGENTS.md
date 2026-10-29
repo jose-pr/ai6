@@ -379,7 +379,15 @@ pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, wr
                                 // interpreters (["python3"]), network ("limited"), allowed_hosts ([]),
                                 // denied_networks ([]: nothing denied, under open too),
                                 // unsandboxed_scripts (false), skills.<name> {path, pin}, skills_unpinned,
-                                // skills_allow_tools, group.<group> and person.<id> narrowing tables
+                                // skills_allow_tools, group.<group> and person.<id> narrowing tables,
+                                // views (AssistantViewLimits)
+// [assistant.views], what Universal Exports holds her views to: Option<u64> each, absent =
+// its default; validate() refuses 0 as "assistant.views.<key> must be at least 1"
+#[non_exhaustive] #[derive(Default, Serialize, Deserialize)]
+pub struct AssistantViewLimits { pub blocks, view_bytes, text_bytes, short_bytes, columns,
+    rows, items, series, points, pie_slices, diff_bytes, fields, schedule_rows, graph_nodes,
+    graph_edges, svg_bytes, svg_elements, svg_depth: Option<u64> }
+impl AssistantViewLimits { pub fn set(&self) -> Vec<(&'static str, u64)>; }  // the ones given
 impl AssistantSettings {
     pub fn new() -> Self;   // keeps nothing, python3 in the sandbox, no host, no skill, refuses elevated Stations
     pub fn with_personal_repo(self, template: impl Into<String>) -> Self; // {person} | {person_digest}
@@ -395,6 +403,8 @@ impl AssistantSettings {
     pub fn with_skills_allow_tools(self, allow: bool) -> Self;  // a weakening
     pub fn with_group(self, group: impl Into<String>, narrowing: AssistantNarrowing) -> Self;
     pub fn with_person(self, person: impl Into<String>, narrowing: AssistantNarrowing) -> Self;
+    pub fn with_views(self, views: AssistantViewLimits) -> Self;
+    pub fn views(&self) -> &AssistantViewLimits;
     pub fn personal_repo(&self) -> Option<&str>;
     pub fn shared(&self) -> &BTreeMap<String, SharedRepo>;
     pub fn org(&self) -> Option<&SharedRepo>;

@@ -93,5 +93,234 @@
     {"uri": "app:/missions?operation_id=G%0A", "reason": "operation_id is not an identifier"},
     {"uri": "app:/missions?text=%E2%80%8B", "reason": "text is 1 to 128 bytes without control or invisible characters"},
     {"uri": "app:/missions?mission_id=m-1", "reason": "mission_id needs operation_id"}
-  ]
+  ],
+  "missions": {
+    "board": [
+      {
+        "operation_id": "G",
+        "mission_id": "m-retried",
+        "sessions": [
+          {
+            "operation_id": "G",
+            "mission_id": "m-retried",
+            "session_id": "s-1",
+            "state": "failed",
+            "reason": null,
+            "sequence": 9,
+            "updated_at": null,
+            "exposure": [],
+            "station_id": "hq",
+            "agent": "007"
+          },
+          {
+            "operation_id": "G",
+            "mission_id": "m-retried",
+            "session_id": "s-2",
+            "state": "working",
+            "reason": null,
+            "sequence": 12,
+            "updated_at": null,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          }
+        ],
+        "brief": {
+          "prompt": "Fix the Flaky build",
+          "agent_id": "007",
+          "role_id": null,
+          "handler_provider": "claude",
+          "terminal_provider": "pipe",
+          "working_directory": "/work",
+          "model": null,
+          "effort": null,
+          "environment_keys": [],
+          "station_id": "worker",
+          "theater_id": null,
+          "mode": "field",
+          "provenance": null
+        },
+        "usage": null,
+        "attempts": []
+      },
+      {
+        "operation_id": "G",
+        "mission_id": "m-quiet",
+        "sessions": [
+          {
+            "operation_id": "G",
+            "mission_id": "m-quiet",
+            "session_id": "s-3",
+            "state": null,
+            "reason": null,
+            "sequence": 0,
+            "updated_at": null,
+            "exposure": [],
+            "station_id": null,
+            "agent": null
+          }
+        ],
+        "brief": null,
+        "usage": null,
+        "attempts": []
+      },
+      {
+        "operation_id": "Q",
+        "mission_id": "m-done",
+        "sessions": [
+          {
+            "operation_id": "Q",
+            "mission_id": "m-done",
+            "session_id": "s-4",
+            "state": "done",
+            "reason": null,
+            "sequence": 5,
+            "updated_at": null,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "008"
+          }
+        ],
+        "brief": {
+          "prompt": "Write the release notes",
+          "agent_id": "008",
+          "role_id": null,
+          "handler_provider": "claude",
+          "terminal_provider": "pipe",
+          "working_directory": "/work",
+          "model": null,
+          "effort": null,
+          "environment_keys": [],
+          "station_id": "worker",
+          "theater_id": null,
+          "mode": "field",
+          "provenance": null
+        },
+        "usage": null,
+        "attempts": []
+      }
+    ],
+    "cases": [
+      {
+        "route": {
+          "page": "missions"
+        },
+        "shows": [
+          "m-retried",
+          "m-quiet",
+          "m-done"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "failed"
+          ]
+        },
+        "shows": [
+          "m-retried"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "working"
+          ]
+        },
+        "shows": [
+          "m-retried",
+          "m-quiet"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "done",
+            "abandoned"
+          ]
+        },
+        "shows": [
+          "m-done"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "operation_id": "Q"
+        },
+        "shows": [
+          "m-done"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "operation_id": "G",
+          "mission_id": "m-quiet"
+        },
+        "shows": [
+          "m-quiet"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "station_id": "hq"
+        },
+        "shows": [
+          "m-retried"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "working"
+          ],
+          "station_id": "hq"
+        },
+        "shows": []
+      },
+      {
+        "route": {
+          "page": "missions",
+          "agent": "008"
+        },
+        "shows": [
+          "m-done"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "text": "flaky"
+        },
+        "shows": [
+          "m-retried"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "text": "S-3"
+        },
+        "shows": [
+          "m-quiet"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "text": "notes",
+          "state": [
+            "failed"
+          ]
+        },
+        "shows": []
+      }
+    ]
+  }
 }

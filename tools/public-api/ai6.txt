@@ -287,6 +287,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::skills_for(&self, &st
 pub fn ai6::directorates::m::assistant::AssistantSettings::skills_unpinned(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::views(&self) -> &ai6::directorates::m::assistant::AssistantViewLimits
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_elevated(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_denied_networks(self, alloc::vec::Vec<alloc::string::String>) -> Self
@@ -301,8 +302,30 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::with_skill(self, impl
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_allow_tools(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_unpinned(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_unsandboxed_scripts(self, bool) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_views(self, ai6::directorates::m::assistant::AssistantViewLimits) -> Self
 impl core::default::Default for ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::assistant::AssistantViewLimits
+pub ai6::directorates::m::assistant::AssistantViewLimits::blocks: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::columns: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::diff_bytes: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::fields: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::graph_edges: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::graph_nodes: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::items: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::pie_slices: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::points: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::rows: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::schedule_rows: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::series: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::short_bytes: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::svg_bytes: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::svg_depth: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::svg_elements: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::text_bytes: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::view_bytes: core::option::Option<u64>
+impl ai6::directorates::m::assistant::AssistantViewLimits
+pub fn ai6::directorates::m::assistant::AssistantViewLimits::set(&self) -> alloc::vec::Vec<(&'static str, u64)>
 pub struct ai6::directorates::m::assistant::SharedRepo
 impl ai6::directorates::m::assistant::SharedRepo
 pub fn ai6::directorates::m::assistant::SharedRepo::new(impl core::convert::Into<alloc::string::String>) -> Self
@@ -5460,6 +5483,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::skills_for(&self, &st
 pub fn ai6::directorates::m::assistant::AssistantSettings::skills_unpinned(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::views(&self) -> &ai6::directorates::m::assistant::AssistantViewLimits
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_elevated(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_denied_networks(self, alloc::vec::Vec<alloc::string::String>) -> Self
@@ -5474,6 +5498,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::with_skill(self, impl
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_allow_tools(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_skills_unpinned(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_unsandboxed_scripts(self, bool) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_views(self, ai6::directorates::m::assistant::AssistantViewLimits) -> Self
 impl core::default::Default for ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::default() -> Self
 pub struct ai6::AssistantSharedBase
@@ -5483,6 +5508,27 @@ pub ai6::AssistantSharedBase::group: alloc::string::String
 pub ai6::AssistantSharedBase::path: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantSharedBase
 pub fn ai6::directorates::section_00::assistant::AssistantSharedBase::validate(&self) -> core::result::Result<(), alloc::string::String>
+#[non_exhaustive] pub struct ai6::AssistantViewLimits
+pub ai6::AssistantViewLimits::blocks: core::option::Option<u64>
+pub ai6::AssistantViewLimits::columns: core::option::Option<u64>
+pub ai6::AssistantViewLimits::diff_bytes: core::option::Option<u64>
+pub ai6::AssistantViewLimits::fields: core::option::Option<u64>
+pub ai6::AssistantViewLimits::graph_edges: core::option::Option<u64>
+pub ai6::AssistantViewLimits::graph_nodes: core::option::Option<u64>
+pub ai6::AssistantViewLimits::items: core::option::Option<u64>
+pub ai6::AssistantViewLimits::pie_slices: core::option::Option<u64>
+pub ai6::AssistantViewLimits::points: core::option::Option<u64>
+pub ai6::AssistantViewLimits::rows: core::option::Option<u64>
+pub ai6::AssistantViewLimits::schedule_rows: core::option::Option<u64>
+pub ai6::AssistantViewLimits::series: core::option::Option<u64>
+pub ai6::AssistantViewLimits::short_bytes: core::option::Option<u64>
+pub ai6::AssistantViewLimits::svg_bytes: core::option::Option<u64>
+pub ai6::AssistantViewLimits::svg_depth: core::option::Option<u64>
+pub ai6::AssistantViewLimits::svg_elements: core::option::Option<u64>
+pub ai6::AssistantViewLimits::text_bytes: core::option::Option<u64>
+pub ai6::AssistantViewLimits::view_bytes: core::option::Option<u64>
+impl ai6::directorates::m::assistant::AssistantViewLimits
+pub fn ai6::directorates::m::assistant::AssistantViewLimits::set(&self) -> alloc::vec::Vec<(&'static str, u64)>
 pub struct ai6::AssistantWorkspace
 pub ai6::AssistantWorkspace::author_email: alloc::string::String
 pub ai6::AssistantWorkspace::author_name: alloc::string::String
