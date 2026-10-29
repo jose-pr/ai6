@@ -64,8 +64,10 @@ geometry, used natively and from WebAssembly.
 
 **Outer Office** (`clients/outer-office`, short name OO) is the Flutter desktop and web
 operator app. [Moneypenny](assistant.md), the operator's AI assistant, works inside it.
-It bundles its fonts, icons and web engine, so by default it makes no request to any
-origin but its own; a web deployment opts in to Google Fonts or Flutter's CDN with
+It bundles its fonts, icons and web engine, and its web build serves the Noto fallback
+fonts for other scripts and emoji (34.4 MiB, fetched only as text needs them), so by
+default it makes no request to any origin but its own; a web deployment opts in to
+Google Fonts or Flutter's CDN with
 `[assets] cdn = "fonts"` or `"all"` in the `OO.cfg` beside its `index.html` (the app's
 README has the details).
 

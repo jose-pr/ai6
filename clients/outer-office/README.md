@@ -85,7 +85,11 @@ $flutter = '<Flutter main SDK>\bin\flutter.bat'
 & $flutter build windows --debug
 & dart run tool/build_guatiao_wasm.dart
 & $flutter build web --release
+& dart run tool/cdn_files.dart fill
 ```
+
+Every web build, a release one included, runs `tool/cdn_files.dart fill` after
+`flutter build web`: it puts the fallback fonts into `build/web` (below).
 
 The Windows runner uses the Skia renderer until Impeller with native windowing is verified
 across Windows GPUs.
@@ -128,9 +132,33 @@ before a non-demo web build. It builds `guatiao-intake` at the revision in `pubs
 
 Outer Office ships everything it shows: the Roboto font (Apache-2.0, in `assets/fonts/`,
 listed on the app's licence page), Material icons, the design kit's icons and wallpapers.
-The web build loads its engine (CanvasKit or skwasm) from its own `canvaskit/` directory,
-so by default the browser fetches nothing from any origin but the one serving the app.
-Desktop builds never use a CDN.
+The web build loads its engine (CanvasKit or skwasm) from its own `canvaskit/` directory
+and the fonts for characters Roboto lacks from its own `assets/fonts/fallback/`, so by
+default the browser fetches nothing from any origin but the one serving the app. Desktop
+builds never use a CDN: the operating system's fonts cover other scripts and emoji there.
+
+The fallback fonts are the 727 Noto files the Flutter web engine can ask for (SIL Open
+Font License 1.1, `assets/fonts/LICENSE-Noto.txt`, on the licence page of the web app):
+34.4 MiB in all, of which Chinese (simplified, traditional and Hong Kong), Japanese and
+Korean are 25.3 MiB, Noto Color Emoji 2.0 MiB and every other script 7.1 MiB (Noto Sans
+for Latin, Greek and Cyrillic 0.2 MiB, Arabic 64 KiB, Hebrew 21 KiB, Devanagari 63 KiB,
+Thai 21 KiB). The engine fetches a file only when the text needs one of its characters;
+CJK comes in slices of about 60 KiB, emoji in ten of about 200 KiB.
+
+They are not in this repository. `tool/cdn_files.json` lists every file the web app would
+otherwise take from a CDN, with its host, path, size, SHA-256 and licence, and
+`tool/cdn_files.dart` fetches them:
+
+- `dart run tool/cdn_files.dart fill [--deps DEPS] [--web build/web]` puts the fonts into
+  the build and checks the build's engine files against the list. With `--deps`, a
+  checkout of this repository's `deps` branch, it reads `DEPS/cdn/` and needs no
+  network; otherwise it downloads from `fonts.gstatic.com`. A file whose SHA-256 differs
+  from the list stops it.
+- `dart run tool/cdn_files.dart mirror --out DIR` writes every listed file to
+  `DIR/<host>/<path>`, which is how `deps` keeps its `cdn/`.
+- `dart run tool/cdn_files.dart update --sdk FLUTTER_SDK` rebuilds the list for a new
+  Flutter engine, after `flutter build web`, from the engine's own fallback font table and
+  the build's `canvaskit/` files.
 
 A web deployment may opt in with `[assets] cdn` in an `OO.cfg` beside `index.html`, read
 by `web/flutter_bootstrap.js` before the engine starts:
@@ -138,7 +166,7 @@ by `web/flutter_bootstrap.js` before the engine starts:
 | `cdn` | Fetched from outside |
 | --- | --- |
 | `"none"` (default; also a missing, unreadable or unknown value) | nothing |
-| `"fonts"` | fonts for characters Roboto lacks (other scripts, emoji), from Google Fonts (`fonts.gstatic.com`) |
+| `"fonts"` | the fallback fonts, from Google Fonts (`fonts.gstatic.com`) instead of the build |
 | `"all"` | those fonts, and the engine from Flutter's CDN (`www.gstatic.com`) |
 
 ```toml
@@ -146,11 +174,10 @@ by `web/flutter_bootstrap.js` before the engine starts:
 cdn = "fonts"
 ```
 
-Under `"none"` a character no bundled font has shows as a box; to cover more scripts
-without a CDN, serve Google's Noto fonts under `assets/fonts/fallback/` with the paths
-`fonts.gstatic.com/s/` uses. `test/no_cdn_test.dart` fails if the page or the bootstrap
-names a CDN host, or if the default stops loading the engine and fonts locally.
-Moneypenny's linked pages are separate pages and may load what they need.
+`test/no_cdn_test.dart` fails if the page or the bootstrap names a CDN host, if the
+default stops loading the engine and fallback fonts from the app's origin, or, given a
+`build/web`, if a listed font is missing from it. Moneypenny's linked pages are separate
+pages and may load what they need.
 
 ## Layout
 
