@@ -492,6 +492,15 @@ interpreter's install directory holds it). Keep the Station's configuration and 
 one of those, or outside what `:minimal` opens: elsewhere under `/etc` or `C:\ProgramData`
 her scripts can read what the Station's user can.
 
+Codex merges its user's own `config.toml` into these settings: a `[permissions.ai6_assistant]`
+table there would add to the profile (with Codex 0.164, `network.enabled = true` in it gave
+her scripts the network), and `shell_environment_policy.set` would change the variables they
+keep. So before her thread starts or resumes, the handler reads Codex's effective
+configuration (`config/read`) and the thread's own (`thread/start`), and refuses to start her
+unless the profile, its choice as the default and the environment policy are exactly what it
+passed and the thread runs in that profile without network. The refusal names the setting;
+remove it from the Codex configuration of the Station's user (or its managed configuration).
+
 What differs from Claude Code:
 
 - **Any command, not only the interpreters.** Codex 0.164 offers the model only its code-mode

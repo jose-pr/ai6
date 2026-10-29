@@ -20,6 +20,7 @@ use ai6::directorates::section_00::assistant::SCRIPT_ENVIRONMENT;
 use ai6::directorates::section_00::programs::{
     canonical, find_program, path_text, program_dirs, starts_with, variable,
 };
+use serde_json::Value;
 
 use crate::tools::CONFIG_ENVIRONMENT;
 
@@ -38,36 +39,164 @@ const PROBE_MARKER: &str = "AI6_CODEX_SANDBOX_OK";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 const PROBE_LIFETIME: Duration = Duration::from_secs(15 * 60);
 
-/// The `-c` overrides that run a scripts thread's commands in [`PROFILE`]: the profile, chosen
-/// as the default; only [`SCRIPT_ENVIRONMENT`] kept in a command's environment; and on Windows
-/// the MXC sandbox, the one implementation that denies reads (`unelevated` refuses a profile
-/// that restricts reads and `elevated` needs the whole filesystem readable, Codex 0.164.0).
-pub(crate) fn overrides(
-    executable: &str,
-    cwd: &str,
-    environment: &BTreeMap<String, String>,
-    mode: &AssistantMode,
-) -> Vec<String> {
-    let rules = rules(
-        executable,
-        Path::new(cwd),
-        environment,
-        &mode.interpreters,
-        &mode.files,
-    );
-    let mut argv = windows_sandbox();
-    argv.extend([
-        "-c".to_owned(),
-        format!("permissions.{PROFILE}={{filesystem={}}}", table(&rules)),
-        "-c".to_owned(),
-        format!("default_permissions=\"{PROFILE}\""),
-        "-c".to_owned(),
-        format!(
-            "shell_environment_policy.include_only={}",
-            serde_json::to_string(&SCRIPT_ENVIRONMENT).unwrap_or_else(|_| "[]".to_owned())
-        ),
-    ]);
-    argv
+/// The sandbox a scripts thread's commands run in: [`PROFILE`] with these filesystem rules
+/// ([`rules`]), keeping only [`SCRIPT_ENVIRONMENT`] in a command's environment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Profile {
+    rules: Vec<(String, &'static str)>,
+}
+
+impl Profile {
+    /// The profile of `mode`'s scripts, run from `cwd` by `executable` with `environment`.
+    pub(crate) fn new(
+        executable: &str,
+        cwd: &str,
+        environment: &BTreeMap<String, String>,
+        mode: &AssistantMode,
+    ) -> Self {
+        Self {
+            rules: rules(
+                executable,
+                Path::new(cwd),
+                environment,
+                &mode.interpreters,
+                &mode.files,
+            ),
+        }
+    }
+
+    /// The `-c` overrides that run the thread's commands in this profile: the profile, chosen
+    /// as the default; only [`SCRIPT_ENVIRONMENT`] kept; and on Windows the MXC sandbox, the one
+    /// implementation that denies reads (`unelevated` refuses a profile that restricts reads
+    /// and `elevated` needs the whole filesystem readable, Codex 0.164.0).
+    pub(crate) fn overrides(&self) -> Vec<String> {
+        let mut argv = windows_sandbox();
+        argv.extend([
+            "-c".to_owned(),
+            format!(
+                "permissions.{PROFILE}={{filesystem={}}}",
+                table(&self.rules)
+            ),
+            "-c".to_owned(),
+            format!("default_permissions=\"{PROFILE}\""),
+            "-c".to_owned(),
+            format!(
+                "shell_environment_policy.include_only={}",
+                serde_json::to_string(&SCRIPT_ENVIRONMENT).unwrap_or_else(|_| "[]".to_owned())
+            ),
+        ]);
+        argv
+    }
+
+    /// Checks an app server's effective configuration (the result of `config/read`) against
+    /// [`Self::overrides`]: `default_permissions` is [`PROFILE`], the profile holds exactly
+    /// these filesystem rules and nothing else, and the environment policy is only
+    /// `include_only`. Codex merges a user's `[permissions.<name>]` table into the one passed
+    /// with `-c` and applies `shell_environment_policy.set` to the variables kept (measured with
+    /// Codex 0.164.0: a user's `network.enabled = true` let scripts reach loopback and the
+    /// internet). `Err` names what differs.
+    pub(crate) fn check_config(&self, result: &Value) -> Result<(), String> {
+        let config = result.get("config").unwrap_or(&Value::Null);
+        let mut found = Vec::new();
+        match config.get("default_permissions") {
+            Some(Value::String(name)) if name == PROFILE => {}
+            other => found.push(format!("default_permissions is {}", shown(other))),
+        }
+        match config
+            .pointer(&format!("/permissions/{PROFILE}"))
+            .and_then(Value::as_object)
+        {
+            None => found.push(format!("permissions.{PROFILE} is missing")),
+            Some(profile) => {
+                for (key, value) in profile {
+                    if key == "filesystem" {
+                        found.extend(self.filesystem_changes(value));
+                    } else if !value.is_null() {
+                        found.push(format!("permissions.{PROFILE}.{key} is {value}"));
+                    }
+                }
+            }
+        }
+        match config
+            .get("shell_environment_policy")
+            .and_then(Value::as_object)
+        {
+            None => found.push("shell_environment_policy is missing".to_owned()),
+            Some(policy) => {
+                for (key, value) in policy {
+                    let expected = if key == "include_only" {
+                        serde_json::json!(SCRIPT_ENVIRONMENT)
+                    } else {
+                        Value::Null
+                    };
+                    if *value != expected {
+                        found.push(format!("shell_environment_policy.{key} is {value}"));
+                    }
+                }
+            }
+        }
+        changed(found)
+    }
+
+    /// The entries of the effective `filesystem` table that differ from these rules.
+    fn filesystem_changes(&self, table: &Value) -> Vec<String> {
+        let Some(table) = table.as_object() else {
+            return vec![format!("permissions.{PROFILE}.filesystem is {table}")];
+        };
+        let expected: BTreeMap<&str, &str> = self
+            .rules
+            .iter()
+            .map(|(key, access)| (key.as_str(), *access))
+            .collect();
+        let mut found: Vec<String> = table
+            .iter()
+            .filter(|(key, value)| {
+                !value.is_null() && value.as_str() != expected.get(key.as_str()).copied()
+            })
+            .map(|(key, value)| format!("permissions.{PROFILE}.filesystem has {key:?} = {value}"))
+            .collect();
+        found.extend(
+            expected
+                .keys()
+                .filter(|key| table.get(**key).is_none_or(Value::is_null))
+                .map(|key| format!("permissions.{PROFILE}.filesystem lacks {key:?}")),
+        );
+        found
+    }
+
+    /// Checks the thread `thread/start` or `thread/resume` answered with: it runs in
+    /// [`PROFILE`] (`activePermissionProfile`) and its sandbox has no network.
+    pub(crate) fn check_thread(&self, result: &Value) -> Result<(), String> {
+        let mut found = Vec::new();
+        match result.pointer("/activePermissionProfile/id") {
+            Some(Value::String(name)) if name == PROFILE => {}
+            other => found.push(format!(
+                "the thread's permission profile is {}",
+                shown(other)
+            )),
+        }
+        if result.pointer("/sandbox/networkAccess") == Some(&Value::Bool(true)) {
+            found.push("the thread's sandbox has network access".to_owned());
+        }
+        changed(found)
+    }
+}
+
+/// `value` as JSON, or `missing`.
+fn shown(value: Option<&Value>) -> String {
+    value.map_or_else(|| "missing".to_owned(), Value::to_string)
+}
+
+/// `Err` naming `found`, unless it is empty.
+fn changed(found: Vec<String>) -> Result<(), String> {
+    if found.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "Codex's configuration changes the sandbox Moneypenny's scripts run in ({}): remove that \
+         from Codex's config.toml or its managed configuration, or run her without interpreters",
+        found.join("; ")
+    ))
 }
 
 /// `-c windows.sandbox="mxc"` on Windows, nothing elsewhere.
@@ -505,12 +634,13 @@ mod tests {
         let mut mode = AssistantMode::moneypenny();
         mode.files = vec!["personal".to_owned(), "notes/scratch".to_owned()];
         mode.interpreters = vec!["python3".to_owned()];
-        let argv = overrides(
+        let argv = Profile::new(
             "codex-not-on-path",
             &cwd.to_string_lossy(),
             &BTreeMap::from([("PATH".to_owned(), String::new())]),
             &mode,
-        );
+        )
+        .overrides();
         let filesystem = parsed(&argv, "permissions.ai6_assistant")["filesystem"].clone();
         let filesystem = filesystem.as_table().unwrap();
         let cwd_text = cwd.to_string_lossy().into_owned();
@@ -626,6 +756,80 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// Codex 0.164.0's `config/read` result (`origins` left out) and `thread/start` result
+    /// (`thread` left out) on Linux for a scripts thread under [`fixture_profile`], with the
+    /// user's `config.toml` empty, adding `[permissions.ai6_assistant]` entries (`"/" = "write"`,
+    /// `network.enabled = true`), and setting `shell_environment_policy.set`; paths and ports
+    /// replaced.
+    const CONFIG_READ: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/config-read-scripts.json");
+    const CONFIG_READ_MERGED: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/config-read-merged-profile.json");
+    const CONFIG_READ_ENV_SET: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/config-read-env-set.json");
+    const THREAD_START: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/thread-start-scripts.json");
+    const THREAD_START_MERGED: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/thread-start-merged-profile.json");
+
+    /// The profile the fixtures were recorded with.
+    fn fixture_profile() -> Profile {
+        let conversation = "/tmp/ai6-desk/conversation";
+        Profile {
+            rules: vec![
+                (":root".to_owned(), "deny"),
+                (":minimal".to_owned(), "read"),
+                (conversation.to_owned(), "read"),
+                (format!("{conversation}/personal"), "write"),
+                (format!("{conversation}/scratch"), "write"),
+                ("/opt/codex".to_owned(), "read"),
+                ("/usr".to_owned(), "read"),
+            ],
+        }
+    }
+
+    fn json(text: &str) -> Value {
+        serde_json::from_str(text).unwrap()
+    }
+
+    #[test]
+    fn a_users_configuration_merged_into_the_scripts_profile_is_refused() {
+        let profile = fixture_profile();
+        assert_eq!(profile.check_config(&json(CONFIG_READ)), Ok(()));
+        assert_eq!(profile.check_thread(&json(THREAD_START)), Ok(()));
+
+        let merged = profile.check_config(&json(CONFIG_READ_MERGED)).unwrap_err();
+        assert!(
+            merged.contains("filesystem has \"/\" = \"write\"")
+                && merged.contains("permissions.ai6_assistant.network is"),
+            "{merged}"
+        );
+        let thread = profile
+            .check_thread(&json(THREAD_START_MERGED))
+            .unwrap_err();
+        assert!(thread.contains("network access"), "{thread}");
+        let set = profile
+            .check_config(&json(CONFIG_READ_ENV_SET))
+            .unwrap_err();
+        assert!(set.contains("shell_environment_policy.set is"), "{set}");
+
+        let mut other = json(CONFIG_READ);
+        other["config"]["default_permissions"] = Value::from("wide");
+        other["config"]["permissions"]["ai6_assistant"]["filesystem"]
+            .as_object_mut()
+            .unwrap()
+            .remove("/usr");
+        let found = profile.check_config(&other).unwrap_err();
+        assert!(
+            found.contains("default_permissions is \"wide\"") && found.contains("lacks \"/usr\""),
+            "{found}"
+        );
+        let mut unprofiled = json(THREAD_START);
+        unprofiled["activePermissionProfile"] = Value::Null;
+        assert!(profile.check_thread(&unprofiled).is_err());
+        assert!(profile.check_config(&Value::Null).is_err());
+    }
+
     #[test]
     fn the_stations_own_paths_are_denied_inside_what_the_profile_opens() {
         let cwd = Path::new(if cfg!(windows) {
@@ -636,12 +840,13 @@ mod tests {
         let program = std::env::current_exe().unwrap();
         let program_dir = canonical(program.parent().unwrap());
         let filesystem = parsed(
-            &overrides(
+            &Profile::new(
                 "codex-not-on-path",
                 &cwd.to_string_lossy(),
                 &BTreeMap::from([("PATH".to_owned(), String::new())]),
                 &AssistantMode::moneypenny(),
-            ),
+            )
+            .overrides(),
             "permissions.ai6_assistant",
         )["filesystem"]
             .clone();

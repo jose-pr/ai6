@@ -130,7 +130,21 @@ directory wins whatever the order. So the Station's paths are denied again: `/et
 `AI6_HOME`, and the directory of the program hosting the handler (`current_exe`), or only that
 program when its directory holds or lies in a readable install directory. A path that is or
 holds the working directory or a readable install directory is not denied. A deny of a path that
-does not exist is accepted. The profile has no network:
+does not exist is accepted.
+Codex merges the user's configuration into these settings rather than replacing them (0.164.0,
+measured through a loopback stand-in for the model): a user's `[permissions.ai6_assistant]`
+entries join the profile (`network.enabled = true` there let scripts reach loopback and the
+internet), and `shell_environment_policy.set` reaches the variables kept; a user's
+`sandbox_mode` or `default_permissions` does not win over the `-c` settings, and a legacy
+`profile = "…"` key fails the app server's start. So a sandboxed scripts thread sends
+`config/read {cwd}` after `initialize` and starts or resumes only when the effective
+`default_permissions` is `ai6_assistant`, `permissions.ai6_assistant` holds exactly the
+filesystem rules passed and nothing else non-null, and `shell_environment_policy` has only
+`include_only` (as passed); then `thread/start` or `thread/resume` must answer with
+`activePermissionProfile.id = "ai6_assistant"` and no `sandbox.networkAccess = true`. Otherwise
+the app server is closed and the start or resume fails with `GUATIAO_ERR_UNSUPPORTED` naming
+what differs (`Codex's configuration changes the sandbox Moneypenny's scripts run in (…)`), in
+both tool-check modes. The profile has no network:
 measured with Codex 0.164.0, app-server threads ran no proxy for a profile's network, so a
 script reached unlisted hosts and host loopback; scripts get none under every policy, which a
 developer-instructions line tells her (when the policy names hosts) and standard error logs.

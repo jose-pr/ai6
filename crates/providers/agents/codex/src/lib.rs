@@ -110,6 +110,12 @@ impl AgentHandler for CodexHandler {
         request: AgentResume,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
+        let profile = scripts_profile(
+            &self.config.executable,
+            &request.working_directory,
+            &request.environment,
+            request.assistant.as_ref(),
+        );
         let (process, weakening) = spawn(
             terminal,
             &self.config.executable,
@@ -120,6 +126,7 @@ impl AgentHandler for CodexHandler {
                 answer_only: request.answer_only || request.assistant.is_some(),
                 assistant: request.assistant.as_ref(),
                 model: request.model.as_deref(),
+                profile: profile.as_ref(),
             },
         )?;
         let gate = station_gate(&request.environment)
@@ -139,6 +146,12 @@ impl AgentHandler for CodexHandler {
             Duration::from_secs(20),
         )?;
         session.notify("initialized", json!({}))?;
+        if let Some(profile) = &profile {
+            close_unless(
+                &session,
+                check_sandbox_config(&session, profile, &request.working_directory),
+            )?;
+        }
         let mut params = json!({ "threadId": request.session_id.as_str(), "excludeTurns": true });
         if let Some(model) = request.model {
             params["model"] = json!(model);
@@ -171,6 +184,14 @@ impl AgentHandler for CodexHandler {
                 "Codex resumed a different thread than requested",
             ));
         }
+        if let Some(profile) = &profile {
+            close_unless(
+                &session,
+                profile
+                    .check_thread(&response)
+                    .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found)),
+            )?;
+        }
         session.thread_id = Some(request.session_id);
         if let Some(message) = request.message
             && let Err(error) = session.send_message(AgentMessage { text: message })
@@ -195,6 +216,12 @@ impl CodexHandler {
         if let Some(mode) = &request.assistant {
             instructions.extend(assistant_instructions(mode, scripts)?);
         }
+        let profile = scripts_profile(
+            &self.config.executable,
+            &request.working_directory,
+            &request.environment,
+            request.assistant.as_ref(),
+        );
         let (process, weakening) = spawn(
             terminal,
             &self.config.executable,
@@ -205,6 +232,7 @@ impl CodexHandler {
                 answer_only: request.answer_only || request.assistant.is_some(),
                 assistant: request.assistant.as_ref(),
                 model: request.model.as_deref(),
+                profile: profile.as_ref(),
             },
         )?;
         let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
@@ -222,6 +250,12 @@ impl CodexHandler {
             Duration::from_secs(20),
         )?;
         session.notify("initialized", json!({}))?;
+        if let Some(profile) = &profile {
+            close_unless(
+                &session,
+                check_sandbox_config(&session, profile, &request.working_directory),
+            )?;
+        }
         let mut params = json!({ "cwd": request.working_directory });
         set_approval_policy(
             &mut params,
@@ -236,6 +270,14 @@ impl CodexHandler {
             params["developerInstructions"] = json!(instructions.join("\n\n"));
         }
         let response = session.request("thread/start", params, Duration::from_secs(30))?;
+        if let Some(profile) = &profile {
+            close_unless(
+                &session,
+                profile
+                    .check_thread(&response)
+                    .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found)),
+            )?;
+        }
         let thread_id = response
             .pointer("/thread/id")
             .and_then(Value::as_str)
@@ -1167,6 +1209,47 @@ struct Mode<'a> {
     assistant: Option<&'a AssistantMode>,
     /// The model the thread asks for; what Codex offers it depends on the model.
     model: Option<&'a str>,
+    /// The sandbox of an assistant's scripts, when they run in one.
+    profile: Option<&'a sandbox::Profile>,
+}
+
+/// The sandbox `assistant`'s scripts run in, `None` when they run in none.
+fn scripts_profile(
+    executable: &str,
+    cwd: &str,
+    environment: &std::collections::BTreeMap<String, String>,
+    assistant: Option<&AssistantMode>,
+) -> Option<sandbox::Profile> {
+    assistant
+        .filter(|mode| Scripts::of(Some(mode)) == Scripts::Sandboxed)
+        .map(|mode| sandbox::Profile::new(executable, cwd, environment, mode))
+}
+
+/// Refuses a scripts thread whose app server's effective configuration is not the sandbox
+/// passed to it ([`sandbox::Profile::check_config`]): Codex merges the user's own settings in.
+fn check_sandbox_config(
+    session: &CodexSession,
+    profile: &sandbox::Profile,
+    cwd: &str,
+) -> Result<(), ProviderError> {
+    let result = session.request(
+        "config/read",
+        json!({ "cwd": cwd }),
+        Duration::from_secs(30),
+    )?;
+    profile
+        .check_config(&result)
+        .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found))
+}
+
+/// Closes `session` and returns `error` when `checked` failed.
+fn close_unless<T>(
+    session: &CodexSession,
+    checked: Result<T, ProviderError>,
+) -> Result<T, ProviderError> {
+    checked.inspect_err(|_| {
+        let _ = session.close();
+    })
 }
 
 /// Starts the app server, and returns what a `warn` tool check found. A restricted (answer-only
@@ -1179,7 +1262,7 @@ fn spawn(
     mode: Mode<'_>,
 ) -> Result<(Object<dyn TerminalSession>, Option<String>), ProviderError> {
     let mut argv = if let Some(assistant) = mode.assistant {
-        assistant_argv(executable, environment, assistant, cwd)?
+        assistant_argv(executable, environment, assistant, mode.profile)?
     } else if mode.answer_only {
         answer_only_argv(executable)
     } else {
@@ -1318,8 +1401,8 @@ fn answer_only_argv(executable: &str) -> Vec<String> {
 /// its standing context is the mode's `context_file`, which the thread gets as developer
 /// instructions.
 ///
-/// With interpreters the command tools stay on and the thread's commands run under
-/// [`sandbox::overrides`]: the mode's `files` directories writable, nothing outside the working
+/// With interpreters the command tools stay on and the thread's commands run under `profile`
+/// ([`sandbox::Profile`]): the mode's `files` directories writable, nothing outside the working
 /// directory readable, no network; unsandboxed, under none. Without interpreters `exec` is not
 /// offered, so `files` gives no tool to write with. Skills are refused: Codex keeps no list of
 /// allowed skills.
@@ -1327,7 +1410,7 @@ fn assistant_argv(
     executable: &str,
     environment: &std::collections::BTreeMap<String, String>,
     mode: &AssistantMode,
-    cwd: &str,
+    profile: Option<&sandbox::Profile>,
 ) -> Result<Vec<String>, ProviderError> {
     mode.validate()
         .map_err(|reason| refuse(Status::GUATIAO_ERR_BAD_VALUE, reason))?;
@@ -1367,8 +1450,8 @@ fn assistant_argv(
     ];
     argv.extend(no_built_in_tools(scripts != Scripts::None));
     argv.extend(["-c".to_owned(), "project_doc_max_bytes=0".to_owned()]);
-    if scripts == Scripts::Sandboxed {
-        argv.extend(sandbox::overrides(executable, cwd, environment, mode));
+    if let Some(profile) = profile {
+        argv.extend(profile.overrides());
     }
     Ok(argv)
 }
@@ -1759,6 +1842,12 @@ mod tests {
                         writeln!(stdout, "{}", json!({"id":id,"result":{}})).unwrap();
                         stdout.flush().unwrap();
                     }
+                    "config/read" => {
+                        let config = fake_config(&argv);
+                        writeln!(stdout, "{}", json!({"id":id,"result":{"config":config}}))
+                            .unwrap();
+                        stdout.flush().unwrap();
+                    }
                     "thread/start" | "thread/resume" => {
                         // Reports the thread's policy as text, for tests that check it.
                         if std::env::var_os("CODEX_FIXTURE_SHOW_POLICY").is_some() {
@@ -1777,10 +1866,20 @@ mod tests {
                             )
                             .unwrap();
                         }
+                        let config = fake_config(&argv);
+                        let network = config.pointer("/permissions/ai6_assistant/network/enabled")
+                            == Some(&json!(true));
+                        let profile = config
+                            .get("default_permissions")
+                            .map(|name| json!({ "id": name }));
                         writeln!(
                             stdout,
                             "{}",
-                            json!({"id":id,"result":{"thread":{"id":thread_id}}})
+                            json!({"id":id,"result":{
+                                "thread":{"id":thread_id},
+                                "activePermissionProfile": profile,
+                                "sandbox": {"networkAccess": network}
+                            }})
                         )
                         .unwrap();
                         stdout.flush().unwrap();
@@ -1803,6 +1902,37 @@ mod tests {
                 stdout.flush().unwrap();
             }
         }
+    }
+
+    /// The fake app server's effective configuration, as Codex 0.164.0 makes it: the sandbox
+    /// settings its `-c` arguments give, merged over `CODEX_FIXTURE_USER_CONFIG` (JSON standing
+    /// for the user's `config.toml`) table by table.
+    fn fake_config(argv: &[&str]) -> Value {
+        fn merge(into: &mut Value, from: Value) {
+            match (into, from) {
+                (Value::Object(into), Value::Object(from)) => {
+                    for (key, value) in from {
+                        merge(into.entry(key).or_insert(Value::Null), value);
+                    }
+                }
+                (slot, value) => *slot = value,
+            }
+        }
+        let mut config = std::env::var("CODEX_FIXTURE_USER_CONFIG")
+            .map(|text| serde_json::from_str(&text).unwrap())
+            .unwrap_or_else(|_| json!({}));
+        for pair in argv.windows(2).filter(|pair| pair[0] == "-c") {
+            let sandbox = [
+                "permissions.",
+                "default_permissions=",
+                "shell_environment_policy.",
+            ];
+            if sandbox.iter().any(|prefix| pair[1].starts_with(prefix)) {
+                let table: toml::Table = toml::from_str(pair[1]).unwrap();
+                merge(&mut config, serde_json::to_value(table).unwrap());
+            }
+        }
+        config
     }
 
     fn read_to_completion(session: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
@@ -3071,6 +3201,60 @@ mod tests {
     }
 
     #[test]
+    fn a_users_codex_configuration_that_widens_the_scripts_sandbox_refuses_the_thread() {
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-widened-fixture".to_owned(),
+        })
+        .unwrap();
+        let mut mode = AssistantMode::moneypenny();
+        mode.interpreters.push("python3".to_owned());
+        mode.files = vec!["personal".to_owned()];
+        for user in [
+            json!({"permissions": {"ai6_assistant": {"network": {"enabled": true}}}}),
+            json!({"shell_environment_policy": {"set": {"TMPDIR": "/elsewhere"}}}),
+        ] {
+            let mut start = assistant_start(mode.clone(), "Chart it.");
+            start
+                .environment
+                .insert("CODEX_FIXTURE_USER_CONFIG".to_owned(), user.to_string());
+            let terminal = ProcessTerminal::new();
+            let refused = handler
+                .start(start.clone(), terminal.clone().into_object())
+                .err()
+                .unwrap_or_else(|| panic!("started with {user}"));
+            assert!(
+                refused.to_string().contains("changes the sandbox"),
+                "{refused}"
+            );
+            let refused = handler
+                .resume(
+                    AgentResume {
+                        mission_id: start.mission_id.clone(),
+                        session_id: SessionId::try_new("codex-scripts-thread").unwrap(),
+                        message: None,
+                        working_directory: start.working_directory.clone(),
+                        environment: start.environment.clone(),
+                        model: start.model.clone(),
+                        effort: None,
+                        max_cost_micro_usd: None,
+                        project_settings: false,
+                        project_mcp: false,
+                        answer_only: false,
+                        assistant: Some(mode.clone()),
+                        initial_context: Vec::new(),
+                    },
+                    terminal.into_object(),
+                )
+                .err()
+                .unwrap_or_else(|| panic!("resumed with {user}"));
+            assert!(
+                refused.to_string().contains("changes the sandbox"),
+                "{refused}"
+            );
+        }
+    }
+
+    #[test]
     fn scripted_commands_run_and_are_reported_as_a_tool() {
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-commands-fixture".to_owned(),
@@ -3589,7 +3773,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
         );
-        let refused = assistant_argv("codex", &environment, &skills, "/work").unwrap_err();
+        let refused = assistant_argv("codex", &environment, &skills, None).unwrap_err();
         assert_eq!(refused.status, Status::GUATIAO_ERR_UNSUPPORTED);
         assert!(
             refused.to_string().contains("no list of allowed skills"),
@@ -3600,7 +3784,7 @@ mod tests {
                 "codex",
                 &BTreeMap::new(),
                 &AssistantMode::moneypenny(),
-                "/work"
+                None
             )
             .is_err(),
             "no endpoint in the environment"
@@ -3627,7 +3811,7 @@ mod tests {
         let mut mode = AssistantMode::moneypenny();
         mode.files.push("personal".to_owned());
         mode.network.policy = "open".to_owned();
-        let argv = assistant_argv("codex", &environment, &mode, "/work").unwrap();
+        let argv = assistant_argv("codex", &environment, &mode, None).unwrap();
         assert_no_built_in_tools(&argv);
         assert!(
             !argv
@@ -3674,7 +3858,7 @@ mod tests {
             "codex",
             &environment,
             &AssistantMode::moneypenny().with_cables(),
-            "/work",
+            None,
         )
         .unwrap();
         let (key, value) = argv[3].split_once('=').unwrap();

@@ -1,0 +1,29 @@
+{
+ "activePermissionProfile": {
+  "extends": null,
+  "id": "ai6_assistant"
+ },
+ "approvalPolicy": "never",
+ "approvalsReviewer": "user",
+ "cwd": "/tmp/ai6-desk/conversation",
+ "disabledPluginIds": [],
+ "instructionSources": [],
+ "model": "gpt-6.1-sol",
+ "modelProvider": "standin",
+ "multiAgentMode": "explicitRequestOnly",
+ "reasoningEffort": null,
+ "runtimeWorkspaceRoots": [
+  "/tmp/ai6-desk/conversation"
+ ],
+ "sandbox": {
+  "excludeSlashTmp": true,
+  "excludeTmpdirEnvVar": true,
+  "networkAccess": false,
+  "type": "workspaceWrite",
+  "writableRoots": [
+   "/tmp/ai6-desk/conversation/personal",
+   "/tmp/ai6-desk/conversation/scratch"
+  ]
+ },
+ "serviceTier": null
+}
