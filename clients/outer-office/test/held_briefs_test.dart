@@ -252,6 +252,8 @@ void main() {
       OuterOfficeApp(board: board, desktopWindows: false),
     );
     await tester.pumpAndSettle();
+    expect(find.text('Command overview'), findsOneWidget);
+    expect(find.textContaining('is held for review'), findsNothing);
     expect(await offersPage(tester, 'Briefings'), isFalse);
     expect(
       gateway.requests.where(

@@ -8,6 +8,8 @@ import 'package:material_ui/material_ui.dart' show TextField;
 import 'package:outer_office/controls/mission_actions.dart';
 import 'package:outer_office/main.dart';
 
+import 'shell_navigation.dart';
+
 /// A signed-in board whose gateway shows one Mission with an earlier, queued attempt and a
 /// later, working one; every request is kept in [requests].
 Future<MissionBoard> signedIn(
@@ -167,6 +169,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
 
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
@@ -227,6 +230,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
 
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
@@ -263,6 +267,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
 
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
@@ -287,6 +292,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
 
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
@@ -314,6 +320,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
 
     await tester.tap(find.text('claude-session-002'));
     await tester.pumpAndSettle();

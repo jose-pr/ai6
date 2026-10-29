@@ -195,6 +195,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: MissionBoardPage(board: board, desktopWindows: false)),
     );
+    await openPage(tester, 'Missions');
 
     expect(
       find.text(
@@ -487,6 +488,10 @@ void main() {
           if (request.url.path == '/v1/user/profile') {
             return http.Response(userProfileResponse(), 200);
           }
+          if (request.url.path ==
+              '/v1/user/operations/operation-alpha/held-briefs') {
+            return http.Response('[]', 200);
+          }
           expect(request.url.path, '/v1/board');
           return http.Response('[]', 200);
         }),
@@ -503,6 +508,7 @@ void main() {
         '/v1/missions',
         '/v1/stations',
         '/v1/user/profile',
+        '/v1/user/operations/operation-alpha/held-briefs',
       ]);
     },
   );
@@ -571,6 +577,10 @@ void main() {
           if (request.url.path == '/v1/user/profile') {
             return http.Response(userProfileResponse(), 200);
           }
+          if (request.url.path ==
+              '/v1/user/operations/operation-alpha/held-briefs') {
+            return http.Response('[]', 200);
+          }
           fail('Unexpected request ${request.url}');
         }),
       );
@@ -590,6 +600,7 @@ void main() {
         '/v1/missions',
         '/v1/stations',
         '/v1/user/profile',
+        '/v1/user/operations/operation-alpha/held-briefs',
       ]);
     },
   );
@@ -1050,6 +1061,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
 
     expect(find.text('Missions'), findsOneWidget);
     expect(find.text('operation-alpha'), findsOneWidget);
@@ -1247,6 +1259,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
     await tester.tap(find.text('preview-session-007'));
     await tester.pumpAndSettle();
 
@@ -1290,6 +1303,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
     await tester.tap(find.text('preview-session-007'));
     await tester.pumpAndSettle();
 
@@ -1492,6 +1506,27 @@ void main() {
         if (request.url.path == '/v1/user/profile') {
           return http.Response(userProfileResponse(), 200);
         }
+        if (request.url.path ==
+            '/v1/user/operations/operation-alpha/held-briefs') {
+          expect(request.headers['authorization'], 'Bearer user-token');
+          return http.Response(
+            jsonEncode([
+              {
+                'key': 'source_github--org_repo_9',
+                'operation': 'operation-alpha',
+                'brief': {
+                  'title': 'Fix the\u200B login page',
+                  'body': 'Untrusted text.',
+                  'source': 'source:github',
+                },
+                'vetting': {'verdict': 'hold', 'findings': []},
+                'held_at': 1000.0,
+              },
+            ]),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         expect(request.url.path, '/v1/board');
         expect(request.headers['authorization'], 'Bearer user-token');
         return http.Response(
@@ -1521,6 +1556,18 @@ void main() {
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
+    // Signing in opens Overview, which lists the brief vetting holds.
+    expect(find.text('Overview'), findsOneWidget);
+    expect(find.text('Command overview'), findsOneWidget);
+    expect(
+      find.text(
+        'Brief "Fix the<U+200B> login page" is held for review in Operation '
+        'operation-alpha',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Open Briefings'), findsOneWidget);
+    await openPage(tester, 'Missions');
     expect(find.text('Missions'), findsOneWidget);
     expect(find.text('claude-session-123'), findsOneWidget);
     await openPage(tester, 'Stations');
@@ -1532,6 +1579,7 @@ void main() {
       '/v1/missions',
       '/v1/stations',
       '/v1/user/profile',
+      '/v1/user/operations/operation-alpha/held-briefs',
     ]);
   });
 

@@ -46,6 +46,25 @@ Future<MissionBoard> demoAt(WidgetTester tester, Size size) async {
 }
 
 void main() {
+  testWidgets('a fresh start opens Overview, which lists held briefs', (
+    tester,
+  ) async {
+    await demoAt(tester, const Size(1400, 900));
+    expect(find.text('Command overview'), findsOneWidget);
+    expect(
+      find.text(
+        'Brief "Resolve github item org/repo#7" is held for review in '
+        'Operation G',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Open Briefings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Held briefs'));
+    await tester.pumpAndSettle();
+    expect(find.text('Resolve github item org/repo#7'), findsOneWidget);
+  });
+
   testWidgets('a wide window has the labelled rail of twelve pages', (
     tester,
   ) async {

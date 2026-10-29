@@ -287,6 +287,7 @@ class MissionBoard extends ChangeNotifier {
           ),
         ],
       );
+      heldBriefs = _demoHeldBriefs('G');
       loading = false;
       return;
     }
@@ -309,6 +310,9 @@ class MissionBoard extends ChangeNotifier {
   /// Every attempt at each Mission, by (Operation, Mission), first first.
   Map<(String, String), List<MissionAttemptSummary>> missionAttempts = const {};
   List<AuditEntrySummary> auditEntries = const [];
+
+  /// The briefs vetting holds, in the Operations whose held briefs this account may review.
+  List<HeldBriefSummary> heldBriefs = const [];
   UserSessionSummary? userSession;
   StationBoardSummary stationBoard = const StationBoardSummary(
     headquartersStation: null,
@@ -620,26 +624,7 @@ class MissionBoard extends ChangeNotifier {
 
   /// The briefs vetting holds in an Operation, oldest first.
   Future<List<HeldBriefSummary>> loadHeldBriefs(String operationId) async {
-    if (demo) {
-      return [
-        HeldBriefSummary(
-          key: 'source_github--org_repo_7',
-          operationId: operationId,
-          title: 'Resolve github item org/repo#7',
-          body: 'Title: Crash on save\n\nThe app crashes when saving.',
-          source: 'source:github',
-          url: 'https://github.com/org/repo/issues/7',
-          findings: const [
-            VettingFinding(
-              kind: 'duplicate',
-              detail: 'the same URL as other work',
-              related: 'mission-007',
-            ),
-          ],
-          heldAt: 1_798_000_000,
-        ),
-      ];
-    }
+    if (demo) return _demoHeldBriefs(operationId);
     final response = await _userRequest(
       'GET',
       '/v1/user/operations/${Uri.encodeComponent(operationId)}/held-briefs',
@@ -652,6 +637,36 @@ class MissionBoard extends ChangeNotifier {
         HeldBriefSummary.fromJson(held as Map<String, dynamic>),
     ];
   }
+
+  /// The briefs vetting holds in every Operation whose held briefs this account may review
+  /// (`mission.create`); an Operation the gateway refuses is left out.
+  Future<List<HeldBriefSummary>> _loadAllHeldBriefs() async {
+    final held = await Future.wait([
+      for (final operationId in proposalOperations)
+        loadHeldBriefs(operationId)
+            .catchError((Object _) => const <HeldBriefSummary>[]),
+    ]);
+    return [for (final briefs in held) ...briefs];
+  }
+
+  static List<HeldBriefSummary> _demoHeldBriefs(String operationId) => [
+    HeldBriefSummary(
+      key: 'source_github--org_repo_7',
+      operationId: operationId,
+      title: 'Resolve github item org/repo#7',
+      body: 'Title: Crash on save\n\nThe app crashes when saving.',
+      source: 'source:github',
+      url: 'https://github.com/org/repo/issues/7',
+      findings: const [
+        VettingFinding(
+          kind: 'duplicate',
+          detail: 'the same URL as other work',
+          related: 'mission-007',
+        ),
+      ],
+      heldAt: 1_798_000_000,
+    ),
+  ];
 
   /// Releases a held brief to the queue, or refuses it with an optional reason.
   Future<void> decideHeldBrief({
@@ -1421,6 +1436,7 @@ class MissionBoard extends ChangeNotifier {
       userSession = UserSessionSummary.fromJson(
         jsonDecode(responses[3].body) as Map<String, dynamic>,
       );
+      heldBriefs = await _loadAllHeldBriefs();
       error = null;
     } on Object {
       error = 'Could not load Stations from Universal Exports.';
@@ -2779,7 +2795,7 @@ class MissionBoardPage extends StatefulWidget {
 class _MissionBoardPageState extends State<MissionBoardPage> {
   String? _selectedState;
   SessionSummary? _selectedWebSession;
-  OoPage _page = OoPage.missions;
+  OoPage _page = OoPage.overview;
   AssistantController? _assistantController;
 
   /// The conversation with Moneypenny, kept while this page lives; none in the demo or
@@ -3021,7 +3037,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   @override
   Widget build(BuildContext context) {
     final pages = _pages(widget.board);
-    final page = pages.contains(_page) ? _page : OoPage.missions;
+    final page = pages.contains(_page) ? _page : OoPage.overview;
     final operatorInitial = _operatorInitial(widget.board.userSession);
     final assistant = _assistant;
     final selectedSession = _selectedWebSession;

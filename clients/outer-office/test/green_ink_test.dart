@@ -152,6 +152,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await openPage(tester, 'Missions');
     await tester.pumpAndSettle();
     expect(find.text('BLOCKED · GREEN INK'), findsOneWidget);
   });

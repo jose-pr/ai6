@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../held/held_briefs_page.dart' show revealInvisible;
 import '../main.dart';
 import '../theme/oo_backdrop.dart';
 import '../theme/oo_icon.dart';
@@ -7,7 +8,8 @@ import '../theme/oo_tokens.dart';
 import 'oo_shell.dart';
 
 /// The command overview: counts of Operations, Stations, active Missions and waiting
-/// Sessions, and what needs the person's attention, all from what the board has loaded.
+/// Sessions, and what needs the person's attention (blocked Sessions, held briefs, dark
+/// Stations), all from what the board has loaded.
 class OverviewPage extends StatelessWidget {
   const OverviewPage({
     required this.board,
@@ -55,6 +57,16 @@ class OverviewPage extends StatelessWidget {
                     '${session.reason == null ? '' : ': ${session.reason!.replaceAll('-', ' ')}'}',
                 page: OoPage.missions,
               ),
+      for (final brief in board.heldBriefs)
+        _Attention(
+          icon: OoIconName.briefings,
+          color: tokens.warning,
+          text:
+              // A brief from a Source is untrusted text: show what renders as nothing.
+              'Brief "${revealInvisible(brief.title)}" is held for review in Operation '
+              '${brief.operationId}',
+          page: OoPage.briefings,
+        ),
       for (final station in stations.where((station) => !station.healthy))
         _Attention(
           icon: OoIconName.stations,
@@ -163,7 +175,11 @@ class OverviewPage extends StatelessWidget {
                         data: IconThemeData(color: item.color),
                         child: OoIcon(item.icon),
                       ),
-                      title: Text(item.text),
+                      title: Text(
+                        item.text,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       trailing: pages.contains(item.page)
                           ? TextButton(
                               onPressed: () => onOpen(item.page),
