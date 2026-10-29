@@ -256,20 +256,18 @@ pub(crate) fn probe(
     environment: &BTreeMap<String, String>,
     runner: &Runner<'_>,
 ) -> Option<String> {
-    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "ai6-codex-probe-{}-{}",
-        std::process::id(),
-        COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    if let Err(error) = std::fs::create_dir_all(&dir) {
-        return Some(format!(
-            "the sandbox probe's directory was not made: {error}"
-        ));
-    }
-    let answer = probe_in(executable, environment, runner, &dir);
-    let _ = std::fs::remove_dir_all(&dir);
-    answer
+    let dir = match tempfile::Builder::new()
+        .prefix("ai6-codex-probe-")
+        .tempdir()
+    {
+        Ok(dir) => dir,
+        Err(error) => {
+            return Some(format!(
+                "the sandbox probe's directory was not made: {error}"
+            ));
+        }
+    };
+    probe_in(executable, environment, runner, dir.path())
 }
 
 fn probe_in(
@@ -326,38 +324,159 @@ fn run(
     cwd: &Path,
     environment: &BTreeMap<String, String>,
 ) -> std::io::Result<(bool, String)> {
+    run_for(argv, cwd, environment, PROBE_TIMEOUT)
+}
+
+/// [`run`] with `timeout`. The command and everything it starts form one process tree (its own
+/// process group on Unix, a kill-on-close Job Object on Windows), killed whole once it exits or
+/// times out, so nothing it left behind keeps running or holds its output open.
+fn run_for(
+    argv: &[String],
+    cwd: &Path,
+    environment: &BTreeMap<String, String>,
+    timeout: Duration,
+) -> std::io::Result<(bool, String)> {
     let program = find_program(&argv[0], environment).unwrap_or_else(|| PathBuf::from(&argv[0]));
-    let mut child = std::process::Command::new(program)
+    let mut command = std::process::Command::new(program);
+    command
         .args(&argv[1..])
         .current_dir(cwd)
         .env_clear()
         .envs(environment)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
-    let deadline = Instant::now() + PROBE_TIMEOUT;
+        .stderr(std::process::Stdio::piped());
+    let (mut child, tree) = tree::spawn(&mut command)?;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break Some(status);
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
             break None;
         }
         std::thread::sleep(Duration::from_millis(50));
     };
+    // Unreaped (timed out), the program's children may still be found by their parent.
+    let _ = tree.kill(status.is_none());
     let output = child.wait_with_output()?;
     let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
     text.push('\n');
     text.push_str(&String::from_utf8_lossy(&output.stderr));
     match status {
         Some(status) => Ok((status.success(), text)),
-        None => Ok((
-            false,
-            format!("{text}\ndid not finish in {PROBE_TIMEOUT:?}"),
-        )),
+        None => Ok((false, format!("{text}\ndid not finish in {timeout:?}"))),
+    }
+}
+
+/// Starting the probe as the root of a process tree.
+#[cfg(unix)]
+mod tree {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Child, Command};
+
+    use crate::process_tree::ProcessTree;
+
+    /// Spawns `command` leading a process group of its own.
+    pub(super) fn spawn(command: &mut Command) -> std::io::Result<(Child, ProcessTree)> {
+        command.process_group(0);
+        let mut child = command.spawn()?;
+        match ProcessTree::of(Some(child.id())) {
+            Ok(tree) => Ok((child, tree)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Starting the probe as the root of a process tree.
+#[cfg(windows)]
+mod tree {
+    #![allow(unsafe_code)]
+
+    use std::io;
+    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Child, Command};
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+    use windows_sys::Win32::System::Threading::{
+        CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+    };
+
+    use crate::process_tree::ProcessTree;
+
+    /// Spawns `command` suspended, puts it in a new Job Object and only then lets it run, so
+    /// nothing it starts is outside the job.
+    pub(super) fn spawn(command: &mut Command) -> io::Result<(Child, ProcessTree)> {
+        let tree = ProcessTree::new()?;
+        command.creation_flags(CREATE_SUSPENDED);
+        let mut child = command.spawn()?;
+        // SAFETY: both handles are open: the job's while `tree` lives, the process's while
+        // `child` does.
+        let joined =
+            unsafe { AssignProcessToJobObject(tree.handle(), child.as_raw_handle() as HANDLE) };
+        let started = if joined == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            resume(child.id())
+        };
+        match started {
+            Ok(()) => Ok((child, tree)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                Err(error)
+            }
+        }
+    }
+
+    /// Resumes the threads of the suspended process `pid`: its main thread, the only one it has.
+    fn resume(pid: u32) -> io::Result<()> {
+        // SAFETY: a thread snapshot takes no pointer; the handle is checked and closed below.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        let mut entry = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..Default::default()
+        };
+        let mut resumed = 0;
+        // SAFETY: `entry` is a THREADENTRY32 with its size set, and `snapshot` is open.
+        let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid {
+                // SAFETY: OpenThread takes plain values; a null handle is checked.
+                let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+                if !thread.is_null() {
+                    // SAFETY: `thread` was opened above with the right to resume it, and is
+                    // closed once.
+                    if unsafe { ResumeThread(thread) } != u32::MAX {
+                        resumed += 1;
+                    }
+                    // SAFETY: as above.
+                    unsafe { CloseHandle(thread) };
+                }
+            }
+            // SAFETY: as for Thread32First.
+            more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+        }
+        // SAFETY: the snapshot handle is open and closed once.
+        unsafe { CloseHandle(snapshot) };
+        if resumed == 0 {
+            return Err(io::Error::other(
+                "the probe's main thread could not be resumed",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -577,6 +696,36 @@ mod tests {
              install directory only the program itself is denied"
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_probe_that_times_out_is_killed_with_everything_it_started() {
+        // The shell's child inherits its output: killing the shell alone would leave the
+        // output open, and the probe waiting, until the child exits.
+        let argv: Vec<String> = if cfg!(windows) {
+            vec!["cmd.exe", "/d", "/c", "ping -n 30 127.0.0.1 & echo done"]
+        } else {
+            vec!["/bin/sh", "-c", "sleep 30; echo done"]
+        }
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let environment: BTreeMap<String, String> = std::env::vars().collect();
+        let started = Instant::now();
+        let (succeeded, output) = run_for(
+            &argv,
+            &std::env::temp_dir(),
+            &environment,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert!(!succeeded && output.contains("did not finish"), "{output}");
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "the probe's child outlived it: {:?}",
+            started.elapsed()
+        );
+        assert!(!output.contains("done"), "{output}");
     }
 
     #[test]

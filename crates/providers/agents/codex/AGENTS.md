@@ -5,9 +5,12 @@ signature, contract and gotchas, so a consuming agent skips the source. It ships
 the package and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
-No features. MSRV: Rust 1.89. The crate depends on `ai6` (feature `gate`) and `serde_json`. It
-re-exports `CodexHandler` and `CodexConfig` from the root, beside the tool check's
-`TOOL_CHECK_ENV` and `KEPT_FEATURES`. The crate contains no `unsafe` code.
+No features. MSRV: Rust 1.89. The crate depends on `ai6` (feature `gate`), `serde_json`,
+`tempfile`, and `libc` (Unix) or `windows-sys` (Windows). It re-exports `CodexHandler` and
+`CodexConfig` from the root, beside the tool check's `TOOL_CHECK_ENV` and `KEPT_FEATURES`. Its
+only `unsafe` code kills the sandbox probe's process tree: the terminal providers'
+`crates/providers/terminals/process_tree/{unix,windows}.rs`, included with `#[path]`, and, on
+Windows, putting the probe in its Job Object before it runs.
 
 ## `CodexHandler`
 
@@ -136,9 +139,11 @@ stays read-only and, with `files`, is told it has no file tools (nothing offers 
 `exec`). Every command execution item a scripts thread starts is reported as tool
 `exec_command`. `assistant_scripts` runs `<executable> [-c windows.sandbox="mxc"] -c
 permissions.ai6_assistant_probe={…} sandbox -P ai6_assistant_probe -- cmd.exe /d /c echo …`
-(`/bin/sh -c 'echo …'` elsewhere) from a fresh temporary directory with exactly the given
-environment (`std::process`, 60 s), and answers `None` only when it exits successfully having
-printed the marker; the answer is cached 15 minutes per executable and configuration
+(`/bin/sh -c 'echo …'` elsewhere) from a fresh temporary directory (`tempfile`, removed after)
+with exactly the given environment (`std::process`, 60 s), and answers `None` only when it exits
+successfully having printed the marker. The probe leads a process group of its own (Unix) or
+starts suspended inside a kill-on-close Job Object (Windows), and that whole tree is killed once
+it exits or times out, so nothing it started outlives it or holds its output open; the answer is cached 15 minutes per executable and configuration
 environment. Codex merges the `mcp_servers` table into the user's own MCP servers rather
 than replacing them (0.164.0: a user's `node_repl` started in an answer-only thread), so the
 tool check below also switches off each of the user's servers by name. Checked against the

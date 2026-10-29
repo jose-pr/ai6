@@ -1,10 +1,20 @@
 //! Codex app-server JSON-RPC implementation of AI6's AgentHandler contract.
 
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 ai6::guatiao::providers!(CodexHandler);
 
+// The terminal providers' process tree, which the sandbox probe kills whole on timeout; the
+// probe uses only part of it.
+#[cfg(unix)]
+#[path = "../../../terminals/process_tree/unix.rs"]
+#[allow(dead_code)]
+mod process_tree;
+#[cfg(windows)]
+#[path = "../../../terminals/process_tree/windows.rs"]
+#[allow(dead_code)]
+mod process_tree;
 mod sandbox;
 mod tools;
 
