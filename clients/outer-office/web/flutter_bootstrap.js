@@ -54,11 +54,13 @@ async function ooCdn() {
   return 'none';
 }
 
+// The loader reads the CanvasKit base itself; the engine reads the rest only from
+// initializeEngine, which onEntrypointLoaded must therefore pass the same config.
 ooCdn().then((cdn) => _flutter.loader.load({
   config: ooOrigins[cdn],
   onEntrypointLoaded: async function (engineInitializer) {
     try {
-      const engine = await engineInitializer.initializeEngine();
+      const engine = await engineInitializer.initializeEngine(ooOrigins[cdn]);
       await engine.runApp();
       document.querySelector('#startup')?.remove();
     } catch (_) {
