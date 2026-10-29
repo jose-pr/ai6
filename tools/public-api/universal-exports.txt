@@ -20,6 +20,7 @@ impl universal_exports::AccessProviders
 pub fn universal_exports::AccessProviders::from_reverse_proxy(alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn universal_exports::AccessProviders::new(alloc::sync::Arc<dyn coqui_access::kind::Authenticator>, alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>) -> Self
 pub fn universal_exports::AccessProviders::with_proxy_identity(self, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn universal_exports::AccessProviders::with_proxy_secret(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, alloc::string::String>
 impl core::fmt::Debug for universal_exports::AccessProviders
 pub fn universal_exports::AccessProviders::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::AgentInput
@@ -277,3 +278,5 @@ pub universal_exports::TimelinePage::next_cursor: core::option::Option<alloc::st
 pub universal_exports::TimelinePage::operation_id: alloc::string::String
 pub const universal_exports::DEFAULT_TIMELINE_PAGE: usize
 pub const universal_exports::MAX_TIMELINE_PAGE: usize
+pub const universal_exports::MIN_PROXY_SECRET_LEN: usize
+pub const universal_exports::PROXY_SECRET_HEADER: &str
