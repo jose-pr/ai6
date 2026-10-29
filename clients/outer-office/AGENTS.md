@@ -10,7 +10,12 @@ sentinel colours `#F6D58E`, `#B9832F`, `#2A1C08` that `OoDuotone` swaps for the 
 Cinzel (`ooDisplayFamily`) only for the wordmark and section labels. The wallpaper
 (`OoBackdrop`) and the hero art (`OoHero`, Overview only) never sit behind tables,
 terminals, Session pages, dialogs, green ink, briefings or the chat, and nothing is plotted
-on the hero.
+on the hero. Ornament (glows, decorative gradients, art) reads `OoTokens.decorated`, which
+high contrast clears; never infer it from colours. Accent edges and glow belong to the
+selection and the primary action only. `test/contrast.dart` lists the pairs text is drawn
+with and checks each theme's chart series: a new text use on a new background joins that
+list. Theme choices go through `OoAppearanceChooser` (`lib/theme/oo_appearance.dart`) and
+native windows build their app with `boardThemedApp`.
 
 ## Boundaries
 

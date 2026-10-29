@@ -76,16 +76,23 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   (after a confirmation), each a commit by the operator. See the
   [assistant guide](https://jose-pr.github.io/ai6/assistant/).
 - Audit log for operators with `audit.read`; operator menu with identity, effective
-  permissions per Operation, theme and wallpaper, and sign-out.
+  permissions per Operation, appearance and sign-out.
 - Six themes from the Outer Office design kit (Night Ops, the default, Black Ops, Dusk,
   Classic, Light and Red File) or the system's light or dark setting, stored per device as
-  `oo.theme`. Every text colour reaches WCAG AA (4.5:1) on its surface, the system's high
-  contrast and reduced motion settings apply, and a theme's wallpaper (`oo.backdrop`) shows
-  only behind sign-in, the Overview hero and empty pages. The hero is decorative: a world
-  map with glowing routes (in Night Ops as drawn, in Black Ops, Classic, Light and Red File
-  recoloured from the theme's own colours) or, in Dusk, a Westminster skyline; nothing is
-  plotted on it, and its text sits on a solid panel. Large icons (stat tiles, recent
-  activity, the phone menu) are duotone drawings of the kit's icons in the theme's accent.
+  `oo.theme`. The appearance settings (the top bar's gear and the operator menu) show each
+  theme as a miniature of its page, panel, selected row and button, with its name, a line
+  on its character and a check mark on the chosen one; a choice applies at once. Every
+  colour text is drawn in reaches WCAG AA (4.5:1) where it is drawn, panels over art
+  included; each theme's eight chart colours stay apart for colour-blind readers. The
+  system's reduced motion stops theme and page transitions, and its high contrast drops
+  every glow, decorative gradient and picture. **Wallpaper** (`oo.backdrop`) puts art
+  behind sign-in, the Overview hero and empty pages only. The hero is decorative: a world
+  map with glowing routes (Night Ops as drawn, Black Ops quieter in its greys, Red File in
+  its crimson), a Westminster skyline (Dusk), or pale cartographic contours on paper
+  (Light as drawn, Classic in its own paper and ink); nothing is plotted on it, and its
+  text sits on a solid panel. Accent edges and glow mark only the selection and the
+  primary action. Large icons (stat tiles, recent activity, the phone menu) are duotone
+  drawings of the kit's icons in the theme's accent.
 
 ## Toolchain
 
@@ -158,6 +165,13 @@ The web build loads its engine (CanvasKit or skwasm) from its own `canvaskit/` d
 and the fonts for characters Roboto lacks from its own `assets/fonts/fallback/`, so by
 default the browser fetches nothing from any origin but the one serving the app. Desktop
 builds never use a CDN: the operating system's fonts cover other scripts and emoji there.
+
+The hero art in `assets/heroes/`: `map.jpg` and `skyline.jpg` cut from the AI6 brand
+banners; `paper.jpg`, a 940×278 crop at the left edge, 746 px down, of a 1536×1024
+picture made with a built-in image generation tool on 2026-10-29 from a written prompt and
+no reference images (pale ivory paper, thin taupe coast-like contours and drafting arcs at
+the left and right edges, a blank centre, no text, labels, routes or markers), saved at
+JPEG quality 92. The wallpapers in `assets/backdrops/` come from the AI6 brand pack.
 
 The fallback fonts are the 727 Noto files the Flutter web engine can ask for (SIL Open
 Font License 1.1, `assets/fonts/LICENSE-Noto.txt`, on the licence page of the web app):

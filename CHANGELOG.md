@@ -61,9 +61,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `clients/outer-office` (Dart package `outer_office`); Moneypenny is the AI assistant
   inside it. Its build defines are `OO_API` and `OO_DEMO`.
 - Outer Office takes the design kit's look: six themes (Night Ops, the default, Black Ops,
-  Dusk, Classic, Light, Red File) or the system setting, chosen in the operator menu and
-  stored as `oo.theme`, with every text colour at WCAG AA on its surface and the system's
-  high contrast and reduced motion honoured; the kit's icons; and a rail of twelve pages
+  Dusk, Classic, Light, Red File) or the system setting, chosen by sight (a miniature of
+  each theme with its name, character and a check mark) from the top bar's gear or the
+  operator menu and stored as `oo.theme`, with every text colour at WCAG AA where it is
+  drawn (panels over art included), a chart palette per theme that stays apart for
+  colour-blind readers, the system's reduced motion honoured and its high contrast
+  dropping every glow, gradient and picture; pale cartographic hero art for Light and
+  Classic; accent edges and glow only on the selection and the primary action; the
+  **Wallpaper** switch (`oo.backdrop`) for the art behind sign-in, the Overview hero and
+  empty pages; the kit's icons; and a rail of twelve pages
   (new Overview, Operations and Sessions pages; Agents, Green Ink, Briefings and Roster take
   Administration's tabs; Theaters, settings and placement are tabs of Stations) that has
   labels from 1200 px, is compact from 900 px and sits behind a menu button below that.
