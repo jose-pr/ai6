@@ -599,7 +599,7 @@ impl Gateway {
     /// Serves `/v1/user/roster/...` from the roster the Stations read; without it those
     /// routes answer 503. The command opens `unex.cfg`'s provider with ai6's config::open_with.
     #[must_use]
-    pub fn with_roster(self, source: Arc<dyn ai6::ConfigSource>) -> Self;
+    pub fn with_roster(self, source: Arc<dyn ai6::ConfigProvider>) -> Self;
     pub fn authenticate_station(&self, presented: &str) -> Result<(), GatewayError>;
     pub async fn register_session(
         &self,

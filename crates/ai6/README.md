@@ -42,7 +42,7 @@ cargo add ai6 --git https://github.com/jose-pr/ai6
 | `publisher` | Bounded publication of lifecycle events and raw terminal bytes to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
 | `station-tls` | Persistent Station certificate identities and pinned-peer or CA mutual TLS, on `coqui-peer-tls`. | No |
-| `sqlite` | The Registry and roster in a SQLite file (`SqlRegistry`, `SqlConfigSource`). | No |
+| `sqlite` | The Registry and roster in a SQLite file (`SqlRegistry`, `SqlProvider`). | No |
 | `postgres` | The Registry and roster in PostgreSQL, shared by the Stations of an HA deployment. | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 

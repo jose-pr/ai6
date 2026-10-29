@@ -205,10 +205,10 @@ that person: a group's shared repository only for a member, by the groups each m
 each shared commit carries. So the gateway and every Station must read the same roster.
 
 A SQL roster (`sqlite:` or `postgres://`, shared by the Stations of an HA deployment) keeps the
-same keys as one record of kind `assistant`, keyed `assistant`, in the table
-`ai6_config_assistant`: the row `assistant` holding `{"personal_repo":
+same keys as one record of kind `assistant`, keyed `settings`, in the table
+`ai6_config_assistant`: the row `settings` holding `{"personal_repo":
 "/srv/moneypenny/{person_digest}.git"}` is the first line above. An administrator with
-`roster.manage` sets it with `PUT /v1/user/roster/assistant/assistant` (the definition as a
+`roster.manage` sets it with `PUT /v1/user/roster/assistant/settings` (the definition as a
 JSON object, replacing the whole record) or removes it to go back to the defaults, through the
 API or on the app's Roster page under **Moneypenny's settings**. It is
 checked as the table is: an unknown key, a repository AI6 refuses or a record under another key

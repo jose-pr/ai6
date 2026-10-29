@@ -11,8 +11,10 @@ are providers that declare what they can do. A Theater is whatever its transport
 
 ## Declaring Theaters
 
-A Station reaches its Theaters through its own `theaters.toml` in the configuration
-directory:
+A Station's Theaters are `theater` records in its configuration provider
+([Operations](operations.md#where-configuration-comes-from)): in a directory, `theaters.toml`
+(or `.json`, `.yaml`) for every Station and `stations/<id>/theaters.toml` for one Station's
+own, which it reads over the global ones. A change applies at the Station's next start.
 
 ```toml
 [theater.build-box]

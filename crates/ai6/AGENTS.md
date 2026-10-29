@@ -12,8 +12,8 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
 | `gate` | The green ink gate's client of a Station (`section_00::gate`), for agent providers; part of `daemon`. | No |
 | `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS (`coqui-peer-tls`). | No |
-| `sqlite` | `SqlRegistry` and `SqlConfigSource` in a SQLite file. | No |
-| `postgres` | `SqlRegistry` and `SqlConfigSource` in PostgreSQL, shared by the Stations of an HA deployment. | No |
+| `sqlite` | `SqlRegistry` and `SqlProvider` in a SQLite file. | No |
+| `postgres` | `SqlRegistry` and `SqlProvider` in PostgreSQL, shared by the Stations of an HA deployment. | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
 MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, `coqui-peer` (digest text for pins), serde, toml, fs2, sha2, lru and zeroize.
@@ -336,7 +336,7 @@ impl RosterError { pub fn kind(&self) -> RosterErrorKind; }
 pub enum RosterErrorKind {
     Invalid,       // the configuration is not acceptable; a refused change changed nothing
     Unavailable,   // could not be read or written (I/O, database); retrying may succeed
-    ReadOnly,      // the ConfigSource takes no put/remove
+    ReadOnly,      // the ConfigProvider takes no put/remove
 }
 impl Roster {
     pub fn load(root: impl Into<PathBuf>) -> Result<Self, RosterError>;
@@ -462,7 +462,7 @@ pub fn file_safe(name: &str) -> bool;          // 1-64 of letters, digits, . - _
 
 `[assistant]` lives in the global `agents.toml` only (an Operation's `.ai6/agents.toml` with
 one fails to resolve its Agents); a SQL roster keeps it as the one row of
-`ai6_config_assistant`, keyed `assistant` (`ConfigRecord::Assistant`), and has the default
+`ai6_config_assistant`, keyed `settings` (`ConfigRecord::Assistant`), and has the default
 settings without it. `RepoKind::of` refuses empty values, control characters, Git
 remote helpers (`::`) and schemes other than `file`, `ssh`, `git`, `http`, `https`; a local
 path or `file://` is `Local` (made bare on first use), the rest and `user@host:path` are
@@ -646,108 +646,133 @@ interpreters may never read; the state and secrets directories always are, sent 
 `AssistantMode::station_paths`) and `with_bootstrap_weakenings` (sent at check-in as
 `bootstrap_weakened`), and `ServeConfig::with_secrets_dir`, carry the file into a Station.
 
-## Configuration sources (`ai6::directorates::m::config`)
+## Configuration providers (`ai6::directorates::m::config`)
 
-Where a Station's roster comes from. Theaters are not part of it: each Station reads its
-own.
+Where a Station's configuration comes from: records of each family (`ConfigRecord`) at a
+scope (`ConfigScope`), global or one Station's. A Station's view is its own records over the
+global ones, key by key (a singleton's one record replaces the global one whole); the
+provider hands it out checked and built. "Provider" here is a configuration provider, not a
+Guatiao provider.
 
 ```rust
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConfigRevision;   // opaque; new(u64), get()
-#[non_exhaustive]
-pub struct ConfigSnapshot { pub revision: ConfigRevision, pub roster: Roster }
-impl ConfigSnapshot { pub fn new(revision: ConfigRevision, roster: Roster) -> Self; }
-pub trait ConfigSource: Send + Sync {
-    fn load(&self) -> Result<ConfigSnapshot, RosterError>;
-    /// Default: load and compare revisions.
-    fn changes_since(&self, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError>;
-    /// Default: load. Every built-in source reads only its revision.
-    fn revision(&self) -> Result<ConfigRevision, RosterError>;
-    /// The records of one kind as JSON objects, for an administrator; default ReadOnly.
-    fn definitions(&self, record: ConfigRecord) -> Result<ConfigDefinitions, RosterError>;
-    /// Store / remove one record, checking the whole roster first; default ReadOnly.
-    fn put(&self, record: ConfigRecord, key: &str, definition: &serde_json::Value)
+#[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq)]
+pub struct Settings { pub theaters: Theaters }        // the non-roster families, for one Station
+#[non_exhaustive] #[derive(Clone)]
+pub struct ConfigSnapshot { pub revision: ConfigRevision, pub roster: Roster, pub settings: Settings }
+impl ConfigSnapshot {
+    pub fn new(revision: ConfigRevision, roster: Roster, settings: Settings) -> Self;
+    /// Families whose records differ; snapshots built with `new` carry none and differ in none.
+    pub fn changed_families(&self, other: &Self) -> Vec<ConfigRecord>;
+}
+pub trait ConfigProvider: Send + Sync {
+    /// `station`'s view; "" is the global records only.
+    fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError>;
+    fn changes_since(&self, station: &str, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError>;
+    fn revision(&self, station: &str) -> Result<ConfigRevision, RosterError>;
+    /// One family's records at one scope as JSON objects, for an administrator; default ReadOnly.
+    fn definitions(&self, record: ConfigRecord, scope: &ConfigScope) -> Result<ConfigDefinitions, RosterError>;
+    /// Store / remove one record, checking every view it touches first; default ReadOnly.
+    fn put(&self, record: ConfigRecord, scope: &ConfigScope, key: &str, definition: &serde_json::Value)
         -> Result<ConfigRevision, RosterError>;
-    fn remove(&self, record: ConfigRecord, key: &str)
+    fn remove(&self, record: ConfigRecord, scope: &ConfigScope, key: &str)
         -> Result<Option<ConfigRevision>, RosterError>;   // None: there was none
 }
-#[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ConfigRecord { Operation, Agent, Role, Cover, Assistant }
+#[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater }
 impl ConfigRecord {
-    pub const ALL: [Self; 5];
-    pub const ASSISTANT_KEY: &'static str;     // "assistant": the one Assistant record
-    pub const fn name(self) -> &'static str;   // "operation" | "agent" | "role" | "cover" | "assistant"
+    pub const ALL: [Self; 6];
+    pub const SINGLETON_KEY: &'static str;      // "settings": a singleton family's one record
+    pub const fn name(self) -> &'static str;    // "operation" | "agent" | "role" | "assistant" | "cover" | "theater"
     pub fn from_name(name: &str) -> Option<Self>;
+    pub const fn file(self) -> &'static str;    // family file stem: operations | agents | covers | theaters
+    pub const fn is_singleton(self) -> bool;    // Assistant
+    pub const fn station_scoped(self) -> bool;  // Theater
+    pub const fn applies_live(self) -> bool;    // all but Theater
+}
+#[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+pub enum ConfigScope { Global, Station(String) }
+impl ConfigScope {
+    pub fn as_text(&self) -> String;              // "" | "station:<id>"
+    pub fn parse(text: &str) -> Option<Self>;
+    pub fn of_station(station: &str) -> Self;     // Global for ""
 }
 #[non_exhaustive] #[derive(Clone, PartialEq)]
 pub struct ConfigDefinitions {
     pub revision: ConfigRevision,
     pub records: Vec<(String, serde_json::Value)>,   // by key
-    pub writable: bool,                              // the source takes put/remove
+    pub writable: bool,                              // the provider takes put/remove
 }
 /// Check-in key `config` of every Station (serde; empty fields are omitted).
 #[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigStatus {
     pub revision: Option<String>,    // decimal: a digest can pass 2^53
-    pub refused: Vec<String>,        // why the newest roster / loadouts.toml is refused
-    pub needs_restart: Vec<String>,  // e.g. "theaters.toml", "cables.toml"
+    pub refused: Vec<String>,        // why the newest configuration / loadouts.toml is refused
+    pub needs_restart: Vec<String>,  // family names ("theater") and files ("cables.toml")
 }
-pub struct TomlConfigDir;   // ConfigSource (+ definitions, read-only); new(root), root()
-pub struct MemoryConfigSource;   // ConfigSource (read-only); new(roster), replace(&self, roster)
-/// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` → SqlConfigSource; anything else →
-/// TomlConfigDir. Unsupported for a SQL location without its feature.
-pub fn open(location: &str) -> io::Result<Arc<dyn ConfigSource>>;
-/// As `open`, a SQL roster connected with `options` (features `sqlite` or `postgres`).
-pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn ConfigSource>>;
+pub struct FileProvider;     // ConfigProvider (+ definitions, read-only); new(root), root()
+pub struct MemoryProvider;   // ConfigProvider (read-only); new(roster), with_settings(Settings),
+                             // replace(&self, roster), replace_all(&self, roster, settings)
+/// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` → SqlProvider; anything else →
+/// FileProvider. Unsupported for a SQL location without its feature.
+pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>>;
+/// As `open`, a SQL provider connected with `options` (features `sqlite` or `postgres`).
+pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn ConfigProvider>>;
 
 // Features `sqlite` or `postgres`; also at the crate root.
-pub struct SqlConfigSource;   // ConfigSource with definitions/put/remove + Debug
-impl SqlConfigSource {
+pub struct SqlProvider;   // ConfigProvider with definitions/put/remove + Debug
+impl SqlProvider {
     pub fn open(location: &str) -> io::Result<Self>;   // as SqlRegistry::open
     pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Self>;
 }
 ```
 
-A source hands out only checked rosters: an unacceptable configuration is an error
-(`RosterErrorKind::Invalid`; a database or file that cannot be read is `Unavailable`). The
-shape is coqui-access-kit's `Table` (load plus a cheap `changes_since`, optional put/remove)
-for one value, the roster. `TomlConfigDir` is `Roster::load` over `operations.toml`,
-`agents.toml` and `covers.toml` plus `Roster::check_agents`, so an Agent that cannot resolve
-is refused as in SQL; its revision is a digest of those three files' contents, taken before
-they are parsed, so `changes_since` reads them but parses nothing while they are unchanged;
-`definitions` converts the files' tables to JSON (`Assistant` lists the global `[assistant]`
-table as one record keyed `assistant`, none without it), and `put`/`remove` are `ReadOnly`.
-`MemoryConfigSource` starts at revision 0 and moves to the next on each `replace`. Any
-other store (a database, an HTTP API) builds its roster with `Roster::from_parts`. The
-daemon reads the roster at start (`ServeConfig::with_config_source`; default
-`TomlConfigDir` over the configuration directory) and polls `revision()` every
-`DEFAULT_CONFIG_POLL` (5 s; `StationConfig::with_config_poll`, `ai6.cfg [provider] poll`,
-0 off): a new revision is loaded and applied to requests, the scheduler and new Sessions
-(running Sessions keep theirs); one that fails with `Invalid` is refused once per revision,
-logged, audited (`config.refused`, actor and resource `station:<id>`) and reported at
-check-in (`config.refused`) while the last good roster keeps running. `loadouts.toml` is read
-again when its contents change (unless loadouts were set in code), with the same refusal
-rule, and the Station then declares its pool accounts again, withdrawing its profile of
-accounts it no longer declares. `theaters.toml` and `cables.toml` are read only at start: a
-change is logged and listed in `config.needs_restart`. Command-line and `ServeConfig`
-settings (listen address, Registry and roster locations, roles, labels, terminal, leases,
-plugins, watchdog) also apply only at start.
+A provider hands out only checked configuration: an unacceptable one is an error
+(`RosterErrorKind::Invalid`; a database or file that cannot be read is `Unavailable`), and
+every Agent is resolved (`Roster::check_agents`). A record of a global-only family at a
+Station scope, or a singleton under another key, is `Invalid`.
 
-`SqlConfigSource` keeps one table per record kind (`ai6_config_operations`, `_agents`,
-`_roles`, `_covers`, `_assistant`): a row is a key and a JSON object with the keys of that
-record's table in `operations.toml`, `agents.toml` or `covers.toml` (`deny_unknown_fields` as
-there). `load` parses each with the file loader's types and checks, resolves Agents'
-`extends` among the rows, adds the cover rows over the built-in covers and builds the roster
-with `Roster::from_parts`; an Operation's trusted `.ai6/agents.toml` still applies on top.
-The `assistant` row holds the keys of `[assistant]` and is checked by
-`AssistantSettings::validate`; a row under any other key makes the roster invalid, so `put`
-refuses one, and removing the row restores the default settings.
-The revision is the `config` row of `ai6_clock`, read before the rows; `changes_since` reads
-only it. `put` and `remove` change one record and check the whole roster in the same
-transaction, refusing (and rolling back) a change that leaves it unacceptable, such as
-removing an Agent another extends; each change advances the revision. A writer that edits
-the tables directly must advance that row in the same transaction, or Stations do not see
-the change. The database may be the Registry's.
+`FileProvider` reads one file per family in its directory, `<stem>.<ext>` with `ext` one of
+`cfg`, `toml`, `json`, `yaml`, `yml` (`ai6::bootstrap::format`), and a Station's own records
+from `stations/<id>/` beside them. Each top-level table of a file names a family that file
+holds: `operations` (`[operation.<id>]`), `agents` (`[agent.<codename>]`, `[role.<id>]`,
+`[assistant]`), `covers` (`[cover.<name>]`), `theaters` (`[theater.<id>]`); anything else is
+`Invalid`, naming the table, and two files for one family are `Invalid`, naming both. A
+relative skill path in `[assistant]` is relative to the directory. Its revision is a digest of
+every family file of the view (global and the Station's own) with their relative paths, taken
+before they are parsed, so `changes_since` reads them but parses nothing while they are
+unchanged. `definitions` lists one scope's records (`Assistant` as one record keyed
+`settings`); `put`/`remove` are `ReadOnly`: the files are edited by hand or version control.
+`MemoryProvider` gives every Station the same view; it starts at revision 0 and moves to the
+next on each `replace`. Any other store builds its roster with `Roster::from_parts`.
+
+The daemon loads its own view at start (`ServeConfig::with_config_provider`; default
+`FileProvider` over the configuration directory) and polls `revision(station)` every
+`DEFAULT_CONFIG_POLL` (5 s; `StationConfig::with_config_poll`, `ai6.cfg [provider] poll`,
+0 off): a new revision is loaded and its live families applied to requests, the scheduler
+and new Sessions (running Sessions keep theirs); a changed family that only a restart applies
+(`theater`) is logged and listed in `config.needs_restart` by name. A revision that fails with
+`Invalid` is refused once per revision, logged, audited (`config.refused`, actor and resource
+`station:<id>`) and reported at check-in (`config.refused`) while the last good configuration
+keeps running. `loadouts.toml` is read again from the configuration directory when its
+contents change (unless loadouts were set in code), with the same refusal rule, and the
+Station then declares its pool accounts again. `cables.toml` is read only at start: a change
+is listed as `cables.toml`. The bootstrap file and `ServeConfig` settings apply only at start.
+
+`SqlProvider` keeps one table per family, `ai6_config_<name>` (`scope`, `key`, `definition`,
+`revision`; primary key `(scope, key)`): a row is a record's scope text, key and a JSON object
+with the keys of its table in the family file (`deny_unknown_fields` as there). `load` parses
+each with the file loader's types and checks, resolves Agents' `extends`, adds the cover rows
+over the built-in covers and builds the roster with `Roster::from_parts`; an Operation's
+trusted `.ai6/agents.toml` still applies on top. The `assistant` row is keyed `settings`;
+removing it restores the default settings. The revision is the `config` row of `ai6_clock`,
+read before the rows; `changes_since` reads only it. `put` and `remove` change one record and
+check, in the same transaction, the views the change touches (the global view and each
+Station's with records of its own for a global change; that Station's for one of its own),
+refusing and rolling back a change that leaves one unacceptable; each change advances the
+revision. A writer that edits the tables directly must advance that row in the same
+transaction, or Stations do not see the change. The database may be the Registry's.
 
 ## Theaters (`ai6::directorates::m::theaters`)
 
@@ -3378,12 +3403,12 @@ serve_with_config_dir_and_capacity(address: SocketAddr, plugin_paths: &[PathBuf]
 
 `ServeConfig::new(address)` defaults to the configured roster path, built-in Mission
 capacity, `StationConfig::default()` and no Universal Exports publisher.
-`with_plugin_paths`, `with_config_dir`, `with_config_source`, `with_registry`,
+`with_plugin_paths`, `with_config_dir`, `with_config_provider`, `with_registry`,
 `with_station_id`, `with_station_config`, `with_max_concurrent_missions`, `with_watchdog`
 and, with feature `publisher`, `with_publisher` set those options before calling
 `serve_with_options`. The configuration directory (`with_config_dir`, default
 `config_dir()`) holds the Station's Theaters, loadouts and Cable settings, and its roster
-unless `with_config_source(Arc<dyn ConfigSource>)` names another source; the roster is
+unless `with_config_provider(Arc<dyn ConfigProvider>)` names another provider; the roster is
 read once at start. `with_registry(Arc<dyn RegistryBackend>)` replaces the
 `FileRegistry::from_environment()` default.
 
