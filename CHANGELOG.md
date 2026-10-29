@@ -105,6 +105,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   branch's `cdn/` or downloaded, each checked against `tool/cdn_files.json`. The bootstrap
   passes its configuration to `initializeEngine`, without which the engine fetched
   fallback fonts from Google Fonts even under the default.
+- Moneypenny's views gain stacked bar and pie charts, a `schedule` of bars over time, a
+  `graph` of nodes and edges (layered or a tree) and `svg` drawings. Universal Exports admits
+  only an allow-list of SVG drawing elements and presentation attributes, refuses anything
+  else with the reason (script, style, event attributes, `href`, images, `use`, animation,
+  filters, DOCTYPEs and entities) and keeps the drawing written out again; the app draws it
+  with `flutter_svg` and loads nothing. Charts are drawn with `fl_chart`, graphs with the
+  app's own layered layout. Every chart, schedule and graph has **Show as table**. A view
+  built in a conversation that read outside text carries `exposed: true`, and the app frames
+  it with a warning. Her `missions` tool takes the Missions page's filters (state, Station,
+  Agent, text) and filters as the page does; the gateway's route code and the app's
+  `routeMissions` are held to one shared fixture. The bounds of her views are settings,
+  `[assistant.views]` (`AssistantViewLimits`, `AssistantSettings::views`, `ViewLimits`,
+  `AssistantConfig::with_view_limits`), sent to the app with each conversation.
 - Moneypenny runs on Codex with scripts and her workspace. With interpreters, the Codex
   handler admits Codex's code-mode tools (`functions.exec`, `functions.wait`) inside Codex's
   own sandbox, a permission profile (`ai6_assistant`) that denies the filesystem but the

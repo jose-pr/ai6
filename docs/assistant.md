@@ -679,7 +679,10 @@ A view is data in a strict, versioned schema that the app renders with its own w
 | `text` | Markdown: headings, lists, bold, italic, code, and links to app pages only |
 | `table` | Columns and rows of plain values |
 | `key_values` | A list of names and values |
-| `chart` | A bar or line chart of up to eight series |
+| `chart` | A bar (side by side or `stacked`), line or pie chart of up to eight series; a pie is one series of up to twelve slices, none below 0 |
+| `schedule` | Bars over time, one row each from `start` to `end` (RFC 3339 times or numbers), coloured by state, each optionally opening an app page (a route link) |
+| `graph` | Nodes (Operations, Stations, Theaters, Missions, Sessions, Agents) and the edges between them, in layers or as a tree; a node may open an app page |
+| `svg` | A drawing in SVG, with a title |
 | `card` | A Mission, Station or Theater, opening its page |
 | `timeline` | Dated events |
 | `diff` | Two texts, line by line |
@@ -689,7 +692,55 @@ Nothing in a view runs: there is no HTML, no script and no outside link. Univers
 refuses a view that is not exactly the schema, within its bounds, and tells her why, so the
 app never receives it; the app checks again and shows a refused view as "View refused" with
 the reason, never as a guess. Submitting a form records a proposal of its tool, which the
-person still confirms.
+person still confirms. Every chart, schedule and graph has **Show as table**, which shows the
+same values in a table, and a summary for screen readers.
+
+An SVG drawing holds drawing elements (`svg`, `g`, `defs`, `title`, `desc`, `path`, `rect`,
+`circle`, `ellipse`, `line`, `polyline`, `polygon`, `text`, `tspan`, `linearGradient`,
+`radialGradient`, `stop`, `clipPath`), their geometry and presentation attributes and `id`,
+and nothing else; `url(#id)` may name only an `id` of the same drawing. It needs a `viewBox`
+and a `<title>`. A script, style, event attribute (`onload` and the like), `href`, `image`,
+`foreignObject`, `use`, link, animation, filter, DOCTYPE, entity or processing instruction is
+refused with the reason, never removed, so she fixes the drawing herself. Universal Exports
+keeps the drawing written out again from what it accepted, and the app draws that text in the
+theme's colours (`currentColor` is the text colour), at most 480 pixels high; it loads
+nothing.
+
+A view she builds after reading text from outside AI6 (a conversation that is exposed when she
+shows it) is marked so, and the app frames it: "Made after reading text from outside AI6.
+Check it before acting on it."
+
+Her `missions` tool filters exactly as the Missions page does (both are held to one shared
+set of cases): by Operation; by state, keeping the Sessions in those states (a Session that
+reported none is working) and each Mission with one kept; then by the Station or Agent of a
+kept Session and by text in the Operation, Mission, Session IDs or brief, in any case.
+
+The bounds are settings, `[assistant.views]` in the global `agents.toml` (the `views` table of
+the `assistant` record), each at least 1; Universal Exports reads them when it starts:
+
+| Key | Bounds | Default |
+| --- | --- | --- |
+| `blocks` | blocks in a view | 24 |
+| `view_bytes` | bytes of a view as JSON | 65536 |
+| `text_bytes` | bytes of a text block | 8192 |
+| `short_bytes` | bytes of a title, label, cell or other short text | 512 |
+| `columns`, `rows` | columns and rows of a table | 12, 200 |
+| `items` | items of a key-value list or a timeline | 100 |
+| `series`, `points` | series of a chart, points of a series | 8, 200 |
+| `pie_slices` | slices of a pie | 12 |
+| `diff_bytes` | bytes of each side of a diff | 16384 |
+| `fields` | fields of a form or a card | 20 |
+| `schedule_rows` | rows of a schedule | 50 |
+| `graph_nodes`, `graph_edges` | nodes and edges of a graph | 60, 120 |
+| `svg_bytes`, `svg_elements`, `svg_depth` | bytes, elements and nesting of a drawing | 32768, 2000, 16 |
+
+```toml
+[assistant.views]
+graph_nodes = 100
+svg_bytes = 65536
+```
+
+The app is sent the bounds with each conversation and checks views against the same values.
 
 ## In the app
 
@@ -726,6 +777,7 @@ answered does nothing.
 | --- | --- | --- |
 | The Agent she is | `moneypenny` | the `unex` record's `assistant_agent` ([Configuration](configuration.md)) |
 | Serve her at all | yes | the `unex` record's `assistant` |
+| The bounds of her views | [Views she shows](#views-she-shows) | `[assistant.views]` |
 | Conversations kept | 20 a person, 2,000 in all, 7 days | `AssistantConfig::with_conversation_limits` |
 | Tool token lifetime | 1 hour | `AssistantConfig::with_token_ttl` |
 | Time for a Station to take a message | 60 seconds | `AssistantConfig::with_answer_timeout` |
