@@ -9,11 +9,13 @@ import 'package:material_ui/material_ui.dart'
         FilledButton,
         Key,
         MaterialApp,
-        NavigationBar,
         ScaffoldMessenger,
+        Tab,
         SwitchListTile,
         TextField;
 import 'package:outer_office/main.dart';
+
+import 'shell_navigation.dart';
 
 String stationBoardResponse() => jsonEncode({
   'headquarters_station': 'station-alpha',
@@ -142,9 +144,6 @@ String userProfileResponse({
   'stations': stations,
 });
 
-Finder navLabel(String label) =>
-    find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
-
 void main() {
   test('a brief origin says who asked for the Mission', () {
     BriefOrigin origin(Map<String, dynamic> json) =>
@@ -205,9 +204,7 @@ void main() {
     );
   });
 
-  testWidgets('demo Administration opens with sample Agent roles', (
-    tester,
-  ) async {
+  testWidgets('demo Agents page opens with sample Agent roles', (tester) async {
     final board = MissionBoard(
       apiOrigin: Uri.parse('https://oo.example'),
       demo: true,
@@ -217,10 +214,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: MissionBoardPage(board: board, desktopWindows: false)),
     );
-    await tester.tap(navLabel('Administration'));
+    await openPage(tester, 'Agents');
+    await tester.tap(find.widgetWithText(Tab, 'Roles'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Administration'), findsNWidgets(2));
     expect(find.text('case-officer'), findsOneWidget);
     expect(find.textContaining('Follow the Operation policy.'), findsOneWidget);
     expect(find.text('Add role'), findsNothing);
@@ -240,8 +237,7 @@ void main() {
           home: MissionBoardPage(board: board, desktopWindows: false),
         ),
       );
-      await tester.tap(navLabel('Administration'));
-      await tester.pumpAndSettle();
+      await openPage(tester, 'Briefings');
       await tester.tap(find.text('Mission proposals'));
       await tester.pumpAndSettle();
 
@@ -259,7 +255,7 @@ void main() {
     },
   );
 
-  testWidgets('navigation hides Administration and Audit without access', (
+  testWidgets('the rail hides pages the account has no access to', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 1000);
@@ -282,10 +278,21 @@ void main() {
       OuterOfficeApp(board: board, desktopWindows: false),
     );
 
-    expect(navLabel('Stations'), findsOneWidget);
-    expect(navLabel('Operations'), findsOneWidget);
-    expect(navLabel('Administration'), findsNothing);
-    expect(navLabel('Audit log'), findsNothing);
+    for (final page in ['Overview', 'Operations', 'Missions', 'Sessions']) {
+      expect(await offersPage(tester, page), isTrue, reason: page);
+    }
+    expect(await offersPage(tester, 'Stations'), isTrue);
+    for (final page in [
+      'Agents',
+      'Green Ink',
+      'Briefings',
+      'Roster',
+      'Account Pools',
+      'Timeline',
+      'Audit',
+    ]) {
+      expect(await offersPage(tester, page), isFalse, reason: page);
+    }
   });
 
   testWidgets('Station settings update through the authorized gateway API', (
@@ -339,8 +346,8 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    await tester.tap(navLabel('Administration'));
-    await tester.pumpAndSettle();
+    await openPage(tester, 'Stations');
+    await tester.tap(find.widgetWithText(Tab, 'Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Maximum concurrent Missions'), findsOneWidget);
     expect(find.textContaining('Current Station value.'), findsOneWidget);
@@ -425,8 +432,8 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    await tester.tap(navLabel('Administration'));
-    await tester.pumpAndSettle();
+    await openPage(tester, 'Stations');
+    await tester.tap(find.widgetWithText(Tab, 'Settings'));
     await tester.pumpAndSettle();
 
     for (final (key, value, message) in [
@@ -675,11 +682,11 @@ void main() {
     'operator menu identity uses the authenticated gateway session',
     () async {
       final requests = <http.Request>[];
-      final themeWrites = <bool>[];
+      final themeWrites = <String>[];
       final board = MissionBoard(
         apiOrigin: Uri.parse('https://oo.example'),
         pollInterval: null,
-        onThemeChanged: (lightTheme) async => themeWrites.add(lightTheme),
+        onThemeChanged: (themeId) async => themeWrites.add(themeId),
         client: MockClient((request) async {
           requests.add(request);
           return http.Response(
@@ -710,12 +717,13 @@ void main() {
       expect(requests.single.headers['authorization'], 'Bearer operator-token');
       expect(board.canCreateMission('operation-alpha'), isFalse);
 
-      board.toggleTheme();
-      expect(board.lightTheme, isTrue);
-      board.toggleTheme();
-      expect(board.lightTheme, isFalse);
+      expect(board.themeId, 'night-ops');
+      board.setThemeId('light');
+      expect(board.themeId, 'light');
+      board.setThemeId('dusk-x');
+      expect(board.themeId, 'night-ops');
       await Future<void>.delayed(Duration.zero);
-      expect(themeWrites, [true, false]);
+      expect(themeWrites, ['light', 'night-ops']);
     },
   );
 
@@ -1043,7 +1051,7 @@ void main() {
       OuterOfficeApp(board: board, desktopWindows: false),
     );
 
-    expect(find.text('Operations'), findsNWidgets(2));
+    expect(find.text('Missions'), findsOneWidget);
     expect(find.text('operation-alpha'), findsOneWidget);
     expect(find.text('Mission mission-007'), findsOneWidget);
     expect(
@@ -1071,8 +1079,7 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(navLabel('Stations'));
-    await tester.pumpAndSettle();
+    await openPage(tester, 'Stations');
     expect(find.text('HQS'), findsOneWidget);
     expect(find.text('station-alpha'), findsOneWidget);
     expect(find.textContaining('2/4 sessions'), findsOneWidget);
@@ -1145,6 +1152,8 @@ void main() {
       ),
       findsOneWidget,
     );
+    await tester.tap(find.widgetWithText(Tab, 'Placement'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Preview placement'));
     await tester.pumpAndSettle();
     expect(
@@ -1172,9 +1181,9 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('operation-alpha'), findsNWidgets(2));
+    expect(find.text('operation-alpha'), findsOneWidget);
     expect(find.text('claude-session-123'), findsNothing);
-    await tester.tap(navLabel('Operations'));
+    await openPage(tester, 'Missions');
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('View Mission brief and launch context'));
@@ -1313,7 +1322,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    await tester.tap(navLabel('Audit log'));
+    await openPage(tester, 'Audit');
     await tester.pumpAndSettle();
 
     expect(
@@ -1392,9 +1401,14 @@ void main() {
       find.text('operation-alpha: mission.read, session.read'),
       findsOneWidget,
     );
+    await tester.ensureVisible(find.text('Light'));
+    await tester.tap(find.text('Light'));
+    await tester.pumpAndSettle();
+    expect(board.themeId, 'light');
+    await tester.ensureVisible(find.byType(SwitchListTile));
     await tester.tap(find.byType(SwitchListTile));
     await tester.pumpAndSettle();
-    expect(board.lightTheme, isTrue);
+    expect(board.backdrop, isFalse);
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
   });
@@ -1438,10 +1452,10 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    await tester.tap(navLabel('Audit log'));
+    await openPage(tester, 'Audit');
     await tester.pumpAndSettle();
 
-    expect(find.text('Audit log'), findsNWidgets(2));
+    expect(find.text('Audit'), findsOneWidget);
     expect(
       find.text('operator-007 · mission.create.requested'),
       findsOneWidget,
@@ -1507,10 +1521,9 @@ void main() {
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Operations'), findsNWidgets(2));
+    expect(find.text('Missions'), findsOneWidget);
     expect(find.text('claude-session-123'), findsOneWidget);
-    await tester.tap(navLabel('Stations'));
-    await tester.pumpAndSettle();
+    await openPage(tester, 'Stations');
     expect(find.text('station-alpha'), findsOneWidget);
     expect(find.text('claude-session-123'), findsNothing);
     expect(requests.map((request) => request.url.path), [

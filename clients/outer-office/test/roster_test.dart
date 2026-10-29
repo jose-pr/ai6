@@ -4,12 +4,10 @@ import 'dart:ui' show Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:material_ui/material_ui.dart'
-    show FilledButton, Key, NavigationBar;
+import 'package:material_ui/material_ui.dart' show FilledButton, Key;
 import 'package:outer_office/main.dart';
 
-Finder navLabel(String label) =>
-    find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
+import 'shell_navigation.dart';
 
 /// A board signed in with `actions` on the roster, whose gateway answers roster calls with
 /// `respond` and records every request in `requests`.
@@ -93,7 +91,7 @@ Future<void> openRoster(WidgetTester tester, MissionBoard board) async {
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(board.dispose);
   await tester.pumpWidget(OuterOfficeApp(board: board, desktopWindows: false));
-  await tester.tap(navLabel('Administration'));
+  await openPage(tester, 'Roster');
   await tester.pumpAndSettle();
 }
 

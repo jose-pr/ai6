@@ -5,11 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show DropdownButton, NavigationBar, Tab, TextField;
+    show DropdownButton, Tab, TextField;
 import 'package:outer_office/main.dart';
 
-Finder navLabel(String label) =>
-    find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
+import 'shell_navigation.dart';
 
 const _agents = [
   {
@@ -117,8 +116,7 @@ Future<void> openAgents(WidgetTester tester, MissionBoard board) async {
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(board.dispose);
   await tester.pumpWidget(OuterOfficeApp(board: board, desktopWindows: false));
-  await tester.tap(navLabel('Administration'));
-  await tester.pumpAndSettle();
+  await openPage(tester, 'Agents');
   await tester.tap(find.widgetWithText(Tab, 'Agents'));
   await tester.pumpAndSettle();
 }

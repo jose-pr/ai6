@@ -4,11 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show DropdownButton, NavigationBar, Text, TextField, TextInputAction;
+    show DropdownButton, Text, TextField, TextInputAction;
 import 'package:outer_office/main.dart';
 
-Finder navLabel(String label) =>
-    find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
+import 'shell_navigation.dart';
 
 Map<String, Object?> item(
   String id,
@@ -124,7 +123,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    await tester.tap(navLabel('Timeline'));
+    await openPage(tester, 'Timeline');
     await tester.pumpAndSettle();
 
     expect(find.text('control · resume.applied'), findsOneWidget);
@@ -164,7 +163,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    await tester.tap(navLabel('Timeline'));
+    await openPage(tester, 'Timeline');
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'mission-1');
@@ -190,7 +189,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    expect(navLabel('Timeline'), findsNothing);
+    expect(await offersPage(tester, 'Timeline'), isFalse);
     expect(timeline.asked, isEmpty);
   });
 }

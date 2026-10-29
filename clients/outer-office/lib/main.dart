@@ -24,6 +24,13 @@ import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
 import 'pools/pools_page.dart';
 import 'roster/roster_page.dart';
+import 'shell/oo_shell.dart';
+import 'shell/operations_page.dart';
+import 'shell/overview_page.dart';
+import 'shell/sessions_page.dart';
+import 'theme/oo_backdrop.dart';
+import 'theme/oo_icon.dart';
+import 'theme/oo_theme.dart';
 import 'timeline/timeline_page.dart';
 
 const _apiOverride = String.fromEnvironment('OO_API');
@@ -53,36 +60,60 @@ Future<void> _startWeb() async {
       terminalRuntimeError = 'The terminal protocol could not be initialized.';
     }
   }
-  final preferences = await SharedPreferences.getInstance();
+  final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
     apiOrigin: _apiOrigin(),
     demo: _demoMode,
     terminalRuntimeError: terminalRuntimeError,
-    lightTheme: preferences.getBool('oo.lightTheme') ?? false,
-    onThemeChanged: (lightTheme) =>
-        preferences.setBool('oo.lightTheme', lightTheme),
+    onThemeChanged: appearance.saveTheme,
+    onBackdropChanged: appearance.saveBackdrop,
   );
+  try {
+    await appearance.restore(board);
+  } on Object {
+    // Browser storage unavailable: the defaults stand.
+  }
 
   runApp(OuterOfficeApp(board: board, desktopWindows: false));
 }
 
 void _startDesktop() {
-  final preferences = SharedPreferences.getInstance();
+  final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
     apiOrigin: _apiOrigin(),
     demo: _demoMode,
-    onThemeChanged: (lightTheme) async {
-      await (await preferences).setBool('oo.lightTheme', lightTheme);
-    },
+    onThemeChanged: appearance.saveTheme,
+    onBackdropChanged: appearance.saveBackdrop,
   );
   runWidget(_DesktopWindowHost(board: board));
-  unawaited(
-    preferences
-        .then((preferences) {
-          board.restoreTheme(preferences.getBool('oo.lightTheme') ?? false);
-        })
-        .catchError((Object _) {}),
-  );
+  unawaited(appearance.restore(board).catchError((Object _) {}));
+}
+
+/// The person's appearance choices on this device: `oo.theme` holds a theme id or
+/// `system`, `oo.backdrop` whether the wallpaper is painted.
+class AppearancePreferences {
+  AppearancePreferences(this._preferences);
+
+  final Future<SharedPreferences> _preferences;
+
+  static const themeKey = 'oo.theme';
+  static const backdropKey = 'oo.backdrop';
+
+  Future<void> saveTheme(String themeId) async {
+    await (await _preferences).setString(themeKey, themeId);
+  }
+
+  Future<void> saveBackdrop(bool backdrop) async {
+    await (await _preferences).setBool(backdropKey, backdrop);
+  }
+
+  /// Applies the stored choices to [board]; an absent or unknown theme is Night Ops.
+  Future<void> restore(MissionBoard board) async {
+    final preferences = await _preferences;
+    board
+      ..restoreThemeId(preferences.getString(themeKey))
+      ..restoreBackdrop(preferences.getBool(backdropKey));
+  }
 }
 
 class MissionBoard extends ChangeNotifier {
@@ -90,11 +121,14 @@ class MissionBoard extends ChangeNotifier {
     required this.apiOrigin,
     this.demo = false,
     this.terminalRuntimeError,
-    this.lightTheme = false,
+    String themeId = 'night-ops',
+    this.backdrop = true,
     this.onThemeChanged,
+    this.onBackdropChanged,
     http.Client? client,
     Duration? pollInterval = const Duration(seconds: 3),
-  }) : _client = client ?? http.Client() {
+  }) : themeId = ooThemePreference(themeId),
+       _client = client ?? http.Client() {
     if (demo) {
       sessions = const [
         SessionSummary(
@@ -251,7 +285,8 @@ class MissionBoard extends ChangeNotifier {
   final Uri apiOrigin;
   final bool demo;
   final String? terminalRuntimeError;
-  final Future<void> Function(bool lightTheme)? onThemeChanged;
+  final Future<void> Function(String themeId)? onThemeChanged;
+  final Future<void> Function(bool backdrop)? onBackdropChanged;
   final http.Client _client;
   Timer? _poll;
   List<SessionSummary> sessions = const [];
@@ -268,20 +303,45 @@ class MissionBoard extends ChangeNotifier {
   String? error;
   String? loginError;
   String? accessToken;
-  bool lightTheme = false;
   bool loading = true;
 
-  void toggleTheme() {
-    restoreTheme(!lightTheme);
+  /// The person's theme: a theme id or `system` ([ooThemePreference]).
+  String themeId;
+
+  /// Whether the theme's wallpaper is painted where one may be.
+  bool backdrop;
+
+  /// Switches to a theme id or `system` and stores the choice.
+  void setThemeId(String themeId) {
+    restoreThemeId(themeId);
     final persist = onThemeChanged;
     if (persist != null) {
-      unawaited(persist(lightTheme).catchError((Object _) {}));
+      unawaited(persist(this.themeId).catchError((Object _) {}));
     }
   }
 
-  void restoreTheme(bool lightTheme) {
-    if (this.lightTheme == lightTheme) return;
-    this.lightTheme = lightTheme;
+  /// Applies a stored theme preference without storing it again; absent or unknown is
+  /// Night Ops.
+  void restoreThemeId(String? themeId) {
+    final theme = ooThemePreference(themeId);
+    if (theme == this.themeId) return;
+    this.themeId = theme;
+    notifyListeners();
+  }
+
+  /// Turns the wallpaper on or off and stores the choice.
+  void setBackdrop(bool backdrop) {
+    restoreBackdrop(backdrop);
+    final persist = onBackdropChanged;
+    if (persist != null) {
+      unawaited(persist(backdrop).catchError((Object _) {}));
+    }
+  }
+
+  /// Applies a stored wallpaper preference without storing it again; absent is on.
+  void restoreBackdrop(bool? backdrop) {
+    if ((backdrop ?? true) == this.backdrop) return;
+    this.backdrop = backdrop ?? true;
     notifyListeners();
   }
 
@@ -2550,12 +2610,10 @@ class OuterOfficeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: board,
-    builder: (context, _) => MaterialApp(
+    builder: (context, _) => OoMaterialApp(
+      themeId: board.themeId,
+      backdrop: board.backdrop,
       title: 'Outer Office | AI6',
-      debugShowCheckedModeBanner: false,
-      theme: _outerOfficeLightTheme(),
-      darkTheme: _outerOfficeTheme(),
-      themeMode: board.lightTheme ? ThemeMode.light : ThemeMode.dark,
       home: _AccessGate(board: board, desktopWindows: desktopWindows),
     ),
   );
@@ -2621,20 +2679,12 @@ class _LoginPageState extends State<_LoginPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.radar, color: Color(0xff61d6bd)),
-          SizedBox(width: 12),
-          Text('Outer Office'),
-        ],
-      ),
-    ),
-    body: Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Card(
+    appBar: AppBar(title: const Text('Outer Office')),
+    body: SizedBox.expand(
+      child: OoBackdrop(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -2698,32 +2748,6 @@ class _LoginPageState extends State<_LoginPage> {
   );
 }
 
-ThemeData _outerOfficeTheme() => ThemeData(
-  useMaterial3: true,
-  colorScheme: ColorScheme.fromSeed(
-    seedColor: const Color(0xff61d6bd),
-    brightness: Brightness.dark,
-  ),
-  scaffoldBackgroundColor: const Color(0xff0a1114),
-  cardTheme: const CardThemeData(
-    color: Color(0xff111c20),
-    margin: EdgeInsets.zero,
-  ),
-);
-
-ThemeData _outerOfficeLightTheme() => ThemeData.light(useMaterial3: true)
-    .copyWith(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xff168c79),
-        brightness: Brightness.light,
-      ),
-      scaffoldBackgroundColor: const Color(0xfff2f7f6),
-      cardTheme: const CardThemeData(
-        color: Colors.white,
-        margin: EdgeInsets.zero,
-      ),
-    );
-
 class MissionBoardPage extends StatefulWidget {
   const MissionBoardPage({
     required this.board,
@@ -2741,7 +2765,7 @@ class MissionBoardPage extends StatefulWidget {
 class _MissionBoardPageState extends State<MissionBoardPage> {
   String? _selectedState;
   SessionSummary? _selectedWebSession;
-  _ControlSection _section = _ControlSection.operations;
+  OoPage _page = OoPage.missions;
   AssistantController? _assistantController;
 
   /// The conversation with Moneypenny, kept while this page lives; none in the demo or
@@ -2764,192 +2788,233 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     super.dispose();
   }
 
-  /// Opens the app page a view links to: a Mission or Theater on the Operations or Stations
-  /// page. Anything else is ignored.
+  /// Opens the app page a view links to: a Mission on Missions, a Station or Theater on
+  /// Stations. Anything else is ignored.
   void _openLink(BuildContext context, String link) {
-    final section = link.startsWith('app:/missions/')
-        ? _ControlSection.operations
+    final page = link.startsWith('app:/missions/')
+        ? OoPage.missions
         : link.startsWith('app:/stations/') || link.startsWith('app:/theaters/')
-        ? _ControlSection.stations
+        ? OoPage.stations
         : null;
-    if (section == null) return;
+    if (page == null) return;
     Navigator.of(context).maybePop();
-    setState(() => _section = section);
+    setState(() => _page = page);
   }
 
-  List<_ControlSection> _sections(MissionBoard board) => [
-    _ControlSection.stations,
-    _ControlSection.operations,
-    if (board.demo ||
-        board.userSession?.operations.any(
-              (operation) => operation.actions.contains('agent.read'),
-            ) ==
-            true ||
-        board.userSession?.stations.any(
-              (station) => station.actions.contains('station.read'),
-            ) ==
-            true ||
-        board.greenInkOperations.isNotEmpty ||
-        board.proposalOperations.isNotEmpty ||
-        board.canReadRoster ||
+  bool get _canReadRoles =>
+      widget.board.demo ||
+      (widget.board.userSession?.operations.any(
+            (operation) => operation.actions.contains('agent.read'),
+          ) ??
+          false);
+
+  /// The rail: every page this person's permissions open, in the kit's order.
+  List<OoPage> _pages(MissionBoard board) => [
+    OoPage.overview,
+    OoPage.operations,
+    OoPage.missions,
+    OoPage.sessions,
+    if (_canReadRoles) OoPage.agents,
+    OoPage.stations,
+    if (board.greenInkOperations.isNotEmpty ||
         board.classAuthorizationOperations.isNotEmpty)
-      _ControlSection.administration,
-    if (board.poolOperations.isNotEmpty) _ControlSection.pools,
-    if (board.timelineOperations.isNotEmpty) _ControlSection.timeline,
-    if (board.demo || board.canReadAudit) _ControlSection.audit,
+      OoPage.greenInk,
+    if (board.proposalOperations.isNotEmpty) OoPage.briefings,
+    if (board.canReadRoster) OoPage.roster,
+    if (board.poolOperations.isNotEmpty) OoPage.pools,
+    if (board.timelineOperations.isNotEmpty) OoPage.timeline,
+    if (board.demo || board.canReadAudit) OoPage.audit,
   ];
 
-  String _sectionTitle(_ControlSection section) => switch (section) {
-    _ControlSection.stations => 'Stations',
-    _ControlSection.operations => 'Operations',
-    _ControlSection.administration => 'Administration',
-    _ControlSection.pools => 'Account pools',
-    _ControlSection.timeline => 'Timeline',
-    _ControlSection.audit => 'Audit log',
-  };
+  void _openSession(BuildContext context, SessionSummary session) {
+    if (widget.desktopWindows) {
+      _openSessionWindow(context, session, widget.board);
+    } else {
+      _openSessionPage(context, session, widget.board);
+    }
+  }
 
-  Widget _sectionBody(
-    BuildContext context,
-    _ControlSection section,
-  ) => AnimatedBuilder(
-    animation: widget.board,
-    builder: (context, _) {
-      if (section == _ControlSection.administration) {
-        return AdministrationPage(board: widget.board);
-      }
-      if (section == _ControlSection.audit) {
-        return AuditLogPage(board: widget.board);
-      }
-      if (section == _ControlSection.timeline) {
-        return OperationTimelinePage(board: widget.board);
-      }
-      if (section == _ControlSection.pools) {
-        return AccountPoolsPage(board: widget.board);
-      }
-      if (section == _ControlSection.stations) {
-        return ListView(
-          children: [
-            _StationOverview(
-              board: widget.board.stationBoard,
-              onCreateMission: (operationId) =>
-                  _showCreateMission(context, operationId, widget.board),
-              canCreateMission: (operationId) =>
-                  !widget.board.demo &&
-                  widget.board.canCreateMission(operationId),
+  Widget _pageBody(BuildContext context, OoPage page, List<OoPage> pages) =>
+      AnimatedBuilder(
+        animation: widget.board,
+        builder: (context, _) {
+          final board = widget.board;
+          return switch (page) {
+            OoPage.overview => OverviewPage(
+              board: board,
+              pages: pages,
+              onOpen: (page) => setState(() => _page = page),
             ),
-            if (widget.board.previewOperations.isNotEmpty)
-              _PlacementPanel(board: widget.board),
-            if (widget.board.demo) const _DemoBanner(),
-            if (widget.board.error != null)
-              _ErrorBanner(
-                apiOrigin: widget.board.apiOrigin,
-                onRetry: widget.board.refresh,
-              ),
-          ],
-        );
-      }
+            OoPage.operations => OperationsPage(board: board),
+            OoPage.missions => _missionsBody(context),
+            OoPage.sessions => SessionsPage(
+              board: board,
+              onOpen: (session) => _openSession(context, session),
+            ),
+            OoPage.agents => OoTabs(
+              empty: 'No Agents are available to this account.',
+              tabs: [
+                if (_canReadRoles) ('Agents', AgentsPage(board: board)),
+                if (_canReadRoles) ('Roles', AgentRolesPage(board: board)),
+              ],
+            ),
+            OoPage.stations => OoTabs(
+              empty: 'No Stations are available to this account.',
+              tabs: [
+                ('Stations', _stationsTab(context)),
+                ('Theaters', _TheatersTab(board: board.stationBoard)),
+                if (board.demo || board.readableStations.isNotEmpty)
+                  ('Settings', StationSettingsPage(board: board)),
+                if (board.previewOperations.isNotEmpty)
+                  (
+                    'Placement',
+                    ListView(children: [_PlacementPanel(board: board)]),
+                  ),
+              ],
+            ),
+            OoPage.greenInk => OoTabs(
+              empty: 'No green ink is available to this account.',
+              tabs: [
+                if (board.greenInkOperations.isNotEmpty)
+                  ('Inbox', GreenInkPage(board: board)),
+                if (board.classAuthorizationOperations.isNotEmpty)
+                  (
+                    'Class authorisations',
+                    ClassAuthorizationsPage(board: board),
+                  ),
+              ],
+            ),
+            OoPage.briefings => OoTabs(
+              empty: 'No briefings are available to this account.',
+              tabs: [
+                ('Mission proposals', MissionProposalsPage(board: board)),
+                ('Held briefs', HeldBriefsPage(board: board)),
+              ],
+            ),
+            OoPage.roster => RosterPage(board: board),
+            OoPage.pools => AccountPoolsPage(board: board),
+            OoPage.timeline => OperationTimelinePage(board: board),
+            OoPage.audit => AuditLogPage(board: board),
+          };
+        },
+      );
 
-      final sessions = widget.board.sessions
-          .where(
-            (session) =>
-                _selectedState == null ||
-                (session.state ?? 'working') == _selectedState,
-          )
-          .toList();
-      final missions = _groupMissions(sessions);
-      final showSessionPane =
-          !widget.desktopWindows && MediaQuery.sizeOf(context).width >= 1200;
-      final boardView = CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: _BoardHeader(
-              sessions: widget.board.sessions,
-              selectedState: _selectedState,
-              onSelectState: (state) => setState(() => _selectedState = state),
-            ),
-          ),
-          if (widget.board.demo) const SliverToBoxAdapter(child: _DemoBanner()),
-          if (widget.board.error != null)
-            SliverToBoxAdapter(
-              child: _ErrorBanner(
-                apiOrigin: widget.board.apiOrigin,
-                onRetry: widget.board.refresh,
-              ),
-            ),
-          if (widget.board.loading && widget.board.sessions.isEmpty)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (missions.isEmpty && _selectedState != null)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: _EmptyFilter(state: _selectedState!),
-            )
-          else if (missions.isEmpty && widget.board.error == null)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: _EmptyBoard(),
-            )
-          else if (missions.isEmpty && widget.board.error != null)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: _GatewayUnavailable(),
-            )
-          else
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 36),
-              sliver: SliverList.separated(
-                itemCount: missions.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 12),
-                itemBuilder: (context, index) => _MissionCard(
-                  mission: missions[index],
-                  board: widget.board,
-                  desktopWindows: widget.desktopWindows,
-                  onSelectSession: showSessionPane
-                      ? (session) {
-                          setState(() => _selectedWebSession = session);
-                        }
-                      : null,
-                ),
-              ),
-            ),
-        ],
-      );
-      final selectedSession = _selectedWebSession;
-      if (!showSessionPane || selectedSession == null) {
-        return boardView;
-      }
-      return Row(
-        children: [
-          Expanded(child: boardView),
-          const VerticalDivider(width: 1),
-          SizedBox(
-            width: 440,
-            child: _SessionDetailPane(
-              key: ValueKey(selectedSession.sessionId),
-              session: selectedSession,
-              board: widget.board,
-              onClose: () => setState(() => _selectedWebSession = null),
-            ),
-          ),
-        ],
-      );
-    },
+  Widget _stationsTab(BuildContext context) => ListView(
+    children: [
+      _StationOverview(
+        board: widget.board.stationBoard,
+        onCreateMission: (operationId) =>
+            _showCreateMission(context, operationId, widget.board),
+        canCreateMission: (operationId) =>
+            !widget.board.demo && widget.board.canCreateMission(operationId),
+      ),
+      if (widget.board.demo) const _DemoBanner(),
+      if (widget.board.error != null)
+        _ErrorBanner(
+          apiOrigin: widget.board.apiOrigin,
+          onRetry: widget.board.refresh,
+        ),
+    ],
   );
+
+  Widget _missionsBody(BuildContext context) {
+    final sessions = widget.board.sessions
+        .where(
+          (session) =>
+              _selectedState == null ||
+              (session.state ?? 'working') == _selectedState,
+        )
+        .toList();
+    final missions = groupMissions(sessions);
+    final showSessionPane =
+        !widget.desktopWindows &&
+        MediaQuery.sizeOf(context).width >= OoBreakpoints.wide;
+    final boardView = CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: _BoardHeader(
+            sessions: widget.board.sessions,
+            selectedState: _selectedState,
+            onSelectState: (state) => setState(() => _selectedState = state),
+          ),
+        ),
+        if (widget.board.demo) const SliverToBoxAdapter(child: _DemoBanner()),
+        if (widget.board.error != null)
+          SliverToBoxAdapter(
+            child: _ErrorBanner(
+              apiOrigin: widget.board.apiOrigin,
+              onRetry: widget.board.refresh,
+            ),
+          ),
+        if (widget.board.loading && widget.board.sessions.isEmpty)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (missions.isEmpty && _selectedState != null)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: _EmptyFilter(state: _selectedState!),
+          )
+        else if (missions.isEmpty && widget.board.error == null)
+          const SliverFillRemaining(hasScrollBody: false, child: _EmptyBoard())
+        else if (missions.isEmpty && widget.board.error != null)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: _GatewayUnavailable(),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 36),
+            sliver: SliverList.separated(
+              itemCount: missions.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 12),
+              itemBuilder: (context, index) => _MissionCard(
+                mission: missions[index],
+                board: widget.board,
+                desktopWindows: widget.desktopWindows,
+                onSelectSession: showSessionPane
+                    ? (session) {
+                        setState(() => _selectedWebSession = session);
+                      }
+                    : null,
+              ),
+            ),
+          ),
+      ],
+    );
+    final selectedSession = _selectedWebSession;
+    if (!showSessionPane || selectedSession == null) {
+      return boardView;
+    }
+    return Row(
+      children: [
+        Expanded(child: boardView),
+        const VerticalDivider(width: 1),
+        SizedBox(
+          width: 440,
+          child: _SessionDetailPane(
+            key: ValueKey(selectedSession.sessionId),
+            session: selectedSession,
+            board: widget.board,
+            onClose: () => setState(() => _selectedWebSession = null),
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final sections = _sections(widget.board);
-    final activeSection = sections.contains(_section)
-        ? _section
-        : _ControlSection.operations;
-    final selectedIndex = sections.indexOf(activeSection);
-    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final pages = _pages(widget.board);
+    final page = pages.contains(_page) ? _page : OoPage.missions;
     final operatorInitial = _operatorInitial(widget.board.userSession);
     final assistant = _assistant;
     final selectedSession = _selectedWebSession;
-    return Scaffold(
+    return OoShell(
+      pages: pages,
+      page: page,
+      onSelect: (page) => setState(() => _page = page),
       endDrawer: assistant == null
           ? null
           : Drawer(
@@ -2959,7 +3024,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                   builder: (context) => AssistantPanel(
                     controller: assistant,
                     page: {
-                      'view': activeSection.name,
+                      'view': page.id,
                       if (selectedSession != null) ...{
                         'operation_id': selectedSession.operationId,
                         'mission_id': selectedSession.missionId,
@@ -2976,96 +3041,73 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                 ),
               ),
             ),
-      appBar: AppBar(
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.radar, color: Color(0xff61d6bd)),
-            const SizedBox(width: 12),
-            Text(_sectionTitle(activeSection)),
-          ],
+      actions: [
+        if (assistant != null)
+          Builder(
+            builder: (context) => IconButton(
+              tooltip: 'Ask Moneypenny',
+              onPressed: () => Scaffold.of(context).openEndDrawer(),
+              icon: const OoIcon(OoIconName.moneypenny),
+            ),
+          ),
+        IconButton(
+          tooltip: 'Operator account and preferences',
+          onPressed: () => _showOperatorMenu(context, widget.board),
+          icon: CircleAvatar(
+            radius: 16,
+            child: operatorInitial == null
+                ? const Icon(Icons.person_outline, size: 19)
+                : Text(operatorInitial),
+          ),
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Operator account and preferences',
-            onPressed: () => _showOperatorMenu(context, widget.board),
-            icon: CircleAvatar(
-              radius: 16,
-              child: operatorInitial == null
-                  ? const Icon(Icons.person_outline, size: 19)
-                  : Text(operatorInitial),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Refresh AI6',
-            onPressed: widget.board.refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-          if (assistant != null)
-            Builder(
-              builder: (context) => IconButton(
-                tooltip: 'Ask Moneypenny',
-                onPressed: () => Scaffold.of(context).openEndDrawer(),
-                icon: const Icon(Icons.support_agent),
-              ),
-            ),
-          const SizedBox(width: 12),
-        ],
-      ),
-      body: Row(
-        children: [
-          if (wide)
-            NavigationRail(
-              selectedIndex: selectedIndex,
-              onDestinationSelected: (index) =>
-                  setState(() => _section = sections[index]),
-              labelType: NavigationRailLabelType.all,
-              destinations: [
-                for (final section in sections)
-                  NavigationRailDestination(
-                    icon: Icon(_sectionIcon(section)),
-                    label: Text(_sectionTitle(section)),
-                  ),
-              ],
-            ),
-          Expanded(child: _sectionBody(context, activeSection)),
-        ],
-      ),
-      bottomNavigationBar: wide
-          ? null
-          : NavigationBar(
-              selectedIndex: selectedIndex,
-              onDestinationSelected: (index) =>
-                  setState(() => _section = sections[index]),
-              destinations: [
-                for (final section in sections)
-                  NavigationDestination(
-                    icon: Icon(_sectionIcon(section)),
-                    label: _sectionTitle(section),
-                  ),
-              ],
-            ),
+        IconButton(
+          tooltip: 'Refresh AI6',
+          onPressed: widget.board.refresh,
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+      body: _pageBody(context, page, pages),
     );
   }
 }
 
-enum _ControlSection {
-  stations,
-  operations,
-  administration,
-  pools,
-  timeline,
-  audit,
-}
+/// Every Theater each Station reports, with what it can do and why it may not be used.
+class _TheatersTab extends StatelessWidget {
+  const _TheatersTab({required this.board});
 
-IconData _sectionIcon(_ControlSection section) => switch (section) {
-  _ControlSection.stations => Icons.hub_outlined,
-  _ControlSection.operations => Icons.workspaces_outline,
-  _ControlSection.administration => Icons.settings_suggest_outlined,
-  _ControlSection.pools => Icons.vpn_key_outlined,
-  _ControlSection.timeline => Icons.timeline,
-  _ControlSection.audit => Icons.fact_check_outlined,
-};
+  final StationBoardSummary board;
+
+  @override
+  Widget build(BuildContext context) {
+    final theaters = [
+      for (final station in board.stations)
+        for (final theater in station.theaters) (station, theater),
+    ];
+    if (theaters.isEmpty) {
+      return const Center(child: Text('No Station reports a Theater.'));
+    }
+    final muted = OoTokens.of(context).muted;
+    return ListView.separated(
+      padding: const EdgeInsets.all(24),
+      itemCount: theaters.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        final (station, theater) = theaters[index];
+        return Card(
+          child: ListTile(
+            leading: const OoIcon(OoIconName.theaters),
+            title: Text('Theater ${theater.id}'),
+            subtitle: Text(
+              'Station ${station.stationId}\n${theater.description}',
+              style: TextStyle(color: muted),
+            ),
+            isThreeLine: true,
+          ),
+        );
+      },
+    );
+  }
+}
 
 class AuditEntrySummary {
   const AuditEntrySummary({
@@ -3096,63 +3138,6 @@ class AuditEntrySummary {
         target: json['target'] as String,
         at: (json['at'] as num).toDouble(),
       );
-}
-
-class AdministrationPage extends StatelessWidget {
-  const AdministrationPage({required this.board, super.key});
-
-  final MissionBoard board;
-
-  @override
-  Widget build(BuildContext context) {
-    final canReadRoles =
-        board.demo ||
-        (board.userSession?.operations.any(
-              (operation) => operation.actions.contains('agent.read'),
-            ) ??
-            false);
-    final canReadStationSettings =
-        board.demo || board.readableStations.isNotEmpty;
-    final canReviewProposals = board.proposalOperations.isNotEmpty;
-    final canSign = board.greenInkOperations.isNotEmpty;
-    final canManageClasses = board.classAuthorizationOperations.isNotEmpty;
-    final canReadRoster = board.canReadRoster;
-    final pages = <Widget>[
-      if (canReadRoles) AgentRolesPage(board: board),
-      if (canReadRoles) AgentsPage(board: board),
-      if (canReadStationSettings) StationSettingsPage(board: board),
-      if (canReadRoster) RosterPage(board: board),
-      if (canReviewProposals) MissionProposalsPage(board: board),
-      if (canReviewProposals) HeldBriefsPage(board: board),
-      if (canSign) GreenInkPage(board: board),
-      if (canManageClasses) ClassAuthorizationsPage(board: board),
-    ];
-    final labels = <String>[
-      if (canReadRoles) 'Agent roles',
-      if (canReadRoles) 'Agents',
-      if (canReadStationSettings) 'Station settings',
-      if (canReadRoster) 'Roster',
-      if (canReviewProposals) 'Mission proposals',
-      if (canReviewProposals) 'Held briefs',
-      if (canSign) 'Green ink',
-      if (canManageClasses) 'Class authorisations',
-    ];
-    if (pages.isEmpty) {
-      return const Center(
-        child: Text('No AI6 settings are available to this account.'),
-      );
-    }
-    if (pages.length == 1) return pages.single;
-    return DefaultTabController(
-      length: pages.length,
-      child: Column(
-        children: [
-          TabBar(tabs: [for (final label in labels) Tab(text: label)]),
-          Expanded(child: TabBarView(children: pages)),
-        ],
-      ),
-    );
-  }
 }
 
 class MissionProposalsPage extends StatefulWidget {
@@ -4101,12 +4086,7 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                       },
                     ),
                   const SizedBox(height: 18),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Light appearance'),
-                    value: board.lightTheme,
-                    onChanged: (_) => board.toggleTheme(),
-                  ),
+                  _ThemeChooser(board: board),
                 ],
               ),
             ),
@@ -4132,6 +4112,74 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
   );
 }
 
+/// The operator menu's appearance settings: the theme, each with its swatch, and the
+/// wallpaper switch.
+class _ThemeChooser extends StatelessWidget {
+  const _ThemeChooser({required this.board});
+
+  final MissionBoard board;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('Theme'),
+      for (final (id, label, swatch) in [
+        (
+          ooSystemTheme,
+          'Match the system (Light or Night Ops)',
+          [OoThemeId.light.tokens, OoThemeId.nightOps.tokens],
+        ),
+        for (final theme in OoThemeId.values)
+          (theme.id, theme.label, [theme.tokens]),
+      ])
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: _Swatch(swatch),
+          title: Text(label),
+          selected: board.themeId == id,
+          trailing: board.themeId == id ? const Icon(Icons.check) : null,
+          onTap: () => board.setThemeId(id),
+        ),
+      SwitchListTile.adaptive(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Wallpaper'),
+        subtitle: const Text(
+          'Behind sign-in, the Overview header and empty pages',
+        ),
+        value: board.backdrop,
+        onChanged: board.setBackdrop,
+      ),
+    ],
+  );
+}
+
+/// A theme's background, surface and accent, side by side.
+class _Swatch extends StatelessWidget {
+  const _Swatch(this.themes);
+
+  final List<OoTokens> themes;
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final tokens in themes)
+          for (final color in [tokens.bg, tokens.surface, tokens.accent])
+            Container(
+              width: 10,
+              height: 24,
+              decoration: BoxDecoration(
+                color: color,
+                border: Border.all(color: OoTokens.of(context).border),
+              ),
+            ),
+      ],
+    ),
+  );
+}
+
 class _StationOverview extends StatelessWidget {
   const _StationOverview({
     required this.board,
@@ -4151,8 +4199,10 @@ class _StationOverview extends StatelessWidget {
       children: [
         Text(
           'STATIONS',
-          style: Theme.of(context).textTheme.labelMedium
-              ?.copyWith(letterSpacing: 2.4, color: const Color(0xff86a39d)),
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            letterSpacing: 2.4,
+            color: OoTokens.of(context).accent,
+          ),
         ),
         const SizedBox(height: 10),
         if (board.stations.isEmpty)
@@ -4216,7 +4266,7 @@ class _PlacementPanelState extends State<_PlacementPanel> {
                 'PLACEMENT PREVIEW',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   letterSpacing: 2.4,
-                  color: const Color(0xff86a39d),
+                  color: OoTokens.of(context).accent,
                 ),
               ),
               const SizedBox(height: 10),
@@ -4450,8 +4500,8 @@ class _StationCard extends StatelessWidget {
                 station.healthy ? Icons.circle : Icons.circle_outlined,
                 size: 11,
                 color: station.healthy
-                    ? const Color(0xff61d6bd)
-                    : const Color(0xffe3a466),
+                    ? OoTokens.of(context).success
+                    : OoTokens.of(context).warning,
               ),
               const SizedBox(width: 9),
               Expanded(
@@ -4531,9 +4581,9 @@ class _StationCard extends StatelessWidget {
                       },
                       size: 14,
                       color: switch (finding.severity) {
-                        'critical' => const Color(0xffe36666),
-                        'warning' => const Color(0xffe3a466),
-                        _ => const Color(0xff86a39d),
+                        'critical' => OoTokens.of(context).danger,
+                        'warning' => OoTokens.of(context).warning,
+                        _ => OoTokens.of(context).muted,
                       },
                     ),
                     const SizedBox(width: 6),
@@ -4599,8 +4649,10 @@ class _BoardHeader extends StatelessWidget {
         children: [
           Text(
             'MISSIONS',
-            style: Theme.of(context).textTheme.labelMedium
-                ?.copyWith(letterSpacing: 2.4, color: const Color(0xff86a39d)),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              letterSpacing: 2.4,
+              color: OoTokens.of(context).accent,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -4616,25 +4668,14 @@ class _BoardHeader extends StatelessWidget {
               _CountChip(
                 label: 'Sessions',
                 count: sessions.length,
-                color: const Color(0xffb5c4c5),
                 selected: selectedState == null,
                 onPressed: () => onSelectState(null),
               ),
-              for (final state in const [
-                'queued',
-                'working',
-                'blocked',
-                'stalled',
-                'parked',
-                'quarantined',
-                'done',
-                'failed',
-                'abandoned',
-              ])
+              for (final state in missionStates)
                 _CountChip(
                   label: state,
                   count: counts[state] ?? 0,
-                  color: _stateColor(state),
+                  state: state,
                   selected: selectedState == state,
                   onPressed: () =>
                       onSelectState(selectedState == state ? null : state),
@@ -4651,20 +4692,25 @@ class _CountChip extends StatelessWidget {
   const _CountChip({
     required this.label,
     required this.count,
-    required this.color,
     required this.selected,
     required this.onPressed,
+    this.state,
   });
 
   final String label;
   final int count;
-  final Color color;
+
+  /// The state this chip filters by; none for all Sessions.
+  final String? state;
   final bool selected;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) => ChoiceChip(
-    avatar: CircleAvatar(backgroundColor: color, radius: 5),
+    avatar: switch (state) {
+      final state? => OoStateMark(state),
+      null => null,
+    },
     label: Text('$label  $count'),
     selected: selected,
     onSelected: (_) => onPressed(),
@@ -4683,8 +4729,22 @@ class _EmptyFilter extends StatelessWidget {
       Center(child: Text('No ${state.toUpperCase()} Sessions'));
 }
 
-class _MissionGroup {
-  const _MissionGroup({
+/// The board's states of a Mission or Session, in the board's order.
+const missionStates = [
+  'queued',
+  'working',
+  'blocked',
+  'stalled',
+  'parked',
+  'quarantined',
+  'done',
+  'failed',
+  'abandoned',
+];
+
+/// One Mission on the board and its Sessions.
+class MissionGroup {
+  const MissionGroup({
     required this.operationId,
     required this.missionId,
     required this.sessions,
@@ -4693,9 +4753,22 @@ class _MissionGroup {
   final String operationId;
   final String missionId;
   final List<SessionSummary> sessions;
+
+  /// The state of its latest Session; a Session not yet reporting one is working.
+  String get state =>
+      sessions
+          .reduce(
+            (left, right) => right.sequence > left.sequence ? right : left,
+          )
+          .state ??
+      'working';
+
+  /// Whether it has stopped for good: done, failed or abandoned.
+  bool get finished => const {'done', 'failed', 'abandoned'}.contains(state);
 }
 
-List<_MissionGroup> _groupMissions(List<SessionSummary> sessions) {
+/// The board's Sessions grouped by Mission, by Operation then Mission ID.
+List<MissionGroup> groupMissions(List<SessionSummary> sessions) {
   final groups = <(String, String), List<SessionSummary>>{};
   for (final session in sessions) {
     groups
@@ -4704,7 +4777,7 @@ List<_MissionGroup> _groupMissions(List<SessionSummary> sessions) {
   }
   final result = groups.entries
       .map(
-        (entry) => _MissionGroup(
+        (entry) => MissionGroup(
           operationId: entry.key.$1,
           missionId: entry.key.$2,
           sessions: List.unmodifiable(entry.value),
@@ -4726,7 +4799,7 @@ class _MissionCard extends StatelessWidget {
     required this.onSelectSession,
   });
 
-  final _MissionGroup mission;
+  final MissionGroup mission;
   final MissionBoard board;
   final bool desktopWindows;
   final ValueChanged<SessionSummary>? onSelectSession;
@@ -4740,7 +4813,13 @@ class _MissionCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.folder_open, color: Color(0xff61d6bd), size: 19),
+              IconTheme.merge(
+                data: IconThemeData(
+                  color: OoTokens.of(context).accent,
+                  size: 19,
+                ),
+                child: const OoIcon(OoIconName.missions),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -4776,7 +4855,7 @@ class _MissionCard extends StatelessWidget {
             child: Text(
               'Mission ${mission.missionId}',
               style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: const Color(0xff9aafb0)),
+                  ?.copyWith(color: OoTokens.of(context).muted),
             ),
           ),
           if (board.attempts(mission.operationId, mission.missionId)
@@ -4815,7 +4894,7 @@ class _AttemptHistory extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final muted = Theme.of(context).textTheme.bodySmall
-        ?.copyWith(color: const Color(0xff9aafb0));
+        ?.copyWith(color: OoTokens.of(context).muted);
     return Padding(
       padding: const EdgeInsets.only(left: 27, bottom: 12),
       child: Column(
@@ -4920,20 +4999,21 @@ class _SessionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = session.state ?? 'working';
+    final tokens = OoTokens.of(context);
     return Container(
       margin: const EdgeInsets.only(top: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xff0c1518),
+        color: tokens.raised,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xff26363a)),
+        border: Border.all(color: tokens.border),
       ),
       child: InkWell(
         onTap: () => _open(context),
         borderRadius: BorderRadius.circular(8),
         child: Row(
           children: [
-            Icon(Icons.circle, size: 9, color: _stateColor(state)),
+            OoStateMark(state, reason: session.reason),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -4946,7 +5026,7 @@ class _SessionRow extends StatelessWidget {
                   Text(
                     'Updated at event ${session.sequence}',
                     style: Theme.of(context).textTheme.labelSmall
-                        ?.copyWith(color: const Color(0xff84999b)),
+                        ?.copyWith(color: tokens.muted),
                   ),
                 ],
               ),
@@ -5020,11 +5100,10 @@ void _openSessionWindow(
     controller: controller,
     builder: (_) => AnimatedBuilder(
       animation: board,
-      builder: (context, _) => MaterialApp(
+      builder: (context, _) => OoMaterialApp(
+        themeId: board.themeId,
+        backdrop: board.backdrop,
         title: 'Session ${session.sessionId}',
-        theme: _outerOfficeLightTheme(),
-        darkTheme: _outerOfficeTheme(),
-        themeMode: board.lightTheme ? ThemeMode.light : ThemeMode.dark,
         home: SessionWindow(session: session, board: board),
       ),
     ),
@@ -5152,7 +5231,7 @@ class _SessionPreviewPanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.terminal, size: 36, color: Color(0xff61d6bd)),
+            Icon(Icons.terminal, size: 36, color: OoTokens.of(context).accent),
             const SizedBox(height: 12),
             const Text('Session preview'),
             const SizedBox(height: 8),
@@ -5261,16 +5340,25 @@ class _EmptyBoard extends StatelessWidget {
   const _EmptyBoard();
 
   @override
-  Widget build(BuildContext context) => const Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.radar, size: 42, color: Color(0xff64847d)),
-        SizedBox(height: 12),
-        Text('No active Missions'),
-        SizedBox(height: 4),
-        Text('Registered agent Sessions will appear here.'),
-      ],
+  Widget build(BuildContext context) => Center(
+    child: OoBackdrop(
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconTheme.merge(
+              data: IconThemeData(size: 42, color: OoTokens.of(context).muted),
+              child: const OoIcon(OoIconName.missions),
+            ),
+            const SizedBox(height: 12),
+            const Text('No active Missions'),
+            const SizedBox(height: 4),
+            const Text('Registered agent Sessions will appear here.'),
+          ],
+        ),
+      ),
     ),
   );
 }
@@ -5283,17 +5371,21 @@ class _DemoBanner extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
     child: DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xff102521),
+        color: OoTokens.of(context).raised,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xff28574d)),
+        border: Border.all(color: OoTokens.of(context).accent),
       ),
-      child: const Padding(
-        padding: EdgeInsets.all(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
         child: Row(
           children: [
-            Icon(Icons.visibility, color: Color(0xff61d6bd), size: 18),
-            SizedBox(width: 10),
-            Expanded(
+            Icon(
+              Icons.visibility,
+              color: OoTokens.of(context).accent,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
               child: Text(
                 'Demo preview · sign-in is unavailable. Open the authenticated Outer Office site.',
               ),
@@ -5309,18 +5401,23 @@ class _GatewayUnavailable extends StatelessWidget {
   const _GatewayUnavailable();
 
   @override
-  Widget build(BuildContext context) => const Center(
-    child: Padding(
-      padding: EdgeInsets.all(32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.cloud_off, size: 42, color: Color(0xff84999b)),
-          SizedBox(height: 12),
-          Text('Universal Exports is offline'),
-          SizedBox(height: 4),
-          Text('Start the gateway, or launch with OO_DEMO=true to preview.'),
-        ],
+  Widget build(BuildContext context) => Center(
+    child: OoBackdrop(
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off, size: 42, color: OoTokens.of(context).muted),
+            const SizedBox(height: 12),
+            const Text('Universal Exports is offline'),
+            const SizedBox(height: 4),
+            const Text(
+              'Start the gateway, or launch with OO_DEMO=true to preview.',
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -5344,16 +5441,3 @@ class _ErrorBanner extends StatelessWidget {
     ),
   );
 }
-
-Color _stateColor(String state) => switch (state) {
-  'working' => const Color(0xff61d6bd),
-  'blocked' => const Color(0xffffc16b),
-  'stalled' => const Color(0xffff7777),
-  'parked' => const Color(0xff8fb7ff),
-  'quarantined' => const Color(0xffd98cff),
-  'queued' => const Color(0xffb5c4c5),
-  'done' => const Color(0xff9da8b5),
-  'failed' => const Color(0xffff4e66),
-  'abandoned' => const Color(0xff6f7f86),
-  _ => const Color(0xff9da8b5),
-};

@@ -4,11 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show DropdownButton, LinearProgressIndicator, NavigationBar;
+    show DropdownButton, LinearProgressIndicator;
 import 'package:outer_office/main.dart';
 
-Finder navLabel(String label) =>
-    find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
+import 'shell_navigation.dart';
 
 Map<String, Object?> account(
   String name, {
@@ -117,7 +116,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    await tester.tap(navLabel('Account pools'));
+    await openPage(tester, 'Account Pools');
     await tester.pumpAndSettle();
 
     expect(asked.single.path, '/v1/user/operations/G/pools');
@@ -151,7 +150,7 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
-    expect(navLabel('Account pools'), findsNothing);
+    expect(await offersPage(tester, 'Account Pools'), isFalse);
     expect(asked, isEmpty);
   });
 }
