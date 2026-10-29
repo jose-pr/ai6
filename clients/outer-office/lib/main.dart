@@ -44,11 +44,19 @@ Uri _apiOrigin() => _apiOverride.isNotEmpty
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(robotoLicense);
   if (kIsWeb) {
     unawaited(_startWeb());
     return;
   }
   _startDesktop();
+}
+
+/// The licence of the bundled Roboto font, for the app's licence page.
+Stream<LicenseEntry> robotoLicense() async* {
+  yield LicenseEntryWithLineBreaks(const [
+    'Roboto',
+  ], await rootBundle.loadString('assets/fonts/LICENSE-Roboto.txt'));
 }
 
 Future<void> _startWeb() async {

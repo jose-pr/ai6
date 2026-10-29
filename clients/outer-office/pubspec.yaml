@@ -32,4 +32,14 @@ flutter:
   assets:
     - assets/backdrops/
     - assets/brand/moneypenny-128.png
+    - assets/fonts/LICENSE-Roboto.txt
     - assets/icons/
+  # Bundled so the web engine has its default font without fetching it from Google Fonts.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+        - asset: assets/fonts/Roboto-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700
