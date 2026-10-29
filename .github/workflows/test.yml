@@ -139,6 +139,7 @@ jobs:
       - run: dart run tool/build_guatiao_wasm.dart
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze --fatal-infos
-      - run: flutter test
+      # Before the tests, so the no-CDN check reads a real build/web.
       - run: flutter build web --release
+      - run: flutter test
       - run: flutter build windows --debug
