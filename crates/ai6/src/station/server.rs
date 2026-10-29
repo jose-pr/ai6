@@ -802,7 +802,9 @@ where
             }
         }
     };
-    config.station.runner_pins = Some((plugin_policy.pins().clone(), plugin_policy.profile()));
+    if snapshot.settings.pins.is_some() || config.plugin_profile.is_some() {
+        config.station.runner_pins = Some((plugin_policy.pins().clone(), plugin_policy.profile()));
+    }
     let cable_config = snapshot.settings.cables.clone();
     let provider_loadouts = snapshot.settings.loadouts.clone();
     let roster = snapshot.roster;

@@ -229,14 +229,21 @@ impl ConfigScope {
         }
     }
 
-    /// The scope of a text form: `""` or `station:<id>`; `None` for anything else.
+    /// The scope of a text form: `""` or `station:<id>`; `None` for anything else, and for an
+    /// ID that is not one plain path component ([`ConfigScope::is_plain`]).
     pub fn parse(text: &str) -> Option<Self> {
         if text.is_empty() {
             return Some(Self::Global);
         }
         text.strip_prefix("station:")
-            .filter(|id| !id.is_empty())
+            .filter(|id| Self::is_plain(id))
             .map(|id| Self::Station(id.to_owned()))
+    }
+
+    /// Whether `id` can name a Station's directory of family files: not empty, not `.` or
+    /// `..`, and no `/`, `\` or `:`.
+    pub fn is_plain(id: &str) -> bool {
+        !id.is_empty() && id != "." && id != ".." && !id.contains(['/', '\\', ':'])
     }
 
     /// The scope a Station's own records have; [`Global`](Self::Global) for `""`.
@@ -541,15 +548,24 @@ impl UnexRecord {
             if let serde_json::Value::Object(entries) = value {
                 for (key, value) in entries {
                     let lower = key.to_ascii_lowercase();
-                    let credential = ["password", "secret", "token"]
-                        .iter()
-                        .any(|word| lower.contains(word))
+                    let credential = [
+                        "password",
+                        "passphrase",
+                        "secret",
+                        "token",
+                        "apikey",
+                        "api_key",
+                        "private_key",
+                    ]
+                    .iter()
+                    .any(|word| lower.contains(word))
                         || lower == "key"
                         || lower.ends_with("_key");
                     let names_file = lower.ends_with("_file") || lower.ends_with("_path");
                     if credential && !names_file && value.is_string() {
                         found.push(format!(
-                            "unex.{path}.{key} is a credential written inline in the shared                              configuration; name a file instead"
+                            "unex.{path}.{key} is a credential written inline in the shared \
+                             configuration; name a file instead"
                         ));
                     }
                     inline(&format!("{path}.{key}"), value, found);
@@ -830,8 +846,20 @@ pub fn family_document(
     toml::to_string(&value).map_err(|reason| error(format!("{record}: {reason}")))
 }
 
+/// Writes `bytes` to `path`, readable by its owner only on Unix: an exported family may hold
+/// a credential.
+fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(path)?.write_all(bytes)
+}
+
 /// Writes every family of every scope `provider` holds into `dir` as TOML family files, laid
-/// out as a [`FileProvider`] reads them, and returns how many files it wrote.
+/// out as a [`FileProvider`] reads them, and returns how many files it wrote. Files are
+/// readable by their owner only on Unix.
 ///
 /// # Errors
 ///
@@ -841,7 +869,10 @@ pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, Roster
     for scope in provider.scopes()? {
         let target = match &scope {
             ConfigScope::Global => dir.to_path_buf(),
-            ConfigScope::Station(id) => dir.join("stations").join(id),
+            ConfigScope::Station(id) if ConfigScope::is_plain(id) => dir.join("stations").join(id),
+            ConfigScope::Station(id) => {
+                return Err(error(format!("station:{id} cannot name a directory")));
+            }
         };
         let mut files: BTreeMap<&'static str, serde_json::Map<String, serde_json::Value>> =
             BTreeMap::new();
@@ -862,7 +893,7 @@ pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, Roster
                 toml::to_string(&value).map_err(|reason| error(format!("{stem}: {reason}")))?;
             let path = target.join(format!("{stem}.toml"));
             std::fs::create_dir_all(&target)
-                .and_then(|()| std::fs::write(&path, text))
+                .and_then(|()| write_private(&path, text.as_bytes()))
                 .map_err(|failure| {
                     error_of(
                         RosterErrorKind::Unavailable,
@@ -1283,6 +1314,9 @@ mod tests {
         assert_eq!(ConfigScope::parse(""), Some(ConfigScope::Global));
         assert_eq!(ConfigScope::parse("station:"), None);
         assert_eq!(ConfigScope::parse("hq"), None);
+        for unsafe_id in ["station:..", "station:../x", "station:a/b", "station:C:x"] {
+            assert_eq!(ConfigScope::parse(unsafe_id), None, "{unsafe_id}");
+        }
         assert_eq!(ConfigScope::of_station(""), ConfigScope::Global);
         assert!(ConfigRecord::Theater.station_scoped() && !ConfigRecord::Theater.applies_live());
         assert!(!ConfigRecord::Agent.station_scoped() && ConfigRecord::Agent.applies_live());

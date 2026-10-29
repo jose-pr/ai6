@@ -139,6 +139,18 @@ impl CredentialDesk {
             if own_backend && let Some(weakening) = definition.source().weakening() {
                 weakened.push(format!("secret {name:?} is weakened: {weakening}"));
             }
+            if own_backend
+                && let crate::bootstrap::SecretRef::File(path) = definition.source()
+                && (path.is_absolute()
+                    || path
+                        .components()
+                        .any(|part| matches!(part, std::path::Component::ParentDir)))
+            {
+                weakened.push(format!(
+                    "secret {name:?} is read from {}, outside the Station's secrets directory",
+                    path.display()
+                ));
+            }
             if let Some(weakening) = definition.green_ink_weakening() {
                 weakened.push(weakening);
             }

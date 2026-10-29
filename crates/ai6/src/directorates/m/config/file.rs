@@ -46,10 +46,15 @@ impl FileProvider {
         &self.root
     }
 
-    fn scope_dir(&self, scope: &ConfigScope) -> PathBuf {
+    fn scope_dir(&self, scope: &ConfigScope) -> Result<PathBuf, RosterError> {
         match scope {
-            ConfigScope::Global => self.root.clone(),
-            ConfigScope::Station(id) => self.root.join(STATIONS_DIR).join(id),
+            ConfigScope::Global => Ok(self.root.clone()),
+            ConfigScope::Station(id) if ConfigScope::is_plain(id) => {
+                Ok(self.root.join(STATIONS_DIR).join(id))
+            }
+            ConfigScope::Station(id) => Err(error(format!(
+                "station:{id} cannot name a directory of family files"
+            ))),
         }
     }
 
@@ -104,7 +109,7 @@ impl FileProvider {
     fn digest(&self, station: &str) -> Result<ConfigRevision, RosterError> {
         let mut digest = Sha256::new();
         for scope in Self::view_scopes(station) {
-            for path in Self::found(&self.scope_dir(&scope))?.values() {
+            for path in Self::found(&self.scope_dir(&scope)?)?.values() {
                 let bytes = fs::read(path).map_err(|failure| unavailable(path, &failure))?;
                 let relative = path.strip_prefix(&self.root).unwrap_or(path);
                 let name = relative.to_string_lossy();
@@ -123,7 +128,7 @@ impl FileProvider {
     /// The records of every family file at `scope`.
     fn layer(&self, scope: &ConfigScope) -> Result<Layer, RosterError> {
         let mut layer = Layer::new();
-        for (stem, path) in Self::found(&self.scope_dir(scope))? {
+        for (stem, path) in Self::found(&self.scope_dir(scope)?)? {
             read_family(stem, &path, scope, &mut layer)?;
         }
         Ok(layer)
@@ -261,6 +266,7 @@ impl ConfigProvider for FileProvider {
             let entry = entry.map_err(|failure| unavailable(&stations, &failure))?;
             if entry.path().is_dir()
                 && let Some(id) = entry.file_name().to_str()
+                && ConfigScope::is_plain(id)
             {
                 scopes.push(ConfigScope::of_station(id));
             }

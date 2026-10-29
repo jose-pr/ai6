@@ -578,6 +578,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
     let station_config = ai6::StationConfig::default()
         .with_state_dir(&opened.state_dir)
         .with_protected_path(&opened.identity_dir)
+        .with_protected_path(&opened.config_dir)
         .with_bootstrap_weakenings(weakenings)
         .with_config_poll(located.value.provider.poll())
         .with_headquarters_lease(opened.lease);

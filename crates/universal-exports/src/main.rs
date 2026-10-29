@@ -212,7 +212,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
     let poll = settings.located.value.provider.poll();
     if !poll.is_zero() {
-        tokio::spawn(follow_policy(provider, policy, poll));
+        tokio::spawn(follow_policy(provider, policy, snapshot.clone(), poll));
     }
     gateway
         .serve_loopback(listen.port(), shutdown_signal())
@@ -261,16 +261,20 @@ impl Authorizer for LivePolicy {
     }
 }
 
-/// Reads the provider every `every` and applies a changed `access` record.
+/// Reads the provider every `every` and applies a changed `access` record; a changed record
+/// of a family only a restart applies (`unex`, `plugin`) is logged as needing one.
 async fn follow_policy(
     provider: Arc<dyn ConfigProvider>,
     policy: Arc<LivePolicy>,
+    started: ai6::ConfigSnapshot,
     every: Duration,
 ) {
+    let started = Arc::new(started);
     let mut refused = None;
+    let mut restart: Vec<ai6::ConfigRecord> = Vec::new();
     loop {
         tokio::time::sleep(every).await;
-        let (provider, policy) = (provider.clone(), policy.clone());
+        let (provider, policy, base) = (provider.clone(), policy.clone(), started.clone());
         let since = policy.revision();
         let outcome = tokio::task::spawn_blocking(move || {
             let snapshot = match provider.changes_since("", since) {
@@ -278,22 +282,38 @@ async fn follow_policy(
                 Ok(None) => return Ok(None),
                 Err(error) => return Err((None, error.to_string())),
             };
+            let changed: Vec<ai6::ConfigRecord> = base
+                .changed_families(&snapshot)
+                .into_iter()
+                .filter(|record| {
+                    matches!(record, ai6::ConfigRecord::Unex | ai6::ConfigRecord::Plugin)
+                })
+                .collect();
             match snapshot.settings.access_authorizer() {
                 Ok(authorizer) => {
                     policy.replace(snapshot.revision, authorizer);
-                    Ok(Some(snapshot.revision))
+                    Ok(Some((snapshot.revision, changed)))
                 }
                 Err(error) => Err((Some(snapshot.revision), error)),
             }
         })
         .await;
         match outcome {
-            Ok(Ok(Some(revision))) => {
+            Ok(Ok(Some((revision, changed)))) => {
                 refused = None;
                 eprintln!(
                     "universal-exports: configuration revision {} applied",
                     revision.get()
                 );
+                for record in &changed {
+                    if !restart.contains(record) {
+                        eprintln!(
+                            "universal-exports: {record} changed; restart universal-exports to \
+                             apply it"
+                        );
+                    }
+                }
+                restart = changed;
             }
             Ok(Ok(None)) => {}
             Ok(Err((revision, error))) if refused != Some(revision) => {

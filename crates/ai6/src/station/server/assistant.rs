@@ -1512,6 +1512,16 @@ impl Desk {
 
     /// The mode a job's harness starts in, and its workspace with the notices preparing it
     /// left: Moneypenny's own tools only without one; with one, the repositories cloned into
+    /// The Station's own directories, which an assistant's interpreters may never read.
+    fn station_paths(&self) -> Vec<String> {
+        self.state
+            .station
+            .protected_paths()
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect()
+    }
+
     /// `area` and the file tools for `personal/` and `scratch/`, its standing text naming
     /// `skills`, those installed.
     async fn workspace(
@@ -1521,7 +1531,11 @@ impl Desk {
         skills: &[String],
     ) -> Result<(AssistantMode, Option<SharedWorkspace>, Vec<String>), String> {
         let Some(wanted) = job.workspace.clone() else {
-            return Ok((AssistantMode::moneypenny(), None, Vec::new()));
+            let mode = AssistantMode {
+                station_paths: self.station_paths(),
+                ..AssistantMode::moneypenny()
+            };
+            return Ok((mode, None, Vec::new()));
         };
         let area = PathBuf::from(area);
         let (context, repos) = context_file(&area)
@@ -1571,13 +1585,7 @@ impl Desk {
         let mode = AssistantMode {
             files: vec![PERSONAL.to_owned(), SCRATCH.to_owned()],
             context_file: Some(context.to_string_lossy().into_owned()),
-            station_paths: self
-                .state
-                .station
-                .protected_paths()
-                .iter()
-                .map(|path| path.to_string_lossy().into_owned())
-                .collect(),
+            station_paths: self.station_paths(),
             ..AssistantMode::moneypenny()
         };
         Ok((mode, Some(Arc::new(Mutex::new(workspace))), notices))

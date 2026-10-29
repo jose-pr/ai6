@@ -530,6 +530,16 @@ impl Theater {
                     .to_owned(),
             );
         }
+        if matches!(self.access, TheaterAccess::Local)
+            && let Some(runner) = &self.runner
+            && (runner.command.is_some() || runner.state_dir.is_some())
+        {
+            weakened.push(
+                "runner.command or runner.state_dir: the configuration names a program or \
+                 directory this Station uses on its own host"
+                    .to_owned(),
+            );
+        }
         weakened
     }
 
