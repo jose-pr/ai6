@@ -837,8 +837,12 @@ The optional `cli` feature builds the service command:
   exist when named, default `plugins.toml` in the AI6 configuration directory) and
   `--plugin-profile strict|report|off` (`AI6_EXPORTS_PLUGIN_PROFILE`; default strict with a
   pin set, report without); refusals and weakenings are printed at start. Provider IDs
-  are those of the `coqui-access` plugin libraries (`coqui_access_local`, `coqui_access_key`,
-  `coqui_access_ldap`, `coqui_access_proxy`, `coqui_access_peer`, `coqui_roles`).
+  are those of the `coqui-access` plugin libraries (`coqui_access_password`, `coqui_access_key`,
+  `coqui_access_ldap`, `coqui_access_proxy`, `coqui_access_mtls`, `coqui_roles`). The
+  Directory and a plugin Authorizer are loaded behind coqui-access-kit's cache:
+  `--access-cache-ttl`, `--access-cache-negative-ttl` and `--access-cache-entries` (below)
+  bound how long and how many answers are kept; a lifetime past the default is printed as a
+  warning at start.
   `--login-tries-per-address`, `--login-tries-per-name` and `--client-address-header` set
   the login limits above. Moneypenny is served by default as the roster Agent
   `--assistant-agent` (default `moneypenny`); `--no-assistant` turns her off.
@@ -865,6 +869,9 @@ The library reads no environment variables. The commands read:
 | `AI6_EXPORTS_ACCESS_POLICY` | TOML configuration for the built-in role Authorizer. | Deny all |
 | `AI6_EXPORTS_AUTHORIZER` | Optional custom Authorizer provider ID; conflicts with access-policy. | None |
 | `AI6_EXPORTS_AUTHORIZER_CONFIG` | Path to a JSON object containing the custom Authorizer's Guatiao config. | None |
+| `AI6_EXPORTS_ACCESS_CACHE_TTL` | Seconds a person the Directory found, or an action a plugin Authorizer granted, is kept; `0` keeps none. | `5` |
+| `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL` | Seconds "no such person" or a denial is kept; `0` keeps none. | `1` |
+| `AI6_EXPORTS_ACCESS_CACHE_ENTRIES` | The most lookups, and the most decisions, kept; `0` keeps none. | `10000` |
 | `AI6_EXPORTS_ROSTER` | The roster the Stations read (`ai6 serve --config`): a configuration directory (listed, read-only), `sqlite:PATH` or a `postgres://` URL (editable); overridden by `--roster`. Its password may come from `AI6_CONFIG_PASSWORD`. | None (roster routes answer 503) |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address at the login route. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |

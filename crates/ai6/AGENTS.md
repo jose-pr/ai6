@@ -88,21 +88,25 @@ loads and enforces this policy for user requests.
 any kind beginning with `KIND_PREFIX`, and lists and constructs `Authenticator`,
 `Directory`, `Authorizer` and `Accounts` providers by id (`authenticators()`,
 `account_managers()`, `authenticator(id, config)`, `accounts(id, config)` and the
-rest); the caller composes authentication, directory lookup and authorization. AI6
+rest); the caller composes authentication, directory lookup and authorization.
+`cached_directory(id, config, cache)` and `cached_authorizer(id, config, cache)` return the
+provider in an `Arc<coqui_access_kit::Cached<dyn ..>>` keeping its answers as the
+`CacheOptions` say (default 5 s, 1 s for "not found" or a denial, 10 000 entries); a credential
+is never kept. AI6
 registers no access provider of its own. The providers are the loadable libraries of
 `coqui-access`, built from <https://github.com/Boriken-Dev/coqui-access>:
 
 | Id | Kinds | Config (a Guatiao value; every key optional) |
 | --- | --- | --- |
-| `coqui_access_local` | Authenticator, Directory, Accounts | `source`, `max_accounts`, `argon2` |
-| `coqui_access_key` | Authenticator, Directory, Accounts | `source`, `prefix`, `key_hash`, `argon2`, `max_keys` |
-| `coqui_access_peer` | Authenticator, Directory, Accounts | `source`, `waiting`, `max_peers`, `waiting_places`, `seen_every_secs` |
+| `coqui_access_password` | Authenticator, Directory, Accounts | `source`, `max_accounts`, `argon2`, `max_password_bytes`, `record_limits` |
+| `coqui_access_key` | Authenticator, Directory, Accounts | `source`, `prefix`, `key_hash` (tagged by `algorithm`), `max_keys`, `record_limits` |
+| `coqui_access_mtls` | Authenticator, Directory, Accounts | `source`, `waiting`, `max_records`, `waiting_per_source`, `waiting_total`, `waiting_rerecord_secs`, `trust`, `ca_file`, `subject`, `san`, `ip_in_dns`, `account`, `max_chain`, `record_limits` |
 | `coqui_access_ldap` | Authenticator, Directory | `url`, `start_tls`, `ca_file`, `base`, `bind`, `bind_password`, `user_filter`, `name_attribute`, `group_attribute`, `group_filter`, `group_base`, `nested_groups`, `timeout_seconds` |
-| `coqui_access_proxy` | Authenticator | `trusted`, `user_header`, `subject_header`, `subject_field` |
-| `coqui_roles` | Authorizer | `scope_kinds`, `roles`, `rules` |
+| `coqui_access_proxy` | Authenticator | `trusted`, `user_header`, `certificate_header`, `certificate_encoding`, `subject_header`, `account`, `max_certificate_bytes` |
+| `coqui_roles` | Authorizer | `scope_kinds`, `roles`, `rules`, `limits` |
 
-`source` is `{ "file": { "path": "<file>", "format": "toml" } }`; with none, records live in
-memory. The host's own tests build the plugin libraries as dev-dependencies and load them from
+`source` is `{ "file": { "path": "<file>", "format": "toml" | "json" } }`; with none, records
+live in memory. `coqui_access_ldap` also takes `cache` (on by default). The host's own tests build the plugin libraries as dev-dependencies and load them from
 beside the test binary; after removing or renaming a plugin, clean `target/`, because the host
 loads every library it finds.
 

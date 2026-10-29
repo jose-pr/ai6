@@ -224,7 +224,7 @@ role = "viewer"
 accepts only AI6's scope kinds. The same authorizer is the `coqui_roles` Guatiao provider
 (configured with `scope_kinds`, `roles` and `rules`). Authentication and directories come from
 the [`coqui-access`](https://github.com/Boriken-Dev/coqui-access) provider libraries
-(`coqui_access_local`, `_key`, `_ldap`, `_proxy` and `_peer`), which a Station or Universal
+(`coqui_access_password`, `_key`, `_ldap`, `_proxy` and `_mtls`), which a Station or Universal
 Exports loads from `--plugin-path`.
 
 ## Development

@@ -5,11 +5,11 @@ Who may do what is three questions, each a Guatiao provider kind from the shared
 
 | Question | Kind | Providers |
 | --- | --- | --- |
-| Are these credentials good? | Authenticator | `coqui_access_local` (passwords), `coqui_access_key` (bearer keys), `coqui_access_ldap`, `coqui_access_proxy` (a trusted reverse proxy), `coqui_access_peer` (Station certificates) |
-| Who is this? | Directory | `coqui_access_local`, `coqui_access_key`, `coqui_access_ldap`, `coqui_access_peer` |
+| Are these credentials good? | Authenticator | `coqui_access_password` (passwords), `coqui_access_key` (bearer keys), `coqui_access_ldap`, `coqui_access_proxy` (a trusted reverse proxy), `coqui_access_mtls` (client certificates: Station certificates, or a CA's) |
+| Who is this? | Directory | `coqui_access_password`, `coqui_access_key`, `coqui_access_ldap`, `coqui_access_mtls` |
 | May they do this here? | Authorizer | `coqui_roles`, or the `access.toml` policy Universal Exports reads itself |
 
-`local`, `key` and `peer` can also manage their own accounts (the `Accounts` kind). The
+`password`, `key` and `mtls` can also manage their own accounts (the `Accounts` kind). The
 providers are libraries: point `--plugin-path` at the directory that holds them.
 
 ## Providers
@@ -18,15 +18,22 @@ Each provider takes a JSON object; every key is optional.
 
 | Provider | Config |
 | --- | --- |
-| `coqui_access_local` | `source`, `max_accounts`, `argon2` (`memory_kib`, `iterations`, `parallelism`) |
-| `coqui_access_key` | `source`, `prefix` (default `ck_`), `key_hash` (`sha256` or `argon2id`), `argon2`, `max_keys` |
-| `coqui_access_peer` | `source`, `waiting`, `max_peers`, `waiting_places`, `seen_every_secs` |
-| `coqui_access_ldap` | `url`, `start_tls`, `ca_file`, `base`, `bind`, `bind_password`, `user_filter`, `name_attribute`, `group_attribute`, `group_filter`, `group_base`, `nested_groups`, `timeout_seconds` |
-| `coqui_access_proxy` | `trusted`, `user_header`, `subject_header`, `subject_field` |
-| `coqui_roles` | `scope_kinds`, `roles`, `rules` |
+| `coqui_access_password` | `source`, `max_accounts`, `argon2` (`memory_kib`, `iterations`, `parallelism`), `max_password_bytes`, `record_limits` |
+| `coqui_access_key` | `source`, `prefix` (default `ck_`), `key_hash` (`{ "algorithm": "sha256" }`, or `"argon2id"` with its costs beside it), `max_keys`, `record_limits` |
+| `coqui_access_mtls` | `source`, `waiting`, `max_records`, `waiting_per_source`, `waiting_total`, `waiting_rerecord_secs`, `trust` (`pinned`, `ca`, `pinned-or-ca`), `ca_file`, `subject`, `san`, `ip_in_dns`, `account`, `max_chain`, `record_limits` |
+| `coqui_access_ldap` | `url`, `start_tls`, `ca_file`, `base`, `bind`, `bind_password`, `user_filter`, `name_attribute`, `group_attribute`, `group_filter`, `group_base`, `nested_groups`, `timeout_seconds`, `cache` |
+| `coqui_access_proxy` | `trusted`, `user_header`, `certificate_header`, `certificate_encoding` (`pem-url`, `der-base64`, `xfcc`), `subject_header`, `account`, `max_certificate_bytes` |
+| `coqui_roles` | `scope_kinds`, `roles`, `rules`, `limits` |
 
-`source` says where records live: `{ "file": { "path": "accounts.toml", "format": "toml" } }`.
-With no `source` they live in memory and are gone at exit.
+`source` says where records live: `{ "file": { "path": "accounts.toml", "format": "toml" } }`,
+`format` being `toml` or `json`. With no `source` they live in memory and are gone at exit.
+
+Universal Exports keeps what its Directory and Authorizer answer for a few seconds, to absorb
+bursts: a person found or an action granted 5 s, "no such person" or a denial 1 s, at most
+10 000 of each (`AI6_EXPORTS_ACCESS_CACHE_TTL`, `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL`,
+`AI6_EXPORTS_ACCESS_CACHE_ENTRIES`; `0` turns one off). A removed account or a withdrawn
+grant can pass for up to the first; passwords and keys are always checked at the provider.
+A longer lifetime is reported at start.
 
 ## The access policy
 

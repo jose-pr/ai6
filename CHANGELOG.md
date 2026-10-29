@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Universal Exports keeps its Directory's lookups and a plugin Authorizer's decisions for a
+  few seconds (coqui-access-kit's `Cached`; `AI6_EXPORTS_ACCESS_CACHE_TTL` 5 s,
+  `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL` 1 s, `AI6_EXPORTS_ACCESS_CACHE_ENTRIES` 10 000, `0`
+  turning one off), and reports a longer lifetime at start. `Plugins::cached_directory` and
+  `cached_authorizer` load a provider that way.
 - Outer Office (short name OO) is the Flutter desktop and web operator app, in
   `clients/outer-office` (Dart package `outer_office`); Moneypenny is the AI assistant
   inside it. Its build defines are `OO_API` and `OO_DEMO`, and it keeps the theme choice
@@ -811,12 +816,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   configuration and bubblewrap argument translation.
 - Station identities (`station-tls` feature): persistent certificates, SHA-256
   fingerprints, pinned-peer or CA mutual TLS and a waiting/accepted peer store, on the shared
-  `coqui-peer-tls` and `coqui-peer` crates. The strict policy is the default (TLS 1.3, SHA-2
+  `coqui-peer-tls` and `coqui-peer` crates. Stations pass the modern policy (TLS 1.3, SHA-2
   pins); the waiting list is bounded per source address, in total and by re-record time, a peer
   is listed only after it proved its key, and `ai6 peer waiting` shows each source address.
 - Access kinds: Authenticator, Directory, Authorizer and Accounts as Guatiao kinds from the shared
   `coqui-access` crate, the first-match `RoleAuthorizer` from `coqui-roles`, and the providers
-  `coqui_access_local`, `_key`, `_ldap`, `_proxy`, `_peer` and `coqui_roles`, loaded as plugin
+  `coqui_access_password`, `_key`, `_ldap`, `_proxy`, `_mtls` and `coqui_roles`, loaded as plugin
   libraries from `--plugin-path`.
 - Universal Exports limits login tries: 5 a minute per client address and 10 in ten minutes per
   account name by default, refused with `429` and `Retry-After` before any Authenticator is
@@ -887,9 +892,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ports, when it reconnects.
 - Access details: `Attempt::headers` is an ordered `Vec<(String, String)>`;
   `ai6::role_authorizer_from_toml` and `load_role_authorizer` read `access.toml`; the
-  `coqui_roles` provider takes `scope_kinds`, `roles` and `rules`. `coqui_access_local`,
-  `coqui_access_key` and `coqui_access_peer` are configured with
-  `{"source": {"file": {"path": P}}}` over an `[[accounts]]`, `[[keys]]` or `[[peers]]` file;
+  `coqui_roles` provider takes `scope_kinds`, `roles` and `rules`. `coqui_access_password`,
+  `coqui_access_key` and `coqui_access_mtls` are configured with
+  `{"source": {"file": {"path": P, "format": "toml"}}}` (or `json`) over an `accounts`, `keys` or
+  `peers` table;
   a key's `hash` is labelled (`sha256:<hex>`), the key `prefix` is configurable, and a peer's
   `certificate` may be in any fingerprint spelling.
 - Station TLS details: `ai6::station::identity` re-exports `coqui-peer-tls`'s `Identity`,

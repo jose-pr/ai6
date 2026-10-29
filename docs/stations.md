@@ -274,7 +274,7 @@ peers a listener refused together with the address each came from, and
 `ai6 peer accept FINGERPRINT` pins one. Any spelling of a fingerprint is read, grouped base32
 included.
 
-Stations speak the `ai6-station/1` protocol over mutual TLS with the strict policy by default
+Stations speak the `ai6-station/1` protocol over mutual TLS with the modern policy by default
 (TLS 1.3, SHA-2 pins). A peer is listed as waiting only after it has proved it holds its key,
 and the list is bounded per source address, in total, and by how often one peer from one
 address is written down again. A Station keeps its identity in `identity.pem` and its peers

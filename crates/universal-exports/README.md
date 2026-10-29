@@ -73,9 +73,9 @@ Providers are the loadable libraries of
 [`coqui-access`](https://github.com/Boriken-Dev/coqui-access) (`--plugin-path` names the
 directory they are in), checked against a pin set as a Station checks its own
 (`--plugin-pins`, `--plugin-profile`). Provider config is read from a JSON object file and validated
-against each provider's Guatiao schema. For example, local accounts use the same config
+against each provider's Guatiao schema. For example, password accounts use the same config
 for both provider kinds. Pass its path with `--authenticator-config` and
-`--directory-config`; select the provider IDs (`coqui_access_local`) with `--authenticator`
+`--directory-config`; select the provider IDs (`coqui_access_password`) with `--authenticator`
 and `--directory`.
 
 ```json
@@ -89,7 +89,7 @@ For an existing authenticated reverse proxy, configure the same identity header
 it already asserts upstream:
 
 ```powershell
-$env:AI6_EXPORTS_DIRECTORY = 'coqui_access_local'
+$env:AI6_EXPORTS_DIRECTORY = 'coqui_access_password'
 $env:AI6_EXPORTS_DIRECTORY_CONFIG = 'C:\secure\accounts.json'
 $env:AI6_EXPORTS_PROXY_USER_HEADER = 'X-Forwarded-User'
 $env:AI6_EXPORTS_PROXY_LOOKUP_BY = 'name'
@@ -252,6 +252,9 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 | `AI6_EXPORTS_ACCESS_POLICY` | TOML policy for the built-in RoleAuthorizer; alternative to `AI6_EXPORTS_AUTHORIZER`. | Deny all |
 | `AI6_EXPORTS_AUTHORIZER` | Optional custom Guatiao Authorizer provider ID; alternative to `AI6_EXPORTS_ACCESS_POLICY`. | None |
 | `AI6_EXPORTS_AUTHORIZER_CONFIG` | Path to the custom Authorizer's JSON config object. | None |
+| `AI6_EXPORTS_ACCESS_CACHE_TTL` | Seconds a found person or a granted action is kept, to absorb bursts; `0` keeps none. | `5` |
+| `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL` | Seconds "no such person" or a denial is kept; `0` keeps none. | `1` |
+| `AI6_EXPORTS_ACCESS_CACHE_ENTRIES` | The most lookups, and decisions, kept; `0` keeps none. | `10000` |
 | `AI6_EXPORTS_ROSTER` | The roster the Stations read (as `ai6 serve --config`): a configuration directory (read-only), `sqlite:PATH` or a `postgres://` URL; its password may come from `AI6_CONFIG_PASSWORD`. | None (roster routes answer 503) |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_ADDRESS` | Password or key tries a minute from one client address. | `5` |
 | `AI6_EXPORTS_LOGIN_TRIES_PER_NAME` | Tries in ten minutes for one account name, from anywhere. | `10` |
