@@ -44,7 +44,7 @@ Uri _apiOrigin() => _apiOverride.isNotEmpty
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  LicenseRegistry.addLicense(robotoLicense);
+  LicenseRegistry.addLicense(() => fontLicenses(web: kIsWeb));
   if (kIsWeb) {
     unawaited(_startWeb());
     return;
@@ -52,11 +52,17 @@ void main() {
   _startDesktop();
 }
 
-/// The licence of the bundled Roboto font, for the app's licence page.
-Stream<LicenseEntry> robotoLicense() async* {
+/// The licences of the fonts the app ships, for its licence page: Roboto everywhere, and on
+/// the [web] the Noto fallback fonts its build serves.
+Stream<LicenseEntry> fontLicenses({required bool web}) async* {
   yield LicenseEntryWithLineBreaks(const [
     'Roboto',
   ], await rootBundle.loadString('assets/fonts/LICENSE-Roboto.txt'));
+  if (web) {
+    yield LicenseEntryWithLineBreaks(const [
+      'Noto fonts',
+    ], await rootBundle.loadString('assets/fonts/LICENSE-Noto.txt'));
+  }
 }
 
 Future<void> _startWeb() async {

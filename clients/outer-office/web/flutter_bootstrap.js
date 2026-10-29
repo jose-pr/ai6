@@ -4,7 +4,7 @@
 // Where the engine may fetch from, by the `[assets] cdn` of OO.cfg beside this page. The
 // engine reads it before the app starts, so this file, not the app, reads that one key.
 // "none" (the default) loads nothing from another origin: CanvasKit from canvaskit/ and
-// fallback glyph fonts from assets/fonts/fallback/, where a deployment may put Noto fonts.
+// fallback glyph fonts from assets/fonts/fallback/, which tool/cdn_files.dart fills.
 // "fonts" takes fallback fonts from Google Fonts; "all" also takes the engine from
 // Flutter's CDN.
 const ooOrigins = {

@@ -23,6 +23,7 @@ dependencies:
   xterm2: ^5.4.0
 
 dev_dependencies:
+  crypto: ^3.0.7
   flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter
@@ -32,6 +33,7 @@ flutter:
   assets:
     - assets/backdrops/
     - assets/brand/moneypenny-128.png
+    - assets/fonts/LICENSE-Noto.txt
     - assets/fonts/LICENSE-Roboto.txt
     - assets/icons/
   # Bundled so the web engine has its default font without fetching it from Google Fonts.

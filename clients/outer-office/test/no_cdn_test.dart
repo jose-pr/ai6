@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:outer_office/main.dart' show fontLicenses;
 
 /// Hosts the web app must not reach unless a deployment opts in.
 const cdnHosts = [
@@ -24,6 +25,9 @@ Map<String, dynamic> origins(String bootstrap) {
   expect(match, isNotNull, reason: 'flutter_bootstrap.js declares ooOrigins');
   return jsonDecode(match!.group(1)!) as Map<String, dynamic>;
 }
+
+/// Where the default build serves the engine's fallback fonts.
+const fallbackBase = 'assets/fonts/fallback/';
 
 bool local(Object? url) =>
     url is String && !url.contains('//') && !url.contains(':');
@@ -48,6 +52,54 @@ void main() {
       greaterThanOrEqualTo(3),
     );
     expect(bootstrap, contains('config: ooOrigins[cdn]'));
+    // The engine takes the fallback font base only from initializeEngine.
+    expect(bootstrap, contains('initializeEngine(ooOrigins[cdn])'));
+    expect(none['fontFallbackBaseUrl'], fallbackBase);
+  });
+
+  test('every fallback font has a place under the default base', () {
+    final manifest = jsonDecode(
+      File('tool/cdn_files.json').readAsStringSync(),
+    ) as Map<String, dynamic>;
+    final files = (manifest['files'] as List<dynamic>)
+        .cast<Map<String, dynamic>>();
+    final fonts = files.where((file) => file['host'] == 'fonts.gstatic.com');
+    final engine = files.where((file) => file['host'] == 'www.gstatic.com');
+    expect(fonts.length, greaterThan(700));
+    expect(engine, isNotEmpty);
+    expect(files.length, fonts.length + engine.length);
+    for (final font in fonts) {
+      final path = font['path'] as String;
+      expect(path, startsWith('/s/'));
+      expect(font['serve'], '$fallbackBase${path.substring(3)}');
+      expect(font['licence'], 'OFL-1.1');
+      expect(font['sha256'], matches(RegExp(r'^[0-9a-f]{64}$')));
+    }
+    for (final family in [
+      'notosans/',
+      'notosansarabic/',
+      'notosanshebrew/',
+      'notosansdevanagari/',
+      'notosansthai/',
+      'notosanssc/',
+      'notosanstc/',
+      'notosansjp/',
+      'notosanskr/',
+      'notocoloremoji/',
+    ]) {
+      expect(
+        fonts.where(
+          (font) => (font['path'] as String).startsWith('/s/$family'),
+        ),
+        isNotEmpty,
+        reason: family,
+      );
+    }
+    for (final file in engine) {
+      expect(file['path'], contains('/${manifest['engine_revision']}/'));
+      expect(file['licence'], 'BSD-3-Clause');
+      expect(file.containsKey('serve'), isFalse);
+    }
   });
 
   test('the page and its web files name no CDN host', () {
@@ -81,6 +133,17 @@ void main() {
       contains('Apache License'),
     );
     expect(
+      await rootBundle.loadString('assets/fonts/LICENSE-Noto.txt'),
+      contains('SIL Open Font License, Version 1.1'),
+    );
+    final web = await fontLicenses(web: true).toList();
+    expect(
+      [for (final entry in web) ...entry.packages],
+      ['Roboto', 'Noto fonts'],
+    );
+    final desktop = await fontLicenses(web: false).toList();
+    expect([for (final entry in desktop) ...entry.packages], ['Roboto']);
+    expect(
       File('pubspec.lock').readAsStringSync(),
       isNot(contains('google_fonts')),
     );
@@ -93,11 +156,27 @@ void main() {
       final output = built.readAsStringSync();
       expect(origins(output), origins(bootstrap));
       expect(output, contains('config: ooOrigins[cdn]'));
+      expect(output, contains('initializeEngine(ooOrigins[cdn])'));
       expect(File('build/web/canvaskit/canvaskit.wasm').existsSync(), isTrue);
       expect(File('build/web/canvaskit/skwasm.wasm').existsSync(), isTrue);
       final index = File('build/web/index.html').readAsStringSync();
       for (final host in cdnHosts) {
         expect(index, isNot(contains(host)), reason: host);
+      }
+      // tool/cdn_files.dart fill puts the fallback fonts into the build.
+      final manifest = jsonDecode(
+        File('tool/cdn_files.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
+      for (final file
+          in (manifest['files'] as List<dynamic>)
+              .cast<Map<String, dynamic>>()) {
+        if (file['serve'] case final String serve) {
+          expect(
+            File('build/web/$serve').lengthSync(),
+            file['bytes'],
+            reason: serve,
+          );
+        }
       }
     },
     skip: built.existsSync()
