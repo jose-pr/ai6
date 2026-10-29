@@ -177,7 +177,7 @@ pub async fn universal_exports::Gateway::submit_input(&self, &ai6_diptel::Sessio
 pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, universal_exports::AccessProviders) -> Self
 pub fn universal_exports::Gateway::with_assistant(self, universal_exports::AssistantConfig) -> Self
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
-pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigSource>) -> Self
+pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>) -> Self
 impl core::fmt::Debug for universal_exports::Gateway
 pub fn universal_exports::Gateway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::GatewayConfig
