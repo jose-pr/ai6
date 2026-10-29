@@ -683,7 +683,7 @@ pub struct UnexRecord { authenticator, authenticator_config, directory, director
     authorizer, authorizer_config, proxy_user_header, proxy_lookup_by /* "name" */,
     login_tries_per_address, login_tries_per_name, client_address_header, access_cache_ttl,
     access_cache_negative_ttl, access_cache_entries, assistant /* true */,
-    assistant_agent /* "moneypenny" */ }
+    assistant_agent /* "moneypenny" */, route_text_bytes /* None: 128 */ }
 impl UnexRecord { pub fn weakenings(&self) -> Vec<String>; }   // inline credentials in *_config
 #[non_exhaustive] #[derive(Clone)]
 pub struct ConfigSnapshot { pub revision: ConfigRevision, pub roster: Roster, pub settings: Settings }

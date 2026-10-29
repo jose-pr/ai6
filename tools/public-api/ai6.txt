@@ -477,6 +477,7 @@ pub ai6::directorates::m::config::UnexRecord::login_tries_per_address: core::opt
 pub ai6::directorates::m::config::UnexRecord::login_tries_per_name: core::option::Option<u32>
 pub ai6::directorates::m::config::UnexRecord::proxy_lookup_by: alloc::string::String
 pub ai6::directorates::m::config::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::config::UnexRecord::route_text_bytes: core::option::Option<u64>
 impl ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
@@ -7300,6 +7301,7 @@ pub ai6::UnexRecord::login_tries_per_address: core::option::Option<u32>
 pub ai6::UnexRecord::login_tries_per_name: core::option::Option<u32>
 pub ai6::UnexRecord::proxy_lookup_by: alloc::string::String
 pub ai6::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
+pub ai6::UnexRecord::route_text_bytes: core::option::Option<u64>
 impl ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord

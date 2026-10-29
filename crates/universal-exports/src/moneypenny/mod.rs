@@ -84,6 +84,7 @@ pub struct AssistantConfig {
     person_bytes: usize,
     memory_per_person: usize,
     memory_total: usize,
+    route_text_bytes: usize,
 }
 
 impl Default for AssistantConfig {
@@ -103,6 +104,7 @@ impl Default for AssistantConfig {
             person_bytes: 4 * 1024 * 1024,
             memory_per_person: 2,
             memory_total: 16,
+            route_text_bytes: routes::DEFAULT_TEXT_BYTES,
         }
     }
 }
@@ -128,6 +130,21 @@ impl AssistantConfig {
     /// The roster Agent that is Moneypenny.
     pub fn agent_id(&self) -> &str {
         &self.agent_id
+    }
+
+    /// The longest `text` filter an app route may carry, in bytes (default 128, at least 1):
+    /// in her links and cards, and in the page a message was sent from. A longer one refuses
+    /// the view, or drops the page line.
+    #[must_use]
+    pub fn with_route_text_bytes(mut self, bytes: usize) -> Self {
+        self.route_text_bytes = bytes.max(1);
+        self
+    }
+
+    pub(crate) fn route_limits(&self) -> routes::Limits {
+        routes::Limits {
+            text_bytes: self.route_text_bytes,
+        }
     }
 
     /// Keeps at most `per_person` conversations for one person (default 20) and `total` in
@@ -580,7 +597,7 @@ impl Assistant {
                 "Sign in again to talk to Moneypenny.".to_owned(),
             )
         })?;
-        let message = match route.and_then(page_line) {
+        let message = match route.and_then(|route| page_line(route, self.config.route_limits())) {
             Some(line) => format!("{line}\n\n{text}"),
             None => text.to_owned(),
         };
@@ -1658,7 +1675,7 @@ impl Assistant {
     /// Shows a view Moneypenny built, when it is exactly the view schema; otherwise tells her
     /// why and shows nothing.
     pub(crate) fn show(&self, granted: &Granted, input: &Value) -> tools::Outcome {
-        let view = match views::parse(input) {
+        let view = match views::parse(input, self.config.route_limits()) {
             Ok(view) => view,
             Err(reason) => {
                 return tools::Outcome::error(format!(
@@ -2039,8 +2056,8 @@ fn recap(conversation: &Conversation) -> Option<String> {
 
 /// The line that tells Moneypenny which app page the person was on when they sent a message:
 /// the route in its link form, percent-encoded, or nothing when it is not a route.
-fn page_line(route: &Value) -> Option<String> {
-    let route = routes::Route::from_json(route).ok()?;
+fn page_line(route: &Value, limits: routes::Limits) -> Option<String> {
+    let route = routes::Route::from_json(route, limits).ok()?;
     Some(format!("[App page: {}]", route.to_uri()))
 }
 

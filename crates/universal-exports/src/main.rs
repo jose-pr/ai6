@@ -206,8 +206,12 @@ async fn run(cli: Cli) -> Result<(), String> {
     };
     gateway = gateway.with_roster(provider.clone());
     if record.assistant {
-        let assistant = AssistantConfig::new(record.assistant_agent.clone())
+        let mut assistant = AssistantConfig::new(record.assistant_agent.clone())
             .map_err(|error| format!("the assistant Agent is not valid: {error}"))?;
+        if let Some(bytes) = record.route_text_bytes {
+            assistant =
+                assistant.with_route_text_bytes(usize::try_from(bytes).unwrap_or(usize::MAX));
+        }
         gateway = gateway.with_assistant(assistant);
     }
     let poll = settings.located.value.provider.poll();

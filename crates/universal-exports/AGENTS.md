@@ -386,6 +386,10 @@ impl AssistantConfig {
     /// Memory requests waiting for a Station at once: per signed-in person (default 2) and in
     /// all (default 16), each at least 1; past either the route answers 429
     pub fn with_memory_requests(self, per_person: usize, total: usize) -> Self;
+    /// The longest `text` filter of an app route (default 128 bytes, at least 1), in her
+    /// links and cards and in a message's `route`; past it the view is refused, or the page
+    /// line dropped
+    pub fn with_route_text_bytes(self, bytes: usize) -> Self;
 }
 impl Gateway { pub fn with_assistant(self, config: AssistantConfig) -> Self; }
 ```
@@ -837,7 +841,8 @@ The optional `cli` feature builds the service command:
   `*_config` JSON objects, `proxy_user_header`, `proxy_lookup_by` (default `name`),
   `login_tries_per_address`, `login_tries_per_name`, `client_address_header`,
   `access_cache_ttl`, `access_cache_negative_ttl`, `access_cache_entries`, `assistant`
-  (default true) and `assistant_agent` (default `moneypenny`)) and its `access` record, the
+  (default true), `assistant_agent` (default `moneypenny`) and `route_text_bytes` (default
+128, `AssistantConfig::with_route_text_bytes`)) and its `access` record, the
   role policy (`Settings::access_authorizer`; none denies every action). User access needs
   `directory` and either `authenticator` or `proxy_user_header`; `access` and `authorizer`
   are exclusive. Provider configurations are limited to 64 nested values and validated by

@@ -18,8 +18,20 @@ const boardStates = [
   'abandoned',
 ];
 
-/// The longest `text` filter, in bytes.
-const maxRouteText = 128;
+/// The bounds every route is checked against.
+@immutable
+class OoRouteLimits {
+  const OoRouteLimits({this.textBytes = defaultTextBytes});
+
+  /// The longest `text` filter by default, in bytes.
+  static const defaultTextBytes = 128;
+
+  /// The longest `text` filter, in bytes: `OO.cfg`'s `[routes] text_bytes`.
+  final int textBytes;
+
+  /// The limits in force, set once at start from `OO.cfg`.
+  static OoRouteLimits current = const OoRouteLimits();
+}
 
 const _sorts = ['updated', 'created', 'state'];
 const _orders = ['asc', 'desc'];
@@ -338,10 +350,11 @@ OoRoute _checked(OoPage page, List<(String, Object)> values) {
         }
       case (_Kind.text, final String text):
         if (text.isEmpty ||
-            utf8.encode(text).length > maxRouteText ||
+            utf8.encode(text).length > OoRouteLimits.current.textBytes ||
             text.runes.any((rune) => _isControl(rune) || isInvisible(rune))) {
-          throw const FormatException(
-            'text is 1 to $maxRouteText bytes without control or invisible characters',
+          throw FormatException(
+            'text is 1 to ${OoRouteLimits.current.textBytes} bytes without control or '
+            'invisible characters',
           );
         }
       case (_Kind.oneOf, final String text):

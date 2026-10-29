@@ -91,6 +91,7 @@ Future<void> _startWeb() async {
     }
   }
   final config = await loadWebConfig(Uri.base);
+  OoRouteLimits.current = config.routeLimits;
   final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
     apiOrigin: _apiOrigin(config),
@@ -117,6 +118,7 @@ Future<void> _startWeb() async {
 
 void _startDesktop() {
   final config = loadDesktopConfig();
+  OoRouteLimits.current = config.routeLimits;
   final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
     apiOrigin: _apiOrigin(config),

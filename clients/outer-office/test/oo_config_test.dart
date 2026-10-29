@@ -109,6 +109,31 @@ void main() {
     }
   });
 
+  test('[routes] text_bytes sets the longest route text, 128 bytes unset', () {
+    expect(OoConfig.none.routeLimits.textBytes, 128);
+    expect(
+      OoConfig.parse('[routes]\ntext_bytes = 512\n').routeLimits.textBytes,
+      512,
+    );
+    expect(
+      OoConfig.parse('#!json\n{"routes": {"text_bytes": 64}}\n')
+          .routeLimits
+          .textBytes,
+      64,
+    );
+    for (final bad in ['0', '-1', '"128"', '1.5']) {
+      expect(
+        () => OoConfig.parse('[routes]\ntext_bytes = $bad\n'),
+        throwsFormatException,
+        reason: bad,
+      );
+    }
+    expect(
+      () => OoConfig.parse('[routes]\nlength = 1\n'),
+      throwsFormatException,
+    );
+  });
+
   test('a document is read as the format it names, never guessed', () {
     expect(declaredFormat('{"unex": {}}'), OoConfigFormat.toml);
     expect(() => OoConfig.parse('{"unex": {}}'), throwsFormatException);

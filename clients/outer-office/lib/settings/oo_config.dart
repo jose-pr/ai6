@@ -4,14 +4,15 @@ import 'package:toml/toml.dart';
 import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
 
+import '../routes/oo_route.dart';
 import '../theme/oo_tokens.dart';
 
 /// The formats an `OO.cfg` can be written in.
 enum OoConfigFormat { toml, json, yaml }
 
 /// Outer Office's own configuration, `OO.cfg`: where Universal Exports is, the deployment's
-/// default theme and Moneypenny's chat sizes. The person's own choices (`oo.theme`, the chat
-/// width they drag to) win over it.
+/// default theme, Moneypenny's chat sizes and the bounds of routes. The person's own choices
+/// (`oo.theme`, the chat width they drag to) win over it.
 ///
 /// A document names its format on its first line, `#!json`, `#!yaml` (`#!yml`) or `#!toml`
 /// (the last word of the line, after any `/`, read without case or leading dots); a document
@@ -19,7 +20,12 @@ enum OoConfigFormat { toml, json, yaml }
 /// Unknown tables and keys are refused; `[assets]` belongs to the web page's bootstrap and is
 /// left alone.
 class OoConfig {
-  const OoConfig({this.unexUrl, this.theme, this.chat = const ChatSettings()});
+  const OoConfig({
+    this.unexUrl,
+    this.theme,
+    this.chat = const ChatSettings(),
+    this.routeTextBytes,
+  });
 
   /// `[unex] url`: Universal Exports' origin.
   final Uri? unexUrl;
@@ -30,7 +36,16 @@ class OoConfig {
   /// `[chat]`: Moneypenny's chat sizes and timing.
   final ChatSettings chat;
 
-  /// The defaults: no origin, no theme and the default chat.
+  /// `[routes] text_bytes`: the longest `text` filter a route may carry, in bytes; `null`
+  /// keeps [OoRouteLimits.defaultTextBytes].
+  final int? routeTextBytes;
+
+  /// The route limits this file sets, over the defaults.
+  OoRouteLimits get routeLimits => routeTextBytes == null
+      ? const OoRouteLimits()
+      : OoRouteLimits(textBytes: routeTextBytes!);
+
+  /// The defaults: no origin, no theme, the default chat and the default route limits.
   static const none = OoConfig();
 
   /// Reads an `OO.cfg`'s text.
@@ -38,7 +53,7 @@ class OoConfig {
   /// Throws a [FormatException] naming the format, the table or the key that is wrong.
   factory OoConfig.parse(String text) {
     final document = decodeOoConfig(text);
-    const known = {'unex', 'appearance', 'chat', 'assets'};
+    const known = {'unex', 'appearance', 'chat', 'routes', 'assets'};
     for (final key in document.keys) {
       if (!known.contains(key)) {
         throw FormatException('OO.cfg: unknown table [$key]');
@@ -108,6 +123,13 @@ class OoConfig {
       );
     }
     final appearance = table('appearance', {'theme'});
+    final routes = table('routes', {'text_bytes'});
+    final textBytes = routes['text_bytes'];
+    if (textBytes != null && (textBytes is! int || textBytes < 1)) {
+      throw const FormatException(
+        'OO.cfg: routes.text_bytes is not a whole number of bytes, 1 or more',
+      );
+    }
     final url = string(unex, 'unex', 'url');
     final origin = url == null ? null : Uri.tryParse(url);
     if (url != null &&
@@ -118,6 +140,7 @@ class OoConfig {
       unexUrl: origin,
       theme: string(appearance, 'appearance', 'theme'),
       chat: chat,
+      routeTextBytes: textBytes as int?,
     );
   }
 

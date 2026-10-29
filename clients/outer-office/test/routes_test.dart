@@ -155,6 +155,34 @@ void main() {
     },
   );
 
+  test('the text limit is the one OO.cfg sets', () {
+    addTearDown(() => OoRouteLimits.current = const OoRouteLimits());
+    final long = 'app:/missions?text=${'a' * 200}';
+    expect(
+      () => OoRoute.parseUri(long),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          'text is 1 to 128 bytes without control or invisible characters',
+        ),
+      ),
+    );
+    OoRouteLimits.current = const OoRouteLimits(textBytes: 200);
+    expect(OoRoute.parseUri(long)['text'], hasLength(200));
+    OoRouteLimits.current = const OoRouteLimits(textBytes: 4);
+    expect(
+      () => OoRoute.parseUri('app:/missions?text=abcde'),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          'text is 1 to 4 bytes without control or invisible characters',
+        ),
+      ),
+    );
+  });
+
   test('a filter is set, removed and cleared, keeping the tab', () {
     final route = OoRoute.parseUri(
       'app:/missions?operation_id=G&mission_id=m-1',

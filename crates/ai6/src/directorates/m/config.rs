@@ -514,6 +514,9 @@ pub struct UnexRecord {
     /// The roster Agent that is Moneypenny.
     #[serde(default = "UnexRecord::default_assistant_agent")]
     pub assistant_agent: String,
+    /// The longest `text` filter an Outer Office route may carry, in bytes: in Moneypenny's
+    /// links and cards, and in the page a message was sent from. Unset is 128; 0 reads as 1.
+    pub route_text_bytes: Option<u64>,
 }
 
 impl Default for UnexRecord {
@@ -535,6 +538,7 @@ impl Default for UnexRecord {
             access_cache_entries: None,
             assistant: Self::default_assistant(),
             assistant_agent: Self::default_assistant_agent(),
+            route_text_bytes: None,
         }
     }
 }

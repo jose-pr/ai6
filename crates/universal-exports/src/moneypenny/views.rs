@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 
 use super::actions;
 use super::checks::{identifier, short};
-use super::routes::Route;
+use super::routes::{Limits, Route};
 
 /// The schema version this gateway shows.
 pub(crate) const VIEW_VERSION: u32 = 1;
@@ -149,7 +149,7 @@ fn scalar(what: &str, value: &Value) -> Result<(), String> {
 }
 
 /// Every Markdown link is an app route (`app:/<page>?...`).
-fn links_stay_in_the_app(markdown: &str) -> Result<(), String> {
+fn links_stay_in_the_app(markdown: &str, limits: Limits) -> Result<(), String> {
     let mut rest = markdown;
     while let Some(at) = rest.find("](") {
         let target = &rest[at + 2..];
@@ -159,7 +159,7 @@ fn links_stay_in_the_app(markdown: &str) -> Result<(), String> {
             );
         }
         let end = target.find(')').unwrap_or(target.len());
-        Route::parse_uri(&target[..end])
+        Route::parse_uri(&target[..end], limits)
             .map_err(|reason| format!("a link is not an app route: {reason}"))?;
         rest = target;
     }
@@ -168,7 +168,12 @@ fn links_stay_in_the_app(markdown: &str) -> Result<(), String> {
 
 /// The page a card opens: a Mission on Missions, a Station on Stations, a Theater on the
 /// Stations page's Theaters tab (a card names no Station, which selecting a Theater needs).
-fn card_route(card: &str, id: &str, operation_id: Option<&str>) -> Result<Route, String> {
+fn card_route(
+    card: &str,
+    id: &str,
+    operation_id: Option<&str>,
+    limits: Limits,
+) -> Result<Route, String> {
     let json = match card {
         "mission" => serde_json::json!({
             "page": "missions", "operation_id": operation_id, "mission_id": id
@@ -176,12 +181,12 @@ fn card_route(card: &str, id: &str, operation_id: Option<&str>) -> Result<Route,
         "station" => serde_json::json!({"page": "stations", "station_id": id}),
         _ => serde_json::json!({"page": "stations", "tab": "theaters"}),
     };
-    Route::from_json(&json)
+    Route::from_json(&json, limits)
 }
 
 impl View {
     /// Checks every bound; the reason names the first one broken.
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self, limits: Limits) -> Result<(), String> {
         if self.version != VIEW_VERSION {
             return Err(format!("version must be {VIEW_VERSION}"));
         }
@@ -202,7 +207,7 @@ impl View {
         }
         for (index, block) in self.blocks.iter().enumerate() {
             block
-                .validate()
+                .validate(limits)
                 .map_err(|reason| format!("block {index}: {reason}"))?;
         }
         let size = serde_json::to_vec(self).map_or(usize::MAX, |bytes| bytes.len());
@@ -227,13 +232,13 @@ impl View {
 }
 
 impl Block {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self, limits: Limits) -> Result<(), String> {
         match self {
             Self::Text { markdown } => {
                 if markdown.trim().is_empty() || markdown.len() > MAX_TEXT {
                     return Err(format!("text is 1 to {MAX_TEXT} bytes"));
                 }
-                links_stay_in_the_app(markdown)
+                links_stay_in_the_app(markdown, limits)
             }
             Self::Table { columns, rows } => {
                 if columns.is_empty() || columns.len() > MAX_COLUMNS {
@@ -308,7 +313,7 @@ impl Block {
                 if card == "mission" && operation_id.is_none() {
                     return Err("a Mission card names its operation_id".to_owned());
                 }
-                card_route(card, id, operation_id.as_deref())?;
+                card_route(card, id, operation_id.as_deref(), limits)?;
                 if let Some(state) = state {
                     short("state", state)?;
                 }
@@ -404,15 +409,16 @@ fn pairs(items: &[Pair]) -> Result<(), String> {
     Ok(())
 }
 
-/// Parses and checks the `view` input of `show`.
-pub(crate) fn parse(input: &Value) -> Result<View, String> {
+/// Parses and checks the `view` input of `show`; its links and cards are routes within
+/// `limits`.
+pub(crate) fn parse(input: &Value, limits: Limits) -> Result<View, String> {
     let object = input
         .as_object()
         .filter(|object| object.len() == 1)
         .and_then(|object| object.get("view"))
         .ok_or("show takes exactly {\"view\": {...}}")?;
     let view: View = serde_json::from_value(object.clone()).map_err(|error| error.to_string())?;
-    view.validate()?;
+    view.validate(limits)?;
     Ok(view)
 }
 
@@ -576,7 +582,7 @@ mod tests {
     fn every_kind_of_the_fixture_is_accepted() {
         let fixture = fixture();
         for (name, view) in fixture["valid"].as_object().unwrap() {
-            let parsed = parse(&json!({ "view": view }));
+            let parsed = parse(&json!({ "view": view }), Limits::default());
             assert!(parsed.is_ok(), "{name}: {parsed:?}");
         }
     }
@@ -585,7 +591,7 @@ mod tests {
     fn every_invalid_view_of_the_fixture_is_refused_with_its_reason() {
         let fixture = fixture();
         for case in fixture["invalid"].as_array().unwrap() {
-            let refused = parse(&json!({ "view": case["view"] })).unwrap_err();
+            let refused = parse(&json!({ "view": case["view"] }), Limits::default()).unwrap_err();
             let reason = case["reason"].as_str().unwrap();
             assert!(
                 refused.contains(reason),
@@ -596,11 +602,14 @@ mod tests {
 
     #[test]
     fn a_form_fills_its_tool_from_fixed_values_and_typed_fields() {
-        let view = parse(&json!({"view": {"version": 1, "blocks": [{
-            "kind": "form", "tool": "propose_roster_edit", "title": "Edit Agent 008",
-            "fixed": {"kind": "agents", "key": "008"},
-            "fields": [{"name": "definition", "label": "Settings", "type": "json"}]
-        }]}}))
+        let view = parse(
+            &json!({"view": {"version": 1, "blocks": [{
+                "kind": "form", "tool": "propose_roster_edit", "title": "Edit Agent 008",
+                "fixed": {"kind": "agents", "key": "008"},
+                "fields": [{"name": "definition", "label": "Settings", "type": "json"}]
+            }]}}),
+            Limits::default(),
+        )
         .unwrap();
         let values = json!({"definition": "{\"priority\": 3}"});
         let (tool, input) = form_input(&view, values.as_object().unwrap()).unwrap();

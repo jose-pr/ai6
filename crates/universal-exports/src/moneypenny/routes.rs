@@ -12,8 +12,24 @@ use serde_json::Value;
 
 use super::checks::identifier;
 
-/// The longest `text` filter, in bytes.
-pub(crate) const MAX_TEXT: usize = 128;
+/// The longest `text` filter by default, in bytes.
+pub(crate) const DEFAULT_TEXT_BYTES: usize = 128;
+
+/// The bounds a route is checked against; [`super::AssistantConfig::with_route_text_bytes`]
+/// sets them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Limits {
+    /// The longest `text` filter, in bytes.
+    pub(crate) text_bytes: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            text_bytes: DEFAULT_TEXT_BYTES,
+        }
+    }
+}
 
 /// The states of a Mission or Session on the board, in the board's order.
 pub(crate) const STATES: [&str; 9] = [
@@ -41,7 +57,7 @@ const ROSTER_KINDS: &[&str] = &["operation", "agent", "role", "cover", "assistan
 enum Kind {
     /// An identifier, by the views' rule.
     Identifier,
-    /// Free text of 1 to [`MAX_TEXT`] bytes, without control or invisible characters.
+    /// Free text of 1 to [`Limits::text_bytes`] bytes, without control or invisible characters.
     Text,
     /// 1 to 9 distinct board states: a JSON array, comma-joined in a link.
     States,
@@ -188,7 +204,7 @@ pub(crate) struct Route {
 
 impl Route {
     /// Parses and checks the JSON form.
-    pub(crate) fn from_json(json: &Value) -> Result<Self, String> {
+    pub(crate) fn from_json(json: &Value, limits: Limits) -> Result<Self, String> {
         const NOT_A_ROUTE: &str = "a route is an object naming its page";
         let object = json.as_object().ok_or(NOT_A_ROUTE)?;
         let page = Page::named(
@@ -218,7 +234,7 @@ impl Route {
             };
             fields.push((name, field));
         }
-        Self::checked(page, fields)
+        Self::checked(page, fields, limits)
     }
 
     /// The JSON form.
@@ -237,7 +253,7 @@ impl Route {
     }
 
     /// Parses and checks the link form, `app:/<page>?k=v&...`; fields may come in any order.
-    pub(crate) fn parse_uri(uri: &str) -> Result<Self, String> {
+    pub(crate) fn parse_uri(uri: &str, limits: Limits) -> Result<Self, String> {
         let rest = uri
             .strip_prefix("app:/")
             .ok_or("a route link starts with app:/")?;
@@ -264,7 +280,7 @@ impl Route {
             };
             fields.push((name, field));
         }
-        Self::checked(page, fields)
+        Self::checked(page, fields, limits)
     }
 
     /// The link form, its query in the page's field order.
@@ -293,7 +309,11 @@ impl Route {
     }
 
     /// Checks each field against its kind and the page's rules, and puts them in field order.
-    fn checked(page: Page, mut fields: Vec<(&'static str, Field)>) -> Result<Self, String> {
+    fn checked(
+        page: Page,
+        mut fields: Vec<(&'static str, Field)>,
+        limits: Limits,
+    ) -> Result<Self, String> {
         for (index, (name, _)) in fields.iter().enumerate() {
             if fields[..index].iter().any(|(earlier, _)| earlier == name) {
                 return Err(format!("{name} appears twice"));
@@ -311,14 +331,15 @@ impl Route {
                 (Kind::Identifier, Field::Text(text)) => identifier(name, text)?,
                 (Kind::Text, Field::Text(text)) => {
                     if text.is_empty()
-                        || text.len() > MAX_TEXT
+                        || text.len() > limits.text_bytes
                         || text.chars().any(|c| {
                             c.is_control() || ai6::directorates::m::vetting::is_invisible(c)
                         })
                     {
                         return Err(format!(
-                            "text is 1 to {MAX_TEXT} bytes without control or invisible \
-                             characters"
+                            "text is 1 to {} bytes without control or invisible \
+                             characters",
+                            limits.text_bytes
                         ));
                     }
                 }
@@ -458,11 +479,12 @@ mod tests {
         let valid = fixture["valid"].as_array().unwrap();
         assert!(valid.len() >= 13, "every page has a case");
         for case in valid {
-            let from_json = Route::from_json(&case["json"])
+            let from_json = Route::from_json(&case["json"], Limits::default())
                 .unwrap_or_else(|reason| panic!("{}: {reason}", case["json"]));
             let uri = case["uri"].as_str().unwrap();
             assert_eq!(from_json.to_uri(), uri);
-            let from_uri = Route::parse_uri(uri).unwrap_or_else(|reason| panic!("{uri}: {reason}"));
+            let from_uri = Route::parse_uri(uri, Limits::default())
+                .unwrap_or_else(|reason| panic!("{uri}: {reason}"));
             assert_eq!(from_uri, from_json, "{uri}");
             assert_eq!(from_uri.to_json(), case["json"], "{uri}");
         }
@@ -475,8 +497,10 @@ mod tests {
         assert!(!invalid.is_empty());
         for case in invalid {
             let refused = match (case.get("json"), case.get("uri")) {
-                (Some(json), None) => Route::from_json(json).unwrap_err(),
-                (None, Some(uri)) => Route::parse_uri(uri.as_str().unwrap()).unwrap_err(),
+                (Some(json), None) => Route::from_json(json, Limits::default()).unwrap_err(),
+                (None, Some(uri)) => {
+                    Route::parse_uri(uri.as_str().unwrap(), Limits::default()).unwrap_err()
+                }
                 _ => panic!("a case has json or uri: {case}"),
             };
             let reason = case["reason"].as_str().unwrap();
@@ -486,7 +510,11 @@ mod tests {
 
     #[test]
     fn routes_accept_fields_in_any_order_and_write_them_in_the_page_order() {
-        let route = Route::parse_uri("app:/missions?state=failed,done&operation_id=G").unwrap();
+        let route = Route::parse_uri(
+            "app:/missions?state=failed,done&operation_id=G",
+            Limits::default(),
+        )
+        .unwrap();
         assert_eq!(
             route.to_uri(),
             "app:/missions?operation_id=G&state=failed,done"
@@ -495,22 +523,38 @@ mod tests {
 
     #[test]
     fn routes_percent_encode_what_is_not_unreserved() {
-        let route = Route::from_json(&json!({
-            "page": "missions", "text": "a&b=c, d)é", "operation_id": "G/1"
-        }))
+        let route = Route::from_json(
+            &json!({"page": "missions", "text": "a&b=c, d)é", "operation_id": "G/1"}),
+            Limits::default(),
+        )
         .unwrap();
         let uri = route.to_uri();
         assert_eq!(
             uri,
             "app:/missions?operation_id=G%2F1&text=a%26b%3Dc%2C%20d%29%C3%A9"
         );
-        assert_eq!(Route::parse_uri(&uri).unwrap(), route);
+        assert_eq!(Route::parse_uri(&uri, Limits::default()).unwrap(), route);
         assert_eq!(
-            Route::parse_uri("app:/missions?text=a+b")
+            Route::parse_uri("app:/missions?text=a+b", Limits::default())
                 .unwrap()
                 .to_json()["text"],
             "a+b",
             "a plus sign is itself"
+        );
+    }
+
+    #[test]
+    fn the_text_limit_is_a_setting() {
+        let text = "a".repeat(200);
+        let route = serde_json::json!({"page": "missions", "text": text});
+        assert_eq!(
+            Route::from_json(&route, Limits::default()).unwrap_err(),
+            "text is 1 to 128 bytes without control or invisible characters"
+        );
+        assert!(Route::from_json(&route, Limits { text_bytes: 200 }).is_ok());
+        assert_eq!(
+            Route::parse_uri("app:/missions?text=abcde", Limits { text_bytes: 4 }).unwrap_err(),
+            "text is 1 to 4 bytes without control or invisible characters"
         );
     }
 }

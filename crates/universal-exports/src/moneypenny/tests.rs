@@ -362,6 +362,23 @@ async fn a_message_from_a_page_that_is_not_a_route_reaches_her_without_a_page_li
 }
 
 #[tokio::test]
+async fn the_route_text_limit_is_the_gateways_setting() {
+    let served = served(AssistantConfig::default().with_route_text_bytes(4)).await;
+    let (mut app, _) = open(&served, &served.operator).await;
+    say(
+        &mut app,
+        "Which Stations are busy?",
+        Some(json!({"page": "missions", "text": "abcde"})),
+    )
+    .await;
+    let job = take(&served, "hq").await;
+    assert_eq!(
+        job.message, "Which Stations are busy?",
+        "a text past the limit is not a route"
+    );
+}
+
+#[tokio::test]
 async fn which_stations_are_busy_is_answered_through_the_board_tool() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, ready) = open(&served, &served.operator).await;
