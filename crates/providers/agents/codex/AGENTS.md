@@ -107,7 +107,8 @@ stay on (`features.shell_tool=false` is left out), `thread/start` and `thread/re
 ```text
 -c windows.sandbox="mxc"                       (Windows only: the implementation that denies reads)
 -c permissions.ai6_assistant={filesystem={":root"="deny",":minimal"="read","<cwd>"="read",
-     "<dir>"="read" (codex executable's, each interpreter's), "<cwd>/<files dir>"="write"}}
+     "<dir>"="read" (codex executable's, each interpreter's), "<cwd>/<files dir>"="write",
+     "<station path>"="deny" (each, below)}}
 -c default_permissions="ai6_assistant"
 -c shell_environment_policy.include_only=[ai6::SCRIPT_ENVIRONMENT]
 ```
@@ -117,7 +118,16 @@ links followed, and its install directory is readable
 (`ai6::directorates::section_00::programs::program_dirs`: the directory above `bin`, so
 `/opt/py/bin/python3` opens `/opt/py`); that directory is left out when it is `/`, is or holds
 the home directory (`HOME`/`USERPROFILE`), the working directory, its parent or a credential
-directory (`ai6::credential_dir_var`), or lies inside a credential directory. The profile has no network:
+directory (`ai6::credential_dir_var`), or lies inside a credential directory.
+`:minimal` re-opens all of `/etc`, `/usr` (`/usr/local/etc` and `/usr/etc` with it), `/dev`,
+`/proc` and `/run` on Linux, and `C:\Windows`, `C:\Program Files` and `C:\ProgramData` on
+Windows (measured with Codex 0.164.0, `codex sandbox -P`), and a `deny` inside a readable
+directory wins whatever the order. So the Station's paths are denied again: `/etc/ai6`,
+`/usr/local/etc` and `/usr/etc` (not on Windows), `ai6::station::safehouse::state_dir()`,
+`AI6_HOME`, and the directory of the program hosting the handler (`current_exe`), or only that
+program when its directory holds or lies in a readable install directory. A path that is or
+holds the working directory or a readable install directory is not denied. A deny of a path that
+does not exist is accepted. The profile has no network:
 measured with Codex 0.164.0, app-server threads ran no proxy for a profile's network, so a
 script reached unlisted hosts and host loopback; scripts get none under every policy, which a
 developer-instructions line tells her (when the policy names hosts) and standard error logs.

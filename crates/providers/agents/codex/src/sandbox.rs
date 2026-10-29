@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use ai6::directorates::section_00::agent::AssistantMode;
 use ai6::directorates::section_00::assistant::SCRIPT_ENVIRONMENT;
 use ai6::directorates::section_00::programs::{
-    canonical, find_program, path_text, program_dirs, variable,
+    canonical, find_program, path_text, program_dirs, starts_with, variable,
 };
 
 use crate::tools::CONFIG_ENVIRONMENT;
@@ -48,21 +48,12 @@ pub(crate) fn overrides(
     environment: &BTreeMap<String, String>,
     mode: &AssistantMode,
 ) -> Vec<String> {
-    let cwd = Path::new(cwd);
-    let mut rules = vec![
-        (":root".to_owned(), "deny"),
-        (":minimal".to_owned(), "read"),
-        (path_text(cwd), "read"),
-    ];
-    rules.extend(
-        read_dirs(executable, cwd, environment, &mode.interpreters)
-            .iter()
-            .map(|dir| (path_text(dir), "read")),
-    );
-    rules.extend(
-        mode.files
-            .iter()
-            .map(|dir| (path_text(&cwd.join(native(dir))), "write")),
+    let rules = rules(
+        executable,
+        Path::new(cwd),
+        environment,
+        &mode.interpreters,
+        &mode.files,
     );
     let mut argv = windows_sandbox();
     argv.extend([
@@ -106,6 +97,103 @@ fn table(rules: &[(String, &str)]) -> String {
 /// `dir`, a `/`-separated relative path, with the platform's separator.
 fn native(dir: &str) -> PathBuf {
     dir.split('/').collect()
+}
+
+/// The filesystem rules of a profile whose commands run in `cwd`: everything denied but
+/// `:minimal` and `cwd`, the install directories of the codex executable and `interpreters`
+/// ([`read_dirs`]) readable, `files` (relative to `cwd`) writable, and the Station's own paths
+/// ([`station_paths`]) denied again.
+///
+/// `:minimal` re-opens all of `/etc`, `/usr` (with `/usr/local/etc` and `/usr/etc`), `/dev`,
+/// `/proc` and `/run` on Linux, and `C:\Windows`, `C:\Program Files` and `C:\ProgramData` on
+/// Windows, and a deny inside a readable directory wins over it (measured with Codex 0.164.0:
+/// `codex sandbox -P`, bubblewrap and MXC).
+fn rules(
+    executable: &str,
+    cwd: &Path,
+    environment: &BTreeMap<String, String>,
+    interpreters: &[String],
+    files: &[String],
+) -> Vec<(String, &'static str)> {
+    let open = read_dirs(executable, cwd, environment, interpreters);
+    let mut rules = vec![
+        (":root".to_owned(), "deny"),
+        (":minimal".to_owned(), "read"),
+        (path_text(cwd), "read"),
+    ];
+    rules.extend(open.iter().map(|dir| (path_text(dir), "read")));
+    rules.extend(
+        files
+            .iter()
+            .map(|dir| (path_text(&cwd.join(native(dir))), "write")),
+    );
+    rules.extend(
+        station_paths(cwd, &open)
+            .iter()
+            .map(|path| (path_text(path), "deny")),
+    );
+    // A key given twice makes the inline table invalid TOML.
+    let mut seen = std::collections::HashSet::new();
+    rules.retain(|(key, _)| seen.insert(key.clone()));
+    rules
+}
+
+/// Where a Station on Unix may keep its configuration and secrets inside what `:minimal` or an
+/// interpreter's install directory (`/usr`) re-opens.
+const STATION_CONFIG_ROOTS: [&str; 3] = ["/etc/ai6", "/usr/local/etc", "/usr/etc"];
+
+/// The Station's own paths a profile denies again: [`STATION_CONFIG_ROOTS`] (not on Windows),
+/// AI6's state directory, `AI6_HOME`, and the directory of the program hosting this handler.
+fn station_paths(cwd: &Path, open: &[PathBuf]) -> Vec<PathBuf> {
+    denied_station_paths(
+        cwd,
+        open,
+        ai6::station::safehouse::state_dir().ok(),
+        std::env::var_os("AI6_HOME").map(PathBuf::from),
+        std::env::current_exe().ok(),
+    )
+}
+
+/// [`station_paths`] from the given state directory, `AI6_HOME` and program. The program's
+/// directory is denied unless it holds or lies in an `open` directory, which keeps it readable,
+/// and then only the program itself is. A path that is or holds `cwd` or an `open` directory is
+/// left out: its deny would take those with it.
+fn denied_station_paths(
+    cwd: &Path,
+    open: &[PathBuf],
+    state: Option<PathBuf>,
+    home: Option<PathBuf>,
+    program: Option<PathBuf>,
+) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = if cfg!(windows) {
+        Vec::new()
+    } else {
+        STATION_CONFIG_ROOTS.iter().map(PathBuf::from).collect()
+    };
+    candidates.extend(state);
+    candidates.extend(home.filter(|home| !home.as_os_str().is_empty()));
+    if let Some(program) = program.map(|program| canonical(&program)) {
+        let overlaps = |dir: &Path| {
+            open.iter()
+                .any(|open| starts_with(dir, open) || starts_with(open, dir))
+        };
+        match program.parent() {
+            Some(dir) if !overlaps(dir) => candidates.push(dir.to_path_buf()),
+            _ => candidates.push(program),
+        }
+    }
+    let cwd = canonical(cwd);
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for path in candidates.iter().map(|path| canonical(path)) {
+        if starts_with(&cwd, &path)
+            || open.iter().any(|dir| starts_with(dir, &path))
+            || paths.contains(&path)
+        {
+            continue;
+        }
+        paths.push(path);
+    }
+    paths
 }
 
 /// The install directories scripts also read ([`program_dirs`]): the codex executable's
@@ -190,16 +278,7 @@ fn probe_in(
     runner: &Runner<'_>,
     dir: &Path,
 ) -> Option<String> {
-    let mut rules = vec![
-        (":root".to_owned(), "deny"),
-        (":minimal".to_owned(), "read"),
-        (path_text(&canonical(dir)), "read"),
-    ];
-    rules.extend(
-        read_dirs(executable, dir, environment, &[])
-            .into_iter()
-            .map(|dir| (path_text(&dir), "read")),
-    );
+    let rules = rules(executable, &canonical(dir), environment, &[], &[]);
     let mut argv = vec![executable.to_owned()];
     argv.extend(windows_sandbox());
     argv.extend([
@@ -332,7 +411,24 @@ mod tests {
                 .as_str(),
             Some("write")
         );
-        assert_eq!(filesystem.len(), 5, "nothing else: {filesystem:?}");
+        let denied_again: std::collections::BTreeSet<String> = filesystem
+            .iter()
+            .filter(|(key, access)| *key != ":root" && access.as_str() == Some("deny"))
+            .map(|(key, _)| key.clone())
+            .collect();
+        let station: std::collections::BTreeSet<String> = station_paths(&cwd, &[])
+            .iter()
+            .map(|path| path_text(path))
+            .collect();
+        assert_eq!(
+            denied_again, station,
+            "the Station's own paths are denied again"
+        );
+        assert_eq!(
+            filesystem.len(),
+            5 + station.len(),
+            "nothing else: {filesystem:?}"
+        );
         assert_eq!(
             parsed(&argv, "default_permissions").as_str(),
             Some("ai6_assistant")
@@ -407,6 +503,78 @@ mod tests {
         assert!(
             read_dirs("codex", &cwd, &environment(&[&codex_home]), &interpreters).is_empty(),
             "so does one inside a credential directory"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_stations_own_paths_are_denied_inside_what_the_profile_opens() {
+        let cwd = Path::new(if cfg!(windows) {
+            r"C:\Temp\desk\conversation"
+        } else {
+            "/tmp/desk/conversation"
+        });
+        let program = std::env::current_exe().unwrap();
+        let program_dir = canonical(program.parent().unwrap());
+        let filesystem = parsed(
+            &overrides(
+                "codex-not-on-path",
+                &cwd.to_string_lossy(),
+                &BTreeMap::from([("PATH".to_owned(), String::new())]),
+                &AssistantMode::moneypenny(),
+            ),
+            "permissions.ai6_assistant",
+        )["filesystem"]
+            .clone();
+        let denied =
+            |path: &Path| filesystem.get(path_text(path)).and_then(|v| v.as_str()) == Some("deny");
+        assert!(denied(&program_dir), "{filesystem:?}");
+        if !cfg!(windows) {
+            for root in STATION_CONFIG_ROOTS {
+                assert!(
+                    denied(&canonical(Path::new(root))),
+                    "{root}: {filesystem:?}"
+                );
+            }
+        }
+
+        let root = tempfile_dir();
+        let (state, home, install) = (root.join("state"), root.join("home"), root.join("opt"));
+        let conversation = state.join("desk").join("conversation");
+        let bin = install.join("bin");
+        for dir in [&conversation, &home, &bin] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let station = bin.join("ai6");
+        std::fs::write(&station, "").unwrap();
+        let unix_roots = if cfg!(windows) {
+            0
+        } else {
+            STATION_CONFIG_ROOTS.len()
+        };
+        let paths = denied_station_paths(
+            &root.join("elsewhere"),
+            &[],
+            Some(state.clone()),
+            Some(home.clone()),
+            Some(station.clone()),
+        );
+        assert_eq!(
+            paths[unix_roots..],
+            [state.clone(), home.clone(), bin.clone()]
+        );
+        let paths = denied_station_paths(
+            &conversation,
+            std::slice::from_ref(&install),
+            Some(state),
+            Some(home.clone()),
+            Some(station.clone()),
+        );
+        assert_eq!(
+            paths[unix_roots..],
+            [home, station],
+            "a deny holding the working directory is left out, and inside an interpreter's \
+             install directory only the program itself is denied"
         );
         let _ = std::fs::remove_dir_all(root);
     }

@@ -483,6 +483,15 @@ scripts keep only the environment variables Claude Code's keep
 "mxc"`, the one Windows implementation that denies reads; `unelevated` refuses such a
 profile and `elevated` needs the whole filesystem readable (Codex 0.164).
 
+Codex's `:minimal` is wider than Claude Code's system paths: with Codex 0.164 it re-opens all
+of `/etc`, `/usr`, `/dev`, `/proc` and `/run` on Linux, and `C:\Windows`, `C:\Program Files`
+and `C:\ProgramData` on Windows. So the handler denies the Station's own paths again inside
+it: `/etc/ai6`, `/usr/local/etc` and `/usr/etc` (not on Windows), AI6's state directory,
+`AI6_HOME`, and the directory of the Station's own program (or only the program, when an
+interpreter's install directory holds it). Keep the Station's configuration and secrets in
+one of those, or outside what `:minimal` opens: elsewhere under `/etc` or `C:\ProgramData`
+her scripts can read what the Station's user can.
+
 What differs from Claude Code:
 
 - **Any command, not only the interpreters.** Codex 0.164 offers the model only its code-mode
