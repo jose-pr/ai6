@@ -24,6 +24,9 @@ import 'terminal/session_connection.dart';
 import 'terminal/session_terminal.dart';
 import 'pools/pools_page.dart';
 import 'roster/roster_page.dart';
+import 'settings/connection_settings.dart';
+import 'settings/oo_config.dart';
+import 'settings/oo_config_file.dart';
 import 'shell/oo_shell.dart';
 import 'shell/operations_page.dart';
 import 'shell/overview_page.dart';
@@ -37,11 +40,13 @@ import 'timeline/timeline_page.dart';
 const _apiOverride = String.fromEnvironment('OO_API');
 const _demoMode = bool.fromEnvironment('OO_DEMO');
 
-Uri _apiOrigin() => _apiOverride.isNotEmpty
+/// Universal Exports' origin: the `OO_API` define, else on the web the page's own origin, else
+/// `OO.cfg`'s `[unex] url`, else the loopback default.
+Uri _apiOrigin(OoConfig config) => _apiOverride.isNotEmpty
     ? Uri.parse(_apiOverride)
     : kIsWeb
     ? Uri.base
-    : Uri.parse('http://127.0.0.1:7082');
+    : config.unexUrl ?? Uri.parse('http://127.0.0.1:7082');
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -78,10 +83,12 @@ Future<void> _startWeb() async {
       terminalRuntimeError = 'The terminal protocol could not be initialized.';
     }
   }
+  final config = await loadWebConfig(Uri.base);
   final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
-    apiOrigin: _apiOrigin(),
+    apiOrigin: _apiOrigin(config),
     demo: _demoMode,
+    themeId: config.defaultTheme(warn: debugPrint),
     terminalRuntimeError: terminalRuntimeError,
     onThemeChanged: appearance.saveTheme,
     onBackdropChanged: appearance.saveBackdrop,
@@ -96,10 +103,12 @@ Future<void> _startWeb() async {
 }
 
 void _startDesktop() {
+  final config = loadDesktopConfig();
   final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
-    apiOrigin: _apiOrigin(),
+    apiOrigin: _apiOrigin(config),
     demo: _demoMode,
+    themeId: config.defaultTheme(warn: debugPrint),
     onThemeChanged: appearance.saveTheme,
     onBackdropChanged: appearance.saveBackdrop,
   );
@@ -125,12 +134,13 @@ class AppearancePreferences {
     await (await _preferences).setBool(backdropKey, backdrop);
   }
 
-  /// Applies the stored choices to [board]; an absent or unknown theme is Night Ops.
+  /// Applies the stored choices to [board]: a stored theme wins over the one it started
+  /// with (`OO.cfg`'s default), and an unknown one is Night Ops.
   Future<void> restore(MissionBoard board) async {
     final preferences = await _preferences;
-    board
-      ..restoreThemeId(preferences.getString(themeKey))
-      ..restoreBackdrop(preferences.getBool(backdropKey));
+    final theme = preferences.getString(themeKey);
+    if (theme != null) board.restoreThemeId(theme);
+    board.restoreBackdrop(preferences.getBool(backdropKey));
   }
 }
 
@@ -4146,6 +4156,10 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                     ),
                   const SizedBox(height: 18),
                   _ThemeChooser(board: board),
+                  if (!kIsWeb && !board.demo) ...[
+                    const SizedBox(height: 18),
+                    ConnectionSettings(),
+                  ],
                 ],
               ),
             ),
