@@ -6962,11 +6962,13 @@ mod tests {
                 .unwrap()
         });
         let calls = tokio::task::spawn_blocking(move || {
-            let agent: ureq::Agent = ureq::Agent::config_builder()
-                .http_status_as_error(false)
-                .build()
-                .into();
+            // A fresh agent per call: the server answers 401 without reading the body and
+            // closes the connection, which a pooled connection meets as an abort on Windows.
             let status = |method: &str, path: &str, bearer: Option<&str>| {
+                let agent: ureq::Agent = ureq::Agent::config_builder()
+                    .http_status_as_error(false)
+                    .build()
+                    .into();
                 let url = format!("http://{address}{path}");
                 let mut request = match method {
                     "GET" => agent.get(&url).force_send_body(),
