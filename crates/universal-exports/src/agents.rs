@@ -658,6 +658,7 @@ mod tests {
             ai6::ActionScope::try_new("clearance", "007:field@G").unwrap(),
             "10 Missions done",
             "007:field@G#1",
+            &Default::default(),
         )
         .unwrap()
         .expiring(now, std::time::Duration::from_secs(3600));
@@ -671,6 +672,7 @@ mod tests {
             ai6::ActionScope::try_new("clearance", "007:00@G").unwrap(),
             "let me",
             "self",
+            &Default::default(),
         )
         .unwrap()
         .expiring(now - 1.0, std::time::Duration::from_secs(3600));

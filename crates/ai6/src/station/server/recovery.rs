@@ -25,11 +25,11 @@ use crate::directorates::m::recovery::{DEFAULT_LOST_AFTER_SECS, adopter, reattac
 use crate::directorates::m::roster::OnLost;
 use crate::directorates::m::theaters::TheaterAccess;
 use crate::directorates::q::safehouse::{CheckpointSpec, SafeHouseCheckpoint};
+use crate::directorates::registry::limits::SessionLimits;
 use crate::directorates::registry::sessions::{
-    MAX_RECENT_EVENT_CHARS, MAX_RECENT_EVENTS, SessionError, SessionLaunch, SessionRecord,
-    SessionStatus, SessionUpdate,
+    SessionError, SessionLaunch, SessionRecord, SessionStatus, SessionUpdate,
 };
-use crate::directorates::registry::store::{DEFAULT_LEASE, GONE_DARK_AFTER, Lease, LeaseRecovery};
+use crate::directorates::registry::store::{DEFAULT_LEASE, Lease, LeaseRecovery};
 use crate::directorates::section_00::agent::{AgentEvent, AgentSession};
 use crate::station::reach::ReachWatch;
 use crate::{MissionId, SessionId};
@@ -457,7 +457,12 @@ fn adoption_choice(
                 .iter()
                 .filter(|lease| lease.station() == station.station())
                 .count();
-            StationFacts::from_record(station, now, GONE_DARK_AFTER, load)
+            StationFacts::from_record(
+                station,
+                now,
+                state.intake.limits().stations.gone_dark_after.0,
+                load,
+            )
         })
         .collect();
     let request = PlacementRequest {
@@ -718,9 +723,18 @@ pub(super) struct Notes {
     lines: VecDeque<String>,
     changed: bool,
     written: Option<Instant>,
+    limits: SessionLimits,
 }
 
 impl Notes {
+    /// Notes kept within the Registry's Session `limits`.
+    pub(super) fn new(limits: &SessionLimits) -> Self {
+        Self {
+            limits: limits.clone(),
+            ..Self::default()
+        }
+    }
+
     /// Notes what `event` said or did, one line each; a line that repeats the last one is not
     /// noted again.
     pub(super) fn record(&mut self, event: &AgentEvent) {
@@ -741,11 +755,14 @@ impl Notes {
         if self.lines.back() == Some(&line) {
             return;
         }
-        if self.lines.len() == MAX_RECENT_EVENTS {
-            self.lines.pop_front();
-        }
-        self.lines
-            .push_back(line.chars().take(MAX_RECENT_EVENT_CHARS).collect());
+        while self.lines.len() >= self.limits.recent_events.or_max()
+            && self.lines.pop_front().is_some()
+        {}
+        self.lines.push_back(
+            line.chars()
+                .take(self.limits.recent_event_chars.or_max())
+                .collect(),
+        );
         self.changed = true;
     }
 
@@ -1472,10 +1489,19 @@ mod tests {
             notes.lines,
             ["text: editing the parser", "tool: Edit, Bash", "blocked"]
         );
-        for index in 0..MAX_RECENT_EVENTS {
+        for index in 0..20 {
             notes.record(&event("text", Some(&format!("line {index}")), &[]));
         }
-        assert_eq!(notes.lines.len(), MAX_RECENT_EVENTS);
+        assert_eq!(notes.lines.len(), 20);
         assert_eq!(notes.lines[0], "text: line 0");
+        let limits = SessionLimits {
+            recent_events: crate::bounds::Limit::at(2),
+            ..SessionLimits::default()
+        };
+        let mut short = Notes::new(&limits);
+        for index in 0..5 {
+            short.record(&event("text", Some(&format!("line {index}")), &[]));
+        }
+        assert_eq!(short.lines, ["text: line 3", "text: line 4"]);
     }
 }

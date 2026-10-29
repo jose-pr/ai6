@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use ai6::directorates::registry::backend::*;
-use ai6::{AuditRecord, HeldBrief, MAX_HELD_RESULTS, TimelineEvent};
+use ai6::{AuditRecord, HeldBrief, TimelineEvent};
 use ai6_diptel::OperationId;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -130,11 +130,12 @@ pub(crate) async fn list(
 ) -> Result<Json<Vec<HeldBriefEntry>>, ApiError> {
     let (_, operation, registry) = authorized(&gateway, &headers, operation_id).await?;
     let operation = operation.to_string();
-    let held =
-        tokio::task::spawn_blocking(move || registry.held_briefs(&operation, MAX_HELD_RESULTS))
-            .await
-            .map_err(|_| ApiError::internal())?
-            .map_err(registry_error)?;
+    let held = tokio::task::spawn_blocking(move || {
+        registry.held_briefs(&operation, registry.limits().held.results.or_max())
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(registry_error)?;
     Ok(Json(
         held.into_iter()
             .map(|held| HeldBriefEntry {

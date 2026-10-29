@@ -7,10 +7,11 @@ use super::SqlRegistry;
 use super::db::Tx;
 use super::stations::headquarters_in;
 use crate::directorates::medical::exposure::Exposure;
+use crate::directorates::registry::limits::SessionLimits;
 use crate::directorates::registry::sessions::{
-    MAX_SESSIONS, NewSession, SessionError, SessionRecord, SessionStore, SessionUpdate,
-    apply_fenced, latest, lose, merged_exposure, opened, parse_session, session_json, take,
-    validate_new_session, validate_session_id,
+    NewSession, SessionError, SessionRecord, SessionStore, SessionUpdate, apply_fenced, latest,
+    lose, merged_exposure, opened, parse_session, session_json, take, validate_new_session,
+    validate_session_id,
 };
 use crate::directorates::registry::store::{invalid_data, validate_station_id};
 
@@ -18,17 +19,26 @@ fn term(tx: &mut Tx<'_>) -> io::Result<u64> {
     Ok(headquarters_in(tx)?.map_or(0, |lease| lease.term()))
 }
 
-fn session_in(tx: &mut Tx<'_>, id: &str) -> io::Result<Option<SessionRecord>> {
+fn session_in(
+    tx: &mut Tx<'_>,
+    id: &str,
+    limits: &SessionLimits,
+) -> io::Result<Option<SessionRecord>> {
     tx.query_opt(
         "SELECT record FROM ai6_sessions WHERE session_id = $1",
         &[id.into()],
     )?
-    .map(|row| parse_session(row.text(0)?.as_bytes()))
+    .map(|row| parse_session(row.text(0)?.as_bytes(), limits))
     .transpose()
 }
 
-fn put_session(tx: &mut Tx<'_>, record: &SessionRecord, revision: i64) -> io::Result<()> {
-    let text = String::from_utf8(session_json(record)?)
+fn put_session(
+    tx: &mut Tx<'_>,
+    record: &SessionRecord,
+    revision: i64,
+    limits: &SessionLimits,
+) -> io::Result<()> {
+    let text = String::from_utf8(session_json(record, limits)?)
         .map_err(|_| invalid_data("Session record is not UTF-8"))?;
     tx.execute(
         "INSERT INTO ai6_sessions (session_id, mission_id, record, revision) \
@@ -45,7 +55,11 @@ fn put_session(tx: &mut Tx<'_>, record: &SessionRecord, revision: i64) -> io::Re
     Ok(())
 }
 
-fn records(tx: &mut Tx<'_>, mission: Option<&str>) -> io::Result<Vec<SessionRecord>> {
+fn records(
+    tx: &mut Tx<'_>,
+    mission: Option<&str>,
+    limits: &SessionLimits,
+) -> io::Result<Vec<SessionRecord>> {
     let rows = match mission {
         Some(mission) => tx.query(
             "SELECT record FROM ai6_sessions WHERE mission_id = $1 ORDER BY session_id",
@@ -54,7 +68,7 @@ fn records(tx: &mut Tx<'_>, mission: Option<&str>) -> io::Result<Vec<SessionReco
         None => tx.query("SELECT record FROM ai6_sessions ORDER BY session_id", &[])?,
     };
     rows.into_iter()
-        .map(|row| parse_session(row.text(0)?.as_bytes()))
+        .map(|row| parse_session(row.text(0)?.as_bytes(), limits))
         .collect()
 }
 
@@ -72,12 +86,13 @@ impl SqlRegistry {
         at: Option<f64>,
         change: impl FnOnce(&mut SessionRecord, &mut Tx<'_>, f64) -> Result<(), SessionError>,
     ) -> Result<SessionRecord, SessionError> {
-        validate_session_id(id)?;
+        validate_session_id(id, &self.limits.sessions)?;
         self.write(|tx, revision| {
-            let mut record = session_in(tx, id)?.ok_or(SessionError::NotFound)?;
+            let mut record =
+                session_in(tx, id, &self.limits.sessions)?.ok_or(SessionError::NotFound)?;
             let now = when(tx, at)?;
             change(&mut record, tx, now)?;
-            put_session(tx, &record, revision)?;
+            put_session(tx, &record, revision, &self.limits.sessions)?;
             Ok(record)
         })
     }
@@ -88,20 +103,20 @@ impl SqlRegistry {
         ttl: Duration,
         at: Option<f64>,
     ) -> Result<SessionRecord, SessionError> {
-        validate_new_session(&new)?;
+        validate_new_session(&new, &self.limits.sessions)?;
         self.write(|tx, revision| {
-            if session_in(tx, &new.session_id)?.is_some() {
+            if session_in(tx, &new.session_id, &self.limits.sessions)?.is_some() {
                 return Err(SessionError::Exists);
             }
             let count = tx
                 .query_opt("SELECT count(*) FROM ai6_sessions", &[])?
                 .map_or(Ok(0), |row| row.int(0))?;
-            if count >= MAX_SESSIONS as i64 {
+            if !self.limits.sessions.records.allows(count + 1) {
                 return Err(io::Error::other("too many Session records").into());
             }
             let now = when(tx, at)?;
             let record = opened(new, ttl, now, term(tx)?);
-            put_session(tx, &record, revision)?;
+            put_session(tx, &record, revision, &self.limits.sessions)?;
             Ok(record)
         })
     }
@@ -129,7 +144,15 @@ impl SqlRegistry {
         update: SessionUpdate,
     ) -> Result<SessionRecord, SessionError> {
         self.change_session(id, at, |record, _, now| {
-            apply_fenced(record, station, fence, now, renew, update)
+            apply_fenced(
+                record,
+                station,
+                fence,
+                now,
+                renew,
+                update,
+                &self.limits.sessions,
+            )
         })
     }
 
@@ -140,7 +163,7 @@ impl SqlRegistry {
         at: Option<f64>,
     ) -> Result<SessionRecord, SessionError> {
         self.change_session(id, at, |record, tx, now| {
-            lose(record, reason, now, || term(tx))
+            lose(record, reason, now, || term(tx), &self.limits.sessions)
         })
     }
 
@@ -195,18 +218,18 @@ impl SessionStore for SqlRegistry {
     }
 
     fn session(&self, id: &str) -> io::Result<Option<SessionRecord>> {
-        validate_session_id(id)?;
-        self.read(|tx| session_in(tx, id))
+        validate_session_id(id, &self.limits.sessions)?;
+        self.read(|tx| session_in(tx, id, &self.limits.sessions))
     }
 
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
-        Ok(merged_exposure(
-            self.read(|tx| records(tx, Some(mission_id)))?,
-        ))
+        Ok(merged_exposure(self.read(|tx| {
+            records(tx, Some(mission_id), &self.limits.sessions)
+        })?))
     }
 
     fn sessions(&self) -> io::Result<Vec<SessionRecord>> {
-        self.read(|tx| records(tx, None))
+        self.read(|tx| records(tx, None, &self.limits.sessions))
     }
 
     fn take_session(
@@ -250,6 +273,8 @@ impl SessionStore for SqlRegistry {
     }
 
     fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>> {
-        Ok(latest(self.read(|tx| records(tx, Some(mission_id)))?))
+        Ok(latest(self.read(|tx| {
+            records(tx, Some(mission_id), &self.limits.sessions)
+        })?))
     }
 }

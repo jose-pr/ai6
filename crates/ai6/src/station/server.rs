@@ -70,7 +70,7 @@ use crate::directorates::registry::cables::{
 use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionStatus, SessionUpdate,
 };
-use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, GONE_DARK_AFTER, Lease};
+use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
@@ -2906,7 +2906,12 @@ fn place_brief(
                 .iter()
                 .filter(|lease| lease.station() == record.station())
                 .count();
-            StationFacts::from_record(record, now, GONE_DARK_AFTER, load)
+            StationFacts::from_record(
+                record,
+                now,
+                state.intake.limits().stations.gone_dark_after.0,
+                load,
+            )
         })
         .collect();
     let request = PlacementRequest {
@@ -5313,7 +5318,7 @@ fn spawn_event_pump_with_monitor(
             .unwrap_or_default();
         let mut announced = exposure.exposures().len();
         medical::persist_exposure(&state, &mission_id, &exposure.exposures());
-        let mut notes = recovery::Notes::default();
+        let mut notes = recovery::Notes::new(&state.intake.limits().sessions);
         loop {
             medical::sync_exposure(&state, &mission_id, &exposure, &mut announced);
             if state.stopping.load(Ordering::Acquire) {
@@ -7975,9 +7980,14 @@ mod tests {
             DEFAULT_MAX_CONCURRENT_MISSIONS
         );
         assert_eq!(stations[0].info()["running"], 0);
-        let resources = StationFacts::from_record(&stations[0], unix_now(), GONE_DARK_AFTER, 0)
-            .resources
-            .expect("the check-in carries the host's resources");
+        let resources = StationFacts::from_record(
+            &stations[0],
+            unix_now(),
+            state.intake.limits().stations.gone_dark_after.0,
+            0,
+        )
+        .resources
+        .expect("the check-in carries the host's resources");
         assert!(
             resources.cpus.is_some_and(|cpus| cpus >= 1.0),
             "{resources:?}"
@@ -9631,7 +9641,7 @@ mod tests {
             author: Some("reporter".to_owned()),
             updated: "2026-10-26T00:00:00Z".to_owned(),
         };
-        let mut brief = crate::source_brief("G", "github", &item);
+        let mut brief = crate::source_brief("G", "github", &item, &Default::default());
         brief.provenance = Some(
             crate::Provenance::new(crate::Origin::Source, &brief, "test", 1)
                 .with_principal("github")
@@ -10418,6 +10428,7 @@ mod tests {
                 crate::ActionScope::try_new(kind, target).unwrap(),
                 "ship it",
                 kind,
+                &Default::default(),
             )
             .unwrap()
             .expiring(now, Duration::from_secs(600));
@@ -10546,6 +10557,7 @@ mod tests {
                 crate::ActionScope::try_new("release", format!("tag v1.{round}.0")).unwrap(),
                 "ship it",
                 lapse,
+                &Default::default(),
             )
             .unwrap()
             .expiring(now as f64, Duration::from_secs(600));
@@ -10696,6 +10708,7 @@ mod tests {
                 crate::ActionScope::try_new("release", target).unwrap(),
                 "ship it",
                 key,
+                &Default::default(),
             )
             .unwrap()
             .expiring(now, Duration::from_secs(600));
@@ -10836,6 +10849,7 @@ mod tests {
             crate::ActionScope::try_new("push", "origin:main").unwrap(),
             "release 2.0",
             "theater-push",
+            &Default::default(),
         )
         .unwrap()
         .expiring(now, Duration::from_secs(600));

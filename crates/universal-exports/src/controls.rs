@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::registry::backend::*;
-use ai6::{AuditRecord, GONE_DARK_AFTER, StationSettings};
+use ai6::{AuditRecord, StationSettings};
 use ai6_diptel::{
     ControlAction, ControlId, MissionControl, MissionId, OperationId, SessionId, control_frames,
 };
@@ -289,7 +289,7 @@ fn control_target(
     on_board: bool,
 ) -> std::io::Result<Routing> {
     let live = registry
-        .stations(GONE_DARK_AFTER)?
+        .stations(registry.limits().stations.gone_dark_after.0)?
         .into_iter()
         .map(|record| record.station().to_owned())
         .collect::<Vec<_>>();
@@ -753,7 +753,7 @@ pub(crate) mod tests {
                 Duration::from_secs(60),
             )
             .unwrap();
-        let authorizer = role_authorizer_from_toml(roles).unwrap();
+        let authorizer = role_authorizer_from_toml(roles, ai6::Limit::UNBOUNDED).unwrap();
         let gateway = Gateway::with_access(
             GatewayConfig::new(
                 "https://localhost",

@@ -6,8 +6,8 @@ use std::fmt;
 use std::io;
 
 use super::{
-    ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
-    Layer, assemble, check_placement, merged,
+    ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
+    ConfigSnapshot, Layer, assemble, check_placement, merged,
 };
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
 use crate::directorates::registry::sql::SqlOptions;
@@ -84,7 +84,11 @@ fn revision_of(number: i64) -> Result<ConfigRevision, RosterError> {
 }
 
 /// `station`'s view (`""`: global only), checked and built.
-fn snapshot(records: &Records, station: &str) -> Result<ConfigSnapshot, RosterError> {
+fn snapshot(
+    records: &Records,
+    station: &str,
+    limits: &ConfigLimits,
+) -> Result<ConfigSnapshot, RosterError> {
     let layers = layers(records)?;
     let global = layers
         .get(&ConfigScope::Global)
@@ -94,7 +98,7 @@ fn snapshot(records: &Records, station: &str) -> Result<ConfigSnapshot, RosterEr
         Some(own) if !station.is_empty() => merged(&global, own),
         _ => global,
     };
-    assemble(revision_of(records.revision)?, &view, None, &SOURCE)
+    assemble(revision_of(records.revision)?, &view, None, &SOURCE, limits)
 }
 
 fn failed(reason: io::Error) -> RosterError {
@@ -115,6 +119,7 @@ fn failed(reason: io::Error) -> RosterError {
 /// own. The database can be the Registry's.
 pub struct SqlProvider {
     db: Database,
+    limits: ConfigLimits,
 }
 
 impl fmt::Debug for SqlProvider {
@@ -151,7 +156,15 @@ impl SqlProvider {
         })?;
         Ok(Self {
             db: Database::open(location, options)?,
+            limits: ConfigLimits::default(),
         })
+    }
+
+    /// The same provider, reading documents within `limits`.
+    #[must_use]
+    pub fn with_limits(mut self, limits: ConfigLimits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// Applies `change` and checks every view at `scope` it touches, all in one
@@ -162,6 +175,7 @@ impl SqlProvider {
         change: impl FnOnce(&mut Tx<'_>, i64) -> io::Result<bool> + Send,
     ) -> Result<Option<ConfigRevision>, RosterError> {
         let scope = scope.clone();
+        let limits = self.limits.clone();
         let outcome = self.db.write(Clock::Config, move |tx, revision| {
             if !change(tx, revision)? {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "unchanged"));
@@ -184,7 +198,11 @@ impl SqlProvider {
             };
             let mut revision = None;
             for station in stations {
-                revision = Some(snapshot(&records, &station).map_err(invalid)?.revision);
+                revision = Some(
+                    snapshot(&records, &station, &limits)
+                        .map_err(invalid)?
+                        .revision,
+                );
             }
             Ok(revision.unwrap_or_default())
         });
@@ -201,7 +219,11 @@ impl SqlProvider {
 
 impl ConfigProvider for SqlProvider {
     fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
-        snapshot(&self.db.read(records).map_err(failed)?, station)
+        snapshot(
+            &self.db.read(records).map_err(failed)?,
+            station,
+            &self.limits,
+        )
     }
 
     fn changes_since(

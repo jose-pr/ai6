@@ -230,7 +230,7 @@ pub(super) fn open_gate(state: &DaemonState, mission: &Mission) -> ExposureGate 
             });
         }
     }
-    ExposureGate::new(policy, inherited)
+    ExposureGate::new(policy, inherited, &state.intake.limits().sessions)
 }
 
 /// What a Mission made from `brief` has already read: the Source item's text, or the
@@ -261,7 +261,10 @@ pub(super) fn brief_exposure(brief: &Brief) -> Vec<String> {
 pub(super) fn expose_by_tools(state: &DaemonState, gate: &ExposureGate, event: &AgentEvent) {
     for tool in &event.tools {
         if gate.policy().exposed_by_tool(tool) {
-            gate.mark(&tool_source(tool), state.clock.now() as f64);
+            gate.mark(
+                &tool_source(tool, state.intake.limits().sessions.exposure_source_bytes),
+                state.clock.now() as f64,
+            );
         }
     }
 }

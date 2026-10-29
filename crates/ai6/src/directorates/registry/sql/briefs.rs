@@ -6,28 +6,27 @@ use std::io;
 use std::time::Duration;
 
 use super::db::Tx;
-use super::{SqlRegistry, bounded_json, from_json, to_json};
+use super::{SqlRegistry, bounded_json, from_json, row_limit, to_json};
 use crate::directorates::m::vetting::{FindingKind, Vetting, content_digest};
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
+use crate::directorates::registry::limits::BriefLimits;
 use crate::directorates::registry::sources::{
-    FinishedSourceBrief, Ingest, MAX_REPORT_ATTEMPTS, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore,
-    is_source_key, refresh_queued, source_brief, source_provenance,
+    FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore, is_source_key,
+    refresh_queued, source_brief, source_provenance,
 };
 use crate::directorates::registry::store::{
-    Brief, BriefStore, Lease, LeaseRecovery, MAX_BRIEF_BYTES, MAX_BRIEFS,
-    MAX_MISSION_PROPOSAL_BYTES, MAX_MISSION_PROPOSAL_RESULTS, MAX_MISSION_PROPOSALS,
-    MissionProposal, invalid_data, lost_outcome, unix_time, validate_registry_key,
+    Brief, BriefStore, Lease, LeaseRecovery, MissionProposal, invalid_data, lost_outcome,
+    unix_time, validate_registry_key,
 };
 use crate::directorates::registry::vetting::{
-    Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_PER_OPERATION, MAX_HELD_RECORD_BYTES,
-    VettingStore, already_decided, check_actor, check_limit, merge_clearance, refused_outcome,
-    too_many_held,
+    Clearance, HeldBrief, VettingStore, already_decided, check_actor, check_limit, merge_clearance,
+    refused_outcome, too_many_held,
 };
 
 /// The brief record, without its provenance.
-fn brief_json(brief: &Brief) -> io::Result<String> {
+fn brief_json(brief: &Brief, limits: &BriefLimits) -> io::Result<String> {
     let (record, _) = bona_fides::seal(brief)?;
-    bounded_json(&record, MAX_BRIEF_BYTES, "brief")
+    bounded_json(&record, limits.record_bytes, "brief")
 }
 
 /// The `provenance` column for `brief`.
@@ -47,14 +46,15 @@ fn stored_brief(record: &str, provenance: Option<String>) -> io::Result<Brief> {
 }
 
 /// The queued briefs in Registry order: priority, creation time, key.
-fn queued(tx: &mut Tx<'_>) -> io::Result<Vec<Brief>> {
+fn queued(tx: &mut Tx<'_>, limits: &BriefLimits) -> io::Result<Vec<Brief>> {
     let rows = tx.query(
         "SELECT brief, provenance FROM ai6_briefs WHERE state = 'new' LIMIT $1",
-        &[(MAX_BRIEFS + 1).into()],
+        &[row_limit(limits.records).saturating_add(1).into()],
     )?;
-    if rows.len() > MAX_BRIEFS {
+    if !limits.records.allows(rows.len()) {
         return Err(invalid_data(format!(
-            "Registry has more than {MAX_BRIEFS} queued briefs"
+            "Registry has more than {} queued briefs",
+            limits.records
         )));
     }
     let mut briefs = Vec::with_capacity(rows.len());
@@ -81,13 +81,18 @@ fn brief_state(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<String>> {
         .transpose()
 }
 
-fn insert_brief(tx: &mut Tx<'_>, brief: &Brief, revision: i64) -> io::Result<()> {
+fn insert_brief(
+    tx: &mut Tx<'_>,
+    brief: &Brief,
+    revision: i64,
+    limits: &BriefLimits,
+) -> io::Result<()> {
     tx.execute(
         "INSERT INTO ai6_briefs (key, state, brief, provenance, revision) \
          VALUES ($1, 'new', $2, $3, $4)",
         &[
             brief.key().into(),
-            brief_json(brief)?.into(),
+            brief_json(brief, limits)?.into(),
             provenance_json(brief)?.into(),
             revision.into(),
         ],
@@ -175,6 +180,7 @@ fn finish_in(
     ok: bool,
     transcript: Option<&[u8]>,
     revision: i64,
+    limits: &BriefLimits,
 ) -> io::Result<()> {
     let state = if ok { "done" } else { "failed" };
     let key = brief.key();
@@ -207,7 +213,7 @@ fn finish_in(
             &[
                 key.as_str().into(),
                 state.into(),
-                brief_json(brief)?.into(),
+                brief_json(brief, limits)?.into(),
                 outcome.into(),
                 transcript.into(),
                 revision.into(),
@@ -280,6 +286,7 @@ fn promote_in(
     operation: &str,
     proposal_id: &str,
     received_by: &str,
+    limits: &BriefLimits,
 ) -> io::Result<Brief> {
     let (state, proposal) = proposal(tx, operation, proposal_id)?.ok_or_else(|| {
         io::Error::new(io::ErrorKind::NotFound, "Mission proposal does not exist")
@@ -330,7 +337,7 @@ fn promote_in(
         }
         None => {
             brief.provenance = Some(proposal_provenance(&proposal, received_by));
-            insert_brief(tx, &brief, revision)?;
+            insert_brief(tx, &brief, revision, limits)?;
         }
     }
     set_proposal_state(tx, operation, proposal_id, "approved", revision)?;
@@ -360,13 +367,14 @@ impl BriefStore for SqlRegistry {
                     &[proposal.operation_id.as_str().into()],
                 )?
                 .map_or(Ok(0), |row| row.int(0))?;
-            if pending >= MAX_MISSION_PROPOSALS as i64 {
+            let most = self.limits.proposals.records;
+            if !most.allows(pending + 1) {
                 return Err(invalid_data(format!(
-                    "Operation has reached the {MAX_MISSION_PROPOSALS} pending Mission proposal limit"
+                    "Operation has reached the {most} pending Mission proposal limit"
                 )));
             }
             stored.created_at = unix_time()?;
-            let text = bounded_json(&stored, MAX_MISSION_PROPOSAL_BYTES, "Mission proposal")?;
+            let text = bounded_json(&stored, self.limits.proposals.record_bytes, "Mission proposal")?;
             tx.execute(
                 "INSERT INTO ai6_mission_proposals (operation, id, state, proposal, created_at, revision) \
                  VALUES ($1, $2, 'pending', $3, $4, $5)",
@@ -388,12 +396,11 @@ impl BriefStore for SqlRegistry {
         limit: usize,
     ) -> io::Result<Vec<MissionProposal>> {
         validate_registry_key(operation)?;
-        if limit == 0 || limit > MAX_MISSION_PROPOSAL_RESULTS {
+        let most = self.limits.proposals.results;
+        if limit == 0 || !most.allows(limit) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!(
-                    "Mission proposal result limit must be between 1 and {MAX_MISSION_PROPOSAL_RESULTS}"
-                ),
+                format!("Mission proposal result limit must be between 1 and {most}"),
             ));
         }
         self.read(|tx| {
@@ -423,7 +430,16 @@ impl BriefStore for SqlRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
-        self.write(|tx, revision| promote_in(tx, revision, operation, proposal_id, received_by))
+        self.write(|tx, revision| {
+            promote_in(
+                tx,
+                revision,
+                operation,
+                proposal_id,
+                received_by,
+                &self.limits.briefs,
+            )
+        })
     }
 
     fn reject_mission_proposal(
@@ -470,7 +486,11 @@ impl BriefStore for SqlRegistry {
                 }
             };
             proposal.vetting = Some(vetting.clone());
-            let text = bounded_json(&proposal, MAX_MISSION_PROPOSAL_BYTES, "Mission proposal")?;
+            let text = bounded_json(
+                &proposal,
+                self.limits.proposals.record_bytes,
+                "Mission proposal",
+            )?;
             tx.execute(
                 "UPDATE ai6_mission_proposals SET proposal = $3, revision = $4 \
                  WHERE operation = $1 AND id = $2",
@@ -486,7 +506,7 @@ impl BriefStore for SqlRegistry {
     }
 
     fn list_new(&self) -> io::Result<Vec<Brief>> {
-        self.read(queued)
+        self.read(|tx| queued(tx, &self.limits.briefs))
     }
 
     fn submit_brief(&self, brief: &Brief) -> io::Result<()> {
@@ -499,13 +519,13 @@ impl BriefStore for SqlRegistry {
                     format!("brief {key} already exists in {state}"),
                 ));
             }
-            insert_brief(tx, brief, revision)
+            insert_brief(tx, brief, revision, &self.limits.briefs)
         })
     }
 
     fn claim_new(&self, key: Option<&str>) -> io::Result<Option<Brief>> {
         self.write(|tx, revision| {
-            for brief in queued(tx)? {
+            for brief in queued(tx, &self.limits.briefs)? {
                 if key.is_some_and(|key| brief.key() != key) {
                     continue;
                 }
@@ -528,7 +548,7 @@ impl BriefStore for SqlRegistry {
     ) -> io::Result<Option<Lease>> {
         check_lease_request(station, duration)?;
         self.write(|tx, revision| {
-            let Some(brief) = queued(tx)?
+            let Some(brief) = queued(tx, &self.limits.briefs)?
                 .into_iter()
                 .find(|brief| key.is_none_or(|key| brief.key() == key))
             else {
@@ -644,7 +664,15 @@ impl BriefStore for SqlRegistry {
                 Ok(brief) if brief.validate().is_ok() => brief,
                 _ => return Ok(None),
             };
-            finish_in(tx, &brief, &lost_outcome(lease, by), false, None, revision)?;
+            finish_in(
+                tx,
+                &brief,
+                &lost_outcome(lease, by),
+                false,
+                None,
+                revision,
+                &self.limits.briefs,
+            )?;
             Ok(Some(LeaseRecovery::Failed))
         })
     }
@@ -697,7 +725,15 @@ impl BriefStore for SqlRegistry {
                     return Ok(false);
                 }
             }
-            finish_in(tx, brief, outcome, ok, transcript, revision)?;
+            finish_in(
+                tx,
+                brief,
+                outcome,
+                ok,
+                transcript,
+                revision,
+                &self.limits.briefs,
+            )?;
             Ok(true)
         })
     }
@@ -739,7 +775,7 @@ impl SourceStore for SqlRegistry {
         item: &SourceItem,
         received_by: &str,
     ) -> io::Result<Ingest> {
-        let mut brief = source_brief(operation, provider, item);
+        let mut brief = source_brief(operation, provider, item, &self.limits.sources);
         brief.validate()?;
         brief.provenance = Some(source_provenance(provider, item, &brief, received_by));
         let key = brief.key();
@@ -749,7 +785,7 @@ impl SourceStore for SqlRegistry {
                 &[key.as_str().into()],
             )?
             else {
-                insert_brief(tx, &brief, revision)?;
+                insert_brief(tx, &brief, revision, &self.limits.briefs)?;
                 return Ok(Ingest::Queued);
             };
             match row.text(0)?.as_str() {
@@ -763,7 +799,7 @@ impl SourceStore for SqlRegistry {
                     "UPDATE ai6_briefs SET brief = $2, provenance = $3, revision = $4 WHERE key = $1",
                     &[
                         key.as_str().into(),
-                        brief_json(&brief)?.into(),
+                        brief_json(&brief, &self.limits.briefs)?.into(),
                         provenance_json(&brief)?.into(),
                         revision.into(),
                     ],
@@ -779,7 +815,12 @@ impl SourceStore for SqlRegistry {
                 "SELECT key, state, brief, outcome, finished_provenance FROM ai6_briefs \
                  WHERE state IN ('done', 'failed') AND reported = 0 AND report_attempts < $1 \
                  AND key LIKE 'source!_%' ESCAPE '!' ORDER BY key LIMIT $2",
-                &[MAX_REPORT_ATTEMPTS.into(), (MAX_BRIEFS * 8).into()],
+                &[
+                    row_limit(self.limits.sources.report_attempts).into(),
+                    row_limit(self.limits.briefs.records)
+                        .saturating_mul(8)
+                        .into(),
+                ],
             )?;
             let mut finished = Vec::new();
             for row in rows {
@@ -899,15 +940,15 @@ impl VettingStore for SqlRegistry {
             let held_here = tx
                 .query(
                     "SELECT held FROM ai6_briefs WHERE state = 'held' LIMIT $1",
-                    &[(MAX_HELD_BRIEFS + 1).into()],
+                    &[row_limit(self.limits.held.records).saturating_add(1).into()],
                 )?
                 .iter()
                 .filter_map(|row| row.opt_text(0).ok().flatten())
                 .filter_map(|text| serde_json::from_str::<HeldBrief>(&text).ok())
                 .filter(|held| held.operation == operation)
                 .count();
-            if held_here >= MAX_HELD_PER_OPERATION {
-                return Err(too_many_held(operation));
+            if !self.limits.held.per_operation.allows(held_here + 1) {
+                return Err(too_many_held(operation, &self.limits.held));
             }
             let held = HeldBrief {
                 operation: operation.to_owned(),
@@ -916,7 +957,7 @@ impl VettingStore for SqlRegistry {
                 held_at: at,
             };
             held.validate()?;
-            let text = bounded_json(&held, MAX_HELD_RECORD_BYTES, "held brief")?;
+            let text = bounded_json(&held, self.limits.held_record_bytes(), "held brief")?;
             tx.execute(
                 "UPDATE ai6_briefs SET state = 'held', held = $2, revision = $3 WHERE key = $1",
                 &[key.into(), text.into(), revision.into()],
@@ -927,11 +968,11 @@ impl VettingStore for SqlRegistry {
 
     fn held_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<HeldBrief>> {
         validate_registry_key(operation)?;
-        check_limit(limit)?;
+        check_limit(limit, &self.limits.held)?;
         self.read(|tx| {
             let rows = tx.query(
                 "SELECT held FROM ai6_briefs WHERE state = 'held' ORDER BY key LIMIT $1",
-                &[(MAX_HELD_BRIEFS + 1).into()],
+                &[row_limit(self.limits.held.records).saturating_add(1).into()],
             )?;
             let mut held = Vec::new();
             for row in rows {
@@ -956,7 +997,7 @@ impl VettingStore for SqlRegistry {
     fn release_held(&self, operation: &str, key: &str, by: &str, at: f64) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        check_actor(by, "")?;
+        check_actor(by, "", &self.limits.held)?;
         self.write(|tx, revision| {
             let row = vetted_row(tx, key)?.ok_or_else(not_held)?;
             match row.state.as_str() {
@@ -996,14 +1037,22 @@ impl VettingStore for SqlRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        check_actor(by, reason)?;
+        check_actor(by, reason, &self.limits.held)?;
         self.write(|tx, revision| {
             let row = vetted_row(tx, key)?.ok_or_else(not_held)?;
             match row.state.as_str() {
                 "held" => {
                     let held = held_by(&row, operation, key).ok_or_else(not_held)?;
                     let outcome = refused_outcome(held, by, reason, at);
-                    finish_in(tx, &held.brief, &outcome, false, None, revision)?;
+                    finish_in(
+                        tx,
+                        &held.brief,
+                        &outcome,
+                        false,
+                        None,
+                        revision,
+                        &self.limits.briefs,
+                    )?;
                     Ok(held.brief.clone())
                 }
                 "failed"
@@ -1052,7 +1101,7 @@ impl VettingStore for SqlRegistry {
         at: f64,
     ) -> io::Result<Option<Clearance>> {
         validate_registry_key(key)?;
-        check_actor(by, "")?;
+        check_actor(by, "", &self.limits.held)?;
         self.write(|tx, revision| {
             let row = vetted_row(tx, key)?
                 .filter(|row| row.state == "new")
@@ -1082,9 +1131,16 @@ impl VettingStore for SqlRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
-        check_actor(by, "")?;
+        check_actor(by, "", &self.limits.held)?;
         self.write(|tx, revision| {
-            let brief = promote_in(tx, revision, operation, proposal_id, received_by)?;
+            let brief = promote_in(
+                tx,
+                revision,
+                operation,
+                proposal_id,
+                received_by,
+                &self.limits.briefs,
+            )?;
             let key = brief.key();
             if brief_state(tx, &key)?.as_deref() == Some("new") {
                 let digest = content_digest(&brief);

@@ -72,8 +72,8 @@ pub const ACTIONS: &[&str];   // agent.configure, agent.read, approval.class,
                               // another person's memory
                               // Moneypenny's Cables for the person
 pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
-pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError>;
-pub fn load_role_authorizer(path: impl AsRef<Path>) -> Result<RoleAuthorizer, AccessPolicyError>;
+pub fn role_authorizer_from_toml(source: &str, max_bytes: Limit) -> Result<RoleAuthorizer, AccessPolicyError>;
+pub fn load_role_authorizer(path: impl AsRef<Path>, max_bytes: Limit) -> Result<RoleAuthorizer, AccessPolicyError>;
 #[non_exhaustive] pub struct AccessPolicyError;   // Display, Error
 ```
 
@@ -86,7 +86,8 @@ decisive even when its role lacks the action. A request names the resource's anc
 Operation from the Stations' `operation_lineage`), and a rule whose scope is among them
 matches too unless it sets `propagate = false`; a child Operation is narrowed by a rule placed
 before its parent's. `[limits] ancestors` (a number or `"none"`, default 64) bounds how many
-a request names; more is an error, never a denial. The file is read up to 1 MiB. The Universal Exports gateway
+a request names; more is an error, never a denial. The file is read up to `max_bytes` (`[provider] access_policy_bytes`, 1 MiB by default). The
+Universal Exports gateway
 loads and enforces this policy for user requests.
 
 `station::plugins::Plugins` scans the plugin paths for libraries that declare an AI6 kind or
@@ -203,8 +204,12 @@ pub struct Exposure { pub source: String /* brief:source | brief:registry_drop |
 pub enum Restriction { Proposals, Approvals, Cables, Secrets }
 pub struct ExposurePolicy;   // default() = strict; ::preset(Strict | Observe); .restricts(r); .exposed_by_tool(name)
 pub struct ExposureDefinition;   // [operation.ID.exposure]: preset, restrict = [..], tools = [..]
-pub struct ExposureGate;     // clone-shared per Session: new(policy, inherited), mark(source, at) -> bool,
-                             // exposures(), is_exposed(), restricts(r), take_changes()
+pub struct ExposureGate;     // clone-shared per Session: new(policy, inherited, &SessionLimits),
+                             // mark(source, at) -> bool (sources cut to exposure_source_bytes,
+                             // at most `exposures` kept), exposures(), is_exposed(), restricts(r),
+                             // take_changes()
+pub fn cable_source(sender: &str, limit: Limit) -> String;   // "cable:SENDER" cut to limit bytes
+pub fn tool_source(tool: &str, limit: Limit) -> String;      // "tool:NAME" cut to limit bytes
 
 // quarantine — when an Agent is stopped everywhere
 pub enum IncidentKind { Stall, Loop, Blown, Budget }
@@ -665,11 +670,13 @@ impl SecretRef {
     pub fn read(&self) -> io::Result<Zeroizing<String>>; // a file's one trailing newline dropped; empty is InvalidData
     pub fn describe(&self) -> String;               // the file or variable, never the value
 }
-pub struct Seconds(pub Duration);                    // a non-negative number of seconds
 
-// every field Option or defaulted; #[non_exhaustive], Deserialize, deny_unknown_fields
-pub struct ProviderSettings { location: Option<String>, password: Option<SecretRef>, poll: Option<Seconds> }
-pub struct RegistrySettings { location: Option<String>, password: Option<SecretRef>, headquarters_lease: Option<Seconds> }
+// every field Option or defaulted; #[non_exhaustive], Deserialize, deny_unknown_fields;
+// Seconds, Limit: crate::bounds
+pub struct ProviderSettings { location: Option<String>, password: Option<SecretRef>, poll: Option<Seconds>,
+    loadout_bytes: Limit, loadout_value_chars: Limit, access_policy_bytes: Limit }   // ConfigLimits defaults
+pub struct RegistrySettings { location: Option<String>, password: Option<SecretRef>, headquarters_lease: Option<Seconds>,
+    sqlite_busy_timeout: Option<Seconds>, limits: RegistryLimits }   // [registry.limits.*]
 pub struct IdentitySettings { dir: Option<PathBuf> }
 pub struct PluginSettings { paths: Vec<PathBuf>, profile: Option<PluginProfile> }
 pub struct SecretSettings { dir: Option<PathBuf> }
@@ -677,8 +684,10 @@ pub struct UnexSettings { url: String, token: Option<SecretRef> }  // a url alon
 pub struct Bootstrap { station, state_dir, listen, provider, registry, identity, plugins, secrets: SecretSettings, unex: Option<UnexSettings> }
 pub struct UnexBootstrap { listen, public_origin: Option<String>, station_token: Option<SecretRef>,
     proxy_secret: Option<SecretRef>, state_dir, provider, registry, plugins }
-impl ProviderSettings { pub fn poll(&self) -> Duration; }                  // DEFAULT_POLL; 0 turns reload off
-impl RegistrySettings { pub fn headquarters_lease(&self) -> Duration; }    // DEFAULT_LEASE
+impl ProviderSettings { pub fn poll(&self) -> Duration;                    // DEFAULT_POLL; 0 turns reload off
+                        pub fn limits(&self) -> ConfigLimits; }
+impl RegistrySettings { pub fn headquarters_lease(&self) -> Duration;      // DEFAULT_LEASE
+                        pub fn sqlite_busy_timeout(&self) -> Duration; }   // 30 s
 
 pub struct Located<T> { pub value: T, pub path: Option<PathBuf> }      // None: defaults
 impl<T> Located<T> { pub fn dir(&self) -> Option<&Path>; }
@@ -738,7 +747,12 @@ pub struct Settings {
     pub tls: Option<serde_json::Value>,      // tls record, a coqui-peer-tls Policy document
     pub access: Option<serde_json::Value>,   // access record, the gateway's role policy
     pub unex: UnexRecord,                    // unex record
+    pub limits: ConfigLimits,                // what the provider read these within
 }
+// [provider] limits of the bootstrap file; also at the crate root. Default: 1 MiB, 4,096, 1 MiB.
+#[non_exhaustive] #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigLimits { pub loadout_bytes: Limit, pub loadout_value_chars: Limit, pub access_policy_bytes: Limit }
+impl ConfigLimits { pub fn weakenings(&self) -> Vec<String>; }   // "provider.KEY VALUE is looser than the default D"
 impl Settings {
     pub fn access_authorizer(&self) -> Result<RoleAuthorizer, String>;   // none: deny all
     #[cfg(feature = "station-tls")]
@@ -821,20 +835,24 @@ pub struct ConfigStatus {
     pub refused: Vec<String>,        // why the newest configuration is refused
     pub needs_restart: Vec<String>,  // restart-only family names ("theater", "cables")
 }
-pub struct FileProvider;     // ConfigProvider (+ definitions, read-only); new(root), root()
+pub struct FileProvider;     // ConfigProvider (+ definitions, read-only); new(root), root(),
+                             // with_limits(ConfigLimits)
 pub struct MemoryProvider;   // ConfigProvider (read-only); new(roster), with_settings(Settings),
-                             // replace(&self, roster), replace_all(&self, roster, settings)
+                             // with_limits(ConfigLimits), replace(&self, roster),
+                             // replace_all(&self, roster, settings)
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` → SqlProvider; anything else →
 /// FileProvider. Unsupported for a SQL location without its feature.
 pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>>;
-/// As `open`, a SQL provider connected with `options` (features `sqlite` or `postgres`).
-pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn ConfigProvider>>;
+/// As `open`, a SQL provider connected with `options` (features `sqlite` or `postgres`), and
+/// either provider reading documents within `limits`.
+pub fn open_with(location: &str, options: &SqlOptions, limits: ConfigLimits) -> io::Result<Arc<dyn ConfigProvider>>;
 
 // Features `sqlite` or `postgres`; also at the crate root.
 pub struct SqlProvider;   // ConfigProvider with definitions/put/remove + Debug
 impl SqlProvider {
     pub fn open(location: &str) -> io::Result<Self>;   // as SqlRegistry::open
     pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Self>;
+    pub fn with_limits(self, limits: ConfigLimits) -> Self;
 }
 ```
 
@@ -1382,7 +1400,8 @@ pub trait TimelineStore;     // the activity timeline (timeline.rs)
 pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
 pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
 pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
-pub trait RegistryBackend: AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
+pub trait Limited { fn limits(&self) -> &RegistryLimits; }   // the bounds it was opened with
+pub trait RegistryBackend: Limited + AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + ClearanceStore + LogbookStore + QuarantineStore + SessionStore
     + SleeperStore + SourceStore + TimelineStore + UsageStore + VettingStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
@@ -1390,8 +1409,47 @@ impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` / `postgresql://…` → SqlRegistry;
 /// anything else → FileRegistry (a directory, not touched until used).
 pub fn open(location: &str) -> io::Result<Arc<dyn RegistryBackend>>;
-/// As `open`, a SQL Registry connected with `options` (features `sqlite` or `postgres`).
+/// As `open`, either store applying `options.limits()`, a SQL Registry connected with
+/// `options` (features `sqlite` or `postgres`).
 pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn RegistryBackend>>;
+```
+
+## Registry limits (`ai6::directorates::registry::limits`, also at the crate root)
+
+```rust
+// [registry.limits] of ai6.cfg and unex.cfg: one table per family, each
+// #[non_exhaustive] #[serde(default, deny_unknown_fields)], Default = the documented defaults
+// (docs/configuration.md "Limits"). Counts and sizes are Limit, ages TimeLimit, days u32.
+pub struct RegistryLimits { pub accounts: AccountLimits, pub agents: AgentLimits, pub agent_roles: AgentRoleLimits,
+    pub approvals: ApprovalLimits, pub audit: AuditLimits, pub briefs: BriefLimits, pub cables: CableLimits,
+    pub clearance: ClearanceLimits, pub files: FileLimits, pub held: HeldLimits, pub logbook: LogbookLimits,
+    pub proposals: ProposalLimits, pub quarantine: QuarantineLimits, pub sessions: SessionLimits,
+    pub sleepers: SleeperLimits, pub sources: SourceLimits, pub stations: StationLimits,
+    pub timeline: TimelineLimits, pub tokens: TokenLimits, pub usage: UsageLimits }
+impl RegistryLimits {
+    pub fn weakenings(&self) -> Vec<String>;   // "registry.limits.T.KEY VALUE is looser than the default D"
+    pub fn held_record_bytes(&self) -> Limit;  // briefs.record_bytes + 64 KiB
+}
+impl LogbookLimits { pub fn record_bytes(&self) -> Limit; }       // a whole logbook, from its four keys
+impl QuarantineLimits { pub fn history_bytes(&self) -> Limit; }   // 16 × record_bytes
+// StationLimits::gone_dark_after is Seconds (45): pass `registry.limits().stations.gone_dark_after.0`
+// where a Station or Universal Exports judges a check-in dark.
+```
+
+## Bounds (`ai6::bounds`, also at the crate root)
+
+```rust
+pub struct Limit;       // u64 or no bound; reads a number, null or "none"; writes a number or null
+impl Limit { pub const UNBOUNDED: Self; pub const fn at(n: u64) -> Self; pub const fn get(self) -> Option<u64>;
+    pub fn allows<N: TryInto<u64>>(self, n: N) -> bool; pub fn or_max(self) -> usize; }   // Display: n or "none"
+pub struct Seconds(pub Duration);   // fractional seconds, finite and not negative; Serialize + Deserialize
+pub struct TimeLimit;   // Seconds or no bound, same null / "none" rule
+impl TimeLimit { pub const UNBOUNDED: Self; pub const fn at(d: Duration) -> Self; pub const fn secs(s: u64) -> Self;
+    pub const fn get(self) -> Option<Duration>; pub fn allows(self, d: Duration) -> bool;
+    pub fn allows_secs(self, s: f64) -> bool; pub fn as_secs_f64(self) -> f64; }   // INFINITY when unbounded
+/// One line per setting in `current` looser than in `default` (both serialized): larger, or
+/// null; a key in `smaller_is_looser` (by name or path) the other way round.
+pub fn looser(prefix: &str, current: &Value, default: &Value, smaller_is_looser: &[&str]) -> Vec<String>;
 ```
 
 Every trait is re-exported at the crate root. The methods are synchronous; async callers run
@@ -1425,6 +1483,9 @@ pub struct SqlOptions;   // also at the crate root; Default = for_lease(DEFAULT_
 impl SqlOptions {
     pub fn for_lease(lease: Duration) -> Self;   // timeouts derived from the HQS lease
     pub fn with_password(self, password: impl Into<String>) -> Self;
+    pub fn with_limits(self, limits: RegistryLimits) -> Self;    // what the opened Registry applies
+    pub fn with_busy_timeout(self, timeout: Duration) -> Self;   // SQLite lock wait; default 30 s
+    pub fn limits(&self) -> &RegistryLimits;
 }
 
 /// The location with its password (userinfo or `password=`) replaced by `***`.
@@ -1451,7 +1512,8 @@ or from `SqlOptions::with_password` when the location has none (the commands pas
 bootstrap file's `[provider]` and `[registry] password`); a password in the location is
 visible in the process list. Messages from the command show locations through `redact`.
 
-Timeouts (`SqlOptions::for_lease(L)`, at least 1 s each): each session runs
+Timeouts (`SqlOptions::for_lease(L)`, no floor; a sub-millisecond server timeout is sent as
+1 ms, since PostgreSQL reads 0 as none): each session runs
 `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` of `L/4`, so a
 Station that stalls inside a transaction (a paused VM, a half-open connection) loses its
 session, and the clock row it held, well before a standby must take over; the connection
@@ -1546,13 +1608,12 @@ pub struct AuditRecord {
 pub struct StationSettings { /* validated settings for one Station */ }  // Serialize: station,
                                          // max_concurrent_missions, min_free_memory_mb, max_cpu_percent
 impl StationSettings {
-    pub fn try_new(station: impl Into<String>, max_concurrent_missions: usize) -> io::Result<Self>; // default ResourceLimits
+    pub fn try_new(station: impl Into<String>, max_concurrent_missions: usize) -> io::Result<Self>; // >= 1; default ResourceLimits
     pub fn with_resource_limits(self, limits: ResourceLimits) -> io::Result<Self>; // max_cpu_percent > 100 refused
     pub fn resource_limits(&self) -> ResourceLimits;
     pub fn station(&self) -> &str;
     pub fn max_concurrent_missions(&self) -> usize;
 }
-pub const MAX_STATION_MISSION_CAPACITY: usize; // 1024
 pub struct MissionProposal {
     pub id: String,
     pub operation_id: String,
@@ -1564,7 +1625,11 @@ pub struct MissionProposal {
     pub vetting: Option<Vetting>,   // serde default, skipped when None: set by Headquarters
     pub parent_role: Option<String>, // serde default: the role the proposing Session's Mission was given
 }
-impl MissionProposal { pub fn with_parent_role(self, Option<String>) -> Self; }  // set by the Station, never the Agent
+impl MissionProposal {
+    pub fn try_new(operation_id, parent_mission_id: MissionId, proposer_agent_id, proposer_session_id: SessionId,
+        idempotency_key: &str, brief: Brief, limits: &ProposalLimits) -> io::Result<Self>;   // key within limits
+    pub fn with_parent_role(self, Option<String>) -> Self;   // set by the Station, never the Agent
+}
 BriefStore::submit_mission_proposal(&MissionProposal) -> io::Result<()>   // a retry keeps the stored vetting
 BriefStore::list_mission_proposals(operation: &str, limit: usize) -> io::Result<Vec<MissionProposal>>
 BriefStore::promote_mission_proposal(operation: &str, proposal_id: &str, received_by: &str) -> io::Result<Brief>
@@ -1576,7 +1641,9 @@ BriefStore::set_proposal_vetting(operation: &str, proposal_id: &str, vetting: &V
 files. `list_new()` returns valid
 version-1 `Brief` values ordered by priority descending, creation time ascending, then
 key. It skips malformed briefs, rejects unknown fields and
-newer versions, and bounds scans to 1,000 files and individual briefs to 1 MiB. Listing
+newer versions, and bounds scans and individual briefs by `[registry.limits.briefs]`
+(`records`, 1,000; `record_bytes`, 1 MiB). `FileRegistry::with_limits(RegistryLimits)` applies
+other limits; `open` keeps the defaults. Listing
 is read-only. `claim_new(key)` moves one queued brief to `claimed/` under the shared
 `.ai6-registry.lock` but does not create a Station lease. Lease-aware operations are:
 
@@ -1628,7 +1695,6 @@ The activity timeline (`ai6::directorates::registry::timeline`) records what the
 does not:
 
 ```rust
-pub const MAX_TIMELINE_EVENTS: usize = 10_000;
 #[non_exhaustive]
 pub struct TimelineEvent {
     pub id: String, pub at: f64,            // fresh UUID; Unix seconds
@@ -1637,7 +1703,7 @@ pub struct TimelineEvent {
     pub operation: String,                  // whose timeline shows it
     pub station: Option<String>, pub mission: Option<String>,
     pub session: Option<String>, pub actor: Option<String>,
-    pub detail: BTreeMap<String, String>,   // at most 8 safe names and IDs
+    pub detail: BTreeMap<String, String>,   // at most detail_entries (8) safe names and IDs
 }
 impl TimelineEvent {
     pub fn new(kind, action, operation, at: f64) -> Self;
@@ -1648,9 +1714,10 @@ impl TimelineEvent {
 ```
 
 `record_event` refuses (`InvalidInput`) a kind, action or detail key that is not a bounded
-lowercase name (`a-z0-9._-`, 64 bytes), an identity or detail value that is blank, over 256
-bytes or holds control characters, more than 8 details, or a non-positive time; it stores the
-event under `timeline/` named by time, and past `MAX_TIMELINE_EVENTS` removes the oldest.
+lowercase name (`a-z0-9._-`, `name_bytes`), an identity or detail value that is blank, over
+`text_bytes` or holds control characters, more than `detail_entries` details, or a
+non-positive time (`[registry.limits.timeline]`: 64, 256, 8); it stores the event under
+`timeline/` named by time, and past `records` (10,000) removes the oldest.
 `timeline_events(operation)` returns one Operation's events oldest first, skipping unreadable
 files. `submit_cable` records a `cable`/`sent` event for a new Cable under the sender's
 Operation (sender Station and Agent, Mission and Session, details `cable`, `scope`,
@@ -1661,7 +1728,8 @@ fails the Cable or authorization it describes. Events never hold prompts, messag
 bodies, terminal bytes or secrets.
 
 `StationSettings::try_new(station, capacity)` accepts a Station ID and a maximum
-concurrent Mission count from 1 through 1,024. `StationStore::station_settings(station)`
+concurrent Mission count of at least 1; `set_station_settings` refuses one above
+`[registry.limits.stations] mission_capacity` (1,024). `StationStore::station_settings(station)`
 reads the validated current value; `set_station_settings(station, settings)` persists it
 under a collision-resistant Station-specific file and the shared Registry lock. A daemon
 uses the live value for new Mission admission and scheduling; absent settings retain its
@@ -1672,7 +1740,8 @@ is invalid.
 `put_agent_role(operation, role)`, `list_agent_roles(operation)`, `agent_role(operation,
 key)` and `remove_agent_role(operation, role_id)` manage validated, bounded role
 overrides in `agent-roles/<operation>/`. These use the shared Registry lock for writes,
-isolate every Operation, reject path-like identifiers and cap each Operation at 256 roles.
+isolate every Operation, reject path-like identifiers and cap each Operation at
+`[registry.limits.agent_roles] records` (256) roles.
 AI6 resolves the Operation override before the global role. Station check-ins publish the
 global role catalog for authorized Universal Exports readers.
 
@@ -1701,13 +1770,14 @@ pub fn expires(&self) -> f64
 for the reserved `station` and `seen` keys are ignored. Station IDs are non-empty, at most
 256 UTF-8 bytes and contain no control characters. `stations(within)` returns fresh,
 valid records in stable filename order and skips malformed, stale or oversized files.
-Records are bounded to 1 MiB and scans to 1,000 Stations. `elect` returns `true` when it
+Records are bounded by `[registry.limits.stations] record_bytes` (1 MiB) and scans by its
+`records` (1,000). `elect` returns `true` when it
 acquires or renews the lease and `false` when another Station still holds it. An expired
 record moves to `headquarters/lease.lapsed.<station>` before the new lease is written.
 `headquarters` returns the current record even when its lease has expired.
 `HeadquartersLease::term() -> u64` is the election term: it grows by one whenever a
 different Station takes the lease and is unchanged by the holder renewing it. Headquarters
-leases are bounded to 1 MiB and use wall-clock Unix seconds, so participating Stations
+leases are bounded like Station records and use wall-clock Unix seconds, so participating Stations
 need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `running`,
 the host's `resources` (sysinfo: CPU count, CPU percent from the second sample on, the
 one-minute load average except on Windows, total and available memory; in this crate's own
@@ -1777,8 +1847,6 @@ impl SessionStatus { pub fn is_closed(self) -> bool }   // Ended or Lost
 impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub fn with_model(self, Option<String>, Option<String>) -> Self;
     pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self; }
-pub const MAX_RECENT_EVENTS: usize = 20;
-pub const MAX_RECENT_EVENT_CHARS: usize = 300;
 #[non_exhaustive] pub struct SessionRecord {
     pub session_id: String,                  // AI6's ID (not the provider's)
     pub mission_id: String,
@@ -1955,7 +2023,7 @@ impl ClearanceGrant {
     pub fn lower(agent, operation, clearance, signer, at) -> Self;
     pub fn expiring(self, at: f64) -> Self; pub fn because(self, reason) -> Self;
     pub fn raises(&self) -> bool; pub fn is_live(&self, now: f64) -> bool;
-    pub fn validate(&self) -> io::Result<()>;   // Registry-key agent and operation, known clearance
+    pub fn validate(&self, limits: &ClearanceLimits) -> io::Result<()>;   // Registry-key agent and operation, known clearance
 }
 pub trait ClearanceStore {
     // FileRegistry: clearance-grants/<operation>/<agent>.json; SQL: ai6_clearance_grants
@@ -2003,7 +2071,7 @@ impl OperationRecord { pub fn tally_of_model(&self, model: Option<&str>) -> Agen
 #[non_exhaustive] #[derive(Default)] pub struct AgentRecord { pub agent: String,
     pub by_operation: BTreeMap<String, OperationRecord> /* 128 kept */, pub counted: Vec<String> /* last 256 keys */ }
 impl AgentRecord { pub fn new(agent) -> Self; pub fn in_operation(&self, op: &str) -> OperationRecord;
-                   pub fn count(&mut self, report: &AgentOutcomeReport) -> io::Result<bool> /* false: key seen */ }
+                   pub fn count(&mut self, report: &AgentOutcomeReport, limits: &AgentLimits) -> io::Result<bool> /* false: key seen */ }
 #[non_exhaustive] pub struct AgentOutcomeReport { pub agent: String, pub operation: Option<String>,
     pub outcome: AgentOutcome, pub key: String /* names the event, e.g. MISSION#ATTEMPT#OUTCOME */,
     pub clearance: Option<String>, pub model: Option<String> /* as launched */, pub at: f64 }
@@ -2018,8 +2086,9 @@ pub trait AgentRecordStore {
 ```
 
 A Session outcome opens a new `ModelTenure` in its Operation when its launch model differs
-from the current one; incidents do not. A record past 128 Operations, 8 clearances in one, or
-1 MiB, is refused (`InvalidData`). Only the Station that holds a Mission's Session counts it:
+from the current one; incidents do not. A record past `[registry.limits.agents]`
+`operations` (128), `clearances` in one (8) or `record_bytes` (1 MiB) is refused
+(`InvalidData`). Only the Station that holds a Mission's Session counts it:
 each finished or stalled state (key `MISSION#ATTEMPT#OUTCOME`, model from the launch record),
 a Session lost with its Station or runner as `lost` (`MISSION#ATTEMPT#lost`, never `failed`),
 budget stops (`budget#MISSION#ATTEMPT#REVISION`) and refused green ink told to an Agent
@@ -2184,16 +2253,17 @@ each weakening at start.
 
 Records, under the Registry lock: `approvals/pending/OP/ID.json`,
 `approvals/decided/OP/ID.json`, `approvals/missions/OP/MISSION.json` (a Mission's request
-IDs, at most 64), `class-authorizations/OP/ID.json`.
+IDs, at most `[registry.limits.approvals] mission_requests`, 64), `class-authorizations/OP/ID.json`.
 
 ```rust
 pub const EXPIRY_SIGNER: &str;   // "expiry"
 #[non_exhaustive] pub struct ApprovalRequest { pub id: String /* green-ink-<sha256> */, pub operation: String,
     pub mission: MissionId, pub session: SessionId, pub agent: String, pub scope: ActionScope,
-    pub reason: String /* 1-2048, newlines allowed; never audited */, pub requested_at: f64, pub expires_at: f64,
+    pub reason: String /* 1 to reason_bytes (2048), newlines allowed; never audited */, pub requested_at: f64, pub expires_at: f64,
     pub proposed_role: Option<String> /* serde default: the role a Mission proposal asks for */ }
 impl ApprovalRequest {
-    pub fn try_new(operation, mission, session, agent, scope, reason, idempotency_key: &str) -> io::Result<Self>;
+    pub fn try_new(operation, mission, session, agent, scope, reason, idempotency_key: &str,
+        limits: &ApprovalLimits) -> io::Result<Self>;   // key and reason within limits
     pub fn expiring(self, requested_at: f64, ttl: Duration) -> Self;   // required before storing
     pub fn proposing_role(self, Option<String>) -> Self;
 }
@@ -2221,7 +2291,7 @@ impl ClassAuthorization {
     pub fn covers(&self, agent: &str, role: Option<&str>, clearance: &str, scope: &ActionScope) -> bool;
     /// No proposed role, or the parent Mission's `role`, or one in proposed_roles.
     pub fn allows_proposed_role(&self, request: &ApprovalRequest, role: Option<&str>) -> bool;
-    pub fn validate(&self) -> io::Result<()>;   // needs a kind, an Agent or role, a glob, an expiry after the grant
+    pub fn validate(&self, limits: &ApprovalLimits) -> io::Result<()>;   // needs a kind, an Agent or role, a glob, an expiry after the grant
 }
 pub trait ApprovalStore {
     fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus>;   // same ID returns the record
@@ -2348,10 +2418,10 @@ pub trait Source: Send + Sync {
     fn report(&self, report: CxReport) -> Result<(), ProviderError>;
 }
 pub const SOURCE_BRIEF_PREFIX: &str = "source:";
-pub const MAX_ITEM_TEXT_BYTES: usize; // 64 KiB of item text kept per brief
+
 pub enum Ingest { Queued, Updated, Unchanged, InFlight, Finished }
 pub struct FinishedSourceBrief { pub brief: Brief, pub outcome: serde_json::Value, pub ok: bool }
-pub fn source_brief(operation: &str, provider: &str, item: &SourceItem) -> Brief;  // no provenance
+pub fn source_brief(operation: &str, provider: &str, item: &SourceItem, limits: &SourceLimits) -> Brief;  // no provenance; text cut to item_text_bytes
 pub fn reportable(brief: &Brief, provider: &str) -> bool;  // a `source` provenance naming provider and item
 
 SourceStore::source_cursor(operation: &str, provider: &str) -> io::Result<Option<String>>
@@ -2372,8 +2442,9 @@ text between fenced markers introduced as untrusted data; the fence is lengthene
 text cannot contain it. `ingest_source_item` queues the brief, updates a brief still in
 `new/` when its fingerprint (title, text, labels, `updated`) changed, and leaves a claimed
 (`InFlight`) or finished brief alone. Cursors are stored under `sources/`.
-`unreported_source_briefs` lists finished source briefs without a report mark (at most five
-attempts each); `mark_source_reported` records an attempt.
+`unreported_source_briefs` lists finished source briefs without a report mark (at most
+`[registry.limits.sources] report_attempts`, five, attempts each); `mark_source_reported`
+records an attempt.
 
 On the Station, the Headquarters holder runs a source desk: per Operation and provider it
 polls on `interval_secs` (default 60 s, minimum 10 s), ingests the batch, then stores the
@@ -2401,17 +2472,16 @@ pub struct Sleeper {
 impl Sleeper {
     pub fn validate(&self) -> Result<(), String>;   // also refuses a `stations` entry that is no Station ID
     pub fn fingerprint(&self) -> String;   // SHA-256 over every field; any edit changes it
-    pub fn due_window(&self, now: i64, authorized_at: i64) -> Option<i64>;
+    pub fn due_window(&self, now: i64, authorized_at: i64, limits: &SleeperLimits) -> Option<i64>;   // no older than window_age
 }
 pub struct SleeperAuthorization { pub fingerprint: String, pub authorized_by: String, pub at: i64 }
 pub enum Fire { Queued, AlreadyFired }
 pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
-pub const MAX_WINDOW_AGE_SECS: i64; // 86_400
 
 pub struct Cron;
 impl Cron {
     pub fn parse(expression: &str) -> Result<Cron, CronError>;
-    pub fn latest_at_or_before(&self, now: i64) -> Option<i64>; // Unix seconds, looks back 366 days
+    pub fn latest_at_or_before(&self, now: i64, lookback_days: u32) -> Option<i64>; // Unix seconds
 }
 pub fn window_label(window: i64) -> String; // "20261025T0300Z"
 /// The brief of one window; with `station`, that Station's round, narrowed to it.
@@ -2436,13 +2506,15 @@ makes a window, or one Station's round in it, fire once across Stations. A brief
 Headquarters holder fires one round for each Station whose last check-in placement accepts
 for the Operation and the sleeper's Agent or role, within the sleeper's `stations`; load,
 resources and quarantines are ignored there (they only delay a brief), and a Station dark
-past `GONE_DARK_AFTER` gets no round until it checks in again. Authorizations are stored under `sleepers/`. The
+past `[registry.limits.stations] gone_dark_after` gets no round until it checks in again.
+`authorize_sleeper` refuses a prompt over `[registry.limits.sleepers] prompt_bytes`.
+Authorizations are stored under `sleepers/`. The
 Headquarters holder fires only sleepers whose stored fingerprint equals the current
-definition, using windows after the approval time and no more than a day old.
+definition, using windows after the approval time and no older than `window_age` (a day).
 
 ## Station logbooks (`ai6::directorates::registry::logbook`)
 
-Each Station's logbook keeps the newest `LOGBOOK_LENGTH` (20) reports its Head of Station
+Each Station's logbook keeps the newest `[registry.limits.logbook] entries` (20) reports its Head of Station
 filed, oldest first, under `logbook/<station>.json` (SQL table `ai6_logbooks`). A round is
 a Mission of role `head-of-station` whose brief, as this Station leased it, is this Station's
 round of an authorized `each_station` Sleeper: the Registry kept `Origin::Sleeper` provenance
@@ -2457,10 +2529,6 @@ asking for one is refused at the Cable endpoint.
 pub const HEAD_OF_STATION_ROLE: &str = "head-of-station";
 pub fn is_head_of_station_role(role: &str) -> bool;   // the role or one beneath it ("head-of-station/...")
 pub const HEAD_OF_STATION_CHANNEL: &str = "heads-of-station";
-pub const LOGBOOK_LENGTH: usize = 20;
-pub const MAX_SUMMARY_BYTES: usize = 4096;
-pub const MAX_FINDINGS: usize = 32;
-pub const MAX_FINDING_BYTES: usize = 1024;
 #[non_exhaustive] pub enum StationFindingKind { Disk, Theater, SafeHouse, Provider, Other } // kebab-case; as_str, FromStr, Display
 #[non_exhaustive] pub enum Severity { Info, Warning, Critical }                     // lowercase; ordered
 #[non_exhaustive] pub struct StationFinding { pub kind: StationFindingKind, pub severity: Severity, pub text: String }
@@ -2474,9 +2542,9 @@ impl StationReport {
     pub fn with_findings(self, findings: impl IntoIterator<Item = StationFinding>) -> Self;
     pub fn filed_by(self, mission, agent) -> Self;
     pub fn worst(&self) -> Option<Severity>;
-    pub fn validate(&self) -> io::Result<()>;   // InvalidInput: Station ID, 1..=4096-byte summary, <= 32 findings of 1..=1024 bytes
+    pub fn validate(&self, limits: &LogbookLimits) -> io::Result<()>;   // InvalidInput: Station ID, summary, findings out of limits
 }
-LogbookStore::file_station_report(report: &StationReport) -> io::Result<()>   // drops the oldest past 20
+LogbookStore::file_station_report(report: &StationReport) -> io::Result<()>   // drops the oldest past `entries`
 LogbookStore::logbook(station: &str) -> io::Result<Vec<StationReport>>         // oldest first; empty when none
 ```
 
@@ -2602,18 +2670,17 @@ own `.ai6/agents.toml` refines it, sets `PATH`, `CODEX_HOME`, any `*_BASE_URL` o
 changed or dropped): the configuration error names the Agent and the variables.
 
 ```rust
-pub const MAX_HELD_PER_OPERATION: usize = 1_000;  // past it a brief stays queued
-pub const MAX_HELD_BRIEFS: usize = 10_000;        // records one listing reads, across Operations
-pub const MAX_HELD_RESULTS: usize = 500;
+// [registry.limits.held]: per_operation (1,000; past it a brief stays queued), records
+// (10,000 read across Operations), results (500), reason_bytes (1,024), actor_bytes (256)
 #[non_exhaustive] pub struct HeldBrief { pub operation: String, pub brief: Brief, pub vetting: Vetting, pub held_at: f64 }
 impl HeldBrief { pub fn held_only_for_rate(&self) -> bool; }
 #[non_exhaustive] pub struct Clearance { pub kinds: BTreeSet<FindingKind>, pub digest: String, pub by: String, pub at: f64 }
 impl Clearance { pub fn kinds_for(&self, brief: &Brief) -> BTreeSet<FindingKind>; } // empty unless digest matches
 
 VettingStore::hold_brief(operation, key, vetting: &Vetting, at: f64) -> io::Result<Option<HeldBrief>> // None: not queued
-VettingStore::held_briefs(operation, limit /* 1..=500 */) -> io::Result<Vec<HeldBrief>>         // oldest first
+VettingStore::held_briefs(operation, limit /* 1..=results */) -> io::Result<Vec<HeldBrief>>     // oldest first
 VettingStore::release_held(operation, key, by, at) -> io::Result<Brief>   // again: same brief; AlreadyExists once claimed/finished
-VettingStore::refuse_held(operation, key, by, reason /* ≤1024 B */, at) -> io::Result<Brief>  // idem
+VettingStore::refuse_held(operation, key, by, reason /* ≤ reason_bytes */, at) -> io::Result<Brief>  // idem
 VettingStore::requeue_held(operation, key) -> io::Result<bool>          // back to new/ with no clearance
 VettingStore::clearance(key) -> io::Result<Option<Clearance>>
 VettingStore::clear_brief(key, digest, kinds: &[FindingKind], by, at) -> io::Result<Option<Clearance>>
@@ -2682,7 +2749,6 @@ Registry lock.
 ## Q Branch loadouts (`ai6::directorates::q`)
 
 ```rust
-pub const MAX_LOADOUT_BYTES: usize;
 #[non_exhaustive]
 pub enum QErrorKind { Io, TooLarge, InvalidUtf8, Parse, Schema }
 pub struct QError;
@@ -2758,7 +2824,8 @@ impl McpServer {
 }
 pub struct LoadoutCatalog;   // Default: empty
 impl LoadoutCatalog {
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, QError>;
+    pub fn load(path: impl AsRef<Path>, limits: &ConfigLimits) -> Result<Self, QError>;   // TooLarge past loadout_bytes
+    pub fn parse(text: &str, limits: &ConfigLimits) -> Result<Self, QError>;   // FromStr: the default limits
     pub fn with_pool(self, pool: AccountPool) -> Result<Self, QError>;   // validates; replaces the same ID
     pub fn pools(&self) -> impl Iterator<Item = &AccountPool>;
     pub fn pool(&self, id: &str) -> Option<&AccountPool>;
@@ -2918,9 +2985,10 @@ apply this vector to AgentHandler startup.
 recipient. `CableDraft::new(sender_agent, sender_operation, sender_station, target, body,
 recipients, idempotency_key, id, created_at, expires_at)` creates the required fields;
 builder methods add the optional Theater, Mission, Session, conversation and reply
-identities. `Cable::try_new(draft)` validates a complete envelope. Bodies are limited to
-16 KiB UTF-8, expiry must be later than creation and no more than 24 hours later, and
-recipient `(agent, session_id)` pairs must be unique. Serde uses the Registry's field names
+identities. `Cable::try_new(draft, &CableLimits)` validates a complete envelope. Bodies are
+limited to `body_bytes` UTF-8 (16 KiB), expiry must be later than creation and no more than
+`max_ttl` later (24 hours), and recipient `(agent, session_id)` pairs must be unique; a
+Cable read back from its record is not held to them again. Serde uses the Registry's field names
 and rejects missing, unknown or invalid fields. `Debug` redacts Cable bodies.
 `with_recipient_state(agent, session_id, state)` returns a new Cable for a permitted
 delivery transition, `None` for a recipient not in the audience, or `CableError` for an
@@ -2932,6 +3000,7 @@ trusted session adapters only; request objects have no sender identity. `CablePo
 holds deny-by-default `CableGrant`s and per-Agent `CableInboundMode` values. A grant
 names an Agent (or `*`), a `CableAction` (`Send`, `Receive`, `Discover`, `Release`) and one exact
 `CableTarget`. `CableRelay::new(Arc<dyn RegistryBackend>, policy, endpoint_source, channels)`
+(`limits()` gives that Registry's `RegistryLimits`)
 uses the shared Registry, an authoritative Agent/Session directory and named channel
 members. `with_limits` configures bounded fan-out (1–1,000) and persistent sender/scope
 token buckets. `send(principal, CableSendRequest)` checks sender and every receiver,

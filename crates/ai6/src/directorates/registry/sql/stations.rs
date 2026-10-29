@@ -4,13 +4,12 @@ use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
 
-use super::SqlRegistry;
 use super::db::Tx;
+use super::{SqlRegistry, row_limit};
 use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::registry::store::{
-    HeadquartersLease, MAX_STATION_RECORD_BYTES, MAX_STATIONS, StationRecord, StationRecordFile,
-    StationSettings, StationStore, check_election, check_in_record, check_settings, elected,
-    invalid_data, validate_station_id,
+    HeadquartersLease, StationRecord, StationRecordFile, StationSettings, StationStore,
+    check_election, check_in_record, check_settings, elected, invalid_data, validate_station_id,
 };
 
 /// The Headquarters lease, read in the transaction that may replace it.
@@ -39,8 +38,13 @@ impl StationStore for SqlRegistry {
     fn check_in(&self, station: &str, info: BTreeMap<String, serde_json::Value>) -> io::Result<()> {
         validate_station_id(station)?;
         self.write(|tx, revision| {
-            let record = String::from_utf8(check_in_record(station, info, tx.now()?)?)
-                .map_err(|_| invalid_data("station record is not UTF-8"))?;
+            let record = String::from_utf8(check_in_record(
+                station,
+                info,
+                tx.now()?,
+                &self.limits.stations,
+            )?)
+            .map_err(|_| invalid_data("station record is not UTF-8"))?;
             tx.execute(
                 "INSERT INTO ai6_stations (station, record, revision) VALUES ($1, $2, $3) \
                  ON CONFLICT (station) DO UPDATE SET record = excluded.record, \
@@ -55,20 +59,23 @@ impl StationStore for SqlRegistry {
         let (rows, now) = self.read(|tx| {
             let rows = tx.query(
                 "SELECT record FROM ai6_stations ORDER BY station LIMIT $1",
-                &[(MAX_STATIONS + 1).into()],
+                &[row_limit(self.limits.stations.records)
+                    .saturating_add(1)
+                    .into()],
             )?;
             Ok::<_, io::Error>((rows, tx.now()?))
         })?;
-        if rows.len() > MAX_STATIONS {
+        if !self.limits.stations.records.allows(rows.len()) {
             return Err(invalid_data(format!(
-                "Registry has more than {MAX_STATIONS} station records"
+                "Registry has more than {} station records",
+                self.limits.stations.records
             )));
         }
         let window = within.as_secs_f64();
         let mut stations = Vec::with_capacity(rows.len());
         for row in rows {
             let text = row.text(0)?;
-            if text.len() as u64 > MAX_STATION_RECORD_BYTES {
+            if !self.limits.stations.record_bytes.allows(text.len()) {
                 continue;
             }
             let Ok(file) = serde_json::from_str::<StationRecordFile>(&text) else {
@@ -113,7 +120,7 @@ impl StationStore for SqlRegistry {
     }
 
     fn set_station_settings(&self, station: &str, settings: &StationSettings) -> io::Result<()> {
-        check_settings(station, settings)?;
+        check_settings(station, settings, &self.limits.stations)?;
         let limits = settings.resource_limits();
         self.write(|tx, revision| {
             tx.execute(

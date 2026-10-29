@@ -27,7 +27,11 @@ use std::time::Duration;
 use serde::{Deserialize, Deserializer};
 use zeroize::Zeroizing;
 
+use crate::bounds::Limit;
+use crate::bounds::Seconds;
+use crate::directorates::m::config::ConfigLimits;
 use crate::directorates::registry::bona_fides::PluginProfile;
+use crate::directorates::registry::limits::RegistryLimits;
 
 use self::format::Format;
 
@@ -248,23 +252,10 @@ fn is_variable_name(name: &str) -> bool {
         && characters.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
-/// A number of seconds, whole or fractional, not negative.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Seconds(pub Duration);
-
-impl<'de> Deserialize<'de> for Seconds {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let seconds = f64::deserialize(deserializer)?;
-        Duration::try_from_secs_f64(seconds)
-            .map(Self)
-            .map_err(|_| serde::de::Error::custom("seconds must be a finite number, 0 or more"))
-    }
-}
-
-/// `[provider]`: where the configuration provider is.
+/// `[provider]`: where the configuration provider is, and how much of a document it reads.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct ProviderSettings {
     /// A configuration directory, `sqlite:PATH` or a `postgres://` URL. Default: the
     /// directory holding the bootstrap file, else the user's configuration directory.
@@ -273,12 +264,33 @@ pub struct ProviderSettings {
     pub password: Option<SecretRef>,
     /// Seconds between checks for changes; 0 turns reloading off. Default 5.
     pub poll: Option<Seconds>,
+    /// Bytes of the loadout document ([`ConfigLimits::loadout_bytes`]). Default 1 MiB.
+    pub loadout_bytes: Limit,
+    /// Characters of one loadout value ([`ConfigLimits::loadout_value_chars`]).
+    /// Default 4,096.
+    pub loadout_value_chars: Limit,
+    /// Bytes of the access policy ([`ConfigLimits::access_policy_bytes`]). Default 1 MiB.
+    pub access_policy_bytes: Limit,
 }
 
-/// `[registry]`: where the shared Registry is.
+impl Default for ProviderSettings {
+    fn default() -> Self {
+        let limits = ConfigLimits::default();
+        Self {
+            location: None,
+            password: None,
+            poll: None,
+            loadout_bytes: limits.loadout_bytes,
+            loadout_value_chars: limits.loadout_value_chars,
+            access_policy_bytes: limits.access_policy_bytes,
+        }
+    }
+}
+
+/// `[registry]`: where the shared Registry is, and how much it keeps.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct RegistrySettings {
     /// A directory, `sqlite:PATH` or a `postgres://` URL. Default: the provider's database
     /// when the provider is SQL, else `registry` in the state directory.
@@ -288,6 +300,10 @@ pub struct RegistrySettings {
     /// Seconds the Headquarters lease lasts between renewals; it also sets the SQL
     /// connections' timeouts. Default 60.
     pub headquarters_lease: Option<Seconds>,
+    /// Seconds a SQLite connection waits for another's lock. Default 30.
+    pub sqlite_busy_timeout: Option<Seconds>,
+    /// `[registry.limits]`: what the Registry keeps and accepts.
+    pub limits: RegistryLimits,
 }
 
 /// `[identity]`: where this host keeps its certificate identity and pinned peers.
@@ -475,8 +491,8 @@ impl Located<UnexBootstrap> {
         self.value.listen.unwrap_or(DEFAULT_UNEX_LISTEN)
     }
 
-    /// Each secret of the file that is read from the environment or written inline, worded
-    /// for a log line.
+    /// Each secret of the file that is read from the environment or written inline, and each
+    /// `[registry]` or `[provider]` limit looser than its default, worded for a log line.
     pub fn weakenings(&self) -> Vec<String> {
         let mut weakened = Vec::new();
         for (what, secret) in [
@@ -489,6 +505,7 @@ impl Located<UnexBootstrap> {
                 weakened.push(format!("the {what} is {weakening}"));
             }
         }
+        weakened.extend(limit_weakenings(&self.value.registry, &self.value.provider));
         weakened
     }
 }
@@ -671,6 +688,15 @@ impl ProviderSettings {
     pub fn poll(&self) -> Duration {
         self.poll.map_or(DEFAULT_POLL, |seconds| seconds.0)
     }
+
+    /// The limits the configuration provider reads documents within.
+    pub fn limits(&self) -> ConfigLimits {
+        ConfigLimits {
+            loadout_bytes: self.loadout_bytes,
+            loadout_value_chars: self.loadout_value_chars,
+            access_policy_bytes: self.access_policy_bytes,
+        }
+    }
 }
 
 impl RegistrySettings {
@@ -689,6 +715,31 @@ impl RegistrySettings {
             |seconds| seconds.0,
         )
     }
+
+    /// How long a SQLite connection waits for another's lock: 30 s unless the file says
+    /// otherwise.
+    pub fn sqlite_busy_timeout(&self) -> Duration {
+        self.sqlite_busy_timeout
+            .map_or(DEFAULT_SQLITE_BUSY_TIMEOUT, |seconds| seconds.0)
+    }
+}
+
+/// How long a SQLite connection waits for another's lock when the file says nothing: a slow
+/// disk or a busy CI runner must not turn into a refused write.
+pub(crate) const DEFAULT_SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// One line per limit of `[registry]` and `[provider]` looser than its default.
+fn limit_weakenings(registry: &RegistrySettings, provider: &ProviderSettings) -> Vec<String> {
+    let mut weakened = registry.limits.weakenings();
+    if registry.sqlite_busy_timeout() > DEFAULT_SQLITE_BUSY_TIMEOUT {
+        weakened.push(format!(
+            "registry.sqlite_busy_timeout {} is looser than the default {}",
+            registry.sqlite_busy_timeout().as_secs_f64(),
+            DEFAULT_SQLITE_BUSY_TIMEOUT.as_secs_f64()
+        ));
+    }
+    weakened.extend(provider.limits().weakenings());
+    weakened
 }
 
 impl PluginSettings {
@@ -825,7 +876,8 @@ impl Located<Bootstrap> {
     }
 
     /// What the file gives up against the defaults, worded for a log line: each secret that
-    /// is read from the environment or written inline.
+    /// is read from the environment or written inline, and each `[registry]` or `[provider]`
+    /// limit looser than its default.
     pub fn weakenings(&self) -> Vec<String> {
         let mut weakened = Vec::new();
         let mut secret = |what: &str, secret: Option<&SecretRef>| {
@@ -842,6 +894,7 @@ impl Located<Bootstrap> {
                 .as_ref()
                 .and_then(|unex| unex.token.as_ref()),
         );
+        weakened.extend(limit_weakenings(&self.value.registry, &self.value.provider));
         weakened
     }
 }
@@ -955,6 +1008,23 @@ mod tests {
                 "{refused}"
             );
         }
+    }
+
+    #[test]
+    fn unex_cfg_reports_its_loosened_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("unex.cfg");
+        std::fs::write(
+            &path,
+            "[provider]\naccess_policy_bytes = \"none\"\n[registry.limits.held]\nresults = 100\n",
+        )
+        .unwrap();
+        let located = UnexBootstrap::find(Some(&path)).unwrap();
+        assert_eq!(located.value.registry.limits.held.results, Limit::at(100));
+        assert_eq!(
+            located.weakenings(),
+            ["provider.access_policy_bytes none is looser than the default 1048576"]
+        );
     }
 
     #[test]

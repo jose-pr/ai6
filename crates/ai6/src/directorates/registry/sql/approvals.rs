@@ -8,13 +8,13 @@ use super::{SqlRegistry, bounded_json, from_json};
 use crate::directorates::m::approvals::ActionScope;
 use crate::directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ApprovalStore, ClassAuthorization, Decision,
-    MAX_CLASS_AUTHORIZATIONS, MAX_MISSION_REQUESTS, MAX_PENDING, MAX_RECORD_BYTES, Revocation,
-    Ruling, class_approval, expired, ruled, validate_ruling,
+    Revocation, Ruling, class_approval, expired, ruled, validate_ruling,
 };
+use crate::directorates::registry::limits::ApprovalLimits;
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
 
-fn record_json(value: &impl serde::Serialize) -> io::Result<String> {
-    bounded_json(value, MAX_RECORD_BYTES, "green ink record")
+fn record_json(value: &impl serde::Serialize, limits: &ApprovalLimits) -> io::Result<String> {
+    bounded_json(value, limits.record_bytes, "green ink record")
 }
 
 /// The request and its decision, expiring a pending request at `now`; `now` of zero never
@@ -25,6 +25,7 @@ fn status_in(
     id: &str,
     now: f64,
     revision: i64,
+    limits: &ApprovalLimits,
 ) -> io::Result<Option<ApprovalStatus>> {
     let Some(row) = tx.query_opt(
         "SELECT state, record FROM ai6_approvals WHERE operation = $1 AND id = $2",
@@ -40,21 +41,26 @@ fn status_in(
     let request: ApprovalRequest = from_json(&row.text(1)?, "green ink record")?;
     if now > 0.0 && request.expires_at <= now {
         let approval = expired(&request);
-        settle(tx, &approval, revision)?;
+        settle(tx, &approval, revision, limits)?;
         return Ok(Some(ApprovalStatus::Decided(approval)));
     }
     Ok(Some(ApprovalStatus::Pending(request)))
 }
 
 /// Stores a decision in place of its pending request.
-fn settle(tx: &mut Tx<'_>, approval: &Approval, revision: i64) -> io::Result<()> {
+fn settle(
+    tx: &mut Tx<'_>,
+    approval: &Approval,
+    revision: i64,
+    limits: &ApprovalLimits,
+) -> io::Result<()> {
     tx.execute(
         "UPDATE ai6_approvals SET state = 'decided', record = $3, revision = $4 \
          WHERE operation = $1 AND id = $2",
         &[
             approval.request.operation.as_str().into(),
             approval.request.id.as_str().into(),
-            record_json(approval)?.into(),
+            record_json(approval, limits)?.into(),
             revision.into(),
         ],
     )?;
@@ -68,6 +74,7 @@ fn insert(
     state: &str,
     record: String,
     revision: i64,
+    limits: &ApprovalLimits,
 ) -> io::Result<()> {
     let made = tx
         .query_opt(
@@ -78,9 +85,10 @@ fn insert(
             ],
         )?
         .map_or(Ok(0), |row| row.int(0))?;
-    if made >= MAX_MISSION_REQUESTS as i64 {
+    let most = limits.mission_requests;
+    if !most.allows(made + 1) {
         return Err(invalid_data(format!(
-            "the Mission has made {MAX_MISSION_REQUESTS} green ink requests"
+            "the Mission has made {most} green ink requests"
         )));
     }
     tx.execute(
@@ -124,7 +132,12 @@ fn classes_in(tx: &mut Tx<'_>, operation: &str) -> io::Result<Vec<ClassAuthoriza
     Ok(records)
 }
 
-fn put_class(tx: &mut Tx<'_>, record: &ClassAuthorization, revision: i64) -> io::Result<()> {
+fn put_class(
+    tx: &mut Tx<'_>,
+    record: &ClassAuthorization,
+    revision: i64,
+    limits: &ApprovalLimits,
+) -> io::Result<()> {
     tx.execute(
         "INSERT INTO ai6_class_authorizations (operation, id, created_at, record, revision) \
          VALUES ($1, $2, $3, $4, $5) ON CONFLICT (operation, id) \
@@ -133,7 +146,7 @@ fn put_class(tx: &mut Tx<'_>, record: &ClassAuthorization, revision: i64) -> io:
             record.operation.as_str().into(),
             record.id.as_str().into(),
             record.created_at.into(),
-            record_json(record)?.into(),
+            record_json(record, limits)?.into(),
             revision.into(),
         ],
     )?;
@@ -142,9 +155,16 @@ fn put_class(tx: &mut Tx<'_>, record: &ClassAuthorization, revision: i64) -> io:
 
 impl ApprovalStore for SqlRegistry {
     fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus> {
-        request.validate()?;
+        request.validate(&self.limits.approvals)?;
         self.write(|tx, revision| {
-            if let Some(status) = status_in(tx, &request.operation, &request.id, 0.0, revision)? {
+            if let Some(status) = status_in(
+                tx,
+                &request.operation,
+                &request.id,
+                0.0,
+                revision,
+                &self.limits.approvals,
+            )? {
                 return Ok(status);
             }
             let pending = tx
@@ -153,12 +173,20 @@ impl ApprovalStore for SqlRegistry {
                     &[request.operation.as_str().into()],
                 )?
                 .map_or(Ok(0), |row| row.int(0))?;
-            if pending >= MAX_PENDING as i64 {
+            let most = self.limits.approvals.pending;
+            if !most.allows(pending + 1) {
                 return Err(invalid_data(format!(
-                    "the Operation has {MAX_PENDING} requests waiting for green ink"
+                    "the Operation has {most} requests waiting for green ink"
                 )));
             }
-            insert(tx, request, "pending", record_json(request)?, revision)?;
+            insert(
+                tx,
+                request,
+                "pending",
+                record_json(request, &self.limits.approvals)?,
+                revision,
+                &self.limits.approvals,
+            )?;
             Ok(ApprovalStatus::Pending(request.clone()))
         })
     }
@@ -166,7 +194,9 @@ impl ApprovalStore for SqlRegistry {
     fn approval(&self, operation: &str, id: &str, now: f64) -> io::Result<Option<ApprovalStatus>> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        self.write(|tx, revision| status_in(tx, operation, id, now, revision))
+        self.write(|tx, revision| {
+            status_in(tx, operation, id, now, revision, &self.limits.approvals)
+        })
     }
 
     fn pending_approvals(&self, operation: &str, now: f64) -> io::Result<Vec<ApprovalRequest>> {
@@ -185,7 +215,7 @@ impl ApprovalStore for SqlRegistry {
                     continue;
                 }
                 if request.expires_at <= now {
-                    settle(tx, &expired(&request), revision)?;
+                    settle(tx, &expired(&request), revision, &self.limits.approvals)?;
                 } else {
                     waiting.push(request);
                 }
@@ -214,7 +244,7 @@ impl ApprovalStore for SqlRegistry {
             )?;
             let mut statuses = Vec::with_capacity(ids.len());
             for row in ids {
-                if let Some(status) = status_in(tx, operation, &row.text(0)?, now, revision)? {
+                if let Some(status) = status_in(tx, operation, &row.text(0)?, now, revision, &self.limits.approvals)? {
                     statuses.push(status);
                 }
             }
@@ -245,28 +275,39 @@ impl ApprovalStore for SqlRegistry {
     fn decide_approval(&self, operation: &str, id: &str, ruling: &Ruling) -> io::Result<Approval> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        validate_ruling(ruling)?;
+        validate_ruling(ruling, &self.limits.approvals)?;
         // A request found expired is recorded as expired even though the ruling is refused,
         // so the transaction commits and the refusal is returned after it.
         self.write(|tx, revision| {
-            Ok::<_, io::Error>(match status_in(tx, operation, id, ruling.at, revision)? {
-                None => Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "no such green ink request",
-                )),
-                Some(ApprovalStatus::Decided(approval)) if approval.decision == ruling.decision => {
-                    Ok(approval)
-                }
-                Some(ApprovalStatus::Decided(approval)) => Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!("the request was already {}", approval.decision.as_str()),
-                )),
-                Some(ApprovalStatus::Pending(request)) => {
-                    let approval = ruled(request, ruling);
-                    settle(tx, &approval, revision)?;
-                    Ok(approval)
-                }
-            })
+            Ok::<_, io::Error>(
+                match status_in(
+                    tx,
+                    operation,
+                    id,
+                    ruling.at,
+                    revision,
+                    &self.limits.approvals,
+                )? {
+                    None => Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "no such green ink request",
+                    )),
+                    Some(ApprovalStatus::Decided(approval))
+                        if approval.decision == ruling.decision =>
+                    {
+                        Ok(approval)
+                    }
+                    Some(ApprovalStatus::Decided(approval)) => Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        format!("the request was already {}", approval.decision.as_str()),
+                    )),
+                    Some(ApprovalStatus::Pending(request)) => {
+                        let approval = ruled(request, ruling);
+                        settle(tx, &approval, revision, &self.limits.approvals)?;
+                        Ok(approval)
+                    }
+                },
+            )
         })?
     }
 
@@ -292,7 +333,7 @@ impl ApprovalStore for SqlRegistry {
                     by: by.to_owned(),
                     at,
                 });
-                settle(tx, &approval, revision)?;
+                settle(tx, &approval, revision, &self.limits.approvals)?;
             }
             Ok(approval)
         })
@@ -307,7 +348,7 @@ impl ApprovalStore for SqlRegistry {
                 return Ok(false);
             }
             approval.spent_at = Some(at);
-            settle(tx, &approval, revision)?;
+            settle(tx, &approval, revision, &self.limits.approvals)?;
             Ok(true)
         })
     }
@@ -319,7 +360,7 @@ impl ApprovalStore for SqlRegistry {
             let mut approval = decided_in(tx, operation, id)?;
             if approval.notified_at.is_none() {
                 approval.notified_at = Some(at);
-                settle(tx, &approval, revision)?;
+                settle(tx, &approval, revision, &self.limits.approvals)?;
             }
             Ok(())
         })
@@ -332,9 +373,18 @@ impl ApprovalStore for SqlRegistry {
         clearance: &str,
         now: f64,
     ) -> io::Result<Option<Approval>> {
-        request.validate()?;
+        request.validate(&self.limits.approvals)?;
         self.write(|tx, revision| {
-            if status_in(tx, &request.operation, &request.id, 0.0, revision)?.is_some() {
+            if status_in(
+                tx,
+                &request.operation,
+                &request.id,
+                0.0,
+                revision,
+                &self.limits.approvals,
+            )?
+            .is_some()
+            {
                 return Ok(None);
             }
             let Some(mut class) = classes_in(tx, &request.operation)?
@@ -348,15 +398,22 @@ impl ApprovalStore for SqlRegistry {
                 return Ok(None);
             };
             class.uses += 1;
-            put_class(tx, &class, revision)?;
+            put_class(tx, &class, revision, &self.limits.approvals)?;
             let approval = class_approval(request, &class, now);
-            insert(tx, request, "decided", record_json(&approval)?, revision)?;
+            insert(
+                tx,
+                request,
+                "decided",
+                record_json(&approval, &self.limits.approvals)?,
+                revision,
+                &self.limits.approvals,
+            )?;
             Ok(Some(approval))
         })
     }
 
     fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()> {
-        record.validate()?;
+        record.validate(&self.limits.approvals)?;
         self.write(|tx, revision| {
             let held = tx
                 .query(
@@ -372,12 +429,13 @@ impl ApprovalStore for SqlRegistry {
                     "the class authorisation identity is taken",
                 ));
             }
-            if held.len() >= MAX_CLASS_AUTHORIZATIONS {
+            let most = self.limits.approvals.class_authorizations;
+            if !most.allows(held.len() + 1) {
                 return Err(invalid_data(format!(
-                    "the Operation holds {MAX_CLASS_AUTHORIZATIONS} class authorisations"
+                    "the Operation holds {most} class authorisations"
                 )));
             }
-            put_class(tx, record, revision)
+            put_class(tx, record, revision, &self.limits.approvals)
         })
     }
 
@@ -410,7 +468,7 @@ impl ApprovalStore for SqlRegistry {
                     by: by.to_owned(),
                     at,
                 });
-                put_class(tx, &record, revision)?;
+                put_class(tx, &record, revision, &self.limits.approvals)?;
             }
             Ok(record)
         })

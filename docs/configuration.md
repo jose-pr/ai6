@@ -64,8 +64,9 @@ password = "the value itself"          # inline
 
 A file is the default and the strongest form. A variable is inherited by every process the
 reader starts, and an inline value is copied and committed with the file, so both are
-**weakenings**: printed at start, and sent at check-in as `bootstrap_weakened`. They are
-allowed. A secret's value never appears in a message, a log or `Debug` output.
+**weakenings**: printed at start, and sent at check-in as `bootstrap_weakened`, as is a
+limit looser than its default ([Limits](#limits)). They are allowed. A secret's value never
+appears in a message, a log or `Debug` output.
 
 ### `ai6.cfg`
 
@@ -78,12 +79,17 @@ listen = "127.0.0.1:7081"
 location = "."                        # a directory, sqlite:PATH or postgres://...
 password = { file = "db-password" }   # when a SQL location gives none
 poll = 5                              # seconds between checks for changes; 0 turns reloading off
+loadout_bytes = 1048576               # and the other limits under Limits below
 
 [registry]
 location = "postgres://db/ai6"        # default: the provider's database when it is SQL,
                                       # else registry/ in the state directory
 password = { file = "db-password" }   # default: the provider's, when the Registry is its database
 headquarters_lease = 60               # seconds; also sets the SQL connections' timeouts
+sqlite_busy_timeout = 30              # seconds a SQLite connection waits for a lock
+
+[registry.limits.sessions]            # what the Registry keeps and accepts: Limits below
+records = 100000
 
 [identity]
 dir = "/var/lib/ai6"                  # identity.pem and peers/; default: the state directory
@@ -125,6 +131,236 @@ state_dir = "/var/lib/unex"           # verified provider libraries, and a defau
 
 `universal-exports` takes `--config`, `--provider`, `--registry`, `--listen`,
 `--public-origin`, `--plugin-path` and `--plugin-profile` over the file.
+
+### Limits
+
+How much the Registry keeps and accepts, and how much of a document the configuration
+provider reads, are bootstrap settings: both are needed before any provider record is read,
+by Stations and Universal Exports alike. `unex.cfg` takes the same `[provider]` and
+`[registry]` keys as `ai6.cfg`. Every key has a default, and a table may name only the keys it
+changes.
+
+A count or size is a whole number; `null`, or the string `"none"` in TOML, which has no
+null, takes the bound away. A number of seconds may be fractional. Only nonsense is refused:
+a negative number, or a word other than `none`. A value looser than its default (larger, or
+no bound) is a weakening, reported like an inline secret:
+`registry.limits.sessions.records none is looser than the default 100000`.
+
+```toml
+[provider]
+loadout_bytes = 2097152               # a larger loadout document; reported as a weakening
+
+[registry]
+sqlite_busy_timeout = 10              # tighter than the default 30
+
+[registry.limits.sessions]
+records = 50000
+
+[registry.limits.audit]
+records = "none"                      # keep every audit record; reported as a weakening
+```
+
+`[provider]`:
+
+| Key | Default | What |
+| --- | --- | --- |
+| `loadout_bytes` | 1 MiB | Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool` records together) |
+| `loadout_value_chars` | 4,096 | Characters of one text value in the loadout document |
+| `access_policy_bytes` | 1 MiB | Bytes of the access policy (the `access` record) |
+
+`[registry]`:
+
+| Key | Default | What |
+| --- | --- | --- |
+| `headquarters_lease` | 60 | Seconds the Headquarters lease lasts between renewals; a PostgreSQL statement, lock wait and idle transaction end after a quarter of it, a connection attempt after a sixth |
+| `sqlite_busy_timeout` | 30 | Seconds a SQLite connection waits for a lock another holds |
+
+Each `[registry.limits.*]` table bounds one record family. A Station's
+`max_concurrent_missions` setting is refused past `[registry.limits.stations]
+mission_capacity`. A logbook's whole size follows from its four keys.
+
+`[registry.limits.accounts]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 256 KiB | Bytes of one account's record |
+| `claims` | 1,024 | Live claims on one account; past it the oldest is dropped |
+| `windows` | 8 | Quota windows kept per account |
+| `kept_days` | 8 | Days of token counts kept per account |
+
+`[registry.limits.agents]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 1 MiB | Bytes of one Agent record |
+| `operations` | 128 | Operations one Agent record tallies |
+| `clearances` | 8 | Clearances one Operation of an Agent record tallies |
+| `counted` | 256 | Mission outcomes remembered per Agent, so a repeated report is counted once |
+| `model_history` | 16 | Model changes kept per Agent |
+| `key_bytes` | 512 | Bytes of an outcome report's key |
+| `agent_bytes` | 256 | Bytes of an outcome report's Agent, Operation and model |
+
+`[registry.limits.agent_roles]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 32 KiB | Bytes of one Agent role record |
+| `records` | 256 | Agent roles per Operation |
+
+`[registry.limits.approvals]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 16 KiB | Bytes of one approval record |
+| `pending` | 1,000 | Pending approval requests |
+| `class_authorizations` | 1,000 | Class authorizations |
+| `mission_requests` | 64 | Requests one Mission may have |
+| `reason_bytes` | 2,048 | Bytes of a request's reason |
+| `note_bytes` | 1,024 | Bytes of a decision's note |
+| `signer_bytes` | 256 | Bytes of a signer's name |
+| `idempotency_key_bytes` | 256 | Bytes of a request's idempotency key |
+| `class_entries` | 64 | Step kinds, Agents, roles and proposed roles each class authorization may name |
+| `pattern_bytes` | 256 | Bytes of a class authorization's target pattern |
+| `name_bytes` | 128 | Bytes of each Agent or role a class authorization names |
+
+`[registry.limits.audit]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 16 KiB | Bytes of one audit record |
+| `records` | 10,000 | Audit records kept |
+| `results` | 500 | Records one listing may ask for |
+
+`[registry.limits.briefs]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 1 MiB | Bytes of one brief |
+| `records` | 1,000 | Queued briefs |
+| `provenance_bytes` | 16 KiB | Bytes of a brief's provenance |
+
+`[registry.limits.cables]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 2 MiB | Bytes of one Cable record |
+| `records` | 10,000 | Cable records the Registry holds |
+| `body_bytes` | 16 KiB | UTF-8 bytes of a Cable's body |
+| `max_ttl` | 86,400 (a day) | Seconds a Cable may live |
+
+`[registry.limits.clearance]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 16 KiB | Bytes of one clearance grant |
+| `grants` | 10,000 | Clearance grants |
+| `text_bytes` | 512 | Bytes of a grant's signer, approval, model and reason |
+
+`[registry.limits.files]`: how long the file Registry waits. The SQL Registry ignores it.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `rename_retry` | 2 | Seconds a record write retries replacing a file another process holds open |
+| `lock_wait` | 30 | Seconds a write waits for the Registry's directory lock |
+
+`[registry.limits.held]`: A held record may be 64 KiB, room for its verdict, larger than a brief's `[registry.limits.briefs] record_bytes`.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `per_operation` | 1,000 | Briefs one Operation may hold |
+| `records` | 10,000 | Briefs held across the Registry |
+| `results` | 500 | Held briefs one listing may ask for |
+| `clearance_bytes` | 4,096 | Bytes of a stored clearance, the finding kinds a brief was released from |
+| `reason_bytes` | 1,024 | Bytes of the reason a held brief is refused for |
+| `actor_bytes` | 256 | Bytes of who released or refused a held brief |
+
+`[registry.limits.logbook]`: A whole logbook's size is bounded by these four.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `entries` | 20 | Reports kept per logbook, and handed to the next round |
+| `summary_bytes` | 4 KiB | Bytes of a report's summary |
+| `findings` | 32 | Findings per report |
+| `finding_bytes` | 1,024 | Bytes of one finding |
+
+`[registry.limits.proposals]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 1 MiB | Bytes of one Mission proposal |
+| `records` | 1,000 | Pending Mission proposals per Operation |
+| `results` | 500 | Proposals one listing may ask for |
+| `idempotency_key_bytes` | 256 | Bytes of a proposal's idempotency key |
+
+`[registry.limits.quarantine]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 16 KiB | Bytes of one quarantine record |
+| `records` | 10,000 | Quarantine records |
+| `incidents` | 256 | Incidents kept per Agent |
+| `keep_incidents` | 604,800 (a week) | Seconds an incident is kept |
+
+`[registry.limits.sessions]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 64 KiB | Bytes of one Session record |
+| `records` | 100,000 | Session records |
+| `id_bytes` | 128 | Bytes of a Session ID |
+| `exposures` | 32 | Exposures recorded per Session |
+| `exposure_source_bytes` | 128 | Bytes of an exposure's source |
+| `recent_events` | 20 | Recent event lines kept per Session |
+| `recent_event_chars` | 300 | Characters kept of each recent event line and of a lost Session's reason |
+
+`[registry.limits.sleepers]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `window_age` | 86,400 (a day) | Seconds a scheduled window may be late and still fire; an older one is skipped |
+| `prompt_bytes` | 16 KiB | Bytes of a Sleeper's prompt |
+| `lookback_days` | 366 | Days a schedule is searched back for its latest window |
+
+`[registry.limits.sources]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `item_text_bytes` | 64 KiB | Bytes of a Source item's text |
+| `report_attempts` | 5 | Times reporting a finished brief to its Source is tried before it is dropped |
+
+`[registry.limits.stations]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 1 MiB | Bytes of one Station record |
+| `records` | 1,000 | Station records |
+| `settings_bytes` | 4,096 | Bytes of a Station's settings record |
+| `mission_capacity` | 1,024 | Missions a Station's settings may let it run at once |
+| `gone_dark_after` | 45 | Seconds after its last check-in that a Station counts as dark |
+
+`[registry.limits.timeline]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `records` | 10,000 | Events kept; the oldest are dropped past it |
+| `record_bytes` | 8,192 | Bytes of one event |
+| `id_bytes` | 128 | Bytes of an event's ID |
+| `name_bytes` | 64 | Bytes of an event's kind, action and detail keys |
+| `text_bytes` | 256 | Bytes of an event's Operation, Station, Mission, Session, actor and detail values |
+| `detail_entries` | 8 | Detail entries per event |
+
+`[registry.limits.tokens]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `record_bytes` | 16 KiB | Bytes of one access token record |
+
+`[registry.limits.usage]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `ledger_bytes` | 1 MiB | Bytes of one Mission's usage ledger |
+| `kept_days` | 8 | Days of usage kept |
 
 ### `ai6ctl`
 

@@ -158,6 +158,7 @@ fn promotion_request(
         ActionScope::try_new(CLEARANCE_KIND, target)?,
         promotion.reason.clone(),
         &format!("{target}#{}", promotion.round),
+        &state.intake.limits().approvals,
     )?;
     Ok(request.expiring(state.clock.now() as f64, operation.green_ink.request_ttl()))
 }

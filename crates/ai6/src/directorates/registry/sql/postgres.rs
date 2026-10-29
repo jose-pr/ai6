@@ -99,7 +99,8 @@ fn session_settings(location: &Location, options: &SqlOptions) -> String {
     ]
     .into_iter()
     .filter(|(name, _)| !location.options.contains(name))
-    .map(|(name, value)| format!("SET {name} = {}; ", value.as_millis()))
+    // PostgreSQL reads 0 as no timeout at all, so a sub-millisecond one is sent as 1 ms.
+    .map(|(name, value)| format!("SET {name} = {}; ", value.as_millis().max(1)))
     .collect()
 }
 

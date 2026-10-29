@@ -149,6 +149,7 @@ impl Desk {
             scope,
             asked.reason,
             &asked.idempotency_key,
+            &state.intake.limits().approvals,
         )
         .map_err(|e| e.to_string())?
         .expiring(now, policy.request_ttl());
@@ -1139,6 +1140,7 @@ mod tests {
             ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
             "a reason only the operator reads",
             "expire-1",
+            &Default::default(),
         )
         .unwrap()
         .expiring(now(&state) - 120.0, Duration::from_secs(60));

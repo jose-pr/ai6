@@ -500,6 +500,7 @@ mod tests {
             ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
             "the release is green",
             key,
+            &Default::default(),
         )
         .unwrap()
         .expiring(now, std::time::Duration::from_secs(ttl));

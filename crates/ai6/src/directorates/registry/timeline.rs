@@ -12,15 +12,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::store::{FileRegistry, invalid_data, registry_lock, write_atomic};
-
-/// Events kept; writing past this drops the oldest.
-pub const MAX_TIMELINE_EVENTS: usize = 10_000;
-const MAX_EVENT_BYTES: u64 = 8_192;
-const MAX_ID_BYTES: usize = 128;
-const MAX_NAME_BYTES: usize = 64;
-const MAX_TEXT_BYTES: usize = 256;
-const MAX_DETAIL_ENTRIES: usize = 8;
+use super::limits::TimelineLimits;
+use super::store::{FileRegistry, invalid_data};
 
 /// One durable activity event.
 #[non_exhaustive]
@@ -116,7 +109,7 @@ impl TimelineEvent {
         self
     }
 
-    fn validate(&self) -> io::Result<()> {
+    fn validate(&self, limits: &TimelineLimits) -> io::Result<()> {
         let invalid = |what: &str| {
             Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -125,18 +118,18 @@ impl TimelineEvent {
         };
         let name = |value: &str| {
             !value.is_empty()
-                && value.len() <= MAX_NAME_BYTES
+                && limits.name_bytes.allows(value.len())
                 && value.bytes().all(|byte| {
                     byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
                 })
         };
         let text = |value: &str| {
             !value.trim().is_empty()
-                && value.len() <= MAX_TEXT_BYTES
+                && limits.text_bytes.allows(value.len())
                 && !value.contains(char::is_control)
         };
         if self.id.is_empty()
-            || self.id.len() > MAX_ID_BYTES
+            || !limits.id_bytes.allows(self.id.len())
             || !self
                 .id
                 .bytes()
@@ -154,7 +147,7 @@ impl TimelineEvent {
         if !text(&self.operation) || optional.into_iter().flatten().any(|value| !text(value)) {
             return invalid("identity");
         }
-        if self.detail.len() > MAX_DETAIL_ENTRIES
+        if !limits.detail_entries.allows(self.detail.len())
             || self
                 .detail
                 .iter()
@@ -176,29 +169,30 @@ impl TimelineEvent {
     }
 
     /// The stored form of a checked event, within the size limit.
-    pub(super) fn to_record(&self) -> io::Result<Vec<u8>> {
-        self.validate()?;
+    pub(super) fn to_record(&self, limits: &TimelineLimits) -> io::Result<Vec<u8>> {
+        self.validate(limits)?;
         let bytes = serde_json::to_vec(self).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_EVENT_BYTES {
+        if !limits.record_bytes.allows(bytes.len()) {
             return Err(invalid_data("timeline event exceeds the size limit"));
         }
         Ok(bytes)
     }
 
     /// Reads a stored event, `None` when it is out of bounds or invalid.
-    pub(super) fn from_record(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() as u64 > MAX_EVENT_BYTES {
+    pub(super) fn from_record(bytes: &[u8], limits: &TimelineLimits) -> Option<Self> {
+        if !limits.record_bytes.allows(bytes.len()) {
             return None;
         }
         serde_json::from_slice::<Self>(bytes)
             .ok()
-            .filter(|event| event.validate().is_ok())
+            .filter(|event| event.validate(limits).is_ok())
     }
 }
 
 /// The activity timeline of each Operation.
 pub trait TimelineStore {
-    /// Records one activity event, dropping the oldest past [`MAX_TIMELINE_EVENTS`].
+    /// Records one activity event, dropping the oldest past `[registry.limits.timeline]
+    /// records`.
     ///
     /// # Errors
     ///
@@ -216,8 +210,8 @@ pub trait TimelineStore {
 
 impl TimelineStore for FileRegistry {
     fn record_event(&self, event: &TimelineEvent) -> io::Result<()> {
-        let _lock = registry_lock(self.root())?;
-        record_event_locked(self.root(), event)
+        let _lock = self.lock()?;
+        record_event_locked(self, event)
     }
 
     fn timeline_events(&self, operation: &str) -> io::Result<Vec<TimelineEvent>> {
@@ -226,13 +220,13 @@ impl TimelineStore for FileRegistry {
             let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
-            if metadata.len() > MAX_EVENT_BYTES {
+            if !self.limits.timeline.record_bytes.allows(metadata.len()) {
                 continue;
             }
             let Ok(bytes) = fs::read(&path) else {
                 continue;
             };
-            if let Some(event) = TimelineEvent::from_record(&bytes)
+            if let Some(event) = TimelineEvent::from_record(&bytes, &self.limits.timeline)
                 && event.operation == operation
             {
                 events.push(event);
@@ -243,14 +237,19 @@ impl TimelineStore for FileRegistry {
 }
 
 /// Records an event while the caller already holds the Registry lock.
-pub(super) fn record_event_locked(root: &Path, event: &TimelineEvent) -> io::Result<()> {
-    let bytes = event.to_record()?;
+pub(super) fn record_event_locked(
+    registry: &FileRegistry,
+    event: &TimelineEvent,
+) -> io::Result<()> {
+    let limits = &registry.limits.timeline;
+    let root = registry.root();
+    let bytes = event.to_record(limits)?;
     fs::create_dir_all(root.join("timeline"))?;
-    write_atomic(&root.join("timeline").join(event.file_name()), &bytes)?;
+    registry.write_atomic(&root.join("timeline").join(event.file_name()), &bytes)?;
     let files = event_files(root)?;
     for oldest in files
         .iter()
-        .take(files.len().saturating_sub(MAX_TIMELINE_EVENTS))
+        .take(files.len().saturating_sub(limits.records.or_max()))
     {
         let _ = fs::remove_file(oldest);
     }
@@ -345,7 +344,7 @@ mod tests {
             );
         }
         let mut crowded = TimelineEvent::new("cable", "sent", "G", 1.0);
-        for index in 0..=MAX_DETAIL_ENTRIES {
+        for index in 0..=TimelineLimits::default().detail_entries.or_max() {
             crowded = crowded.detail(format!("key{index}"), "value");
         }
         assert!(registry.record_event(&crowded).is_err());
@@ -356,8 +355,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         fs::create_dir_all(root.join("timeline")).unwrap();
+        let mut limits = crate::directorates::registry::limits::RegistryLimits::default();
+        limits.timeline.records = crate::bounds::Limit::at(5);
         // Planting files directly keeps the test fast; the writer prunes after each write.
-        for index in 0..MAX_TIMELINE_EVENTS {
+        for index in 0..5 {
             let event = TimelineEvent::new("lifecycle", "working", "G", 10.0 + index as f64);
             fs::write(
                 root.join("timeline").join(event.file_name()),
@@ -365,12 +366,12 @@ mod tests {
             )
             .unwrap();
         }
-        let registry = FileRegistry::open(root);
+        let registry = FileRegistry::open(root).with_limits(limits);
         registry
             .record_event(&TimelineEvent::new("lifecycle", "done", "G", 1e9))
             .unwrap();
         let events = registry.timeline_events("G").unwrap();
-        assert_eq!(events.len(), MAX_TIMELINE_EVENTS);
+        assert_eq!(events.len(), 5);
         assert_eq!(events[0].at, 11.0);
         assert_eq!(events.last().unwrap().action, "done");
     }

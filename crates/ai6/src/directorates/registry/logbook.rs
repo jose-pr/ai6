@@ -2,7 +2,8 @@
 //!
 //! A round of an `each_station` Sleeper is a Mission of its own, so what one round saw
 //! reaches the next through the logbook: the Station keeps the newest
-//! [`LOGBOOK_LENGTH`] reports and hands them to the next round as context. The newest report
+//! `[registry.limits.logbook] entries` reports and hands them to the next round as context.
+//! The newest report
 //! is also published with the Station's check-in, so the operator sees each Station's state
 //! in one place.
 
@@ -15,10 +16,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::store::{
-    FileRegistry, hex_digest, invalid_data, registry_lock, safe_component, validate_station_id,
-    write_atomic,
-};
+use super::limits::LogbookLimits;
+use super::store::{FileRegistry, hex_digest, invalid_data, safe_component, validate_station_id};
 
 /// The role of the Agent that keeps a Station: a Mission for this role narrowed to one Station
 /// is that Station's round, given its logbook and the Station's own tools.
@@ -31,17 +30,6 @@ pub fn is_head_of_station_role(role: &str) -> bool {
 
 /// The Cable channel a filed report is sent to, when `cables.toml` configures it.
 pub const HEAD_OF_STATION_CHANNEL: &str = "heads-of-station";
-/// How many reports a Station's logbook keeps; filing another drops the oldest.
-pub const LOGBOOK_LENGTH: usize = 20;
-/// The longest summary a report may carry, in bytes.
-pub const MAX_SUMMARY_BYTES: usize = 4 * 1024;
-/// The most findings one report may carry.
-pub const MAX_FINDINGS: usize = 32;
-/// The longest text one finding may carry, in bytes.
-pub const MAX_FINDING_BYTES: usize = 1024;
-/// Upper bound of a stored logbook; a larger file is refused as damaged.
-pub(super) const MAX_LOGBOOK_BYTES: u64 =
-    (LOGBOOK_LENGTH * (MAX_SUMMARY_BYTES + MAX_FINDINGS * (MAX_FINDING_BYTES + 128) + 1024)) as u64;
 
 /// What a finding is about, so the operator's view can group them.
 #[non_exhaustive]
@@ -224,32 +212,33 @@ impl StationReport {
         self.findings.iter().map(|finding| finding.severity).max()
     }
 
-    /// Checks the bounds above.
+    /// Checks the report against `limits`.
     ///
     /// # Errors
     ///
     /// `InvalidInput` naming what is out of bounds: the Station ID, an empty or long summary,
     /// too many findings, or an empty or long finding.
-    pub fn validate(&self) -> io::Result<()> {
+    pub fn validate(&self, limits: &LogbookLimits) -> io::Result<()> {
         validate_station_id(&self.station)?;
         let bad = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
-        if self.summary.trim().is_empty() || self.summary.len() > MAX_SUMMARY_BYTES {
+        if self.summary.trim().is_empty() || !limits.summary_bytes.allows(self.summary.len()) {
             return Err(bad(format!(
-                "a report's summary must be 1 to {MAX_SUMMARY_BYTES} bytes"
+                "a report's summary must be 1 to {} bytes",
+                limits.summary_bytes
             )));
         }
-        if self.findings.len() > MAX_FINDINGS {
+        if !limits.findings.allows(self.findings.len()) {
             return Err(bad(format!(
-                "a report carries at most {MAX_FINDINGS} findings"
+                "a report carries at most {} findings",
+                limits.findings
             )));
         }
-        if self
-            .findings
-            .iter()
-            .any(|finding| finding.text.trim().is_empty() || finding.text.len() > MAX_FINDING_BYTES)
-        {
+        if self.findings.iter().any(|finding| {
+            finding.text.trim().is_empty() || !limits.finding_bytes.allows(finding.text.len())
+        }) {
             return Err(bad(format!(
-                "each finding's text must be 1 to {MAX_FINDING_BYTES} bytes"
+                "each finding's text must be 1 to {} bytes",
+                limits.finding_bytes
             )));
         }
         Ok(())
@@ -267,17 +256,21 @@ pub(super) fn station_key(station: &str) -> String {
     format!("{safe}-{}", &digest[..12])
 }
 
-/// Keeps the newest [`LOGBOOK_LENGTH`] reports of a logbook, oldest first.
-pub(super) fn append_report(logbook: &mut Vec<StationReport>, report: &StationReport) {
+/// Keeps the newest `limits.entries` reports of a logbook, oldest first.
+pub(super) fn append_report(
+    logbook: &mut Vec<StationReport>,
+    report: &StationReport,
+    limits: &LogbookLimits,
+) {
     logbook.push(report.clone());
-    let excess = logbook.len().saturating_sub(LOGBOOK_LENGTH);
+    let excess = logbook.len().saturating_sub(limits.entries.or_max());
     logbook.drain(..excess);
 }
 
 /// Each Station's logbook of Head of Station reports.
 pub trait LogbookStore {
     /// Files `report` in its Station's logbook, dropping the oldest past
-    /// [`LOGBOOK_LENGTH`].
+    /// `[registry.limits.logbook] entries`.
     ///
     /// # Errors
     ///
@@ -303,24 +296,25 @@ impl FileRegistry {
 
 impl LogbookStore for FileRegistry {
     fn file_station_report(&self, report: &StationReport) -> io::Result<()> {
-        report.validate()?;
-        let _lock = registry_lock(&self.root)?;
+        let limits = &self.limits.logbook;
+        report.validate(limits)?;
+        let _lock = self.lock()?;
         let path = self.logbook_path(&report.station);
-        let mut logbook = read_logbook(&path)?;
-        append_report(&mut logbook, report);
+        let mut logbook = read_logbook(&path, limits)?;
+        append_report(&mut logbook, report, limits);
         let bytes = serde_json::to_vec(&logbook).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)
+        self.write_atomic(&path, &bytes)
     }
 
     fn logbook(&self, station: &str) -> io::Result<Vec<StationReport>> {
         validate_station_id(station)?;
-        read_logbook(&self.logbook_path(station))
+        read_logbook(&self.logbook_path(station), &self.limits.logbook)
     }
 }
 
-fn read_logbook(path: &std::path::Path) -> io::Result<Vec<StationReport>> {
+fn read_logbook(path: &std::path::Path, limits: &LogbookLimits) -> io::Result<Vec<StationReport>> {
     match fs::read(path) {
-        Ok(bytes) if bytes.len() as u64 <= MAX_LOGBOOK_BYTES => serde_json::from_slice(&bytes)
+        Ok(bytes) if limits.record_bytes().allows(bytes.len()) => serde_json::from_slice(&bytes)
             .map_err(|error| invalid_data(format!("invalid Station logbook: {error}"))),
         Ok(_) => Err(invalid_data("Station logbook exceeds the size limit")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
@@ -360,7 +354,7 @@ mod tests {
             .file_station_report(&report("station b", 99))
             .unwrap();
         let logbook = store.handle().logbook("station-a").unwrap();
-        assert_eq!(logbook.len(), LOGBOOK_LENGTH);
+        assert_eq!(logbook.len(), LogbookLimits::default().entries.or_max());
         assert_eq!(logbook.first().unwrap().at, 5, "the oldest are dropped");
         assert_eq!(logbook.last().unwrap(), &report("station-a", 24));
         assert_eq!(logbook.last().unwrap().worst(), Some(Severity::Warning));
@@ -375,13 +369,13 @@ mod tests {
         let registry = store.handle();
         let empty = StationReport::new("station-a", " ", 1);
         let crowded = StationReport::new("station-a", "s", 1).with_findings(
-            (0..=MAX_FINDINGS)
+            (0..=LogbookLimits::default().findings.or_max())
                 .map(|_| StationFinding::new(StationFindingKind::Other, Severity::Info, "x")),
         );
         let long = StationReport::new("station-a", "s", 1).with_findings([StationFinding::new(
             StationFindingKind::Disk,
             Severity::Critical,
-            "x".repeat(MAX_FINDING_BYTES + 1),
+            "x".repeat(LogbookLimits::default().finding_bytes.or_max() + 1),
         )]);
         for bad in [empty, crowded, long] {
             let error = registry.file_station_report(&bad).unwrap_err();

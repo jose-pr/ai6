@@ -30,11 +30,9 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use crate::bootstrap::SecretRef;
+use crate::bounds::Limit;
+use crate::directorates::m::config::ConfigLimits;
 use serde::Deserialize;
-
-/// Maximum UTF-8 size of a Q Branch loadout document.
-pub const MAX_LOADOUT_BYTES: usize = 1024 * 1024;
-const MAX_VALUE_CHARS: usize = 4096;
 
 /// Stage at which a loadout operation failed.
 #[non_exhaustive]
@@ -140,9 +138,7 @@ impl std::fmt::Display for QError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
             QErrorKind::Io => write!(f, "could not read Q Branch loadout")?,
-            QErrorKind::TooLarge => {
-                write!(f, "Q Branch loadout exceeds {MAX_LOADOUT_BYTES} bytes")?
-            }
+            QErrorKind::TooLarge => write!(f, "Q Branch loadout exceeds its size limit")?,
             QErrorKind::InvalidUtf8 => write!(f, "Q Branch loadout is not valid UTF-8")?,
             QErrorKind::Parse => write!(f, "invalid Q Branch TOML")?,
             QErrorKind::Schema => write!(f, "invalid Q Branch loadout schema")?,
@@ -397,21 +393,25 @@ impl LoadoutCatalog {
         self.pools.get(id)
     }
 
-    /// Reads and validates a UTF-8 TOML loadout file, bounded to one MiB.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, QError> {
+    /// Reads and validates a UTF-8 TOML loadout file within `limits`.
+    pub fn load(path: impl AsRef<Path>, limits: &ConfigLimits) -> Result<Self, QError> {
         let path = path.as_ref();
         let mut file = File::open(path).map_err(|error| {
             QError::new(QErrorKind::Io, Some(path.to_path_buf())).with_source(error)
         })?;
         let mut bytes = Vec::new();
+        let most = limits
+            .loadout_bytes
+            .get()
+            .map_or(u64::MAX, |bytes| bytes.saturating_add(1));
         file.by_ref()
-            .take((MAX_LOADOUT_BYTES + 1) as u64)
+            .take(most)
             .read_to_end(&mut bytes)
             .map_err(|error| {
                 QError::new(QErrorKind::Io, Some(path.to_path_buf())).with_source(error)
             })?;
-        if bytes.len() > MAX_LOADOUT_BYTES {
-            return Err(QError::new(QErrorKind::TooLarge, Some(path.to_path_buf())));
+        if !limits.loadout_bytes.allows(bytes.len()) {
+            return Err(too_large(Some(path.to_path_buf()), limits));
         }
         let text = std::str::from_utf8(&bytes).map_err(|error| {
             QError::new(QErrorKind::InvalidUtf8, Some(path.to_path_buf())).at(
@@ -419,7 +419,17 @@ impl LoadoutCatalog {
                 error.valid_up_to(),
             )
         })?;
-        parse_document(text, Some(path.to_path_buf()))
+        parse_document(text, Some(path.to_path_buf()), limits)
+    }
+
+    /// Parses TOML within `limits`, without reading files, expanding environment or
+    /// executing commands.
+    ///
+    /// # Errors
+    ///
+    /// A [`QError`] naming why the document is refused.
+    pub fn parse(text: &str, limits: &ConfigLimits) -> Result<Self, QError> {
+        parse_document(text, None, limits)
     }
 
     /// Returns the exact Agent loadout or a schema error when none is declared.
@@ -498,9 +508,9 @@ impl LoadoutCatalog {
 impl FromStr for LoadoutCatalog {
     type Err = QError;
 
-    /// Parses TOML without reading files, expanding environment or executing commands.
+    /// Parses TOML within the default [`ConfigLimits`], as [`LoadoutCatalog::parse`].
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        parse_document(text, None)
+        parse_document(text, None, &ConfigLimits::default())
     }
 }
 
@@ -643,10 +653,22 @@ fn default_backend() -> String {
     "bubblewrap".to_owned()
 }
 
-fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, QError> {
-    if text.len() > MAX_LOADOUT_BYTES {
-        return Err(QError::new(QErrorKind::TooLarge, path));
+fn too_large(path: Option<PathBuf>, limits: &ConfigLimits) -> QError {
+    QError::new(QErrorKind::TooLarge, path).because(format!(
+        "over {} bytes (`[provider] loadout_bytes`)",
+        limits.loadout_bytes
+    ))
+}
+
+fn parse_document(
+    text: &str,
+    path: Option<PathBuf>,
+    limits: &ConfigLimits,
+) -> Result<LoadoutCatalog, QError> {
+    if !limits.loadout_bytes.allows(text.len()) {
+        return Err(too_large(path, limits));
     }
+    let chars = limits.loadout_value_chars;
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let value = toml::from_str::<toml::Value>(text).map_err(|error| {
         let mut failure = QError::new(QErrorKind::Parse, path.clone());
@@ -679,8 +701,8 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
     let mut loadouts = BTreeMap::new();
     for (name, raw) in document.loadout {
         validate_name(&name, QErrorKind::Schema, path.clone())?;
-        validate_names(&raw.mcp, QErrorKind::Schema, path.clone())?;
-        validate_names(&raw.secrets, QErrorKind::Schema, path.clone())?;
+        validate_names(&raw.mcp, QErrorKind::Schema, path.clone(), chars)?;
+        validate_names(&raw.secrets, QErrorKind::Schema, path.clone(), chars)?;
         for secret in &raw.secrets {
             validate_name(secret, QErrorKind::Schema, path.clone())?;
         }
@@ -701,10 +723,10 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
     let mut sandboxes = BTreeMap::new();
     for (name, raw) in document.sandbox {
         validate_name(&name, QErrorKind::Schema, path.clone())?;
-        validate_text(&raw.backend, QErrorKind::Schema, path.clone())?;
-        validate_names(&raw.read_write, QErrorKind::Schema, path.clone())?;
-        validate_names(&raw.read_only, QErrorKind::Schema, path.clone())?;
-        validate_names(&raw.network, QErrorKind::Schema, path.clone())?;
+        validate_text(&raw.backend, QErrorKind::Schema, path.clone(), chars)?;
+        validate_names(&raw.read_write, QErrorKind::Schema, path.clone(), chars)?;
+        validate_names(&raw.read_only, QErrorKind::Schema, path.clone(), chars)?;
+        validate_names(&raw.network, QErrorKind::Schema, path.clone(), chars)?;
         sandboxes.insert(
             name.clone(),
             SandboxProfile {
@@ -724,7 +746,7 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
             return Err(QError::new(QErrorKind::Schema, path));
         }
         for value in raw.command.iter().chain(&raw.deny) {
-            validate_text(value, QErrorKind::Schema, path.clone())?;
+            validate_text(value, QErrorKind::Schema, path.clone(), chars)?;
         }
         servers.insert(
             name.clone(),
@@ -758,7 +780,7 @@ fn parse_document(text: &str, path: Option<PathBuf>) -> Result<LoadoutCatalog, Q
             Some(_) => return Err(QError::new(QErrorKind::Schema, path)),
             None => definition.source,
         };
-        validate_names(&raw.kinds, QErrorKind::Schema, path.clone())?;
+        validate_names(&raw.kinds, QErrorKind::Schema, path.clone(), chars)?;
         if (!raw.kinds.is_empty() || !raw.targets.is_empty()) && !raw.green_ink {
             return Err(QError::new(QErrorKind::Schema, path));
         }
@@ -825,10 +847,11 @@ fn validate_names(
     values: &[String],
     kind: QErrorKind,
     path: Option<PathBuf>,
+    chars: Limit,
 ) -> Result<(), QError> {
     let mut unique = std::collections::BTreeSet::new();
     for value in values {
-        validate_text(value, kind, path.clone())?;
+        validate_text(value, kind, path.clone(), chars)?;
         if !unique.insert(value) {
             return Err(QError::new(kind, path));
         }
@@ -850,9 +873,14 @@ fn validate_name(value: &str, kind: QErrorKind, path: Option<PathBuf>) -> Result
     }
 }
 
-fn validate_text(value: &str, kind: QErrorKind, path: Option<PathBuf>) -> Result<(), QError> {
+fn validate_text(
+    value: &str,
+    kind: QErrorKind,
+    path: Option<PathBuf>,
+    chars: Limit,
+) -> Result<(), QError> {
     if !value.is_empty()
-        && value.chars().count() <= MAX_VALUE_CHARS
+        && chars.allows(value.chars().count())
         && !value.chars().any(char::is_control)
     {
         Ok(())
@@ -863,7 +891,7 @@ fn validate_text(value: &str, kind: QErrorKind, path: Option<PathBuf>) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{LoadoutCatalog, MAX_LOADOUT_BYTES, QErrorKind};
+    use super::{ConfigLimits, Limit, LoadoutCatalog, QErrorKind};
     use std::str::FromStr;
 
     const GOOD: &str = r#"
@@ -951,10 +979,24 @@ deny = ["git push --force"]
 
     #[test]
     fn loadout_document_size_is_bounded() {
-        let input = format!("#{}", " ".repeat(MAX_LOADOUT_BYTES));
+        let input = format!("{GOOD}#{}", " ".repeat(1024 * 1024));
         assert_eq!(
             LoadoutCatalog::from_str(&input).unwrap_err().kind(),
             QErrorKind::TooLarge
+        );
+        let roomy = ConfigLimits {
+            loadout_bytes: Limit::UNBOUNDED,
+            ..ConfigLimits::default()
+        };
+        assert!(LoadoutCatalog::parse(&input, &roomy).is_ok());
+        assert!(LoadoutCatalog::parse(GOOD, &ConfigLimits::default()).is_ok());
+        let tight = ConfigLimits {
+            loadout_value_chars: Limit::at(3),
+            ..ConfigLimits::default()
+        };
+        assert_eq!(
+            LoadoutCatalog::parse(GOOD, &tight).unwrap_err().kind(),
+            QErrorKind::Schema
         );
     }
 

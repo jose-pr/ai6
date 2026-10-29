@@ -9,17 +9,23 @@ use crate::directorates::registry::agent_records::{
     AgentOutcomeReport, AgentRecord, AgentRecordStore, parse_record, record_bytes,
 };
 use crate::directorates::registry::clearance::{
-    ClearanceGrant, ClearanceStore, MAX_GRANTS, grant_bytes, parse_grant,
+    ClearanceGrant, ClearanceStore, grant_bytes, parse_grant,
 };
+use crate::directorates::registry::limits::{AgentLimits, ClearanceLimits};
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
 
 /// The Agent's grant in `operation`, read within a transaction.
-fn grant_in(tx: &mut Tx<'_>, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>> {
+fn grant_in(
+    tx: &mut Tx<'_>,
+    operation: &str,
+    agent: &str,
+    limits: &ClearanceLimits,
+) -> io::Result<Option<ClearanceGrant>> {
     tx.query_opt(
         "SELECT record FROM ai6_clearance_grants WHERE operation = $1 AND agent = $2",
         &[operation.into(), agent.into()],
     )?
-    .map(|row| parse_grant(row.text(0)?.as_bytes()))
+    .map(|row| parse_grant(row.text(0)?.as_bytes(), limits))
     .transpose()
 }
 
@@ -29,6 +35,7 @@ pub(super) fn remove_raises_in(
     tx: &mut Tx<'_>,
     agent: &str,
     operation: Option<&str>,
+    limits: &ClearanceLimits,
 ) -> io::Result<usize> {
     let rows = match operation {
         Some(operation) => tx.query(
@@ -44,7 +51,7 @@ pub(super) fn remove_raises_in(
     for row in rows {
         let operation = row.text(0)?;
         // An unreadable grant is removed too: it could be a raise.
-        if parse_grant(row.text(1)?.as_bytes()).is_ok_and(|grant| !grant.raises()) {
+        if parse_grant(row.text(1)?.as_bytes(), limits).is_ok_and(|grant| !grant.raises()) {
             continue;
         }
         removed += tx.execute(
@@ -57,8 +64,9 @@ pub(super) fn remove_raises_in(
 
 impl ClearanceStore for SqlRegistry {
     fn put_clearance_grant(&self, grant: &ClearanceGrant) -> io::Result<()> {
-        grant.validate()?;
-        let text = String::from_utf8(grant_bytes(grant)?).map_err(io::Error::other)?;
+        grant.validate(&self.limits.clearance)?;
+        let text = String::from_utf8(grant_bytes(grant, &self.limits.clearance)?)
+            .map_err(io::Error::other)?;
         self.write(|tx, revision| {
             let exists = tx
                 .query_opt(
@@ -70,7 +78,7 @@ impl ClearanceStore for SqlRegistry {
                 let count = tx
                     .query_opt("SELECT count(*) FROM ai6_clearance_grants", &[])?
                     .map_or(Ok(0), |row| row.int(0))?;
-                if count >= MAX_GRANTS as i64 {
+                if !self.limits.clearance.grants.allows(count + 1) {
                     return Err(invalid_data("too many clearance grants"));
                 }
             }
@@ -94,10 +102,11 @@ impl ClearanceStore for SqlRegistry {
         expected: Option<&ClearanceGrant>,
         grant: &ClearanceGrant,
     ) -> io::Result<bool> {
-        grant.validate()?;
-        let text = String::from_utf8(grant_bytes(grant)?).map_err(io::Error::other)?;
+        grant.validate(&self.limits.clearance)?;
+        let text = String::from_utf8(grant_bytes(grant, &self.limits.clearance)?)
+            .map_err(io::Error::other)?;
         self.write(|tx, revision| {
-            let current = grant_in(tx, &grant.operation, &grant.agent)?;
+            let current = grant_in(tx, &grant.operation, &grant.agent, &self.limits.clearance)?;
             if current.as_ref() != expected {
                 return Ok(false);
             }
@@ -105,7 +114,7 @@ impl ClearanceStore for SqlRegistry {
                 let count = tx
                     .query_opt("SELECT count(*) FROM ai6_clearance_grants", &[])?
                     .map_or(Ok(0), |row| row.int(0))?;
-                if count >= MAX_GRANTS as i64 {
+                if !self.limits.clearance.grants.allows(count + 1) {
                     return Err(invalid_data("too many clearance grants"));
                 }
             }
@@ -132,7 +141,7 @@ impl ClearanceStore for SqlRegistry {
                 "SELECT record FROM ai6_clearance_grants WHERE operation = $1 AND agent = $2",
                 &[operation.into(), agent.into()],
             )?
-            .map(|row| parse_grant(row.text(0)?.as_bytes()))
+            .map(|row| parse_grant(row.text(0)?.as_bytes(), &self.limits.clearance))
             .transpose()
         })
     }
@@ -147,7 +156,7 @@ impl ClearanceStore for SqlRegistry {
         })?;
         let mut grants = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Ok(grant) = parse_grant(row.text(0)?.as_bytes()) {
+            if let Ok(grant) = parse_grant(row.text(0)?.as_bytes(), &self.limits.clearance) {
                 grants.push(grant);
             }
         }
@@ -159,7 +168,15 @@ impl ClearanceStore for SqlRegistry {
         validate_registry_key(&expected.operation)?;
         validate_registry_key(&expected.agent)?;
         self.write(|tx, _| {
-            if grant_in(tx, &expected.operation, &expected.agent)?.as_ref() != Some(expected) {
+            if grant_in(
+                tx,
+                &expected.operation,
+                &expected.agent,
+                &self.limits.clearance,
+            )?
+            .as_ref()
+                != Some(expected)
+            {
                 return Ok(false);
             }
             tx.execute(
@@ -188,7 +205,7 @@ impl ClearanceStore for SqlRegistry {
             else {
                 return Ok(None);
             };
-            let grant = parse_grant(row.text(0)?.as_bytes())?;
+            let grant = parse_grant(row.text(0)?.as_bytes(), &self.limits.clearance)?;
             tx.execute(
                 "DELETE FROM ai6_clearance_grants WHERE operation = $1 AND agent = $2",
                 &[operation.into(), agent.into()],
@@ -203,16 +220,17 @@ pub(super) fn count_in(
     tx: &mut Tx<'_>,
     revision: i64,
     report: &AgentOutcomeReport,
+    limits: &AgentLimits,
 ) -> io::Result<AgentRecord> {
     let mut record = match tx.query_opt(
         "SELECT record FROM ai6_agent_records WHERE agent = $1",
         &[report.agent.as_str().into()],
     )? {
-        Some(row) => parse_record(row.text(0)?.as_bytes())?,
+        Some(row) => parse_record(row.text(0)?.as_bytes(), limits)?,
         None => AgentRecord::new(report.agent.clone()),
     };
-    if record.count(report)? {
-        let text = String::from_utf8(record_bytes(&record)?).map_err(io::Error::other)?;
+    if record.count(report, limits)? {
+        let text = String::from_utf8(record_bytes(&record, limits)?).map_err(io::Error::other)?;
         tx.execute(
             "INSERT INTO ai6_agent_records (agent, record, revision) VALUES ($1, $2, $3) \
              ON CONFLICT (agent) DO UPDATE SET record = excluded.record, \
@@ -225,7 +243,7 @@ pub(super) fn count_in(
 
 impl AgentRecordStore for SqlRegistry {
     fn record_agent_outcome(&self, report: &AgentOutcomeReport) -> io::Result<AgentRecord> {
-        self.write(|tx, revision| count_in(tx, revision, report))
+        self.write(|tx, revision| count_in(tx, revision, report, &self.limits.agents))
     }
 
     fn agent_record(&self, agent: &str) -> io::Result<Option<AgentRecord>> {
@@ -234,7 +252,7 @@ impl AgentRecordStore for SqlRegistry {
                 "SELECT record FROM ai6_agent_records WHERE agent = $1",
                 &[agent.into()],
             )?
-            .map(|row| parse_record(row.text(0)?.as_bytes()))
+            .map(|row| parse_record(row.text(0)?.as_bytes(), &self.limits.agents))
             .transpose()
         })
     }
@@ -243,7 +261,7 @@ impl AgentRecordStore for SqlRegistry {
         let rows = self.read(|tx| tx.query("SELECT record FROM ai6_agent_records", &[]))?;
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Ok(record) = parse_record(row.text(0)?.as_bytes()) {
+            if let Ok(record) = parse_record(row.text(0)?.as_bytes(), &self.limits.agents) {
                 records.push(record);
             }
         }

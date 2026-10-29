@@ -29,11 +29,6 @@ const SQLITE_SCHEMA: &str = include_str!("schema/sqlite.sql");
 #[cfg(feature = "postgres")]
 const POSTGRES_SCHEMA: &str = include_str!("schema/postgres.sql");
 
-/// How long a SQLite writer waits for another process's write to finish. Generous: a slow
-/// disk or a busy CI runner must not turn into a refused write.
-#[cfg(feature = "sqlite")]
-const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// With the schema's name, serializes concurrent migrations of one PostgreSQL schema.
 #[cfg(feature = "postgres")]
 const MIGRATION_LOCK: i64 = 0x0a16_5c4e;
@@ -231,7 +226,7 @@ impl Database {
     /// Opens the database at `location` and brings its schema up to date.
     pub(crate) fn open(location: Location<'_>, options: &SqlOptions) -> io::Result<Self> {
         let database = match location {
-            Location::Sqlite(path) => Self::open_sqlite(path)?,
+            Location::Sqlite(path) => Self::open_sqlite(path, options.busy_timeout())?,
             Location::Postgres(url) => Self::open_postgres(url, options)?,
         };
         database.migrate()?;
@@ -239,7 +234,7 @@ impl Database {
     }
 
     #[cfg(feature = "sqlite")]
-    fn open_sqlite(path: &str) -> io::Result<Self> {
+    fn open_sqlite(path: &str, busy_timeout: Duration) -> io::Result<Self> {
         if path.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -248,7 +243,7 @@ impl Database {
         }
         let connection = rusqlite::Connection::open(path).map_err(sqlite_error)?;
         connection
-            .busy_timeout(SQLITE_BUSY_TIMEOUT)
+            .busy_timeout(busy_timeout)
             .map_err(sqlite_error)?;
         // WAL lets readers in other processes carry on while one Station writes.
         connection
@@ -260,7 +255,7 @@ impl Database {
     }
 
     #[cfg(not(feature = "sqlite"))]
-    fn open_sqlite(_path: &str) -> io::Result<Self> {
+    fn open_sqlite(_path: &str, _busy_timeout: Duration) -> io::Result<Self> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "this build of ai6 has no SQLite support (cargo feature `sqlite`)",

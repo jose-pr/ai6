@@ -510,6 +510,7 @@ fn asked(registry: &FileRegistry, target: &str, key: &str) -> ai6::ApprovalReque
         ai6::ActionScope::try_new("push", target).unwrap(),
         "the release branch is green",
         key,
+        &Default::default(),
     )
     .unwrap()
     .expiring(now, Duration::from_secs(3600));

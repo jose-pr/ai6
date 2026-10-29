@@ -19,18 +19,8 @@ use crate::directorates::q::safehouse::SafeHouseCheckpoint;
 
 use super::accounts::AccountRef;
 
-use super::store::{
-    FileRegistry, invalid_data, read_headquarters, registry_lock, unix_time, write_atomic,
-};
-
-const MAX_SESSION_RECORD_BYTES: u64 = 65_536;
-pub(super) const MAX_SESSIONS: usize = 100_000;
-const MAX_SESSION_ID_BYTES: usize = 128;
-const MAX_EXPOSURES_PER_SESSION: usize = 32;
-/// How many recent events a Session record keeps for a hand-off.
-pub const MAX_RECENT_EVENTS: usize = 20;
-/// The longest one recent event is kept, in characters.
-pub const MAX_RECENT_EVENT_CHARS: usize = 300;
+use super::limits::SessionLimits;
+use super::store::{FileRegistry, invalid_data, read_headquarters, unix_time};
 
 /// Where a Session stands, as far as the Registry knows.
 #[non_exhaustive]
@@ -289,8 +279,8 @@ impl SessionUpdate {
         self
     }
 
-    /// Replaces the recent events with the last [`MAX_RECENT_EVENTS`] of `recent`, each cut
-    /// to [`MAX_RECENT_EVENT_CHARS`].
+    /// Replaces the recent events with the last `[registry.limits.sessions] recent_events` of
+    /// `recent`, each cut to `recent_event_chars` characters.
     pub fn recent(mut self, recent: Vec<String>) -> Self {
         self.recent = Some(recent);
         self
@@ -373,9 +363,9 @@ impl From<io::Error> for SessionError {
     }
 }
 
-pub(super) fn validate_session_id(id: &str) -> io::Result<()> {
+pub(super) fn validate_session_id(id: &str, limits: &SessionLimits) -> io::Result<()> {
     let valid = !id.is_empty()
-        && id.len() <= MAX_SESSION_ID_BYTES
+        && limits.id_bytes.allows(id.len())
         && !id.starts_with('.')
         && id
             .chars()
@@ -385,7 +375,10 @@ pub(super) fn validate_session_id(id: &str) -> io::Result<()> {
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Session ID must be 1-128 letters, digits, '-', '_' or '.' and not start with '.'",
+            format!(
+                "Session ID must be 1-{} letters, digits, '-', '_' or '.' and not start with '.'",
+                limits.id_bytes
+            ),
         ))
     }
 }
@@ -397,7 +390,8 @@ impl FileRegistry {
 
     fn headquarters_term(&self) -> io::Result<u64> {
         let path = self.root.join("headquarters").join("lease.json");
-        Ok(read_headquarters(&path)?.map_or(0, |lease| lease.term()))
+        Ok(read_headquarters(&path, self.limits.stations.record_bytes)?
+            .map_or(0, |lease| lease.term()))
     }
 
     pub(crate) fn open_session_at(
@@ -406,19 +400,19 @@ impl FileRegistry {
         ttl: Duration,
         now: f64,
     ) -> Result<SessionRecord, SessionError> {
-        validate_new_session(&new)?;
-        let _lock = registry_lock(&self.root)?;
+        validate_new_session(&new, &self.limits.sessions)?;
+        let _lock = self.lock()?;
         let path = self.session_path(&new.session_id);
         if path.exists() {
             return Err(SessionError::Exists);
         }
         if fs::read_dir(self.root.join("sessions"))
-            .is_ok_and(|entries| entries.count() >= MAX_SESSIONS)
+            .is_ok_and(|entries| !self.limits.sessions.records.allows(entries.count() + 1))
         {
             return Err(io::Error::other("too many Session records").into());
         }
         let record = opened(new, ttl, now, self.headquarters_term()?);
-        write_session(&path, &record)?;
+        self.write_session(&path, &record)?;
         Ok(record)
     }
 
@@ -429,13 +423,14 @@ impl FileRegistry {
         ttl: Duration,
         now: f64,
     ) -> Result<SessionRecord, SessionError> {
-        validate_session_id(id)?;
+        validate_session_id(id, &self.limits.sessions)?;
         super::store::validate_station_id(station)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self.session_path(id);
-        let mut record = read_session(&path)?.ok_or(SessionError::NotFound)?;
+        let mut record =
+            read_session(&path, &self.limits.sessions)?.ok_or(SessionError::NotFound)?;
         take(&mut record, station, ttl, now, || self.headquarters_term())?;
-        write_session(&path, &record)?;
+        self.write_session(&path, &record)?;
         Ok(record)
     }
 
@@ -448,12 +443,21 @@ impl FileRegistry {
         renew: Option<Duration>,
         update: SessionUpdate,
     ) -> Result<SessionRecord, SessionError> {
-        validate_session_id(id)?;
-        let _lock = registry_lock(&self.root)?;
+        validate_session_id(id, &self.limits.sessions)?;
+        let _lock = self.lock()?;
         let path = self.session_path(id);
-        let mut record = read_session(&path)?.ok_or(SessionError::NotFound)?;
-        apply_fenced(&mut record, station, fence, now, renew, update)?;
-        write_session(&path, &record)?;
+        let mut record =
+            read_session(&path, &self.limits.sessions)?.ok_or(SessionError::NotFound)?;
+        apply_fenced(
+            &mut record,
+            station,
+            fence,
+            now,
+            renew,
+            update,
+            &self.limits.sessions,
+        )?;
+        self.write_session(&path, &record)?;
         Ok(record)
     }
 
@@ -463,19 +467,26 @@ impl FileRegistry {
         reason: &str,
         now: f64,
     ) -> Result<SessionRecord, SessionError> {
-        validate_session_id(id)?;
-        let _lock = registry_lock(&self.root)?;
+        validate_session_id(id, &self.limits.sessions)?;
+        let _lock = self.lock()?;
         let path = self.session_path(id);
-        let mut record = read_session(&path)?.ok_or(SessionError::NotFound)?;
-        lose(&mut record, reason, now, || self.headquarters_term())?;
-        write_session(&path, &record)?;
+        let mut record =
+            read_session(&path, &self.limits.sessions)?.ok_or(SessionError::NotFound)?;
+        lose(
+            &mut record,
+            reason,
+            now,
+            || self.headquarters_term(),
+            &self.limits.sessions,
+        )?;
+        self.write_session(&path, &record)?;
         Ok(record)
     }
 }
 
 /// Checks the identities of a Session to record.
-pub(super) fn validate_new_session(new: &NewSession) -> io::Result<()> {
-    validate_session_id(&new.session_id)?;
+pub(super) fn validate_new_session(new: &NewSession, limits: &SessionLimits) -> io::Result<()> {
+    validate_session_id(&new.session_id, limits)?;
     super::store::validate_station_id(&new.station)
 }
 
@@ -536,6 +547,7 @@ pub(super) fn apply_fenced(
     now: f64,
     renew: Option<Duration>,
     update: SessionUpdate,
+    limits: &SessionLimits,
 ) -> Result<(), SessionError> {
     if record.station != station || record.fence != fence {
         return Err(SessionError::Stale);
@@ -556,11 +568,15 @@ pub(super) fn apply_fenced(
         record.account = Some(account);
     }
     if let Some(recent) = update.recent {
-        let skip = recent.len().saturating_sub(MAX_RECENT_EVENTS);
+        let skip = recent.len().saturating_sub(limits.recent_events.or_max());
         record.recent = recent
             .into_iter()
             .skip(skip)
-            .map(|line| line.chars().take(MAX_RECENT_EVENT_CHARS).collect())
+            .map(|line| {
+                line.chars()
+                    .take(limits.recent_event_chars.or_max())
+                    .collect()
+            })
             .collect();
     }
     if let Some((checkpoint, at)) = update.checkpoint {
@@ -568,7 +584,7 @@ pub(super) fn apply_fenced(
         record.checkpointed_at = Some(at);
     }
     for exposure in update.exposure {
-        if record.exposure.len() < MAX_EXPOSURES_PER_SESSION
+        if limits.exposures.allows(record.exposure.len() + 1)
             && !record
                 .exposure
                 .iter()
@@ -594,6 +610,7 @@ pub(super) fn lose(
     reason: &str,
     now: f64,
     term: impl FnOnce() -> io::Result<u64>,
+    limits: &SessionLimits,
 ) -> Result<(), SessionError> {
     if record.status.is_closed() {
         return Err(SessionError::Ended);
@@ -603,7 +620,12 @@ pub(super) fn lose(
     }
     record.status = SessionStatus::Lost;
     record.parked_until = None;
-    record.lost = Some(reason.chars().take(MAX_RECENT_EVENT_CHARS).collect());
+    record.lost = Some(
+        reason
+            .chars()
+            .take(limits.recent_event_chars.or_max())
+            .collect(),
+    );
     record.fence = term()?.max(record.fence + 1);
     Ok(())
 }
@@ -724,9 +746,9 @@ impl SessionStore for FileRegistry {
     }
 
     fn session(&self, id: &str) -> io::Result<Option<SessionRecord>> {
-        validate_session_id(id)?;
-        let _lock = registry_lock(&self.root)?;
-        read_session(&self.session_path(id))
+        validate_session_id(id, &self.limits.sessions)?;
+        let _lock = self.lock()?;
+        read_session(&self.session_path(id), &self.limits.sessions)
     }
 
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
@@ -738,7 +760,7 @@ impl SessionStore for FileRegistry {
     }
 
     fn sessions(&self) -> io::Result<Vec<SessionRecord>> {
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let mut records = Vec::new();
         let entries = match fs::read_dir(self.root.join("sessions")) {
             Ok(entries) => entries,
@@ -750,7 +772,7 @@ impl SessionStore for FileRegistry {
             if path
                 .extension()
                 .is_some_and(|extension| extension == "json")
-                && let Some(record) = read_session(&path)?
+                && let Some(record) = read_session(&path, &self.limits.sessions)?
             {
                 records.push(record);
             }
@@ -808,17 +830,20 @@ impl SessionStore for FileRegistry {
     }
 }
 
-fn read_session(path: &std::path::Path) -> io::Result<Option<SessionRecord>> {
+fn read_session(
+    path: &std::path::Path,
+    limits: &SessionLimits,
+) -> io::Result<Option<SessionRecord>> {
     match fs::read(path) {
-        Ok(bytes) => parse_session(&bytes).map(Some),
+        Ok(bytes) => parse_session(&bytes, limits).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
 }
 
 /// Reads a stored Session record, refusing one out of bounds.
-pub(super) fn parse_session(bytes: &[u8]) -> io::Result<SessionRecord> {
-    if bytes.len() as u64 > MAX_SESSION_RECORD_BYTES {
+pub(super) fn parse_session(bytes: &[u8], limits: &SessionLimits) -> io::Result<SessionRecord> {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("Session record exceeds the size limit"));
     }
     let record: SessionRecord = serde_json::from_slice(bytes)
@@ -830,9 +855,9 @@ pub(super) fn parse_session(bytes: &[u8]) -> io::Result<SessionRecord> {
 }
 
 /// The stored form of a Session record, within the size limit.
-pub(super) fn session_json(record: &SessionRecord) -> io::Result<Vec<u8>> {
+pub(super) fn session_json(record: &SessionRecord, limits: &SessionLimits) -> io::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(record).map_err(io::Error::other)?;
-    if bytes.len() as u64 > MAX_SESSION_RECORD_BYTES {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Session record exceeds the size limit",
@@ -841,8 +866,10 @@ pub(super) fn session_json(record: &SessionRecord) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn write_session(path: &std::path::Path, record: &SessionRecord) -> io::Result<()> {
-    write_atomic(path, &session_json(record)?)
+impl FileRegistry {
+    fn write_session(&self, path: &std::path::Path, record: &SessionRecord) -> io::Result<()> {
+        self.write_atomic(path, &session_json(record, &self.limits.sessions)?)
+    }
 }
 
 #[cfg(test)]
@@ -1089,8 +1116,8 @@ mod tests {
             .unwrap();
         assert_eq!(opened.launch.as_ref(), Some(&launch));
 
-        let many = (0..MAX_RECENT_EVENTS + 5)
-            .map(|index| format!("event {index} {}", "x".repeat(MAX_RECENT_EVENT_CHARS)))
+        let many = (0..20 + 5)
+            .map(|index| format!("event {index} {}", "x".repeat(300)))
             .collect::<Vec<_>>();
         let checkpoint = SafeHouseCheckpoint {
             remote: "origin".to_owned(),
@@ -1110,13 +1137,13 @@ mod tests {
                     .checkpoint(checkpoint.clone(), NOW + 1.0),
             )
             .unwrap();
-        assert_eq!(written.recent.len(), MAX_RECENT_EVENTS);
+        assert_eq!(written.recent.len(), 20);
         assert!(written.recent[0].starts_with("event 5 "));
         assert!(
             written
                 .recent
                 .iter()
-                .all(|line| line.chars().count() == MAX_RECENT_EVENT_CHARS)
+                .all(|line| line.chars().count() == 300)
         );
         assert_eq!(written.checkpoint, Some(checkpoint));
         assert_eq!(written.checkpointed_at, Some(NOW + 1.0));

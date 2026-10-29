@@ -1275,6 +1275,7 @@ mod tests {
                 author: Some("someone".to_owned()),
                 updated: "2026-10-26T00:00:00Z".to_owned(),
             },
+            &Default::default(),
         )
     }
 

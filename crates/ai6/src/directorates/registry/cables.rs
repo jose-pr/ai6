@@ -14,10 +14,7 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// Maximum UTF-8 body size accepted for one Cable.
-pub const MAX_CABLE_BODY_BYTES: usize = 16 * 1024;
-/// Maximum lifetime of a Cable, in seconds.
-pub const MAX_CABLE_TTL: f64 = 24.0 * 60.0 * 60.0;
+use super::limits::CableLimits;
 
 /// Errors returned when a Cable value violates the wire contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -399,30 +396,45 @@ impl TryFrom<CableWire> for Cable {
     type Error = CableError;
 
     fn try_from(wire: CableWire) -> Result<Self, Self::Error> {
-        Self::try_new(CableDraft {
-            sender_agent: wire.sender_agent,
-            sender_operation: wire.sender_operation,
-            sender_theater: wire.sender_theater,
-            sender_station: wire.sender_station,
-            target: wire.target,
-            body: wire.body,
-            recipients: wire.recipients,
-            idempotency_key: wire.idempotency_key,
-            mission_id: wire.mission_id,
-            session_id: wire.session_id,
-            conversation_id: wire.conversation_id,
-            reply_to: wire.reply_to,
-            on_behalf_of: wire.on_behalf_of,
-            id: wire.id,
-            created_at: wire.created_at,
-            expires_at: wire.expires_at,
-        })
+        Self::try_new(
+            CableDraft {
+                sender_agent: wire.sender_agent,
+                sender_operation: wire.sender_operation,
+                sender_theater: wire.sender_theater,
+                sender_station: wire.sender_station,
+                target: wire.target,
+                body: wire.body,
+                recipients: wire.recipients,
+                idempotency_key: wire.idempotency_key,
+                mission_id: wire.mission_id,
+                session_id: wire.session_id,
+                conversation_id: wire.conversation_id,
+                reply_to: wire.reply_to,
+                on_behalf_of: wire.on_behalf_of,
+                id: wire.id,
+                created_at: wire.created_at,
+                expires_at: wire.expires_at,
+            },
+            &stored_limits(),
+        )
+    }
+}
+
+/// What a Cable read back is checked within: its record's size bound
+/// (`[registry.limits.cables] record_bytes`) already holds the body, and the body and
+/// lifetime were checked against the limits in force when it was sent.
+fn stored_limits() -> CableLimits {
+    CableLimits {
+        body_bytes: crate::bounds::Limit::UNBOUNDED,
+        max_ttl: crate::bounds::TimeLimit::UNBOUNDED,
+        ..CableLimits::default()
     }
 }
 
 impl Cable {
-    /// Constructs a validated Cable from relay-authenticated request data.
-    pub fn try_new(draft: CableDraft) -> Result<Self, CableError> {
+    /// Constructs a validated Cable from relay-authenticated request data, its body and
+    /// lifetime within `limits`.
+    pub fn try_new(draft: CableDraft, limits: &CableLimits) -> Result<Self, CableError> {
         validate_text("Cable sender_agent", Some(&draft.sender_agent), 256, true)?;
         validate_text(
             "Cable sender_operation",
@@ -458,9 +470,10 @@ impl Cable {
         if draft.body.trim().is_empty() {
             return Err(CableError::new("Cable body must be non-empty text"));
         }
-        if draft.body.len() > MAX_CABLE_BODY_BYTES {
+        if !limits.body_bytes.allows(draft.body.len()) {
             return Err(CableError::new(format!(
-                "Cable body exceeds {MAX_CABLE_BODY_BYTES} UTF-8 bytes"
+                "Cable body exceeds {} UTF-8 bytes",
+                limits.body_bytes
             )));
         }
         if draft.recipients.is_empty() {
@@ -495,10 +508,13 @@ impl Cable {
                 "Cable expiry must be after its creation time",
             ));
         }
-        if draft.expires_at - draft.created_at > MAX_CABLE_TTL {
+        if !limits
+            .max_ttl
+            .allows_secs(draft.expires_at - draft.created_at)
+        {
             return Err(CableError::new(format!(
-                "Cable TTL exceeds {} seconds",
-                MAX_CABLE_TTL as u64
+                "Cable TTL exceeds {}",
+                limits.max_ttl
             )));
         }
         Ok(Self {
@@ -735,7 +751,7 @@ mod tests {
 
     #[test]
     fn cable_round_trips_through_its_wire_shape() {
-        let cable = Cable::try_new(draft()).unwrap();
+        let cable = Cable::try_new(draft(), &CableLimits::default()).unwrap();
         let value = serde_json::to_value(&cable).unwrap();
         assert_eq!(
             value["target"],
@@ -748,17 +764,24 @@ mod tests {
 
     #[test]
     fn the_person_a_cable_was_sent_for_is_kept_and_omitted_when_none() {
-        let plain = serde_json::to_value(Cable::try_new(draft()).unwrap()).unwrap();
+        let plain = serde_json::to_value(Cable::try_new(draft(), &CableLimits::default()).unwrap())
+            .unwrap();
         assert!(plain.get("on_behalf_of").is_none());
         assert!(serde_json::from_value::<Cable>(plain).is_ok());
 
-        let cable = Cable::try_new(draft().with_on_behalf_of("person-007")).unwrap();
+        let cable = Cable::try_new(
+            draft().with_on_behalf_of("person-007"),
+            &CableLimits::default(),
+        )
+        .unwrap();
         assert_eq!(cable.on_behalf_of(), Some("person-007"));
         let value = serde_json::to_value(&cable).unwrap();
         assert_eq!(value["on_behalf_of"], "person-007");
         assert_eq!(serde_json::from_value::<Cable>(value).unwrap(), cable);
-        assert!(!cable.same_request(&Cable::try_new(draft()).unwrap()));
-        assert!(Cable::try_new(draft().with_on_behalf_of("a\nb")).is_err());
+        assert!(!cable.same_request(&Cable::try_new(draft(), &CableLimits::default()).unwrap()));
+        assert!(
+            Cable::try_new(draft().with_on_behalf_of("a\nb"), &CableLimits::default()).is_err()
+        );
     }
 
     #[test]
@@ -768,16 +791,21 @@ mod tests {
 
         let mut repeated = draft();
         repeated.recipients.push(repeated.recipients[0].clone());
-        assert!(Cable::try_new(repeated).is_err());
+        assert!(Cable::try_new(repeated, &CableLimits::default()).is_err());
 
         let mut oversized = draft();
-        oversized.body = "x".repeat(MAX_CABLE_BODY_BYTES + 1);
-        assert!(Cable::try_new(oversized).is_err());
+        oversized.body = "x".repeat(16 * 1024 + 1);
+        assert!(Cable::try_new(oversized.clone(), &CableLimits::default()).is_err());
+        let roomy = CableLimits {
+            body_bytes: crate::bounds::Limit::UNBOUNDED,
+            ..CableLimits::default()
+        };
+        assert!(Cable::try_new(oversized, &roomy).is_ok());
     }
 
     #[test]
     fn recipient_delivery_transitions_are_checked() {
-        let cable = Cable::try_new(draft()).unwrap();
+        let cable = Cable::try_new(draft(), &CableLimits::default()).unwrap();
         let delivered = cable
             .with_recipient_state("008", Some("session-8"), CableState::Delivered)
             .unwrap()
@@ -802,15 +830,21 @@ mod tests {
 
     #[test]
     fn deserialization_validates_wire_values_and_rejects_unknown_fields() {
-        let mut value = serde_json::to_value(Cable::try_new(draft()).unwrap()).unwrap();
+        let mut value =
+            serde_json::to_value(Cable::try_new(draft(), &CableLimits::default()).unwrap())
+                .unwrap();
         value["target"]["scope"] = serde_json::json!("moon");
         assert!(serde_json::from_value::<Cable>(value).is_err());
 
-        let mut value = serde_json::to_value(Cable::try_new(draft()).unwrap()).unwrap();
+        let mut value =
+            serde_json::to_value(Cable::try_new(draft(), &CableLimits::default()).unwrap())
+                .unwrap();
         value["unknown"] = serde_json::json!(true);
         assert!(serde_json::from_value::<Cable>(value).is_err());
 
-        let mut value = serde_json::to_value(Cable::try_new(draft()).unwrap()).unwrap();
+        let mut value =
+            serde_json::to_value(Cable::try_new(draft(), &CableLimits::default()).unwrap())
+                .unwrap();
         value.as_object_mut().unwrap().remove("reply_to");
         assert!(serde_json::from_value::<Cable>(value).is_err());
     }

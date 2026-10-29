@@ -19,7 +19,7 @@ use crate::directorates::registry::sleepers::{Fire, Sleeper};
 use crate::directorates::registry::sources::{
     CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
-use crate::directorates::registry::store::GONE_DARK_AFTER;
+
 use crate::station::plugins::Plugins;
 use guatiao::ToValue;
 
@@ -324,7 +324,8 @@ pub(crate) fn fire_due_sleepers(
                     continue;
                 }
             };
-            let Some(window) = sleeper.due_window(now, approval.at) else {
+            let Some(window) = sleeper.due_window(now, approval.at, &registry.limits().sleepers)
+            else {
                 continue;
             };
             let rounds = if sleeper.each_station {
@@ -398,7 +399,12 @@ fn round_stations(
             sleeper.stations.is_empty() || sleeper.stations.iter().any(|s| s == record.station())
         })
         .filter_map(|record| {
-            let mut facts = StationFacts::from_record(record, now as f64, GONE_DARK_AFTER, 0);
+            let mut facts = StationFacts::from_record(
+                record,
+                now as f64,
+                registry.limits().stations.gone_dark_after.0,
+                0,
+            );
             facts.running = 0;
             facts.resources = None;
             let request = PlacementRequest {
@@ -793,7 +799,7 @@ mod tests {
         );
         assert_eq!(warned.len(), 1);
 
-        let window = sleeper.due_window(NOW, 0).unwrap();
+        let window = sleeper.due_window(NOW, 0, &Default::default()).unwrap();
         registry
             .authorize_sleeper("G", "deps", &sleeper, "operator", window - 60)
             .unwrap();
@@ -871,7 +877,7 @@ mod tests {
         // check-ins, taken at the real time, are still fresh.
         let real = unix_seconds();
         let now = real - real.rem_euclid(3600) + 1;
-        let window = sleeper.due_window(now, 0).unwrap();
+        let window = sleeper.due_window(now, 0, &Default::default()).unwrap();
         registry
             .authorize_sleeper("H", "rounds", &sleeper, "operator", window - 60)
             .unwrap();
@@ -978,7 +984,7 @@ mod tests {
             updated: "t".to_owned(),
         };
         FinishedSourceBrief {
-            brief: crate::source_brief("G", "github", &item),
+            brief: crate::source_brief("G", "github", &item, &Default::default()),
             outcome: serde_json::json!({
                 "state": if ok { "done" } else { "failed" },
                 "mission_id": "m-9",

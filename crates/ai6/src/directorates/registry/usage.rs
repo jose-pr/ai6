@@ -8,11 +8,10 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-use super::store::{FileRegistry, invalid_data, registry_lock, safe_component, write_atomic};
+use super::limits::UsageLimits;
+use super::store::{FileRegistry, invalid_data, safe_component};
 use crate::directorates::medical::usage::{MissionUsage, UsageTotals, utc_day};
 
-const MAX_LEDGER_BYTES: u64 = 1024 * 1024;
-const KEPT_DAYS: usize = 8;
 const NO_OPERATION: &str = "_";
 
 impl FileRegistry {
@@ -70,12 +69,13 @@ impl UsageStore for FileRegistry {
         delta: &UsageTotals,
         now: i64,
     ) -> io::Result<MissionUsage> {
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self.usage_path(operation, mission);
-        let mut usage = read_ledger(&path)?.unwrap_or_default();
-        add_usage(&mut usage, session, delta, now);
+        let limits = &self.limits.usage;
+        let mut usage = read_ledger(&path, limits)?.unwrap_or_default();
+        add_usage(&mut usage, session, delta, now, limits);
         let bytes = serde_json::to_vec(&usage).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         Ok(usage)
     }
 
@@ -84,7 +84,7 @@ impl UsageStore for FileRegistry {
         operation: Option<&str>,
         mission: &str,
     ) -> io::Result<Option<MissionUsage>> {
-        read_ledger(&self.usage_path(operation, mission))
+        read_ledger(&self.usage_path(operation, mission), &self.limits.usage)
     }
 
     fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64> {
@@ -103,7 +103,7 @@ impl UsageStore for FileRegistry {
             if path.extension().is_none_or(|extension| extension != "json") {
                 continue;
             }
-            if let Some(usage) = read_ledger(&path)? {
+            if let Some(usage) = read_ledger(&path, &self.limits.usage)? {
                 total = total.saturating_add(cost_on_day(&usage, now));
             }
         }
@@ -112,8 +112,14 @@ impl UsageStore for FileRegistry {
 }
 
 /// Adds `delta` to a Session's totals and the Mission's, and its cost to the UTC day of
-/// `now`, keeping the last few days.
-pub(super) fn add_usage(usage: &mut MissionUsage, session: &str, delta: &UsageTotals, now: i64) {
+/// `now`, keeping the last `limits.kept_days` days.
+pub(super) fn add_usage(
+    usage: &mut MissionUsage,
+    session: &str,
+    delta: &UsageTotals,
+    now: i64,
+    limits: &UsageLimits,
+) {
     usage.total.add(delta);
     usage
         .sessions
@@ -123,7 +129,7 @@ pub(super) fn add_usage(usage: &mut MissionUsage, session: &str, delta: &UsageTo
     if delta.cost_micro_usd > 0 {
         let day = usage.daily_cost_micro_usd.entry(utc_day(now)).or_default();
         *day = day.saturating_add(delta.cost_micro_usd);
-        while usage.daily_cost_micro_usd.len() > KEPT_DAYS {
+        while usage.daily_cost_micro_usd.len() > limits.kept_days as usize {
             usage.daily_cost_micro_usd.pop_first();
         }
     }
@@ -138,17 +144,17 @@ pub(super) fn cost_on_day(usage: &MissionUsage, now: i64) -> u64 {
         .unwrap_or_default()
 }
 
-fn read_ledger(path: &std::path::Path) -> io::Result<Option<MissionUsage>> {
+fn read_ledger(path: &std::path::Path, limits: &UsageLimits) -> io::Result<Option<MissionUsage>> {
     match fs::read(path) {
-        Ok(bytes) => parse_ledger(&bytes).map(Some),
+        Ok(bytes) => parse_ledger(&bytes, limits).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
 }
 
 /// Reads a stored ledger, refusing one over the size limit.
-pub(super) fn parse_ledger(bytes: &[u8]) -> io::Result<MissionUsage> {
-    if bytes.len() as u64 > MAX_LEDGER_BYTES {
+pub(super) fn parse_ledger(bytes: &[u8], limits: &UsageLimits) -> io::Result<MissionUsage> {
+    if !limits.ledger_bytes.allows(bytes.len()) {
         return Err(invalid_data("usage ledger exceeds the size limit"));
     }
     serde_json::from_slice(bytes)

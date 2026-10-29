@@ -16,6 +16,7 @@
 use std::io;
 use std::sync::Arc;
 
+use super::limits::RegistryLimits;
 use super::store::FileRegistry;
 
 pub use super::accounts::AccountStore;
@@ -34,9 +35,22 @@ pub use super::timeline::TimelineStore;
 pub use super::usage::UsageStore;
 pub use super::vetting::VettingStore;
 
+/// The bounds a Registry applies to what it keeps and accepts.
+pub trait Limited {
+    /// The Registry's [`RegistryLimits`], as it was opened with.
+    fn limits(&self) -> &RegistryLimits;
+}
+
+impl Limited for FileRegistry {
+    fn limits(&self) -> &RegistryLimits {
+        &self.limits
+    }
+}
+
 /// Every Registry record family. Implemented for each type that implements them all.
 pub trait RegistryBackend:
-    AccountStore
+    Limited
+    + AccountStore
     + AgentRecordStore
     + BriefStore
     + StationStore
@@ -82,7 +96,9 @@ pub fn open(location: &str) -> io::Result<Arc<dyn RegistryBackend>> {
     }
 }
 
-/// As [`open`], connecting a SQL Registry with `options` (password, timeouts).
+/// As [`open`], with `options`: the limits either store applies
+/// ([`SqlOptions::with_limits`](super::sql::SqlOptions::with_limits)), and a SQL Registry's
+/// password and timeouts.
 ///
 /// # Errors
 ///
@@ -97,7 +113,9 @@ pub fn open_with(
             location, options,
         )?))
     } else {
-        Ok(Arc::new(FileRegistry::open(location)))
+        Ok(Arc::new(
+            FileRegistry::open(location).with_limits(options.limits().clone()),
+        ))
     }
 }
 
@@ -108,7 +126,8 @@ fn is_sql(location: &str) -> bool {
 }
 
 impl<T> RegistryBackend for T where
-    T: AccountStore
+    T: Limited
+        + AccountStore
         + AgentRecordStore
         + BriefStore
         + StationStore

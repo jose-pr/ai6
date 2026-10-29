@@ -55,7 +55,7 @@ combinations that pass these checks:
 | Operation `stations` | the Operation lists Stations and this one is not among them |
 | Mission `stations` | the brief narrows to Stations and this one is not among them. A Mission can only narrow the Operation's list, never widen it |
 | Role | the Station has no `execution` role |
-| Health | its last check-in is older than 45 seconds (gone dark; `GONE_DARK_AFTER`) |
+| Health | its last check-in is older than `[registry.limits.stations] gone_dark_after`, 45 seconds by default (gone dark) |
 | Capacity | its capacity is 0, or it already holds that many Missions: its leases or the Sessions it reported running, whichever is more |
 | Resources | it reported less free memory than `min_free_memory_mb` (default 512) or a CPU busier than `max_cpu_percent` (default 95). The same limits rule out a Theater by its own sample. A figure that was not reported never rules anything out |
 | Theater binding | the Operation's `theater` names a different Theater |
@@ -161,7 +161,8 @@ embedding the Station can pass another store with `ServeConfig::with_registry`.
 ## Capacity and visibility
 
 Operators granted `station.configure` can change a Station's maximum concurrent Missions
-(1–1,024) in Outer Office under Stations → Settings; the change applies to new Missions and is
+(1 to `[registry.limits.stations] mission_capacity`, 1,024 by default) in Outer Office under
+Stations → Settings; the change applies to new Missions and is
 audited. The same settings hold the Station's resource limits, `min_free_memory_mb` (default
 512; 0 never rules it out) and `max_cpu_percent` (default 95; 100 never does), set in the
 same view or through `PUT /v1/user/stations/{id}/settings`; the Station publishes them at check-in and placement

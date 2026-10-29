@@ -14,14 +14,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::store::{
-    FileRegistry, invalid_data, registry_lock, safe_component, validate_registry_key, write_atomic,
-};
+use super::limits::ClearanceLimits;
+use super::store::{FileRegistry, invalid_data, safe_component, validate_registry_key};
 use crate::directorates::m::roster::CLEARANCES;
-
-pub(super) const MAX_RECORD_BYTES: u64 = 16 * 1024;
-pub(super) const MAX_GRANTS: usize = 10_000;
-const MAX_TEXT_BYTES: usize = 512;
 
 /// An Agent's clearance in one Operation, raised by green ink or lowered by a person.
 #[non_exhaustive]
@@ -153,14 +148,14 @@ impl ClearanceGrant {
     ///
     /// `InvalidInput` for an Agent or Operation that is not a Registry key, an unknown
     /// clearance, a raise without a known base clearance, an empty or oversized signer,
-    /// approval, model or reason, or a time that is not finite and positive or an expiry
-    /// before it.
-    pub fn validate(&self) -> io::Result<()> {
+    /// approval, model or reason (past `limits.text_bytes`), or a time that is not finite and
+    /// positive or an expiry before it.
+    pub fn validate(&self, limits: &ClearanceLimits) -> io::Result<()> {
         validate_registry_key(&self.agent)?;
         validate_registry_key(&self.operation)?;
         let bounded = |text: &str| {
             !text.trim().is_empty()
-                && text.len() <= MAX_TEXT_BYTES
+                && limits.text_bytes.allows(text.len())
                 && !text.contains(char::is_control)
         };
         if !CLEARANCES.contains(&self.clearance.as_str())
@@ -262,14 +257,15 @@ impl FileRegistry {
 
 impl ClearanceStore for FileRegistry {
     fn put_clearance_grant(&self, grant: &ClearanceGrant) -> io::Result<()> {
-        grant.validate()?;
-        let bytes = grant_bytes(grant)?;
-        let _lock = registry_lock(&self.root)?;
+        let limits = &self.limits.clearance;
+        grant.validate(limits)?;
+        let bytes = grant_bytes(grant, limits)?;
+        let _lock = self.lock()?;
         let path = self.grant_path(&grant.operation, &grant.agent);
-        if !path.exists() && count_files(&self.grants_root())? >= MAX_GRANTS {
+        if !path.exists() && !limits.grants.allows(count_files(&self.grants_root())? + 1) {
             return Err(invalid_data("too many clearance grants"));
         }
-        write_atomic(&path, &bytes)
+        self.write_atomic(&path, &bytes)
     }
 
     fn replace_clearance_grant(
@@ -277,25 +273,31 @@ impl ClearanceStore for FileRegistry {
         expected: Option<&ClearanceGrant>,
         grant: &ClearanceGrant,
     ) -> io::Result<bool> {
-        grant.validate()?;
-        let bytes = grant_bytes(grant)?;
-        let _lock = registry_lock(&self.root)?;
+        let limits = &self.limits.clearance;
+        grant.validate(limits)?;
+        let bytes = grant_bytes(grant, limits)?;
+        let _lock = self.lock()?;
         let path = self.grant_path(&grant.operation, &grant.agent);
-        let current = read_grant(&path, &grant.operation, &grant.agent)?;
+        let current = read_grant(&path, &grant.operation, &grant.agent, limits)?;
         if current.as_ref() != expected {
             return Ok(false);
         }
-        if current.is_none() && count_files(&self.grants_root())? >= MAX_GRANTS {
+        if current.is_none() && !limits.grants.allows(count_files(&self.grants_root())? + 1) {
             return Err(invalid_data("too many clearance grants"));
         }
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         Ok(true)
     }
 
     fn clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>> {
         validate_registry_key(operation)?;
         validate_registry_key(agent)?;
-        read_grant(&self.grant_path(operation, agent), operation, agent)
+        read_grant(
+            &self.grant_path(operation, agent),
+            operation,
+            agent,
+            &self.limits.clearance,
+        )
     }
 
     fn clearance_grants(&self, operation: &str) -> io::Result<Vec<ClearanceGrant>> {
@@ -309,7 +311,7 @@ impl ClearanceStore for FileRegistry {
         for entry in entries {
             let path = entry?.path();
             if let Ok(bytes) = fs::read(&path)
-                && let Ok(grant) = parse_grant(&bytes)
+                && let Ok(grant) = parse_grant(&bytes, &self.limits.clearance)
                 && grant.operation == operation
                 && path.file_stem().and_then(|stem| stem.to_str())
                     == Some(safe_component(&grant.agent).as_str())
@@ -324,9 +326,17 @@ impl ClearanceStore for FileRegistry {
     fn remove_clearance_grant_if(&self, expected: &ClearanceGrant) -> io::Result<bool> {
         validate_registry_key(&expected.operation)?;
         validate_registry_key(&expected.agent)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self.grant_path(&expected.operation, &expected.agent);
-        if read_grant(&path, &expected.operation, &expected.agent)?.as_ref() != Some(expected) {
+        if read_grant(
+            &path,
+            &expected.operation,
+            &expected.agent,
+            &self.limits.clearance,
+        )?
+        .as_ref()
+            != Some(expected)
+        {
             return Ok(false);
         }
         fs::remove_file(&path)?;
@@ -340,9 +350,9 @@ impl ClearanceStore for FileRegistry {
     ) -> io::Result<Option<ClearanceGrant>> {
         validate_registry_key(operation)?;
         validate_registry_key(agent)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self.grant_path(operation, agent);
-        let Some(grant) = read_grant(&path, operation, agent)? else {
+        let Some(grant) = read_grant(&path, operation, agent, &self.limits.clearance)? else {
             return Ok(None);
         };
         fs::remove_file(&path)?;
@@ -372,7 +382,7 @@ impl FileRegistry {
         for operation in operations {
             let path = self.grant_path(&operation, agent);
             // An unreadable grant is removed too: it could be a raise.
-            let raise = match read_grant(&path, &operation, agent) {
+            let raise = match read_grant(&path, &operation, agent, &self.limits.clearance) {
                 Ok(grant) => grant.is_some_and(|grant| grant.raises()),
                 Err(_) => path.is_file(),
             };
@@ -401,23 +411,23 @@ fn count_files(root: &std::path::Path) -> io::Result<usize> {
 }
 
 /// The stored form of a grant, refused past the size limit.
-pub(super) fn grant_bytes(grant: &ClearanceGrant) -> io::Result<Vec<u8>> {
+pub(super) fn grant_bytes(grant: &ClearanceGrant, limits: &ClearanceLimits) -> io::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(grant).map_err(io::Error::other)?;
-    if bytes.len() as u64 > MAX_RECORD_BYTES {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("the clearance grant exceeds the size limit"));
     }
     Ok(bytes)
 }
 
 /// A stored grant, checked against the size limit and its bounds.
-pub(super) fn parse_grant(bytes: &[u8]) -> io::Result<ClearanceGrant> {
-    if bytes.len() as u64 > MAX_RECORD_BYTES {
+pub(super) fn parse_grant(bytes: &[u8], limits: &ClearanceLimits) -> io::Result<ClearanceGrant> {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("the clearance grant exceeds the size limit"));
     }
     let grant: ClearanceGrant = serde_json::from_slice(bytes)
         .map_err(|error| invalid_data(format!("invalid clearance grant: {error}")))?;
     grant
-        .validate()
+        .validate(limits)
         .map_err(|error| invalid_data(error.to_string()))?;
     Ok(grant)
 }
@@ -426,13 +436,14 @@ fn read_grant(
     path: &std::path::Path,
     operation: &str,
     agent: &str,
+    limits: &ClearanceLimits,
 ) -> io::Result<Option<ClearanceGrant>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let grant = parse_grant(&bytes)?;
+    let grant = parse_grant(&bytes, limits)?;
     Ok((grant.operation == operation && grant.agent == agent).then_some(grant))
 }
 

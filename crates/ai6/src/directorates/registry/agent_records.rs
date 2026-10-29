@@ -18,17 +18,15 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::store::{FileRegistry, invalid_data, registry_lock, safe_component, write_atomic};
+use super::limits::AgentLimits;
+use super::store::{FileRegistry, invalid_data, safe_component};
+use crate::bounds::Limit;
 
 /// The Operation key of outcomes outside any Operation, and of quarantines in every Operation.
 pub const NO_OPERATION: &str = "";
-pub(super) const MAX_RECORD_BYTES: u64 = 1024 * 1024;
-const MAX_OPERATIONS: usize = 128;
-const MAX_CLEARANCES: usize = 8;
-const MAX_COUNTED: usize = 256;
-const MAX_MODEL_HISTORY: usize = 16;
-const MAX_KEY_BYTES: usize = 512;
-const MAX_AGENT_BYTES: usize = 256;
+/// Bytes of a clearance name in a report: clearances are a fixed vocabulary (`desk`, `field`,
+/// `00`), so this bounds a name read from a report, not a setting.
+const CLEARANCE_NAME_BYTES: Limit = Limit::at(16);
 
 /// What happened that counts toward an Agent's record.
 #[non_exhaustive]
@@ -234,7 +232,7 @@ impl OperationRecord {
             .unwrap_or_default()
     }
 
-    fn note_model(&mut self, model: Option<String>, at: f64) -> &mut ModelTenure {
+    fn note_model(&mut self, model: Option<String>, at: f64, history: Limit) -> &mut ModelTenure {
         let current = self
             .model_history
             .last()
@@ -249,10 +247,8 @@ impl OperationRecord {
                 to: None,
                 tally: AgentTally::default(),
             });
-            if self.model_history.len() > MAX_MODEL_HISTORY {
-                self.model_history
-                    .drain(..self.model_history.len() - MAX_MODEL_HISTORY);
-            }
+            let excess = self.model_history.len().saturating_sub(history.or_max());
+            self.model_history.drain(..excess);
         }
         self.model_history
             .last_mut()
@@ -296,10 +292,11 @@ impl AgentRecord {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for a report out of bounds or for another Agent; `InvalidData` when the
-    /// record would hold more than 128 Operations or 8 clearances in one.
-    pub fn count(&mut self, report: &AgentOutcomeReport) -> io::Result<bool> {
-        report.validate()?;
+    /// `InvalidInput` for a report out of `limits` or for another Agent; `InvalidData` when
+    /// the record would hold more Operations, or more clearances in one, than `limits`
+    /// allows.
+    pub fn count(&mut self, report: &AgentOutcomeReport, limits: &AgentLimits) -> io::Result<bool> {
+        report.validate(limits)?;
         if report.agent != self.agent {
             return Err(invalid_input("the report is for another Agent"));
         }
@@ -310,11 +307,11 @@ impl AgentRecord {
         let new_clearance = |record: &OperationRecord| {
             report.clearance.as_deref().is_some_and(|clearance| {
                 !record.by_clearance.contains_key(clearance)
-                    && record.by_clearance.len() >= MAX_CLEARANCES
+                    && !limits.clearances.allows(record.by_clearance.len() + 1)
             })
         };
         match self.by_operation.get(operation) {
-            None if self.by_operation.len() >= MAX_OPERATIONS => {
+            None if !limits.operations.allows(self.by_operation.len() + 1) => {
                 return Err(invalid_data("the Agent record holds too many Operations"));
             }
             Some(record) if new_clearance(record) => {
@@ -346,14 +343,13 @@ impl AgentRecord {
         }
         if report.outcome.is_session_outcome() {
             record
-                .note_model(report.model.clone(), report.at)
+                .note_model(report.model.clone(), report.at, limits.model_history)
                 .tally
                 .add(report.outcome, report.at);
         }
         self.counted.push(report.key.clone());
-        if self.counted.len() > MAX_COUNTED {
-            self.counted.drain(..self.counted.len() - MAX_COUNTED);
-        }
+        let excess = self.counted.len().saturating_sub(limits.counted.or_max());
+        self.counted.drain(..excess);
         Ok(true)
     }
 }
@@ -413,24 +409,24 @@ impl AgentOutcomeReport {
         self
     }
 
-    fn validate(&self) -> io::Result<()> {
-        let bounded = |text: &str, limit: usize| {
-            !text.trim().is_empty() && text.len() <= limit && !text.contains(char::is_control)
+    fn validate(&self, limits: &AgentLimits) -> io::Result<()> {
+        let bounded = |text: &str, limit: Limit| {
+            !text.trim().is_empty() && limit.allows(text.len()) && !text.contains(char::is_control)
         };
-        if !bounded(&self.agent, MAX_AGENT_BYTES)
-            || !bounded(&self.key, MAX_KEY_BYTES)
+        if !bounded(&self.agent, limits.agent_bytes)
+            || !bounded(&self.key, limits.key_bytes)
             || self
                 .operation
                 .as_deref()
-                .is_some_and(|operation| !bounded(operation, MAX_AGENT_BYTES))
+                .is_some_and(|operation| !bounded(operation, limits.agent_bytes))
             || self
                 .clearance
                 .as_deref()
-                .is_some_and(|clearance| !bounded(clearance, 16))
+                .is_some_and(|clearance| !bounded(clearance, CLEARANCE_NAME_BYTES))
             || self
                 .model
                 .as_deref()
-                .is_some_and(|model| !bounded(model, MAX_AGENT_BYTES))
+                .is_some_and(|model| !bounded(model, limits.agent_bytes))
             || !self.at.is_finite()
             || self.at < 0.0
         {
@@ -485,12 +481,13 @@ impl FileRegistry {
         &self,
         report: &AgentOutcomeReport,
     ) -> io::Result<AgentRecord> {
-        report.validate()?;
+        let limits = &self.limits.agents;
+        report.validate(limits)?;
         let path = self.agent_record_path(&report.agent);
-        let mut record = read_record(&path, &report.agent)?
+        let mut record = read_record(&path, &report.agent, limits)?
             .unwrap_or_else(|| AgentRecord::new(report.agent.clone()));
-        if record.count(report)? {
-            write_atomic(&path, &record_bytes(&record)?)?;
+        if record.count(report, limits)? {
+            self.write_atomic(&path, &record_bytes(&record, limits)?)?;
         }
         Ok(record)
     }
@@ -498,13 +495,13 @@ impl FileRegistry {
 
 impl AgentRecordStore for FileRegistry {
     fn record_agent_outcome(&self, report: &AgentOutcomeReport) -> io::Result<AgentRecord> {
-        report.validate()?;
-        let _lock = registry_lock(&self.root)?;
+        report.validate(&self.limits.agents)?;
+        let _lock = self.lock()?;
         self.count_outcome_locked(report)
     }
 
     fn agent_record(&self, agent: &str) -> io::Result<Option<AgentRecord>> {
-        read_record(&self.agent_record_path(agent), agent)
+        read_record(&self.agent_record_path(agent), agent, &self.limits.agents)
     }
 
     fn agent_records(&self) -> io::Result<Vec<AgentRecord>> {
@@ -520,7 +517,7 @@ impl AgentRecordStore for FileRegistry {
                 continue;
             }
             if let Ok(bytes) = fs::read(&path)
-                && let Ok(record) = parse_record(&bytes)
+                && let Ok(record) = parse_record(&bytes, &self.limits.agents)
                 && path.file_stem().and_then(|stem| stem.to_str())
                     == Some(safe_component(&record.agent).as_str())
             {
@@ -533,30 +530,34 @@ impl AgentRecordStore for FileRegistry {
 }
 
 /// The stored form of a record, refused past the size limit.
-pub(super) fn record_bytes(record: &AgentRecord) -> io::Result<Vec<u8>> {
+pub(super) fn record_bytes(record: &AgentRecord, limits: &AgentLimits) -> io::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(record).map_err(io::Error::other)?;
-    if bytes.len() as u64 > MAX_RECORD_BYTES {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("the Agent record exceeds the size limit"));
     }
     Ok(bytes)
 }
 
 /// A stored record, checked against the size limit.
-pub(super) fn parse_record(bytes: &[u8]) -> io::Result<AgentRecord> {
-    if bytes.len() as u64 > MAX_RECORD_BYTES {
+pub(super) fn parse_record(bytes: &[u8], limits: &AgentLimits) -> io::Result<AgentRecord> {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("the Agent record exceeds the size limit"));
     }
     serde_json::from_slice(bytes)
         .map_err(|error| invalid_data(format!("invalid Agent record: {error}")))
 }
 
-fn read_record(path: &std::path::Path, agent: &str) -> io::Result<Option<AgentRecord>> {
+fn read_record(
+    path: &std::path::Path,
+    agent: &str,
+    limits: &AgentLimits,
+) -> io::Result<Option<AgentRecord>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let record = parse_record(&bytes)?;
+    let record = parse_record(&bytes, limits)?;
     // Codenames that differ only in characters a file name cannot hold share a file.
     if record.agent != agent {
         return Ok(None);

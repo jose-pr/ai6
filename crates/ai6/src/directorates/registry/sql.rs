@@ -35,6 +35,7 @@ mod stations;
 
 use std::fmt;
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -42,6 +43,10 @@ use serde::de::DeserializeOwned;
 use zeroize::Zeroizing;
 
 use db::{Clock, Database, Location, Tx};
+
+use super::backend::Limited;
+use super::limits::RegistryLimits;
+use crate::bounds::Limit;
 
 /// How a SQL Registry or roster connects to PostgreSQL: a password kept out of the location,
 /// and timeouts derived from the Headquarters lease, so a Station that stalls inside a
@@ -51,13 +56,18 @@ use db::{Clock, Database, Location, Tx};
 /// after `L/4` (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`,
 /// set on each session); connecting gives up and TCP keepalives start after `L/6`
 /// (`connect_timeout`, `keepalives_idle`), and unacknowledged data drops the connection after
-/// `L/4` (`tcp_user_timeout`, where the platform has it). Each is at least a second. A
-/// location that sets one of them itself (a parameter, or `-c` in `options`) keeps its own.
-/// SQLite ignores these.
+/// `L/4` (`tcp_user_timeout`, where the platform has it). A location that sets one of them
+/// itself (a parameter, or `-c` in `options`) keeps its own. SQLite ignores these, and waits
+/// for another connection's lock for its busy timeout instead.
+///
+/// The options also carry the [`RegistryLimits`] the opened Registry applies, whichever store
+/// the location names.
 #[derive(Clone)]
 pub struct SqlOptions {
     lease: Duration,
     password: Option<Zeroizing<String>>,
+    busy_timeout: Duration,
+    limits: RegistryLimits,
 }
 
 impl fmt::Debug for SqlOptions {
@@ -66,6 +76,8 @@ impl fmt::Debug for SqlOptions {
             .debug_struct("SqlOptions")
             .field("lease", &self.lease)
             .field("password", &self.password.as_ref().map(|_| "***"))
+            .field("busy_timeout", &self.busy_timeout)
+            .field("limits", &self.limits)
             .finish()
     }
 }
@@ -87,7 +99,32 @@ impl SqlOptions {
         Self {
             lease,
             password: None,
+            busy_timeout: crate::bootstrap::DEFAULT_SQLITE_BUSY_TIMEOUT,
+            limits: RegistryLimits::default(),
         }
+    }
+
+    /// The limits the opened Registry applies. Default [`RegistryLimits::default`].
+    #[must_use]
+    pub fn with_limits(mut self, limits: RegistryLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// How long a SQLite connection waits for a lock another connection holds. Default 30 s.
+    #[must_use]
+    pub fn with_busy_timeout(mut self, timeout: Duration) -> Self {
+        self.busy_timeout = timeout;
+        self
+    }
+
+    /// The limits the opened Registry applies.
+    pub fn limits(&self) -> &RegistryLimits {
+        &self.limits
+    }
+
+    pub(crate) fn busy_timeout(&self) -> Duration {
+        self.busy_timeout
     }
 
     /// The password to connect with when the location gives none.
@@ -102,7 +139,7 @@ impl SqlOptions {
     }
 
     fn fraction(&self, divisor: u32) -> Duration {
-        (self.lease / divisor).max(Duration::from_secs(1))
+        self.lease / divisor
     }
 
     pub(crate) fn statement_timeout(&self) -> Duration {
@@ -295,6 +332,7 @@ pub(crate) fn postgres_admin(location: &str, sql: &str) -> io::Result<()> {
 #[derive(Debug)]
 pub struct SqlRegistry {
     db: Database,
+    limits: Arc<RegistryLimits>,
 }
 
 impl SqlRegistry {
@@ -326,6 +364,7 @@ impl SqlRegistry {
         })?;
         Ok(Self {
             db: Database::open(location, options)?,
+            limits: Arc::new(options.limits.clone()),
         })
     }
 
@@ -344,21 +383,35 @@ impl SqlRegistry {
     }
 }
 
+impl Limited for SqlRegistry {
+    fn limits(&self) -> &RegistryLimits {
+        &self.limits
+    }
+}
+
 /// A record as stored: compact JSON.
 fn to_json(value: &impl Serialize) -> io::Result<String> {
     serde_json::to_string(value).map_err(io::Error::other)
 }
 
 /// A record as stored, refused past `limit` bytes as the file Registry refuses it.
-fn bounded_json(value: &impl Serialize, limit: u64, what: &str) -> io::Result<String> {
+fn bounded_json(value: &impl Serialize, limit: Limit, what: &str) -> io::Result<String> {
     let text = to_json(value)?;
-    if text.len() as u64 > limit {
+    if !limit.allows(text.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("{what} exceeds the size limit"),
         ));
     }
     Ok(text)
+}
+
+/// `limit` as a SQL row count: `i64::MAX` when there is none.
+fn row_limit(limit: Limit) -> i64 {
+    limit
+        .get()
+        .and_then(|bound| i64::try_from(bound).ok())
+        .unwrap_or(i64::MAX)
 }
 
 /// Reads a stored record; a malformed one is `InvalidData`.
@@ -418,8 +471,8 @@ mod tests {
         assert_eq!(options.connect_timeout(), Duration::from_secs(10));
         assert_eq!(
             SqlOptions::for_lease(Duration::from_secs(2)).lock_timeout(),
-            Duration::from_secs(1),
-            "never under a second"
+            Duration::from_millis(500),
+            "a short lease gives short timeouts"
         );
     }
 

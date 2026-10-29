@@ -17,24 +17,14 @@ use globset::Glob;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::store::{
-    FileRegistry, hex_digest, invalid_data, registry_lock, validate_registry_key, write_atomic,
-};
+use super::limits::ApprovalLimits;
+use super::store::{FileRegistry, hex_digest, invalid_data, validate_registry_key};
+use crate::bounds::Limit;
 use crate::directorates::m::approvals::{ActionScope, clearance_at_least, valid_kind};
 use crate::directorates::m::identity::{MissionId, SessionId};
 
 /// The signer of a request that expired without a decision.
 pub const EXPIRY_SIGNER: &str = "expiry";
-
-pub(super) const MAX_RECORD_BYTES: u64 = 16 * 1024;
-pub(super) const MAX_PENDING: usize = 1_000;
-pub(super) const MAX_CLASS_AUTHORIZATIONS: usize = 1_000;
-pub(super) const MAX_MISSION_REQUESTS: usize = 64;
-const MAX_REASON_BYTES: usize = 2_048;
-const MAX_NOTE_BYTES: usize = 1_024;
-const MAX_SIGNER_BYTES: usize = 256;
-const MAX_IDEMPOTENCY_KEY_BYTES: usize = 256;
-const MAX_CLASS_ENTRIES: usize = 64;
 
 /// An Agent's request to take one step that needs green ink.
 #[non_exhaustive]
@@ -80,8 +70,9 @@ impl ApprovalRequest {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for an Operation or Agent that is not a Registry key, an empty or
-    /// oversized reason or retry key, or a scope out of bounds.
+    /// `InvalidInput` for an Operation or Agent that is not a Registry key, an empty reason or
+    /// retry key or one longer than `limits` allows, or a scope out of bounds.
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         operation: impl Into<String>,
         mission: MissionId,
@@ -90,15 +81,14 @@ impl ApprovalRequest {
         scope: ActionScope,
         reason: impl Into<String>,
         idempotency_key: &str,
+        limits: &ApprovalLimits,
     ) -> io::Result<Self> {
         let operation = operation.into();
-        if idempotency_key.trim().is_empty()
-            || idempotency_key.len() > MAX_IDEMPOTENCY_KEY_BYTES
-            || idempotency_key.contains(char::is_control)
-        {
-            return Err(invalid_input(
-                "the idempotency key must be 1 to 256 bytes without control characters",
-            ));
+        if !valid_text(idempotency_key, limits.idempotency_key_bytes, false) {
+            return Err(invalid_input(&format!(
+                "the idempotency key must be 1 to {} bytes without control characters",
+                limits.idempotency_key_bytes
+            )));
         }
         let mut digest = Sha256::new();
         for component in [
@@ -123,7 +113,7 @@ impl ApprovalRequest {
             expires_at: 0.0,
             proposed_role: None,
         };
-        request.validate_fields()?;
+        request.validate_fields(limits)?;
         Ok(request)
     }
 
@@ -135,21 +125,22 @@ impl ApprovalRequest {
         self
     }
 
-    fn validate_fields(&self) -> io::Result<()> {
+    fn validate_fields(&self, limits: &ApprovalLimits) -> io::Result<()> {
         validate_registry_key(&self.id)?;
         validate_registry_key(&self.operation)?;
         validate_registry_key(&self.agent)?;
         self.scope.validate()?;
-        if !valid_text(&self.reason, MAX_REASON_BYTES, true) {
-            return Err(invalid_input(
-                "the reason must be 1 to 2048 bytes without control characters other than newlines",
-            ));
+        if !valid_text(&self.reason, limits.reason_bytes, true) {
+            return Err(invalid_input(&format!(
+                "the reason must be 1 to {} bytes without control characters other than newlines",
+                limits.reason_bytes
+            )));
         }
         Ok(())
     }
 
-    pub(super) fn validate(&self) -> io::Result<()> {
-        self.validate_fields()?;
+    pub(super) fn validate(&self, limits: &ApprovalLimits) -> io::Result<()> {
+        self.validate_fields(limits)?;
         if !(self.requested_at.is_finite()
             && self.requested_at > 0.0
             && self.expires_at.is_finite()
@@ -461,44 +452,49 @@ impl ClassAuthorization {
     /// # Errors
     ///
     /// `InvalidInput` naming what is wrong: no kinds or an invalid one, a pattern that is not
-    /// a glob, neither Agents nor roles, an unknown clearance, a non-positive use limit, or
-    /// an expiry not after the grant.
-    pub fn validate(&self) -> io::Result<()> {
+    /// a glob, neither Agents nor roles, an unknown clearance, a non-positive use limit, an
+    /// expiry not after the grant, or more entries or longer text than `limits` allows.
+    pub fn validate(&self, limits: &ApprovalLimits) -> io::Result<()> {
         validate_registry_key(&self.id)?;
         validate_registry_key(&self.operation)?;
+        let entries = limits.class_entries;
         if self.kinds.is_empty()
-            || self.kinds.len() > MAX_CLASS_ENTRIES
+            || !entries.allows(self.kinds.len())
             || !self.kinds.iter().all(|kind| valid_kind(kind))
         {
-            return Err(invalid_input(
-                "a class authorisation names 1 to 64 valid step kinds",
-            ));
+            return Err(invalid_input(&format!(
+                "a class authorisation names 1 to {entries} valid step kinds"
+            )));
         }
-        if !valid_text(&self.target_pattern, 256, false) || Glob::new(&self.target_pattern).is_err()
+        if !valid_text(&self.target_pattern, limits.pattern_bytes, false)
+            || Glob::new(&self.target_pattern).is_err()
         {
-            return Err(invalid_input(
-                "the target pattern must be a glob of 1 to 256 bytes",
-            ));
+            return Err(invalid_input(&format!(
+                "the target pattern must be a glob of 1 to {} bytes",
+                limits.pattern_bytes
+            )));
         }
         let names = self.agents.iter().chain(&self.roles);
         if (self.agents.is_empty() && self.roles.is_empty())
-            || self.agents.len() > MAX_CLASS_ENTRIES
-            || self.roles.len() > MAX_CLASS_ENTRIES
-            || names.clone().any(|name| !valid_text(name, 128, false))
+            || !entries.allows(self.agents.len())
+            || !entries.allows(self.roles.len())
+            || names
+                .clone()
+                .any(|name| !valid_text(name, limits.name_bytes, false))
         {
-            return Err(invalid_input(
-                "a class authorisation covers 1 to 64 Agents or roles",
-            ));
+            return Err(invalid_input(&format!(
+                "a class authorisation covers 1 to {entries} Agents or roles"
+            )));
         }
-        if self.proposed_roles.len() > MAX_CLASS_ENTRIES
+        if !entries.allows(self.proposed_roles.len())
             || self
                 .proposed_roles
                 .iter()
-                .any(|name| !valid_text(name, 128, false))
+                .any(|name| !valid_text(name, limits.name_bytes, false))
         {
-            return Err(invalid_input(
-                "a class authorisation lists at most 64 proposed roles",
-            ));
+            return Err(invalid_input(&format!(
+                "a class authorisation lists at most {entries} proposed roles"
+            )));
         }
         if !clearance_at_least(&self.clearance_min, "desk") {
             return Err(invalid_input("clearance_min must be desk, field or 00"));
@@ -506,8 +502,11 @@ impl ClassAuthorization {
         if self.max_uses == Some(0) {
             return Err(invalid_input("max_uses must be at least 1"));
         }
-        if !valid_text(&self.signer, MAX_SIGNER_BYTES, false) {
-            return Err(invalid_input("the signer must be 1 to 256 bytes"));
+        if !valid_text(&self.signer, limits.signer_bytes, false) {
+            return Err(invalid_input(&format!(
+                "the signer must be 1 to {} bytes",
+                limits.signer_bytes
+            )));
         }
         if !(self.created_at.is_finite()
             && self.created_at > 0.0
@@ -523,6 +522,28 @@ impl ClassAuthorization {
 }
 
 impl FileRegistry {
+    fn read_json<T: for<'de> Deserialize<'de>>(&self, path: &Path) -> io::Result<Option<T>> {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        if !self.limits.approvals.record_bytes.allows(bytes.len()) {
+            return Err(invalid_data("green ink record exceeds the size limit"));
+        }
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|error| invalid_data(format!("invalid green ink record: {error}")))
+    }
+
+    fn write_json(&self, path: &Path, value: &impl Serialize) -> io::Result<()> {
+        let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
+        if !self.limits.approvals.record_bytes.allows(bytes.len()) {
+            return Err(invalid_data("green ink record exceeds the size limit"));
+        }
+        self.write_atomic(path, &bytes)
+    }
+
     fn approvals_dir(&self, state: &str, operation: &str) -> PathBuf {
         self.root.join("approvals").join(state).join(operation)
     }
@@ -539,7 +560,7 @@ impl FileRegistry {
     fn class_authorizations_locked(&self, operation: &str) -> io::Result<Vec<ClassAuthorization>> {
         let mut records = Vec::new();
         for path in json_files(&self.class_dir(operation))? {
-            if let Ok(Some(record)) = read_json::<ClassAuthorization>(&path)
+            if let Ok(Some(record)) = self.read_json::<ClassAuthorization>(&path)
                 && record.operation == operation
             {
                 records.push(record);
@@ -562,12 +583,12 @@ impl FileRegistry {
     ) -> io::Result<Option<ApprovalStatus>> {
         let file = format!("{id}.json");
         if let Some(approval) =
-            read_json::<Approval>(&self.approvals_dir("decided", operation).join(&file))?
+            self.read_json::<Approval>(&self.approvals_dir("decided", operation).join(&file))?
         {
             return Ok(Some(ApprovalStatus::Decided(approval)));
         }
-        let Some(request) =
-            read_json::<ApprovalRequest>(&self.approvals_dir("pending", operation).join(&file))?
+        let Some(request) = self
+            .read_json::<ApprovalRequest>(&self.approvals_dir("pending", operation).join(&file))?
         else {
             return Ok(None);
         };
@@ -589,7 +610,7 @@ impl FileRegistry {
     fn settle_locked(&self, approval: &Approval) -> io::Result<()> {
         let operation = &approval.request.operation;
         let file = format!("{}.json", approval.request.id);
-        write_json(
+        self.write_json(
             &self.approvals_dir("decided", operation).join(&file),
             approval,
         )?;
@@ -601,17 +622,18 @@ impl FileRegistry {
 
     fn index_locked(&self, request: &ApprovalRequest) -> io::Result<()> {
         let path = self.mission_index(&request.operation, request.mission.as_str());
-        let mut ids = read_json::<Vec<String>>(&path)?.unwrap_or_default();
+        let mut ids = self.read_json::<Vec<String>>(&path)?.unwrap_or_default();
         if ids.contains(&request.id) {
             return Ok(());
         }
-        if ids.len() >= MAX_MISSION_REQUESTS {
+        let most = self.limits.approvals.mission_requests;
+        if !most.allows(ids.len() + 1) {
             return Err(invalid_data(format!(
-                "the Mission has made {MAX_MISSION_REQUESTS} green ink requests"
+                "the Mission has made {most} green ink requests"
             )));
         }
         ids.push(request.id.clone());
-        write_json(&path, &ids)
+        self.write_json(&path, &ids)
     }
 }
 
@@ -753,35 +775,36 @@ pub trait ApprovalStore {
 
 impl ApprovalStore for FileRegistry {
     fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus> {
-        request.validate()?;
-        let _lock = registry_lock(&self.root)?;
+        request.validate(&self.limits.approvals)?;
+        let _lock = self.lock()?;
         if let Some(status) = self.status_locked(&request.operation, &request.id, 0.0)? {
             return Ok(status);
         }
         let pending = self.approvals_dir("pending", &request.operation);
-        if count_json(&pending)? >= MAX_PENDING {
+        let most = self.limits.approvals.pending;
+        if !most.allows(count_json(&pending)? + 1) {
             return Err(invalid_data(format!(
-                "the Operation has {MAX_PENDING} requests waiting for green ink"
+                "the Operation has {most} requests waiting for green ink"
             )));
         }
         self.index_locked(request)?;
-        write_json(&pending.join(format!("{}.json", request.id)), request)?;
+        self.write_json(&pending.join(format!("{}.json", request.id)), request)?;
         Ok(ApprovalStatus::Pending(request.clone()))
     }
 
     fn approval(&self, operation: &str, id: &str, now: f64) -> io::Result<Option<ApprovalStatus>> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         self.status_locked(operation, id, now)
     }
 
     fn pending_approvals(&self, operation: &str, now: f64) -> io::Result<Vec<ApprovalRequest>> {
         validate_registry_key(operation)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let mut waiting = Vec::new();
         for path in json_files(&self.approvals_dir("pending", operation))? {
-            let Ok(Some(request)) = read_json::<ApprovalRequest>(&path) else {
+            let Ok(Some(request)) = self.read_json::<ApprovalRequest>(&path) else {
                 continue;
             };
             if request.operation != operation {
@@ -809,9 +832,10 @@ impl ApprovalStore for FileRegistry {
     ) -> io::Result<Vec<ApprovalStatus>> {
         validate_registry_key(operation)?;
         validate_registry_key(mission)?;
-        let _lock = registry_lock(&self.root)?;
-        let ids =
-            read_json::<Vec<String>>(&self.mission_index(operation, mission))?.unwrap_or_default();
+        let _lock = self.lock()?;
+        let ids = self
+            .read_json::<Vec<String>>(&self.mission_index(operation, mission))?
+            .unwrap_or_default();
         let mut statuses = Vec::new();
         for id in ids {
             if validate_registry_key(&id).is_ok()
@@ -846,8 +870,8 @@ impl ApprovalStore for FileRegistry {
     fn decide_approval(&self, operation: &str, id: &str, ruling: &Ruling) -> io::Result<Approval> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        validate_ruling(ruling)?;
-        let _lock = registry_lock(&self.root)?;
+        validate_ruling(ruling, &self.limits.approvals)?;
+        let _lock = self.lock()?;
         match self.status_locked(operation, id, ruling.at)? {
             None => Err(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -877,11 +901,11 @@ impl ApprovalStore for FileRegistry {
     ) -> io::Result<Approval> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self
             .approvals_dir("decided", operation)
             .join(format!("{id}.json"));
-        let mut approval = read_json::<Approval>(&path)?.ok_or_else(|| {
+        let mut approval = self.read_json::<Approval>(&path)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
         })?;
         if approval.decision != Decision::Approved {
@@ -895,7 +919,7 @@ impl ApprovalStore for FileRegistry {
                 by: by.to_owned(),
                 at,
             });
-            write_json(&path, &approval)?;
+            self.write_json(&path, &approval)?;
         }
         Ok(approval)
     }
@@ -903,34 +927,34 @@ impl ApprovalStore for FileRegistry {
     fn spend_approval(&self, operation: &str, id: &str, at: f64) -> io::Result<bool> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self
             .approvals_dir("decided", operation)
             .join(format!("{id}.json"));
-        let mut approval = read_json::<Approval>(&path)?.ok_or_else(|| {
+        let mut approval = self.read_json::<Approval>(&path)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
         })?;
         if approval.spent_at.is_some() || !approval.is_live(at) {
             return Ok(false);
         }
         approval.spent_at = Some(at);
-        write_json(&path, &approval)?;
+        self.write_json(&path, &approval)?;
         Ok(true)
     }
 
     fn mark_approval_notified(&self, operation: &str, id: &str, at: f64) -> io::Result<()> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self
             .approvals_dir("decided", operation)
             .join(format!("{id}.json"));
-        let mut approval = read_json::<Approval>(&path)?.ok_or_else(|| {
+        let mut approval = self.read_json::<Approval>(&path)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
         })?;
         if approval.notified_at.is_none() {
             approval.notified_at = Some(at);
-            write_json(&path, &approval)?;
+            self.write_json(&path, &approval)?;
         }
         Ok(())
     }
@@ -942,8 +966,8 @@ impl ApprovalStore for FileRegistry {
         clearance: &str,
         now: f64,
     ) -> io::Result<Option<Approval>> {
-        request.validate()?;
-        let _lock = registry_lock(&self.root)?;
+        request.validate(&self.limits.approvals)?;
+        let _lock = self.lock()?;
         if self
             .status_locked(&request.operation, &request.id, 0.0)?
             .is_some()
@@ -962,7 +986,7 @@ impl ApprovalStore for FileRegistry {
             return Ok(None);
         };
         class.uses += 1;
-        write_json(
+        self.write_json(
             &self
                 .class_dir(&request.operation)
                 .join(format!("{}.json", class.id)),
@@ -970,7 +994,7 @@ impl ApprovalStore for FileRegistry {
         )?;
         let approval = class_approval(request, &class, now);
         self.index_locked(request)?;
-        write_json(
+        self.write_json(
             &self
                 .approvals_dir("decided", &request.operation)
                 .join(format!("{}.json", request.id)),
@@ -980,8 +1004,8 @@ impl ApprovalStore for FileRegistry {
     }
 
     fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()> {
-        record.validate()?;
-        let _lock = registry_lock(&self.root)?;
+        record.validate(&self.limits.approvals)?;
+        let _lock = self.lock()?;
         let directory = self.class_dir(&record.operation);
         let path = directory.join(format!("{}.json", record.id));
         if path.exists() {
@@ -990,12 +1014,13 @@ impl ApprovalStore for FileRegistry {
                 "the class authorisation identity is taken",
             ));
         }
-        if count_json(&directory)? >= MAX_CLASS_AUTHORIZATIONS {
+        let most = self.limits.approvals.class_authorizations;
+        if !most.allows(count_json(&directory)? + 1) {
             return Err(invalid_data(format!(
-                "the Operation holds {MAX_CLASS_AUTHORIZATIONS} class authorisations"
+                "the Operation holds {most} class authorisations"
             )));
         }
-        write_json(&path, record)
+        self.write_json(&path, record)
     }
 
     fn class_authorizations(&self, operation: &str) -> io::Result<Vec<ClassAuthorization>> {
@@ -1012,17 +1037,19 @@ impl ApprovalStore for FileRegistry {
     ) -> io::Result<ClassAuthorization> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self.class_dir(operation).join(format!("{id}.json"));
-        let mut record = read_json::<ClassAuthorization>(&path)?.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "no such class authorisation")
-        })?;
+        let mut record = self
+            .read_json::<ClassAuthorization>(&path)?
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "no such class authorisation")
+            })?;
         if record.revoked.is_none() {
             record.revoked = Some(Revocation {
                 by: by.to_owned(),
                 at,
             });
-            write_json(&path, &record)?;
+            self.write_json(&path, &record)?;
         }
         Ok(record)
     }
@@ -1079,9 +1106,12 @@ pub(super) fn class_approval(
     }
 }
 
-pub(super) fn validate_ruling(ruling: &Ruling) -> io::Result<()> {
-    if !valid_text(&ruling.signer, MAX_SIGNER_BYTES, false) {
-        return Err(invalid_input("the signer must be 1 to 256 bytes"));
+pub(super) fn validate_ruling(ruling: &Ruling, limits: &ApprovalLimits) -> io::Result<()> {
+    if !valid_text(&ruling.signer, limits.signer_bytes, false) {
+        return Err(invalid_input(&format!(
+            "the signer must be 1 to {} bytes",
+            limits.signer_bytes
+        )));
     }
     if !ruling.at.is_finite() || ruling.at <= 0.0 {
         return Err(invalid_input("a decision needs a positive time"));
@@ -1089,11 +1119,12 @@ pub(super) fn validate_ruling(ruling: &Ruling) -> io::Result<()> {
     if ruling
         .note
         .as_deref()
-        .is_some_and(|note| !valid_text(note, MAX_NOTE_BYTES, true))
+        .is_some_and(|note| !valid_text(note, limits.note_bytes, true))
     {
-        return Err(invalid_input(
-            "the note must be 1 to 1024 bytes without control characters other than newlines",
-        ));
+        return Err(invalid_input(&format!(
+            "the note must be 1 to {} bytes without control characters other than newlines",
+            limits.note_bytes
+        )));
     }
     match (ruling.decision, ruling.expires_at) {
         (Decision::Approved, Some(expires)) if expires.is_finite() && expires > ruling.at => Ok(()),
@@ -1104,9 +1135,9 @@ pub(super) fn validate_ruling(ruling: &Ruling) -> io::Result<()> {
     }
 }
 
-fn valid_text(value: &str, max_bytes: usize, multiline: bool) -> bool {
+fn valid_text(value: &str, max_bytes: Limit, multiline: bool) -> bool {
     !value.trim().is_empty()
-        && value.len() <= max_bytes
+        && max_bytes.allows(value.len())
         && !value
             .chars()
             .any(|character| character.is_control() && !(multiline && "\n\t".contains(character)))
@@ -1142,28 +1173,6 @@ fn count_json(directory: &Path) -> io::Result<usize> {
     json_files(directory).map(|paths| paths.len())
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> io::Result<Option<T>> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    if bytes.len() as u64 > MAX_RECORD_BYTES {
-        return Err(invalid_data("green ink record exceeds the size limit"));
-    }
-    serde_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|error| invalid_data(format!("invalid green ink record: {error}")))
-}
-
-fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
-    let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
-    if bytes.len() as u64 > MAX_RECORD_BYTES {
-        return Err(invalid_data("green ink record exceeds the size limit"));
-    }
-    write_atomic(path, &bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1192,6 +1201,7 @@ mod tests {
             ActionScope::try_new(kind, target).unwrap(),
             "the release is ready",
             key,
+            &ApprovalLimits::default(),
         )
         .unwrap()
         .expiring(NOW, HOUR)
@@ -1570,13 +1580,14 @@ mod tests {
                 scope.clone(),
                 reason,
                 key,
+                &ApprovalLimits::default(),
             )
         };
         assert!(attempt("007", "line one\nline two", "key").is_ok());
         assert!(attempt("007", " ", "key").is_err());
         assert!(attempt("007", "reason", "").is_err());
         assert!(attempt("../007", "reason", "key").is_err());
-        assert!(attempt("007", &"x".repeat(MAX_REASON_BYTES + 1), "key").is_err());
+        assert!(attempt("007", &"x".repeat(2_048 + 1), "key").is_err());
         let registry = store.handle();
         let untimed = attempt("007", "reason", "key").unwrap();
         assert_eq!(

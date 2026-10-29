@@ -12,15 +12,11 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::agent_records::{AgentOutcome, AgentOutcomeReport};
-use super::store::{FileRegistry, invalid_data, registry_lock, safe_component, write_atomic};
+use super::limits::QuarantineLimits;
+use super::store::{FileRegistry, invalid_data, safe_component};
 use crate::directorates::medical::quarantine::Incident;
 
 const ALL_OPERATIONS: &str = "_all";
-pub(super) const MAX_RECORD_BYTES: u64 = 16 * 1024;
-pub(super) const MAX_QUARANTINES: usize = 10_000;
-const MAX_INCIDENTS: usize = 256;
-/// Incidents older than this are dropped; no policy window is longer in practice.
-const KEEP_INCIDENTS_SECS: f64 = 7.0 * 24.0 * 3600.0;
 
 /// An Agent stopped by Medical or an operator.
 #[non_exhaustive]
@@ -127,18 +123,19 @@ pub trait QuarantineStore {
 impl QuarantineStore for FileRegistry {
     fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine> {
         validate_quarantine(record)?;
-        let _lock = registry_lock(&self.root)?;
+        let limits = &self.limits.quarantine;
+        let _lock = self.lock()?;
         let path = self.quarantine_path(&record.agent, record.operation.as_deref());
-        if let Some(existing) = read_record(&path)? {
+        if let Some(existing) = read_record(&path, limits)? {
             return Ok(existing);
         }
         if fs::read_dir(self.quarantine_dir())
-            .is_ok_and(|entries| entries.count() >= MAX_QUARANTINES)
+            .is_ok_and(|entries| !limits.records.allows(entries.count() + 1))
         {
             return Err(io::Error::other("too many quarantine records"));
         }
         let bytes = serde_json::to_vec(record).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         // Under the same lock, so no Station reads the raise once the quarantine is stored.
         // A grant that cannot be removed stays for Headquarters' next round to take back.
         let _ = self.remove_raises_locked(&record.agent, record.operation.as_deref());
@@ -148,7 +145,7 @@ impl QuarantineStore for FileRegistry {
     }
 
     fn release_quarantine(&self, agent: &str, operation: Option<&str>) -> io::Result<bool> {
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         match fs::remove_file(self.quarantine_path(agent, operation)) {
             Ok(()) => Ok(true),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -168,7 +165,7 @@ impl QuarantineStore for FileRegistry {
             if path
                 .extension()
                 .is_some_and(|extension| extension == "json")
-                && let Some(record) = read_record(&path)?
+                && let Some(record) = read_record(&path, &self.limits.quarantine)?
             {
                 records.push(record);
             }
@@ -187,13 +184,14 @@ impl QuarantineStore for FileRegistry {
     }
 
     fn record_incident(&self, agent: &str, incident: Incident) -> io::Result<Vec<Incident>> {
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let path = self
             .quarantine_dir()
             .join("incidents")
             .join(format!("{}.json", safe_component(agent)));
+        let limits = &self.limits.quarantine;
         let mut history: Vec<Incident> = match fs::read(&path) {
-            Ok(bytes) if bytes.len() as u64 <= MAX_RECORD_BYTES * 16 => {
+            Ok(bytes) if limits.history_bytes().allows(bytes.len()) => {
                 serde_json::from_slice(&bytes)
                     .map_err(|error| invalid_data(format!("invalid incident history: {error}")))?
             }
@@ -201,22 +199,25 @@ impl QuarantineStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(error),
         };
-        add_incident(&mut history, incident);
+        add_incident(&mut history, incident, limits);
         let bytes = serde_json::to_vec(&history).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         Ok(history)
     }
 }
 
-/// Adds `incident` to an Agent's history, dropping incidents too old to count and the
-/// oldest past the bound.
-pub(super) fn add_incident(history: &mut Vec<Incident>, incident: Incident) {
-    let cutoff = incident.at - KEEP_INCIDENTS_SECS;
+/// Adds `incident` to an Agent's history, dropping incidents older than
+/// `limits.keep_incidents` and the oldest past `limits.incidents`.
+pub(super) fn add_incident(
+    history: &mut Vec<Incident>,
+    incident: Incident,
+    limits: &QuarantineLimits,
+) {
+    let cutoff = incident.at - limits.keep_incidents.as_secs_f64();
     history.retain(|known| known.at >= cutoff);
     history.push(incident);
-    if history.len() > MAX_INCIDENTS {
-        history.drain(..history.len() - MAX_INCIDENTS);
-    }
+    let excess = history.len().saturating_sub(limits.incidents.or_max());
+    history.drain(..excess);
 }
 
 /// The outcome a new quarantine counts on its Agent's record: in its Operation, or under
@@ -243,13 +244,16 @@ pub(super) fn validate_quarantine(record: &Quarantine) -> io::Result<()> {
     Ok(())
 }
 
-fn read_record(path: &std::path::Path) -> io::Result<Option<Quarantine>> {
+fn read_record(
+    path: &std::path::Path,
+    limits: &QuarantineLimits,
+) -> io::Result<Option<Quarantine>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    if bytes.len() as u64 > MAX_RECORD_BYTES {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("quarantine record exceeds the size limit"));
     }
     serde_json::from_slice(&bytes)
@@ -356,7 +360,7 @@ mod tests {
         let history = registry.record_incident("007", incident(2_000.0)).unwrap();
         assert_eq!(history.len(), 2);
         let history = registry
-            .record_incident("007", incident(2_000.0 + KEEP_INCIDENTS_SECS + 1.0))
+            .record_incident("007", incident(2_000.0 + 7.0 * 24.0 * 3600.0 + 1.0))
             .unwrap();
         assert_eq!(history.len(), 1, "incidents past the retention are dropped");
     }

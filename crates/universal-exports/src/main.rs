@@ -86,13 +86,16 @@ fn settings(cli: &Cli) -> Result<Settings, String> {
     Ok(Settings { located, state_dir })
 }
 
-/// SQL options from the Headquarters lease and the password `secret` refers to.
+/// SQL options from `[registry]` (timeouts, limits) and the password `secret` refers to.
 fn sql_options(
     settings: &Settings,
     secret: Option<&ai6::bootstrap::SecretRef>,
     what: &str,
 ) -> Result<ai6::SqlOptions, String> {
-    let options = ai6::SqlOptions::for_lease(settings.located.value.registry.headquarters_lease());
+    let registry = &settings.located.value.registry;
+    let options = ai6::SqlOptions::for_lease(registry.headquarters_lease())
+        .with_busy_timeout(registry.sqlite_busy_timeout())
+        .with_limits(registry.limits.clone());
     match secret {
         Some(secret) => {
             let password = secret
@@ -116,10 +119,12 @@ fn open_provider(settings: &Settings) -> Result<Arc<dyn ConfigProvider>, String>
         settings.located.value.provider.password.as_ref(),
         "provider",
     )?;
-    let provider =
-        ai6::directorates::m::config::open_with(&location, &options).map_err(|error| {
-            format!("the configuration provider at {shown} cannot be opened: {error}")
-        })?;
+    let provider = ai6::directorates::m::config::open_with(
+        &location,
+        &options,
+        settings.located.value.provider.limits(),
+    )
+    .map_err(|error| format!("the configuration provider at {shown} cannot be opened: {error}"))?;
     for weakening in ai6::directorates::registry::sql::weakenings(&location) {
         eprintln!("universal-exports: warning: the configuration provider at {shown}: {weakening}");
     }
@@ -719,6 +724,7 @@ mod tests {
         let allowed = ai6::role_authorizer_from_toml(
             "[role.viewer]\nactions = [\"mission.read\"]\n\
              [[rule]]\nsubject = \"group:ops\"\nscope = \"operation:G\"\nrole = \"viewer\"\n",
+            ai6::Limit::UNBOUNDED,
         )
         .unwrap();
         policy.replace(ConfigRevision::new(2), allowed);

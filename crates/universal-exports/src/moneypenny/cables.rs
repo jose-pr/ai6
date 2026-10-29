@@ -88,18 +88,20 @@ pub(super) async fn grants(gateway: &Gateway, person: &ai6::Person) -> Vec<Assis
     .unwrap_or_default()
 }
 
-/// Records one Cable event of a Station's report in the conversation.
+/// Records one Cable event of a Station's report in the conversation, refusing a proposed
+/// body past `body_bytes` (the Registry's `[registry.limits.cables] body_bytes`).
 pub(super) fn apply(
     conversation: &mut Conversation,
     event: &AssistantEvent,
     station: &str,
     bounds: Bounds,
+    body_bytes: ai6::Limit,
     after: &mut After,
 ) {
     match event.kind.as_str() {
         EVENT_CABLE_PROPOSAL => {
             if let Some(cable) = &event.cable {
-                propose(conversation, cable, station, bounds, after);
+                propose(conversation, cable, station, bounds, body_bytes, after);
             }
         }
         EVENT_CABLE_SENT => {
@@ -117,6 +119,7 @@ fn propose(
     cable: &AssistantCable,
     station: &str,
     bounds: Bounds,
+    body_bytes: ai6::Limit,
     after: &mut After,
 ) {
     let Some(body) = cable.body.clone() else {
@@ -136,7 +139,7 @@ fn propose(
         || !valid(&cable.target)
         || !valid(&cable.recipient)
         || cable.request_digest() != cable.digest
-        || body.len() > ai6::directorates::registry::cables::MAX_CABLE_BODY_BYTES
+        || !body_bytes.allows(body.len())
         || actions::hidden_characters(&shown, "cable").is_err()
         || actions::hidden_characters(&Value::String(cable.target.clone()), "target").is_err()
     {

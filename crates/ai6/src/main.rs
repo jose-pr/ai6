@@ -632,11 +632,7 @@ fn open_station(located: &Located<Bootstrap>) -> Result<Opened, String> {
         return Err("[registry] headquarters_lease must be positive".to_owned());
     }
     let provider_location = located.provider_location().map_err(text)?;
-    let provider = open_provider(
-        &provider_location,
-        lease,
-        located.value.provider.password.as_ref(),
-    )?;
+    let provider = open_provider(&provider_location, &located.value)?;
     let registry = open_registry(located)?;
     let config_dir = if is_sql_location(&provider_location) {
         match located.dir() {
@@ -668,11 +664,7 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
         let location = located
             .provider_location()
             .map_err(|error| error.to_string())?;
-        open_provider(
-            &location,
-            located.value.registry.headquarters_lease(),
-            located.value.provider.password.as_ref(),
-        )
+        open_provider(&location, &located.value)
     };
     match command {
         ConfigCommand::Path { .. } => Ok(String::new()),
@@ -753,19 +745,23 @@ fn station_of(located: &Located<Bootstrap>, opened: &Opened) -> String {
         .unwrap_or_default()
 }
 
-/// Opens the configuration provider at `location`, connecting a SQL one with timeouts from
-/// `lease` and `password`.
+/// Opens the configuration provider at `location` within the bootstrap file's `[provider]`
+/// limits, connecting a SQL one with its `[registry]` timeouts and `[provider]` password.
 fn open_provider(
     location: &str,
-    lease: Duration,
-    password: Option<&SecretRef>,
+    bootstrap: &Bootstrap,
 ) -> Result<Arc<dyn ai6::ConfigProvider>, String> {
-    let options = sql_options(lease, password, "provider")?;
+    let options = sql_options(
+        &bootstrap.registry,
+        bootstrap.provider.password.as_ref(),
+        "provider",
+    )?;
     let shown = ai6::directorates::registry::sql::redact(location);
     let provider =
-        ai6::directorates::m::config::open_with(location, &options).map_err(|error| {
-            format!("the configuration provider at {shown} cannot be opened: {error}")
-        })?;
+        ai6::directorates::m::config::open_with(location, &options, bootstrap.provider.limits())
+            .map_err(|error| {
+                format!("the configuration provider at {shown} cannot be opened: {error}")
+            })?;
     warn_weakenings("configuration provider", location);
     Ok(provider)
 }
@@ -776,10 +772,11 @@ fn open_registry(located: &Located<Bootstrap>) -> Result<Arc<dyn ai6::RegistryBa
         .registry_location()
         .map_err(|error| error.to_string())?;
     let options = sql_options(
-        located.value.registry.headquarters_lease(),
+        &located.value.registry,
         located.registry_password(),
         "Registry",
-    )?;
+    )?
+    .with_limits(located.value.registry.limits.clone());
     let registry =
         ai6::directorates::registry::backend::open_with(&location, &options).map_err(|error| {
             let location = ai6::directorates::registry::sql::redact(&location);
@@ -1112,14 +1109,10 @@ fn sleeper_command(bootstrap: &BootstrapArg, command: SleeperCommand) -> Result<
     let location = located
         .provider_location()
         .map_err(|error| error.to_string())?;
-    let roster = open_provider(
-        &location,
-        located.value.registry.headquarters_lease(),
-        located.value.provider.password.as_ref(),
-    )?
-    .load("")
-    .map_err(|e| e.to_string())?
-    .roster;
+    let roster = open_provider(&location, &located.value)?
+        .load("")
+        .map_err(|e| e.to_string())?
+        .roster;
     let registry = open_registry(&located)?;
     let find = |operation: &str, name: &str| -> Result<(String, ai6::Sleeper), String> {
         let operation = roster.operation(operation).map_err(|e| e.to_string())?;
@@ -1318,14 +1311,15 @@ fn publisher_config(
         .map_err(|error| error.to_string())
 }
 
-/// Options for a SQL Registry or configuration provider: timeouts from the Headquarters
-/// lease, and the password `password` refers to.
+/// Options for a SQL Registry or configuration provider: timeouts from `[registry]`, and the
+/// password `password` refers to.
 fn sql_options(
-    headquarters_lease: Duration,
+    registry: &ai6::bootstrap::RegistrySettings,
     password: Option<&SecretRef>,
     what: &str,
 ) -> Result<ai6::SqlOptions, String> {
-    let options = ai6::SqlOptions::for_lease(headquarters_lease);
+    let options = ai6::SqlOptions::for_lease(registry.headquarters_lease())
+        .with_busy_timeout(registry.sqlite_busy_timeout());
     match password {
         Some(password) => {
             let value = password

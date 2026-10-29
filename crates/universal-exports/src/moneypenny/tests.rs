@@ -146,7 +146,7 @@ async fn served_with(
         AccessProviders::new(
             Arc::new(People),
             Arc::new(People),
-            Arc::new(role_authorizer_from_toml(ROLES).unwrap()),
+            Arc::new(role_authorizer_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
         ),
     )
     .with_assistant(config);

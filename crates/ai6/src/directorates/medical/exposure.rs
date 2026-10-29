@@ -11,6 +11,9 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use crate::bounds::Limit;
+use crate::directorates::registry::limits::SessionLimits;
+
 /// The source of a Session whose Mission came from a Source item.
 pub const BRIEF_SOURCE: &str = "brief:source";
 /// The source of a Session whose Mission came from a brief dropped into the Registry's queue
@@ -30,22 +33,20 @@ pub const BRIEF_EXPOSURE_KEY: &str = "exposure";
 /// Tools whose results are untrusted unless the Operation lists others.
 pub const DEFAULT_EXPOSING_TOOLS: [&str; 2] = ["WebFetch", "WebSearch"];
 
-const MAX_EXPOSURES: usize = 32;
-const MAX_SOURCE_BYTES: usize = 128;
-
-/// The source for a Session that read a Cable from `sender`.
-pub fn cable_source(sender: &str) -> String {
-    bounded(format!("cable:{sender}"))
+/// The source for a Session that read a Cable from `sender`, cut to `limit` bytes
+/// (`[registry.limits.sessions] exposure_source_bytes`).
+pub fn cable_source(sender: &str, limit: Limit) -> String {
+    bounded(format!("cable:{sender}"), limit)
 }
 
-/// The source for a Session whose tool call named `tool`.
-pub fn tool_source(tool: &str) -> String {
-    bounded(format!("tool:{tool}"))
+/// The source for a Session whose tool call named `tool`, cut to `limit` bytes.
+pub fn tool_source(tool: &str, limit: Limit) -> String {
+    bounded(format!("tool:{tool}"), limit)
 }
 
-fn bounded(mut source: String) -> String {
-    if source.len() > MAX_SOURCE_BYTES {
-        let mut end = MAX_SOURCE_BYTES;
+fn bounded(mut source: String, limit: Limit) -> String {
+    if !limit.allows(source.len()) {
+        let mut end = limit.or_max();
         while !source.is_char_boundary(end) {
             end -= 1;
         }
@@ -208,15 +209,18 @@ pub struct ExposureGate(Arc<GateInner>);
 #[derive(Debug, Default)]
 struct GateInner {
     policy: ExposurePolicy,
+    limits: SessionLimits,
     exposures: Mutex<Vec<Exposure>>,
     changed: AtomicBool,
 }
 
 impl ExposureGate {
-    /// A gate under `policy`, starting from the exposures a Session inherits.
-    pub fn new(policy: ExposurePolicy, inherited: Vec<Exposure>) -> Self {
+    /// A gate under `policy`, starting from the exposures a Session inherits, keeping as many
+    /// sources, each as long, as the Registry's Session `limits` allow.
+    pub fn new(policy: ExposurePolicy, inherited: Vec<Exposure>, limits: &SessionLimits) -> Self {
         let gate = Self(Arc::new(GateInner {
             policy,
+            limits: limits.clone(),
             ..GateInner::default()
         }));
         for exposure in inherited {
@@ -236,14 +240,14 @@ impl ExposureGate {
         let Ok(mut exposures) = self.0.exposures.lock() else {
             return false;
         };
-        if exposures.iter().any(|known| known.source == source) || exposures.len() >= MAX_EXPOSURES
+        let limits = &self.0.limits;
+        let source = bounded(source.to_owned(), limits.exposure_source_bytes);
+        if exposures.iter().any(|known| known.source == source)
+            || !limits.exposures.allows(exposures.len() + 1)
         {
             return false;
         }
-        exposures.push(Exposure {
-            source: bounded(source.to_owned()),
-            at,
-        });
+        exposures.push(Exposure { source, at });
         self.0.changed.store(true, Ordering::Release);
         true
     }
@@ -289,7 +293,7 @@ mod tests {
         assert!(!gate.is_exposed());
         assert!(gate.mark("tool:WebFetch", 10.0));
         assert!(!gate.mark("tool:WebFetch", 20.0));
-        assert!(gate.mark(&cable_source("007"), 30.0));
+        assert!(gate.mark(&cable_source("007", Limit::at(128)), 30.0));
         let sources: Vec<_> = gate.exposures().into_iter().map(|e| e.source).collect();
         assert_eq!(sources, ["tool:WebFetch", "cable:007"]);
         assert_eq!(gate.exposures()[0].at, 10.0);
@@ -303,13 +307,18 @@ mod tests {
             source: BRIEF_SOURCE.to_owned(),
             at: 1.0,
         }];
-        let gate = ExposureGate::new(ExposurePolicy::default(), inherited);
+        let gate = ExposureGate::new(
+            ExposurePolicy::default(),
+            inherited,
+            &SessionLimits::default(),
+        );
         assert!(gate.is_exposed());
         assert_eq!(gate.take_changes(), None);
         assert!(Restriction::ALL.into_iter().all(|r| gate.restricts(r)));
         let observe = ExposureGate::new(
             ExposurePolicy::preset(ExposurePreset::Observe),
             gate.exposures(),
+            &SessionLimits::default(),
         );
         assert!(observe.is_exposed());
         assert!(!observe.restricts(Restriction::Cables));

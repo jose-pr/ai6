@@ -15,22 +15,16 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::bona_fides::{Origin, Provenance, now_secs};
+use super::limits::SleeperLimits;
 use super::logbook::station_key;
 use super::store::{
-    Brief, FileRegistry, hex_digest, invalid_data, registry_lock, safe_component, unix_time,
-    validate_station_id, write_atomic,
+    Brief, FileRegistry, hex_digest, invalid_data, safe_component, unix_time, validate_station_id,
 };
 use super::timeline::{TimelineEvent, record_event_locked};
 use crate::directorates::registry::backend::*;
 
 /// The Brief `source` of every brief a sleeper queues.
 pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
-
-/// A window older than this is skipped rather than fired late.
-pub const MAX_WINDOW_AGE_SECS: i64 = 24 * 60 * 60;
-
-const MAX_PROMPT_BYTES: usize = 16 * 1024;
-const LOOKBACK_DAYS: i64 = 366;
 
 /// A standing order, as written under `sleepers.<name>`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,19 +57,17 @@ pub struct Sleeper {
 }
 
 impl Sleeper {
-    /// Checks the definition without any Registry; the roster calls this when it loads.
+    /// Checks the definition without any Registry; the roster calls this when it loads. The
+    /// Registry also checks the prompt's size when the sleeper is authorized.
     ///
     /// # Errors
     ///
-    /// Returns a message for a bad cron expression, an empty title, an oversized prompt or a
-    /// `stations` entry that is not a Station ID.
+    /// Returns a message for a bad cron expression, an empty title or a `stations` entry
+    /// that is not a Station ID.
     pub fn validate(&self) -> Result<(), String> {
         Cron::parse(&self.schedule).map_err(|e| format!("schedule: {e}"))?;
         if self.title.trim().is_empty() {
             return Err("title must not be empty".to_owned());
-        }
-        if self.prompt.len() > MAX_PROMPT_BYTES {
-            return Err(format!("prompt is over {MAX_PROMPT_BYTES} bytes"));
         }
         if let Some(station) = self
             .stations
@@ -97,10 +89,23 @@ impl Sleeper {
     }
 
     /// The latest scheduled minute (Unix seconds) at or before `now` that may still fire:
-    /// after `authorized_at` and no older than [`MAX_WINDOW_AGE_SECS`].
-    pub fn due_window(&self, now: i64, authorized_at: i64) -> Option<i64> {
-        let window = Cron::parse(&self.schedule).ok()?.latest_at_or_before(now)?;
-        (window > authorized_at && now - window <= MAX_WINDOW_AGE_SECS).then_some(window)
+    /// after `authorized_at` and no older than `limits.window_age`; an older window is
+    /// skipped rather than fired late.
+    pub fn due_window(&self, now: i64, authorized_at: i64, limits: &SleeperLimits) -> Option<i64> {
+        let window = Cron::parse(&self.schedule)
+            .ok()?
+            .latest_at_or_before(now, limits.lookback_days)?;
+        (window > authorized_at && limits.window_age.allows_secs((now - window) as f64))
+            .then_some(window)
+    }
+
+    /// Checks the prompt against `limits`.
+    pub(super) fn check_size(&self, limits: &SleeperLimits) -> Result<(), String> {
+        if limits.prompt_bytes.allows(self.prompt.len()) {
+            Ok(())
+        } else {
+            Err(format!("prompt is over {} bytes", limits.prompt_bytes))
+        }
     }
 }
 
@@ -239,11 +244,12 @@ impl Cron {
         }
     }
 
-    /// The latest scheduled minute at or before `now` (Unix seconds), looking back a year.
-    pub fn latest_at_or_before(&self, now: i64) -> Option<i64> {
+    /// The latest scheduled minute at or before `now` (Unix seconds), looking back
+    /// `lookback_days` days.
+    pub fn latest_at_or_before(&self, now: i64, lookback_days: u32) -> Option<i64> {
         let today = now.div_euclid(86_400);
         let minute_now = now.rem_euclid(86_400) / 60;
-        for back in 0..=LOOKBACK_DAYS {
+        for back in 0..=i64::from(lookback_days) {
             let day = today - back;
             let (_, month, date) = civil_from_days(day);
             let weekday = (day + 4).rem_euclid(7) as u32; // 1970-01-01 was a Thursday
@@ -423,19 +429,22 @@ impl SleeperStore for FileRegistry {
         at: i64,
     ) -> io::Result<()> {
         sleeper.validate().map_err(invalid_data)?;
-        let _lock = registry_lock(&self.root)?;
+        sleeper
+            .check_size(&self.limits.sleepers)
+            .map_err(invalid_data)?;
+        let _lock = self.lock()?;
         let record = SleeperAuthorization {
             fingerprint: sleeper.fingerprint(),
             authorized_by: authorized_by.to_owned(),
             at,
         };
         let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
-        write_atomic(&self.sleeper_path(operation, name), &bytes)?;
+        self.write_atomic(&self.sleeper_path(operation, name), &bytes)?;
         let event = TimelineEvent::new("sleeper", "authorized", operation, at as f64)
             .actor(authorized_by)
             .detail("sleeper", name);
         // The approval stands either way; its timeline entry is a record, not a condition.
-        let _ = record_event_locked(self.root(), &event);
+        let _ = record_event_locked(self, &event);
         Ok(())
     }
 
@@ -454,13 +463,13 @@ impl SleeperStore for FileRegistry {
     }
 
     fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool> {
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         match fs::remove_file(self.sleeper_path(operation, name)) {
             Ok(()) => {
                 if let Ok(at) = unix_time() {
                     let event = TimelineEvent::new("sleeper", "revoked", operation, at)
                         .detail("sleeper", name);
-                    let _ = record_event_locked(self.root(), &event);
+                    let _ = record_event_locked(self, &event);
                 }
                 Ok(true)
             }
@@ -515,7 +524,7 @@ mod tests {
     fn label(cron: &str, now: i64) -> Option<String> {
         Cron::parse(cron)
             .unwrap()
-            .latest_at_or_before(now)
+            .latest_at_or_before(now, 366)
             .map(window_label)
     }
 
@@ -583,7 +592,9 @@ mod tests {
             assert!(Cron::parse(bad).is_err(), "{bad:?}");
         }
         assert_eq!(
-            Cron::parse("0 0 30 2 *").unwrap().latest_at_or_before(NOW),
+            Cron::parse("0 0 30 2 *")
+                .unwrap()
+                .latest_at_or_before(NOW, 366),
             None
         );
     }
@@ -646,7 +657,9 @@ mod tests {
             each_station: true,
             ..nightly()
         };
-        let window = rounds.due_window(NOW, 0).unwrap();
+        let window = rounds
+            .due_window(NOW, 0, &SleeperLimits::default())
+            .unwrap();
         for station in ["station-a", "station-b"] {
             assert_eq!(
                 headquarters
@@ -680,7 +693,9 @@ mod tests {
         let first_hq = store.handle();
         let second_hq = store.handle();
         let sleeper = nightly();
-        let window = sleeper.due_window(NOW, 0).unwrap();
+        let window = sleeper
+            .due_window(NOW, 0, &SleeperLimits::default())
+            .unwrap();
 
         assert_eq!(
             first_hq
@@ -736,7 +751,9 @@ mod tests {
         assert!(second_hq.list_new().unwrap().is_empty());
 
         // The next night is a new window.
-        let next = sleeper.due_window(NOW + 86_400, 0).unwrap();
+        let next = sleeper
+            .due_window(NOW + 86_400, 0, &SleeperLimits::default())
+            .unwrap();
         assert_eq!(
             second_hq
                 .fire_sleeper("G", "deps", &sleeper, (next, None), "station-a")
@@ -750,13 +767,16 @@ mod tests {
         let sleeper = nightly();
         let three = at("2026-10-25") + 3 * 3600;
         assert_eq!(
-            sleeper.due_window(NOW, three),
+            sleeper.due_window(NOW, three, &SleeperLimits::default()),
             None,
             "approved after the 03:00 window"
         );
-        assert_eq!(sleeper.due_window(NOW, three - 1), Some(three));
         assert_eq!(
-            sleeper.due_window(three + MAX_WINDOW_AGE_SECS + 60, 0),
+            sleeper.due_window(NOW, three - 1, &SleeperLimits::default()),
+            Some(three)
+        );
+        assert_eq!(
+            sleeper.due_window(three + 24 * 60 * 60 + 60, 0, &SleeperLimits::default()),
             Some(three + 86_400),
             "the next night's window is the latest"
         );
@@ -765,7 +785,7 @@ mod tests {
             ..nightly()
         };
         assert_eq!(
-            weekly.due_window(NOW + 3 * 86_400, 0),
+            weekly.due_window(NOW + 3 * 86_400, 0, &SleeperLimits::default()),
             None,
             "a window over a day old is skipped"
         );

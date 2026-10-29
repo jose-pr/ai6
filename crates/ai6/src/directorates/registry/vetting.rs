@@ -19,22 +19,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::store::{
-    Brief, FileRegistry, MAX_BRIEF_BYTES, finish_locked, invalid_data, registry_lock,
-    validate_registry_key, write_atomic,
-};
+use super::limits::{HeldLimits, RegistryLimits};
+use super::store::{Brief, FileRegistry, finish_locked, invalid_data, validate_registry_key};
+use crate::bounds::Limit;
 use crate::directorates::m::vetting::{FindingKind, Vetting, content_digest};
-
-/// The most briefs one Operation holds at once; past it a brief stays queued.
-pub const MAX_HELD_PER_OPERATION: usize = 1_000;
-/// The most held briefs the Registry reads in one listing, across Operations.
-pub const MAX_HELD_BRIEFS: usize = 10_000;
-/// The most held briefs one listing returns.
-pub const MAX_HELD_RESULTS: usize = 500;
-pub(super) const MAX_HELD_RECORD_BYTES: u64 = MAX_BRIEF_BYTES + 64 * 1024;
-const MAX_CLEARANCE_BYTES: u64 = 4_096;
-const MAX_REASON_BYTES: usize = 1_024;
-const MAX_ACTOR_BYTES: usize = 256;
 
 /// A brief vetting held, waiting for an operator.
 #[non_exhaustive]
@@ -111,27 +99,34 @@ pub(super) fn refused_outcome(
     })
 }
 
-pub(super) fn check_actor(by: &str, reason: &str) -> io::Result<()> {
-    if by.trim().is_empty() || by.len() > MAX_ACTOR_BYTES || by.contains(char::is_control) {
+pub(super) fn check_actor(by: &str, reason: &str, limits: &HeldLimits) -> io::Result<()> {
+    if by.trim().is_empty() || !limits.actor_bytes.allows(by.len()) || by.contains(char::is_control)
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "the actor must be 1 to 256 bytes without control characters",
+            format!(
+                "the actor must be 1 to {} bytes without control characters",
+                limits.actor_bytes
+            ),
         ));
     }
-    if reason.len() > MAX_REASON_BYTES {
+    if !limits.reason_bytes.allows(reason.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "the reason must be at most 1024 bytes",
+            format!("the reason must be at most {} bytes", limits.reason_bytes),
         ));
     }
     Ok(())
 }
 
-pub(super) fn check_limit(limit: usize) -> io::Result<()> {
-    if limit == 0 || limit > MAX_HELD_RESULTS {
+pub(super) fn check_limit(limit: usize, limits: &HeldLimits) -> io::Result<()> {
+    if limit == 0 || !limits.results.allows(limit) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("held brief result limit must be between 1 and {MAX_HELD_RESULTS}"),
+            format!(
+                "held brief result limit must be between 1 and {}",
+                limits.results
+            ),
         ));
     }
     Ok(())
@@ -166,9 +161,10 @@ pub(super) fn already_decided() -> io::Error {
     )
 }
 
-pub(super) fn too_many_held(operation: &str) -> io::Error {
+pub(super) fn too_many_held(operation: &str, limits: &HeldLimits) -> io::Error {
     invalid_data(format!(
-        "Operation {operation:?} already holds {MAX_HELD_PER_OPERATION} briefs"
+        "Operation {operation:?} already holds {} briefs",
+        limits.per_operation
     ))
 }
 
@@ -180,7 +176,7 @@ pub trait VettingStore {
     /// # Errors
     ///
     /// `InvalidInput` for a key or Operation that is not a Registry key; `InvalidData` when
-    /// the Operation already holds [`MAX_HELD_PER_OPERATION`]; I/O errors otherwise.
+    /// the Operation already holds `[registry.limits.held] per_operation`; I/O errors otherwise.
     fn hold_brief(
         &self,
         operation: &str,
@@ -295,8 +291,10 @@ impl FileRegistry {
     }
 
     fn held_by(&self, operation: &str, key: &str) -> io::Result<Option<HeldBrief>> {
-        Ok(read_held(&self.held_path(key))?
-            .filter(|held| held.operation == operation && held.brief.key() == key))
+        Ok(
+            read_held(&self.held_path(key), self.limits.held_record_bytes())?
+                .filter(|held| held.operation == operation && held.brief.key() == key),
+        )
     }
 
     fn remove_held(&self, key: &str) -> io::Result<()> {
@@ -307,7 +305,7 @@ impl FileRegistry {
     }
 
     fn write_clearance(&self, key: &str, clearance: &Clearance) -> io::Result<()> {
-        write_atomic(
+        self.write_atomic(
             &self.clearance_path(key),
             &serde_json::to_vec(clearance).map_err(io::Error::other)?,
         )
@@ -324,7 +322,7 @@ impl VettingStore for FileRegistry {
     ) -> io::Result<Option<HeldBrief>> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let queued = self.queued_path(key);
         let brief = match fs::read(&queued) {
             Ok(bytes) => serde_json::from_slice::<Brief>(&bytes)
@@ -332,12 +330,12 @@ impl VettingStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        let held_here = held_records(&self.root.join("held"))?
+        let held_here = held_records(&self.root.join("held"), &self.limits)?
             .iter()
             .filter(|held| held.operation == operation && held.brief.key() != key)
             .count();
-        if held_here >= MAX_HELD_PER_OPERATION {
-            return Err(too_many_held(operation));
+        if !self.limits.held.per_operation.allows(held_here + 1) {
+            return Err(too_many_held(operation, &self.limits.held));
         }
         let held = HeldBrief {
             operation: operation.to_owned(),
@@ -347,20 +345,20 @@ impl VettingStore for FileRegistry {
         };
         held.validate()?;
         let bytes = serde_json::to_vec_pretty(&held).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_HELD_RECORD_BYTES {
+        if !self.limits.held_record_bytes().allows(bytes.len()) {
             return Err(invalid_data("held brief exceeds the size limit"));
         }
         // Held first and the queued copy removed after, so a crash in between holds it twice, which
         // the next hold or release resolves, and never loses it.
-        write_atomic(&self.held_path(key), &bytes)?;
+        self.write_atomic(&self.held_path(key), &bytes)?;
         fs::remove_file(&queued)?;
         Ok(Some(held))
     }
 
     fn held_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<HeldBrief>> {
         validate_registry_key(operation)?;
-        check_limit(limit)?;
-        let mut held = held_records(&self.root.join("held"))?
+        check_limit(limit, &self.limits.held)?;
+        let mut held = held_records(&self.root.join("held"), &self.limits)?
             .into_iter()
             .filter(|held| held.operation == operation)
             .collect::<Vec<_>>();
@@ -376,8 +374,8 @@ impl VettingStore for FileRegistry {
     fn release_held(&self, operation: &str, key: &str, by: &str, at: f64) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        check_actor(by, "")?;
-        let _lock = registry_lock(&self.root)?;
+        check_actor(by, "", &self.limits.held)?;
+        let _lock = self.lock()?;
         if self.decided(key).is_some() {
             self.remove_held(key)?;
             return Err(already_decided());
@@ -385,7 +383,7 @@ impl VettingStore for FileRegistry {
         let Some(held) = self.held_by(operation, key)? else {
             // Released already: the brief is queued with a clearance for what it is.
             if let Some(brief) = read_brief(&self.queued_path(key))?
-                && read_clearance(&self.clearance_path(key))?
+                && read_clearance(&self.clearance_path(key), &self.limits.held)?
                     .is_some_and(|clearance| !clearance.kinds_for(&brief).is_empty())
             {
                 return Ok(brief);
@@ -398,14 +396,14 @@ impl VettingStore for FileRegistry {
         let kinds = held.vetting.kinds().into_iter().collect::<Vec<_>>();
         let digest = content_digest(&held.brief);
         let clearance = merge_clearance(
-            read_clearance(&self.clearance_path(key))?,
+            read_clearance(&self.clearance_path(key), &self.limits.held)?,
             &digest,
             &kinds,
             by,
             at,
         );
         self.write_clearance(key, &clearance)?;
-        write_atomic(
+        self.write_atomic(
             &self.queued_path(key),
             &serde_json::to_vec_pretty(&held.brief).map_err(io::Error::other)?,
         )?;
@@ -423,8 +421,8 @@ impl VettingStore for FileRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        check_actor(by, reason)?;
-        let _lock = registry_lock(&self.root)?;
+        check_actor(by, reason, &self.limits.held)?;
+        let _lock = self.lock()?;
         match self.decided(key) {
             Some("failed") if refused(&self.root, key) => {
                 self.remove_held(key)?;
@@ -441,7 +439,7 @@ impl VettingStore for FileRegistry {
             io::Error::new(io::ErrorKind::NotFound, "the Operation holds no such brief")
         })?;
         finish_locked(
-            &self.root,
+            self,
             &held.brief,
             &refused_outcome(&held, by, reason, at),
             false,
@@ -460,7 +458,7 @@ impl VettingStore for FileRegistry {
     fn requeue_held(&self, operation: &str, key: &str) -> io::Result<bool> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let Some(held) = self.held_by(operation, key)? else {
             return Ok(false);
         };
@@ -468,7 +466,7 @@ impl VettingStore for FileRegistry {
             self.remove_held(key)?;
             return Ok(false);
         }
-        write_atomic(
+        self.write_atomic(
             &self.queued_path(key),
             &serde_json::to_vec_pretty(&held.brief).map_err(io::Error::other)?,
         )?;
@@ -478,7 +476,7 @@ impl VettingStore for FileRegistry {
 
     fn clearance(&self, key: &str) -> io::Result<Option<Clearance>> {
         validate_registry_key(key)?;
-        read_clearance(&self.clearance_path(key))
+        read_clearance(&self.clearance_path(key), &self.limits.held)
     }
 
     fn clear_brief(
@@ -490,15 +488,15 @@ impl VettingStore for FileRegistry {
         at: f64,
     ) -> io::Result<Option<Clearance>> {
         validate_registry_key(key)?;
-        check_actor(by, "")?;
-        let _lock = registry_lock(&self.root)?;
+        check_actor(by, "", &self.limits.held)?;
+        let _lock = self.lock()?;
         let brief = read_brief(&self.queued_path(key))?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such brief is queued"))?;
         if content_digest(&brief) != digest {
             return Ok(None);
         }
         let clearance = merge_clearance(
-            read_clearance(&self.clearance_path(key))?,
+            read_clearance(&self.clearance_path(key), &self.limits.held)?,
             digest,
             kinds,
             by,
@@ -519,14 +517,14 @@ impl VettingStore for FileRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
-        check_actor(by, "")?;
-        let _lock = registry_lock(&self.root)?;
+        check_actor(by, "", &self.limits.held)?;
+        let _lock = self.lock()?;
         let brief = self.promote_locked(operation, proposal_id, received_by)?;
         let key = brief.key();
         if self.queued_path(&key).is_file() {
             let digest = content_digest(&brief);
             let clearance = merge_clearance(
-                read_clearance(&self.clearance_path(&key))?,
+                read_clearance(&self.clearance_path(&key), &self.limits.held)?,
                 &digest,
                 kinds,
                 by,
@@ -556,13 +554,13 @@ fn read_brief(path: &Path) -> io::Result<Option<Brief>> {
     }
 }
 
-fn read_held(path: &Path) -> io::Result<Option<HeldBrief>> {
+fn read_held(path: &Path, limit: Limit) -> io::Result<Option<HeldBrief>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    if bytes.len() as u64 > MAX_HELD_RECORD_BYTES {
+    if !limit.allows(bytes.len()) {
         return Err(invalid_data("held brief exceeds the size limit"));
     }
     let held: HeldBrief =
@@ -571,13 +569,13 @@ fn read_held(path: &Path) -> io::Result<Option<HeldBrief>> {
     Ok(Some(held))
 }
 
-fn read_clearance(path: &Path) -> io::Result<Option<Clearance>> {
+fn read_clearance(path: &Path, limits: &HeldLimits) -> io::Result<Option<Clearance>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    if bytes.len() as u64 > MAX_CLEARANCE_BYTES {
+    if !limits.clearance_bytes.allows(bytes.len()) {
         return Err(invalid_data("clearance exceeds the size limit"));
     }
     serde_json::from_slice(&bytes)
@@ -586,7 +584,7 @@ fn read_clearance(path: &Path) -> io::Result<Option<Clearance>> {
 }
 
 /// Every readable held record, skipping files that are not one or not named by their key.
-fn held_records(directory: &Path) -> io::Result<Vec<HeldBrief>> {
+fn held_records(directory: &Path, limits: &RegistryLimits) -> io::Result<Vec<HeldBrief>> {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -601,12 +599,13 @@ fn held_records(directory: &Path) -> io::Result<Vec<HeldBrief>> {
         {
             continue;
         }
-        if records.len() >= MAX_HELD_BRIEFS {
+        if !limits.held.records.allows(records.len() + 1) {
             return Err(invalid_data(format!(
-                "the Registry holds more than {MAX_HELD_BRIEFS} briefs"
+                "the Registry holds more than {} briefs",
+                limits.held.records
             )));
         }
-        if let Ok(Some(held)) = read_held(&path)
+        if let Ok(Some(held)) = read_held(&path, limits.held_record_bytes())
             && path.file_stem().and_then(|stem| stem.to_str()) == Some(&held.brief.key())
         {
             records.push(held);
@@ -643,6 +642,7 @@ mod tests {
             SessionId::try_new("session-1").unwrap(),
             key,
             brief("child"),
+            &Default::default(),
         )
         .unwrap()
     }
@@ -940,11 +940,12 @@ mod file_tests {
             .hold_brief("G", "manual--crash", &vetting, 1.0)
             .unwrap();
         // The crash: the queued copy is back beside the held record.
-        write_atomic(
-            &registry.queued_path("manual--crash"),
-            &serde_json::to_vec(&brief("crash")).unwrap(),
-        )
-        .unwrap();
+        registry
+            .write_atomic(
+                &registry.queued_path("manual--crash"),
+                &serde_json::to_vec(&brief("crash")).unwrap(),
+            )
+            .unwrap();
         assert!(
             registry
                 .hold_brief("G", "manual--crash", &vetting, 2.0)
@@ -953,11 +954,12 @@ mod file_tests {
         );
         assert!(registry.list_new().unwrap().is_empty());
 
-        write_atomic(
-            &registry.queued_path("manual--crash"),
-            &serde_json::to_vec(&brief("crash")).unwrap(),
-        )
-        .unwrap();
+        registry
+            .write_atomic(
+                &registry.queued_path("manual--crash"),
+                &serde_json::to_vec(&brief("crash")).unwrap(),
+            )
+            .unwrap();
         let lease = registry
             .claim_with_lease(None, "s", Duration::from_secs(60), Default::default())
             .unwrap()
@@ -984,23 +986,26 @@ mod file_tests {
     fn an_operation_holds_at_most_its_own_limit() {
         use crate::directorates::registry::suite::brief;
         let root = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(root.path());
+        let mut limits = RegistryLimits::default();
+        limits.held.per_operation = Limit::at(3);
+        let registry = FileRegistry::open(root.path()).with_limits(limits);
         let vetting = Vetting::from_findings(vec![crate::directorates::m::vetting::Finding::new(
             FindingKind::Duplicate,
             "same",
         )]);
-        for index in 0..MAX_HELD_PER_OPERATION {
+        for index in 0..3 {
             let held = HeldBrief {
                 operation: "G".to_owned(),
                 brief: brief(&format!("h{index}")),
                 vetting: vetting.clone(),
                 held_at: 1.0,
             };
-            write_atomic(
-                &registry.held_path(&held.brief.key()),
-                &serde_json::to_vec(&held).unwrap(),
-            )
-            .unwrap();
+            registry
+                .write_atomic(
+                    &registry.held_path(&held.brief.key()),
+                    &serde_json::to_vec(&held).unwrap(),
+                )
+                .unwrap();
         }
         use crate::directorates::registry::backend::*;
         registry.submit_brief(&brief("g")).unwrap();

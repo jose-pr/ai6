@@ -11,9 +11,14 @@ use crate::directorates::registry::accounts::{
     add_tokens, claim_among, parse_state, release_in, renew_in, report_in, state_bytes,
     validate_ref,
 };
+use crate::directorates::registry::limits::AccountLimits;
 use crate::directorates::registry::store::invalid_data;
 
-fn account_in(tx: &mut Tx<'_>, account: &AccountRef) -> io::Result<AccountState> {
+fn account_in(
+    tx: &mut Tx<'_>,
+    account: &AccountRef,
+    limits: &AccountLimits,
+) -> io::Result<AccountState> {
     match tx.query_opt(
         "SELECT record FROM ai6_accounts WHERE pool = $1 AND account = $2",
         &[
@@ -21,13 +26,18 @@ fn account_in(tx: &mut Tx<'_>, account: &AccountRef) -> io::Result<AccountState>
             account.account.as_str().into(),
         ],
     )? {
-        Some(row) => parse_state(row.text(0)?.as_bytes()),
+        Some(row) => parse_state(row.text(0)?.as_bytes(), limits),
         None => Ok(AccountState::new(account.clone())),
     }
 }
 
-fn put_account(tx: &mut Tx<'_>, state: &AccountState, revision: i64) -> io::Result<()> {
-    let text = String::from_utf8(state_bytes(state)?)
+fn put_account(
+    tx: &mut Tx<'_>,
+    state: &AccountState,
+    revision: i64,
+    limits: &AccountLimits,
+) -> io::Result<()> {
+    let text = String::from_utf8(state_bytes(state, limits)?)
         .map_err(|_| invalid_data("account record is not UTF-8"))?;
     tx.execute(
         "INSERT INTO ai6_accounts (pool, account, record, revision) VALUES ($1, $2, $3, $4) \
@@ -43,13 +53,13 @@ fn put_account(tx: &mut Tx<'_>, state: &AccountState, revision: i64) -> io::Resu
     Ok(())
 }
 
-fn all_accounts(tx: &mut Tx<'_>) -> io::Result<Vec<AccountState>> {
+fn all_accounts(tx: &mut Tx<'_>, limits: &AccountLimits) -> io::Result<Vec<AccountState>> {
     tx.query(
         "SELECT record FROM ai6_accounts ORDER BY pool, account",
         &[],
     )?
     .into_iter()
-    .map(|row| parse_state(row.text(0)?.as_bytes()))
+    .map(|row| parse_state(row.text(0)?.as_bytes(), limits))
     .collect()
 }
 
@@ -60,10 +70,11 @@ impl SqlRegistry {
         change: impl FnOnce(&mut AccountState),
     ) -> io::Result<()> {
         validate_ref(account)?;
+        let limits = &self.limits.accounts;
         self.write(|tx, revision| {
-            let mut state = account_in(tx, account)?;
+            let mut state = account_in(tx, account, limits)?;
             change(&mut state);
-            put_account(tx, &state, revision)
+            put_account(tx, &state, revision, limits)
         })
     }
 }
@@ -95,21 +106,23 @@ impl AccountStore for SqlRegistry {
         for account in &accounts {
             validate_ref(account)?;
         }
+        let limits = &self.limits.accounts;
         self.write(|tx, revision| {
-            let (chosen, changed) = claim_among(all_accounts(tx)?, request, now);
+            let (chosen, changed) = claim_among(all_accounts(tx, limits)?, request, now, limits);
             for state in &changed {
-                put_account(tx, state, revision)?;
+                put_account(tx, state, revision, limits)?;
             }
             Ok(chosen)
         })
     }
 
     fn release_account(&self, station: &str, mission: &str) -> io::Result<bool> {
+        let limits = &self.limits.accounts;
         self.write(|tx, revision| {
             let mut released = false;
-            for mut state in all_accounts(tx)? {
+            for mut state in all_accounts(tx, limits)? {
                 if release_in(&mut state, station, mission) {
-                    put_account(tx, &state, revision)?;
+                    put_account(tx, &state, revision, limits)?;
                     released = true;
                 }
             }
@@ -124,10 +137,11 @@ impl AccountStore for SqlRegistry {
         ttl: Duration,
         now: f64,
     ) -> io::Result<()> {
+        let limits = &self.limits.accounts;
         self.write(|tx, revision| {
-            for mut state in all_accounts(tx)? {
+            for mut state in all_accounts(tx, limits)? {
                 if renew_in(&mut state, station, missions, ttl, now) {
-                    put_account(tx, &state, revision)?;
+                    put_account(tx, &state, revision, limits)?;
                 }
             }
             Ok(())
@@ -135,7 +149,8 @@ impl AccountStore for SqlRegistry {
     }
 
     fn report_quota(&self, account: &AccountRef, windows: &[QuotaWindow]) -> io::Result<()> {
-        self.update_account(account, |state| report_in(state, windows))
+        let limits = &self.limits.accounts;
+        self.update_account(account, |state| report_in(state, windows, limits))
     }
 
     fn clear_account_limit(&self, account: &AccountRef) -> io::Result<bool> {
@@ -153,11 +168,12 @@ impl AccountStore for SqlRegistry {
     }
 
     fn record_account_usage(&self, account: &AccountRef, tokens: u64, now: i64) -> io::Result<()> {
-        self.update_account(account, |state| add_tokens(state, tokens, now))
+        let limits = &self.limits.accounts;
+        self.update_account(account, |state| add_tokens(state, tokens, now, limits))
     }
 
     fn accounts(&self) -> io::Result<Vec<AccountState>> {
-        self.read(all_accounts)
+        self.read(|tx| all_accounts(tx, &self.limits.accounts))
     }
 }
 

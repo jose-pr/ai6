@@ -30,7 +30,6 @@ use crate::directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, Lease, MissionProposal,
 };
 use crate::directorates::registry::timeline::TimelineEvent;
-use crate::directorates::registry::vetting::MAX_HELD_RESULTS;
 
 /// The window the hourly rate limits count passes in.
 const RATE_WINDOW_SECS: f64 = 3_600.0;
@@ -421,7 +420,10 @@ impl<'a> Round<'a> {
             .filter(|(owner, _)| *owner == operation.id)
             .map(|(_, work)| work.clone())
             .collect::<Vec<_>>();
-        match state.intake.held_briefs(&operation.id, MAX_HELD_RESULTS) {
+        match state
+            .intake
+            .held_briefs(&operation.id, held_results(state.intake.limits()))
+        {
             Ok(held) => work.extend(
                 held.iter()
                     .map(|held| KnownWork::of(&held.brief, held.brief.key())),
@@ -501,7 +503,10 @@ impl<'a> Round<'a> {
             else {
                 continue;
             };
-            let held = match state.intake.held_briefs(&operation.id, MAX_HELD_RESULTS) {
+            let held = match state
+                .intake
+                .held_briefs(&operation.id, held_results(state.intake.limits()))
+            {
                 Ok(held) => held,
                 Err(error) => {
                     eprintln!("ai6: held briefs of {:?} unreadable: {error}", operation.id);
@@ -683,6 +688,11 @@ impl<'a> Round<'a> {
 }
 
 /// The vetting stored for a pending proposal, read again from the Registry.
+/// The most held briefs one listing may ask `registry` for.
+fn held_results(limits: &crate::directorates::registry::limits::RegistryLimits) -> usize {
+    limits.held.results.or_max()
+}
+
 fn stored_vetting(state: &DaemonState, proposal: &MissionProposal) -> Option<Vetting> {
     state
         .intake
@@ -766,6 +776,7 @@ fn promote_by_class(
         scope,
         format!("Mission proposal {}", proposal.id),
         &proposal.id,
+        &state.intake.limits().approvals,
     ) else {
         return;
     };
@@ -1461,7 +1472,13 @@ mod tests {
             .intake
             .ingest_source_item("G", provider, item, "hq")
             .unwrap();
-        crate::directorates::registry::sources::source_brief("G", provider, item).key()
+        crate::directorates::registry::sources::source_brief(
+            "G",
+            provider,
+            item,
+            &Default::default(),
+        )
+        .key()
     }
 
     fn intake_actions(state: &DaemonState) -> Vec<String> {
@@ -1969,6 +1986,7 @@ mod tests {
             SessionId::try_new(session).unwrap(),
             key,
             brief,
+            &Default::default(),
         )
         .unwrap()
         .with_parent_role(parent_role.map(str::to_owned));

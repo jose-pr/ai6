@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use ai6::directorates::m::config::{ConfigProvider, ConfigRecord, ConfigScope, SqlProvider};
 use ai6::directorates::registry::sql::SqlRegistry;
-use ai6::{AuditStore, GONE_DARK_AFTER, HeadquartersLease, RosterErrorKind, StationStore};
+use ai6::{AuditStore, HeadquartersLease, Limited, RosterErrorKind, StationStore};
 use serde_json::json;
 
 const POSTGRES_URL_ENV: &str = "AI6_TEST_POSTGRES_URL";
@@ -228,7 +228,9 @@ fn two_stations_on_one_database_elect_one_headquarters_share_the_roster_and_fail
         root.path(),
         "both Stations to check in with the shared roster",
         || {
-            let records = registry.stations(GONE_DARK_AFTER).unwrap();
+            let records = registry
+                .stations(registry.limits().stations.gone_dark_after.0)
+                .unwrap();
             let shared = |name: &str| {
                 records.iter().any(|record| {
                     record.station() == name
@@ -283,7 +285,9 @@ fn published_priority(info: &Info) -> Option<i64> {
 
 /// Whether both Stations' latest check-ins pass `check`.
 fn both(registry: &SqlRegistry, check: impl Fn(&Info) -> bool) -> bool {
-    let records = registry.stations(GONE_DARK_AFTER).unwrap();
+    let records = registry
+        .stations(registry.limits().stations.gone_dark_after.0)
+        .unwrap();
     ["station-a", "station-b"].iter().all(|name| {
         records
             .iter()

@@ -12,10 +12,7 @@ use serde::Serialize;
 
 use crate::directorates::registry::backend::*;
 
-use super::{
-    Cable, CableDraft, CableError, CableRecipient, CableScope, CableState, CableTarget,
-    MAX_CABLE_BODY_BYTES, MAX_CABLE_TTL,
-};
+use super::{Cable, CableDraft, CableError, CableRecipient, CableScope, CableState, CableTarget};
 
 /// Default Cable lifetime in seconds.
 pub const DEFAULT_CABLE_TTL: f64 = 15.0 * 60.0;
@@ -680,6 +677,11 @@ pub struct CableRelay {
 }
 
 impl CableRelay {
+    /// The limits of the Registry the relay stores Cables in.
+    pub fn limits(&self) -> &crate::directorates::registry::limits::RegistryLimits {
+        self.registry.limits()
+    }
+
     /// Creates a relay over the file Registry and an authoritative Agent directory.
     pub fn new(
         registry: Arc<dyn RegistryBackend>,
@@ -1213,11 +1215,15 @@ impl CableRelay {
         principal: &CablePrincipal,
         request: CableSendRequest,
     ) -> Result<Cable, CableRelayError> {
-        if !request.ttl.is_finite() || request.ttl <= 0.0 || request.ttl > MAX_CABLE_TTL {
+        let limits = &self.registry.limits().cables;
+        if !request.ttl.is_finite()
+            || request.ttl <= 0.0
+            || !limits.max_ttl.allows_secs(request.ttl)
+        {
             return Err(CableRelayError::InvalidRequest);
         }
         if request.body.trim().is_empty()
-            || request.body.len() > MAX_CABLE_BODY_BYTES
+            || !limits.body_bytes.allows(request.body.len())
             || super::validate_text(
                 "Cable idempotency_key",
                 Some(&request.idempotency_key),
@@ -1248,7 +1254,8 @@ impl CableRelay {
             retry.id = existing.id().to_owned();
             retry.created_at = existing.created_at();
             retry.expires_at = existing.expires_at();
-            let retry = Cable::try_new(retry).map_err(|_| CableRelayError::InvalidRequest)?;
+            let retry = Cable::try_new(retry, &self.registry.limits().cables)
+                .map_err(|_| CableRelayError::InvalidRequest)?;
             self.audit_for_person("cable_retry", principal, &request.target, &retry)?;
             let accepted = self
                 .registry
@@ -1320,7 +1327,8 @@ impl CableRelay {
         }
 
         let draft = self.draft(principal, &request, recipients, now)?;
-        let cable = Cable::try_new(draft).map_err(|_| CableRelayError::InvalidRequest)?;
+        let cable = Cable::try_new(draft, &self.registry.limits().cables)
+            .map_err(|_| CableRelayError::InvalidRequest)?;
         self.audit_for_person("cable_send", principal, &request.target, &cable)?;
         let accepted = self
             .registry
@@ -1343,7 +1351,13 @@ impl CableRelay {
         recipients: Vec<CableRecipient>,
         now: f64,
     ) -> Result<CableDraft, CableRelayError> {
-        if request.body.len() > MAX_CABLE_BODY_BYTES {
+        if !self
+            .registry
+            .limits()
+            .cables
+            .body_bytes
+            .allows(request.body.len())
+        {
             return Err(CableRelayError::InvalidRequest);
         }
         let id = new_cable_id();

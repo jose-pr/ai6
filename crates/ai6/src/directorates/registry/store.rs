@@ -6,6 +6,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -13,39 +14,21 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::bounds::TimeLimit;
+
+use crate::bounds::Limit;
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::vetting::Vetting;
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::cables::{Cable, CableError, CableState};
+use crate::directorates::registry::limits::{ProposalLimits, RegistryLimits, StationLimits};
 use crate::directorates::registry::timeline::{TimelineEvent, record_event_locked};
 
 const BRIEF_VERSION: u32 = 1;
-pub(super) const MAX_BRIEF_BYTES: u64 = 1_048_576;
-pub(super) const MAX_BRIEFS: usize = 1_000;
-const MAX_PROVENANCE_BYTES: u64 = 16_384;
-pub(super) const MAX_STATION_RECORD_BYTES: u64 = 1_048_576;
-pub(super) const MAX_STATIONS: usize = 1_000;
-pub(super) const MAX_STATION_SETTINGS_BYTES: u64 = 4_096;
-/// The largest live Mission capacity accepted for one Station.
-pub const MAX_STATION_MISSION_CAPACITY: usize = 1_024;
-pub(super) const MAX_CABLE_RECORD_BYTES: u64 = 2_097_152;
-pub(super) const MAX_CABLE_FILES: usize = 10_000;
-pub(super) const MAX_ACCESS_TOKEN_RECORD_BYTES: u64 = 16_384;
-pub(super) const MAX_AUDIT_RECORD_BYTES: u64 = 16_384;
-pub(super) const MAX_AUDIT_ENTRIES: usize = 10_000;
-pub(super) const MAX_AUDIT_RESULTS: usize = 500;
-pub(super) const MAX_AGENT_ROLE_RECORD_BYTES: u64 = 32_768;
-pub(super) const MAX_AGENT_ROLES: usize = 256;
-pub(super) const MAX_MISSION_PROPOSAL_BYTES: u64 = 1_048_576;
-pub(super) const MAX_MISSION_PROPOSALS: usize = 1_000;
-pub(super) const MAX_MISSION_PROPOSAL_RESULTS: usize = 500;
-const MAX_PROPOSAL_IDEMPOTENCY_KEY_BYTES: usize = 256;
 /// Default duration for a file-backed Registry claim.
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
-/// A Station whose last check-in is older than this has gone dark: three missed check-ins.
-pub const GONE_DARK_AFTER: Duration = Duration::from_secs(45);
 
 /// One queued brief with a bounded, versioned file representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,7 +168,8 @@ impl MissionProposal {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidInput` when the identity, retry key or brief is invalid.
+    /// Returns `InvalidInput` when the identity, retry key or brief is invalid, or the key is
+    /// longer than `limits.idempotency_key_bytes`.
     pub fn try_new(
         operation_id: impl Into<String>,
         parent_mission_id: MissionId,
@@ -193,11 +177,12 @@ impl MissionProposal {
         proposer_session_id: SessionId,
         idempotency_key: &str,
         mut brief: Brief,
+        limits: &ProposalLimits,
     ) -> io::Result<Self> {
         let operation_id = operation_id.into();
         let proposer_agent_id = proposer_agent_id.into();
         if idempotency_key.is_empty()
-            || idempotency_key.len() > MAX_PROPOSAL_IDEMPOTENCY_KEY_BYTES
+            || !limits.idempotency_key_bytes.allows(idempotency_key.len())
             || idempotency_key.chars().any(char::is_control)
         {
             return Err(io::Error::new(
@@ -411,15 +396,16 @@ struct StationSettingsFile {
 }
 
 impl StationSettings {
-    /// Creates settings with a Mission capacity from 1 through 1,024 and the default
-    /// [`ResourceLimits`].
+    /// Creates settings with a Mission capacity of at least 1 and the default
+    /// [`ResourceLimits`]. The Registry refuses to store a capacity above its
+    /// `[registry.limits.stations] mission_capacity`.
     pub fn try_new(station: impl Into<String>, max_concurrent_missions: usize) -> io::Result<Self> {
         let station = station.into();
         validate_station_id(&station)?;
-        if !(1..=MAX_STATION_MISSION_CAPACITY).contains(&max_concurrent_missions) {
+        if max_concurrent_missions == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Station Mission capacity must be between 1 and 1024",
+                "Station Mission capacity must be at least 1",
             ));
         }
         Ok(Self {
@@ -599,12 +585,36 @@ pub enum LeaseRecovery {
 #[derive(Debug, Clone)]
 pub struct FileRegistry {
     pub(super) root: PathBuf,
+    pub(super) limits: Arc<RegistryLimits>,
 }
 
 impl FileRegistry {
-    /// Opens a Registry directory without creating or changing it.
+    /// Opens a Registry directory without creating or changing it, with the default
+    /// [`RegistryLimits`].
     pub fn open(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            limits: Arc::default(),
+        }
+    }
+
+    /// The same Registry, applying `limits`.
+    #[must_use]
+    pub fn with_limits(mut self, limits: RegistryLimits) -> Self {
+        self.limits = Arc::new(limits);
+        self
+    }
+
+    /// Writes `bytes` to `path` atomically, retrying a refused rename for
+    /// `[registry.limits.files] rename_retry`.
+    pub(super) fn write_atomic(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        write_atomic_within(path, bytes, self.limits.files.rename_retry)
+    }
+
+    /// Takes the Registry's directory lock, waiting up to `[registry.limits.files]
+    /// lock_wait`.
+    pub(super) fn lock(&self) -> io::Result<File> {
+        registry_lock(&self.root, self.limits.files.lock_wait)
     }
 
     /// Returns the configured Registry root.
@@ -631,7 +641,7 @@ impl FileRegistry {
     ) -> io::Result<()> {
         let path = self.provenance_path(key);
         match provenance {
-            Some(provenance) => write_atomic(
+            Some(provenance) => self.write_atomic(
                 &path,
                 &serde_json::to_vec_pretty(provenance).map_err(io::Error::other)?,
             ),
@@ -646,7 +656,7 @@ impl FileRegistry {
     pub(super) fn attach_provenance(&self, brief: &mut Brief) {
         let kept = fs::read(self.provenance_path(&brief.key()))
             .ok()
-            .filter(|bytes| bytes.len() as u64 <= MAX_PROVENANCE_BYTES)
+            .filter(|bytes| self.limits.briefs.provenance_bytes.allows(bytes.len()))
             .and_then(|bytes| serde_json::from_slice::<Provenance>(&bytes).ok());
         bona_fides::unseal(brief, kept);
     }
@@ -659,7 +669,7 @@ impl FileRegistry {
                 .join(format!("{}.provenance", brief.key())),
         )
         .ok()
-        .filter(|bytes| bytes.len() as u64 <= MAX_PROVENANCE_BYTES)
+        .filter(|bytes| self.limits.briefs.provenance_bytes.allows(bytes.len()))
         .and_then(|bytes| serde_json::from_slice::<Provenance>(&bytes).ok());
         bona_fides::unseal(brief, kept);
     }
@@ -668,11 +678,11 @@ impl FileRegistry {
     pub(super) fn write_brief(&self, path: &Path, brief: &Brief) -> io::Result<()> {
         let (record, provenance) = bona_fides::seal(brief)?;
         let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_BRIEF_BYTES {
+        if !self.limits.briefs.record_bytes.allows(bytes.len()) {
             return Err(invalid_data("brief exceeds the size limit"));
         }
         self.keep_provenance(&brief.key(), provenance.as_ref())?;
-        write_atomic(path, &bytes)
+        self.write_atomic(path, &bytes)
     }
 
     fn station_settings_path(&self, station: &str) -> PathBuf {
@@ -698,9 +708,10 @@ impl FileRegistry {
                     .extension()
                     .is_some_and(|extension| extension == "json")
             {
-                if paths.len() == MAX_CABLE_FILES {
+                if !self.limits.cables.records.allows(paths.len() + 1) {
                     return Err(invalid_data(format!(
-                        "Registry has more than {MAX_CABLE_FILES} Cable records"
+                        "Registry has more than {} Cable records",
+                        self.limits.cables.records
                     )));
                 }
                 paths.push(path);
@@ -709,7 +720,7 @@ impl FileRegistry {
         paths.sort();
         let mut cables = Vec::with_capacity(paths.len());
         for path in paths {
-            match read_cable(&path) {
+            match read_cable(&path, self.limits.cables.record_bytes) {
                 Ok(Some(cable)) => cables.push(cable),
                 Ok(None) => {}
                 Err(error) if error.kind() == io::ErrorKind::InvalidData => {}
@@ -741,7 +752,7 @@ impl FileRegistry {
             .join(operation)
             .join(format!("{proposal_id}.json"));
         if !pending.is_file() {
-            return match read_mission_proposal(&approved) {
+            return match read_mission_proposal(&approved, self.limits.proposals.record_bytes) {
                 Ok(proposal) => {
                     let mut brief = proposal.brief;
                     self.attach_provenance(&mut brief);
@@ -766,7 +777,7 @@ impl FileRegistry {
                 Err(error) => Err(error),
             };
         }
-        let proposal = read_mission_proposal(&pending)?;
+        let proposal = read_mission_proposal(&pending, self.limits.proposals.record_bytes)?;
         if proposal.operation_id != operation || proposal.id != proposal_id {
             return Err(invalid_data(
                 "Mission proposal path does not match its identity",
@@ -982,7 +993,7 @@ pub trait BriefStore {
 impl BriefStore for FileRegistry {
     fn submit_mission_proposal(&self, proposal: &MissionProposal) -> io::Result<()> {
         proposal.validate()?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let directory = self
             .root
             .join("proposals")
@@ -993,7 +1004,7 @@ impl BriefStore for FileRegistry {
         let mut stored = proposal.clone();
         stored.vetting = None;
         if path.exists() {
-            let existing = read_mission_proposal(&path)?;
+            let existing = read_mission_proposal(&path, self.limits.proposals.record_bytes)?;
             stored.created_at = existing.created_at;
             stored.vetting.clone_from(&existing.vetting);
             if existing == stored {
@@ -1016,17 +1027,18 @@ impl BriefStore for FileRegistry {
                 count += 1;
             }
         }
-        if count >= MAX_MISSION_PROPOSALS {
+        if !self.limits.proposals.records.allows(count + 1) {
             return Err(invalid_data(format!(
-                "Operation has reached the {MAX_MISSION_PROPOSALS} pending Mission proposal limit"
+                "Operation has reached the {} pending Mission proposal limit",
+                self.limits.proposals.records
             )));
         }
         stored.created_at = unix_time()?;
         let bytes = serde_json::to_vec_pretty(&stored).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_MISSION_PROPOSAL_BYTES {
+        if !self.limits.proposals.record_bytes.allows(bytes.len()) {
             return Err(invalid_data("Mission proposal exceeds the size limit"));
         }
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         Ok(())
     }
 
@@ -1036,11 +1048,12 @@ impl BriefStore for FileRegistry {
         limit: usize,
     ) -> io::Result<Vec<MissionProposal>> {
         validate_registry_key(operation)?;
-        if limit == 0 || limit > MAX_MISSION_PROPOSAL_RESULTS {
+        if limit == 0 || !self.limits.proposals.results.allows(limit) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "Mission proposal result limit must be between 1 and {MAX_MISSION_PROPOSAL_RESULTS}"
+                    "Mission proposal result limit must be between 1 and {}",
+                    self.limits.proposals.results
                 ),
             ));
         }
@@ -1059,9 +1072,10 @@ impl BriefStore for FileRegistry {
                     .extension()
                     .is_some_and(|extension| extension == "json")
             {
-                if paths.len() >= MAX_MISSION_PROPOSALS {
+                if !self.limits.proposals.records.allows(paths.len() + 1) {
                     return Err(invalid_data(format!(
-                        "Operation has more than {MAX_MISSION_PROPOSALS} Mission proposals"
+                        "Operation has more than {} Mission proposals",
+                        self.limits.proposals.records
                     )));
                 }
                 paths.push(path);
@@ -1070,7 +1084,7 @@ impl BriefStore for FileRegistry {
         paths.sort();
         let mut proposals = Vec::new();
         for path in paths {
-            match read_mission_proposal(&path) {
+            match read_mission_proposal(&path, self.limits.proposals.record_bytes) {
                 Ok(proposal)
                     if proposal.operation_id == operation
                         && path.file_stem().and_then(|stem| stem.to_str())
@@ -1100,7 +1114,7 @@ impl BriefStore for FileRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         self.promote_locked(operation, proposal_id, received_by)
     }
 
@@ -1111,7 +1125,7 @@ impl BriefStore for FileRegistry {
     ) -> io::Result<MissionProposal> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let pending = self
             .root
             .join("proposals")
@@ -1125,7 +1139,9 @@ impl BriefStore for FileRegistry {
             .join(operation)
             .join(format!("{proposal_id}.json"));
         if !pending.is_file() {
-            if let Ok(proposal) = read_mission_proposal(&rejected) {
+            if let Ok(proposal) =
+                read_mission_proposal(&rejected, self.limits.proposals.record_bytes)
+            {
                 return Ok(proposal);
             }
             let approved = self
@@ -1145,7 +1161,7 @@ impl BriefStore for FileRegistry {
                 "Mission proposal does not exist",
             ));
         }
-        let proposal = read_mission_proposal(&pending)?;
+        let proposal = read_mission_proposal(&pending, self.limits.proposals.record_bytes)?;
         if proposal.operation_id != operation || proposal.id != proposal_id {
             return Err(invalid_data(
                 "Mission proposal path does not match its identity",
@@ -1167,14 +1183,15 @@ impl BriefStore for FileRegistry {
     ) -> io::Result<MissionProposal> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let pending = self
             .root
             .join("proposals")
             .join("pending")
             .join(operation)
             .join(format!("{proposal_id}.json"));
-        let mut proposal = match read_mission_proposal(&pending) {
+        let mut proposal = match read_mission_proposal(&pending, self.limits.proposals.record_bytes)
+        {
             Ok(proposal) if proposal.operation_id == operation && proposal.id == proposal_id => {
                 proposal
             }
@@ -1193,10 +1210,10 @@ impl BriefStore for FileRegistry {
         };
         proposal.vetting = Some(vetting.clone());
         let bytes = serde_json::to_vec_pretty(&proposal).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_MISSION_PROPOSAL_BYTES {
+        if !self.limits.proposals.record_bytes.allows(bytes.len()) {
             return Err(invalid_data("Mission proposal exceeds the size limit"));
         }
-        write_atomic(&pending, &bytes)?;
+        self.write_atomic(&pending, &bytes)?;
         Ok(proposal)
     }
 
@@ -1210,10 +1227,13 @@ impl BriefStore for FileRegistry {
         let mut paths = Vec::new();
         for entry in entries {
             let entry = entry?;
-            if paths.len() >= MAX_BRIEFS {
+            if !self.limits.briefs.records.allows(paths.len() + 1) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("Registry has more than {MAX_BRIEFS} queued briefs"),
+                    format!(
+                        "Registry has more than {} queued briefs",
+                        self.limits.briefs.records
+                    ),
                 ));
             }
             let path = entry.path();
@@ -1232,7 +1252,7 @@ impl BriefStore for FileRegistry {
             let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
-            if metadata.len() > MAX_BRIEF_BYTES {
+            if !self.limits.briefs.record_bytes.allows(metadata.len()) {
                 continue;
             }
             let Ok(bytes) = fs::read(&path) else {
@@ -1259,7 +1279,7 @@ impl BriefStore for FileRegistry {
     fn submit_brief(&self, brief: &Brief) -> io::Result<()> {
         brief.validate()?;
         let key = brief.key();
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         for state in ["new", "held", "claimed", "done", "failed"] {
             if self.root.join(state).join(format!("{key}.json")).exists() {
                 return Err(io::Error::new(
@@ -1272,7 +1292,7 @@ impl BriefStore for FileRegistry {
     }
 
     fn claim_new(&self, key: Option<&str>) -> io::Result<Option<Brief>> {
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let destination_dir = self.root.join("claimed");
         fs::create_dir_all(&destination_dir)?;
         for brief in self.list_new()? {
@@ -1309,7 +1329,7 @@ impl BriefStore for FileRegistry {
                 "a Registry lease needs a station and positive duration",
             ));
         }
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let destination_dir = self.root.join("claimed");
         fs::create_dir_all(&destination_dir)?;
         for brief in self.list_new()? {
@@ -1352,11 +1372,11 @@ impl BriefStore for FileRegistry {
                 meta,
             };
             let record = LeaseRecord::from_lease(&lease);
-            let attempts_result = write_atomic(&attempts_path, attempt.to_string().as_bytes());
+            let attempts_result = self.write_atomic(&attempts_path, attempt.to_string().as_bytes());
             let lease_result = serde_json::to_vec(&record)
                 .map_err(io::Error::other)
                 .and_then(|bytes| {
-                    write_atomic(
+                    self.write_atomic(
                         &self.root.join("leases").join(format!("{key}.json")),
                         &bytes,
                     )
@@ -1393,7 +1413,7 @@ impl BriefStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        if bytes.len() as u64 > MAX_BRIEF_BYTES {
+        if !self.limits.briefs.record_bytes.allows(bytes.len()) {
             return Err(invalid_data("claimed brief exceeds the size limit"));
         }
         let mut brief = serde_json::from_slice::<Brief>(&bytes).map_err(io::Error::other)?;
@@ -1442,7 +1462,7 @@ impl BriefStore for FileRegistry {
                 "a Registry lease needs a station and positive duration",
             ));
         }
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let Some(mut lease) = self.lease(key)? else {
             return Ok(false);
         };
@@ -1462,7 +1482,7 @@ impl BriefStore for FileRegistry {
             + duration.as_secs_f64();
         let bytes =
             serde_json::to_vec(&LeaseRecord::from_lease(&lease)).map_err(io::Error::other)?;
-        write_atomic(
+        self.write_atomic(
             &self.root.join("leases").join(format!("{key}.json")),
             &bytes,
         )?;
@@ -1485,7 +1505,7 @@ impl BriefStore for FileRegistry {
         by: &str,
     ) -> io::Result<Option<LeaseRecovery>> {
         validate_registry_key(lease.key())?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         if self.lease(lease.key())?.as_ref() != Some(lease) || lease.expires >= unix_time()? {
             return Ok(None);
         }
@@ -1515,7 +1535,7 @@ impl BriefStore for FileRegistry {
             Ok(brief) if brief.validate().is_ok() => brief,
             _ => return Ok(None),
         };
-        finish_locked(&self.root, &brief, &lost_outcome(lease, by), false, None)?;
+        finish_locked(self, &brief, &lost_outcome(lease, by), false, None)?;
         Ok(Some(LeaseRecovery::Failed))
     }
 
@@ -1533,7 +1553,7 @@ impl BriefStore for FileRegistry {
                 "a Registry lease needs a station and positive duration",
             ));
         }
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let now = unix_time()?;
         if self.lease(lease.key())?.as_ref() != Some(lease)
             || lease.expires >= now
@@ -1551,7 +1571,7 @@ impl BriefStore for FileRegistry {
         handed.meta.extend(meta);
         let bytes =
             serde_json::to_vec(&LeaseRecord::from_lease(&handed)).map_err(io::Error::other)?;
-        write_atomic(
+        self.write_atomic(
             &self
                 .root
                 .join("leases")
@@ -1575,7 +1595,7 @@ impl BriefStore for FileRegistry {
                 "Registry outcomes must be JSON objects",
             ));
         }
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         if let Some(station) = station {
             let key = brief.key();
             let lease = self.lease(&key)?;
@@ -1592,7 +1612,7 @@ impl BriefStore for FileRegistry {
                 return Ok(false);
             }
         }
-        finish_locked(&self.root, brief, outcome, ok, transcript)?;
+        finish_locked(self, brief, outcome, ok, transcript)?;
         Ok(true)
     }
 }
@@ -1640,13 +1660,13 @@ pub trait StationStore {
 
 impl StationStore for FileRegistry {
     fn check_in(&self, station: &str, info: BTreeMap<String, serde_json::Value>) -> io::Result<()> {
-        let bytes = check_in_record(station, info, unix_time()?)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let bytes = check_in_record(station, info, unix_time()?, &self.limits.stations)?;
+        let _registry_lock = self.lock()?;
         let path = self
             .root
             .join("stations")
             .join(format!("{}.json", registry_station_component(station)));
-        write_atomic(&path, &bytes)
+        self.write_atomic(&path, &bytes)
     }
 
     fn stations(&self, within: Duration) -> io::Result<Vec<StationRecord>> {
@@ -1665,9 +1685,10 @@ impl StationStore for FileRegistry {
                     .extension()
                     .is_some_and(|extension| extension == "json")
             {
-                if paths.len() == MAX_STATIONS {
+                if !self.limits.stations.records.allows(paths.len() + 1) {
                     return Err(invalid_data(format!(
-                        "Registry has more than {MAX_STATIONS} station records"
+                        "Registry has more than {} station records",
+                        self.limits.stations.records
                     )));
                 }
                 paths.push(path);
@@ -1682,7 +1703,7 @@ impl StationStore for FileRegistry {
             let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
-            if metadata.len() > MAX_STATION_RECORD_BYTES {
+            if !self.limits.stations.record_bytes.allows(metadata.len()) {
                 continue;
             }
             let Ok(bytes) = fs::read(&path) else {
@@ -1709,7 +1730,7 @@ impl StationStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        if bytes.len() as u64 > MAX_STATION_SETTINGS_BYTES {
+        if !self.limits.stations.settings_bytes.allows(bytes.len()) {
             return Err(invalid_data("Station settings exceed the size limit"));
         }
         let record: StationSettingsFile = serde_json::from_slice(&bytes)
@@ -1725,7 +1746,7 @@ impl StationStore for FileRegistry {
     }
 
     fn set_station_settings(&self, station: &str, settings: &StationSettings) -> io::Result<()> {
-        check_settings(station, settings)?;
+        check_settings(station, settings, &self.limits.stations)?;
         let record = StationSettingsFile {
             station: settings.station.clone(),
             max_concurrent_missions: settings.max_concurrent_missions,
@@ -1733,24 +1754,24 @@ impl StationStore for FileRegistry {
             max_cpu_percent: settings.resource_limits.max_cpu_percent,
         };
         let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_STATION_SETTINGS_BYTES {
+        if !self.limits.stations.settings_bytes.allows(bytes.len()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Station settings exceed the size limit",
             ));
         }
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let path = self.station_settings_path(station);
-        write_atomic(&path, &bytes)
+        self.write_atomic(&path, &bytes)
     }
 
     fn elect(&self, station: &str, ttl: Duration) -> io::Result<bool> {
         check_election(station, ttl)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let directory = self.root.join("headquarters");
         fs::create_dir_all(&directory)?;
         let path = directory.join("lease.json");
-        let current = read_headquarters(&path)?;
+        let current = read_headquarters(&path, self.limits.stations.record_bytes)?;
         let Some(elected) = elected(current.as_ref(), station, ttl, unix_time()?) else {
             return Ok(false);
         };
@@ -1768,13 +1789,16 @@ impl StationStore for FileRegistry {
                 Err(error) => return Err(error),
             }
         }
-        write_headquarters(&path, &elected)?;
+        write_headquarters(self, &path, &elected)?;
         Ok(true)
     }
 
     fn headquarters(&self) -> io::Result<Option<HeadquartersLease>> {
-        let _registry_lock = registry_lock(&self.root)?;
-        read_headquarters(&self.root.join("headquarters").join("lease.json"))
+        let _registry_lock = self.lock()?;
+        read_headquarters(
+            &self.root.join("headquarters").join("lease.json"),
+            self.limits.stations.record_bytes,
+        )
     }
 }
 
@@ -1804,7 +1828,7 @@ impl AccessTokenStore for FileRegistry {
             .root
             .join("access-token-digests")
             .join(format!("{}.txt", record.digest()));
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         if token_path.exists() || digest_path.exists() {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
@@ -1812,16 +1836,16 @@ impl AccessTokenStore for FileRegistry {
             ));
         }
         let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_ACCESS_TOKEN_RECORD_BYTES {
+        if !self.limits.tokens.record_bytes.allows(bytes.len()) {
             return Err(invalid_data("access token record exceeds the size limit"));
         }
-        write_atomic(&token_path, &bytes)?;
-        write_atomic(&digest_path, record.token_id().as_bytes())
+        self.write_atomic(&token_path, &bytes)?;
+        self.write_atomic(&digest_path, record.token_id().as_bytes())
     }
 
     fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
         validate_token_digest(digest)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let digest_path = self
             .root
             .join("access-token-digests")
@@ -1836,7 +1860,7 @@ impl AccessTokenStore for FileRegistry {
             .join("access-tokens")
             .join(format!("{}.json", registry_station_component(&token_id)));
         let bytes = match fs::read(&token_path) {
-            Ok(bytes) if bytes.len() as u64 <= MAX_ACCESS_TOKEN_RECORD_BYTES => bytes,
+            Ok(bytes) if self.limits.tokens.record_bytes.allows(bytes.len()) => bytes,
             Ok(_) => return Ok(None),
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
@@ -1866,9 +1890,9 @@ impl AccessTokenStore for FileRegistry {
             .root
             .join("access-tokens")
             .join(format!("{token_id}.json"));
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let bytes = match fs::read(&token_path) {
-            Ok(bytes) if bytes.len() as u64 <= MAX_ACCESS_TOKEN_RECORD_BYTES => bytes,
+            Ok(bytes) if self.limits.tokens.record_bytes.allows(bytes.len()) => bytes,
             Ok(_) => return Ok(false),
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error),
@@ -1892,7 +1916,7 @@ impl AccessTokenStore for FileRegistry {
         )
         .map_err(|_| invalid_data("invalid access token record"))?;
         let updated = serde_json::to_vec(&updated).map_err(io::Error::other)?;
-        write_atomic(&token_path, &updated)?;
+        self.write_atomic(&token_path, &updated)?;
         Ok(true)
     }
 }
@@ -1945,7 +1969,7 @@ pub trait CableStore {
 
 impl CableStore for FileRegistry {
     fn submit_cable(&self, cable: &Cable) -> io::Result<Cable> {
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         for existing in self.scan_cables()? {
             if existing.sender_agent() == cable.sender_agent()
                 && existing.idempotency_key() == cable.idempotency_key()
@@ -1971,9 +1995,9 @@ impl CableStore for FileRegistry {
             ));
         }
         let bytes = serde_json::to_vec(cable).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         // The Cable is sent either way; its timeline entry is a record, not a condition.
-        let _ = record_event_locked(&self.root, &cable_sent_event(cable));
+        let _ = record_event_locked(self, &cable_sent_event(cable));
         Ok(cable.clone())
     }
 
@@ -1988,7 +2012,10 @@ impl CableStore for FileRegistry {
 
     fn get_cable(&self, cable_id: &str) -> io::Result<Option<Cable>> {
         validate_cable_id(cable_id)?;
-        read_cable(&self.root.join("cables").join(format!("{cable_id}.json")))
+        read_cable(
+            &self.root.join("cables").join(format!("{cable_id}.json")),
+            self.limits.cables.record_bytes,
+        )
     }
 
     fn cable_inbox(
@@ -2074,7 +2101,7 @@ impl CableStore for FileRegistry {
         now: Option<f64>,
     ) -> io::Result<Option<Cable>> {
         validate_cable_id(cable_id)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let Some(cable) = self.get_cable(cable_id)? else {
             return Ok(None);
         };
@@ -2098,13 +2125,13 @@ impl CableStore for FileRegistry {
             .join("cables")
             .join(format!("{}.json", updated.id()));
         let bytes = serde_json::to_vec(&updated).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         Ok(Some(updated))
     }
 
     fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
         check_quota_buckets(buckets, now)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let path = self.root.join("cable-quotas.json");
         let mut saved = fs::read(&path)
             .ok()
@@ -2129,7 +2156,7 @@ impl CableStore for FileRegistry {
             };
         }
         let bytes = serde_json::to_vec(&saved).map_err(io::Error::other)?;
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         Ok(allowed)
     }
 }
@@ -2149,7 +2176,7 @@ pub trait AuditStore {
 impl AuditStore for FileRegistry {
     fn record_audit(&self, entry: &AuditRecord) -> io::Result<()> {
         entry.validate()?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let directory = self.root.join("audit");
         fs::create_dir_all(&directory)?;
         let path = directory.join(format!("{}.json", entry.id));
@@ -2160,18 +2187,21 @@ impl AuditStore for FileRegistry {
             ));
         }
         let bytes = serde_json::to_vec_pretty(entry).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_AUDIT_RECORD_BYTES {
+        if !self.limits.audit.record_bytes.allows(bytes.len()) {
             return Err(invalid_data("audit entry exceeds the size limit"));
         }
-        write_atomic(&path, &bytes)?;
+        self.write_atomic(&path, &bytes)?;
         Ok(())
     }
 
     fn list_audit(&self, limit: usize) -> io::Result<Vec<AuditRecord>> {
-        if limit == 0 || limit > MAX_AUDIT_RESULTS {
+        if limit == 0 || !self.limits.audit.results.allows(limit) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("audit result limit must be between 1 and {MAX_AUDIT_RESULTS}"),
+                format!(
+                    "audit result limit must be between 1 and {}",
+                    self.limits.audit.results
+                ),
             ));
         }
         let mut records = self.audit_records()?;
@@ -2201,9 +2231,10 @@ impl AuditStore for FileRegistry {
                     .extension()
                     .is_some_and(|extension| extension == "json")
             {
-                if paths.len() >= MAX_AUDIT_ENTRIES {
+                if !self.limits.audit.records.allows(paths.len() + 1) {
                     return Err(invalid_data(format!(
-                        "Registry has more than {MAX_AUDIT_ENTRIES} audit entries"
+                        "Registry has more than {} audit entries",
+                        self.limits.audit.records
                     )));
                 }
                 paths.push(entry.path());
@@ -2214,7 +2245,7 @@ impl AuditStore for FileRegistry {
             let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
-            if metadata.len() > MAX_AUDIT_RECORD_BYTES {
+            if !self.limits.audit.record_bytes.allows(metadata.len()) {
                 continue;
             }
             let Ok(bytes) = fs::read(&path) else {
@@ -2253,12 +2284,12 @@ impl AgentRoleStore for FileRegistry {
         role.validate()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
         let bytes = serde_json::to_vec_pretty(role).map_err(io::Error::other)?;
-        if bytes.len() as u64 > MAX_AGENT_ROLE_RECORD_BYTES {
+        if !self.limits.agent_roles.record_bytes.allows(bytes.len()) {
             return Err(invalid_data(
                 "Agent role configuration exceeds the size limit",
             ));
         }
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let directory = self.root.join("agent-roles").join(operation);
         fs::create_dir_all(&directory)?;
         let current = fs::read_dir(&directory)?;
@@ -2269,12 +2300,13 @@ impl AgentRoleStore for FileRegistry {
             }
         }
         let path = directory.join(format!("{}.json", role.id));
-        if !path.exists() && count >= MAX_AGENT_ROLES {
+        if !path.exists() && !self.limits.agent_roles.records.allows(count + 1) {
             return Err(invalid_data(format!(
-                "Operation has reached the {MAX_AGENT_ROLES} Agent role limit"
+                "Operation has reached the {} Agent role limit",
+                self.limits.agent_roles.records
             )));
         }
-        write_atomic(&path, &bytes)
+        self.write_atomic(&path, &bytes)
     }
 
     fn list_agent_roles(&self, operation: &str) -> io::Result<Vec<AgentRole>> {
@@ -2294,9 +2326,10 @@ impl AgentRoleStore for FileRegistry {
                     .extension()
                     .is_some_and(|extension| extension == "json")
             {
-                if paths.len() >= MAX_AGENT_ROLES {
+                if !self.limits.agent_roles.records.allows(paths.len() + 1) {
                     return Err(invalid_data(format!(
-                        "Operation has more than {MAX_AGENT_ROLES} Agent roles"
+                        "Operation has more than {} Agent roles",
+                        self.limits.agent_roles.records
                     )));
                 }
                 paths.push(entry.path());
@@ -2305,7 +2338,7 @@ impl AgentRoleStore for FileRegistry {
         let mut roles = Vec::new();
         for path in paths {
             let metadata = fs::metadata(&path)?;
-            if metadata.len() > MAX_AGENT_ROLE_RECORD_BYTES {
+            if !self.limits.agent_roles.record_bytes.allows(metadata.len()) {
                 continue;
             }
             let bytes = fs::read(&path)?;
@@ -2333,7 +2366,7 @@ impl AgentRoleStore for FileRegistry {
     fn remove_agent_role(&self, operation: &str, role_id: &str) -> io::Result<bool> {
         validate_registry_key(operation)?;
         validate_registry_key(role_id)?;
-        let _registry_lock = registry_lock(&self.root)?;
+        let _registry_lock = self.lock()?;
         let path = self
             .root
             .join("agent-roles")
@@ -2403,6 +2436,7 @@ pub(super) fn check_in_record(
     station: &str,
     mut info: BTreeMap<String, serde_json::Value>,
     seen: f64,
+    limits: &StationLimits,
 ) -> io::Result<Vec<u8>> {
     validate_station_id(station)?;
     info.remove("station");
@@ -2413,7 +2447,7 @@ pub(super) fn check_in_record(
         seen,
     };
     let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
-    if bytes.len() as u64 > MAX_STATION_RECORD_BYTES {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "station record exceeds the size limit",
@@ -2423,10 +2457,26 @@ pub(super) fn check_in_record(
 }
 
 /// Checks settings before they are stored for `station`.
-pub(super) fn check_settings(station: &str, settings: &StationSettings) -> io::Result<()> {
+pub(super) fn check_settings(
+    station: &str,
+    settings: &StationSettings,
+    limits: &StationLimits,
+) -> io::Result<()> {
     validate_station_id(station)?;
     StationSettings::try_new(settings.station.clone(), settings.max_concurrent_missions)?
         .with_resource_limits(settings.resource_limits)?;
+    if !limits
+        .mission_capacity
+        .allows(settings.max_concurrent_missions)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "Station Mission capacity must be between 1 and {}",
+                limits.mission_capacity
+            ),
+        ));
+    }
     if station != settings.station {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -2600,22 +2650,22 @@ pub(super) fn hex_digest(bytes: &[u8]) -> String {
     output
 }
 
-fn read_cable(path: &Path) -> io::Result<Option<Cable>> {
+fn read_cable(path: &Path, limit: Limit) -> io::Result<Option<Cable>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    if bytes.len() as u64 > MAX_CABLE_RECORD_BYTES {
+    if !limit.allows(bytes.len()) {
         return Err(invalid_data("Cable record exceeds the size limit"));
     }
     let cable = serde_json::from_slice(&bytes).map_err(|error| invalid_data(error.to_string()))?;
     Ok(Some(cable))
 }
 
-fn read_mission_proposal(path: &Path) -> io::Result<MissionProposal> {
+fn read_mission_proposal(path: &Path, limit: Limit) -> io::Result<MissionProposal> {
     let metadata = fs::metadata(path)?;
-    if metadata.len() > MAX_MISSION_PROPOSAL_BYTES {
+    if !limit.allows(metadata.len()) {
         return Err(invalid_data("Mission proposal exceeds the size limit"));
     }
     let bytes = fs::read(path)?;
@@ -2631,7 +2681,7 @@ pub(super) fn cable_error(error: CableError) -> io::Error {
     invalid_data(error.to_string())
 }
 
-pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+fn write_atomic_within(path: &Path, bytes: &[u8], retry: TimeLimit) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
@@ -2639,14 +2689,16 @@ pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     temporary.as_file().sync_all()?;
     // Windows refuses to replace a file while a reader has it open ("Access is denied");
     // readers hold it only for a read, so the rename is tried again for a short while.
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = retry
+        .get()
+        .and_then(|retry| Instant::now().checked_add(retry));
     let mut delay = Duration::from_millis(5);
     loop {
         match temporary.persist(path) {
             Ok(_) => return Ok(()),
             Err(error)
                 if error.error.kind() == io::ErrorKind::PermissionDenied
-                    && Instant::now() < deadline =>
+                    && deadline.is_none_or(|deadline| Instant::now() < deadline) =>
             {
                 temporary = error.file;
                 thread::sleep(delay);
@@ -2658,12 +2710,13 @@ pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 pub(super) fn finish_locked(
-    root: &Path,
+    registry: &FileRegistry,
     brief: &Brief,
     outcome: &serde_json::Value,
     ok: bool,
     transcript: Option<&[u8]>,
 ) -> io::Result<()> {
+    let root = registry.root.as_path();
     let state = if ok { "done" } else { "failed" };
     let key = brief.key();
     if let Err(error) = fs::remove_file(root.join("vetting").join(format!("{key}.json")))
@@ -2673,12 +2726,12 @@ pub(super) fn finish_locked(
     }
     let target = root.join(state).join(format!("{key}.json"));
     let outcome_path = root.join(state).join(format!("{key}.outcome.json"));
-    write_atomic(
+    registry.write_atomic(
         &outcome_path,
         &serde_json::to_vec_pretty(outcome).map_err(io::Error::other)?,
     )?;
     if let Some(transcript) = transcript {
-        write_atomic(&root.join(state).join(format!("{key}.log")), transcript)?;
+        registry.write_atomic(&root.join(state).join(format!("{key}.log")), transcript)?;
     }
     // The provenance is spent before the brief moves: a record queued again under this key
     // finds none, and a crash in between leaves a brief without one, never one with two.
@@ -2687,7 +2740,7 @@ pub(super) fn finish_locked(
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             if let (_, Some(provenance)) = bona_fides::seal(brief)? {
-                write_atomic(
+                registry.write_atomic(
                     &spent,
                     &serde_json::to_vec_pretty(&provenance).map_err(io::Error::other)?,
                 )?;
@@ -2700,7 +2753,7 @@ pub(super) fn finish_locked(
         fs::rename(source, &target)?;
     } else {
         let (record, _) = bona_fides::seal(brief)?;
-        write_atomic(
+        registry.write_atomic(
             &target,
             &serde_json::to_vec_pretty(&record).map_err(io::Error::other)?,
         )?;
@@ -2774,13 +2827,16 @@ fn registry_station_component(station: &str) -> String {
         .collect()
 }
 
-pub(super) fn read_headquarters(path: &Path) -> io::Result<Option<HeadquartersLease>> {
+pub(super) fn read_headquarters(
+    path: &Path,
+    limit: Limit,
+) -> io::Result<Option<HeadquartersLease>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    if bytes.len() as u64 > MAX_STATION_RECORD_BYTES {
+    if !limit.allows(bytes.len()) {
         return Err(invalid_data("Headquarters lease exceeds the size limit"));
     }
     let record: HeadquartersLeaseFile = serde_json::from_slice(&bytes)
@@ -2788,18 +2844,22 @@ pub(super) fn read_headquarters(path: &Path) -> io::Result<Option<HeadquartersLe
     Ok(Some(record.into_lease()?))
 }
 
-fn write_headquarters(path: &Path, lease: &HeadquartersLease) -> io::Result<()> {
+fn write_headquarters(
+    registry: &FileRegistry,
+    path: &Path,
+    lease: &HeadquartersLease,
+) -> io::Result<()> {
     let bytes = serde_json::to_vec(lease).map_err(io::Error::other)?;
-    if bytes.len() as u64 > MAX_STATION_RECORD_BYTES {
+    if !registry.limits.stations.record_bytes.allows(bytes.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Headquarters lease exceeds the size limit",
         ));
     }
-    write_atomic(path, &bytes)
+    registry.write_atomic(path, &bytes)
 }
 
-pub(super) fn registry_lock(root: &Path) -> io::Result<File> {
+fn registry_lock(root: &Path, wait: TimeLimit) -> io::Result<File> {
     fs::create_dir_all(root)?;
     let path = root.join(".ai6-registry.lock");
     let file = OpenOptions::new()
@@ -2820,14 +2880,16 @@ pub(super) fn registry_lock(root: &Path) -> io::Result<File> {
         }
         file
     };
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = wait.get().and_then(|wait| Instant::now().checked_add(wait));
+    let open =
+        |deadline: Option<Instant>| deadline.is_none_or(|deadline| Instant::now() < deadline);
     loop {
         match file.try_lock_exclusive() {
             Ok(()) => return Ok(file),
-            Err(error) if lock_is_contended(&error) && Instant::now() < deadline => {
+            Err(error) if lock_is_contended(&error) && open(deadline) => {
                 thread::sleep(Duration::from_millis(10));
             }
-            Err(error) if Instant::now() >= deadline => {
+            Err(error) if !open(deadline) => {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     format!("timed out locking the Registry: {error}"),
@@ -2893,21 +2955,28 @@ mod tests {
     use std::fs;
 
     fn test_cable(id: &str, key: &str, body: &str, session_id: &str) -> Cable {
-        Cable::try_new(CableDraft::new(
-            "007".into(),
-            "operation-a".into(),
-            "station-a".into(),
-            CableTarget::try_new(CableScope::Agent, Some("008".into())).unwrap(),
-            body.into(),
-            vec![
-                CableRecipient::try_new("008".into(), Some(session_id.into()), CableState::Queued)
+        Cable::try_new(
+            CableDraft::new(
+                "007".into(),
+                "operation-a".into(),
+                "station-a".into(),
+                CableTarget::try_new(CableScope::Agent, Some("008".into())).unwrap(),
+                body.into(),
+                vec![
+                    CableRecipient::try_new(
+                        "008".into(),
+                        Some(session_id.into()),
+                        CableState::Queued,
+                    )
                     .unwrap(),
-            ],
-            key.into(),
-            id.into(),
-            1_700_000_000.0,
-            1_700_000_900.0,
-        ))
+                ],
+                key.into(),
+                id.into(),
+                1_700_000_000.0,
+                1_700_000_900.0,
+            ),
+            &Default::default(),
+        )
         .unwrap()
     }
 
@@ -2943,6 +3012,7 @@ mod tests {
                 version: 1,
                 provenance: None,
             },
+            &Default::default(),
         )
         .unwrap()
     }
@@ -3125,7 +3195,7 @@ mod tests {
         let mut info = BTreeMap::new();
         info.insert(
             "payload".to_owned(),
-            serde_json::Value::String("x".repeat(MAX_STATION_RECORD_BYTES as usize)),
+            serde_json::Value::String("x".repeat(1_048_576)),
         );
         assert_eq!(
             registry.check_in("station-a", info).unwrap_err().kind(),
@@ -3150,7 +3220,15 @@ mod tests {
             Some(second)
         );
         assert!(StationSettings::try_new("station/a", 0).is_err());
-        assert!(StationSettings::try_new("station/a", MAX_STATION_MISSION_CAPACITY + 1).is_err());
+        let crowded = StationSettings::try_new("station/a", 1_025).unwrap();
+        assert_eq!(
+            registry
+                .set_station_settings("station/a", &crowded)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput,
+            "past [registry.limits.stations] mission_capacity"
+        );
         assert!(registry.set_station_settings("station?a", &first).is_err());
 
         // Resource limits default and persist.
@@ -3191,7 +3269,9 @@ mod tests {
             thread::sleep(Duration::from_millis(200));
             drop(reader);
         });
-        write_atomic(&path, b"new").unwrap();
+        FileRegistry::open(directory.path())
+            .write_atomic(&path, b"new")
+            .unwrap();
         release.join().unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"new");
     }
@@ -3387,10 +3467,7 @@ mod tests {
             io::ErrorKind::AlreadyExists
         );
         assert_eq!(
-            registry
-                .list_audit(MAX_AUDIT_RESULTS + 1)
-                .unwrap_err()
-                .kind(),
+            registry.list_audit(501).unwrap_err().kind(),
             io::ErrorKind::InvalidInput
         );
         assert_eq!(

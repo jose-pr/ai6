@@ -19,6 +19,8 @@ pub use coqui_roles::{
 };
 use serde::Deserialize;
 
+use crate::bounds::Limit;
+
 /// The resource kinds a role rule may be scoped to in AI6: `station:<id>`, `operation:<id>`,
 /// `theater:<id>`, `config:roster` (the roster every Station reads) and `config:assistant`
 /// (Moneypenny's repositories). A rule may also name `*`.
@@ -109,8 +111,6 @@ const fn propagates() -> bool {
     true
 }
 
-const MAX_POLICY_BYTES: usize = 1024 * 1024;
-
 /// Reads an `access.toml` policy: `[role.<name>]` tables with `actions`, then `[[rule]]`
 /// entries binding a `subject` to a `role` at a `scope`, tried in order. A rule on an
 /// Operation also reaches every Operation under it unless it sets `propagate = false`;
@@ -119,13 +119,16 @@ const MAX_POLICY_BYTES: usize = 1024 * 1024;
 ///
 /// # Errors
 ///
-/// Returns an error when the text is over 1 MiB, is not the policy format, or names a role,
-/// subject or scope the authorizer refuses.
-pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError> {
-    if source.len() > MAX_POLICY_BYTES {
-        return Err(AccessPolicyError(
-            "access policy exceeds the 1 MiB limit".into(),
-        ));
+/// Returns an error when the text is over `max_bytes` (`[provider] access_policy_bytes`), is
+/// not the policy format, or names a role, subject or scope the authorizer refuses.
+pub fn role_authorizer_from_toml(
+    source: &str,
+    max_bytes: Limit,
+) -> Result<RoleAuthorizer, AccessPolicyError> {
+    if !max_bytes.allows(source.len()) {
+        return Err(AccessPolicyError(format!(
+            "access policy exceeds the {max_bytes}-byte limit"
+        )));
     }
     let document: PolicyDocument = toml::from_str(source)
         .map_err(|error| AccessPolicyError(format!("invalid access policy: {error}")))?;
@@ -161,21 +164,24 @@ pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessP
 /// # Errors
 ///
 /// Returns an error when the file cannot be read or [`role_authorizer_from_toml`] refuses it.
-pub fn load_role_authorizer(path: impl AsRef<Path>) -> Result<RoleAuthorizer, AccessPolicyError> {
+pub fn load_role_authorizer(
+    path: impl AsRef<Path>,
+    max_bytes: Limit,
+) -> Result<RoleAuthorizer, AccessPolicyError> {
     let path = path.as_ref();
     let mut source = String::new();
+    let most = max_bytes
+        .get()
+        .map_or(u64::MAX, |bytes| bytes.saturating_add(1));
     std::fs::File::open(path)
-        .and_then(|file| {
-            file.take((MAX_POLICY_BYTES + 1) as u64)
-                .read_to_string(&mut source)
-        })
+        .and_then(|file| file.take(most).read_to_string(&mut source))
         .map_err(|error| {
             AccessPolicyError(format!(
                 "{}: could not read access policy: {error}",
                 path.display()
             ))
         })?;
-    role_authorizer_from_toml(&source)
+    role_authorizer_from_toml(&source, max_bytes)
         .map_err(|error| AccessPolicyError(format!("{}: {error}", path.display())))
 }
 
@@ -221,6 +227,7 @@ mod tests {
                 scope = "operation:G"
                 role = "operator"
             "#,
+            Limit::UNBOUNDED,
         )
         .unwrap();
         let debug = format!("{policy:?}");
@@ -289,16 +296,19 @@ mod tests {
     fn role_policy_rejects_unknown_roles_and_unrecognized_scopes() {
         assert!(
             role_authorizer_from_toml(
-                "[[rule]]\nsubject='account:007'\nscope='operation:G'\nrole='missing'"
+                "[[rule]]\nsubject='account:007'\nscope='operation:G'\nrole='missing'",
+                Limit::UNBOUNDED
             )
             .is_err()
         );
         assert!(role_authorizer_from_toml(
-            "[role.viewer]\nactions=['mission.read']\n[[rule]]\nsubject='account:007'\nscope='universe:all'\nrole='viewer'"
+            "[role.viewer]\nactions=['mission.read']\n[[rule]]\nsubject='account:007'\nscope='universe:all'\nrole='viewer'", Limit::UNBOUNDED
         )
         .is_err());
-        assert!(role_authorizer_from_toml("[role.viewer]\nunknown = 1").is_err());
-        assert!(role_authorizer_from_toml(&" ".repeat(MAX_POLICY_BYTES + 1)).is_err());
+        assert!(role_authorizer_from_toml("[role.viewer]\nunknown = 1", Limit::UNBOUNDED).is_err());
+        let oversized = " ".repeat(1024 * 1024 + 1);
+        assert!(role_authorizer_from_toml(&oversized, Limit::at(1024 * 1024)).is_err());
+        assert!(role_authorizer_from_toml(&oversized, Limit::UNBOUNDED).is_ok());
     }
 
     #[test]
@@ -313,6 +323,7 @@ mod tests {
                 scope = "station:station-a"
                 role = "station-admin"
             "#,
+            Limit::UNBOUNDED,
         )
         .unwrap();
         let operator = person("operator-id", "operator", &[]);
@@ -333,7 +344,10 @@ mod tests {
             let policy = format!(
                 "[role.r]\nactions=['mission.read']\n[[rule]]\nsubject='account:a'\nscope='{kind}:x'\nrole='r'"
             );
-            assert!(role_authorizer_from_toml(&policy).is_ok(), "{kind}");
+            assert!(
+                role_authorizer_from_toml(&policy, Limit::UNBOUNDED).is_ok(),
+                "{kind}"
+            );
         }
     }
 

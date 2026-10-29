@@ -16,14 +16,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::store::{FileRegistry, invalid_data, registry_lock, write_atomic};
+use super::limits::AccountLimits;
+use super::store::{FileRegistry, invalid_data};
 use crate::directorates::medical::usage::utc_day;
 use crate::directorates::q::{AccountPool, PoolStrategy};
 
-pub(super) const MAX_ACCOUNT_RECORD_BYTES: u64 = 256 * 1024;
-const MAX_CLAIMS: usize = 1024;
-const MAX_WINDOWS: usize = 8;
-const KEPT_DAYS: usize = 8;
 /// The window use an account counts with before its provider has reported any.
 pub const UNKNOWN_USE_PERMILLE: u16 = 500;
 
@@ -418,6 +415,7 @@ pub(super) fn claim_in(
     states: &mut BTreeMap<String, AccountState>,
     request: &AccountClaimRequest,
     now: f64,
+    limits: &AccountLimits,
 ) -> (Option<String>, Vec<String>) {
     let mut changed = Vec::new();
     for candidate in &request.candidates {
@@ -455,7 +453,7 @@ pub(super) fn claim_in(
             expires: now + request.ttl.as_secs_f64(),
             operation: request.operation.clone(),
         });
-        if state.active.len() > MAX_CLAIMS {
+        if !limits.claims.allows(state.active.len()) {
             state.active.remove(0);
         }
         state.last_used = Some(now);
@@ -473,6 +471,7 @@ pub(super) fn claim_among(
     all: Vec<AccountState>,
     request: &AccountClaimRequest,
     now: f64,
+    limits: &AccountLimits,
 ) -> (Option<AccountState>, Vec<AccountState>) {
     let mut pool = BTreeMap::new();
     let mut changed = Vec::new();
@@ -488,7 +487,7 @@ pub(super) fn claim_among(
             changed.push(state);
         }
     }
-    let (chosen, names) = claim_in(&mut pool, request, now);
+    let (chosen, names) = claim_in(&mut pool, request, now, limits);
     changed.extend(names.iter().filter_map(|name| pool.get(name).cloned()));
     (chosen.and_then(|name| pool.remove(&name)), changed)
 }
@@ -528,7 +527,7 @@ pub(super) fn renew_in(
 }
 
 /// Merges `reports` into `state`'s windows, replacing each window of the same name.
-pub(super) fn report_in(state: &mut AccountState, reports: &[QuotaWindow]) {
+pub(super) fn report_in(state: &mut AccountState, reports: &[QuotaWindow], limits: &AccountLimits) {
     for report in reports {
         state.windows.retain(|window| window.name != report.name);
         state.windows.push(report.clone());
@@ -536,16 +535,16 @@ pub(super) fn report_in(state: &mut AccountState, reports: &[QuotaWindow]) {
     state
         .windows
         .sort_by(|left, right| left.name.cmp(&right.name));
-    while state.windows.len() > MAX_WINDOWS {
+    while !limits.windows.allows(state.windows.len()) {
         state.windows.remove(0);
     }
 }
 
-/// Adds `tokens` to the UTC day of `now`, keeping the last few days.
-pub(super) fn add_tokens(state: &mut AccountState, tokens: u64, now: i64) {
+/// Adds `tokens` to the UTC day of `now`, keeping the last `limits.kept_days` days.
+pub(super) fn add_tokens(state: &mut AccountState, tokens: u64, now: i64, limits: &AccountLimits) {
     let day = state.daily_tokens.entry(utc_day(now)).or_default();
     *day = day.saturating_add(tokens);
-    while state.daily_tokens.len() > KEPT_DAYS {
+    while state.daily_tokens.len() > limits.kept_days as usize {
         state.daily_tokens.pop_first();
     }
 }
@@ -680,11 +679,14 @@ impl FileRegistry {
             }
             Err(error) => return Err(error),
         };
-        parse_state(&bytes)
+        parse_state(&bytes, &self.limits.accounts)
     }
 
     fn write_account(&self, state: &AccountState) -> io::Result<()> {
-        write_atomic(&self.account_path(&state.account), &state_bytes(state)?)
+        self.write_atomic(
+            &self.account_path(&state.account),
+            &state_bytes(state, &self.limits.accounts)?,
+        )
     }
 
     /// Reads, changes and writes one account under the Registry lock.
@@ -694,7 +696,7 @@ impl FileRegistry {
         change: impl FnOnce(&mut AccountState),
     ) -> io::Result<()> {
         validate_ref(account)?;
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let mut state = self.read_account(account)?;
         change(&mut state);
         self.write_account(&state)
@@ -702,8 +704,8 @@ impl FileRegistry {
 }
 
 /// A stored account, refused past the size limit.
-pub(super) fn parse_state(bytes: &[u8]) -> io::Result<AccountState> {
-    if bytes.len() as u64 > MAX_ACCOUNT_RECORD_BYTES {
+pub(super) fn parse_state(bytes: &[u8], limits: &AccountLimits) -> io::Result<AccountState> {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("account record exceeds the size limit"));
     }
     serde_json::from_slice(bytes)
@@ -711,9 +713,9 @@ pub(super) fn parse_state(bytes: &[u8]) -> io::Result<AccountState> {
 }
 
 /// An account as stored, refused past the size limit.
-pub(super) fn state_bytes(state: &AccountState) -> io::Result<Vec<u8>> {
+pub(super) fn state_bytes(state: &AccountState, limits: &AccountLimits) -> io::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(state).map_err(io::Error::other)?;
-    if bytes.len() as u64 > MAX_ACCOUNT_RECORD_BYTES {
+    if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("account record exceeds the size limit"));
     }
     Ok(bytes)
@@ -745,8 +747,8 @@ impl AccountStore for FileRegistry {
         for candidate in &request.candidates {
             validate_ref(&AccountRef::new(&request.pool, &candidate.account))?;
         }
-        let _lock = registry_lock(&self.root)?;
-        let (chosen, changed) = claim_among(self.accounts()?, request, now);
+        let _lock = self.lock()?;
+        let (chosen, changed) = claim_among(self.accounts()?, request, now, &self.limits.accounts);
         for state in &changed {
             self.write_account(state)?;
         }
@@ -754,7 +756,7 @@ impl AccountStore for FileRegistry {
     }
 
     fn release_account(&self, station: &str, mission: &str) -> io::Result<bool> {
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         let mut released = false;
         for mut state in self.accounts()? {
             if release_in(&mut state, station, mission) {
@@ -772,7 +774,7 @@ impl AccountStore for FileRegistry {
         ttl: Duration,
         now: f64,
     ) -> io::Result<()> {
-        let _lock = registry_lock(&self.root)?;
+        let _lock = self.lock()?;
         for mut state in self.accounts()? {
             if renew_in(&mut state, station, missions, ttl, now) {
                 self.write_account(&state)?;
@@ -782,7 +784,9 @@ impl AccountStore for FileRegistry {
     }
 
     fn report_quota(&self, account: &AccountRef, windows: &[QuotaWindow]) -> io::Result<()> {
-        self.update_account(account, |state| report_in(state, windows))
+        self.update_account(account, |state| {
+            report_in(state, windows, &self.limits.accounts)
+        })
     }
 
     fn limit_account(&self, account: &AccountRef, until: f64) -> io::Result<()> {
@@ -800,7 +804,9 @@ impl AccountStore for FileRegistry {
     }
 
     fn record_account_usage(&self, account: &AccountRef, tokens: u64, now: i64) -> io::Result<()> {
-        self.update_account(account, |state| add_tokens(state, tokens, now))
+        self.update_account(account, |state| {
+            add_tokens(state, tokens, now, &self.limits.accounts)
+        })
     }
 
     fn accounts(&self) -> io::Result<Vec<AccountState>> {
@@ -821,7 +827,7 @@ impl AccountStore for FileRegistry {
                     .extension()
                     .is_some_and(|extension| extension == "json")
                 {
-                    states.push(parse_state(&fs::read(&path)?)?);
+                    states.push(parse_state(&fs::read(&path)?, &self.limits.accounts)?);
                 }
             }
         }

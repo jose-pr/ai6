@@ -10,6 +10,9 @@
 extern crate alloc;
 
 pub mod bootstrap;
+pub mod bounds;
+
+pub use bounds::{Limit, Seconds, TimeLimit};
 pub mod directorates;
 pub mod station;
 
@@ -32,8 +35,9 @@ pub use directorates::m::assistant::{
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::m::config::SqlProvider;
 pub use directorates::m::config::{
-    ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
-    ConfigStatus, FileProvider, MemoryProvider, Settings, StationRuntime, UnexRecord,
+    ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
+    ConfigSnapshot, ConfigStatus, FileProvider, MemoryProvider, Settings, StationRuntime,
+    UnexRecord,
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::harness::{
@@ -112,10 +116,10 @@ pub use directorates::q::{
     PoolChoice, PoolStrategy, choose_pools,
 };
 pub use directorates::q::{
-    DEFAULT_SECRET_LEASE_TTL, Loadout, LoadoutCatalog, MAX_LOADOUT_BYTES, MAX_SECRET_LEASE_TTL,
-    McpServer, QError, QErrorKind, SandboxError, SandboxProfile, SandboxRequest, SecretBackend,
-    SecretBackendFailure, SecretBroker, SecretDefinition, SecretError, SecretLease,
-    SecretLeaseRequest, SecretRequest, SecretValue, StationSecrets, claude_mcp_config,
+    DEFAULT_SECRET_LEASE_TTL, Loadout, LoadoutCatalog, MAX_SECRET_LEASE_TTL, McpServer, QError,
+    QErrorKind, SandboxError, SandboxProfile, SandboxRequest, SecretBackend, SecretBackendFailure,
+    SecretBroker, SecretDefinition, SecretError, SecretLease, SecretLeaseRequest, SecretRequest,
+    SecretValue, StationSecrets, claude_mcp_config,
 };
 pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,
@@ -131,8 +135,9 @@ pub use directorates::registry::approvals::{
 };
 pub use directorates::registry::backend::{
     AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore, AuditStore,
-    BriefStore, CableStore, ClearanceStore, LogbookStore, QuarantineStore, RegistryBackend,
-    SessionStore, SleeperStore, SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
+    BriefStore, CableStore, ClearanceStore, Limited, LogbookStore, QuarantineStore,
+    RegistryBackend, SessionStore, SleeperStore, SourceStore, StationStore, TimelineStore,
+    UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
     LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey, Require,
@@ -142,18 +147,22 @@ pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,
     CableError, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy,
     CablePrincipal, CableRecipient, CableRelay, CableRelayError, CableRelease, CableScope,
-    CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_BODY_BYTES,
-    MAX_CABLE_FANOUT, MAX_CABLE_TTL,
+    CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_FANOUT,
 };
 pub use directorates::registry::clearance::ClearanceGrant;
+pub use directorates::registry::limits::{
+    AccountLimits, AgentLimits, AgentRoleLimits, ApprovalLimits, AuditLimits, BriefLimits,
+    CableLimits, ClearanceLimits, FileLimits, HeldLimits, LogbookLimits, ProposalLimits,
+    QuarantineLimits, RegistryLimits, SessionLimits, SleeperLimits, SourceLimits, StationLimits,
+    TimelineLimits, TokenLimits, UsageLimits,
+};
 pub use directorates::registry::logbook::{
-    HEAD_OF_STATION_ROLE, LOGBOOK_LENGTH, Severity, StationFinding, StationFindingKind,
-    StationReport, is_head_of_station_role,
+    HEAD_OF_STATION_ROLE, Severity, StationFinding, StationFindingKind, StationReport,
+    is_head_of_station_role,
 };
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
-    MAX_RECENT_EVENT_CHARS, MAX_RECENT_EVENTS, NewSession, SessionError, SessionLaunch,
-    SessionRecord, SessionStatus, SessionUpdate,
+    NewSession, SessionError, SessionLaunch, SessionRecord, SessionStatus, SessionUpdate,
 };
 pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization,
@@ -165,13 +174,11 @@ pub use directorates::registry::sources::{
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::registry::sql::{SqlOptions, SqlRegistry};
 pub use directorates::registry::store::{
-    AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, GONE_DARK_AFTER, HeadquartersLease, Lease,
-    LeaseRecovery, MAX_STATION_MISSION_CAPACITY, MissionProposal, StationRecord, StationSettings,
+    AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, HeadquartersLease, Lease, LeaseRecovery,
+    MissionProposal, StationRecord, StationSettings,
 };
-pub use directorates::registry::timeline::{MAX_TIMELINE_EVENTS, TimelineEvent};
-pub use directorates::registry::vetting::{
-    Clearance, HeldBrief, MAX_HELD_BRIEFS, MAX_HELD_PER_OPERATION, MAX_HELD_RESULTS,
-};
+pub use directorates::registry::timeline::TimelineEvent;
+pub use directorates::registry::vetting::{Clearance, HeldBrief};
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
     AssistantNetwork, LIMIT_EVENT, McpServerRef, QuotaReport, TokenUsage, UsageLimit,

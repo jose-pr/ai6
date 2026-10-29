@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use super::{
-    ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
-    Layer, assemble, check_placement, merged,
+    ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
+    ConfigSnapshot, Layer, assemble, check_placement, merged,
 };
 use crate::bootstrap::format::{self, EXTENSIONS, Format};
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
@@ -30,6 +30,7 @@ const STATIONS_DIR: &str = "stations";
 #[derive(Debug, Clone)]
 pub struct FileProvider {
     root: PathBuf,
+    limits: ConfigLimits,
 }
 
 /// The family files of one directory: each family file's stem, the path found, if any.
@@ -38,7 +39,17 @@ type Found = BTreeMap<&'static str, PathBuf>;
 impl FileProvider {
     /// The configuration in `root`. Nothing is read until the provider is asked.
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            limits: ConfigLimits::default(),
+        }
+    }
+
+    /// The same provider, reading documents within `limits`.
+    #[must_use]
+    pub fn with_limits(mut self, limits: ConfigLimits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// The configuration directory.
@@ -241,7 +252,13 @@ impl ConfigProvider for FileProvider {
         } else {
             merged(&global, &self.layer(&ConfigScope::of_station(station))?)
         };
-        assemble(revision, &view, Some(&self.root), &self.root.display())
+        assemble(
+            revision,
+            &view,
+            Some(&self.root),
+            &self.root.display(),
+            &self.limits,
+        )
     }
 
     fn changes_since(

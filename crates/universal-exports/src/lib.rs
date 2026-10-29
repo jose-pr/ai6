@@ -1338,12 +1338,13 @@ async fn stations(
         .ok_or_else(ApiError::unavailable)?
         .authorizer
         .clone();
-    let (station_records, headquarters) = tokio::task::spawn_blocking(move || {
+    let (station_records, headquarters, dark) = tokio::task::spawn_blocking(move || {
         let stations = registry
             .stations(Duration::MAX)
             .map_err(|_| ApiError::internal())?;
         let headquarters = registry.headquarters().map_err(|_| ApiError::internal())?;
-        Ok::<_, ApiError>((stations, headquarters))
+        let dark = registry.limits().stations.gone_dark_after.0;
+        Ok::<_, ApiError>((stations, headquarters, dark))
     })
     .await
     .map_err(|_| ApiError::internal())??;
@@ -1389,7 +1390,7 @@ async fn stations(
             }
             operations.sort();
             operations.dedup();
-            let mut board = board_station(&station, &operations, now, headquarters.as_ref());
+            let mut board = board_station(&station, &operations, now, headquarters.as_ref(), dark);
             // The report covers every Operation on the Station: it is the Station's to read.
             if board.head_of_station.is_some()
                 && !authorizer
@@ -1458,6 +1459,7 @@ fn board_station(
     operations: &[String],
     now: f64,
     headquarters: Option<&ai6::HeadquartersLease>,
+    gone_dark_after: Duration,
 ) -> BoardStation {
     let info = record.info();
     let string_list = |key: &str| {
@@ -1477,7 +1479,7 @@ fn board_station(
     };
     BoardStation {
         station_id: record.station().to_owned(),
-        healthy: now - record.seen() <= ai6::GONE_DARK_AFTER.as_secs_f64(),
+        healthy: now - record.seen() <= gone_dark_after.as_secs_f64(),
         headquarters: headquarters
             .is_some_and(|lease| lease.station() == record.station() && lease.expires() > now),
         seen: record.seen(),
@@ -1801,7 +1803,12 @@ async fn placement_preview(
                     .iter()
                     .filter(|lease| lease.station() == record.station())
                     .count();
-                ai6::StationFacts::from_record(record, now, ai6::GONE_DARK_AFTER, load)
+                ai6::StationFacts::from_record(
+                    record,
+                    now,
+                    registry.limits().stations.gone_dark_after.0,
+                    load,
+                )
             })
             .collect::<Vec<_>>();
         let placement = ai6::place(&policy, &request, &stations);
@@ -5006,7 +5013,7 @@ mod tests {
                 subject = "person:operator-007"
                 scope = "station:hq"
                 role = "station-operator"
-            "#,
+            "#, ai6::Limit::UNBOUNDED,
         )
         .unwrap();
         let directory = tempfile::tempdir().unwrap();
@@ -5120,6 +5127,7 @@ mod tests {
                     version: 1,
                     provenance: None,
                 },
+                &Default::default(),
             )
             .unwrap()
         };

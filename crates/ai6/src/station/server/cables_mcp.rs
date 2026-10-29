@@ -610,7 +610,8 @@ mod tests {
             BTreeMap::new(),
         ));
         // 007's Mission came from a Source item; its Session record says so.
-        let exposed_gate = ExposureGate::new(ExposurePolicy::default(), Vec::new());
+        let exposed_gate =
+            ExposureGate::new(ExposurePolicy::default(), Vec::new(), &Default::default());
         exposed_gate.mark(BRIEF_SOURCE, 1.0);
         registry
             .open_session(
@@ -619,7 +620,8 @@ mod tests {
                 std::time::Duration::from_secs(60),
             )
             .unwrap();
-        let clean_gate = ExposureGate::new(ExposurePolicy::default(), Vec::new());
+        let clean_gate =
+            ExposureGate::new(ExposurePolicy::default(), Vec::new(), &Default::default());
         let mut exposed = Endpoint::start_with_exposure(
             relay.clone(),
             endpoint_identity("007", "mission-7"),
@@ -732,7 +734,11 @@ mod tests {
             Vec::new,
             BTreeMap::new(),
         ));
-        let gate = ExposureGate::new(ExposurePolicy::preset(ExposurePreset::Observe), Vec::new());
+        let gate = ExposureGate::new(
+            ExposurePolicy::preset(ExposurePreset::Observe),
+            Vec::new(),
+            &Default::default(),
+        );
         gate.mark(REVIEW, 1.0);
         let mut peer = Endpoint::start(
             relay.clone(),
@@ -1721,9 +1727,9 @@ impl CableTools {
                 finding.text.trim()
             ));
         }
-        let limit = crate::directorates::registry::cables::MAX_CABLE_BODY_BYTES;
-        if body.len() > limit {
-            let mut end = limit;
+        let limit = self.relay.limits().cables.body_bytes;
+        if !limit.allows(body.len()) {
+            let mut end = limit.or_max();
             while !body.is_char_boundary(end) {
                 end -= 1;
             }
@@ -1900,6 +1906,7 @@ impl CableTools {
             },
             &args.idempotency_key,
             brief,
+            &self.intake.limits().proposals,
         ) {
             Ok(proposal) => proposal.with_parent_role(self.mission_role.get().cloned()),
             Err(_) => return "Mission proposal is invalid".to_owned(),
@@ -2011,7 +2018,13 @@ impl CableTools {
                         .is_ok_and(|exposed| !exposed.is_empty())
                 });
                 if from_elsewhere || from_exposed {
-                    exposure.mark(&cable_source(&delivery.from_agent), unix_now());
+                    exposure.mark(
+                        &cable_source(
+                            &delivery.from_agent,
+                            intake.limits().sessions.exposure_source_bytes,
+                        ),
+                        unix_now(),
+                    );
                 }
             }
             Ok::<_, crate::directorates::registry::cables::CableRelayError>(deliveries)
@@ -2323,10 +2336,9 @@ impl AssistantCableDesk {
 
     /// Keeps the request for the person to confirm and tells Universal Exports; sends nothing.
     fn hold(&self, operation: &str, action: Held, body: String, idempotency_key: String) -> String {
-        if body.trim().is_empty()
-            || body.len() > crate::directorates::registry::cables::MAX_CABLE_BODY_BYTES
-        {
-            return "Cable body is empty or longer than 16 KiB; nothing was held".to_owned();
+        let limit = self.relay.limits().cables.body_bytes;
+        if body.trim().is_empty() || !limit.allows(body.len()) {
+            return format!("Cable body is empty or longer than {limit} bytes; nothing was held");
         }
         // The person confirms what they see, so no character may render as nothing.
         if let Some(hidden) = body
@@ -2781,7 +2793,8 @@ impl AssistantCableTools {
             // Universal Exports keeps the conversation's exposure, so a resumed or moved
             // conversation stays exposed: no body is shown until it has acknowledged.
             for sender in senders {
-                let source = cable_source(&sender);
+                let source =
+                    cable_source(&sender, desk.relay.limits().sessions.exposure_source_bytes);
                 if !desk.gate.expose(&desk.identity.conversation, &source) {
                     return Err(CableRelayError::RegistryUnavailable);
                 }

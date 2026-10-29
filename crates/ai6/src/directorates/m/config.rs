@@ -34,6 +34,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde::Deserialize as _;
 use sha2::{Digest, Sha256};
 
+use crate::bounds::Limit;
 use crate::directorates::m::access::{RoleAuthorizer, role_authorizer_from_toml};
 use crate::directorates::m::cover::{Covers, cover_from};
 use crate::directorates::m::roster::{
@@ -333,6 +334,45 @@ impl ConfigRevision {
     }
 }
 
+/// How much the configuration provider reads of a document: `[provider]` in the bootstrap
+/// file. Each default is the value the provider applies when the file says nothing; `null`
+/// (or `"none"` in TOML) takes the bound away.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConfigLimits {
+    /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool`
+    /// records together). Default 1 MiB.
+    pub loadout_bytes: Limit,
+    /// Characters of one text value in a loadout document. Default 4,096.
+    pub loadout_value_chars: Limit,
+    /// Bytes of the access policy (the `access` record). Default 1 MiB.
+    pub access_policy_bytes: Limit,
+}
+
+impl Default for ConfigLimits {
+    fn default() -> Self {
+        Self {
+            loadout_bytes: Limit::at(1024 * 1024),
+            loadout_value_chars: Limit::at(4096),
+            access_policy_bytes: Limit::at(1024 * 1024),
+        }
+    }
+}
+
+impl ConfigLimits {
+    /// One line per limit looser than its default, for the bootstrap file's weakenings.
+    pub fn weakenings(&self) -> Vec<String> {
+        let (Ok(current), Ok(default)) = (
+            serde_json::to_value(self),
+            serde_json::to_value(Self::default()),
+        ) else {
+            return Vec::new();
+        };
+        crate::bounds::looser("provider", &current, &default, &[])
+    }
+}
+
 /// What a snapshot holds besides the roster, resolved for one Station.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default)]
@@ -355,6 +395,8 @@ pub struct Settings {
     pub access: Option<serde_json::Value>,
     /// Universal Exports' sign-in, limits and assistant (the `unex` record).
     pub unex: UnexRecord,
+    /// The limits the provider read these settings within.
+    pub limits: ConfigLimits,
 }
 
 impl Settings {
@@ -368,8 +410,11 @@ impl Settings {
         match &self.access {
             Some(document) => json_to_toml(document.clone())
                 .and_then(|value| {
-                    role_authorizer_from_toml(&toml::to_string(&value).unwrap_or_default())
-                        .map_err(|reason| reason.to_string())
+                    role_authorizer_from_toml(
+                        &toml::to_string(&value).unwrap_or_default(),
+                        self.limits.access_policy_bytes,
+                    )
+                    .map_err(|reason| reason.to_string())
                 })
                 .map_err(|reason| format!("access: {reason}")),
             None => Ok(RoleAuthorizer::default()),
@@ -455,11 +500,8 @@ impl StationRuntime {
                 ));
             }
         }
-        if let Some(capacity) = self.max_concurrent_missions
-            && !(1..=crate::directorates::registry::store::MAX_STATION_MISSION_CAPACITY)
-                .contains(&capacity)
-        {
-            return Err("station.max_concurrent_missions: from 1 to 1024".to_owned());
+        if self.max_concurrent_missions == Some(0) {
+            return Err("station.max_concurrent_missions: at least 1".to_owned());
         }
         if let Some(roles) = &self.roles
             && (roles.is_empty()
@@ -937,6 +979,7 @@ pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>> {
     return open_with(
         location,
         &crate::directorates::registry::sql::SqlOptions::default(),
+        ConfigLimits::default(),
     );
     #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
     if crate::bootstrap::is_sql_location(location) {
@@ -949,7 +992,8 @@ pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>> {
     }
 }
 
-/// As [`open`], connecting a SQL provider with `options` (password, timeouts).
+/// As [`open`], connecting a SQL provider with `options` (password, timeouts) and reading
+/// documents within `limits`.
 ///
 /// # Errors
 ///
@@ -958,11 +1002,14 @@ pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>> {
 pub fn open_with(
     location: &str,
     options: &crate::directorates::registry::sql::SqlOptions,
+    limits: ConfigLimits,
 ) -> io::Result<Arc<dyn ConfigProvider>> {
     if crate::bootstrap::is_sql_location(location) {
-        Ok(Arc::new(SqlProvider::open_with(location, options)?))
+        Ok(Arc::new(
+            SqlProvider::open_with(location, options)?.with_limits(limits),
+        ))
     } else {
-        Ok(Arc::new(FileProvider::new(location)))
+        Ok(Arc::new(FileProvider::new(location).with_limits(limits)))
     }
 }
 
@@ -1009,6 +1056,7 @@ pub(crate) fn assemble(
     view: &Layer,
     base: Option<&Path>,
     source: &dyn fmt::Display,
+    limits: &ConfigLimits,
 ) -> Result<ConfigSnapshot, RosterError> {
     let family = |record: ConfigRecord| -> Vec<(String, serde_json::Value)> {
         view.get(&record)
@@ -1077,8 +1125,7 @@ pub(crate) fn assemble(
     let loadouts = if loadouts.trim().is_empty() {
         LoadoutCatalog::default()
     } else {
-        loadouts
-            .parse::<LoadoutCatalog>()
+        LoadoutCatalog::parse(&loadouts, limits)
             .map_err(|reason| error(format!("{source}: loadouts: {reason}")))?
     };
     let singleton = |record: ConfigRecord| -> Result<Option<String>, RosterError> {
@@ -1143,7 +1190,7 @@ pub(crate) fn assemble(
         .next()
         .map(|(_, definition)| definition);
     if let Some(text) = singleton(ConfigRecord::Access)? {
-        role_authorizer_from_toml(&text)
+        role_authorizer_from_toml(&text, limits.access_policy_bytes)
             .map_err(|reason| error(format!("{source}: access: {reason}")))?;
     }
     let unex = match family(ConfigRecord::Unex).into_iter().next() {
@@ -1170,6 +1217,7 @@ pub(crate) fn assemble(
             tls,
             access,
             unex,
+            limits: limits.clone(),
         },
         fingerprints,
     })
@@ -1203,7 +1251,8 @@ impl MemoryProvider {
         }
     }
 
-    /// This provider with `settings` instead of the defaults.
+    /// This provider with `settings` instead of the defaults; their `limits` decide how
+    /// much of the access policy [`Settings::access_authorizer`] reads.
     #[must_use]
     pub fn with_settings(self, settings: Settings) -> Self {
         let mut state = self
@@ -1211,6 +1260,19 @@ impl MemoryProvider {
             .into_inner()
             .unwrap_or_else(PoisonError::into_inner);
         state.2 = settings;
+        Self {
+            state: Mutex::new(state),
+        }
+    }
+
+    /// This provider with its settings' `limits` replaced.
+    #[must_use]
+    pub fn with_limits(self, limits: ConfigLimits) -> Self {
+        let mut state = self
+            .state
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.2.limits = limits;
         Self {
             state: Mutex::new(state),
         }

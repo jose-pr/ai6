@@ -5,30 +5,27 @@
 use std::io;
 
 use super::db::Tx;
-use super::{SqlRegistry, bounded_json, from_json, to_json};
+use super::{SqlRegistry, bounded_json, from_json, row_limit, to_json};
+use crate::bounds::Limit;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::medical::quarantine::Incident;
 use crate::directorates::medical::usage::{MissionUsage, UsageTotals};
 use crate::directorates::registry::cables::{Cable, CableState};
-use crate::directorates::registry::logbook::{
-    LogbookStore, MAX_LOGBOOK_BYTES, StationReport, append_report,
-};
+use crate::directorates::registry::limits::{CableLimits, QuarantineLimits, TimelineLimits};
+use crate::directorates::registry::logbook::{LogbookStore, StationReport, append_report};
 use crate::directorates::registry::quarantine::{
-    MAX_QUARANTINES, MAX_RECORD_BYTES as MAX_QUARANTINE_BYTES, Quarantine, QuarantineStore,
-    add_incident, quarantine_report, validate_quarantine,
+    Quarantine, QuarantineStore, add_incident, quarantine_report, validate_quarantine,
 };
 use crate::directorates::registry::sleepers::{
     Fire, Sleeper, SleeperAuthorization, SleeperStore, fired_brief,
 };
 use crate::directorates::registry::store::{
-    AccessTokenStore, AgentRoleStore, AuditRecord, AuditStore, BriefStore, CableStore,
-    MAX_ACCESS_TOKEN_RECORD_BYTES, MAX_AGENT_ROLE_RECORD_BYTES, MAX_AGENT_ROLES, MAX_AUDIT_ENTRIES,
-    MAX_AUDIT_RECORD_BYTES, MAX_AUDIT_RESULTS, MAX_CABLE_FILES, MAX_CABLE_RECORD_BYTES,
-    cable_error, cable_sent_event, check_quota_buckets, invalid_data, quota_allows, quota_balances,
-    unix_time, validate_access_token_record, validate_cable_id, validate_registry_key,
-    validate_station_id, validate_token_digest,
+    AccessTokenStore, AgentRoleStore, AuditRecord, AuditStore, BriefStore, CableStore, cable_error,
+    cable_sent_event, check_quota_buckets, invalid_data, quota_allows, quota_balances, unix_time,
+    validate_access_token_record, validate_cable_id, validate_registry_key, validate_station_id,
+    validate_token_digest,
 };
-use crate::directorates::registry::timeline::{MAX_TIMELINE_EVENTS, TimelineEvent, TimelineStore};
+use crate::directorates::registry::timeline::{TimelineEvent, TimelineStore};
 use crate::directorates::registry::usage::{UsageStore, add_usage, cost_on_day, parse_ledger};
 
 impl AccessTokenStore for SqlRegistry {
@@ -36,7 +33,7 @@ impl AccessTokenStore for SqlRegistry {
         let record = validate_access_token_record(record)?;
         let text = bounded_json(
             &record,
-            MAX_ACCESS_TOKEN_RECORD_BYTES,
+            self.limits.tokens.record_bytes,
             "access token record",
         )?;
         self.write(|tx, revision| {
@@ -77,7 +74,7 @@ impl AccessTokenStore for SqlRegistry {
         else {
             return Ok(None);
         };
-        let Some(record) = stored_token(&text) else {
+        let Some(record) = stored_token(&text, self.limits.tokens.record_bytes) else {
             return Ok(None);
         };
         if record.digest() != digest {
@@ -103,7 +100,7 @@ impl AccessTokenStore for SqlRegistry {
             else {
                 return Ok(false);
             };
-            let Some(record) = stored_token(&row.text(0)?) else {
+            let Some(record) = stored_token(&row.text(0)?, self.limits.tokens.record_bytes) else {
                 return Ok(false);
             };
             if record.token_id() != token_id || record.revoked_at().is_some() {
@@ -128,8 +125,8 @@ impl AccessTokenStore for SqlRegistry {
 }
 
 /// A stored token record that is within bounds and valid.
-fn stored_token(text: &str) -> Option<crate::AccessTokenRecord> {
-    if text.len() as u64 > MAX_ACCESS_TOKEN_RECORD_BYTES {
+fn stored_token(text: &str, limit: Limit) -> Option<crate::AccessTokenRecord> {
+    if !limit.allows(text.len()) {
         return None;
     }
     let record = serde_json::from_str::<crate::AccessTokenRecord>(text).ok()?;
@@ -139,7 +136,7 @@ fn stored_token(text: &str) -> Option<crate::AccessTokenRecord> {
 impl AuditStore for SqlRegistry {
     fn record_audit(&self, entry: &AuditRecord) -> io::Result<()> {
         entry.validate()?;
-        let text = bounded_json(entry, MAX_AUDIT_RECORD_BYTES, "audit entry")?;
+        let text = bounded_json(entry, self.limits.audit.record_bytes, "audit entry")?;
         self.write(|tx, revision| {
             tx.execute(
                 "INSERT INTO ai6_audit (id, at, record, revision) VALUES ($1, $2, $3, $4)",
@@ -162,10 +159,11 @@ impl AuditStore for SqlRegistry {
     }
 
     fn list_audit(&self, limit: usize) -> io::Result<Vec<AuditRecord>> {
-        if limit == 0 || limit > MAX_AUDIT_RESULTS {
+        let most = self.limits.audit.results;
+        if limit == 0 || !most.allows(limit) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("audit result limit must be between 1 and {MAX_AUDIT_RESULTS}"),
+                format!("audit result limit must be between 1 and {most}"),
             ));
         }
         let mut records = self.audit_records()?;
@@ -183,12 +181,15 @@ impl AuditStore for SqlRegistry {
         let rows = self.read(|tx| {
             tx.query(
                 "SELECT record FROM ai6_audit LIMIT $1",
-                &[(MAX_AUDIT_ENTRIES + 1).into()],
+                &[row_limit(self.limits.audit.records)
+                    .saturating_add(1)
+                    .into()],
             )
         })?;
-        if rows.len() > MAX_AUDIT_ENTRIES {
+        if !self.limits.audit.records.allows(rows.len()) {
             return Err(invalid_data(format!(
-                "Registry has more than {MAX_AUDIT_ENTRIES} audit entries"
+                "Registry has more than {} audit entries",
+                self.limits.audit.records
             )));
         }
         let mut records = Vec::with_capacity(rows.len());
@@ -211,7 +212,7 @@ impl AgentRoleStore for SqlRegistry {
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
         let text = bounded_json(
             role,
-            MAX_AGENT_ROLE_RECORD_BYTES,
+            self.limits.agent_roles.record_bytes,
             "Agent role configuration",
         )?;
         self.write(|tx, revision| {
@@ -223,9 +224,10 @@ impl AgentRoleStore for SqlRegistry {
                 .into_iter()
                 .map(|row| row.text(0))
                 .collect::<io::Result<Vec<_>>>()?;
-            if !ids.contains(&role.id) && ids.len() >= MAX_AGENT_ROLES {
+            let most = self.limits.agent_roles.records;
+            if !ids.contains(&role.id) && !most.allows(ids.len() + 1) {
                 return Err(invalid_data(format!(
-                    "Operation has reached the {MAX_AGENT_ROLES} Agent role limit"
+                    "Operation has reached the {most} Agent role limit"
                 )));
             }
             tx.execute(
@@ -283,8 +285,8 @@ impl AgentRoleStore for SqlRegistry {
     }
 }
 
-fn cable_from(text: &str) -> io::Result<Cable> {
-    if text.len() as u64 > MAX_CABLE_RECORD_BYTES {
+fn cable_from(text: &str, limits: &CableLimits) -> io::Result<Cable> {
+    if !limits.record_bytes.allows(text.len()) {
         return Err(invalid_data("Cable record exceeds the size limit"));
     }
     from_json(text, "Cable")
@@ -292,23 +294,23 @@ fn cable_from(text: &str) -> io::Result<Cable> {
 
 /// Unexpired Cables in creation order; unreadable ones are skipped as the file Registry
 /// skips them.
-fn live_cables(tx: &mut Tx<'_>, now: f64) -> io::Result<Vec<Cable>> {
+fn live_cables(tx: &mut Tx<'_>, now: f64, limits: &CableLimits) -> io::Result<Vec<Cable>> {
     let rows = tx.query(
         "SELECT cable FROM ai6_cables WHERE expires_at > $1 ORDER BY created_at, id LIMIT $2",
-        &[now.into(), MAX_CABLE_FILES.into()],
+        &[now.into(), row_limit(limits.records).into()],
     )?;
     let mut cables = Vec::with_capacity(rows.len());
     for row in rows {
-        if let Ok(cable) = cable_from(&row.text(0)?) {
+        if let Ok(cable) = cable_from(&row.text(0)?, limits) {
             cables.push(cable);
         }
     }
     Ok(cables)
 }
 
-fn cable_in(tx: &mut Tx<'_>, id: &str) -> io::Result<Option<Cable>> {
+fn cable_in(tx: &mut Tx<'_>, id: &str, limits: &CableLimits) -> io::Result<Option<Cable>> {
     tx.query_opt("SELECT cable FROM ai6_cables WHERE id = $1", &[id.into()])?
-        .map(|row| cable_from(&row.text(0)?))
+        .map(|row| cable_from(&row.text(0)?, limits))
         .transpose()
 }
 
@@ -322,13 +324,13 @@ fn check_now(now: Option<f64>, what: &str) -> io::Result<f64> {
 
 impl CableStore for SqlRegistry {
     fn submit_cable(&self, cable: &Cable) -> io::Result<Cable> {
-        let text = bounded_json(cable, MAX_CABLE_RECORD_BYTES, "Cable record")?;
+        let text = bounded_json(cable, self.limits.cables.record_bytes, "Cable record")?;
         self.write(|tx, revision| {
             if let Some(row) = tx.query_opt(
                 "SELECT cable FROM ai6_cables WHERE sender_agent = $1 AND idempotency_key = $2",
                 &[cable.sender_agent().into(), cable.idempotency_key().into()],
             )? {
-                let existing = cable_from(&row.text(0)?)?;
+                let existing = cable_from(&row.text(0)?, &self.limits.cables)?;
                 if existing.same_request(cable) {
                     return Ok(existing);
                 }
@@ -337,7 +339,7 @@ impl CableStore for SqlRegistry {
                     "Cable idempotency key was reused for different content",
                 ));
             }
-            if cable_in(tx, cable.id())?.is_some() {
+            if cable_in(tx, cable.id(), &self.limits.cables)?.is_some() {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
                     format!("Cable {} already exists", cable.id()),
@@ -358,8 +360,8 @@ impl CableStore for SqlRegistry {
             )?;
             // The Cable is sent either way; an event out of bounds is not recorded.
             let event = cable_sent_event(cable);
-            if event.to_record().is_ok() {
-                insert_event(tx, &event, revision)?;
+            if event.to_record(&self.limits.timeline).is_ok() {
+                insert_event(tx, &event, revision, &self.limits.timeline)?;
             }
             Ok(cable.clone())
         })
@@ -371,14 +373,14 @@ impl CableStore for SqlRegistry {
                 "SELECT cable FROM ai6_cables WHERE sender_agent = $1 AND idempotency_key = $2",
                 &[sender_agent.into(), idempotency_key.into()],
             )?
-            .map(|row| cable_from(&row.text(0)?))
+            .map(|row| cable_from(&row.text(0)?, &self.limits.cables))
             .transpose()
         })
     }
 
     fn get_cable(&self, cable_id: &str) -> io::Result<Option<Cable>> {
         validate_cable_id(cable_id)?;
-        self.read(|tx| cable_in(tx, cable_id))
+        self.read(|tx| cable_in(tx, cable_id, &self.limits.cables))
     }
 
     fn cable_inbox(
@@ -396,7 +398,7 @@ impl CableStore for SqlRegistry {
         }
         let now = check_now(now, "Cable inbox")?;
         let mut cables = self
-            .read(|tx| live_cables(tx, now))?
+            .read(|tx| live_cables(tx, now, &self.limits.cables))?
             .into_iter()
             .filter(|cable| {
                 cable.recipients().iter().any(|recipient| {
@@ -424,7 +426,7 @@ impl CableStore for SqlRegistry {
         }
         let now = check_now(now, "held Cable")?;
         let mut cables = self
-            .read(|tx| live_cables(tx, now))?
+            .read(|tx| live_cables(tx, now, &self.limits.cables))?
             .into_iter()
             .filter(|cable| {
                 cable
@@ -447,7 +449,7 @@ impl CableStore for SqlRegistry {
     ) -> io::Result<Option<Cable>> {
         validate_cable_id(cable_id)?;
         self.write(|tx, revision| {
-            let Some(cable) = cable_in(tx, cable_id)? else {
+            let Some(cable) = cable_in(tx, cable_id, &self.limits.cables)? else {
                 return Ok(None);
             };
             let now = check_now(now, "Cable delivery")?;
@@ -466,7 +468,7 @@ impl CableStore for SqlRegistry {
                 "UPDATE ai6_cables SET cable = $2, revision = $3 WHERE id = $1",
                 &[
                     updated.id().into(),
-                    bounded_json(&updated, MAX_CABLE_RECORD_BYTES, "Cable record")?.into(),
+                    bounded_json(&updated, self.limits.cables.record_bytes, "Cable record")?.into(),
                     revision.into(),
                 ],
             )?;
@@ -511,9 +513,14 @@ impl CableStore for SqlRegistry {
     }
 }
 
-/// Records `event` and drops the oldest past [`MAX_TIMELINE_EVENTS`].
-fn insert_event(tx: &mut Tx<'_>, event: &TimelineEvent, revision: i64) -> io::Result<()> {
-    let record = String::from_utf8(event.to_record()?)
+/// Records `event` and drops the oldest past `limits.records`.
+fn insert_event(
+    tx: &mut Tx<'_>,
+    event: &TimelineEvent,
+    revision: i64,
+    limits: &TimelineLimits,
+) -> io::Result<()> {
+    let record = String::from_utf8(event.to_record(limits)?)
         .map_err(|_| invalid_data("timeline event is not UTF-8"))?;
     tx.execute(
         "INSERT INTO ai6_timeline (id, operation, at_micros, event, revision) \
@@ -529,7 +536,7 @@ fn insert_event(tx: &mut Tx<'_>, event: &TimelineEvent, revision: i64) -> io::Re
     let count = tx
         .query_opt("SELECT count(*) FROM ai6_timeline", &[])?
         .map_or(Ok(0), |row| row.int(0))?;
-    let excess = count.saturating_sub(MAX_TIMELINE_EVENTS as i64);
+    let excess = count.saturating_sub(row_limit(limits.records));
     if excess > 0 {
         tx.execute(
             "DELETE FROM ai6_timeline WHERE id IN \
@@ -542,8 +549,8 @@ fn insert_event(tx: &mut Tx<'_>, event: &TimelineEvent, revision: i64) -> io::Re
 
 impl TimelineStore for SqlRegistry {
     fn record_event(&self, event: &TimelineEvent) -> io::Result<()> {
-        event.to_record()?;
-        self.write(|tx, revision| insert_event(tx, event, revision))
+        event.to_record(&self.limits.timeline)?;
+        self.write(|tx, revision| insert_event(tx, event, revision, &self.limits.timeline))
     }
 
     fn timeline_events(&self, operation: &str) -> io::Result<Vec<TimelineEvent>> {
@@ -555,7 +562,8 @@ impl TimelineStore for SqlRegistry {
         })?;
         let mut events = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Some(event) = TimelineEvent::from_record(row.text(0)?.as_bytes())
+            if let Some(event) =
+                TimelineEvent::from_record(row.text(0)?.as_bytes(), &self.limits.timeline)
                 && event.operation == operation
             {
                 events.push(event);
@@ -570,8 +578,8 @@ fn scope(operation: Option<&str>) -> &str {
     operation.unwrap_or("")
 }
 
-fn quarantine_from(text: &str) -> io::Result<Quarantine> {
-    if text.len() as u64 > MAX_QUARANTINE_BYTES {
+fn quarantine_from(text: &str, limits: &QuarantineLimits) -> io::Result<Quarantine> {
+    if !limits.record_bytes.allows(text.len()) {
         return Err(invalid_data("quarantine record exceeds the size limit"));
     }
     from_json(text, "quarantine record")
@@ -587,12 +595,12 @@ impl QuarantineStore for SqlRegistry {
                 "SELECT record FROM ai6_quarantines WHERE agent = $1 AND scope = $2",
                 &[record.agent.as_str().into(), scope.into()],
             )? {
-                return quarantine_from(&row.text(0)?);
+                return quarantine_from(&row.text(0)?, &self.limits.quarantine);
             }
             let count = tx
                 .query_opt("SELECT count(*) FROM ai6_quarantines", &[])?
                 .map_or(Ok(0), |row| row.int(0))?;
-            if count >= MAX_QUARANTINES as i64 {
+            if !self.limits.quarantine.records.allows(count + 1) {
                 return Err(io::Error::other("too many quarantine records"));
             }
             tx.execute(
@@ -606,9 +614,19 @@ impl QuarantineStore for SqlRegistry {
             )?;
             // In the same transaction, so no Station reads the raise once the quarantine is
             // stored.
-            super::agents::remove_raises_in(tx, &record.agent, record.operation.as_deref())?;
+            super::agents::remove_raises_in(
+                tx,
+                &record.agent,
+                record.operation.as_deref(),
+                &self.limits.clearance,
+            )?;
             // A full or unreadable Agent record never keeps a quarantine from being stored.
-            let _ = super::agents::count_in(tx, revision, &quarantine_report(record));
+            let _ = super::agents::count_in(
+                tx,
+                revision,
+                &quarantine_report(record),
+                &self.limits.agents,
+            );
             Ok(record.clone())
         })
     }
@@ -626,7 +644,7 @@ impl QuarantineStore for SqlRegistry {
         let rows = self.read(|tx| tx.query("SELECT record FROM ai6_quarantines", &[]))?;
         let mut records = rows
             .into_iter()
-            .map(|row| quarantine_from(&row.text(0)?))
+            .map(|row| quarantine_from(&row.text(0)?, &self.limits.quarantine))
             .collect::<io::Result<Vec<_>>>()?;
         records.sort_by(|left, right| {
             (&left.agent, &left.operation).cmp(&(&right.agent, &right.operation))
@@ -650,7 +668,7 @@ impl QuarantineStore for SqlRegistry {
                 Some(row) => from_json(&row.text(0)?, "incident history")?,
                 None => Vec::new(),
             };
-            add_incident(&mut history, incident);
+            add_incident(&mut history, incident, &self.limits.quarantine);
             tx.execute(
                 "INSERT INTO ai6_incidents (agent, history, revision) VALUES ($1, $2, $3) \
                  ON CONFLICT (agent) DO UPDATE SET history = excluded.history, \
@@ -672,6 +690,9 @@ impl SleeperStore for SqlRegistry {
         at: i64,
     ) -> io::Result<()> {
         sleeper.validate().map_err(invalid_data)?;
+        sleeper
+            .check_size(&self.limits.sleepers)
+            .map_err(invalid_data)?;
         let record = SleeperAuthorization {
             fingerprint: sleeper.fingerprint(),
             authorized_by: authorized_by.to_owned(),
@@ -693,8 +714,8 @@ impl SleeperStore for SqlRegistry {
                 ],
             )?;
             // The approval stands either way; an event out of bounds is not recorded.
-            if event.to_record().is_ok() {
-                insert_event(tx, &event, revision)?;
+            if event.to_record(&self.limits.timeline).is_ok() {
+                insert_event(tx, &event, revision, &self.limits.timeline)?;
             }
             Ok(())
         })
@@ -724,8 +745,8 @@ impl SleeperStore for SqlRegistry {
             if removed && let Ok(at) = unix_time() {
                 let event =
                     TimelineEvent::new("sleeper", "revoked", operation, at).detail("sleeper", name);
-                if event.to_record().is_ok() {
-                    insert_event(tx, &event, revision)?;
+                if event.to_record(&self.limits.timeline).is_ok() {
+                    insert_event(tx, &event, revision, &self.limits.timeline)?;
                 }
             }
             Ok(removed)
@@ -750,7 +771,7 @@ impl SleeperStore for SqlRegistry {
 
 impl LogbookStore for SqlRegistry {
     fn file_station_report(&self, report: &StationReport) -> io::Result<()> {
-        report.validate()?;
+        report.validate(&self.limits.logbook)?;
         self.write(|tx, revision| {
             let mut logbook: Vec<StationReport> = match tx.query_opt(
                 "SELECT reports FROM ai6_logbooks WHERE station = $1",
@@ -759,8 +780,12 @@ impl LogbookStore for SqlRegistry {
                 Some(row) => from_json(&row.text(0)?, "Station logbook")?,
                 None => Vec::new(),
             };
-            append_report(&mut logbook, report);
-            let text = bounded_json(&logbook, MAX_LOGBOOK_BYTES, "Station logbook")?;
+            append_report(&mut logbook, report, &self.limits.logbook);
+            let text = bounded_json(
+                &logbook,
+                self.limits.logbook.record_bytes(),
+                "Station logbook",
+            )?;
             tx.execute(
                 "INSERT INTO ai6_logbooks (station, reports, revision) VALUES ($1, $2, $3) \
                  ON CONFLICT (station) DO UPDATE SET reports = excluded.reports, \
@@ -800,10 +825,10 @@ impl UsageStore for SqlRegistry {
                 "SELECT ledger FROM ai6_usage WHERE operation = $1 AND mission = $2",
                 &[operation.into(), mission.into()],
             )? {
-                Some(row) => parse_ledger(row.text(0)?.as_bytes())?,
+                Some(row) => parse_ledger(row.text(0)?.as_bytes(), &self.limits.usage)?,
                 None => MissionUsage::default(),
             };
-            add_usage(&mut usage, session, delta, now);
+            add_usage(&mut usage, session, delta, now, &self.limits.usage);
             tx.execute(
                 "INSERT INTO ai6_usage (operation, mission, ledger, revision) VALUES ($1, $2, $3, $4) \
                  ON CONFLICT (operation, mission) DO UPDATE SET ledger = excluded.ledger, \
@@ -829,7 +854,7 @@ impl UsageStore for SqlRegistry {
                 "SELECT ledger FROM ai6_usage WHERE operation = $1 AND mission = $2",
                 &[operation.unwrap_or("").into(), mission.into()],
             )?
-            .map(|row| parse_ledger(row.text(0)?.as_bytes()))
+            .map(|row| parse_ledger(row.text(0)?.as_bytes(), &self.limits.usage))
             .transpose()
         })
     }
@@ -843,7 +868,10 @@ impl UsageStore for SqlRegistry {
         })?;
         let mut total = 0_u64;
         for row in rows {
-            total = total.saturating_add(cost_on_day(&parse_ledger(row.text(0)?.as_bytes())?, now));
+            total = total.saturating_add(cost_on_day(
+                &parse_ledger(row.text(0)?.as_bytes(), &self.limits.usage)?,
+                now,
+            ));
         }
         Ok(total)
     }

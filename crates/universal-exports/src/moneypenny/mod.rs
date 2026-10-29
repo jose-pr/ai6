@@ -950,6 +950,10 @@ impl Assistant {
             return Err(StatusCode::BAD_REQUEST);
         }
         let max_entries = self.config.bounds();
+        let cable_body = gateway.registry.as_ref().map_or_else(
+            || ai6::CableLimits::default().body_bytes,
+            |registry| registry.limits().cables.body_bytes,
+        );
         let mut refused = false;
         let mut notify = false;
         let mut based = false;
@@ -1031,6 +1035,7 @@ impl Assistant {
                         event,
                         &report.station_id,
                         max_entries,
+                        cable_body,
                         &mut after,
                     );
                 }
@@ -1094,6 +1099,7 @@ impl Assistant {
                         event,
                         &report.station_id,
                         max_entries,
+                        cable_body,
                         &mut after,
                     ),
                     _ => apply(conversation, event, max_entries),
@@ -2312,16 +2318,16 @@ async fn healthy_stations(gateway: &Gateway) -> Vec<String> {
     let found = tokio::task::spawn_blocking(move || {
         let stations = registry.stations(Duration::MAX).ok()?;
         let headquarters = registry.headquarters().ok().flatten();
-        Some((stations, headquarters))
+        let dark = registry.limits().stations.gone_dark_after.0.as_secs_f64();
+        Some((stations, headquarters, dark))
     })
     .await
     .ok()
     .flatten();
-    let Some((stations, headquarters)) = found else {
+    let Some((stations, headquarters, dark)) = found else {
         return Vec::new();
     };
     let now = now();
-    let dark = ai6::GONE_DARK_AFTER.as_secs_f64();
     let leader = headquarters
         .filter(|lease| lease.expires() > now)
         .map(|lease| lease.station().to_owned());
