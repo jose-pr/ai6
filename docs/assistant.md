@@ -245,7 +245,11 @@ exactly what was shown (audited `moneypenny.confirmed`), **Cancel** discards it.
 she is told. A memory change records what each of its files held when she made it, and its
 commit is refused when one of them has changed on `main` since (another conversation's
 memory, or the person's own edit), so nothing written meanwhile is lost: she proposes it
-again from what the file holds now.
+again from what the file holds now. A memory change the Station cannot get to Universal
+Exports (it is down, or no longer waits for that answer) is kept on that Station and sent again
+with the conversation's next message there; no queue drops a memory change, a held Cable or
+a Station's answer to make room (64 kept changes at most per Station, the oldest logged and
+dropped past that).
 
 A conversation is exposed, for good, when:
 

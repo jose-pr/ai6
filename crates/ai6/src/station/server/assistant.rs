@@ -40,7 +40,7 @@ mod workspace;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -62,9 +62,9 @@ use crate::directorates::section_00::agent::{
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
     AssistantJob, AssistantReach, AssistantReport, AssistantSharedBase, COMMIT_MEMORY,
-    EVENT_ACCEPTED, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED,
-    EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT,
-    EVENT_TOOL, MemoryAnswer, outside_tool,
+    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
+    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
+    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
 };
 use crate::guatiao::library::Object;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
@@ -81,8 +81,12 @@ const READ_SLICE_MS: i64 = 250;
 const AREA_PREFIX: &str = "ai6-assistant-";
 /// How long Universal Exports holds a job poll open.
 const JOB_WAIT_MS: u64 = 1_000;
-/// Reports waiting to be sent; past it the newest are dropped, and the gateway sees a gap.
+/// Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are
+/// dropped, and the gateway sees a gap. A report [`must_deliver`] marks is never dropped for room.
 const REPORT_QUEUE: usize = 256;
+/// Memory changes kept on the Station because they could not be delivered, until the
+/// conversation's next message here sends them again; past it the oldest is logged and dropped.
+const MAX_PARKED: usize = 64;
 /// How long a stopping desk waits between looks at its queue.
 const STOP_CHECK: Duration = Duration::from_millis(250);
 /// Conversations whose provider Session the desk remembers for a resume.
@@ -95,13 +99,38 @@ const MAX_MEMORY_JOBS: usize = 4;
 /// A harness, shared by the desk (to send it messages) and its pump (to read it).
 type SharedSession = Arc<Mutex<Object<dyn AgentSession>>>;
 
-/// Told whether Universal Exports refused a job's answer (403, 404 or 409); dropped untold
-/// when the answer never reached it.
-pub(super) type Answered = tokio::sync::oneshot::Sender<bool>;
+/// What became of a report the desk's link sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Delivery {
+    /// Universal Exports took it.
+    Taken,
+    /// Universal Exports refused it (403, 404 or 409): it no longer waits for it from here.
+    Refused,
+    /// It did not reach Universal Exports, or Universal Exports failed it otherwise.
+    Lost,
+}
+
+/// Told what became of a report once the link sent it; dropped untold when it never was.
+pub(super) type Answered = tokio::sync::oneshot::Sender<Delivery>;
 
 /// Queues one report for Universal Exports behind every report queued before it; it must not
-/// block for long. A job's answer comes with its [`Answered`], told once it was sent.
+/// block for long. A job's answer, and a memory change, come with an [`Answered`].
 pub(super) type Reporter = Arc<dyn Fn(AssistantReport, Option<Answered>) + Send + Sync>;
+
+/// Whether `report` carries what must reach Universal Exports, so no queue drops it for room:
+/// a job's answer, a memory change, a Cable held for the person or a Cable sent.
+fn must_deliver(report: &AssistantReport) -> bool {
+    report.events.iter().any(|event| {
+        matches!(
+            event.kind.as_str(),
+            EVENT_ACCEPTED
+                | EVENT_REJECTED
+                | EVENT_MEMORY_CHANGES
+                | EVENT_CABLE_PROPOSAL
+                | EVENT_CABLE_SENT
+        )
+    })
+}
 
 /// A report waiting for the desk's link to Universal Exports.
 type Queued = (AssistantReport, Option<Answered>);
@@ -109,28 +138,30 @@ type Queued = (AssistantReport, Option<Answered>);
 /// The desk's reports in the order Universal Exports relies on: from before a harness gets a
 /// message until Universal Exports has its `accepted`, the conversation's reports wait, and
 /// once that `accepted` is refused none is sent but the Cables the harness sent, which
-/// Universal Exports audits.
+/// Universal Exports audits. A memory change that cannot be delivered is kept aside, never
+/// lost: it goes again with the conversation's next message here.
 #[derive(Clone)]
 struct Outbox {
     report: Reporter,
     held: Arc<Mutex<BTreeMap<String, Held>>>,
+    /// Memory changes that could not be delivered, oldest first ([`MAX_PARKED`]).
+    parked: Arc<Mutex<std::collections::VecDeque<AssistantReport>>>,
 }
 
 /// A conversation's reports while its message's answer is unsettled, or after it was refused.
 enum Held {
     Waiting(Vec<AssistantReport>),
     /// Universal Exports refused the message's `accepted`: the harness is closing, and nothing
-    /// it says is sent but its `cable_sent` events ([`cables_sent`]).
+    /// it says is sent but its `cable_sent` events; its memory change is kept aside.
     Refused,
 }
 
-/// `report` with only its `cable_sent` events, when it has any: a Cable that was sent is
-/// reported for the audit log even from a harness whose message was given up.
-fn cables_sent(report: &AssistantReport) -> Option<AssistantReport> {
+/// `report` with only its events of `kind`, when it has any.
+fn only(report: &AssistantReport, kind: &str) -> Option<AssistantReport> {
     let events: Vec<AssistantEvent> = report
         .events
         .iter()
-        .filter(|event| event.kind == EVENT_CABLE_SENT)
+        .filter(|event| event.kind == kind)
         .cloned()
         .collect();
     (!events.is_empty()).then(|| AssistantReport {
@@ -145,25 +176,102 @@ impl Outbox {
         Self {
             report,
             held: Arc::default(),
+            parked: Arc::default(),
         }
     }
 
     /// Sends `report`, or keeps it while its conversation's message is unsettled.
     fn send(&self, report: AssistantReport) {
         let Ok(mut held) = self.held.lock() else {
-            return (self.report)(report, None);
+            return self.deliver(report);
         };
         match held.get_mut(&report.conversation_id) {
-            None => (self.report)(report, None),
-            Some(Held::Refused) => {
-                if let Some(sent) = cables_sent(&report) {
-                    (self.report)(sent, None);
-                }
+            None => self.deliver(report),
+            Some(Held::Refused) => self.refused(&report),
+            Some(Held::Waiting(waiting))
+                if waiting.len() < REPORT_QUEUE || must_deliver(&report) =>
+            {
+                waiting.push(report);
             }
-            Some(Held::Waiting(waiting)) if waiting.len() < REPORT_QUEUE => waiting.push(report),
             Some(Held::Waiting(_)) => eprintln!(
                 "ai6: an assistant report was dropped: too many wait for their message's answer"
             ),
+        }
+    }
+
+    /// What is sent of a report of a harness whose `accepted` was refused: a Cable it sent, for
+    /// the audit log; and its memory change is kept aside rather than lost.
+    fn refused(&self, report: &AssistantReport) {
+        if let Some(sent) = only(report, EVENT_CABLE_SENT) {
+            self.deliver(sent);
+        }
+        if let Some(memory) = only(report, EVENT_MEMORY_CHANGES) {
+            self.park(memory);
+        }
+    }
+
+    /// Hands `report` to the link. One carrying a memory change is watched, on a thread of its
+    /// own so neither a pump nor the runtime waits, and kept aside unless Universal Exports
+    /// took it.
+    fn deliver(&self, report: AssistantReport) {
+        let Some(memory) = only(&report, EVENT_MEMORY_CHANGES) else {
+            return (self.report)(report, None);
+        };
+        let (answered, delivery) = tokio::sync::oneshot::channel();
+        (self.report)(report, Some(answered));
+        let outbox = self.clone();
+        let watched = std::thread::Builder::new()
+            .name("ai6-assistant-memory".to_owned())
+            .spawn(move || {
+                if delivery.blocking_recv() != Ok(Delivery::Taken) {
+                    outbox.park(memory);
+                }
+            });
+        if let Err(error) = watched {
+            eprintln!("ai6: an assistant memory change is not watched for delivery: {error}");
+        }
+    }
+
+    /// Keeps a memory change that could not be delivered until [`Outbox::unpark`].
+    fn park(&self, report: AssistantReport) {
+        let digest = conversation_digest(&report.conversation_id);
+        let Ok(mut parked) = self.parked.lock() else {
+            return eprintln!(
+                "ai6: assistant conversation {digest}: a memory change could not be delivered \
+                 or kept, so it was lost"
+            );
+        };
+        if parked.len() >= MAX_PARKED
+            && let Some(lost) = parked.pop_front()
+        {
+            eprintln!(
+                "ai6: assistant conversation {}: a memory change kept aside was dropped: {MAX_PARKED} \
+                 wait already",
+                conversation_digest(&lost.conversation_id)
+            );
+        }
+        eprintln!(
+            "ai6: assistant conversation {digest}: a memory change could not be delivered; it is \
+             kept and sent again with the conversation's next message here"
+        );
+        parked.push_back(report);
+    }
+
+    /// Sends again the memory changes kept aside for `conversation`, once Universal Exports has
+    /// taken a message of it here.
+    fn unpark(&self, conversation: &str) {
+        let again: Vec<AssistantReport> = {
+            let Ok(mut parked) = self.parked.lock() else {
+                return;
+            };
+            let (again, kept): (Vec<_>, Vec<_>) = parked
+                .drain(..)
+                .partition(|report| report.conversation_id == conversation);
+            parked.extend(kept);
+            again
+        };
+        for report in again {
+            self.send(report);
         }
     }
 
@@ -177,31 +285,38 @@ impl Outbox {
     /// Sends a job's answer behind every report queued before it and waits until it was sent;
     /// answers whether Universal Exports refused it. For a `message` job the reports held
     /// meanwhile follow it, or, when it was a refused `accepted`, are dropped with all later
-    /// ones until the harness has closed ([`Outbox::closed`]), their `cable_sent` events
-    /// excepted.
+    /// ones until the harness has closed ([`Outbox::closed`]), but for what
+    /// [`Outbox::refused`] keeps. A taken `accepted` sends again the memory changes kept aside
+    /// for the conversation.
     async fn answer(&self, report: AssistantReport, message: bool) -> bool {
         let conversation = report.conversation_id.clone();
         let accepted = report
             .events
             .first()
             .is_some_and(|event| event.kind == EVENT_ACCEPTED);
-        let (answered, refusal) = tokio::sync::oneshot::channel();
+        let (answered, delivery) = tokio::sync::oneshot::channel();
         (self.report)(report, Some(answered));
         // An answer that never reached Universal Exports is not a refusal.
-        let refused = refusal.await.unwrap_or(false);
+        let delivery = delivery.await;
+        let refused = delivery == Ok(Delivery::Refused);
         if message && let Ok(mut held) = self.held.lock() {
             if accepted && refused {
                 if let Some(Held::Waiting(waiting)) = held.insert(conversation, Held::Refused) {
-                    for sent in waiting.iter().filter_map(cables_sent) {
-                        (self.report)(sent, None);
+                    for report in &waiting {
+                        self.refused(report);
                     }
                 }
-            } else if let Some(Held::Waiting(waiting)) = held.remove(&conversation) {
+                return refused;
+            }
+            if let Some(Held::Waiting(waiting)) = held.remove(&conversation) {
                 // Still under the lock, so a report sent meanwhile goes after these.
                 for report in waiting {
-                    (self.report)(report, None);
+                    self.deliver(report);
                 }
             }
+        }
+        if message && accepted && delivery == Ok(Delivery::Taken) {
+            self.unpark(&conversation);
         }
         refused
     }
@@ -2167,7 +2282,8 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
         .join(ASSISTANT_MCP_PATH)
         .map_err(|error| std::io::Error::other(format!("assistant endpoint URL: {error}")))?
         .to_string();
-    let (reports, queued) = std::sync::mpsc::sync_channel::<Queued>(REPORT_QUEUE);
+    let (reports, queued) = std::sync::mpsc::channel::<Queued>();
+    let ordinary = Arc::new(AtomicUsize::new(0));
     let (jobs, mut receiver) = mpsc::channel::<AssistantJob>(8);
     let link = Link {
         origin,
@@ -2182,13 +2298,23 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
         .spawn(move || poll_link.take_jobs(&running, &jobs))?;
     std::thread::Builder::new()
         .name("ai6-assistant-reports".to_owned())
-        .spawn(move || link.send_reports(&queued))?;
+        .spawn({
+            let ordinary = ordinary.clone();
+            move || link.send_reports(&queued, &ordinary)
+        })?;
     let report: Reporter = Arc::new(move |report, answered| {
-        if reports.try_send((report, answered)).is_err() {
+        // What must reach Universal Exports always gets in line; an ordinary report only while
+        // fewer than REPORT_QUEUE wait.
+        if is_ordinary(&report, answered.as_ref())
+            && ordinary.fetch_add(1, Ordering::AcqRel) >= REPORT_QUEUE
+        {
+            ordinary.fetch_sub(1, Ordering::AcqRel);
             eprintln!(
                 "ai6: an assistant report was dropped: the queue to Universal Exports is full"
             );
+            return;
         }
+        let _ = reports.send((report, answered));
     });
     let desk = Desk::new(
         state.clone(),
@@ -2336,15 +2462,19 @@ impl Link {
         }
     }
 
-    /// Sends reports in the order they were queued, and tells each job's answer whether
-    /// Universal Exports refused it once it was sent.
-    fn send_reports(&self, queued: &std::sync::mpsc::Receiver<Queued>) {
+    /// Sends reports in the order they were queued, and tells each one queued with an
+    /// [`Answered`] what became of it. `ordinary` counts the ordinary reports waiting
+    /// ([`is_ordinary`]), so the reporter can bound them.
+    fn send_reports(&self, queued: &std::sync::mpsc::Receiver<Queued>, ordinary: &AtomicUsize) {
         let Ok(endpoint) = self.origin.join("v1/station/assistant/reports") else {
             return;
         };
         let agent = Self::agent(Duration::ZERO);
         while let Ok((report, answered)) = queued.recv() {
-            let mut refused = false;
+            if is_ordinary(&report, answered.as_ref()) {
+                ordinary.fetch_sub(1, Ordering::AcqRel);
+            }
+            let mut delivery = Delivery::Lost;
             for _ in 0..3 {
                 let sent = agent
                     .post(endpoint.as_str())
@@ -2353,18 +2483,27 @@ impl Link {
                 // A refused report (an unknown conversation) is not retried.
                 match sent {
                     Err(ureq::Error::StatusCode(403 | 404 | 409)) => {
-                        refused = true;
+                        delivery = Delivery::Refused;
                         break;
                     }
-                    Ok(_) | Err(ureq::Error::StatusCode(_)) => break,
+                    Ok(_) => {
+                        delivery = Delivery::Taken;
+                        break;
+                    }
+                    Err(ureq::Error::StatusCode(_)) => break,
                     Err(_) => std::thread::sleep(Duration::from_millis(200)),
                 }
             }
             if let Some(answered) = answered {
-                let _ = answered.send(refused);
+                let _ = answered.send(delivery);
             }
         }
     }
+}
+
+/// Whether a report queued with `answered` is ordinary: one the reporter may drop for room.
+fn is_ordinary(report: &AssistantReport, answered: Option<&Answered>) -> bool {
+    answered.is_none() && !must_deliver(report)
 }
 
 #[cfg(test)]
@@ -2798,7 +2937,7 @@ mod tests {
             Arc::new(move |report, answered: Option<Answered>| {
                 sink.lock().unwrap().push(report);
                 if let Some(answered) = answered {
-                    let _ = answered.send(false);
+                    let _ = answered.send(Delivery::Taken);
                 }
             }),
             "https://exports.example/v1/moneypenny/mcp".to_owned(),
@@ -3215,7 +3354,11 @@ mod tests {
 
     #[test]
     fn the_link_tells_a_job_answer_whether_the_gateway_refused_it() {
-        for (status, refused) in [(409, true), (204, false)] {
+        for (status, delivery) in [
+            (409, Delivery::Refused),
+            (204, Delivery::Taken),
+            (500, Delivery::Lost),
+        ] {
             let (origin, served) = refusing_gateway(status);
             let link = Link {
                 origin,
@@ -3236,9 +3379,15 @@ mod tests {
                 .unwrap();
             reports.send((report(None, EVENT_TEXT), None)).unwrap();
             drop(reports);
-            link.send_reports(&queued);
+            let ordinary = AtomicUsize::new(1);
+            link.send_reports(&queued, &ordinary);
             assert_eq!(served.join().unwrap(), 2);
-            assert_eq!(told.try_recv(), Ok(refused), "at {status}");
+            assert_eq!(told.try_recv(), Ok(delivery), "at {status}");
+            assert_eq!(
+                ordinary.load(Ordering::Acquire),
+                0,
+                "the ordinary one was counted out"
+            );
         }
     }
 
@@ -3276,10 +3425,18 @@ mod tests {
                 let accepted = report.events[0].kind == EVENT_ACCEPTED;
                 seen.lock().unwrap().push((report.clone(), held));
                 sink.lock().unwrap().push(report);
-                let _ = answered.send(refuse && accepted);
+                let _ = answered.send(if refuse && accepted {
+                    Delivery::Refused
+                } else {
+                    Delivery::Taken
+                });
             });
         });
-        fixture.desk.outbox = Outbox { report, held };
+        fixture.desk.outbox = Outbox {
+            report,
+            held,
+            parked: Arc::default(),
+        };
         answers
     }
 
@@ -3348,7 +3505,7 @@ mod tests {
         let outbox = Outbox::new(Arc::new(
             move |report: AssistantReport, answered: Option<Answered>| match answered {
                 Some(answered) => {
-                    let _ = answered.send(true);
+                    let _ = answered.send(Delivery::Refused);
                 }
                 None => seen.lock().unwrap().push(report),
             },
@@ -3398,6 +3555,99 @@ mod tests {
             kinds,
             [[EVENT_CABLE_SENT.to_owned()], [EVENT_CABLE_SENT.to_owned()]]
         );
+    }
+
+    /// An outbox whose link answers a memory change `Lost` the first time and `Taken` after,
+    /// and every other report `Taken`; and the reports it sent.
+    fn losing_outbox() -> (Outbox, Arc<Mutex<Vec<AssistantReport>>>) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let seen = sent.clone();
+        let lost_once = Arc::new(AtomicBool::new(false));
+        let outbox = Outbox::new(Arc::new(
+            move |report: AssistantReport, answered: Option<Answered>| {
+                let memory = only(&report, EVENT_MEMORY_CHANGES).is_some();
+                seen.lock().unwrap().push(report);
+                if let Some(answered) = answered {
+                    let lost = memory && !lost_once.swap(true, Ordering::AcqRel);
+                    let _ = answered.send(if lost {
+                        Delivery::Lost
+                    } else {
+                        Delivery::Taken
+                    });
+                }
+            },
+        ));
+        (outbox, sent)
+    }
+
+    fn kinds_sent(sent: &Mutex<Vec<AssistantReport>>, kind: &str) -> usize {
+        sent.lock()
+            .unwrap()
+            .iter()
+            .filter(|report| report.events.iter().any(|event| event.kind == kind))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn a_full_queue_drops_no_memory_change_cable_or_answer() {
+        let (outbox, sent) = losing_outbox();
+        outbox.hold("c-full");
+        for _ in 0..REPORT_QUEUE + 10 {
+            outbox.send(reported("c-full", &[EVENT_TEXT]));
+        }
+        outbox.send(reported("c-full", &[EVENT_CABLE_PROPOSAL]));
+        outbox.send(reported("c-full", &[EVENT_CABLE_SENT]));
+        let accepted = AssistantReport {
+            job_id: Some("job-full".to_owned()),
+            ..reported("c-full", &[EVENT_ACCEPTED])
+        };
+        assert!(!outbox.answer(accepted, true).await);
+        assert_eq!(
+            kinds_sent(&sent, EVENT_TEXT),
+            REPORT_QUEUE,
+            "ordinary ones are bounded"
+        );
+        assert_eq!(kinds_sent(&sent, EVENT_CABLE_PROPOSAL), 1);
+        assert_eq!(kinds_sent(&sent, EVENT_CABLE_SENT), 1);
+    }
+
+    #[tokio::test]
+    async fn a_memory_change_that_is_not_delivered_is_kept_and_sent_with_the_next_message() {
+        let (outbox, sent) = losing_outbox();
+        outbox.send(reported("c-kept", &[EVENT_NOTICE, EVENT_MEMORY_CHANGES]));
+        until(|| outbox.parked.lock().unwrap().len() == 1).await;
+        assert_eq!(kinds_sent(&sent, EVENT_MEMORY_CHANGES), 1);
+        // Another conversation's message does not take it.
+        let other = AssistantReport {
+            job_id: Some("job-other".to_owned()),
+            ..reported("c-other", &[EVENT_ACCEPTED])
+        };
+        outbox.hold("c-other");
+        outbox.answer(other, true).await;
+        assert_eq!(outbox.parked.lock().unwrap().len(), 1);
+        // Its own next accepted message sends it again, and this time it is taken.
+        outbox.hold("c-kept");
+        let next = AssistantReport {
+            job_id: Some("job-next".to_owned()),
+            ..reported("c-kept", &[EVENT_ACCEPTED])
+        };
+        assert!(!outbox.answer(next, true).await);
+        until(|| kinds_sent(&sent, EVENT_MEMORY_CHANGES) == 2).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            outbox.parked.lock().unwrap().is_empty(),
+            "taken the second time"
+        );
+        // A harness whose accept was refused keeps its memory change too.
+        let (refusing, _) = refusing_outbox();
+        refusing.hold("c-gone");
+        let refused = AssistantReport {
+            job_id: Some("job-gone".to_owned()),
+            ..reported("c-gone", &[EVENT_ACCEPTED])
+        };
+        assert!(refusing.answer(refused, true).await);
+        refusing.send(reported("c-gone", &[EVENT_MEMORY_CHANGES, EVENT_CLOSED]));
+        assert_eq!(refusing.parked.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -3554,7 +3804,7 @@ mod tests {
         };
         use crate::directorates::section_00::assistant::{
             ASSISTANT_CABLE_MCP_TOKEN_ENV, ASSISTANT_CABLE_MCP_URL_ENV, AssistantCableDecision,
-            AssistantCableGrant, EVENT_CABLE_PROPOSAL,
+            AssistantCableGrant,
         };
 
         let mut fixture = fixture(true, IDLE);
