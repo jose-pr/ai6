@@ -7162,27 +7162,32 @@ mod tests {
                 .unwrap()
         });
         let calls = tokio::task::spawn_blocking(move || {
-            // A fresh agent per call: the server answers 401 without reading the body and
-            // closes the connection, which a pooled connection meets as an abort on Windows.
+            // A fresh agent per call, retried when Windows aborts the loopback connection under
+            // load: the status is what this test checks, not the transport.
             let status = |method: &str, path: &str, bearer: Option<&str>| {
-                let agent: ureq::Agent = ureq::Agent::config_builder()
-                    .http_status_as_error(false)
-                    .build()
-                    .into();
-                let url = format!("http://{address}{path}");
-                let mut request = match method {
-                    "GET" => agent.get(&url).force_send_body(),
-                    _ => agent.post(&url),
-                };
-                if let Some(bearer) = bearer {
-                    request = request.header("Authorization", &format!("Bearer {bearer}"));
+                let mut attempts = 0;
+                loop {
+                    attempts += 1;
+                    let agent: ureq::Agent = ureq::Agent::config_builder()
+                        .http_status_as_error(false)
+                        .build()
+                        .into();
+                    let url = format!("http://{address}{path}");
+                    let mut request = match method {
+                        "GET" => agent.get(&url).force_send_body(),
+                        _ => agent.post(&url),
+                    };
+                    if let Some(bearer) = bearer {
+                        request = request.header("Authorization", &format!("Bearer {bearer}"));
+                    }
+                    match request.content_type("application/json").send("{}") {
+                        Ok(response) => break response.status().as_u16(),
+                        Err(ureq::Error::Io(error)) if attempts < 5 => {
+                            eprintln!("{method} {path}: {error}; retrying");
+                        }
+                        Err(error) => panic!("{method} {path}: {error}"),
+                    }
                 }
-                request
-                    .content_type("application/json")
-                    .send("{}")
-                    .unwrap()
-                    .status()
-                    .as_u16()
             };
             let mut seen = Vec::new();
             for (method, path) in [
