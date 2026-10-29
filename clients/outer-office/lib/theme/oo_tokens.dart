@@ -6,19 +6,22 @@ const ooSystemTheme = 'system';
 
 /// The Outer Office themes, by the id `oo.theme` stores.
 enum OoThemeId {
-  nightOps('night-ops', 'Night Ops', Brightness.dark),
-  blackOps('black-ops', 'Black Ops', Brightness.dark),
-  dusk('dusk', 'Dusk', Brightness.dark),
-  classic('classic', 'Classic', Brightness.light),
-  light('light', 'Light', Brightness.light),
-  redFile('red-file', 'Red File', Brightness.dark);
+  nightOps('night-ops', 'Night Ops', Brightness.dark, 'Navy and warm gold'),
+  blackOps('black-ops', 'Black Ops', Brightness.dark, 'Quiet charcoal'),
+  dusk('dusk', 'Dusk', Brightness.dark, 'Warm evening plum and copper'),
+  classic('classic', 'Classic', Brightness.light, 'Paper dossier in brown ink'),
+  light('light', 'Light', Brightness.light, 'Clear daylight'),
+  redFile('red-file', 'Red File', Brightness.dark, 'Restrained crimson');
 
-  const OoThemeId(this.id, this.label, this.brightness);
+  const OoThemeId(this.id, this.label, this.brightness, this.character);
 
   /// The stored id, such as `night-ops`.
   final String id;
   final String label;
   final Brightness brightness;
+
+  /// One line on the theme's look, shown beside its name in the chooser.
+  final String character;
 
   /// The theme with this id, or null for `system`, an unknown id or none.
   static OoThemeId? byId(String? id) =>

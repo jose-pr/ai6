@@ -40,6 +40,7 @@ import 'shell/operations_page.dart';
 import 'shell/overview_page.dart';
 import 'shell/sessions_page.dart';
 import 'shell/top_bar.dart';
+import 'theme/oo_appearance.dart';
 import 'theme/oo_backdrop.dart';
 import 'theme/oo_icon.dart';
 import 'theme/oo_theme.dart';
@@ -2845,14 +2846,22 @@ AppWindow _openChatWindow(
   context,
   chat: chat,
   onClosed: onClosed,
-  app: (home) => AnimatedBuilder(
-    animation: board,
-    builder: (context, _) => OoMaterialApp(
-      themeId: board.themeId,
-      backdrop: board.backdrop,
-      title: chatWindowTitle,
-      home: home,
-    ),
+  app: (home) => boardThemedApp(board, title: chatWindowTitle, home: home),
+);
+
+/// The app of a native window: [home] in the board's theme and wallpaper, following
+/// every change the person makes in the main window.
+Widget boardThemedApp(
+  MissionBoard board, {
+  required String title,
+  required Widget home,
+}) => AnimatedBuilder(
+  animation: board,
+  builder: (context, _) => OoMaterialApp(
+    themeId: board.themeId,
+    backdrop: board.backdrop,
+    title: title,
+    home: home,
   ),
 );
 
@@ -4800,71 +4809,18 @@ Future<void> _showAppearance(BuildContext context, MissionBoard board) =>
       ),
     );
 
-/// The operator menu's appearance settings: the theme, each with its swatch, and the
-/// wallpaper switch.
+/// The operator menu's and the top bar's appearance settings, applied and stored at once.
 class _ThemeChooser extends StatelessWidget {
   const _ThemeChooser({required this.board});
 
   final MissionBoard board;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Text('Theme'),
-      for (final (id, label, swatch) in [
-        (
-          ooSystemTheme,
-          'Match the system (Light or Night Ops)',
-          [OoThemeId.light.tokens, OoThemeId.nightOps.tokens],
-        ),
-        for (final theme in OoThemeId.values)
-          (theme.id, theme.label, [theme.tokens]),
-      ])
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: _Swatch(swatch),
-          title: Text(label),
-          selected: board.themeId == id,
-          trailing: board.themeId == id ? const Icon(Icons.check) : null,
-          onTap: () => board.setThemeId(id),
-        ),
-      SwitchListTile.adaptive(
-        contentPadding: EdgeInsets.zero,
-        title: const Text('Wallpaper'),
-        subtitle: const Text(
-          'Behind sign-in, the Overview header and empty pages',
-        ),
-        value: board.backdrop,
-        onChanged: board.setBackdrop,
-      ),
-    ],
-  );
-}
-
-/// A theme's background, surface and accent, side by side.
-class _Swatch extends StatelessWidget {
-  const _Swatch(this.themes);
-
-  final List<OoTokens> themes;
-
-  @override
-  Widget build(BuildContext context) => ExcludeSemantics(
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final tokens in themes)
-          for (final color in [tokens.bg, tokens.surface, tokens.accent])
-            Container(
-              width: 10,
-              height: 24,
-              decoration: BoxDecoration(
-                color: color,
-                border: Border.all(color: OoTokens.of(context).border),
-              ),
-            ),
-      ],
-    ),
+  Widget build(BuildContext context) => OoAppearanceChooser(
+    themeId: board.themeId,
+    backdrop: board.backdrop,
+    onTheme: board.setThemeId,
+    onBackdrop: board.setBackdrop,
   );
 }
 
@@ -5787,14 +5743,10 @@ void _openSessionWindow(
   context,
   size: const Size(900, 680),
   title: 'Session ${session.sessionId} | Outer Office',
-  builder: (_) => AnimatedBuilder(
-    animation: board,
-    builder: (context, _) => OoMaterialApp(
-      themeId: board.themeId,
-      backdrop: board.backdrop,
-      title: 'Session ${session.sessionId}',
-      home: SessionWindow(session: session, board: board),
-    ),
+  builder: (_) => boardThemedApp(
+    board,
+    title: 'Session ${session.sessionId}',
+    home: SessionWindow(session: session, board: board),
   ),
 );
 

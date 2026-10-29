@@ -2,10 +2,13 @@ import 'dart:ui' show Brightness, Color, Size;
 
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:material_ui/material_ui.dart'
     show
+        AnimatedBuilder,
         BuildContext,
         Builder,
+        Focus,
         Icon,
         IconTheme,
         IconThemeData,
@@ -13,17 +16,21 @@ import 'package:material_ui/material_ui.dart'
         MaterialApp,
         Row,
         Scaffold,
+        Semantics,
         SizedBox,
+        SwitchListTile,
         TargetPlatform,
         Theme,
         ThemeData;
 import 'package:outer_office/main.dart';
 import 'package:outer_office/routes/oo_route.dart';
+import 'package:outer_office/theme/oo_appearance.dart';
 import 'package:outer_office/theme/oo_icon.dart';
 import 'package:outer_office/theme/oo_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'contrast.dart';
+import 'shell_test.dart' show demoAt;
 
 void main() {
   test('the ratio check fails the kit colours it was written to catch', () {
@@ -392,5 +399,175 @@ void main() {
       );
     }
     semantics.dispose();
+  });
+
+  group('the appearance chooser', () {
+    /// The choice row of [label], found by its announced label.
+    Finder choice(String label) => find.byWidgetPredicate(
+      (widget) =>
+          widget is Semantics &&
+          (widget.properties.label?.startsWith('$label theme.') ?? false),
+    );
+
+    /// Whether the choice row of [label] is announced as selected.
+    bool isSelected(WidgetTester tester, String label) =>
+        tester.widget<Semantics>(choice(label)).properties.selected ?? false;
+
+    for (final (size, entry) in [
+      (const Size(1440, 900), 'Appearance settings'),
+      (const Size(1440, 900), 'Operator account and preferences'),
+      (const Size(390, 844), 'Operator account and preferences'),
+    ]) {
+      for (final scale in [1.0, 2.0]) {
+        testWidgets('opens from "$entry" at ${size.width.toInt()} px, '
+            'text x$scale, and applies a choice at once', (tester) async {
+          tester.platformDispatcher.textScaleFactorTestValue = scale;
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          final board = await demoAt(tester, size);
+          final semantics = tester.ensureSemantics();
+          await tester.tap(find.byTooltip(entry));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          for (final theme in OoThemeId.values) {
+            expect(choice(theme.label), findsOneWidget, reason: theme.label);
+          }
+          expect(choice('System'), findsOneWidget);
+          expect(find.text('Wallpaper'), findsOneWidget);
+          expect(find.text(OoAppearanceChooser.wallpaperHint), findsOneWidget);
+          expect(isSelected(tester, 'Night Ops'), isTrue);
+          expect(
+            find.bySemanticsLabel(RegExp('^Night Ops theme')),
+            findsOneWidget,
+          );
+
+          await tester.ensureVisible(choice('Dusk'));
+          await tester.tap(choice('Dusk'));
+          await tester.pumpAndSettle();
+          expect(board.themeId, 'dusk');
+          expect(isSelected(tester, 'Dusk'), isTrue);
+          expect(isSelected(tester, 'Night Ops'), isFalse);
+          // The name and a check mark say which is chosen, not colour alone.
+          expect(
+            find.descendant(
+              of: choice('Dusk'),
+              matching: find.byIcon(Icons.check),
+            ),
+            findsOneWidget,
+          );
+          expect(
+            OoTokens.of(tester.element(find.text('Wallpaper'))).bg,
+            OoThemeId.dusk.tokens.bg,
+          );
+          expect(tester.takeException(), isNull);
+          semantics.dispose();
+        });
+      }
+    }
+
+    testWidgets('works by keyboard', (tester) async {
+      final board = await demoAt(tester, const Size(1440, 900));
+      await tester.tap(find.byTooltip('Appearance settings'));
+      await tester.pumpAndSettle();
+      Focus.of(tester.element(find.text('Light'))).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(board.themeId, 'light');
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pumpAndSettle();
+      expect(board.themeId, 'red-file');
+    });
+
+    testWidgets('under high contrast the wallpaper shows off and the choice '
+        'is kept', (tester) async {
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(highContrast: true);
+      final board = await demoAt(tester, const Size(1440, 900));
+      await tester.tap(find.byTooltip('Appearance settings'));
+      await tester.pumpAndSettle();
+      expect(find.text(OoAppearanceChooser.wallpaperOffHint), findsOneWidget);
+      final wallpaper = tester.widget<SwitchListTile>(
+        find.byType(SwitchListTile),
+      );
+      expect(wallpaper.value, isFalse);
+      expect(wallpaper.onChanged, isNull);
+      expect(board.backdrop, isTrue);
+    });
+
+    testWidgets('a choice is stored and survives a restart', (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      SharedPreferences.setMockInitialValues({});
+      final preferences = AppearancePreferences(
+        SharedPreferences.getInstance(),
+      );
+      final board = MissionBoard(
+        apiOrigin: Uri.parse('https://oo.example'),
+        pollInterval: null,
+        onThemeChanged: preferences.saveTheme,
+        onBackdropChanged: preferences.saveBackdrop,
+      );
+      addTearDown(board.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: board,
+              builder: (context, _) => OoAppearanceChooser(
+                themeId: board.themeId,
+                backdrop: board.backdrop,
+                onTheme: board.setThemeId,
+                onBackdrop: board.setBackdrop,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(choice('Classic'));
+      await tester.tap(find.text('Wallpaper'));
+      await tester.pumpAndSettle();
+      final restarted = MissionBoard(
+        apiOrigin: Uri.parse('https://oo.example'),
+        pollInterval: null,
+      );
+      addTearDown(restarted.dispose);
+      await AppearancePreferences(SharedPreferences.getInstance())
+          .restore(restarted);
+      expect(restarted.themeId, 'classic');
+      expect(restarted.backdrop, isFalse);
+    });
+
+    testWidgets('an open native window follows the choice', (tester) async {
+      final board = MissionBoard(
+        apiOrigin: Uri.parse('https://oo.example'),
+        pollInterval: null,
+      );
+      addTearDown(board.dispose);
+      late OoTokens tokens;
+      await tester.pumpWidget(
+        boardThemedApp(
+          board,
+          title: 'Session s',
+          home: Builder(
+            builder: (context) {
+              tokens = OoTokens.of(context);
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      expect(tokens.bg, OoThemeId.nightOps.tokens.bg);
+      board.setThemeId('classic');
+      board.setBackdrop(false);
+      await tester.pumpAndSettle();
+      expect(tokens.bg, OoThemeId.classic.tokens.bg);
+      expect(tokens.backdrop, isNull);
+      expect(tokens.hero, isNull);
+    });
   });
 }
